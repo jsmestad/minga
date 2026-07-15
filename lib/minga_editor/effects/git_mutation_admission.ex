@@ -82,7 +82,8 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
       effect,
       {:git_repository_resolution, scheduler},
       Policy.fifo(@max_queued),
-      operation_id
+      operation_id: operation_id,
+      activity: :git_syncing
     )
   end
 

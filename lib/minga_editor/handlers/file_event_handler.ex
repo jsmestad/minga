@@ -8,17 +8,13 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   terminal outcomes. Save follow-ups run in the Editor process: LSP requests
   are issued before deferred session persistence and rendering.
 
-  Git remote replies stay behind the existing dynamic extension boundary and
-  are correlated by task monitor reference before this workflow receives them.
-  Stale extension results are ignored, missing/stopped extensions are no-ops,
-  and file-tree or LSP failures retain their existing domain reporting policy.
+  File-tree or LSP failures retain their existing domain reporting policy.
   """
 
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.LspActions
   alias MingaEditor.PickerUI
-  alias MingaEditor.Renderer
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Workflow
@@ -30,27 +26,12 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
-          | {:handle_git_remote_result, reference(), term()}
 
   @doc "Applies one file/Git event and its focused actions."
   @spec dispatch(EditorState.t(), term()) :: EditorState.t()
   def dispatch(%EditorState{} = state, message) do
     {state, effects} = handle(state, message)
     apply_effects(state, effects)
-  end
-
-  @doc "Lets the active Git extension correlate a monitored remote task termination."
-  @spec handle_remote_task_down(EditorState.t(), reference(), term()) ::
-          :not_matched | EditorState.t()
-  def handle_remote_task_down(state, ref, reason) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) and
-         function_exported?(module, :handle_remote_task_down, 3) do
-      :erlang.apply(module, :handle_remote_task_down, [state, ref, reason])
-    else
-      :not_matched
-    end
   end
 
   @doc """
@@ -98,10 +79,6 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_file_changed(state, path)
   end
 
-  def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
-    {state, [{:handle_git_remote_result, ref, result}]}
-  end
-
   def handle(state, _msg) do
     {state, []}
   end
@@ -126,21 +103,6 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp apply_effect(state, {:save_session_deferred}) do
     if state.frontend.backend != :headless, do: send(self(), :save_session)
     state
-  end
-
-  defp apply_effect(state, {:handle_git_remote_result, ref, result}),
-    do: state |> handle_git_remote_result(ref, result) |> Renderer.render_or_async()
-
-  @spec handle_git_remote_result(EditorState.t(), reference(), term()) :: EditorState.t()
-  defp handle_git_remote_result(state, ref, result) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) and
-         function_exported?(module, :handle_remote_result, 3) do
-      :erlang.apply(module, :handle_remote_result, [state, ref, result])
-    else
-      state
-    end
   end
 
   @spec handle_git_status_changed(EditorState.t(), Minga.Events.GitStatusEvent.t()) ::

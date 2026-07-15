@@ -165,6 +165,22 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Sets a remote operation result for a repository."
+  @spec set_remote_result(String.t(), :push | :pull | :fetch, :ok | {:error, String.t()}) :: :ok
+  def set_remote_result(git_root, operation, result)
+      when operation in [:push, :pull, :fetch] do
+    :ets.insert(@table, {{:remote_result, Path.expand(git_root), operation}, result})
+    :ok
+  end
+
+  @doc "Blocks one remote operation until its worker receives an unblock message."
+  @spec set_remote_blocker(String.t(), :push | :pull | :fetch, pid()) :: :ok
+  def set_remote_blocker(git_root, operation, notify_pid)
+      when operation in [:push, :pull, :fetch] and is_pid(notify_pid) do
+    :ets.insert(@table, {{:remote_blocker, Path.expand(git_root), operation}, notify_pid})
+    :ok
+  end
+
   @doc "Sets the result for `stage/2` on `git_root`. Default is `:ok`."
   @spec set_stage_result(String.t(), :ok | {:error, String.t()}) :: :ok
   def set_stage_result(git_root, result) do
@@ -197,6 +213,8 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:commit_notify, expanded}, :_})
     :ets.match_delete(@table, {{:stage_blocker, expanded}, :_})
     :ets.match_delete(@table, {{:stage_result, expanded}, :_})
+    :ets.match_delete(@table, {{:remote_result, expanded, :_}, :_})
+    :ets.match_delete(@table, {{:remote_blocker, expanded, :_}, :_})
     :ok
   end
 
@@ -527,16 +545,16 @@ defmodule Minga.Git.Stub do
   end
 
   @impl true
-  @spec push(String.t(), keyword()) :: :ok
-  def push(_git_root, _opts \\ []), do: :ok
+  @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def push(git_root, _opts \\ []), do: remote_operation(git_root, :push)
 
   @impl true
-  @spec pull(String.t(), keyword()) :: :ok
-  def pull(_git_root, _opts \\ []), do: :ok
+  @spec pull(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def pull(git_root, _opts \\ []), do: remote_operation(git_root, :pull)
 
   @impl true
-  @spec fetch_remotes(String.t(), keyword()) :: :ok
-  def fetch_remotes(_git_root, _opts \\ []), do: :ok
+  @spec fetch_remotes(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def fetch_remotes(git_root, _opts \\ []), do: remote_operation(git_root, :fetch)
 
   # ── Additional Stub Configuration ─────────────────────────────────────
 
@@ -557,6 +575,25 @@ defmodule Minga.Git.Stub do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec remote_operation(String.t(), :push | :pull | :fetch) :: :ok | {:error, String.t()}
+  defp remote_operation(git_root, operation) do
+    expanded = Path.expand(git_root)
+
+    case :ets.lookup(@table, {:remote_blocker, expanded, operation}) do
+      [{_, notify_pid}] ->
+        send(notify_pid, {:stub_git_remote_blocked, operation, self()})
+        receive do: ({:unblock_stub_git_remote, ^operation} -> :ok)
+
+      [] ->
+        :ok
+    end
+
+    case :ets.lookup(@table, {:remote_result, expanded, operation}) do
+      [{_, result}] -> result
+      [] -> :ok
+    end
+  end
 
   @spec delete_branch_from_list(String.t(), String.t()) :: :ok
   defp delete_branch_from_list(git_root, name) do

@@ -19,8 +19,6 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.EffectScheduler
-  alias MingaEditor.Effects.GitMutation
-  alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.UI.FontRegistry
@@ -153,7 +151,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
         Map.get(state, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table()),
       title: title,
       status_bar_data: state.status_bar_data,
-      git_syncing: Map.get(state, :git_remote_op) != nil or git_effect_active?(state),
+      git_syncing: git_effect_active?(state),
       git_toast: Map.get(shell_state, :git_toast),
       search: state.workspace.search,
       last_input_seq: Map.get(state, :last_input_seq, 0),
@@ -184,10 +182,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
 
   @spec git_effect_active?(map()) :: boolean()
   defp git_effect_active?(state) do
-    scheduler = Map.get(state, :effect_scheduler)
-
-    EffectScheduler.active?(scheduler, GitMutationAdmission) or
-      EffectScheduler.active?(scheduler, GitMutation)
+    EffectScheduler.active_activity?(Map.get(state, :effect_scheduler), :git_syncing)
   end
 
   @spec gui_only(boolean(), value) :: value | nil when value: var

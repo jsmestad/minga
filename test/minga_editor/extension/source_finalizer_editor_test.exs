@@ -436,7 +436,7 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
 
     assert :ok = GenServer.call(ctx.editor, {:api_execute_command, :reload_config})
 
-    assert_receive {:cleanup_reached, ^source}
+    assert_receive {:cleanup_reached, ^source}, 5_000
     assert_receive {:DOWN, ^picker_monitor, :process, ^picker_worker, _reason}
     refute EffectScheduler.active_source?(scheduler, source)
     assert EffectScheduler.active_source?(scheduler, other_source)

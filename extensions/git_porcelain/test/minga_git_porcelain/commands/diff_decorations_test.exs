@@ -138,13 +138,16 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
         hunk_lines: []
       }
 
-      state = %{
+      state =
         build_state()
-        | diff_views: %{
-            diff_one => info,
-            diff_two => info
-          }
-      }
+        |> then(fn state ->
+          git =
+            state.git
+            |> MingaEditor.State.Git.register_diff_view(diff_one, info)
+            |> MingaEditor.State.Git.register_diff_view(diff_two, info)
+
+          %{state | git: git}
+        end)
 
       state = GitCommands.refresh_diff_views_for_buffer(state, source_buf)
 
@@ -289,11 +292,15 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       state =
         build_state()
         |> then(fn state ->
-          %{state | workspace: then(state.workspace, fn workspace ->
-            MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
-          end)}
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
+                end)
+          }
         end)
-        |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+        |> set_frontend_capabilities(:native_gui)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
         |> then(fn state ->
@@ -342,11 +349,15 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       state =
         build_state()
         |> then(fn state ->
-          %{state | workspace: then(state.workspace, fn workspace ->
-            MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
-          end)}
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
+                end)
+          }
         end)
-        |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+        |> set_frontend_capabilities(:native_gui)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
         |> then(fn state ->
@@ -389,11 +400,15 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       state =
         build_state()
         |> then(fn state ->
-          %{state | workspace: then(state.workspace, fn workspace ->
-            MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
-          end)}
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
+                end)
+          }
         end)
-        |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+        |> set_frontend_capabilities(:native_gui)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
         |> then(fn state ->
@@ -541,7 +556,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> Map.put(:capabilities, %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui})
+        |> set_frontend_capabilities(:native_gui)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
         |> then(fn state ->
@@ -633,6 +648,16 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
   defp buffer_content(buf) do
     {content, _cursor} = Buffer.content_and_cursor(buf)
     content
+  end
+
+  defp set_frontend_capabilities(state, frontend_type) do
+    frontend =
+      MingaEditor.State.Frontend.accept_capabilities(
+        state.frontend,
+        %Capabilities{frontend_type: frontend_type}
+      )
+
+    %{state | frontend: frontend}
   end
 
   defp unique_git_root do

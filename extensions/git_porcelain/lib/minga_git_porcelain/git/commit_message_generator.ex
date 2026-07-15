@@ -1,16 +1,12 @@
 defmodule MingaGitPorcelain.Git.CommitMessageGenerator do
   @moduledoc """
-  Generates conventional commit messages from staged diffs using the configured AI provider.
-
-  Spawns a one-shot LLM task via Eval.TaskSupervisor that sends the result
-  back to the Editor GenServer as {:git_commit_message_generated, result}.
+  Generates conventional commit messages synchronously from staged diffs using
+  the configured AI provider. The effect scheduler owns the worker lifecycle.
   """
 
   alias ReqLLM.StreamResponse
 
   @max_diff_chars 4000
-  @timeout_ms 15_000
-
   @system_prompt """
   You are a commit message generator. Given a git diff, write a commit message following the conventional commit format:
 
@@ -29,28 +25,11 @@ defmodule MingaGitPorcelain.Git.CommitMessageGenerator do
   - Output ONLY the commit message, no explanation or markdown formatting
   """
 
-  @spec timeout_ms() :: pos_integer()
-  def timeout_ms, do: @timeout_ms
-
-  @doc """
-  Spawns an async task that generates a commit message from the staged diff.
-
-  On completion, sends `{:git_commit_message_generated, result}` to `reply_to`
-  where result is `{:ok, message}` or `{:error, reason}`.
-  """
-  @spec generate(String.t(), GenServer.server()) :: {:ok, pid()} | {:error, term()}
-  def generate(staged_diff, reply_to) do
+  @doc "Generates a commit message synchronously for one staged diff."
+  @spec generate(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def generate(staged_diff) when is_binary(staged_diff) do
     model = MingaAgent.ProviderResolver.configured_model() || MingaAgent.Config.default_model()
-
-    spawn_task(model, staged_diff, reply_to)
-  end
-
-  @spec spawn_task(String.t(), String.t(), GenServer.server()) :: {:ok, pid()} | {:error, term()}
-  defp spawn_task(model, staged_diff, reply_to) do
-    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      result = run_generation(model, staged_diff)
-      send(reply_to, {:git_commit_message_generated, result})
-    end)
+    run_generation(model, staged_diff)
   end
 
   @spec run_generation(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}

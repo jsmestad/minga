@@ -4,9 +4,10 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
 
   alias Minga.Git.StashEntry
   alias Minga.Git.Stub, as: GitStub
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Context
-  alias MingaGitPorcelain.UI.Picker.GitStashSource
   alias MingaEditor.UI.Picker.Item
+  alias MingaGitPorcelain.UI.Picker.GitStashSource
 
   @moduletag :tmp_dir
 
@@ -42,8 +43,8 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
       state = test_state()
       item = %Item{id: {:stash, dir, 0, :list}, label: "WIP on main"}
 
-      assert %{shell_state: %{notice: %{message: "Stash: WIP on main"}}} =
-               GitStashSource.on_select(item, state)
+      result = GitStashSource.on_select(item, state)
+      assert result.shell_runtime.state.notice.message == "Stash: WIP on main"
     end
 
     test "drop mode drops the selected stash", %{tmp_dir: dir} do
@@ -57,8 +58,8 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
       state = test_state()
       item = %Item{id: {:stash, dir, 1, :drop}, label: "WIP on feature"}
 
-      assert %{shell_state: %{notice: %{message: "Dropped stash@{1}"}}} =
-               GitStashSource.on_select(item, state)
+      result = GitStashSource.on_select(item, state)
+      assert result.shell_runtime.state.notice.message == "Dropped stash@{1}"
     end
 
     test "drop action is available from list mode", %{tmp_dir: dir} do
@@ -72,8 +73,8 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
 
       assert GitStashSource.actions(item) == [{"Drop", :drop}]
 
-      assert %{shell_state: %{notice: %{message: "Dropped stash@{0}"}}} =
-               GitStashSource.on_action(:drop, item, test_state())
+      result = GitStashSource.on_action(:drop, item, test_state())
+      assert result.shell_runtime.state.notice.message == "Dropped stash@{0}"
     end
   end
 
@@ -91,6 +92,8 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
   end
 
   defp test_state do
-    %{shell_state: %{notice: %{message: nil}}}
+    %EditorState{
+      workspace: %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(80, 24)}
+    }
   end
 end

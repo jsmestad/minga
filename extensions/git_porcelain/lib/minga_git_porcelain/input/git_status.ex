@@ -197,42 +197,14 @@ defmodule MingaGitPorcelain.Input.GitStatus do
     update_tui_state(state, fn tui, _entries -> TuiState.clear_discard_confirmation(tui) end)
   end
 
-  defp execute_command(state, :git_status_push) do
-    case resolve_git_root() do
-      nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
+  defp execute_command(state, :git_status_push),
+    do: MingaGitPorcelain.Commands.schedule_remote(state, :push)
 
-      git_root ->
-        do_git_remote_op(state, git_root, &Git.push/1, "Pushing…", "Pushed", "Push failed")
-    end
-  end
+  defp execute_command(state, :git_status_pull),
+    do: MingaGitPorcelain.Commands.schedule_remote(state, :pull)
 
-  defp execute_command(state, :git_status_pull) do
-    case resolve_git_root() do
-      nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
-
-      git_root ->
-        do_git_remote_op(state, git_root, &Git.pull/1, "Pulling…", "Pulled", "Pull failed")
-    end
-  end
-
-  defp execute_command(state, :git_status_fetch) do
-    case resolve_git_root() do
-      nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
-
-      git_root ->
-        do_git_remote_op(
-          state,
-          git_root,
-          &Git.fetch_remotes/1,
-          "Fetching…",
-          "Fetched",
-          "Fetch failed"
-        )
-    end
-  end
+  defp execute_command(state, :git_status_fetch),
+    do: MingaGitPorcelain.Commands.schedule_remote(state, :fetch)
 
   defp execute_command(state, :git_status_amend) do
     case resolve_git_root() do
@@ -329,28 +301,6 @@ defmodule MingaGitPorcelain.Input.GitStatus do
     case SidebarWorkflow.git_status_panel(state) do
       nil -> nil
       _panel -> git_status_tui_state(state).discard_confirmation
-    end
-  end
-
-  @spec do_git_remote_op(
-          EditorState.t(),
-          String.t(),
-          (String.t() -> :ok | {:error, String.t()}),
-          String.t(),
-          String.t(),
-          String.t()
-        ) :: EditorState.t()
-  defp do_git_remote_op(state, git_root, operation, _progress_msg, success_msg, error_prefix) do
-    # For now, just run synchronously. Could be improved with async later.
-    case operation.(git_root) do
-      :ok ->
-        refresh_repo(git_root)
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, success_msg)
-
-      {:error, reason} ->
-        error_msg = "#{error_prefix}: #{reason}"
-        Log.warning(:ext, error_msg)
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, error_msg)
     end
   end
 

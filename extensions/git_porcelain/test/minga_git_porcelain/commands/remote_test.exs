@@ -1,23 +1,46 @@
-Code.require_file("../../../../../test/support/fake_shell.ex", __DIR__)
+unless Code.ensure_loaded?(MingaEditor.Test.FakeShell),
+  do: Code.require_file("../../../../../test/support/fake_shell.ex", __DIR__)
 
 defmodule MingaGitPorcelain.CommandsRemoteTest do
-  @moduledoc """
-  Focused tests for async git remote operation feedback.
-  """
-  # Serial because the shell-switch regression test uses the global shell registry.
+  @moduledoc "Typed scheduler and visible-feedback coverage for Git remote commands."
+
+  # Uses the global shell/scope registries and the shared Git stub table.
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaEditor
+  alias Minga.Extension.InvocationContext
+  alias Minga.Git.Stub
+  alias Minga.Keymap.Scope
+  alias Minga.Project.Root
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Policy
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Shell.Registry, as: ShellRegistry
-  alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.GitToast
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Viewport
-  alias MingaGitPorcelain.Commands, as: GitCommands
+  alias MingaGitPorcelain.Commands
+  alias MingaGitPorcelain.Effects.RemoteOperation
+  alias MingaGitPorcelain.Input.GitStatus
+  alias MingaGitPorcelain.Test.EffectDependencies, as: Dependencies
+
+  @source {:extension, :minga_git_porcelain}
+  @timeout 2_000
 
   setup do
+    Dependencies.reset(self())
+    MingaGitPorcelain.Feature.register_contributions()
+    previous_root = Minga.Project.workspace_root()
+    git_root = Path.join(System.tmp_dir!(), "git_remote_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(git_root)
+    {:ok, root} = Root.directory(git_root)
+    {:ok, _snapshot} = Minga.Project.activate(root)
+    Stub.set_root(git_root, git_root)
+
     ShellRegistry.reset_for_test()
     ShellRegistry.seed_builtin()
 
@@ -31,214 +54,358 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       })
 
     on_exit(fn ->
+      Stub.clear(git_root)
+      File.rm_rf!(git_root)
+      restore_project(previous_root)
+      Scope.unregister_source(@source)
       ShellRegistry.reset_for_test()
       ShellRegistry.seed_builtin()
     end)
 
-    :ok
+    %{git_root: git_root}
   end
 
-  describe "command registration" do
-    test "remote git commands are registered" do
-      names = GitCommands.__commands__() |> Enum.map(& &1.name)
+  test "remote commands remain registered" do
+    names = Commands.__commands__() |> Enum.map(& &1.name)
 
-      assert :git_pull in names
-      assert :git_push in names
-      assert :git_fetch in names
-      assert :git_pull_and_retry in names
-      assert :git_stash_save in names
-      assert :git_stash_pop in names
-      assert :git_stash_list in names
-      assert :git_stash_drop in names
-      assert :git_log in names
-      assert :git_log_file in names
-    end
+    assert [:git_pull, :git_push, :git_fetch, :git_pull_and_retry] -- names == []
   end
 
-  describe "handle_remote_result/3" do
-    test "matching success clears the in-flight operation and reports success" do
-      ref = make_ref()
+  test "top-level and Git-status commands return while the same typed path is blocked", %{
+    git_root: git_root
+  } do
+    {state, scheduler} = build_state()
+    Stub.set_remote_blocker(git_root, :push, self())
 
-      state =
-        build_state(%{git_remote_op: make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})})
+    returned = Commands.execute(state, :git_push)
+    assert returned.shell_runtime.state.notice.message == "Pushing…"
 
-      result = GitCommands.handle_remote_result(state, ref, :ok)
+    running = receive_running(scheduler, :push)
+    assert running.request.handler == RemoteOperation
+    assert running.request.resource == {:git_porcelain_remote, @source}
+    assert running.request.activity == :git_syncing
+    assert_receive {:stub_git_remote_blocked, :push, push_worker}, @timeout
+    assert is_pid(push_worker)
 
-      assert result.shell_runtime.state.notice.message == "Pushed"
-      assert result.git.git_remote_op == nil
-    end
+    duplicate = Commands.execute(returned, :git_pull)
+    assert duplicate.shell_runtime.state.notice.message == "Git operation already in progress"
+    refute_received {:stub_git_remote_blocked, :pull, _worker}
 
-    test "non-fast-forward push failures offer pull-and-retry" do
-      ref = make_ref()
+    assert :ok = EffectScheduler.cancel(scheduler, running.request.id)
+    {_state, canceled} = receive_and_apply(returned, scheduler, :canceled)
+    assert canceled.reason == :requested
 
-      state =
-        build_state(%{git_remote_op: make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})})
+    Stub.set_remote_blocker(git_root, :pull, self())
+    status_state = git_status_state(%{state | effect_scheduler: scheduler})
 
-      result = GitCommands.handle_remote_result(state, ref, {:error, "non-fast-forward rejected"})
+    assert {:handled, returned_status} = GitStatus.handle_key(status_state, ?l, 0)
 
-      assert result.git.git_remote_op == nil
+    assert returned_status.shell_runtime.state.notice.message == "Pulling…"
+    status_running = receive_running(scheduler, :pull)
+    assert status_running.request.handler == RemoteOperation
+    assert status_running.request.resource == running.request.resource
+    assert_receive {:stub_git_remote_blocked, :pull, pull_worker}, @timeout
+    assert is_pid(pull_worker)
 
-      assert %{
-               message: "Push failed: non-fast-forward rejected",
-               level: :error,
-               action: :pull_and_retry
-             } = Runtime.state(result.shell_runtime).git_toast
-    end
-
-    test "stale results leave the current operation untouched" do
-      current_ref = make_ref()
-      op = make_remote_op(current_ref, {"/tmp/repo", "Pushed", "Push failed"})
-      state = build_state(%{git_remote_op: op, notice_message: "Pushing…"})
-
-      result = GitCommands.handle_remote_result(state, make_ref(), :ok)
-
-      assert result.shell_runtime.state.notice.message == "Pushing…"
-      assert result.git.git_remote_op == op
-    end
-
-    test "delayed result clears the operation without touching or replaying a foreign shell" do
-      ref = make_ref()
-
-      state =
-        build_state(%{git_remote_op: make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})})
-        |> MingaEditor.Shell.Workflow.switch(:fake)
-
-      foreign_shell_state = Runtime.state(state.shell_runtime)
-      message_store = state.render.message_store
-
-      result = GitCommands.handle_remote_result(state, ref, :ok)
-
-      assert result.git.git_remote_op == nil
-      assert Runtime.state(result.shell_runtime) == foreign_shell_state
-      assert result.render.message_store == message_store
-
-      restored = MingaEditor.Shell.Workflow.switch(result, :traditional)
-      assert Runtime.state(restored.shell_runtime).notice.message == nil
-      refute GitToast.present?(Runtime.state(restored.shell_runtime).git_toast)
-    end
+    assert :ok = EffectScheduler.cancel(scheduler, status_running.request.id)
+    {_state, _canceled} = receive_and_apply(returned_status, scheduler, :canceled)
   end
 
-  describe "handle_remote_task_down/3" do
-    test "crashed tasks clear the operation and show an error toast" do
-      task_monitor = make_ref()
+  test "push, pull, fetch, and pull-and-retry produce success feedback and refresh", %{
+    git_root: git_root
+  } do
+    Enum.reduce([:push, :pull, :fetch, :pull_and_retry], nil, fn operation, _previous ->
+      {state, scheduler} = build_state()
 
-      state =
-        build_state(%{
-          git_remote_op: {make_ref(), task_monitor, {"/tmp/repo", "Pushed", "Push failed"}}
-        })
+      returned =
+        with_source(fn ->
+          Commands.schedule_remote(state, operation,
+            git: Dependencies,
+            admission: Dependencies,
+            refresher: Dependencies
+          )
+        end)
 
-      result = GitCommands.handle_remote_task_down(state, task_monitor, :killed)
+      assert returned.shell_runtime.state.notice.message == progress_message(operation)
+      running = receive_running(scheduler, operation)
+      assert running.request.policy == Policy.fifo(0)
 
-      assert result.git.git_remote_op == nil
+      assert_receive {:dependency_called, {:remote, first_operation}, worker, ^git_root}, @timeout
 
-      assert result.shell_runtime.state.notice.message ==
-               "Git operation failed unexpectedly: killed"
+      case operation do
+        :pull_and_retry ->
+          assert first_operation == :pull
+          assert_receive {:dependency_called, {:remote, :push}, ^worker, ^git_root}, @timeout
 
-      assert %{message: "Git operation failed unexpectedly: killed", level: :error, action: nil} =
+        _operation ->
+          assert first_operation == operation
+      end
+
+      {result, outcome} = receive_and_apply(returned, scheduler, :completed)
+      assert outcome.result == :ok
+      assert result.shell_runtime.state.notice.message == success_message(operation)
+
+      assert %{message: message, level: :success, action: nil} =
                Runtime.state(result.shell_runtime).git_toast
-    end
 
-    test "normal task exit waits for the result message" do
-      task_monitor = make_ref()
-      op = {make_ref(), task_monitor, {"/tmp/repo", "Pushed", "Push failed"}}
-      state = build_state(%{git_remote_op: op, notice_message: "Pushing…"})
+      assert message == success_message(operation)
+      assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
+      result
+    end)
+  end
 
-      result = GitCommands.handle_remote_task_down(state, task_monitor, :normal)
+  test "Git failures and non-fast-forward recovery preserve detailed feedback", %{
+    git_root: git_root
+  } do
+    {state, scheduler} = build_state()
+    Dependencies.put({:remote, :push}, {:return, {:error, "non-fast-forward rejected"}})
 
-      assert result.git.git_remote_op == op
-      assert result.shell_runtime.state.notice.message == "Pushing…"
-      refute GitToast.present?(result.shell_runtime.state.git_toast)
+    returned =
+      with_source(fn ->
+        Commands.schedule_remote(state, :push,
+          git: Dependencies,
+          admission: Dependencies,
+          refresher: Dependencies
+        )
+      end)
+
+    _running = receive_running(scheduler, :push)
+    {result, outcome} = receive_and_apply(returned, scheduler, :failed)
+    assert outcome.reason == "non-fast-forward rejected"
+    assert result.shell_runtime.state.notice.message == "Push failed: non-fast-forward rejected"
+
+    assert %{
+             message: "Push failed: non-fast-forward rejected",
+             level: :error,
+             action: :pull_and_retry
+           } = Runtime.state(result.shell_runtime).git_toast
+
+    assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
+  end
+
+  test "pull-and-retry stops after pull failure and reports retry push failure", %{
+    git_root: git_root
+  } do
+    for {failing_operation, reason} <- [pull: "conflict", push: "denied"] do
+      Dependencies.reset(self())
+      Dependencies.put({:remote, failing_operation}, {:return, {:error, reason}})
+      {state, scheduler} = build_state()
+
+      returned =
+        Commands.schedule_remote(state, :pull_and_retry,
+          git: Dependencies,
+          admission: Dependencies,
+          refresher: Dependencies
+        )
+
+      _running = receive_running(scheduler, :pull_and_retry)
+      assert_receive {:dependency_called, {:remote, :pull}, _worker, ^git_root}, @timeout
+
+      case failing_operation do
+        :pull ->
+          refute_receive {:dependency_called, {:remote, :push}, _worker, ^git_root}, 50
+
+        :push ->
+          assert_receive {:dependency_called, {:remote, :push}, _worker, ^git_root}, @timeout
+      end
+
+      {result, outcome} = receive_and_apply(returned, scheduler, :failed)
+      expected_reason = if failing_operation == :pull, do: "pull failed: #{reason}", else: reason
+      assert outcome.reason == expected_reason
+
+      expected_message = "Pull and retry failed: #{expected_reason}"
+      assert result.shell_runtime.state.notice.message == expected_message
+
+      assert %{message: ^expected_message, level: :error, action: nil} =
+               Runtime.state(result.shell_runtime).git_toast
+
+      assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
     end
   end
 
-  describe "Editor GenServer routing" do
-    test "git_remote_result messages are applied" do
-      {editor, _buffer} = start_editor()
-      ref = make_ref()
-      put_remote_op(editor, {ref, make_ref(), {"/tmp/repo", "Fetched", "Fetch failed"}})
+  test "worker crash and timeout settle once, report failure, and refresh", %{git_root: git_root} do
+    for {action, expected_message} <- [
+          {{:raise, "remote boom"}, "Git operation failed unexpectedly:"},
+          {{:block, :ok}, "Git operation timed out"}
+        ] do
+      Dependencies.reset(self())
+      Dependencies.put({:remote, :fetch}, action)
+      {state, scheduler} = build_state()
 
-      send(editor, {:git_remote_result, ref, :ok})
-      state = get_state(editor)
+      returned =
+        with_source(fn ->
+          Commands.schedule_remote(state, :fetch,
+            git: Dependencies,
+            admission: Dependencies,
+            refresher: Dependencies,
+            timeout_ms: 60_000
+          )
+        end)
 
-      assert state.shell_runtime.state.notice.message == "Fetched"
-      assert state.git.git_remote_op == nil
-    end
+      running = receive_running(scheduler, :fetch)
+      assert_receive {:dependency_called, {:remote, :fetch}, worker, ^git_root}, @timeout
 
-    test "task crash DOWN messages are applied" do
-      {editor, _buffer} = start_editor()
-      task_monitor = make_ref()
-      fake_pid = spawn(fn -> :ok end)
-      put_remote_op(editor, {make_ref(), task_monitor, {"/tmp/repo", "Pushed", "Push failed"}})
+      if match?({:block, _}, action) do
+        worker_monitor = Process.monitor(worker)
+        send(scheduler, {:effect_timeout, running.request.id})
+        assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, @timeout
+      end
 
-      send(editor, {:DOWN, task_monitor, :process, fake_pid, :killed})
-      state = get_state(editor)
-
-      assert state.git.git_remote_op == nil
-
-      assert state.shell_runtime.state.notice.message ==
-               "Git operation failed unexpectedly: killed"
-
-      assert %{level: :error, action: nil} = state.shell_runtime.state.git_toast
-    end
-  end
-
-  describe "concurrent operation guard" do
-    test "rejects remote actions when an operation is already in flight" do
-      op = make_remote_op(make_ref(), {"/tmp/repo", "Pushed", "Push failed"})
-      state = build_state(%{git_remote_op: op, notice_message: "Pushing…"})
-
-      result = GitCommands.execute(state, :git_pull)
-
-      assert result.shell_runtime.state.notice.message == "Git operation already in progress"
-      assert result.git.git_remote_op == op
+      {result, _outcome} = receive_and_apply(returned, scheduler, :failed)
+      assert String.starts_with?(result.shell_runtime.state.notice.message, expected_message)
+      assert %{level: :error, action: nil} = Runtime.state(result.shell_runtime).git_toast
+      assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
+      assert EffectScheduler.stats(scheduler).admitted == 0
     end
   end
 
-  defp build_state(overrides) do
-    {notice_message, overrides} = Map.pop(overrides, :notice_message)
+  test "explicit cancellation reports feedback, refreshes, and rejects delayed authority", %{
+    git_root: git_root
+  } do
+    Dependencies.put({:remote, :pull}, {:block, :ok})
+    {state, scheduler} = build_state()
 
-    state =
-      Map.merge(
-        %EditorState{
-          frontend: %MingaEditor.State.Frontend{port_manager: nil},
-          workspace: %MingaEditor.Session.State{viewport: Viewport.new(80, 24)}
-        },
-        overrides
-      )
+    returned =
+      with_source(fn ->
+        Commands.schedule_remote(state, :pull,
+          git: Dependencies,
+          admission: Dependencies,
+          refresher: Dependencies,
+          timeout_ms: 60_000
+        )
+      end)
 
-    if notice_message,
-      do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, notice_message),
-      else: state
+    running = receive_running(scheduler, :pull)
+    assert_receive {:dependency_called, {:remote, :pull}, _worker, ^git_root}, @timeout
+
+    [%{running: %{task: task}}] =
+      scheduler |> :sys.get_state() |> Map.fetch!(:lanes) |> Map.values()
+
+    assert :ok = EffectScheduler.cancel(scheduler, running.request.id)
+    {result, outcome} = receive_and_apply(returned, scheduler, :canceled)
+    assert outcome.reason == :requested
+    assert result.shell_runtime.state.notice.message == "Git operation canceled"
+
+    assert %{message: "Git operation canceled", level: :error} =
+             result.shell_runtime.state.git_toast
+
+    assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
+
+    send(scheduler, {task.ref, {:ok, :late}})
+    send(scheduler, {:effect_timeout, running.request.id})
+    _barrier = EffectScheduler.stats(scheduler)
+    request_id = running.request.id
+    refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^request_id}}}
   end
 
-  defp start_editor(content \\ "") do
-    {:ok, buffer} = BufferProcess.start_link(content: content)
+  test "terminal feedback never mutates or replays a foreign shell", %{git_root: git_root} do
+    {state, scheduler} = build_state()
+    Dependencies.put({:remote, :push}, {:return, {:error, "denied"}})
 
-    generation =
+    returned =
+      with_source(fn ->
+        Commands.schedule_remote(state, :push,
+          git: Dependencies,
+          admission: Dependencies,
+          refresher: Dependencies
+        )
+      end)
+
+    _running = receive_running(scheduler, :push)
+    foreign = MingaEditor.Shell.Workflow.switch(returned, :fake)
+    foreign_shell = Runtime.state(foreign.shell_runtime)
+    message_store = foreign.render.message_store
+
+    {result, _outcome} = receive_and_apply(foreign, scheduler, :failed)
+    assert Runtime.state(result.shell_runtime) == foreign_shell
+    assert result.render.message_store == message_store
+    assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
+
+    restored = MingaEditor.Shell.Workflow.switch(result, :traditional)
+    assert restored.shell_runtime.state.notice.message == nil
+    refute GitToast.present?(restored.shell_runtime.state.git_toast)
+  end
+
+  defp restore_project(nil), do: Minga.Project.close()
+  defp restore_project(%Root{} = root), do: Minga.Project.activate(root)
+
+  defp build_state do
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
+
+    scheduler =
       start_supervised!(
         Supervisor.child_spec(
-          {MingaEditor,
-           name: :"editor_#{:erlang.unique_integer([:positive])}",
-           port_manager: nil,
-           buffer: buffer,
-           width: 40,
-           height: 10,
-           editing_model: :vim},
+          {EffectScheduler, task_supervisor: task_supervisor, observer: self()},
           id: make_ref()
         )
       )
 
-    {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
-    {editor, buffer}
+    :ok = EffectScheduler.attach(scheduler, self())
+
+    state = %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: nil, backend: :headless},
+      workspace: %MingaEditor.Session.State{viewport: Viewport.new(80, 24)},
+      effect_scheduler: scheduler
+    }
+
+    {state, scheduler}
   end
 
-  defp get_state(editor), do: :sys.get_state(editor)
+  defp git_status_state(state) do
+    panel =
+      GitStatusPanel.new(%{
+        repo_state: :normal,
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        entries: []
+      })
 
-  defp put_remote_op(editor, op) do
-    :sys.replace_state(editor, fn state -> %{state | git_remote_op: op} end)
+    state = %{
+      state
+      | workspace:
+          state.workspace
+          |> MingaEditor.Session.State.set_keymap_scope(:git_status),
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+        }
+    }
+
+    state
+    |> SidebarWorkflow.replace_git_status(panel)
+    |> SidebarWorkflow.replace_git_status_tui(TUIState.new())
   end
 
-  defp make_remote_op(msg_ref, context) do
-    {msg_ref, make_ref(), context}
+  defp with_source(fun), do: InvocationContext.with_source(@source, fun)
+
+  defp receive_running(_scheduler, operation) do
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      status: :running,
+                      request: %{effect: %RemoteOperation{operation: ^operation}}
+                    } = outcome},
+                   @timeout
+
+    outcome
   end
+
+  defp receive_and_apply(state, scheduler, status) do
+    assert_receive {:effect_result, ^scheduler, %Outcome{status: ^status} = outcome}, @timeout
+    assert :ok = EffectScheduler.claim(scheduler, outcome)
+    {state, outcome} = outcome.request.handler.apply(state, outcome)
+    EffectScheduler.finalize(scheduler, outcome)
+    _barrier = EffectScheduler.stats(scheduler)
+    {state, outcome}
+  end
+
+  defp progress_message(:push), do: "Pushing…"
+  defp progress_message(:pull), do: "Pulling…"
+  defp progress_message(:fetch), do: "Fetching…"
+  defp progress_message(:pull_and_retry), do: "Pulling and retrying…"
+
+  defp success_message(:push), do: "Pushed"
+  defp success_message(:pull), do: "Pulled"
+  defp success_message(:fetch), do: "Fetched"
+  defp success_message(:pull_and_retry), do: "Pushed"
 end

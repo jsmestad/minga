@@ -84,9 +84,7 @@ defmodule MingaEditor do
 
   alias MingaEditor.State, as: EditorState
 
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
 
   alias MingaEditor.MouseHoverTooltip
 
@@ -955,9 +953,6 @@ defmodule MingaEditor do
         state = MingaEditor.Handlers.BufferRegistry.retire_dead_buffer(state, pid)
         {:noreply, Renderer.render_or_async(state)}
 
-      {:git_remote_task, updated_state} ->
-        {:noreply, Renderer.render_or_async(updated_state)}
-
       :unknown ->
         {:noreply, state}
     end
@@ -995,36 +990,7 @@ defmodule MingaEditor do
     {:noreply, Renderer.render_or_async(state)}
   end
 
-  # ── AI commit message generation ───────────────────────────────────────────
-
-  def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
-    state = %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)}
-    state = apply_git_commit_generation_result(state, {:ok, message})
-    {:noreply, Renderer.render_or_async(state)}
-  end
-
-  def handle_info({:git_commit_message_generated, {:error, reason}}, state) do
-    state = %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)}
-    state = apply_git_commit_generation_result(state, {:error, reason})
-    {:noreply, Renderer.render_or_async(state)}
-  end
-
-  def handle_info(:git_generate_timeout, %{git: %{git_commit_gen_ref: ref}} = state)
-      when ref != nil do
-    state = %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)}
-    state = apply_git_commit_generation_result(state, :timeout)
-    {:noreply, Renderer.render_or_async(state)}
-  end
-
-  def handle_info(:git_generate_timeout, state) do
-    {:noreply, state}
-  end
-
   # ── File/git events (delegated to FileEventHandler) ─────────────────────────
-
-  def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do
-    {:noreply, FileEventHandler.dispatch(state, msg)}
-  end
 
   # ── Async completion processing result ──────────────────────────────────
   # LSP completion responses are parsed/sorted/filtered in a Task off the
@@ -1051,45 +1017,6 @@ defmodule MingaEditor do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
-
-  @spec apply_git_commit_generation_result(
-          state(),
-          {:ok, String.t()} | {:error, String.t()} | :timeout
-        ) :: state()
-  defp apply_git_commit_generation_result(
-         %{shell_runtime: %{state: %TraditionalShellState{modal: modal}}} = state,
-         {:ok, message}
-       ) do
-    if ModalOverlay.active?(modal) do
-      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-        state,
-        "Commit message ready (prompt already open)"
-      )
-    else
-      state
-      |> open_git_commit_prompt(default: message)
-      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Commit message generated")
-    end
-  end
-
-  defp apply_git_commit_generation_result(
-         %{shell_runtime: %{state: %TraditionalShellState{}}} = state,
-         {:error, reason}
-       ) do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, reason)
-  end
-
-  defp apply_git_commit_generation_result(
-         %{shell_runtime: %{state: %TraditionalShellState{}}} = state,
-         :timeout
-       ) do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-      state,
-      "Commit message generation timed out"
-    )
-  end
-
-  defp apply_git_commit_generation_result(state, _result), do: state
 
   @spec apply_current_scheduler_result(state(), pid(), Outcome.t()) :: {:noreply, state()}
   defp apply_current_scheduler_result(state, scheduler, outcome) do
@@ -1178,46 +1105,9 @@ defmodule MingaEditor do
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
 
-  @spec classify_down(EditorState.t(), reference(), pid(), term()) ::
-          :buffer | {:git_remote_task, EditorState.t()} | :unknown
-  defp classify_down(state, ref, pid, reason) do
-    if Map.has_key?(state.buffer_lifecycle.buffer_monitors, pid) do
-      :buffer
-    else
-      case FileEventHandler.handle_remote_task_down(state, ref, reason) do
-        :not_matched -> :unknown
-        updated_state -> {:git_remote_task, updated_state}
-      end
-    end
-  end
-
-  @spec open_git_commit_prompt(EditorState.t(), keyword()) :: EditorState.t()
-  defp open_git_commit_prompt(state, opts) when is_list(opts) do
-    prompt = :"Elixir.MingaGitPorcelain.UI.Prompt.GitCommit"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(prompt) do
-      MingaEditor.PromptUI.open(state, prompt, opts)
-    else
-      state
-    end
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil -> false
-      _pid -> git_porcelain_running_in_registry?()
-    end
-  catch
-    :exit, _reason -> false
-  end
-
-  @spec git_porcelain_running_in_registry?() :: boolean()
-  defp git_porcelain_running_in_registry? do
-    case Minga.Extension.Registry.get(:minga_git_porcelain) do
-      {:ok, %{status: :running}} -> true
-      _ -> false
-    end
+  @spec classify_down(EditorState.t(), reference(), pid(), term()) :: :buffer | :unknown
+  defp classify_down(state, _ref, pid, _reason) do
+    if Map.has_key?(state.buffer_lifecycle.buffer_monitors, pid), do: :buffer, else: :unknown
   end
 
   @doc """
