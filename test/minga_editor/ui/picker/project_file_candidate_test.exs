@@ -37,6 +37,22 @@ defmodule MingaEditor.UI.Picker.ProjectFileCandidateTest do
     assert {:error, :enoent} = ProjectFileCandidate.resolve(missing)
   end
 
+  test "authorized entry path preserves an in-workspace symlink's lexical path", %{
+    tmp_dir: tmp_dir
+  } do
+    workspace = Path.join(tmp_dir, "workspace")
+    target = Path.join(workspace, "target.txt")
+    link = Path.join(workspace, "link.txt")
+    File.mkdir_p!(workspace)
+    File.write!(target, "target")
+    File.ln_s!("target.txt", link)
+    {:ok, root} = Root.directory(workspace)
+    {:ok, candidate} = ProjectFileCandidate.new(root, "link.txt")
+
+    assert ProjectFileCandidate.resolve(candidate) == {:ok, target}
+    assert ProjectFileCandidate.authorized_entry_path(candidate) == {:ok, link}
+  end
+
   test "resolution rejects a symlink escaping the captured Root", %{tmp_dir: tmp_dir} do
     workspace = Path.join(tmp_dir, "workspace")
     outside = Path.join(tmp_dir, "outside.txt")

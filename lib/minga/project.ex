@@ -220,6 +220,19 @@ defmodule Minga.Project do
     GenServer.cast(server, {:record_file, file_path})
   end
 
+  @doc """
+  Records a workspace-relative file under its captured project root.
+
+  Unlike `record_file/2`, this does not consult the active workspace. The path
+  is re-authorized through the supplied root before that project's recent-file
+  and frecency history is updated.
+  """
+  @spec record_file_for_root(GenServer.server(), Root.t(), String.t()) :: :ok
+  def record_file_for_root(server \\ __MODULE__, %Root{kind: :directory} = root, relative_path)
+      when is_binary(relative_path) do
+    GenServer.cast(server, {:record_file_for_root, root, relative_path})
+  end
+
   @doc "Returns the list of recently opened files for the current project (relative paths, most recent first)."
   @spec recent_files(GenServer.server()) :: [String.t()]
   def recent_files(server \\ __MODULE__) do
@@ -430,6 +443,10 @@ defmodule Minga.Project do
     {:noreply, do_record_file(state, file_path)}
   end
 
+  def handle_cast({:record_file_for_root, root, relative_path}, state) do
+    {:noreply, do_record_file_for_root(state, root, relative_path)}
+  end
+
   def handle_cast({:record_command, command_name}, state) do
     {:noreply, do_record_command(state, command_name)}
   end
@@ -522,35 +539,47 @@ defmodule Minga.Project do
     root = workspace_path(state.workspace)
 
     case make_relative(expanded, root) do
-      nil ->
-        state
-
-      rel_path ->
-        limit = recent_files_limit()
-        existing = Map.get(state.recent_files, root, [])
-        updated = [rel_path | Enum.reject(existing, &(&1 == rel_path))]
-        updated = Enum.take(updated, limit)
-        new_recent = Map.put(state.recent_files, root, updated)
-
-        now_unix = System.system_time(:second)
-
-        new_frecency =
-          state.frecency_events
-          |> Map.get(root, %{})
-          |> Map.update(rel_path, [now_unix], fn timestamps ->
-            [now_unix | timestamps] |> Enum.take(@frecency_events_per_file_limit)
-          end)
-          |> then(&Map.put(state.frecency_events, root, &1))
-
-        state = %{state | recent_files: new_recent, frecency_events: new_frecency}
-
-        if persist_recent_files?() do
-          persist_recent_files(new_recent)
-          persist_frecency_events(new_frecency)
-        end
-
-        state
+      nil -> state
+      rel_path -> update_file_history(state, root, rel_path)
     end
+  end
+
+  @spec do_record_file_for_root(t(), Root.t(), String.t()) :: t()
+  defp do_record_file_for_root(state, %Root{kind: :directory} = root, relative_path) do
+    with {:ok, safe_relative} when safe_relative != "" <- Path.safe_relative(relative_path),
+         {:ok, _canonical_path} <- Root.resolve_file(root, safe_relative) do
+      update_file_history(state, root.path, safe_relative)
+    else
+      _invalid_or_missing_path -> state
+    end
+  end
+
+  @spec update_file_history(t(), String.t(), String.t()) :: t()
+  defp update_file_history(state, root, rel_path) do
+    limit = recent_files_limit()
+    existing = Map.get(state.recent_files, root, [])
+    updated = [rel_path | Enum.reject(existing, &(&1 == rel_path))]
+    updated = Enum.take(updated, limit)
+    new_recent = Map.put(state.recent_files, root, updated)
+
+    now_unix = System.system_time(:second)
+
+    new_frecency =
+      state.frecency_events
+      |> Map.get(root, %{})
+      |> Map.update(rel_path, [now_unix], fn timestamps ->
+        [now_unix | timestamps] |> Enum.take(@frecency_events_per_file_limit)
+      end)
+      |> then(&Map.put(state.frecency_events, root, &1))
+
+    state = %{state | recent_files: new_recent, frecency_events: new_frecency}
+
+    if persist_recent_files?() do
+      persist_recent_files(new_recent)
+      persist_frecency_events(new_frecency)
+    end
+
+    state
   end
 
   @spec do_record_command(t(), atom()) :: t()
