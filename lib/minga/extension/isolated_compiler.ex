@@ -106,8 +106,7 @@ defmodule Minga.Extension.IsolatedCompiler do
     :erlang.trace_pattern({:code, :load_binary, 3}, true, [])
     :erlang.trace_pattern({Module, :create, 3}, [{:_, [], [{:return_trace}]}], [])
     trace_flags = [:call, :procs, :set_on_spawn, {:tracer, tracker}]
-    :erlang.trace(:all, true, trace_flags)
-    :erlang.trace(:new_processes, true, trace_flags)
+    :erlang.trace(compile_owner, true, trace_flags)
 
     try do
       {outcome, diagnostics} =
@@ -119,8 +118,7 @@ defmodule Minga.Extension.IsolatedCompiler do
 
       finish_compile(outcome, diagnostics, tracker, directory, compiler_output)
     after
-      :erlang.trace(:new_processes, false, [:all])
-      :erlang.trace(:all, false, [:all])
+      :erlang.trace(compile_owner, false, [:all])
       :erlang.trace_pattern({:code, :load_binary, 3}, false, [])
       :erlang.trace_pattern({Module, :create, 3}, false, [])
       send(tracker, :stop)
@@ -226,10 +224,8 @@ defmodule Minga.Extension.IsolatedCompiler do
       {:trace_delivered, :all, delivered_ref} ->
         case Map.pop(barriers, delivered_ref) do
           {{owner, request_ref}, remaining} ->
-            alive = Enum.count(active, fn {pid, true} -> Process.alive?(pid) end)
-            send(owner, {:tracker_barrier, request_ref, alive, errors})
-            filtered = Map.filter(active, fn {pid, true} -> Process.alive?(pid) end)
-            process_tracker_loop(filtered, tracked, remaining, directory, errors)
+            send(owner, {:tracker_barrier, request_ref, map_size(active), errors})
+            process_tracker_loop(active, tracked, remaining, directory, errors)
 
           {nil, _remaining} ->
             process_tracker_loop(active, tracked, barriers, directory, errors)

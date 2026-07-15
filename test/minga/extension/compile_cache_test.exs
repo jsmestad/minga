@@ -1275,10 +1275,13 @@ defmodule Minga.Extension.CompileCacheTest do
       Macro.Env.location(__ENV__)
     )
 
+    compiler_owner = self()
+
     spawn(fn ->
+      monitor = Process.monitor(compiler_owner)
+
       receive do
-      after
-        50 ->
+        {:DOWN, ^monitor, :process, ^compiler_owner, _reason} ->
           Module.create(
             #{inspect(names.spawned)},
             quote(do: def(marker, do: :spawned_generated)),
