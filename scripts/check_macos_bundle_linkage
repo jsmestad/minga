@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_bundle=${1:?usage: scripts/check_macos_bundle_linkage APP_BUNDLE}
+executable="$app_bundle/Contents/MacOS/Minga"
+frameworks_dir="$app_bundle/Contents/Frameworks"
+
+if [[ ! -x "$executable" ]]; then
+  echo "error: Minga executable not found at $executable" >&2
+  exit 1
+fi
+
+if ! otool -l "$executable" | grep -A2 LC_RPATH | grep -q 'path @executable_path/../Frameworks'; then
+  echo "error: Minga executable does not search its bundled Frameworks directory" >&2
+  exit 1
+fi
+
+for framework in MingaProtocol MingaUI; do
+  framework_binary="$frameworks_dir/$framework.framework/Versions/A/$framework"
+
+  if [[ ! -f "$framework_binary" ]]; then
+    echo "error: bundled framework not found at $framework_binary" >&2
+    exit 1
+  fi
+
+  expected_name="@rpath/$framework.framework/Versions/A/$framework"
+
+  if ! otool -D "$framework_binary" | grep -Fq "$expected_name"; then
+    echo "error: $framework install name is not $expected_name" >&2
+    otool -D "$framework_binary" >&2
+    exit 1
+  fi
+
+  if ! otool -L "$executable" | grep -Fq "$expected_name"; then
+    echo "error: Minga executable does not link $framework through @rpath" >&2
+    otool -L "$executable" >&2
+    exit 1
+  fi
+done
+
+if otool -L "$executable" "$frameworks_dir/MingaUI.framework/Versions/A/MingaUI" | grep -Eq '/Library/Frameworks/Minga(Protocol|UI)\.framework'; then
+  echo "error: Minga bundle contains an absolute /Library/Frameworks dependency" >&2
+  exit 1
+fi
+
+echo "Minga bundle framework linkage: valid"
