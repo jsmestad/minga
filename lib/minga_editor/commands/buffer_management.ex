@@ -22,6 +22,8 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
+  alias MingaEditor.ConfigReloadEffect
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Commands.Search, as: SearchCommands
   alias MingaEditor.HighlightSync
@@ -657,28 +659,54 @@ defmodule MingaEditor.Commands.BufferManagement do
   # ── Reload config ──────────────────────────────────────────────────────────
 
   @spec reload_config(state()) :: state()
-  def reload_config(state) do
-    reload_config(state, fn cleaned_state -> {Config.reload(), cleaned_state} end)
-  end
+  def reload_config(state), do: reload_config(state, Minga.Config)
+
+  @doc "Schedules config reload through an explicit reload implementation."
+  @spec reload_config(state(), module()) :: state()
+  def reload_config(state, reload_module) when is_atom(reload_module),
+    do: reload_config(state, reload_module, [])
 
   @spec reload_config(state(), (state() -> {:ok | {:error, String.t()}, state()})) :: state()
   def reload_config(state, reload_fun) when is_function(reload_fun, 1) do
-    state =
-      state
-      |> EditorState.drop_feature_state_source(:config)
-      |> EditorState.drop_extension_feature_state_sources()
-
+    state = cleanup_reload_state(state)
     {result, state} = reload_fun.(state)
+    ConfigReloadEffect.finish(state, result)
+  end
 
-    case result do
-      :ok ->
-        Minga.Log.info(:editor, "Config reloaded")
-        NoticeWorkflow.publish(state, "Config reloaded")
+  @doc "Schedules config reload with explicit data arguments for the reload implementation."
+  @spec reload_config(state(), module(), [term()]) :: state()
+  def reload_config(state, reload_module, reload_args)
+      when is_atom(reload_module) and is_list(reload_args) do
+    request = ConfigReloadEffect.request(reload_module, reload_args)
 
-      {:error, msg} ->
-        Minga.Log.warning(:config, "Config reload error: #{msg}")
-        NoticeWorkflow.publish(state, "Config reload error: #{msg}")
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} ->
+        state
+        |> cleanup_reload_state()
+        |> NoticeWorkflow.publish("Reloading config…")
+
+      {:error, :queue_full} ->
+        NoticeWorkflow.publish(state, "Config reload already in progress")
+
+      {:error, reason} ->
+        config_reload_admission_failure(state, reason)
     end
+  catch
+    :exit, reason -> config_reload_admission_failure(state, reason)
+  end
+
+  @spec config_reload_admission_failure(state(), term()) :: state()
+  defp config_reload_admission_failure(state, reason) do
+    message = "could not schedule config reload: #{inspect(reason)}"
+    Minga.Log.warning(:config, message)
+    NoticeWorkflow.publish(state, "Config reload error: #{message}")
+  end
+
+  @spec cleanup_reload_state(state()) :: state()
+  defp cleanup_reload_state(state) do
+    state
+    |> EditorState.drop_feature_state_source(:config)
+    |> EditorState.drop_extension_feature_state_sources()
   end
 
   # ── Alternate file ───────────────────────────────────────────────────────

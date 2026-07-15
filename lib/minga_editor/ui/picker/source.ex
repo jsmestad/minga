@@ -38,6 +38,9 @@ defmodule MingaEditor.UI.Picker.Source do
       end
   """
 
+  alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.InvocationContext
+  alias Minga.Extension.Registry, as: ExtensionRegistry
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
@@ -202,6 +205,32 @@ defmodule MingaEditor.UI.Picker.Source do
       _ ->
         state
     end
+  end
+
+  @doc "Returns the authoritative contribution source installed at callback invocation."
+  @spec source_identity(module()) :: ContributionCleanup.contribution_source() | nil
+  def source_identity(module) when is_atom(module) do
+    case InvocationContext.current_source() do
+      {:ok, source} -> source
+      :none -> nil
+    end
+  end
+
+  @doc "Verifies that a contribution source still admits picker callback work."
+  @spec verify_admission(ContributionCleanup.contribution_source() | nil) ::
+          :ok | {:error, {:source_admission_denied, term()}}
+  def verify_admission(nil), do: :ok
+  def verify_admission(:builtin), do: :ok
+  def verify_admission(:config), do: :ok
+  def verify_admission({:bundle, name}) when is_atom(name), do: :ok
+
+  def verify_admission({:extension, name} = source) when is_atom(name) do
+    case ExtensionRegistry.get(name) do
+      {:ok, %{status: :running}} -> :ok
+      _entry -> {:error, {:source_admission_denied, source}}
+    end
+  catch
+    :exit, _reason -> {:error, {:source_admission_denied, source}}
   end
 
   @doc """

@@ -1,6 +1,7 @@
 defmodule MingaEditor.Extension.SidebarTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Extension.InvocationContext
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Extension.Sidebar.Snapshot
 
@@ -146,17 +147,45 @@ defmodule MingaEditor.Extension.SidebarTest do
     assert %{id: "bookmarks"} = Sidebar.get(table, "bookmarks")
   end
 
-  test "dispatches actions through the editor action pipeline", %{table: table} do
-    handler = fn state, action, context -> Map.put(state, :handled, {action, context}) end
+  test "dispatches actions with the owning source installed", %{table: table} do
+    source = {:extension, :alpha}
+
+    handler = fn state, action, context ->
+      Map.put(state, :handled, {action, context, InvocationContext.current_source()})
+    end
 
     assert :ok =
-             Sidebar.register(table, {:extension, :alpha}, %{
+             Sidebar.register(table, source, %{
                id: "outline",
                display_name: "Outline",
                action_handler: handler
              })
 
     state = Sidebar.dispatch_action(table, %{}, "outline", "open", %{row: 1})
-    assert state.handled == {"open", %{row: 1, sidebar_id: "outline"}}
+
+    assert state.handled ==
+             {"open", %{row: 1, sidebar_id: "outline"}, {:ok, source}}
+
+    assert InvocationContext.current_source() == :none
+  end
+
+  test "built-in and config actions retain their exact source", %{table: table} do
+    for source <- [:builtin, :config] do
+      id = "#{source}_sidebar"
+
+      assert :ok =
+               Sidebar.register(table, source, %{
+                 id: id,
+                 display_name: id,
+                 action_handler: fn state, _action, _context ->
+                   Map.put(state, :callback_source, InvocationContext.current_source())
+                 end
+               })
+
+      assert %{callback_source: {:ok, ^source}} =
+               Sidebar.dispatch_action(table, %{}, id, "open", %{})
+
+      assert InvocationContext.current_source() == :none
+    end
   end
 end

@@ -52,6 +52,30 @@ defmodule MingaEditor.EffectScheduler.Engine do
     end
   end
 
+  @doc "Cancels and terminalizes all work attributed to a contribution source."
+  @spec cancel_source(State.t(), Minga.Extension.ContributionCleanup.contribution_source()) ::
+          {:ok, State.t()}
+  def cancel_source(%State{} = state, source) do
+    {:ok, cancel_matching(state, &(&1.source == source), :source_canceled, false)}
+  end
+
+  @doc "Cancels and terminalizes all work for one semantic resource."
+  @spec cancel_resource(State.t(), Request.resource()) :: {:ok, State.t()}
+  def cancel_resource(%State{} = state, resource) do
+    {:ok, cancel_matching(state, &(&1.resource == resource), :resource_canceled, true)}
+  end
+
+  @doc "Returns whether a source has running, queued, or pending work."
+  @spec active_source?(State.t(), Minga.Extension.ContributionCleanup.contribution_source()) ::
+          boolean()
+  def active_source?(%State{} = state, source), do: request_active?(state, &(&1.source == source))
+
+  @doc "Returns whether an exact request still holds scheduler admission."
+  @spec admitted?(State.t(), Request.id()) :: boolean()
+  def admitted?(%State{} = state, request_id) when is_reference(request_id) do
+    MapSet.member?(state.admitted, request_id)
+  end
+
   @doc "Atomically claims a still-pending candidate without releasing its resource."
   @spec claim(State.t(), Outcome.t()) :: {claim(), State.t()}
   def claim(%State{} = state, %Outcome{} = outcome) do
@@ -374,6 +398,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
   @spec stop_running_task(State.t(), State.running() | nil) :: State.t()
   defp stop_running_task(state, %{task: %Task{} = task}) do
     _shutdown_result = Task.shutdown(task, :brutal_kill)
+    Process.demonitor(task.ref, [:flush])
     %{state | tasks: Map.delete(state.tasks, task.ref)}
   end
 
@@ -392,6 +417,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
          reason
        ) do
     _shutdown_result = Task.shutdown(task, :brutal_kill)
+    Process.demonitor(task.ref, [:flush])
 
     state
     |> Map.put(:tasks, Map.delete(state.tasks, task.ref))
@@ -461,6 +487,91 @@ defmodule MingaEditor.EffectScheduler.Engine do
           |> notify_queued_lifecycle(queue)
 
         {:ok, deliver_result(state, Outcome.canceled(request, :requested))}
+    end
+  end
+
+  @spec cancel_matching(State.t(), (Request.t() -> boolean()), term(), boolean()) :: State.t()
+  defp cancel_matching(state, match?, reason, notify_owner?) do
+    {state, resources} = cancel_matching_lanes(state, match?, reason, notify_owner?)
+
+    state =
+      state.pending
+      |> Enum.map(fn {_request_id, outcome} -> outcome.request end)
+      |> Enum.filter(match?)
+      |> Enum.reduce(state, fn request, acc ->
+        terminalize_canceled_request(acc, request, reason, notify_owner?)
+      end)
+
+    Enum.reduce(resources, state, &start_next(&2, &1))
+  end
+
+  @spec cancel_matching_lanes(State.t(), (Request.t() -> boolean()), term(), boolean()) ::
+          {State.t(), [Request.resource()]}
+  defp cancel_matching_lanes(state, match?, reason, notify_owner?) do
+    Enum.reduce(state.lanes, {state, []}, fn {resource, lane}, {acc, resources} ->
+      {acc, running, canceled_running} = cancel_matching_running(acc, lane.running, match?)
+      {queue, canceled_queued} = split_matching_queue(lane.queue, match?)
+      changed? = canceled_running != [] or canceled_queued != []
+
+      acc =
+        acc
+        |> put_lane(resource, %{lane | running: running, queue: queue})
+        |> maybe_notify_queued_lifecycle(queue, changed?)
+
+      acc =
+        Enum.reduce(canceled_running ++ canceled_queued, acc, fn request, inner_acc ->
+          terminalize_canceled_request(inner_acc, request, reason, notify_owner?)
+        end)
+
+      if changed?, do: {acc, [resource | resources]}, else: {acc, resources}
+    end)
+  end
+
+  @spec cancel_matching_running(
+          State.t(),
+          State.running() | nil,
+          (Request.t() -> boolean())
+        ) :: {State.t(), State.running() | nil, [Request.t()]}
+  defp cancel_matching_running(state, %{request: request} = running, match?) do
+    if match?.(request) do
+      {stop_running_task(state, running), nil, [request]}
+    else
+      {state, running, []}
+    end
+  end
+
+  defp cancel_matching_running(state, nil, _match?), do: {state, nil, []}
+
+  @spec split_matching_queue(:queue.queue(Request.t()), (Request.t() -> boolean())) ::
+          {:queue.queue(Request.t()), [Request.t()]}
+  defp split_matching_queue(queue, match?) do
+    {canceled, retained} = queue |> :queue.to_list() |> Enum.split_with(match?)
+    {:queue.from_list(retained), canceled}
+  end
+
+  @spec maybe_notify_queued_lifecycle(State.t(), :queue.queue(Request.t()), boolean()) ::
+          State.t()
+  defp maybe_notify_queued_lifecycle(state, queue, true),
+    do: notify_queued_lifecycle(state, queue)
+
+  defp maybe_notify_queued_lifecycle(state, _queue, false), do: state
+
+  @spec terminalize_canceled_request(State.t(), Request.t(), term(), boolean()) :: State.t()
+  defp terminalize_canceled_request(state, request, reason, notify_owner?) do
+    outcome = Outcome.canceled(request, reason)
+
+    state =
+      state
+      |> release_current(request)
+      |> Map.put(:pending, Map.delete(state.pending, request.id))
+      |> Map.put(:claimed, MapSet.delete(state.claimed, request.id))
+
+    if MapSet.member?(state.admitted, request.id) do
+      if notify_owner?, do: notify_lifecycle(state.owner, outcome)
+      notify_terminal(state.observer, outcome)
+      release_admission(state, request.id)
+    else
+      state
     end
   end
 
@@ -575,18 +686,23 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
   @spec handler_active?(State.t(), module()) :: boolean()
   defp handler_active?(state, handler) do
-    Enum.any?(state.lanes, fn {_resource, lane} ->
-      running_handler?(lane.running, handler) or queued_handler?(lane.queue, handler)
-    end) or Enum.any?(state.pending, fn {_id, outcome} -> outcome.request.handler == handler end)
+    request_active?(state, &(&1.handler == handler))
   end
 
-  @spec running_handler?(State.running() | nil, module()) :: boolean()
-  defp running_handler?(%{request: %{handler: handler}}, handler), do: true
-  defp running_handler?(_running, _handler), do: false
+  @spec request_active?(State.t(), (Request.t() -> boolean())) :: boolean()
+  defp request_active?(state, match?) do
+    Enum.any?(state.lanes, fn {_resource, lane} ->
+      running_matches?(lane.running, match?) or queued_matches?(lane.queue, match?)
+    end) or Enum.any?(state.pending, fn {_id, outcome} -> match?.(outcome.request) end)
+  end
 
-  @spec queued_handler?(:queue.queue(Request.t()), module()) :: boolean()
-  defp queued_handler?(queue, handler) do
-    queue |> :queue.to_list() |> Enum.any?(&(&1.handler == handler))
+  @spec running_matches?(State.running() | nil, (Request.t() -> boolean())) :: boolean()
+  defp running_matches?(%{request: request}, match?), do: match?.(request)
+  defp running_matches?(_running, _match?), do: false
+
+  @spec queued_matches?(:queue.queue(Request.t()), (Request.t() -> boolean())) :: boolean()
+  defp queued_matches?(queue, match?) do
+    queue |> :queue.to_list() |> Enum.any?(match?)
   end
 
   @spec shutdown_all(State.t(), term()) :: State.t()
@@ -600,8 +716,12 @@ defmodule MingaEditor.EffectScheduler.Engine do
       |> Map.new(fn request -> {request.id, request} end)
 
     Enum.each(state.lanes, fn
-      {_resource, %{running: %{task: %Task{} = task}}} -> Task.shutdown(task, :brutal_kill)
-      _lane -> :ok
+      {_resource, %{running: %{task: %Task{} = task}}} ->
+        _shutdown_result = Task.shutdown(task, :brutal_kill)
+        Process.demonitor(task.ref, [:flush])
+
+      _lane ->
+        :ok
     end)
 
     Enum.each(state.admitted, fn request_id ->

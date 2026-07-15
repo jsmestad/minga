@@ -11,7 +11,9 @@ defmodule MingaEditor.Commands.SearchAsyncTest do
 
   alias Minga.Mode.SearchPromptState
   alias MingaEditor.Commands.Search
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.UI.Picker.FetchEffect
 
   defp with_search_prompt(state, input) do
     then(state, fn state ->
@@ -31,10 +33,27 @@ defmodule MingaEditor.Commands.SearchAsyncTest do
     end)
   end
 
+  defp with_scheduler(state) do
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
+
+    scheduler =
+      start_supervised!(
+        Supervisor.child_spec(
+          {EffectScheduler, task_supervisor: task_supervisor},
+          id: make_ref()
+        )
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+    %{state | effect_scheduler: scheduler}
+  end
+
   describe ":confirm_project_search" do
     test "opens the picker immediately in a loading state without blocking on the scan" do
       state =
         base_state(content: "scratch")
+        |> with_scheduler()
         |> with_search_prompt("some-query-that-need-not-match-anything")
 
       # The command must return promptly. If it blocked on a real subprocess scan,
@@ -61,26 +80,34 @@ defmodule MingaEditor.Commands.SearchAsyncTest do
     test "stashes the query for the off-path source to read" do
       state =
         base_state(content: "scratch")
+        |> with_scheduler()
         |> with_search_prompt("widget")
 
       new_state = Search.execute(state, :confirm_project_search)
       assert new_state.workspace.search.project_query == "widget"
     end
 
-    test "defers the actual fetch via a self-sent message rather than running it inline" do
+    test "submits a typed fetch request instead of a private Editor message" do
+      state =
+        base_state(content: "scratch")
+        |> with_scheduler()
+        |> with_search_prompt("widget")
+
+      new_state = Search.execute(state, :confirm_project_search)
+
+      assert EffectScheduler.active?(new_state.effect_scheduler, FetchEffect)
+    end
+
+    test "records an explicit admission failure when no scheduler is available" do
       state =
         base_state(content: "scratch")
         |> with_search_prompt("widget")
 
-      _new_state = Search.execute(state, :confirm_project_search)
+      new_state = Search.execute(state, :confirm_project_search)
+      {:picker, %{picker_ui: picker}} = new_state.shell_runtime.state.modal
 
-      # PickerUI.open/3 for an async source enqueues the fetch to the editor's own
-      # mailbox (self() here is the test process), keeping the scan off the
-      # synchronous command path. Assert the deferred fetch was scheduled.
-      assert_received {:picker_fetch_candidates, MingaEditor.UI.Picker.ProjectSearchSource,
-                       revision, _ctx}
-
-      assert is_reference(revision)
+      assert picker.load_status ==
+               {:error, "Picker fetch not scheduled: :scheduler_unavailable"}
     end
 
     test "empty query reports a status instead of opening the picker" do

@@ -18,6 +18,40 @@ defmodule Minga.Extension.ContributionCleanupTest do
     {:ok, keymap: keymap}
   end
 
+  test "targeted finalization runs one family and full cleanup remains idempotent", %{
+    keymap: keymap
+  } do
+    source = {:extension, :cleanup_test}
+    test_pid = self()
+
+    callbacks = %{
+      editor_effects: fn callback_source ->
+        send(test_pid, {:editor_effects_finalized, callback_source})
+        :ok
+      end,
+      later_family: fn callback_source ->
+        send(test_pid, {:later_family_cleaned, callback_source})
+        :ok
+      end
+    }
+
+    assert :ok =
+             ContributionCleanup.finalize_source(source, :editor_effects, callbacks: callbacks)
+
+    assert_receive {:editor_effects_finalized, ^source}
+    refute_received {:later_family_cleaned, ^source}
+
+    assert :ok =
+             ContributionCleanup.unregister_source(source,
+               command_registry: Minga.Command.Registry,
+               keymap: keymap,
+               callbacks: callbacks
+             )
+
+    assert_receive {:editor_effects_finalized, ^source}
+    assert_receive {:later_family_cleaned, ^source}
+  end
+
   test "continues cleanup after one family fails and reports the failure", %{keymap: keymap} do
     source = {:extension, :cleanup_test}
     test_pid = self()

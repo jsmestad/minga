@@ -128,6 +128,130 @@ defmodule MingaEditor.EffectSchedulerTest do
     refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^request_id}}}
   end
 
+  test "source cancellation kills running work, removes queued work, and advances the lane" do
+    scheduler = start_scheduler()
+    policy = Policy.fifo(2)
+    source = {:extension, :source_alpha}
+    other_source = {:extension, :source_beta}
+
+    running = EffectProbe.source_request(self(), :source_running, :shared, policy, source)
+    queued = EffectProbe.source_request(self(), :source_queued, :shared, policy, source)
+    retained = EffectProbe.source_request(self(), :retained, :shared, policy, other_source)
+    core = EffectProbe.request(self(), :core, :core_resource, Policy.fifo(0))
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, running)
+    assert_receive {:effect_started, :source_running, worker, [:source_running]}
+    worker_monitor = Process.monitor(worker)
+    assert {:ok, _, :queued} = EffectScheduler.schedule(scheduler, queued)
+    assert {:ok, _, :queued} = EffectScheduler.schedule(scheduler, retained)
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, core)
+    assert_receive {:effect_started, :core, core_worker, [:core]}
+    assert EffectScheduler.active_source?(scheduler, source)
+
+    assert :ok = EffectScheduler.cancel_source(scheduler, source)
+    refute EffectScheduler.active_source?(scheduler, source)
+    assert EffectScheduler.active_source?(scheduler, other_source)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
+    assert_terminal_direct(running.id, :canceled, :source_canceled)
+    assert_terminal_direct(queued.id, :canceled, :source_canceled)
+    assert_receive {:effect_started, :retained, retained_worker, [:retained]}
+    assert EffectScheduler.stats(scheduler) == stats(2, 2, 0, 0, 2)
+
+    send(retained_worker, {:release_effect, :retained})
+    send(core_worker, {:release_effect, :core})
+    finalize_once(scheduler, receive_candidate(scheduler, retained.id, :completed))
+    finalize_once(scheduler, receive_candidate(scheduler, core.id, :completed))
+  end
+
+  test "source cancellation terminalizes unclaimed and claimed pending outcomes" do
+    scheduler = start_scheduler()
+    source = {:extension, :pending_source}
+
+    unclaimed =
+      EffectProbe.source_request(
+        self(),
+        :unclaimed,
+        :unclaimed_resource,
+        Policy.fifo(0),
+        source,
+        {:return, :done}
+      )
+
+    claimed =
+      EffectProbe.source_request(
+        self(),
+        :claimed,
+        :claimed_resource,
+        Policy.fifo(0),
+        source,
+        {:return, :done}
+      )
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, unclaimed)
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, claimed)
+    unclaimed_outcome = receive_candidate(scheduler, unclaimed.id, :completed)
+    claimed_outcome = receive_candidate(scheduler, claimed.id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, claimed_outcome)
+    assert EffectScheduler.active_source?(scheduler, source)
+
+    assert :ok = EffectScheduler.cancel_source(scheduler, source)
+    assert_terminal_direct(unclaimed.id, :canceled, :source_canceled)
+    assert_terminal_direct(claimed.id, :canceled, :source_canceled)
+    refute EffectScheduler.active_source?(scheduler, source)
+    assert EffectScheduler.claim(scheduler, unclaimed_outcome) == {:error, :not_pending}
+    assert EffectScheduler.claim(scheduler, claimed_outcome) == {:error, :not_pending}
+
+    EffectScheduler.finalize(scheduler, unclaimed_outcome)
+    EffectScheduler.finalize(scheduler, claimed_outcome)
+    assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
+  end
+
+  test "picker resource close terminalizes queued and claimed candidates" do
+    scheduler = start_scheduler()
+    resource = {:picker_fetch, :close_candidates}
+    policy = Policy.fifo(1)
+
+    claimed =
+      EffectProbe.request(self(), :claimed_picker, resource, policy, {:return, :ready})
+
+    queued = EffectProbe.request(self(), :queued_picker, resource, policy)
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, claimed)
+    assert {:ok, _, :queued} = EffectScheduler.schedule(scheduler, queued)
+    claimed_outcome = receive_candidate(scheduler, claimed.id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, claimed_outcome)
+
+    assert :ok = EffectScheduler.cancel_resource(scheduler, resource)
+    assert_terminal_direct(claimed.id, :canceled, :resource_canceled)
+    assert_terminal_direct(queued.id, :canceled, :resource_canceled)
+    assert EffectScheduler.claim(scheduler, claimed_outcome) == {:error, :not_pending}
+    refute_received {:effect_started, :queued_picker, _worker, _payloads}
+    assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
+  end
+
+  test "source cancellation is idempotent and rejects delayed worker delivery" do
+    scheduler = start_scheduler()
+    source = {:extension, :delayed_source}
+    request = EffectProbe.source_request(self(), :delayed, :resource, Policy.fifo(0), source)
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, request)
+    assert_receive {:effect_started, :delayed, _worker, [:delayed]}
+
+    [%{running: %{task: task}}] =
+      scheduler |> :sys.get_state() |> Map.fetch!(:lanes) |> Map.values()
+
+    assert :ok = EffectScheduler.cancel_source(scheduler, source)
+    assert :ok = EffectScheduler.cancel_source(scheduler, source)
+    assert_terminal_direct(request.id, :canceled, :source_canceled)
+
+    send(scheduler, {task.ref, {:ok, :late}})
+    _state = :sys.get_state(scheduler)
+    request_id = request.id
+    refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^request_id}}}
+    refute_received {:effect_terminal, %Outcome{request: %{id: ^request_id}}}
+    assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
+  end
+
   test "operation cancellation distinguishes an unavailable scheduler" do
     assert EffectScheduler.cancel_operation(nil, 1) == {:error, :scheduler_unavailable}
   end

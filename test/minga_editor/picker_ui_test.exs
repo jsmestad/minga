@@ -4,6 +4,8 @@ defmodule MingaEditor.PickerUITest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Runtime
@@ -140,6 +142,34 @@ defmodule MingaEditor.PickerUITest do
     def live_preview?, do: true
   end
 
+  defmodule BlockingAsyncSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    @impl true
+    def title, do: "Blocking async"
+
+    @impl true
+    def candidates(_ctx), do: []
+
+    @impl true
+    def async?, do: true
+
+    @impl true
+    def async_fetch(%{picker_ui: %{context: %{test_pid: test_pid}}}) do
+      send(test_pid, {:blocking_picker_started, self()})
+
+      receive do
+        :release_blocking_picker -> {:ok, [], %{}}
+      end
+    end
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+  end
+
   defmodule NoBulkActionsSource do
     @behaviour MingaEditor.UI.Picker.Source
 
@@ -169,6 +199,22 @@ defmodule MingaEditor.PickerUITest do
     def on_action(_action, _item, state), do: state
   end
 
+  defp state_with_scheduler do
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
+
+    scheduler =
+      start_supervised!(
+        Supervisor.child_spec(
+          {EffectScheduler, task_supervisor: task_supervisor},
+          id: make_ref()
+        )
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+    %{TestHelpers.base_state(rendering: :disabled) | effect_scheduler: scheduler}
+  end
+
   defp picker_state_for_source(state, source, items) do
     picker = items |> Picker.new(title: "Test", max_visible: 10) |> mark_all_picker()
 
@@ -187,6 +233,42 @@ defmodule MingaEditor.PickerUITest do
     Enum.reduce(1..length(picker.items), picker, fn _, acc ->
       Picker.toggle_mark(acc) |> Picker.move_down()
     end)
+  end
+
+  describe "async picker lifecycle" do
+    test "replacing and closing a picker cancel scheduler-owned fetches" do
+      state = state_with_scheduler()
+      first = PickerUI.open(state, BlockingAsyncSource, %{test_pid: self()})
+      assert_receive {:blocking_picker_started, first_worker}
+      first_monitor = Process.monitor(first_worker)
+
+      replacement = PickerUI.open(first, BlockingAsyncSource, %{test_pid: self()})
+      assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, _reason}
+      assert_receive {:blocking_picker_started, replacement_worker}
+      replacement_monitor = Process.monitor(replacement_worker)
+
+      closed = PickerUI.close(replacement)
+      assert_receive {:DOWN, ^replacement_monitor, :process, ^replacement_worker, _reason}
+      assert closed.shell_runtime.state.modal == :none
+      assert EffectScheduler.stats(closed.effect_scheduler).admitted == 0
+    end
+
+    test "closing terminalizes a completed candidate before it can be claimed" do
+      state = state_with_scheduler()
+      opened = PickerUI.open(state, BlockingAsyncSource, %{test_pid: self()})
+      assert_receive {:blocking_picker_started, worker}
+      send(worker, :release_blocking_picker)
+
+      assert_receive {:effect_result, scheduler,
+                      %Outcome{status: :completed, request: request} = outcome}
+
+      assert scheduler == opened.effect_scheduler
+      closed = PickerUI.close(opened)
+
+      assert EffectScheduler.claim(scheduler, outcome) == {:error, :not_pending}
+      assert EffectScheduler.cancel(scheduler, request.id) == {:error, :not_found}
+      assert closed.shell_runtime.state.modal == :none
+    end
   end
 
   describe "bulk picker actions" do

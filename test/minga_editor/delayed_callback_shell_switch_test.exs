@@ -2,6 +2,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   # Serial because these tests exercise shell switching through the global shell registry.
   use ExUnit.Case, async: false
 
+  alias MingaEditor.Effect.Outcome
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Registry
@@ -13,6 +14,8 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.UI.Picker.Candidate
+  alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
 
@@ -54,24 +57,24 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   end
 
   test "picker candidate delivery is dropped without touching or replaying a foreign shell" do
-    traditional_state =
+    {traditional_state, revision} =
       TestHelpers.base_state(rendering: :disabled)
-      |> PickerUI.open(TodoSearchSource)
+      |> PickerUI.open_loading(TodoSearchSource)
 
-    assert_receive {:picker_fetch_candidates, TodoSearchSource, revision, _ctx}
     assert is_reference(revision)
-
+    context = Context.from_editor_state(traditional_state)
     state = ShellWorkflow.switch(traditional_state, :fake)
     foreign_shell_state = Runtime.state(state.shell_runtime)
     message_store = state.render.message_store
     items = [%Item{id: %{path: "/tmp/stale.ex", line: 1}, label: "stale candidate"}]
     result = {:ok, items, Candidate.from_items(items), %{status: "stale status"}}
 
-    assert {:noreply, new_state} =
-             MingaEditor.handle_info(
-               {:picker_candidates_result, TodoSearchSource, revision, result},
-               state
-             )
+    request = FetchEffect.request(TodoSearchSource, nil, context, revision)
+
+    outcome = Outcome.completed(request, result)
+
+    assert {new_state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+             FetchEffect.apply(state, outcome)
 
     assert new_state == state
     assert Runtime.state(new_state.shell_runtime) == foreign_shell_state

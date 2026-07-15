@@ -16,6 +16,7 @@ defmodule MingaEditor.Input.Router do
 
   alias Minga.Buffer
   alias Minga.Editing
+  alias Minga.Extension.InvocationContext
   alias MingaEditor
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
@@ -165,7 +166,7 @@ defmodule MingaEditor.Input.Router do
       MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
 
     Enum.reduce_while(surface_handlers, state, fn handler, acc ->
-      case handler.handle_key(acc, codepoint, modifiers) do
+      case invoke_key_handler(handler, acc, codepoint, modifiers) do
         {:handled, new_state} -> {:halt, new_state}
         {:passthrough, new_state} -> {:cont, new_state}
       end
@@ -398,9 +399,12 @@ defmodule MingaEditor.Input.Router do
     {:passthrough, state}
   end
 
-  defp dispatch_mouse_to_node(%FocusNode{handler: handler} = node, state, event) do
+  defp dispatch_mouse_to_node(%FocusNode{handler: handler, source: source} = node, state, event) do
     Code.ensure_loaded(handler)
-    call_mouse_handler(handler, node, state, event)
+
+    with_invocation_source(source, fn ->
+      call_mouse_handler(handler, node, state, event)
+    end)
   end
 
   @spec call_mouse_handler(module(), FocusNode.t(), EditorState.t(), mouse_event()) ::
@@ -440,6 +444,14 @@ defmodule MingaEditor.Input.Router do
     end
   end
 
+  @spec with_invocation_source(
+          Minga.Extension.ContributionCleanup.contribution_source() | nil,
+          (-> result)
+        ) :: result
+        when result: var
+  defp with_invocation_source(nil, fun), do: fun.()
+  defp with_invocation_source(source, fun), do: InvocationContext.with_source(source, fun)
+
   # Walks handlers and reports whether any consumed the key.
   # Returns {:handled, state} if a handler consumed it, or
   # {:passthrough, state} if all handlers passed through.
@@ -452,11 +464,27 @@ defmodule MingaEditor.Input.Router do
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
   defp walk_handlers_until_passthrough(handlers, state, codepoint, modifiers) do
     Enum.reduce_while(handlers, {:passthrough, state}, fn handler, {_status, acc} ->
-      case handler.handle_key(acc, codepoint, modifiers) do
+      case invoke_key_handler(handler, acc, codepoint, modifiers) do
         {:handled, new_state} -> {:halt, {:handled, new_state}}
         {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
       end
     end)
+  end
+
+  @spec invoke_key_handler(
+          MingaEditor.Input.dispatch_handler(),
+          EditorState.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: MingaEditor.Input.Handler.result()
+  defp invoke_key_handler({handler, source}, state, codepoint, modifiers) do
+    InvocationContext.with_source(source, fn ->
+      handler.handle_key(state, codepoint, modifiers)
+    end)
+  end
+
+  defp invoke_key_handler(handler, state, codepoint, modifiers) when is_atom(handler) do
+    handler.handle_key(state, codepoint, modifiers)
   end
 
   @spec record_keystroke(EditorState.t(), non_neg_integer(), non_neg_integer(), atom()) ::

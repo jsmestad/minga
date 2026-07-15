@@ -27,6 +27,7 @@ defmodule MingaEditor do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Extension.SourceFinalizer
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
@@ -84,7 +85,6 @@ defmodule MingaEditor do
   alias MingaEditor.State, as: EditorState
 
   alias MingaEditor.State.ModalOverlay
-  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
 
@@ -234,6 +234,7 @@ defmodule MingaEditor do
 
     state = Startup.build_initial_state(opts)
     :ok = attach_effect_scheduler(state.effect_scheduler)
+    :ok = SourceFinalizer.ensure_cleanup_registered()
 
     renderer_pid = renderer_pid_for_backend(state.frontend.backend)
 
@@ -446,6 +447,13 @@ defmodule MingaEditor do
   def handle_call({:cleanup_feature_state, source}, _from, state) do
     state = EditorState.drop_feature_state_source(state, source)
     {:reply, :ok, Renderer.render_or_async(state)}
+  end
+
+  def handle_call({:finalize_extension_source, source}, _from, state) do
+    case SourceFinalizer.finalize(state, source) do
+      {:ok, new_state} -> {:reply, :ok, Renderer.render_or_async(new_state)}
+      {{:error, reason}, new_state} -> {:reply, {:error, reason}, new_state}
+    end
   end
 
   @spec handle_open_native(state(), String.t(), boolean()) ::
@@ -1024,69 +1032,6 @@ defmodule MingaEditor do
     {:noreply, FileEventHandler.dispatch(state, msg)}
   end
 
-  # ── Async picker candidate fetching ─────────────────────────────────────
-  # When a picker source is async, PickerUI.open/3 opens the picker immediately
-  # with a loading indicator, then sends this message to spawn the background fetch.
-
-  def handle_info({:picker_fetch_candidates, source_module, revision, ctx}, state) do
-    editor = self()
-
-    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      result =
-        try do
-          case MingaEditor.UI.Picker.Source.fetch(source_module, ctx) do
-            {:ok, items, meta} ->
-              # Build the candidate cache here, off the editor process. The O(n)
-              # normalization (downcase, grapheme split, search-text join) is the
-              # work that froze the editor when a source returned 100K+ paths
-              # (#2628); doing it in the Task means the editor handler only swaps
-              # in the finished list instead of normalizing every path inline.
-              {:ok, items, MingaEditor.UI.Picker.Candidate.from_items(items), meta}
-
-            {:error, _reason} = error ->
-              error
-          end
-        rescue
-          e -> {:error, Exception.message(e)}
-        catch
-          :exit, reason -> {:error, "Source timed out: #{inspect(reason)}"}
-          :throw, value -> {:error, "Source failed: #{inspect(value)}"}
-        end
-
-      send(editor, {:picker_candidates_result, source_module, revision, result})
-    end)
-
-    {:noreply, state}
-  end
-
-  # Latest-wins stale-result guard: a candidate fetch is applied only when the
-  # live picker is still the same source *and* the result carries the picker's
-  # current fetch revision. A newer search, project switch, reopen, or close
-  # mints a new revision (or drops the picker), so older in-flight fetches land
-  # here as stale and are discarded. Picker fetches retain this read-only
-  # latest-wins path; #2805 migrates external formatting and git mutations.
-  def handle_info(
-        {:picker_candidates_result, source_module, revision, result},
-        %{
-          shell_runtime: %{
-            state: %TraditionalShellState{
-              modal: {:picker, %{picker_ui: %{source: source_module} = picker_ui} = payload}
-            }
-          }
-        } = state
-      ) do
-    if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
-      new_state = handle_picker_candidates(state, payload, result)
-      {:noreply, Renderer.render_or_async(new_state)}
-    else
-      {:noreply, state}
-    end
-  end
-
-  def handle_info({:picker_candidates_result, _source_module, _revision, _result}, state) do
-    {:noreply, state}
-  end
-
   # ── Async completion processing result ──────────────────────────────────
   # LSP completion responses are parsed/sorted/filtered in a Task off the
   # Editor hot path (CompletionHandling.handle_response/3). The Task sends this
@@ -1101,20 +1046,12 @@ defmodule MingaEditor do
   # Slow-effect lifecycle and terminal candidates dispatch through the typed
   # request's domain handler. The Editor has no resource- or lane-specific switch.
   def handle_info({:effect_lifecycle, %Outcome{} = outcome}, state) do
-    {new_state, final_outcome} = apply_effect_outcome(state, outcome)
+    {new_state, final_outcome} = apply_effect_lifecycle(state, outcome)
     {:noreply, maybe_render_effect_outcome(new_state, final_outcome)}
   end
 
   def handle_info({:effect_result, scheduler, %Outcome{} = outcome}, state) do
-    case EffectScheduler.claim(scheduler, outcome) do
-      :ok ->
-        {new_state, final_outcome} = apply_effect_outcome(state, outcome)
-        EffectScheduler.finalize(scheduler, final_outcome)
-        {:noreply, maybe_render_effect_outcome(new_state, final_outcome)}
-
-      {:error, :not_pending} ->
-        {:noreply, state}
-    end
+    apply_current_scheduler_result(state, scheduler, outcome)
   end
 
   def handle_info(_msg, state) do
@@ -1160,6 +1097,41 @@ defmodule MingaEditor do
 
   defp apply_git_commit_generation_result(state, _result), do: state
 
+  @spec apply_current_scheduler_result(state(), pid(), Outcome.t()) :: {:noreply, state()}
+  defp apply_current_scheduler_result(state, scheduler, outcome) do
+    if GenServer.whereis(state.effect_scheduler) == scheduler do
+      case EffectScheduler.claim(scheduler, outcome) do
+        :ok ->
+          {new_state, final_outcome} = apply_effect_outcome(state, outcome)
+          EffectScheduler.finalize(scheduler, final_outcome)
+          {:noreply, maybe_render_effect_outcome(new_state, final_outcome)}
+
+        {:error, :not_pending} ->
+          {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  @spec apply_effect_lifecycle(state(), Outcome.t()) :: {state(), Outcome.t()}
+  defp apply_effect_lifecycle(
+         state,
+         %Outcome{request: %Request{source: nil}} = outcome
+       ),
+       do: apply_effect_outcome(state, outcome)
+
+  defp apply_effect_lifecycle(
+         state,
+         %Outcome{request: %Request{id: request_id}} = outcome
+       ) do
+    if EffectScheduler.admitted?(state.effect_scheduler, request_id) do
+      apply_effect_outcome(state, outcome)
+    else
+      {state, outcome}
+    end
+  end
+
   @spec apply_effect_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
   defp apply_effect_outcome(state, %Outcome{request: %Request{handler: handler}} = outcome) do
     handler.apply(state, outcome)
@@ -1193,44 +1165,6 @@ defmodule MingaEditor do
     send(self(), :setup_highlight)
     state
   end
-
-  @spec handle_picker_candidates(
-          state(),
-          PickerPayload.t(),
-          {:ok, [term()], [MingaEditor.UI.Picker.Candidate.t()],
-           MingaEditor.UI.Picker.Source.fetch_meta()}
-          | {:error, String.t()}
-        ) :: state()
-  defp handle_picker_candidates(state, payload, {:ok, items, candidates, meta}) do
-    picker_state = payload.picker_ui
-    # Candidates are pre-built by the fetch Task (#2628); the editor only swaps
-    # them in here, so the input loop stays responsive on large directories.
-    picker = MingaEditor.UI.Picker.put_candidates(picker_state.picker, items, candidates)
-    new_picker_state = %{picker_state | picker: picker, load_status: :ready}
-
-    state
-    |> MingaEditor.Shell.Traditional.ModalWorkflow.transition(
-      {:picker, PickerPayload.put_picker_ui(payload, new_picker_state)}
-    )
-    |> apply_fetch_status(meta)
-  end
-
-  defp handle_picker_candidates(state, payload, {:error, reason}) do
-    picker_state = payload.picker_ui
-    new_picker_state = %{picker_state | load_status: {:error, reason}}
-
-    MingaEditor.Shell.Traditional.ModalWorkflow.transition(
-      state,
-      {:picker, PickerPayload.put_picker_ui(payload, new_picker_state)}
-    )
-  end
-
-  @spec apply_fetch_status(state(), MingaEditor.UI.Picker.Source.fetch_meta()) :: state()
-  defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
-  end
-
-  defp apply_fetch_status(state, _meta), do: state
 
   # Run the blocking SystemObserver collection in a supervised Task so the
   # Editor GenServer mailbox stays free. The token is echoed back with the

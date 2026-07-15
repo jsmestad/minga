@@ -107,6 +107,7 @@ defmodule Minga.Extension.DevReloadTest do
     send(pid, :debounced_reload)
 
     assert_reload_event({:recompiled, path})
+    assert_reload_event(:quiesce)
     assert_reload_event(:stop)
     assert_reload_event(:cleanup)
     assert_reload_event(:load)

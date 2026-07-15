@@ -43,6 +43,18 @@ defmodule Minga.Extension.ContributionCleanup do
     :ok
   end
 
+  @doc "Runs one targeted source finalizer before runtime termination."
+  @spec finalize_source(contribution_source(), atom(), cleanup_opts()) ::
+          :ok | {:error, cleanup_failure()}
+  def finalize_source(source, family, opts \\ []) when is_atom(family) do
+    cbs = Keyword.get(opts, :callbacks, callbacks())
+
+    case Map.fetch(cbs, family) do
+      {:ok, fun} -> run_cleanup_family(family, source, fn -> fun.(source) end)
+      :error -> :ok
+    end
+  end
+
   @doc "Removes all contributions owned by a source."
   @spec unregister_source(contribution_source(), cleanup_opts()) ::
           :ok | {:error, [cleanup_failure()]}

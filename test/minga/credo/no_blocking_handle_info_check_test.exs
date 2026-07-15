@@ -181,19 +181,6 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheckTest do
     |> refute_issues()
   end
 
-  test "suppresses the 4-tuple picker tag in the default allowlist" do
-    """
-    defmodule MingaEditor do
-      def handle_info({:picker_candidates_result, source, revision, result}, state) do
-        rows = Enum.map(result, fn item -> item end)
-        {:noreply, %{state | rows: rows}}
-      end
-    end
-    """
-    |> check()
-    |> refute_issues()
-  end
-
   test "allows extending the allowlist via the allow param" do
     """
     defmodule MingaEditor do

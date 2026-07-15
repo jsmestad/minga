@@ -26,6 +26,29 @@ defmodule MingaEditor.Input.RegistryTest do
     assert Enum.at(handlers, -1) == MingaEditor.Input.ModeFSM
   end
 
+  test "dispatch entries preserve exact built-in, config, and extension sources" do
+    extension_source = {:extension, :input_registry_test}
+
+    :ok =
+      Input.register_handler(:config, MingaEditor.Input.ExtensionOne,
+        phase: :surface,
+        priority: -30
+      )
+
+    :ok =
+      Input.register_handler(extension_source, MingaEditor.Input.ExtensionTwo,
+        phase: :surface,
+        priority: -20
+      )
+
+    entries = Input.surface_handler_entries(%{editing_model: Minga.Editing.Model.Vim})
+
+    assert {MingaEditor.Input.ExtensionOne, :config} in entries
+    assert {MingaEditor.Input.ExtensionTwo, extension_source} in entries
+    assert {MingaEditor.Input.MentionCompletion, :builtin} in entries
+    assert [{MingaEditor.Input.ModeFSM, :builtin} | _rest] = Enum.reverse(entries)
+  end
+
   test "extension handler priority controls relative order without callbacks on the hot path" do
     source = {:extension, :input_registry_test}
 

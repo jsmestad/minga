@@ -472,6 +472,128 @@ defmodule Minga.Extension.SupervisorTest do
       assert stopped.module == nil
     end
 
+    test "quiesces source work after admission closes and before runtime termination", ctx do
+      name = :ordered_source_stop
+      source = {:extension, name}
+      :ok = ExtRegistry.register_module(ctx.registry, name, Minga.Extensions.MCP, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+
+      assert {:ok, runtime} =
+               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry)
+
+      runtime_monitor = Process.monitor(runtime)
+
+      finalizer = fn finalized_source ->
+        {:ok, projected} = ExtRegistry.get(ctx.registry, name)
+
+        runtime_present? =
+          Enum.any?(DynamicSupervisor.which_children(ctx.supervisor), fn
+            {_id, ^runtime, _type, _modules} -> true
+            _child -> false
+          end)
+
+        send(self(), {:source_finalized, finalized_source, projected.status, runtime_present?})
+        :ok
+      end
+
+      {:ok, running_entry} = ExtRegistry.get(ctx.registry, name)
+
+      assert :ok =
+               ExtSupervisor.stop_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 name,
+                 running_entry,
+                 callbacks: %{editor_effects: finalizer}
+               )
+
+      assert_receive {:source_finalized, ^source, :stopped, true}
+      assert_receive {:source_finalized, ^source, :stopped, false}
+      assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
+    end
+
+    test "source finalizer failure keeps runtime alive and allows stop retry", ctx do
+      name = :failed_source_quiesce
+      source = {:extension, name}
+      :ok = ExtRegistry.register_module(ctx.registry, name, Minga.Extensions.MCP, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+
+      assert {:ok, runtime} =
+               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry)
+
+      runtime_monitor = Process.monitor(runtime)
+
+      finalizer = fn finalized_source ->
+        attempts = Process.get({__MODULE__, :finalizer_attempts}, 0)
+        Process.put({__MODULE__, :finalizer_attempts}, attempts + 1)
+        send(self(), {:source_finalizer_called, finalized_source, attempts})
+
+        case attempts do
+          0 -> {:error, :scheduler_unavailable}
+          _later_attempt -> :ok
+        end
+      end
+
+      later_cleanup = fn cleaned_source ->
+        send(self(), {:later_cleanup_called, cleaned_source})
+        :ok
+      end
+
+      {:ok, running_entry} = ExtRegistry.get(ctx.registry, name)
+
+      assert {:error,
+              {:source_quiesce_failed,
+               %{family: :editor_effects, source: ^source, reason: :scheduler_unavailable}}} =
+               ExtSupervisor.stop_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 name,
+                 running_entry,
+                 callbacks: %{editor_effects: finalizer, later_cleanup: later_cleanup}
+               )
+
+      assert_receive {:source_finalizer_called, ^source, 0}
+      refute_receive {:later_cleanup_called, ^source}
+      refute_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
+
+      assert Enum.any?(DynamicSupervisor.which_children(ctx.supervisor), fn
+               {_id, ^runtime, _type, _modules} -> true
+               _child -> false
+             end)
+
+      {:ok, quiescing_entry} = ExtRegistry.get(ctx.registry, name)
+      assert quiescing_entry.status == :stopped
+      assert quiescing_entry.pid == runtime
+      assert quiescing_entry.lifecycle_ref == nil
+
+      assert {:ok, ^runtime} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 name,
+                 quiescing_entry
+               )
+
+      assert Enum.count(DynamicSupervisor.which_children(ctx.supervisor), fn
+               {_id, ^runtime, _type, _modules} -> true
+               _child -> false
+             end) == 1
+
+      assert :ok =
+               ExtSupervisor.stop_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 name,
+                 quiescing_entry,
+                 callbacks: %{editor_effects: finalizer, later_cleanup: later_cleanup}
+               )
+
+      assert_receive {:source_finalizer_called, ^source, 1}
+      assert_receive {:source_finalizer_called, ^source, 2}
+      assert_receive {:later_cleanup_called, ^source}
+      assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
+    end
+
     test "stops a module-sourced extension without purging its module", ctx do
       :ok = ExtRegistry.register_module(ctx.registry, :minga_mcp, Minga.Extensions.MCP, [])
       {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_mcp)

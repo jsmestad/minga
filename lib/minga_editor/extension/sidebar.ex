@@ -9,6 +9,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
   alias Minga.Extension.CodeLease
   alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.InvocationContext
   alias MingaEditor.Extension.Sidebar.Entry
   alias MingaEditor.Extension.Sidebar.Snapshot
 
@@ -484,16 +485,23 @@ defmodule MingaEditor.Extension.Sidebar do
     )
   end
 
-  defp run_action_handler(fun, _source, state, action, context) when is_function(fun, 3),
-    do: fun.(state, action, context)
+  defp run_action_handler(fun, source, state, action, context) when is_function(fun, 3) do
+    InvocationContext.with_source(source, fn -> fun.(state, action, context) end)
+  end
 
   defp run_action_handler({module, function}, source, state, action, context) do
-    with_action_lease(source, module, fn -> apply(module, function, [state, action, context]) end)
+    with_action_lease(source, module, fn ->
+      InvocationContext.with_source(source, fn ->
+        apply(module, function, [state, action, context])
+      end)
+    end)
   end
 
   defp run_action_handler({module, function, extra}, source, state, action, context) do
     with_action_lease(source, module, fn ->
-      apply(module, function, [state, action, context | extra])
+      InvocationContext.with_source(source, fn ->
+        apply(module, function, [state, action, context | extra])
+      end)
     end)
   end
 

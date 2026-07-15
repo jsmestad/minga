@@ -52,6 +52,12 @@ defmodule MingaEditor.Input do
 
   @type handler_entry :: {module(), contribution_source(), handler_meta()}
 
+  @typedoc "Input handler paired with its authoritative contribution source."
+  @type sourced_handler :: {module(), contribution_source()}
+
+  @typedoc "Input handler dispatched by the active shell."
+  @type dispatch_handler :: module() | sourced_handler()
+
   @handler_registry_key {__MODULE__, :surface_handlers}
   @builtin_surface_handlers [
     {MentionCompletion, 10},
@@ -197,9 +203,16 @@ defmodule MingaEditor.Input do
   """
   @spec surface_handlers(map()) :: [module()]
   def surface_handlers(state) do
-    bottom_handler = editing_dispatch_handler(state)
+    state
+    |> surface_handler_entries()
+    |> Enum.map(fn {module, _source} -> module end)
+  end
 
-    Enum.concat(registered_surface_handlers(), [bottom_handler])
+  @doc "Returns surface handlers paired with their authoritative contribution sources."
+  @spec surface_handler_entries(map()) :: [sourced_handler()]
+  def surface_handler_entries(state) do
+    bottom_handler = editing_dispatch_handler(state)
+    Enum.concat(registered_surface_handler_entries(), [{bottom_handler, :builtin}])
   end
 
   @doc """
@@ -227,8 +240,8 @@ defmodule MingaEditor.Input do
     Minga.Editing.key_sequence_pending?(state)
   end
 
-  @spec registered_surface_handlers() :: [module()]
-  defp registered_surface_handlers do
+  @spec registered_surface_handler_entries() :: [sourced_handler()]
+  defp registered_surface_handler_entries do
     ensure_handler_registry!()
 
     @handler_registry_key
@@ -236,7 +249,7 @@ defmodule MingaEditor.Input do
     |> Enum.sort_by(fn {module, _source, %{phase: phase, priority: priority}} ->
       {phase_order(phase), priority, Atom.to_string(module)}
     end)
-    |> Enum.map(fn {module, _source, _meta} -> module end)
+    |> Enum.map(fn {module, source, _meta} -> {module, source} end)
   end
 
   @spec ensure_handler_registry!() :: :ok

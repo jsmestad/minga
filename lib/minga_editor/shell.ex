@@ -44,7 +44,10 @@ defmodule MingaEditor.Shell do
   @callback render(editor_state :: term()) :: term()
 
   @doc "Returns the input handler stack for this shell."
-  @callback input_handlers(editor_state :: term()) :: %{overlay: [module()], surface: [module()]}
+  @callback input_handlers(editor_state :: term()) :: %{
+              overlay: [MingaEditor.Input.dispatch_handler()],
+              surface: [MingaEditor.Input.dispatch_handler()]
+            }
 
   @doc "Blurs shell-owned bottom-panel presentation during a window focus transition."
   @callback blur_bottom_panel(shell_state()) :: shell_state()

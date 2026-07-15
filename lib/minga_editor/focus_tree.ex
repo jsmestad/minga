@@ -250,20 +250,22 @@ defmodule MingaEditor.FocusTree do
   @spec file_tree_node(Layout.rect(), map() | nil) :: TreeNode.t()
   defp file_tree_node(rect, state) do
     case active_left_sidebar(state) do
-      %{id: "file_tree", input_handler: handler} ->
+      %{id: "file_tree", input_handler: handler, source: source} ->
         TreeNode.new(:file_tree, rect,
           id: {:sidebar, "file_tree"},
           ref: "file_tree",
           handler: handler || Input.FileTreeHandler,
+          source: source,
           scrollable?: true,
           focusable?: true
         )
 
-      %{id: id, input_handler: handler} ->
+      %{id: id, input_handler: handler, source: source} ->
         TreeNode.new({:custom, :sidebar}, rect,
           id: {:sidebar, id},
           ref: id,
           handler: handler || Input.Sidebar,
+          source: source,
           scrollable?: true,
           focusable?: true
         )

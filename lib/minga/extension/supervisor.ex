@@ -19,6 +19,7 @@ defmodule Minga.Extension.Supervisor do
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
+  alias Minga.Extension.InvocationContext
   alias Minga.Extension.Lazy
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
@@ -779,8 +780,42 @@ defmodule Minga.Extension.Supervisor do
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
     with :ok <- ensure_extension_unload_allowed(name, entry, opts) do
-      ExtRegistry.update(registry, name, lifecycle_ref: nil)
+      # Close source admission before stopping runtime code or running cleanup.
+      # The final stopped/load-error projection is published after every cleanup
+      # family has had a chance to settle its source-owned work.
+      ExtRegistry.update(registry, name, status: :stopped, lifecycle_ref: nil)
 
+      quiesce_and_stop_extension(
+        supervisor,
+        registry,
+        name,
+        entry,
+        cmd_registry,
+        keymap,
+        opts
+      )
+    end
+  end
+
+  @spec quiesce_and_stop_extension(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
+        ) :: :ok | {:error, term()}
+  defp quiesce_and_stop_extension(
+         supervisor,
+         registry,
+         name,
+         entry,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
+    with :ok <- quiesce_extension_source(name, opts) do
       termination_result =
         run_lifecycle_phase(name, :stop, opts, fn ->
           terminate_extension_process(supervisor, entry)
@@ -878,7 +913,7 @@ defmodule Minga.Extension.Supervisor do
     case CodeLease.lease({:extension, ext_name}, module, reason, server: code_lease) do
       {:ok, lease} ->
         try do
-          fun.()
+          InvocationContext.with_source({:extension, ext_name}, fun)
         after
           CodeLease.release(lease)
         end
@@ -972,7 +1007,7 @@ defmodule Minga.Extension.Supervisor do
           {:ok, ExtRegistry.entry() | {:running, pid()}} | {:error, term()}
   defp current_start_entry(supervisor, registry, name) do
     case ExtRegistry.get(registry, name) do
-      {:ok, %{status: :running, pid: pid} = entry} when is_pid(pid) ->
+      {:ok, %{pid: pid} = entry} when is_pid(pid) ->
         current_running_or_restartable_entry(supervisor, registry, name, pid, entry)
 
       {:ok, entry} ->
@@ -1070,6 +1105,13 @@ defmodule Minga.Extension.Supervisor do
            current_entry
        )
        when is_atom(requested_module) and not is_nil(requested_module),
+       do: {:ok, current_entry}
+
+  defp current_stop_entry_for_request(
+         %{pid: requested_pid},
+         %{status: :stopped, pid: requested_pid, lifecycle_ref: nil} = current_entry
+       )
+       when is_pid(requested_pid),
        do: {:ok, current_entry}
 
   defp current_stop_entry_for_request(
@@ -1253,8 +1295,12 @@ defmodule Minga.Extension.Supervisor do
   @spec lifecycle_monitor_active?(GenServer.server(), atom(), reference()) :: boolean()
   defp lifecycle_monitor_active?(registry, name, lifecycle_ref) do
     case ExtRegistry.get(registry, name) do
-      {:ok, %{lifecycle_ref: ^lifecycle_ref, status: :running}} -> true
-      _ -> false
+      {:ok, %{lifecycle_ref: ^lifecycle_ref, status: status}}
+      when status in [:running, :stopped] ->
+        true
+
+      _ ->
+        false
     end
   end
 
@@ -1442,6 +1488,7 @@ defmodule Minga.Extension.Supervisor do
     if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
       case ExtRegistry.get(registry, name) do
         {:ok, entry} ->
+          ExtRegistry.update(registry, name, status: :stopped)
           cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
 
           finalize_terminal_cleanup_result(
@@ -1753,6 +1800,34 @@ defmodule Minga.Extension.Supervisor do
     case missing do
       [] -> :ok
       funs -> {:error, "extension #{name} missing callbacks: #{inspect(funs)}"}
+    end
+  end
+
+  @spec quiesce_extension_source(atom(), start_opts()) ::
+          :ok
+          | {:error,
+             {:source_quiesce_failed, Minga.Extension.ContributionCleanup.cleanup_failure()}}
+  defp quiesce_extension_source(name, opts) do
+    source = {:extension, name}
+    cleanup_opts = Keyword.take(opts, [:callbacks])
+
+    case run_lifecycle_phase(name, :quiesce, opts, fn ->
+           Minga.Extension.ContributionCleanup.finalize_source(
+             source,
+             :editor_effects,
+             cleanup_opts
+           )
+         end) do
+      :ok ->
+        :ok
+
+      {:error, failure} ->
+        Log.warning(
+          :config,
+          "Extension #{name} source quiescence failed: #{format_cleanup_failure(failure)}"
+        )
+
+        {:error, {:source_quiesce_failed, failure}}
     end
   end
 
