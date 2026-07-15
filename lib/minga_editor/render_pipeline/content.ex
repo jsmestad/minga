@@ -258,9 +258,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         ctx_fp
       )
 
-    new_map = Map.put(state.workspace.windows.map, scroll.win_id, updated_window)
-    ws = state.workspace
-    state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
+    state = Input.record_render_window(state, scroll.win_id, updated_window)
 
     {window_content, cursor_info, state}
   end
@@ -460,21 +458,14 @@ defmodule MingaEditor.RenderPipeline.Content do
          rows,
          cols
        ) do
-    ws = state.workspace
     updated_viewport = %{viewport | rows: rows, cols: cols, reserved: 0}
     updated_window = Window.set_viewport(window, updated_viewport)
-    windows = %{ws.windows | map: Map.put(ws.windows.map, win_id, updated_window)}
-    %{state | workspace: %{ws | windows: windows}}
+    Input.record_render_window(state, win_id, updated_window)
   end
 
   @spec update_agent_scroll_metrics(state(), non_neg_integer(), pos_integer()) :: state()
   defp update_agent_scroll_metrics(state, total_lines, visible_height) do
-    ws = state.workspace
-
-    agent_ui =
-      MingaEditor.Agent.UIState.record_scroll_metrics(ws.agent_ui, total_lines, visible_height)
-
-    %{state | workspace: %{ws | agent_ui: agent_ui}}
+    Input.record_agent_scroll_metrics(state, total_lines, visible_height)
   end
 
   @spec prompt_cursor(

@@ -94,6 +94,41 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.RenderCorrelation")) == 1
   end
 
+  test "scans if and unless conditions before their isolated branches" do
+    forbidden =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        alias MingaEditor.State.FileTree
+
+        def evaluate(tree, value) do
+          if %FileTree{tree | hidden: true}, do: value
+          if typed = %FileTree{}, do: %{typed | hidden: true}
+          %{typed | hidden: false}
+          unless MingaEditor.RenderPipeline.render(value), do: value
+        end
+      end
+      """
+
+    issues = check(forbidden, "lib/minga_editor/state/render_correlation.ex")
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 3
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.RenderPipeline.render")) == 1
+
+    allowed =
+      """
+      defmodule MingaEditor.State.FileTree do
+        def visible?(tree), do: if(%__MODULE__{tree | hidden: false}, do: true, else: false)
+      end
+
+      defmodule MingaEditor.RenderWorkflow do
+        def ready?(value), do: unless(MingaEditor.RenderPipeline.render(value), do: false)
+      end
+      """
+
+    allowed
+    |> check("lib/minga_editor/render_workflow.ex")
+    |> refute_issues()
+  end
+
   test "flags an aggregate update when a receiver path identifies Session.State" do
     """
     defmodule MingaEditor.BadAggregateTransition do
@@ -603,37 +638,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     |> refute_issues()
   end
 
-  test "an exact documented legacy entry suppresses only its named site" do
-    params = [
-      allowlist: [
-        [
-          module: "MingaEditor.LegacyRender",
-          function: "clear/1",
-          violation: "direct_write",
-          target: "MingaEditor.State.RenderCorrelation",
-          ticket: "#2870",
-          reason: "Legacy render transition awaiting final convergence",
-          invariant: "Only render timer state changes at this legacy boundary"
-        ]
-      ]
-    ]
-
-    allowed =
-      """
-      defmodule MingaEditor.LegacyRender do
-        def clear(value) do
-          %MingaEditor.State.RenderCorrelation{value | timer: nil}
-        end
-      end
-      """
-
-    rejected = String.replace(allowed, "def clear", "def replace")
-
-    allowed |> check("lib/minga_editor/legacy_render.ex", params) |> refute_issues()
-    rejected |> check("lib/minga_editor/legacy_render.ex", params) |> assert_issue()
-  end
-
-  test "rejects broad or undocumented allowlist entries" do
+  test "rejects every non-empty or malformed allowlist" do
     source =
       """
       defmodule MingaEditor.State.RenderCorrelation do
@@ -641,42 +646,559 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
       end
       """
 
-    broad = [
-      allowlist: [
-        [
-          module: "MingaEditor.*",
-          function: "clear/1",
-          violation: "direct_write",
-          target: "MingaEditor.State.RenderCorrelation",
-          ticket: "#2870",
-          reason: "Broad legacy exception that must not be accepted",
-          invariant: "Only render timer state changes at this legacy boundary"
+    exact =
+      [
+        allowlist: [
+          [
+            module: "MingaEditor.LegacyRender",
+            function: "clear/1",
+            violation: "direct_write",
+            target: "MingaEditor.State.RenderCorrelation",
+            ticket: "#2870",
+            reason: "Legacy render transition awaiting final convergence",
+            invariant: "Only render timer state changes at this legacy boundary"
+          ]
         ]
       ]
-    ]
 
-    undocumented = [
-      allowlist: [
-        [
-          module: "MingaEditor.LegacyRender",
-          function: "clear/1",
-          violation: "direct_write",
-          target: "MingaEditor.State.RenderCorrelation",
-          ticket: "#2870",
-          reason: "legacy",
-          invariant: "Only render timer state changes at this legacy boundary"
-        ]
-      ]
-    ]
+    Enum.each([exact, [allowlist: [module: "MingaEditor.*"]], [allowlist: :invalid]], fn params ->
+      source
+      |> check("lib/minga_editor/state/render_correlation.ex", params)
+      |> assert_issue(fn issue -> assert issue.message =~ "allowlist must remain empty" end)
+    end)
+  end
 
-    source
-    |> check("lib/minga_editor/state/render_correlation.ex", broad)
-    |> assert_issue(fn issue -> assert issue.message =~ "wildcards and paths are forbidden" end)
+  test "attributes piped Map.put to its real receiver and allows the owner" do
+    forbidden =
+      """
+      defmodule MingaEditor.ForeignFileTreeWrite do
+        def hide(state), do: state.workspace.file_tree |> Map.put(:hidden, true)
+      end
+      """
 
-    source
-    |> check("lib/minga_editor/state/render_correlation.ex", undocumented)
+    allowed =
+      """
+      defmodule MingaEditor.State.FileTree do
+        def hide(%__MODULE__{} = tree), do: tree |> Map.put(:hidden, true)
+      end
+      """
+
+    forbidden
+    |> check()
     |> assert_issue(fn issue ->
-      assert issue.message =~ "migration ticket, reason, and invariant"
+      assert issue.trigger == "MingaEditor.State.FileTree"
+      assert issue.message =~ "receiver state.workspace.file_tree"
+      assert issue.message =~ "expected owner MingaEditor.State.FileTree"
+      assert issue.message =~ "focused file-tree workflow"
+    end)
+
+    allowed |> check("lib/minga_editor/state/file_tree.ex") |> refute_issues()
+  end
+
+  test "attributes piped put_in and update_in paths and allows their owners" do
+    forbidden =
+      """
+      defmodule MingaEditor.ForeignPipedAccess do
+        def hide(state), do: state.workspace.file_tree |> put_in([:hidden], true)
+
+        def clear_refresh(state, fun) do
+          state.workspace.file_tree |> update_in([:refresh, :timer], fun)
+        end
+      end
+      """
+
+    issues = check(forbidden)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 1
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree.Refresh")) == 1
+
+    """
+    defmodule MingaEditor.State.FileTree do
+      def hide(%__MODULE__{} = tree), do: tree |> put_in([:hidden], true)
+    end
+    """
+    |> check("lib/minga_editor/state/file_tree.ex")
+    |> refute_issues()
+
+    """
+    defmodule MingaEditor.State.FileTree.Refresh do
+      def clear(%__MODULE__{} = refresh, fun), do: refresh |> update_in([:timer], fun)
+    end
+    """
+    |> check("lib/minga_editor/state/file_tree/refresh.ex")
+    |> refute_issues()
+  end
+
+  test "resolves aliased and imported Map mutations in pipelines and direct calls" do
+    forbidden =
+      """
+      defmodule MingaEditor.ForeignMapAliases do
+        alias Map, as: Mapper
+        import Map, only: [put: 3]
+
+        def piped(state), do: state.workspace |> Mapper.put(:editing, :bad)
+        def imported(state), do: put(state.workspace, :editing, :bad)
+      end
+      """
+
+    issues = check(forbidden)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.Session.State")) == 2
+
+    """
+    defmodule MingaEditor.Session.State do
+      alias Map, as: Mapper
+      import Map, only: [put: 3]
+
+      def piped(%__MODULE__{} = workspace), do: workspace |> Mapper.put(:editing, :next)
+      def imported(%__MODULE__{} = workspace), do: put(workspace, :editing, :next)
+    end
+    """
+    |> check("lib/minga_editor/session/state.ex")
+    |> refute_issues()
+  end
+
+  test "carries owner types through local assignments and mutation results" do
+    forbidden =
+      """
+      defmodule MingaEditor.ForeignTypeFlow do
+        def hide(state) do
+          tree = state.workspace.file_tree
+          changed = Map.put(tree, :hidden, true)
+          Map.put(changed, :width, 40)
+        end
+      end
+      """
+
+    assert Enum.count(check(forbidden), &(&1.trigger == "MingaEditor.State.FileTree")) == 2
+
+    """
+    defmodule MingaEditor.State.FileTree do
+      def hide(%__MODULE__{} = tree) do
+        changed = Map.put(tree, :hidden, true)
+        Map.put(changed, :width, 40)
+      end
+    end
+    """
+    |> check("lib/minga_editor/state/file_tree.ex")
+    |> refute_issues()
+  end
+
+  test "rejects captured module and function boundaries but allows value calls" do
+    forbidden =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        alias MingaEditor.RenderPipeline, as: Pipeline
+
+        def submit(value) do
+          module = Pipeline
+          module.render(value)
+          render = &Pipeline.render/1
+          render.(value)
+          value
+        end
+      end
+      """
+
+    issues = check(forbidden, "lib/minga_editor/state/render_correlation.ex")
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.RenderPipeline.render")) == 2
+
+    """
+    defmodule MingaEditor.State.RenderCorrelation do
+      alias MingaEditor.State.FileTree
+
+      def reset(value, tree) do
+        transition = &FileTree.open/3
+        {value, transition.(tree, :node, self())}
+      end
+    end
+    """
+    |> check("lib/minga_editor/state/render_correlation.ex")
+    |> refute_issues()
+  end
+
+  test "resolves imported local captures for callable purity checks" do
+    forbidden =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        import MingaEditor.RenderPipeline
+
+        def submit(value) do
+          render = &render/1
+          render.(value)
+          (&render/1).(value)
+        end
+      end
+      """
+
+    issues = check(forbidden, "lib/minga_editor/state/render_correlation.ex")
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.RenderPipeline.render")) == 2
+
+    """
+    defmodule MingaEditor.RenderWorkflow do
+      import MingaEditor.RenderPipeline
+
+      def submit(value) do
+        render = &render/1
+        render.(value)
+        (&render/1).(value)
+      end
+    end
+    """
+    |> check("lib/minga_editor/render_workflow.ex")
+    |> refute_issues()
+  end
+
+  test "rejects indirect local delegation and imported workflow boundaries" do
+    delegated =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        def submit(value), do: dispatch(value)
+        defp dispatch(value), do: MingaEditor.RenderPipeline.render(value)
+      end
+      """
+
+    imported =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        import MingaEditor.RenderPipeline, only: [render: 1]
+        def submit(value), do: render(value)
+      end
+      """
+
+    delegated_issues = check(delegated, "lib/minga_editor/state/render_correlation.ex")
+    assert Enum.any?(delegated_issues, &(&1.trigger == "MingaEditor.RenderPipeline.render"))
+    assert Enum.any?(delegated_issues, &(&1.message =~ "receiver dispatch(value)"))
+
+    imported
+    |> check("lib/minga_editor/state/render_correlation.ex")
+    |> assert_issue(fn issue -> assert issue.trigger == "MingaEditor.RenderPipeline.render" end)
+
+    """
+    defmodule MingaEditor.RenderWorkflow do
+      def submit(value), do: dispatch(value)
+      defp dispatch(value), do: MingaEditor.RenderPipeline.render(value)
+    end
+    """
+    |> check("lib/minga_editor/render_workflow.ex")
+    |> refute_issues()
+  end
+
+  test "protects every configured nested owner with paired foreign and owner writes" do
+    owners = [
+      "MingaEditor.State.TabBar",
+      "MingaEditor.State.Tab",
+      "MingaEditor.State.Tab.Context",
+      "MingaEditor.State.Workspace",
+      "MingaEditor.BottomPanel",
+      "MingaEditor.State.ModalOverlay",
+      "MingaEditor.State.ModalOverlay.Picker",
+      "MingaEditor.State.ModalOverlay.Prompt",
+      "MingaEditor.State.ModalOverlay.Completion",
+      "MingaEditor.State.ModalOverlay.CommandCompletion",
+      "MingaEditor.State.ModalOverlay.Conflict"
+    ]
+
+    Enum.each(owners, fn owner ->
+      forbidden =
+        """
+        defmodule MingaEditor.ForeignNestedOwner do
+          def alter(value), do: %#{owner}{value | marker: true}
+        end
+        """
+
+      forbidden
+      |> check()
+      |> assert_issue(fn issue ->
+        assert issue.trigger == owner
+        assert issue.message =~ "expected owner #{owner}"
+      end)
+
+      allowed =
+        """
+        defmodule #{owner} do
+          def alter(value), do: %__MODULE__{value | marker: true}
+        end
+        """
+
+      allowed |> check("lib/minga_editor/state/nested_owner.ex") |> refute_issues()
+    end)
+
+    """
+    defmodule MingaEditor.ForeignModalWrite do
+      def alter(state, fun), do: state.shell_runtime.state.modal |> update_in([], fun)
+    end
+    """
+    |> check()
+    |> assert_issue(fn issue ->
+      assert issue.trigger == "MingaEditor.State.ModalOverlay"
+      assert issue.message =~ "MingaEditor.Shell.Traditional.ModalWorkflow"
+    end)
+  end
+
+  test "uses broad MingaAgent purity coverage with exact value-module exemptions" do
+    forbidden =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        def violate(value) do
+          MingaAgent.Session.resume(value)
+          MingaAgent.EphemeralSession.start_link(value)
+          MingaAgent.OAuth.Flow.start(value)
+          value
+        end
+      end
+      """
+
+    issues = check(forbidden, "lib/minga_editor/state/render_correlation.ex")
+
+    assert Enum.count(issues, &String.starts_with?(&1.trigger, "MingaAgent.")) == 3
+    assert Enum.any?(issues, &(&1.trigger == "MingaAgent.Session.resume"))
+    assert Enum.any?(issues, &(&1.trigger == "MingaAgent.EphemeralSession.start_link"))
+    assert Enum.any?(issues, &(&1.trigger == "MingaAgent.OAuth.Flow.start"))
+
+    """
+    defmodule MingaEditor.State.RenderCorrelation do
+      def values(value) do
+        MingaAgent.Provider.Spec.new(value)
+        MingaAgent.Message.new(value)
+        MingaAgent.Subagent.Handle.new(value)
+        value
+      end
+    end
+    """
+    |> check("lib/minga_editor/state/render_correlation.ex")
+    |> refute_issues()
+  end
+
+  test "resolves multi-segment and grouped aliases by expanding their first segment" do
+    source =
+      """
+      defmodule MingaEditor.ForeignAliasWriter do
+        alias MingaEditor.State
+        alias MingaEditor.State.{RenderCorrelation, FileTree}
+
+        def tree(value), do: %State.FileTree{value | hidden: true}
+        def render(value), do: %RenderCorrelation{value | timer: nil}
+        def grouped_tree(value), do: %FileTree{value | hidden: true}
+      end
+      """
+
+    issues = check(source)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 2
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.RenderCorrelation")) == 1
+  end
+
+  test "keeps alias and import declarations lexical source ordered and shadowable" do
+    source =
+      """
+      defmodule MingaEditor.ForeignScopedWriter do
+        def before_alias(value), do: %Owned{value | timer: nil}
+
+        alias MingaEditor.State.FileTree, as: Owned
+        def file_tree(value), do: %Owned{value | hidden: true}
+
+        def scoped_alias(value) do
+          alias MingaEditor.State.RenderCorrelation, as: Owned
+          %Owned{value | timer: nil}
+        end
+
+        def scoped_import(state) do
+          import Map, only: [put: 3]
+          put(state.workspace, :editing, :bad)
+        end
+
+        def after_scopes(value, state) do
+          {%Owned{value | hidden: true}, put(state.workspace, :editing, :ignored)}
+        end
+
+        alias MingaEditor.State.RenderCorrelation, as: Owned
+        def shadowed(value), do: %Owned{value | timer: nil}
+      end
+      """
+
+    issues = check(source)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 2
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.RenderCorrelation")) == 2
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.Session.State")) == 1
+  end
+
+  test "does not leak nested-module aliases or imports to the enclosing module" do
+    source =
+      """
+      defmodule MingaEditor.ForeignOuterScope do
+        alias MingaEditor.State.FileTree, as: Owned
+
+        defmodule Inner do
+          alias MingaEditor.State.RenderCorrelation, as: Owned
+          import Map, only: [put: 3]
+
+          def write(value, state) do
+            {%Owned{value | timer: nil}, put(state.workspace, :editing, :bad)}
+          end
+        end
+
+        def write(value, state) do
+          {%Owned{value | hidden: true}, put(state.workspace, :editing, :ignored)}
+        end
+      end
+      """
+
+    issues = check(source)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 1
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.RenderCorrelation")) == 1
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.Session.State")) == 1
+  end
+
+  test "attributes every mutation in chained and imported Map pipelines" do
+    foreign =
+      """
+      defmodule MingaEditor.ForeignChainedPipeline do
+        import Map, only: [put: 3]
+
+        def remote(state) do
+          state.workspace.file_tree
+          |> Map.put(:hidden, true)
+          |> Map.put(:width, 40)
+        end
+
+        def imported(state) do
+          state.workspace
+          |> put(:editing, :first)
+          |> put(:editing, :second)
+        end
+      end
+      """
+
+    issues = check(foreign)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 2
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.Session.State")) == 2
+
+    """
+    defmodule MingaEditor.State.FileTree do
+      import Map, only: [put: 3]
+
+      def mutate(%__MODULE__{} = tree) do
+        tree |> put(:hidden, true) |> put(:width, 40)
+      end
+    end
+    """
+    |> check("lib/minga_editor/state/file_tree.ex")
+    |> refute_issues()
+  end
+
+  test "checks every boundary in a pipeline from a pure owner" do
+    source =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        def submit(value) do
+          value
+          |> MingaEditor.RenderPipeline.render()
+          |> MingaEditor.RenderPipeline.persist()
+        end
+      end
+      """
+
+    issues = check(source, "lib/minga_editor/state/render_correlation.ex")
+
+    assert Enum.count(issues, &String.starts_with?(&1.trigger, "MingaEditor.RenderPipeline.")) ==
+             2
+  end
+
+  test "does not assign an enclosing struct type to nested pattern variables" do
+    source =
+      """
+      defmodule MingaEditor.ForeignStructPattern do
+        alias MingaEditor.State.FileTree
+        alias MingaEditor.State.FileTree.Refresh
+
+        def nested_value(%FileTree{refresh: refresh}), do: %{refresh | timer: nil}
+        def whole(%FileTree{} = tree), do: %{tree | hidden: true}
+
+        def nested_struct(%FileTree{refresh: %Refresh{} = refresh}) do
+          %{refresh | timer: nil}
+        end
+      end
+      """
+
+    issues = check(source)
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree")) == 1
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree.Refresh")) == 1
+  end
+
+  test "applies only explicit nested struct bindings on assignment patterns" do
+    source =
+      """
+      defmodule MingaEditor.ForeignAssignmentPattern do
+        alias MingaEditor.State.FileTree
+        alias MingaEditor.State.FileTree.Refresh
+
+        def nested_value(value) do
+          %FileTree{refresh: refresh} = value
+          %{refresh | timer: nil}
+        end
+
+        def nested_struct(value) do
+          %FileTree{refresh: %Refresh{} = refresh} = value
+          %{refresh | timer: nil}
+        end
+      end
+      """
+
+    issues = check(source)
+    refute Enum.any?(issues, &(&1.trigger == "MingaEditor.State.FileTree"))
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State.FileTree.Refresh")) == 1
+  end
+
+  test "rejects typoed or undeclared explicit pure module owners without scanning source" do
+    source =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        def violate(value) do
+          MingaEditor.RenderPipeline.render(value)
+          %MingaEditor.State.FileTree{value | hidden: true}
+        end
+      end
+      """
+
+    for module <- [
+          "MingaEditor.State.RenderCorrelatio",
+          "MingaEditor.NotAnOwnershipOwner"
+        ] do
+      issues =
+        check(
+          source,
+          "lib/minga_editor/state/render_correlation.ex",
+          pure_modules: [module]
+        )
+
+      assert issues != []
+      assert Enum.all?(issues, &(&1.trigger == "ownership configuration"))
+      assert Enum.any?(issues, &(&1.message =~ "pure_modules entry #{module}"))
+      assert Enum.any?(issues, &(&1.message =~ "not a declared ownership owner"))
+      assert Enum.any?(issues, &(&1.message =~ "remove it from pure_modules"))
+    end
+  end
+
+  test "reports malformed policy and skips source scanning entirely" do
+    source =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        def violate(value) do
+          Process.send_after(self(), :tick, 10)
+          %MingaEditor.State.FileTree{value | hidden: true}
+        end
+      end
+      """
+
+    parameter_sets = [
+      [ownerships: :invalid],
+      [ownerships: [[struct: "Bad.*"]]],
+      [pure_modules: :invalid],
+      [pure_modules: ["Bad.*"]]
+    ]
+
+    Enum.each(parameter_sets, fn params ->
+      issues = check(source, "lib/minga_editor/state/render_correlation.ex", params)
+      assert issues != []
+      assert Enum.all?(issues, &(&1.trigger == "ownership configuration"))
     end)
   end
 end

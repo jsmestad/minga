@@ -101,6 +101,35 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
+  describe "frame-local renderer transitions" do
+    test "records a renderer working window without passing it through State.Windows", %{
+      state: state
+    } do
+      input = Input.from_editor_state(state)
+      id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, id)
+
+      render_window =
+        window
+        |> WindowIntent.from_window()
+        |> WindowIntent.materialize(%MingaEditor.Renderer.WindowCache{})
+
+      result = Input.record_render_window(input, id, render_window)
+
+      assert result.workspace.windows.map[id] == render_window
+      assert result.workspace.windows.tree == input.workspace.windows.tree
+    end
+
+    test "records agent scroll metrics in the frame-local workspace", %{state: state} do
+      input = Input.from_editor_state(state)
+
+      result = Input.record_agent_scroll_metrics(input, 40, 10)
+
+      assert result.workspace.agent_ui ==
+               MingaEditor.Agent.UIState.record_scroll_metrics(input.workspace.agent_ui, 40, 10)
+    end
+  end
+
   describe "EditorState.reset_frontend_render_state/1" do
     test "resets frontend cursors and requests a keyframe without resetting receipt ordering", %{
       state: state

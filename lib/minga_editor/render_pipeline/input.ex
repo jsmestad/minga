@@ -45,6 +45,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
+  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
@@ -245,6 +246,29 @@ defmodule MingaEditor.RenderPipeline.Input do
     do: file_tree
 
   def file_tree_state(%__MODULE__{}), do: %FileTreeState{}
+
+  @doc "Records one renderer-owned working window in the frame-local input snapshot."
+  @spec record_render_window(t(), RenderWindow.id(), RenderWindow.t()) :: t()
+  def record_render_window(
+        %__MODULE__{workspace: %{windows: windows} = workspace} = input,
+        id,
+        %RenderWindow{} = window
+      ) do
+    map = Map.put(windows.map, id, window)
+    workspace = Map.put(workspace, :windows, Map.put(windows, :map, map))
+    %{input | workspace: workspace}
+  end
+
+  @doc "Records agent transcript metrics in the frame-local input snapshot."
+  @spec record_agent_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
+  def record_agent_scroll_metrics(
+        %__MODULE__{workspace: %{agent_ui: agent_ui} = workspace} = input,
+        total_lines,
+        visible_height
+      ) do
+    agent_ui = UIState.record_scroll_metrics(agent_ui, total_lines, visible_height)
+    %{input | workspace: Map.put(workspace, :agent_ui, agent_ui)}
+  end
 
   @doc "Returns a copy of the render input with the renderer-owned font registry attached."
   @spec with_font_registry(t(), FontRegistry.t()) :: t()
