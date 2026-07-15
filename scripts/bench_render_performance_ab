@@ -9,15 +9,8 @@
 # two more alternating pairs and decides over the median ratio of all five.
 set -uo pipefail
 
-original_head=$(git rev-parse HEAD) || exit 2
-original_checkout=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || printf '%s' "$original_head")
 repo_root=$(git rev-parse --show-toplevel) || exit 2
 cd "$repo_root" || exit 2
-
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo "error: render A/B benchmark requires a clean tracked worktree because it checks out both revisions" >&2
-  exit 2
-fi
 
 if [[ $# -eq 2 && $1 == "--head-only" ]]; then
   base_available=0
@@ -27,7 +20,7 @@ if [[ $# -eq 2 && $1 == "--head-only" ]]; then
 elif [[ $# -eq 2 ]]; then
   base_available=1
   head_only=0
-  base_sha=$1
+  base_sha=$(git rev-parse "$1") || exit 2
   head_sha=$(git rev-parse "$2") || exit 2
 else
   echo "usage: $0 BASE_SHA HEAD_SHA | --head-only HEAD_SHA" >&2
@@ -40,6 +33,8 @@ head_output="$artifact_dir/render_performance.json"
 comparison_output="$artifact_dir/render_performance_comparison.json"
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-render-performance.XXXXXX")
 runner_script="$work_dir/check_render_performance"
+base_source="$work_dir/base-source"
+head_source="$work_dir/head-source"
 base_build="$work_dir/base-build"
 head_build="$work_dir/head-build"
 base_runs=()
@@ -47,7 +42,6 @@ head_runs=()
 measurement_status=0
 
 cleanup() {
-  git checkout -f --quiet "$original_checkout" || true
   rm -rf "$work_dir"
 }
 trap cleanup EXIT
@@ -69,6 +63,15 @@ ruler_paths=(
   scripts/check_render_performance
   macos/Tests/Performance/main.swift
   macos/Sources/Protocol/RenderPerformanceGate.swift
+  docs/protocol_schema.toml
+  mix/protocol_generator.ex
+  mix/tasks/protocol.gen.ex
+)
+
+generated_protocol_paths=(
+  macos/.generated/protocol/ProtocolOpcodes.generated.swift
+  macos/.generated/protocol/ProtocolCommandSize.generated.swift
+  macos/.generated/protocol/ProtocolSemanticDecode.generated.swift
 )
 
 if (( base_available )) && ! git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
@@ -94,29 +97,51 @@ fi
 build_revision() {
   local revision=$1
   local side=$2
-  local build_dir=$3
+  local source_root=$3
+  local build_dir=$4
+  local path
 
   echo "::group::Build Swift render benchmark ${side} (${revision})"
-  if ! git checkout -f --quiet "$revision"; then
+  mkdir -p "$source_root"
+  if ! git archive "$revision" | tar -x -C "$source_root"; then
     echo "::endgroup::"
     return 1
   fi
-  if ! MINGA_RENDER_ROOT="$repo_root" "$runner_script" --build "$build_dir"; then
+  if ! (cd "$source_root" && MIX_DEPS_PATH="$repo_root/deps" MIX_BUILD_PATH="$repo_root/_build/test" MIX_ENV=test mix protocol.gen >/dev/null); then
+    echo "::endgroup::"
+    return 1
+  fi
+  for path in "${generated_protocol_paths[@]}"; do
+    if [[ ! -f "$source_root/$path" ]]; then
+      echo "error: protocol generator did not produce $path for $side" >&2
+      echo "::endgroup::"
+      return 1
+    fi
+  done
+  if ! MINGA_RENDER_ROOT="$source_root" MINGA_RENDER_SKIP_PROTOCOL_GEN=1 "$runner_script" --build "$build_dir"; then
     echo "::endgroup::"
     return 1
   fi
   echo "::endgroup::"
 }
 
+generated_protocol_matches() {
+  local path
+  for path in "${generated_protocol_paths[@]}"; do
+    cmp -s "$base_source/$path" "$head_source/$path" || return 1
+  done
+}
+
 measure_revision() {
   local side=$1
   local round=$2
-  local build_dir=$3
+  local source_root=$3
+  local build_dir=$4
   local output="$work_dir/${side}-${round}.json"
   local status=0
 
   echo "::group::Measure Swift render benchmark ${side}, pair ${round}"
-  MINGA_RENDER_ROOT="$repo_root" "$runner_script" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
+  MINGA_RENDER_ROOT="$source_root" "$runner_script" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
   echo "::endgroup::"
   if [[ ! -s "$output" ]]; then
     return 1
@@ -140,11 +165,11 @@ run_pairs() {
 
   for ((pair = first_pair; pair < first_pair + count; pair++)); do
     if (( pair % 2 == 1 )); then
-      measure_revision base "$pair" "$base_build" || return 1
-      measure_revision head "$pair" "$head_build" || return 1
+      measure_revision base "$pair" "$base_source" "$base_build" || return 1
+      measure_revision head "$pair" "$head_source" "$head_build" || return 1
     else
-      measure_revision head "$pair" "$head_build" || return 1
-      measure_revision base "$pair" "$base_build" || return 1
+      measure_revision head "$pair" "$head_source" "$head_build" || return 1
+      measure_revision base "$pair" "$base_source" "$base_build" || return 1
     fi
   done
 }
@@ -154,7 +179,7 @@ run_comparison() {
   local path
   for path in "${base_runs[@]}"; do args+=(--base "$path"); done
   for path in "${head_runs[@]}"; do args+=(--head "$path"); done
-  MINGA_RENDER_ROOT="$repo_root" "$runner_script" --compare "$head_build" "${args[@]}"
+  MINGA_RENDER_ROOT="$head_source" "$runner_script" --compare "$head_build" "${args[@]}"
 }
 
 preserve_head_artifact() {
@@ -163,19 +188,24 @@ preserve_head_artifact() {
 }
 
 if (( base_available )); then
-  if ! build_revision "$base_sha" base "$base_build"; then
+  if ! build_revision "$base_sha" base "$base_source" "$base_build"; then
     echo "::warning::merge-base render benchmark could not be built; relative gate will be skipped (HEAD absolute ceilings only)."
     base_available=0
   fi
 fi
 
-if ! build_revision "$head_sha" head "$head_build"; then
+if ! build_revision "$head_sha" head "$head_source" "$head_build"; then
   echo "HEAD render benchmark could not be built" >&2
   exit 1
 fi
 
+if (( base_available )) && ! generated_protocol_matches; then
+  echo "::warning::generated Swift protocol inputs differ between base and HEAD; relative gate will be skipped because the benchmark ruler differs (HEAD absolute ceilings only)."
+  base_available=0
+fi
+
 if (( ! base_available )); then
-  if ! measure_revision head 1 "$head_build"; then
+  if ! measure_revision head 1 "$head_source" "$head_build"; then
     echo "HEAD render benchmark failed" >&2
     exit 1
   fi

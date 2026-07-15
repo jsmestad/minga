@@ -31,7 +31,9 @@ build_harness() {
   rm -rf "$build_dir"
   mkdir -p "$module_dir"
   cd "$ROOT"
-  mix protocol.gen >/dev/null
+  if [[ "${MINGA_RENDER_SKIP_PROTOCOL_GEN:-0}" != "1" ]]; then
+    mix protocol.gen >/dev/null
+  fi
   swiftc --version
 
   # Build the exact Metal-free production resident types with optimization. The
