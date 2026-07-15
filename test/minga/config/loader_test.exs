@@ -1245,6 +1245,96 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) =~ "Extension start_all failed"
     end
 
+    @tag :heavy
+    test "reload reports changed path artifacts without replacing the admitted runtime" do
+      ensure_extension_runtime()
+      suffix = System.unique_integer([:positive])
+      extension_name = String.to_atom("loader_generation_pinned_#{suffix}")
+      extension_module = Module.concat(["LoaderGenerationPinned#{suffix}"])
+      extension_dir = Path.join(System.tmp_dir!(), "minga-loader-generation-#{suffix}")
+      source_path = Path.join(extension_dir, "extension.ex")
+      compile_log = Path.join(extension_dir, "compiled.log")
+      File.mkdir_p!(extension_dir)
+
+      source = fn version ->
+        """
+        File.write!(#{inspect(compile_log)}, #{inspect(version <> "\n")}, [:append])
+
+        defmodule #{inspect(extension_module)} do
+          use Minga.Extension
+          @impl true
+          def name, do: #{inspect(extension_name)}
+          @impl true
+          def description, do: "Config reload generation fixture"
+          @impl true
+          def version, do: #{inspect(version)}
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """
+      end
+
+      File.write!(source_path, source.("1.0.0"))
+
+      {_minga_dir, config_home, cleanup_config} =
+        make_config_dir("""
+        use Minga.Config
+        extension #{inspect(extension_name)}, path: #{inspect(extension_dir)}
+        """)
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+        cleanup_config.()
+        File.rm_rf!(extension_dir)
+        :code.purge(extension_module)
+        :code.delete(extension_module)
+      end)
+
+      loader_name = String.to_atom("loader_generation_reload_#{suffix}")
+      {:ok, loader} = Loader.start_link(name: loader_name, config_home: config_home)
+      assert Loader.load_error(loader) == nil
+      assert {:ok, declared} = ExtRegistry.get(extension_name)
+
+      assert {:ok, runtime_pid} =
+               ExtSupervisor.start_extension(
+                 Minga.Extension.Supervisor,
+                 ExtRegistry,
+                 extension_name,
+                 declared
+               )
+
+      assert {:ok, admitted} = ExtRegistry.get(extension_name)
+      assert admitted.pid == runtime_pid
+      assert admitted.module == extension_module
+      assert admitted.manifest.version == "1.0.0"
+      assert File.read!(compile_log) == "1.0.0\n"
+
+      File.write!(source_path, source.("2.0.0"))
+      Minga.Events.subscribe(:extension_restart_required)
+
+      assert {:error, message} = Loader.reload(loader)
+      assert message =~ "Extension restart required before config reload"
+      assert message =~ Atom.to_string(extension_name)
+
+      assert_receive {:minga_event, :extension_restart_required,
+                      %Minga.Events.ExtensionRestartRequiredEvent{
+                        extension: ^extension_name,
+                        reason: :source_changed
+                      }}
+
+      assert {:ok, unchanged} = ExtRegistry.get(extension_name)
+      assert unchanged.pid == runtime_pid
+      assert unchanged.module == extension_module
+      assert unchanged.manifest.version == "1.0.0"
+      assert File.read!(compile_log) == "1.0.0\n"
+
+      assert Enum.any?(DynamicSupervisor.which_children(Minga.Extension.Supervisor), fn
+               {_id, ^runtime_pid, _type, _modules} -> true
+               _child -> false
+             end)
+    end
+
     test "reload picks up changed config values" do
       {minga_dir, config_home, cleanup} =
         make_config_dir("""

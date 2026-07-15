@@ -48,6 +48,9 @@ config :minga,
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.
 config :minga, load_extensions: false
+# Unit suites start path extensions against private admission authorities after
+# application boot; production seals the default authority after initial load.
+config :minga, seal_extension_artifact_generation: false
 # Use stub installers in tests to avoid spawning npm/pip/cargo/go/curl
 # subprocesses during concurrent test runs (same EPIPE concern as git).
 config :minga,

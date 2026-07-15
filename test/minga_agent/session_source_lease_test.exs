@@ -41,9 +41,6 @@ defmodule MingaAgent.SessionSourceLeaseTest do
 
     assert lease.reason == :provider
 
-    assert {:error, {:leased_modules, [_summary]}} =
-             CodeLease.ensure_purge_allowed(source, Minga.Test.SessionSlowMockProvider)
-
     GenServer.stop(session)
 
     assert [] =

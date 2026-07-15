@@ -2,7 +2,11 @@ defmodule Minga.Extension.CodeLease do
   @moduledoc """
   Tracks short-lived leases for extension callback modules.
 
-  Extension reload and disable may purge path, git, and generated plugin modules. Agent-facing callbacks can outlive the extension process that registered them, so callers lease the callback module while a provider, tool worker, hook, MCP config builder, or UI action may still call it. Purge paths consult this service and reject unsafe unloads with a clear error instead of racing `:code.purge/1` against active work.
+  Agent-facing callbacks can outlive the extension process that registered them,
+  so callers lease callback code while a provider, tool worker, hook, MCP config
+  builder, or UI action may still call it. Leases document and observe in-flight
+  callback ownership; extension code remains resident for the whole VM generation
+  and this service has no unload or purge operation.
   """
 
   use GenServer
@@ -85,32 +89,6 @@ defmodule Minga.Extension.CodeLease do
     safe_call(server, {:active_leases, source, module}, [])
   end
 
-  @doc "Returns `:ok` when a module can be purged safely."
-  @spec ensure_purge_allowed(ContributionCleanup.contribution_source() | nil, module(), keyword()) ::
-          :ok | {:error, term()}
-  def ensure_purge_allowed(source, module, opts \\ []) when is_atom(module) do
-    server = Keyword.get(opts, :server, __MODULE__)
-
-    safe_call(
-      server,
-      {:ensure_purge_allowed, source, module},
-      {:error, {:lease_service_unavailable, server}}
-    )
-  end
-
-  @doc "Purges and deletes a module atomically with the lease check."
-  @spec purge_module(ContributionCleanup.contribution_source() | nil, module(), keyword()) ::
-          :ok | {:error, term()}
-  def purge_module(source, module, opts \\ []) when is_atom(module) do
-    server = Keyword.get(opts, :server, __MODULE__)
-
-    safe_call(
-      server,
-      {:purge_module, source, module},
-      {:error, {:lease_service_unavailable, server}}
-    )
-  end
-
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(_opts) do
@@ -144,21 +122,6 @@ defmodule Minga.Extension.CodeLease do
     {:reply, matching_leases(state, source, module), state}
   end
 
-  def handle_call({:ensure_purge_allowed, _source, module}, _from, state) do
-    {:reply, purge_allowed_reply(state, module), state}
-  end
-
-  def handle_call({:purge_module, _source, module}, _from, state) do
-    case purge_allowed_reply(state, module) do
-      :ok ->
-        unload_module(module)
-        {:reply, :ok, state}
-
-      {:error, _reason} = error ->
-        {:reply, error, state}
-    end
-  end
-
   @impl true
   def handle_info({:DOWN, ref, :process, owner, _reason}, state) do
     case Map.get(state.monitor_owners, ref) do
@@ -168,14 +131,6 @@ defmodule Minga.Extension.CodeLease do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
-
-  @spec unload_module(module()) :: :ok
-  defp unload_module(module) do
-    :code.delete(module)
-    :code.purge(module)
-    :code.delete(module)
-    :ok
-  end
 
   @spec put_lease(state(), t()) :: state()
   defp put_lease(state, %__MODULE__{id: id, owner: owner} = lease) do
@@ -260,14 +215,6 @@ defmodule Minga.Extension.CodeLease do
     |> Map.values()
     |> Enum.filter(&matches?(&1, source, module))
     |> Enum.map(&summarize/1)
-  end
-
-  @spec purge_allowed_reply(state(), module()) :: :ok | {:error, {:leased_modules, [summary()]}}
-  defp purge_allowed_reply(state, module) do
-    case matching_leases(state, :_, module) do
-      [] -> :ok
-      leases -> {:error, {:leased_modules, leases}}
-    end
   end
 
   @spec matches?(t(), ContributionCleanup.contribution_source() | :_, module() | :_) :: boolean()
