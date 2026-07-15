@@ -309,6 +309,17 @@ jobs:
       - run: mix deps.get
       - run: mix protocol.gen
 
+      - name: Gate optimized native render preparation
+        run: |
+          HEAD_REF=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA=$(git merge-base origin/main "$HEAD_REF")
+            echo "Merge-base: $BASE_SHA"
+            bash scripts/bench_render_performance_ab "$BASE_SHA" "$HEAD_REF"
+          else
+            bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
+          fi
+
       - name: Cache DerivedData
         uses: actions/cache@v4
         with:
@@ -327,17 +338,6 @@ jobs:
 
       - name: Verify Release optimization
         run: scripts/check_macos_release_optimization
-
-      - name: Gate optimized native render preparation
-        run: |
-          HEAD_REF=$(git rev-parse HEAD)
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA=$(git merge-base origin/main "$HEAD_REF")
-            echo "Merge-base: $BASE_SHA"
-            bash scripts/bench_render_performance_ab "$BASE_SHA" "$HEAD_REF"
-          else
-            bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
-          fi
 
       - name: Build
         run: |
