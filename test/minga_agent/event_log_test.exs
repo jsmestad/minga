@@ -319,7 +319,10 @@ defmodule MingaAgent.EventLogTest do
         record_and_await(first_name, event_type, payload)
       end)
 
+    first_writer = EventLog.writer_pid(first_name)
+    first_writer_ref = Process.monitor(first_writer)
     stop_supervised(first_id)
+    assert_receive {:DOWN, ^first_writer_ref, :process, ^first_writer, _reason}, @event_timeout
 
     second_name = unique_name("durable-log")
     start_event_log(second_name, db_dir: tmp_dir)

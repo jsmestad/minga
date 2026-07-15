@@ -61,24 +61,29 @@ end
 
 The `option` macro follows the same pattern as Ecto's `field`: you declare it at the module level, and `use Minga.Extension` generates a `__option_schema__/0` function from the accumulated declarations. You never write the introspection function yourself.
 
-**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, introspects its manifest, validates config options against the schema, calls `init/1`, then starts `child_spec/1` under `Extension.Supervisor`. Runtime lifecycle and code activation are separate: Minga can stop, disable, lazily start, or restart an extension in the current session, but changed extension code activates only after Minga starts a fresh BEAM OS process. See [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md) for the accepted contract and migration scope.
+**Lifecycle:** The user declares the extension in `config.exs`. Minga resolves the source to one admitted current-generation artifact, introspects its manifest, validates config options against the schema, calls `init/1`, then starts `child_spec/1` beneath that extension's runtime supervisor. Runtime lifecycle and code activation are separate: Minga can stop, disable, lazily start, or restart an extension in the current session, but changed extension code activates only after Minga starts a fresh BEAM OS process. See [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md) for the accepted contract and migration scope.
 
 `init/1` is setup-only. It may register runtime-dynamic source-owned contributions and return `{:ok, state}` to report success, but the default child process does not receive that returned state. The default child stores the validated config keyword list so existing extensions keep working. If your extension has runtime state, put that state in your own GenServer or supervision tree and return it from your custom `child_spec/1`.
 
-Each extension runs under a `DynamicSupervisor` with `:one_for_one` strategy. If your extension crashes, only your extension restarts. The editor and other extensions keep running.
+Each declaration has one stable `Minga.Extension.Instance` process beneath `Minga.Extension.RootSupervisor`. Calls through the compatible `Minga.Extension.Supervisor` facade route start, stop, lazy activation, deferred activation, failure, restart, and unload through that Instance mailbox. The current runtime PID is not the extension's identity. It is a projection of the Instance's current phase, along with status, module, manifest, and last error, in `Minga.Extension.Registry`.
+
+The per-extension `Minga.Extension.Root` uses `rest_for_one` and starts `Minga.Extension.RuntimeSupervisor` before the Instance. A runtime supervisor failure therefore replaces the Instance after a new empty runtime supervisor exists. An Instance failure leaves its local runtime supervisor in place, so the replacement Instance can recover only that extension's child. Other extensions and the editor remain unaffected.
 
 ### Lifecycle ordering and cleanup
 
 The lifecycle contract is intentionally boring:
 
-1. **Load:** path and Git source compiles in a standalone disposable BEAM OS process with byte-only standard streams. The complete validated BEAM artifact set atomically establishes module ownership before host loading; hex extensions load from their installed application.
-2. **Manifest:** Minga records the extension name, version, source type, commands, keybindings, modeline segments, and declared capabilities before `init/1` runs.
-3. **Options:** declared options are validated and registered.
-4. **Init:** `init/1` runs. If it returns `{:error, reason}` or raises, startup fails.
-5. **Child start:** `child_spec/1` starts under the extension supervisor.
-6. **DSL registration:** declarative commands, keybindings, modeline segments, and runtime event handlers are registered with source `{:extension, name}`.
+1. **Source resolution:** module, Hex/application, and bundled sources identify a trusted resident application inventory. Resolved Git and path sources identify an immutable source snapshot. A path with no Elixir source may use the deterministic JSON fallback.
+2. **Artifact admission:** the complete module inventory establishes current-generation ownership before host loading. Path and resolved Git source compiles in a standalone disposable BEAM OS process with byte-only standard streams. Resident application sources are adopted rather than overwritten.
+3. **Manifest:** Minga records the extension name, version, source type, commands, keybindings, modeline segments, and declared capabilities before `init/1` runs.
+4. **Options:** declared options are validated and registered.
+5. **Init:** `init/1` runs. If it returns `{:error, reason}` or raises, startup fails.
+6. **Child start:** the child spec is normalized to `:temporary` and starts under the extension's local runtime supervisor. The Instance alone preserves and interprets the extension's declared `:permanent`, `:transient`, or `:temporary` restart policy.
+7. **DSL registration:** declarative commands, keybindings, modeline segments, and runtime event handlers are registered with source `{:extension, name}`.
 
-Stop, failed start, and reload all run source-owned cleanup. Cleanup families are aggregated: a failure in one family is logged and returned, but later cleanup families still run. This prevents a bad command cleanup from leaving stale keymaps, themes, languages, tool recipes, or modeline segments behind.
+Stop, failed start, and reload all converge through the Instance's source-owned cleanup transition. Concurrent starts join one start and receive the same runtime PID. Concurrent stops finalize once, and a start that reaches the mailbox during stop waits for safe cleanup before starting one replacement. A cleanup failure retains retry state rather than allowing a new start to bypass unfinished work. Cleanup families are aggregated: a failure in one family is logged and returned, but later cleanup families still run. This prevents a bad command cleanup from leaving stale keymaps, themes, languages, tool recipes, or modeline segments behind.
+
+Editor-owned finalization is asynchronous. The Instance casts effect cancellation, unload, and presentation cleanup requests to the Editor and waits for explicit acknowledgements without occupying the Editor mailbox. This ordering keeps config reload and effect-worker initiated reload paths from forming an Editor/Instance call cycle.
 
 Runtime disable closes new source-owned work, invokes source-unload handlers with unload-only authority, removes dispatch-visible contributions, cancels or settles source-owned effects, stops the runtime subtree, runs source cleanup, and removes Editor-owned presentation state. Loaded modules remain resident. A later start in the same session may use only the exact artifact admitted for that extension in the current VM generation; installing, updating, or editing extension code reports that a Minga restart is required.
 
@@ -128,9 +133,10 @@ end
 **How it works:**
 
 1. At boot, Minga admits the extension's isolated compiler artifact (via the validated compile cache, so this is fast for unchanged sources) and reads its schema callbacks (`__command_schema__/0`, `__keybind_schema__/0`, etc.).
-2. For non-eager extensions, Minga registers stub commands whose execute function triggers a synchronous autoload, then re-dispatches the command. Keybindings are registered normally (they reference command names, so the autoload happens via the stub command).
-3. `init/1` and `child_spec/1` are NOT called until the trigger fires.
-4. On first trigger: init runs, child starts, stub contributions are replaced with real handlers, and the original command executes. The user sees no difference besides first-invocation latency.
+2. For non-eager extensions, the Instance registers stub commands whose execute function triggers synchronous autoload through the same mailbox, then re-dispatches the command. Keybindings are registered normally because they reference command names.
+3. `init/1` and `child_spec/1` are not called until the trigger fires.
+4. Racing triggers join one Instance start and receive the same runtime. The stub is replaced with real handlers before the original command executes.
+5. Deferred activation also uses the same Instance and checks that its captured declaration identity is still current. Stale deferred work does not activate a re-registered extension.
 
 **What must stay eager:**
 

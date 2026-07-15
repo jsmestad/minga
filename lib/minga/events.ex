@@ -47,6 +47,7 @@ defmodule Minga.Events do
   | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
   | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason, disconnected_at` |
   | `:power_thermal_state_changed` | `PowerThermalStateEvent` | `low_power?, thermal_state` |
+  | `:extension_deferred_batch_complete` | `Minga.Extension.DeferredBatchCompleteEvent` | `count, failures` |
 
   ## Why Registry?
 
@@ -340,6 +341,7 @@ defmodule Minga.Events do
           | :file_written
           | :extension_updates_available
           | :extension_restart_required
+          | :extension_deferred_batch_complete
           | :ghost_cursor_removed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
@@ -371,6 +373,7 @@ defmodule Minga.Events do
           | MingaAgent.Changeset.MergedEvent.t()
           | MingaAgent.Changeset.BudgetExhaustedEvent.t()
           | Minga.Extension.UpdatesAvailableEvent.t()
+          | Minga.Extension.DeferredBatchCompleteEvent.t()
           | map()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
@@ -501,6 +504,10 @@ defmodule Minga.Events do
   @spec broadcast(:file_written, FileWrittenEvent.t()) :: :ok
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   @spec broadcast(:extension_agent_contributions_started, map()) :: :ok
+  @spec broadcast(
+          :extension_deferred_batch_complete,
+          Minga.Extension.DeferredBatchCompleteEvent.t()
+        ) :: :ok
   @spec broadcast(:agent_mcp_servers_changed, map()) :: :ok
   @spec broadcast(:agent_tools_changed, AgentToolsChangedEvent.t()) :: :ok
   def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do

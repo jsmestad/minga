@@ -69,6 +69,27 @@ defmodule Minga.ArchitectureTest do
     assert generation > 0
   end
 
+  test "extension lifecycle infrastructure is direct under Services in dependency order" do
+    children = Supervisor.which_children(Minga.Services.Supervisor)
+    ids = children |> Enum.map(&elem(&1, 0)) |> Enum.reverse()
+
+    expected = [
+      Minga.Extension.Registry,
+      Minga.Extension.ArtifactGenerationState,
+      Minga.Extension.ArtifactAdmission,
+      Minga.Extension.CodeLease,
+      Minga.Extension.CallbackRegistry,
+      Minga.Extension.InstanceRegistry,
+      Minga.Extension.RootSupervisor,
+      Minga.Config.Loader
+    ]
+
+    assert Enum.all?(expected, &(&1 in ids))
+    positions = Enum.map(expected, &Enum.find_index(ids, fn id -> id == &1 end))
+    assert positions == Enum.sort(positions)
+    refute Minga.Extension.Supervisor in ids
+  end
+
   test "MingaAgent.Supervisor is a top-level peer, not nested under Services" do
     top_children = Supervisor.which_children(Minga.Supervisor)
     top_ids = Enum.map(top_children, &elem(&1, 0))

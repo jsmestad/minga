@@ -4,8 +4,9 @@ defmodule Minga.Services.Supervisor do
 
   Uses `rest_for_one` at this level to preserve two dependency chains:
 
-  1. Extension.Registry → Extension.Supervisor → Config.Loader
-     (Loader evaluates user config that registers and starts extensions)
+  1. Extension.Registry → artifact/callback authorities → InstanceRegistry →
+     Extension.RootSupervisor → Config.Loader
+     (Loader evaluates user config that declares and starts extension Instances)
   2. LSP.Supervisor → LSP.SyncServer
      (SyncServer calls into LSP.Supervisor to ensure clients)
 
@@ -28,6 +29,9 @@ defmodule Minga.Services.Supervisor do
       ├── Minga.Extension.ArtifactGenerationState Persistent VM-generation provenance owner
       ├── Minga.Extension.ArtifactAdmission  VM-generation module admission serializer
       ├── Minga.Extension.CodeLease          Process-owned leases for extension callback modules
+      ├── Minga.Extension.CallbackRegistry   Declarative runtime extension callbacks
+      ├── Minga.Extension.InstanceRegistry   Unique per-extension process names
+      ├── Minga.Extension.RootSupervisor     Dynamic owner of ordered extension roots
       ├── MingaAgent.ProviderRegistry        Source-owned provider declarations
       ├── MingaAgent.ProviderPacks.Native    Bundled native provider declaration
       ├── MingaAgent.Hooks.Registry          Source-owned agent hook declarations
@@ -35,7 +39,6 @@ defmodule Minga.Services.Supervisor do
       ├── MingaAgent.Skills.Registry         Source-owned extension skill paths
       ├── MingaEditor.Agent.SlashCommand.Registry Source-owned agent slash commands
       ├── MingaEditor.Agent.SemanticUI.Registry Source-owned semantic agent UI contributions
-      ├── Minga.Extension.Supervisor         DynamicSupervisor for extension processes
       ├── Minga.Config.Loader                Evaluates user config on init
       ├── Minga.Config.Writer                Debounced GUI settings overlay writer
       ├── Minga.LSP.Supervisor               DynamicSupervisor for LSP clients
@@ -80,6 +83,9 @@ defmodule Minga.Services.Supervisor do
         Minga.Extension.ArtifactAdmission
       ),
       StartupTimer.timed_child_spec(:svc_code_lease, Minga.Extension.CodeLease),
+      StartupTimer.timed_child_spec(:svc_callback_registry, Minga.Extension.CallbackRegistry),
+      StartupTimer.timed_child_spec(:svc_instance_registry, Minga.Extension.InstanceRegistry),
+      StartupTimer.timed_child_spec(:svc_ext_root_supervisor, Minga.Extension.RootSupervisor),
       StartupTimer.timed_child_spec(:svc_provider_registry, MingaAgent.ProviderRegistry),
       StartupTimer.timed_child_spec(:svc_provider_packs, MingaAgent.ProviderPacks.Native),
       StartupTimer.timed_child_spec(:svc_hooks_registry, MingaAgent.Hooks.Registry),
@@ -93,7 +99,6 @@ defmodule Minga.Services.Supervisor do
         :svc_semantic_ui_registry,
         MingaEditor.Agent.SemanticUI.Registry
       ),
-      StartupTimer.timed_child_spec(:svc_ext_supervisor, Minga.Extension.Supervisor),
       StartupTimer.timed_child_spec(:svc_config_loader, Minga.Config.Loader),
       StartupTimer.timed_child_spec(:svc_config_writer, Minga.Config.Writer),
       StartupTimer.timed_child_spec(:svc_lsp_supervisor, Minga.LSP.Supervisor),

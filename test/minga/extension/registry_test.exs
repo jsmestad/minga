@@ -203,8 +203,10 @@ defmodule Minga.Extension.RegistryTest do
       assert entry.path == "/tmp/ext"
     end
 
-    test "no-op for nonexistent extension", %{registry: r} do
-      :ok = Registry.update(r, :nonexistent, status: :running)
+    test "reports a missing declaration", %{registry: r} do
+      assert {:error, {:extension_not_declared, :nonexistent}} =
+               Registry.update(r, :nonexistent, status: :running)
+
       assert :error = Registry.get(r, :nonexistent)
     end
   end

@@ -15,7 +15,9 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Extension.RuntimeSupervisor
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Language
@@ -1062,93 +1064,6 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) =~ "Config reload cleanup for :config failed"
     end
 
-    test "reload surfaces stop_all failures instead of silently proceeding" do
-      {_dir, config_home, cleanup} =
-        make_config_dir("""
-        use Minga.Config
-        set :tab_width, 2
-        """)
-
-      on_exit(cleanup)
-
-      ensure_extension_runtime()
-
-      on_exit(fn ->
-        ExtSupervisor.stop_all()
-        ExtRegistry.reset()
-      end)
-
-      name = :"loader_reload_stop_all_failure_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
-      assert Loader.load_error(pid) == nil
-      assert Options.get(test_options_server(), :tab_width) == 2
-
-      bogus_pid =
-        spawn(fn ->
-          receive do
-            :never -> :ok
-          end
-        end)
-
-      on_exit(fn ->
-        if Process.alive?(bogus_pid) do
-          Process.exit(bogus_pid, :kill)
-        end
-      end)
-
-      ext_name = :loader_reload_stop_all_failure
-      :ok = ExtRegistry.register(ext_name, "/tmp/loader_reload_stop_all_failure", [])
-      :ok = ExtRegistry.update(ext_name, pid: bogus_pid, module: nil, status: :running)
-
-      on_exit(fn -> ExtRegistry.unregister(ext_name) end)
-
-      ext_dir =
-        Path.join(
-          System.tmp_dir!(),
-          "minga_loader_reload_blocked_#{System.unique_integer([:positive])}"
-        )
-
-      File.mkdir_p!(ext_dir)
-
-      File.write!(Path.join(ext_dir, "reload_blocked_ext.ex"), """
-      defmodule Minga.TestExtensions.LoaderReloadBlockedExt do
-        use Minga.Extension
-
-        @impl true
-        def name, do: :loader_reload_blocked_ext
-
-        @impl true
-        def description, do: "Reload blocked extension"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-      end
-      """)
-
-      on_exit(fn ->
-        File.rm_rf!(ext_dir)
-        :code.purge(Minga.TestExtensions.LoaderReloadBlockedExt)
-        :code.delete(Minga.TestExtensions.LoaderReloadBlockedExt)
-      end)
-
-      File.write!(Path.join(Path.dirname(Loader.config_path(pid)), "config.exs"), """
-      use Minga.Config
-
-      set :tab_width, 7
-      extension :loader_reload_blocked_ext, path: #{inspect(ext_dir)}
-      """)
-
-      assert {:error, msg} = Loader.reload(pid)
-      assert msg =~ "Extension stop_all failed"
-      assert msg =~ "loader_reload_stop_all_failure"
-      assert Loader.load_error(pid) =~ "Extension stop_all failed"
-      assert Options.get(test_options_server(), :tab_width) == 2
-      assert ExtRegistry.get(:loader_reload_blocked_ext) == :error
-    end
-
     @tag :heavy
     test "reload surfaces start_all failures with cleanup details" do
       {minga_dir, config_home, cleanup} =
@@ -1329,10 +1244,10 @@ defmodule Minga.Config.LoaderTest do
       assert unchanged.manifest.version == "1.0.0"
       assert File.read!(compile_log) == "1.0.0\n"
 
-      assert Enum.any?(DynamicSupervisor.which_children(Minga.Extension.Supervisor), fn
-               {_id, ^runtime_pid, _type, _modules} -> true
-               _child -> false
-             end)
+      runtime_supervisor =
+        InstanceRegistry.via(InstanceRegistry, :runtime, extension_name)
+
+      assert RuntimeSupervisor.local_child(runtime_supervisor) == {:ok, runtime_pid}
     end
 
     test "reload picks up changed config values" do

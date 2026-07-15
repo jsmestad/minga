@@ -5,7 +5,11 @@ defmodule Minga.Extension.LazyTest do
   # Runtime code compilation makes these inherently slow.
   @moduletag :heavy
 
+  import ExUnit.CaptureLog
+
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Extension.DeferredBatchCompleteEvent
+  alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Lazy
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
@@ -157,6 +161,123 @@ defmodule Minga.Extension.LazyTest do
 
       assert {:command, :lazy_key_cmd, _desc} =
                Minga.Keymap.Bindings.lookup_sequence(leader_trie, keys)
+    end
+
+    test "registered stub racing stop and redeclaration cannot activate its stale declaration",
+         ctx do
+      {path, cleanup} =
+        make_extension("LazyRedeclareRace", """
+        defmodule Minga.TestExtensions.LazyRedeclareRace do
+          use Minga.Extension
+
+          load_policy {:on_command, [:lazy_redeclare_race_cmd]}
+
+          command :lazy_redeclare_race_cmd, "Lazy redeclaration race",
+            execute: {Minga.TestExtensions.LazyRedeclareRace, :run}
+
+          @impl true
+          def name, do: :lazy_redeclare_race
+          @impl true
+          def description, do: "Lazy redeclaration race"
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(config) do
+            send(Keyword.fetch!(config, :test_pid), {:lazy_redeclare_init, config[:generation]})
+            {:ok, %{}}
+          end
+
+          def run(state), do: Map.put(state, :lazy_generation, :new)
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.LazyRedeclareRace)
+        :code.delete(Minga.TestExtensions.LazyRedeclareRace)
+      end)
+
+      old_config = [
+        load_policy: {:on_command, [:lazy_redeclare_race_cmd]},
+        test_pid: self(),
+        generation: :old
+      ]
+
+      :ok = ExtRegistry.register(ctx.registry, :lazy_redeclare_race, path, old_config)
+      {:ok, old_declaration} = ExtRegistry.get(ctx.registry, :lazy_redeclare_race)
+
+      assert :ok =
+               Lazy.register_stubs(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :lazy_redeclare_race,
+                 old_declaration,
+                 start_opts(ctx)
+               )
+
+      assert {:ok, stale_stub} =
+               CommandRegistry.lookup(ctx.command_registry, :lazy_redeclare_race_cmd)
+
+      parent = self()
+
+      finalizer = fn _source ->
+        send(parent, {:lazy_stop_blocked, self()})
+        receive do: (:release -> :ok)
+      end
+
+      stop_opts = Keyword.put(start_opts(ctx), :callbacks, %{editor_effects: finalizer})
+
+      stop_task =
+        Task.async(fn ->
+          ExtSupervisor.stop_extension(
+            ctx.supervisor,
+            ctx.registry,
+            :lazy_redeclare_race,
+            old_declaration,
+            stop_opts
+          )
+        end)
+
+      assert_receive {:lazy_stop_blocked, finalizer_worker}
+
+      new_config =
+        Keyword.merge(old_config, generation: :new)
+
+      :ok = ExtRegistry.register(ctx.registry, :lazy_redeclare_race, path, new_config)
+      {:ok, new_declaration} = ExtRegistry.get(ctx.registry, :lazy_redeclare_race)
+
+      log =
+        capture_log(fn ->
+          stale_trigger = Task.async(fn -> stale_stub.execute.(%{untouched: true}) end)
+          refute Task.yield(stale_trigger, 25)
+          send(finalizer_worker, :release)
+          assert :ok = Task.await(stop_task)
+          assert %{untouched: true} = Task.await(stale_trigger)
+        end)
+
+      assert log =~ "Extension lazy_redeclare_race lazy activation failed"
+      assert log =~ "stale_deferred_declaration"
+      refute_receive {:lazy_redeclare_init, :old}
+
+      assert :ok =
+               Lazy.register_stubs(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :lazy_redeclare_race,
+                 new_declaration,
+                 start_opts(ctx)
+               )
+
+      assert {:ok, current_stub} =
+               CommandRegistry.lookup(ctx.command_registry, :lazy_redeclare_race_cmd)
+
+      assert {:extension_callback, {:extension, :lazy_redeclare_race},
+              Minga.TestExtensions.LazyRedeclareRace, :run, {:ok, %{lazy_generation: :new}}} =
+               current_stub.execute.(%{})
+
+      assert_receive {:lazy_redeclare_init, :new}
+      refute_receive {:lazy_redeclare_init, _duplicate}
     end
 
     test "extension with runtime error in body still registers stubs (AC4)", ctx do
@@ -363,6 +484,152 @@ defmodule Minga.Extension.LazyTest do
                       }}
     end
 
+    test "authority exit races return typed errors without crashing the caller", ctx do
+      {path, cleanup} =
+        make_extension("AutoloadAuthorityExit", """
+        defmodule Minga.TestExtensions.AutoloadAuthorityExit do
+          use Minga.Extension
+
+          load_policy {:on_command, [:autoload_authority_exit_cmd]}
+
+          command :autoload_authority_exit_cmd, "Authority exit",
+            execute: {Minga.TestExtensions.AutoloadAuthorityExit, :run}
+
+          @impl true
+          def name, do: :autoload_authority_exit
+          @impl true
+          def description, do: "Autoload authority exit"
+          @impl true
+          def version, do: "1.0.0"
+          @impl true
+          def init(_config), do: {:ok, %{}}
+          def run(state), do: Map.put(state, :should_not_run, true)
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.AutoloadAuthorityExit)
+        :code.delete(Minga.TestExtensions.AutoloadAuthorityExit)
+      end)
+
+      :ok =
+        ExtRegistry.register(ctx.registry, :autoload_authority_exit, path,
+          load_policy: {:on_command, [:autoload_authority_exit_cmd]}
+        )
+
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :autoload_authority_exit)
+
+      assert :ok =
+               Lazy.register_stubs(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :autoload_authority_exit,
+                 entry,
+                 start_opts(ctx)
+               )
+
+      registry = InstanceRegistry.registry_for_root(ctx.supervisor)
+      authority = InstanceRegistry.whereis(registry, :instance, :autoload_authority_exit)
+      :ok = :sys.suspend(authority)
+      parent = self()
+
+      task =
+        Task.async(fn ->
+          capture_log(fn ->
+            result =
+              Lazy.autoload(
+                ctx.supervisor,
+                ctx.registry,
+                :autoload_authority_exit,
+                start_opts(ctx)
+              )
+
+            send(parent, {:autoload_exit_result, result})
+          end)
+        end)
+
+      refute Task.yield(task, 25)
+      Process.exit(authority, :kill)
+      log = Task.await(task)
+
+      assert_receive {:autoload_exit_result,
+                      {:error, {:authority_call_exit, :autoload_authority_exit, _reason}}}
+
+      assert log =~ "Extension autoload_authority_exit lazy activation failed"
+      assert log =~ "authority_call_exit"
+    end
+
+    test "stub command contains authority exit and leaves Editor state unchanged", ctx do
+      {path, cleanup} =
+        make_extension("LazyCommandAuthorityExit", """
+        defmodule Minga.TestExtensions.LazyCommandAuthorityExit do
+          use Minga.Extension
+
+          load_policy {:on_command, [:lazy_command_authority_exit_cmd]}
+
+          command :lazy_command_authority_exit_cmd, "Command authority exit",
+            execute: {Minga.TestExtensions.LazyCommandAuthorityExit, :run}
+
+          @impl true
+          def name, do: :lazy_command_authority_exit
+          @impl true
+          def description, do: "Lazy command authority exit"
+          @impl true
+          def version, do: "1.0.0"
+          @impl true
+          def init(_config), do: {:ok, %{}}
+          def run(state), do: Map.put(state, :should_not_run, true)
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.LazyCommandAuthorityExit)
+        :code.delete(Minga.TestExtensions.LazyCommandAuthorityExit)
+      end)
+
+      :ok =
+        ExtRegistry.register(ctx.registry, :lazy_command_authority_exit, path,
+          load_policy: {:on_command, [:lazy_command_authority_exit_cmd]}
+        )
+
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :lazy_command_authority_exit)
+
+      assert :ok =
+               Lazy.register_stubs(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :lazy_command_authority_exit,
+                 entry,
+                 start_opts(ctx)
+               )
+
+      assert {:ok, command} =
+               CommandRegistry.lookup(ctx.command_registry, :lazy_command_authority_exit_cmd)
+
+      registry = InstanceRegistry.registry_for_root(ctx.supervisor)
+      authority = InstanceRegistry.whereis(registry, :instance, :lazy_command_authority_exit)
+      :ok = :sys.suspend(authority)
+      parent = self()
+
+      task =
+        Task.async(fn ->
+          capture_log(fn ->
+            result = command.execute.(%{unchanged: true})
+            send(parent, {:lazy_command_exit_result, result})
+          end)
+        end)
+
+      refute Task.yield(task, 25)
+      Process.exit(authority, :kill)
+      log = Task.await(task)
+
+      assert_receive {:lazy_command_exit_result, %{unchanged: true}}
+      assert log =~ "Extension lazy_command_authority_exit lazy activation failed"
+      assert log =~ "authority_call_exit"
+    end
+
     test "autoload is idempotent (returns running pid on second call)", ctx do
       {path, cleanup} =
         make_extension("AutoloadIdempotent", """
@@ -419,6 +686,64 @@ defmodule Minga.Extension.LazyTest do
       # Second autoload should return the same pid
       assert {:ok, ^pid1} =
                Lazy.autoload(ctx.supervisor, ctx.registry, :autoload_idempotent, start_opts(ctx))
+    end
+  end
+
+  describe "compatibility deferred scheduler" do
+    test "logs and aggregates lazy stub registration failures", ctx do
+      {path, cleanup} =
+        make_extension("DeferredRegistrationFailure", """
+        defmodule Minga.TestExtensions.DeferredRegistrationFailure do
+          use Minga.Extension
+
+          load_policy :deferred
+
+          @impl true
+          def name, do: :deferred_registration_failure
+          @impl true
+          def description, do: "Deferred registration failure"
+          @impl true
+          def version, do: "1.0.0"
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.DeferredRegistrationFailure)
+        :code.delete(Minga.TestExtensions.DeferredRegistrationFailure)
+      end)
+
+      :ok =
+        ExtRegistry.register(ctx.registry, :deferred_registration_failure, path,
+          load_policy: :deferred
+        )
+
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :deferred_registration_failure)
+      Minga.Events.subscribe(:extension_deferred_batch_complete)
+
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   Lazy.schedule_deferred_loads(
+                     :missing_deferred_root,
+                     ctx.registry,
+                     [{:deferred_registration_failure, entry}],
+                     start_opts(ctx)
+                   )
+        end)
+
+      assert log =~ "Extension deferred_registration_failure deferred stub registration failed"
+
+      assert_receive {:minga_event, :extension_deferred_batch_complete,
+                      %DeferredBatchCompleteEvent{
+                        count: 1,
+                        failures: [
+                          %{extension: :deferred_registration_failure, reason: _reason}
+                        ]
+                      }},
+                     5_000
     end
   end
 

@@ -1,38 +1,20 @@
 defmodule Minga.Extension.Lazy do
-  @moduledoc """
-  Lazy loading for extensions with non-eager load policies.
+  @moduledoc "Lazy/deferred activation helpers routed through stable extension Instances."
 
-  Extensions that declare a load policy other than `:eager` are compiled
-  at boot (via the compile cache, so this is fast for unchanged sources)
-  but their `init/1` and child process are deferred. Instead, lightweight
-  stub commands and keybindings are registered from the compiled module's
-  schema callbacks. The first time a stub is triggered, the extension
-  loads fully (init + child start) and the stub is replaced with the
-  real handler, all synchronously within the command dispatch.
-
-  This keeps startup cost proportional to the number of *eager*
-  extensions, not the total installed count.
-  """
-
-  alias Minga.Command
-  alias Minga.Extension.BundledApplications
-  alias Minga.Extension.CompileCache
-  alias Minga.Extension.Manifest
+  alias Minga.Extension.DeferredBatchCompleteEvent
+  alias Minga.Extension.Instance
+  alias Minga.Extension.Instance.Source
+  alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Log
 
-  @typedoc "Result from registering stubs for a lazy extension."
+  @typedoc "Result from registering lazy stubs."
   @type stub_result :: :ok | {:error, term()}
 
-  @doc """
-  Compiles a path/git extension, reads its schema, and registers stub
-  commands and keybindings without calling init or starting a child.
+  @authority_retry_attempts 2
 
-  The extension's module is loaded into the VM (so schema callbacks are
-  callable) but no runtime side effects run. The registry entry is
-  updated to `:stub` status with the compiled module and manifest.
-  """
+  @doc "Registers path/Git/Hex stubs through the extension Instance."
   @spec register_stubs(
           GenServer.server(),
           GenServer.server(),
@@ -41,22 +23,10 @@ defmodule Minga.Extension.Lazy do
           ExtSupervisor.start_opts()
         ) :: stub_result()
   def register_stubs(supervisor, registry, name, entry, opts) do
-    case compile_extension(name, entry, opts) do
-      {:ok, module} ->
-        do_register_stubs(supervisor, registry, name, module, entry, opts, set_module: true)
-
-      {:error, reason} ->
-        log_stub_failure(name, reason, registry)
-        {:error, reason}
-    end
+    ExtSupervisor.register_lazy_extension(supervisor, registry, name, entry, opts)
   end
 
-  @doc """
-  Compiles a module-sourced extension and registers stubs without init.
-
-  For bundled extensions already on the code path, no compilation is
-  needed beyond `Code.ensure_loaded/1`.
-  """
+  @doc "Registers module-source stubs through the same extension Instance."
   @spec register_module_stubs(
           GenServer.server(),
           GenServer.server(),
@@ -65,492 +35,33 @@ defmodule Minga.Extension.Lazy do
           ExtSupervisor.start_opts()
         ) :: stub_result()
   def register_module_stubs(supervisor, registry, name, entry, opts) do
-    module = entry.module
-
-    case Code.ensure_loaded(module) do
-      {:module, ^module} ->
-        do_register_stubs(supervisor, registry, name, module, entry, opts, set_module: false)
-
-      {:error, reason} ->
-        log_stub_failure(name, {:module_load_failed, reason}, registry)
-        {:error, {:module_load_failed, reason}}
-    end
+    register_stubs(supervisor, registry, name, entry, opts)
   end
 
-  @doc """
-  Fully loads a previously-stubbed extension: runs init, starts its
-  child process, and replaces stub commands/keybinds with real handlers.
-
-  Called synchronously when a stub command or keybinding is first
-  triggered. Uses the same lifecycle lock as `start_extension` to
-  prevent races between concurrent stub triggers.
-
-  Returns `{:ok, pid}` on success or `{:error, reason}` if the
-  extension fails to load.
-  """
+  @doc "Activates the captured lazy declaration through its stable mailbox."
   @spec autoload(
           GenServer.server(),
           GenServer.server(),
           atom(),
           ExtSupervisor.start_opts()
         ) :: {:ok, pid()} | {:error, term()}
-  def autoload(supervisor, registry, name, opts) do
-    with_autoload_lock(registry, name, fn ->
-      case ExtRegistry.get(registry, name) do
-        {:ok, %{status: :stub} = entry} ->
-          do_autoload(supervisor, registry, name, entry, opts)
-
-        {:ok, %{status: :running, pid: pid}} when is_pid(pid) ->
-          {:ok, pid}
-
-        {:ok, %{status: status}} ->
-          {:error, {:unexpected_status, status}}
-
-        :error ->
-          {:error, :not_registered}
-      end
-    end)
-  end
-
-  # ── Private ────────────────────────────────────────────────────────────
-
-  @spec do_register_stubs(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          module(),
-          ExtRegistry.entry(),
-          ExtSupervisor.start_opts(),
-          keyword()
-        ) :: stub_result()
-  defp do_register_stubs(supervisor, registry, name, module, entry, opts, internal_opts) do
-    cmd_registry = Keyword.get(opts, :command_registry, Command.Registry)
-    keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
-
-    with :ok <- ExtSupervisor.validate_behaviour(module, name),
-         {:ok, manifest} <- build_manifest(module, entry.source_type),
-         :ok <- ExtSupervisor.register_and_validate_options(name, module, entry.config) do
-      registry_fields =
-        if Keyword.get(internal_opts, :set_module, false) do
-          [module: module, manifest: manifest, status: :stub]
-        else
-          [manifest: manifest, status: :stub]
-        end
-
-      ExtRegistry.update(registry, name, registry_fields)
-
-      with :ok <- register_stub_commands(supervisor, registry, name, module, cmd_registry, opts),
-           :ok <- register_stub_keybinds(name, module, keymap) do
-        Log.info(
-          :config,
-          "Extension #{name} registered as stub (#{inspect(manifest.load_policy)})"
-        )
-
-        :ok
-      else
-        {:error, reason} ->
-          rollback_stub_registration(name, cmd_registry, keymap, registry, opts)
-          {:error, reason}
-      end
-    else
-      {:error, reason} ->
-        log_stub_failure(name, reason, registry)
-        {:error, reason}
-    end
-  end
-
-  @spec log_stub_failure(atom(), term(), GenServer.server()) :: :ok
-  defp log_stub_failure(name, reason, registry) do
-    Log.warning(
-      :config,
-      "Extension #{name} stub registration failed: #{inspect(reason)}"
-    )
-
-    ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
-    :ok
-  end
-
-  @spec rollback_stub_registration(
-          atom(),
-          GenServer.server(),
-          GenServer.server(),
-          GenServer.server(),
-          ExtSupervisor.start_opts()
-        ) :: :ok
-  defp rollback_stub_registration(name, cmd_registry, keymap, registry, opts) do
-    ExtSupervisor.cleanup_extension_contributions(name, cmd_registry, keymap, opts)
-    ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
-    :ok
-  end
-
-  @spec do_autoload(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          ExtRegistry.entry(),
-          ExtSupervisor.start_opts()
-        ) :: {:ok, pid()} | {:error, term()}
-  defp do_autoload(supervisor, registry, name, entry, opts) do
-    cmd_registry = Keyword.get(opts, :command_registry, Command.Registry)
-    keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
-
-    Log.info(:config, "Extension #{name} autoloading on first use")
-
-    ExtSupervisor.cleanup_extension_contributions(name, cmd_registry, keymap, opts)
-    ExtRegistry.update(registry, name, status: :stopped)
-
-    case ExtSupervisor.start_extension(supervisor, registry, name, entry, opts) do
-      {:ok, pid} ->
-        Log.info(:config, "Extension #{name} autoloaded successfully")
-        {:ok, pid}
-
-      {:error, reason} ->
-        Log.warning(:config, "Extension #{name} autoload failed: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  @spec with_autoload_lock(GenServer.server(), atom(), (-> result)) :: result when result: var
-  defp with_autoload_lock(registry, name, fun) when is_atom(name) and is_function(fun, 0) do
-    resource_id = {ExtSupervisor, :lifecycle, canonical_registry_id(registry), name}
-    requester_id = self()
-    :global.trans({resource_id, requester_id}, fun, [node()], :infinity)
-  end
-
-  @spec canonical_registry_id(GenServer.server()) :: term()
-  defp canonical_registry_id(registry) when is_pid(registry) do
-    case Process.info(registry, :registered_name) do
-      {:registered_name, reg_name} when is_atom(reg_name) -> {:local_name, reg_name}
-      _other -> {:pid, registry}
-    end
-  end
-
-  defp canonical_registry_id(registry) when is_atom(registry) do
-    case Process.whereis(registry) do
-      pid when is_pid(pid) -> canonical_registry_id(pid)
-      nil -> {:local_name, registry}
-    end
-  end
-
-  defp canonical_registry_id({:global, reg_name}), do: {:global_name, reg_name}
-  defp canonical_registry_id({:via, module, reg_name}), do: {:via, module, reg_name}
-  defp canonical_registry_id(registry), do: registry
-
-  @spec compile_extension(atom(), ExtRegistry.entry(), ExtSupervisor.start_opts()) ::
-          {:ok, module()} | {:error, term()}
-  defp compile_extension(name, %{source_type: :path, path: path}, opts) when is_binary(path) do
-    compile_from_path(name, Path.expand(path), opts)
-  end
-
-  defp compile_extension(name, %{source_type: :git, path: path}, opts) when is_binary(path) do
-    compile_from_path(name, Path.expand(path), opts)
-  end
-
-  defp compile_extension(_name, %{source_type: :git, path: nil}, _opts) do
-    {:error, :clone_failed}
-  end
-
-  defp compile_extension(_name, %{source_type: :module, module: module}, _opts) do
-    case Code.ensure_loaded(module) do
-      {:module, ^module} -> {:ok, module}
-      {:error, reason} -> {:error, {:module_load_failed, reason}}
-    end
-  end
-
-  defp compile_extension(_name, %{source_type: :hex, hex: %{app: app}} = entry, _opts) do
-    app_atom =
-      if is_atom(app) and app != nil, do: app, else: entry.manifest && entry.manifest.name
-
-    resolve_hex_module(app_atom)
-  end
-
-  @spec resolve_hex_module(atom() | nil) :: {:ok, module()} | {:error, term()}
-  defp resolve_hex_module(nil), do: {:error, :hex_app_name_unknown}
-
-  defp resolve_hex_module(app_atom) do
-    with :ok <- load_hex_app_metadata(app_atom),
-         {:ok, modules} <- hex_modules(app_atom) do
-      find_extension_module(modules)
-    end
-  end
-
-  @spec load_hex_app_metadata(atom()) :: :ok | {:error, term()}
-  defp load_hex_app_metadata(app_atom) do
-    case Application.load(app_atom) do
-      :ok -> :ok
-      {:error, {:already_loaded, ^app_atom}} -> :ok
-      {:error, reason} -> {:error, {:hex_app_load_failed, app_atom, reason}}
-    end
-  end
-
-  @spec hex_modules(atom()) :: {:ok, [module()]} | {:error, String.t()}
-  defp hex_modules(app_atom) do
-    case :application.get_key(app_atom, :modules) do
-      {:ok, modules} -> {:ok, modules}
-      :undefined -> {:error, "hex application #{app_atom} not found after install"}
-    end
-  end
-
-  @spec compile_from_path(atom(), String.t(), ExtSupervisor.start_opts()) ::
-          {:ok, module()} | {:error, term()}
-  defp compile_from_path(name, expanded, opts) do
-    if File.dir?(expanded) do
-      files = expanded |> Path.join("**/*.ex") |> Path.wildcard() |> Enum.sort()
-      compile_source_files(name, expanded, files, opts)
-    else
-      {:error, "extension path does not exist: #{expanded}"}
-    end
-  end
-
-  @spec compile_source_files(atom(), String.t(), [String.t()], ExtSupervisor.start_opts()) ::
-          {:ok, module()} | {:error, term()}
-  defp compile_source_files(_name, _expanded, [], _opts), do: {:error, "no .ex files found"}
-
-  defp compile_source_files(name, expanded, files, opts) do
-    admission = Keyword.get(opts, :artifact_admission, Minga.Extension.ArtifactAdmission)
-    source = {:extension, name}
-
-    case Minga.Extension.ArtifactAdmission.source_modules(source, server: admission) do
-      {:ok, modules} ->
-        report_staged_source_change(name, expanded, files, source, admission, opts)
-        find_extension_module(modules)
-
-      :error ->
-        case CompileCache.load_or_compile(expanded, files,
-               source: source,
-               artifact_admission: admission,
-               trusted_application: BundledApplications.trusted_application(name)
-             ) do
-          {:ok, %{modules: modules}} -> find_extension_module(modules)
-          {:error, reason} -> {:error, reason}
-        end
-    end
-  end
-
-  @spec report_staged_source_change(
-          atom(),
-          String.t(),
-          [String.t()],
-          term(),
-          GenServer.server(),
-          ExtSupervisor.start_opts()
-        ) :: :ok
-  defp report_staged_source_change(name, expanded, files, source, admission, opts) do
-    with {:ok, admitted} <-
-           Minga.Extension.ArtifactAdmission.source_fingerprint(source, server: admission),
-         {:ok, current} <- CompileCache.source_fingerprint(expanded, files, opts),
-         false <- admitted == current do
-      Minga.Events.broadcast(
-        :extension_restart_required,
-        %Minga.Events.ExtensionRestartRequiredEvent{
-          extension: name,
-          reason: :source_changed,
-          old_ref: Base.encode16(admitted, case: :lower),
-          new_ref: Base.encode16(current, case: :lower)
-        }
+  def autoload(supervisor, _registry, name, opts) do
+    registry =
+      Keyword.get(
+        opts,
+        :instance_registry,
+        InstanceRegistry.registry_for_root(root_supervisor(supervisor))
       )
-    else
-      _unchanged_or_unavailable -> :ok
+
+    case InstanceRegistry.whereis(registry, :instance, name) do
+      pid when is_pid(pid) -> safe_start(name, InstanceRegistry.via(registry, :instance, name))
+      nil -> {:error, :not_registered}
     end
   end
 
-  @spec find_extension_module([module()]) :: {:ok, module()} | {:error, String.t()}
-  defp find_extension_module(modules) do
-    case Enum.find(modules, &ExtSupervisor.implements_extension?/1) do
-      nil -> {:error, "no module implementing Minga.Extension behaviour found"}
-      mod -> {:ok, mod}
-    end
-  end
-
-  @spec build_manifest(module(), Manifest.source_type()) ::
-          {:ok, Manifest.t()} | {:error, term()}
-  defp build_manifest(module, source) do
-    {:ok, Manifest.from_module(module, source)}
-  rescue
-    e -> {:error, "manifest introspection failed: #{Exception.message(e)}"}
-  catch
-    kind, reason ->
-      {:error, "manifest introspection failed: #{inspect(kind)} #{inspect(reason)}"}
-  end
-
-  @spec register_stub_commands(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          module(),
-          GenServer.server(),
-          ExtSupervisor.start_opts()
-        ) :: :ok | {:error, term()}
-  defp register_stub_commands(supervisor, registry, name, module, cmd_registry, opts) do
-    schema = command_schema(module)
-
-    Enum.reduce_while(schema, :ok, fn {cmd_name, description, cmd_opts}, :ok ->
-      case validate_command_spec(name, cmd_name, cmd_opts) do
-        :ok ->
-          register_single_stub_command(
-            supervisor,
-            registry,
-            name,
-            cmd_name,
-            description,
-            cmd_opts,
-            cmd_registry,
-            opts
-          )
-
-        {:error, _reason} = error ->
-          {:halt, error}
-      end
-    end)
-  end
-
-  @spec validate_command_spec(atom(), atom(), keyword()) :: :ok | {:error, term()}
-  defp validate_command_spec(ext_name, cmd_name, cmd_opts) do
-    case Keyword.fetch(cmd_opts, :execute) do
-      {:ok, {mod, fun}} when is_atom(mod) and is_atom(fun) ->
-        :ok
-
-      {:ok, invalid} ->
-        reason = {:invalid_execute, cmd_name, invalid}
-
-        Log.warning(
-          :config,
-          "Extension #{ext_name} command #{cmd_name} has invalid :execute: #{inspect(invalid)}"
-        )
-
-        {:error, reason}
-
-      :error ->
-        reason = {:missing_execute, cmd_name}
-
-        Log.warning(
-          :config,
-          "Extension #{ext_name} command #{cmd_name} is missing required :execute option"
-        )
-
-        {:error, reason}
-    end
-  end
-
-  @spec register_single_stub_command(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          atom(),
-          String.t(),
-          keyword(),
-          GenServer.server(),
-          ExtSupervisor.start_opts()
-        ) :: {:cont, :ok} | {:halt, {:error, term()}}
-  defp register_single_stub_command(
-         supervisor,
-         registry,
-         name,
-         cmd_name,
-         description,
-         cmd_opts,
-         cmd_registry,
-         opts
-       ) do
-    requires_buffer = Keyword.get(cmd_opts, :requires_buffer, false)
-
-    stub_cmd = %Command{
-      name: cmd_name,
-      description: description,
-      requires_buffer: requires_buffer,
-      execute: stub_execute_fn(supervisor, registry, name, cmd_name, cmd_registry, opts)
-    }
-
-    case Command.Registry.register_command(cmd_registry, {:extension, name}, stub_cmd) do
-      :ok ->
-        {:cont, :ok}
-
-      {:error, reason} ->
-        Log.warning(
-          :config,
-          "Extension #{name} stub command #{cmd_name} rejected: #{inspect(reason)}"
-        )
-
-        {:halt, {:error, {:stub_command_rejected, cmd_name, reason}}}
-    end
-  end
-
-  @spec stub_execute_fn(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          atom(),
-          GenServer.server(),
-          ExtSupervisor.start_opts()
-        ) :: (term() -> term())
-  defp stub_execute_fn(supervisor, registry, name, cmd_name, cmd_registry, opts) do
-    fn state ->
-      case autoload(supervisor, registry, name, opts) do
-        {:ok, _pid} -> execute_autoloaded_command(cmd_registry, cmd_name, state)
-        {:error, _reason} -> state
-      end
-    end
-  end
-
-  @spec execute_autoloaded_command(GenServer.server(), atom(), term()) :: term()
-  defp execute_autoloaded_command(cmd_registry, cmd_name, state) do
-    case Command.Registry.lookup(cmd_registry, cmd_name) do
-      {:ok, cmd} -> cmd.execute.(state)
-      :error -> state
-    end
-  end
-
-  @spec register_stub_keybinds(atom(), module(), GenServer.server()) ::
-          :ok | {:error, term()}
-  defp register_stub_keybinds(name, module, keymap) do
-    schema = keybind_schema(module)
-
-    Enum.reduce_while(schema, :ok, fn {mode, key_str, command, description, bind_opts}, :ok ->
-      source_opts = Keyword.put(bind_opts, :source, {:extension, name})
-
-      case Minga.Keymap.Active.bind(keymap, mode, key_str, command, description, source_opts) do
-        :ok ->
-          {:cont, :ok}
-
-        {:error, reason} ->
-          Log.warning(
-            :config,
-            "Extension #{name} stub keybind #{inspect(key_str)} failed: #{reason}"
-          )
-
-          {:halt, {:error, {:stub_keybind_rejected, key_str, reason}}}
-      end
-    end)
-  end
-
-  @spec command_schema(module()) :: [Minga.Extension.command_spec()]
-  defp command_schema(module) do
-    if function_exported?(module, :__command_schema__, 0),
-      do: module.__command_schema__(),
-      else: []
-  end
-
-  @spec keybind_schema(module()) :: [Minga.Extension.keybind_spec()]
-  defp keybind_schema(module) do
-    if function_exported?(module, :__keybind_schema__, 0),
-      do: module.__keybind_schema__(),
-      else: []
-  end
-
-  @doc """
-  Resolves the effective load policy for an extension entry.
-
-  If the entry has an explicit `load_policy` set from config (non-nil),
-  that wins. Otherwise falls back to the module's declared
-  `__load_policy__/0` if the module is loaded, then to `:eager`.
-  """
+  @doc "Returns the effective policy already present on a declaration."
   @spec effective_load_policy(ExtRegistry.entry()) :: Minga.Extension.load_policy()
-  def effective_load_policy(%{load_policy: policy}) when is_atom(policy) and policy != nil,
-    do: policy
-
-  def effective_load_policy(%{load_policy: policy}) when is_tuple(policy), do: policy
-
-  def effective_load_policy(%{module: module}) when is_atom(module) and not is_nil(module) do
+  def effective_load_policy(%{load_policy: nil, module: module}) when is_atom(module) do
     if Code.ensure_loaded?(module) and function_exported?(module, :__load_policy__, 0) do
       module.__load_policy__()
     else
@@ -558,142 +69,207 @@ defmodule Minga.Extension.Lazy do
     end
   end
 
+  def effective_load_policy(%{load_policy: nil}), do: :eager
+  def effective_load_policy(%{load_policy: policy}), do: policy
   def effective_load_policy(_entry), do: :eager
 
-  @doc """
-  Compiles a path/git extension to discover the module's declared
-  load policy when no config-level override is set.
-
-  Returns `{:ok, policy, module}` on success so the caller can reuse the
-  artifact admitted for this VM generation. Returns `{:error, reason}` if
-  boot-time admission fails, in which case the caller falls back to `:eager`.
-  """
+  @doc "Discovers policy through the single source preparation path."
   @spec discover_load_policy(atom(), ExtRegistry.entry(), ExtSupervisor.start_opts()) ::
           {:ok, Minga.Extension.load_policy(), module()} | {:error, term()}
   def discover_load_policy(name, entry, opts) do
-    case compile_extension(name, entry, opts) do
-      {:ok, module} ->
-        policy = module_load_policy(module)
-        {:ok, policy, module}
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, policy, artifact} <- Source.discover_load_policy(name, entry, opts) do
+      {:ok, entry.load_policy || policy, artifact.module}
     end
   end
 
-  @spec module_load_policy(module()) :: Minga.Extension.load_policy()
-  defp module_load_policy(module) do
-    if function_exported?(module, :__load_policy__, 0) do
-      module.__load_policy__()
-    else
-      :eager
-    end
-  end
-
-  @doc """
-  Returns true if the given load policy requires eager loading at boot.
-  """
+  @doc "Returns true for eager policy."
   @spec eager?(Minga.Extension.load_policy()) :: boolean()
   def eager?(:eager), do: true
   def eager?(_policy), do: false
 
-  @doc """
-  Returns true if the given load policy is deferred (post-first-paint).
-  """
+  @doc "Returns true for deferred policy."
   @spec deferred?(Minga.Extension.load_policy()) :: boolean()
   def deferred?(:deferred), do: true
   def deferred?(_policy), do: false
 
-  @doc """
-  Returns true if the load policy is trigger-based (on_command, on_filetype, on_key).
-  """
+  @doc "Returns true for trigger-based policy."
   @spec trigger_based?(Minga.Extension.load_policy()) :: boolean()
-  def trigger_based?({:on_command, _}), do: true
-  def trigger_based?({:on_filetype, _}), do: true
-  def trigger_based?({:on_key, _}), do: true
+  def trigger_based?({tag, _trigger}) when tag in [:on_command, :on_filetype, :on_key], do: true
   def trigger_based?(_policy), do: false
 
   @deferred_load_delay_ms 100
 
-  @doc """
-  Schedules deferred extensions to load in the background after a short
-  delay, allowing the editor to render the first frame first.
-  """
+  @doc "Schedules captured Instance identities after first-paint delay."
+  @spec schedule_deferred_loads([{GenServer.server(), atom(), ExtRegistry.entry()}]) :: :ok
+  def schedule_deferred_loads([]), do: :ok
+
+  def schedule_deferred_loads(instances) do
+    schedule_deferred_batch(instances, [], length(instances))
+  end
+
+  @doc "Registers declarations and schedules their deferred Instance activations."
   @spec schedule_deferred_loads(
           GenServer.server(),
           GenServer.server(),
           [{atom(), ExtRegistry.entry()}],
           ExtSupervisor.start_opts()
         ) :: :ok
-  def schedule_deferred_loads(_supervisor, _registry, [], _opts), do: :ok
+  def schedule_deferred_loads(supervisor, registry, entries, opts) do
+    {instances, failures} =
+      Enum.reduce(entries, {[], []}, fn {name, entry}, {instances, failures} ->
+        case ExtSupervisor.register_lazy_extension(supervisor, registry, name, entry, opts) do
+          :ok ->
+            instance_registry =
+              Keyword.get(
+                opts,
+                :instance_registry,
+                InstanceRegistry.registry_for_root(root_supervisor(supervisor))
+              )
 
-  def schedule_deferred_loads(supervisor, registry, deferred_entries, opts) do
-    Task.start(fn ->
-      receive do
-      after
-        @deferred_load_delay_ms -> :ok
-      end
+            instance = {InstanceRegistry.via(instance_registry, :instance, name), name, entry}
+            {[instance | instances], failures}
 
-      Enum.each(deferred_entries, fn {name, entry} ->
-        start_deferred_extension(supervisor, registry, name, entry, opts)
+          {:error, reason} ->
+            failure = %{extension: name, reason: reason}
+
+            Log.warning(
+              :config,
+              "Extension #{name} deferred stub registration failed: #{inspect(reason)}"
+            )
+
+            {instances, [failure | failures]}
+        end
       end)
-    end)
+
+    schedule_deferred_batch(Enum.reverse(instances), Enum.reverse(failures), length(entries))
+  end
+
+  @spec schedule_deferred_batch(
+          [{GenServer.server(), atom(), ExtRegistry.entry()}],
+          [DeferredBatchCompleteEvent.failure()],
+          non_neg_integer()
+        ) :: :ok
+  defp schedule_deferred_batch(instances, registration_failures, total_count) do
+    {:ok, _pid} =
+      Task.start(fn ->
+        receive do
+        after
+          @deferred_load_delay_ms -> :ok
+        end
+
+        failures =
+          instances
+          |> Enum.reduce(
+            Enum.reverse(registration_failures),
+            &start_deferred_instance/2
+          )
+          |> Enum.reverse()
+
+        event = DeferredBatchCompleteEvent.new(total_count, failures)
+        Minga.Events.broadcast(:extension_deferred_batch_complete, event)
+      end)
 
     :ok
   end
 
-  @spec start_deferred_extension(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          ExtRegistry.entry(),
-          ExtSupervisor.start_opts()
-        ) :: :ok
-  defp start_deferred_extension(supervisor, registry, name, entry, opts) do
-    case ExtRegistry.get(registry, name) do
-      {:ok, %{status: :stopped}} ->
-        do_start_deferred(supervisor, registry, name, entry, opts)
-
-      {:ok, %{status: status}} ->
-        Log.debug(
-          :config,
-          "Extension #{name} deferred load skipped (status: #{status})"
-        )
-
-      :error ->
-        Log.debug(:config, "Extension #{name} deferred load skipped (unregistered)")
-    end
-
-    :ok
-  rescue
-    e ->
-      Log.warning(
-        :config,
-        "Extension #{name} deferred load crashed: #{Exception.message(e)}"
-      )
-
-      :ok
-  end
-
-  @spec do_start_deferred(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          ExtRegistry.entry(),
-          ExtSupervisor.start_opts()
-        ) :: :ok
-  defp do_start_deferred(supervisor, registry, name, entry, opts) do
-    case ExtSupervisor.start_extension(supervisor, registry, name, entry, opts) do
+  @spec start_deferred_instance(
+          {GenServer.server(), atom(), ExtRegistry.entry()},
+          [DeferredBatchCompleteEvent.failure()]
+        ) :: [DeferredBatchCompleteEvent.failure()]
+  defp start_deferred_instance({instance, name, declaration}, failures) do
+    case safe_start_deferred(name, instance, declaration) do
       {:ok, _pid} ->
         Log.info(:config, "Extension #{name} deferred load complete")
+        failures
 
       {:error, reason} ->
-        Log.warning(
-          :config,
-          "Extension #{name} deferred load failed: #{inspect(reason)}"
-        )
+        Log.warning(:config, "Extension #{name} deferred load failed: #{inspect(reason)}")
+        [%{extension: name, reason: reason} | failures]
     end
-
-    :ok
   end
+
+  @spec safe_start(atom(), GenServer.server()) :: {:ok, pid()} | {:error, term()}
+  defp safe_start(name, instance) do
+    case retry_instance_call(name, instance, &Instance.start/1, @authority_retry_attempts) do
+      {:authority_call_exit, reason} ->
+        failure = {:authority_call_exit, name, reason}
+        Log.warning(:config, "Extension #{name} lazy activation failed: #{inspect(failure)}")
+        {:error, failure}
+
+      result ->
+        result
+    end
+  end
+
+  @spec safe_start_deferred(atom(), GenServer.server(), ExtRegistry.entry()) ::
+          {:ok, pid()} | {:error, term()}
+  defp safe_start_deferred(name, instance, declaration) do
+    case retry_instance_call(
+           name,
+           instance,
+           fn current -> Instance.start_deferred(current, declaration) end,
+           @authority_retry_attempts
+         ) do
+      {:authority_call_exit, reason} -> {:error, {:instance_call_exit, reason}}
+      result -> result
+    end
+  end
+
+  @spec retry_instance_call(
+          atom(),
+          GenServer.server(),
+          (GenServer.server() -> result),
+          non_neg_integer()
+        ) :: result | {:authority_call_exit, term()}
+        when result: var
+  defp retry_instance_call(name, instance, fun, retries) do
+    fun.(instance)
+  catch
+    :exit, reason ->
+      retry_instance_call_after_exit(name, instance, fun, retries, reason)
+  end
+
+  @spec retry_instance_call_after_exit(
+          atom(),
+          GenServer.server(),
+          (GenServer.server() -> result),
+          non_neg_integer(),
+          term()
+        ) :: result | {:authority_call_exit, term()}
+        when result: var
+  defp retry_instance_call_after_exit(name, instance, fun, retries, reason) do
+    if retries > 0 and restart_gap?(reason) do
+      case await_current_instance(instance, name) do
+        {:ok, current} -> retry_instance_call(name, current, fun, retries - 1)
+        {:error, _reason} -> {:authority_call_exit, reason}
+      end
+    else
+      {:authority_call_exit, reason}
+    end
+  end
+
+  @spec await_current_instance(GenServer.server(), atom()) ::
+          {:ok, GenServer.server()} | {:error, term()}
+  defp await_current_instance(
+         {:via, Registry, {registry, {:instance, name}}} = instance,
+         name
+       ) do
+    case InstanceRegistry.await(registry, :instance, name) do
+      {:ok, _pid} -> {:ok, instance}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp await_current_instance(_instance, name),
+    do: {:error, {:authority_unavailable, name, :unregistered_server}}
+
+  @spec restart_gap?(term()) :: boolean()
+  defp restart_gap?(:noproc), do: true
+  defp restart_gap?({:noproc, _call}), do: true
+  defp restart_gap?({:authority_unavailable, _name, reason}), do: restart_gap?(reason)
+  defp restart_gap?(_reason), do: false
+
+  @spec root_supervisor(GenServer.server()) :: GenServer.server()
+  defp root_supervisor(ExtSupervisor), do: Minga.Extension.RootSupervisor
+  defp root_supervisor(supervisor), do: supervisor
 end
