@@ -12,7 +12,9 @@ defmodule Minga.Extension.SupervisorTest do
   alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.CallbackRegistry
   alias Minga.Extension.CodeLease
+  alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Extension.RuntimeSupervisor
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
 
@@ -114,13 +116,11 @@ defmodule Minga.Extension.SupervisorTest do
                  entry
                )
 
-      children = DynamicSupervisor.which_children(ctx.supervisor)
-
-      assert Enum.count(children, fn {_id, child_pid, _type, _modules} -> child_pid == pid end) ==
-               1
+      assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, :already_running_ext)) ==
+               {:ok, pid}
     end
 
-    test "reuses supervised child when registry running pid is stale", ctx do
+    test "registry projection is repaired from the Instance rather than used as authority", ctx do
       {path, cleanup} =
         make_extension("StaleRegistryPidExt", """
         defmodule Minga.TestExtensions.StaleRegistryPidExt do
@@ -176,10 +176,8 @@ defmodule Minga.Extension.SupervisorTest do
       {:ok, updated} = ExtRegistry.get(ctx.registry, :stale_registry_pid_ext)
       assert updated.pid == pid
 
-      children = DynamicSupervisor.which_children(ctx.supervisor)
-
-      assert Enum.count(children, fn {_id, child_pid, _type, _modules} -> child_pid == pid end) ==
-               1
+      assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, :stale_registry_pid_ext)) ==
+               {:ok, pid}
     end
 
     test "restarts when registry has stale running pid outside supervisor", ctx do
@@ -654,7 +652,7 @@ defmodule Minga.Extension.SupervisorTest do
   end
 
   describe "stop_extension/4" do
-    test "preserves supervisor lookup failures instead of reporting not found", ctx do
+    test "reports authority unavailable when a declared running projection has no root", ctx do
       :ok = ExtRegistry.register(ctx.registry, :lookup_failure, System.tmp_dir!(), [])
 
       :ok =
@@ -666,7 +664,7 @@ defmodule Minga.Extension.SupervisorTest do
 
       {:ok, entry} = ExtRegistry.get(ctx.registry, :lookup_failure)
 
-      assert {:error, {:which_children_failed, _reason}} =
+      assert {:error, {:authority_unavailable, :lookup_failure, _reason}} =
                ExtSupervisor.stop_extension(
                  :missing_extension_supervisor,
                  ctx.registry,
@@ -862,16 +860,15 @@ defmodule Minga.Extension.SupervisorTest do
 
       runtime_monitor = Process.monitor(runtime)
 
+      test_pid = self()
+
       finalizer = fn finalized_source ->
         {:ok, projected} = ExtRegistry.get(ctx.registry, name)
 
         runtime_present? =
-          Enum.any?(DynamicSupervisor.which_children(ctx.supervisor), fn
-            {_id, ^runtime, _type, _modules} -> true
-            _child -> false
-          end)
+          RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
 
-        send(self(), {:source_finalized, finalized_source, projected.status, runtime_present?})
+        send(test_pid, {:source_finalized, finalized_source, projected.status, runtime_present?})
         :ok
       end
 
@@ -887,7 +884,7 @@ defmodule Minga.Extension.SupervisorTest do
                )
 
       assert_receive {:source_finalized, ^source, :stopped, true}
-      assert_receive {:source_finalized, ^source, :stopped, false}
+      refute_receive {:source_finalized, ^source, _, _}
       assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
     end
 
@@ -909,19 +906,17 @@ defmodule Minga.Extension.SupervisorTest do
 
       runtime_monitor = Process.monitor(runtime)
 
-      finalizer = fn finalized_source ->
-        attempts = Process.get({__MODULE__, :finalizer_attempts}, 0)
-        Process.put({__MODULE__, :finalizer_attempts}, attempts + 1)
-        send(self(), {:source_finalizer_called, finalized_source, attempts})
+      test_pid = self()
+      attempts = start_supervised!({Agent, fn -> 0 end})
 
-        case attempts do
-          0 -> {:error, :scheduler_unavailable}
-          _later_attempt -> :ok
-        end
+      finalizer = fn finalized_source ->
+        attempt = Agent.get_and_update(attempts, &{&1, &1 + 1})
+        send(test_pid, {:source_finalizer_called, finalized_source, attempt})
+        if attempt == 0, do: {:error, :scheduler_unavailable}, else: :ok
       end
 
       later_cleanup = fn cleaned_source ->
-        send(self(), {:later_cleanup_called, cleaned_source})
+        send(test_pid, {:later_cleanup_called, cleaned_source})
         :ok
       end
 
@@ -945,17 +940,13 @@ defmodule Minga.Extension.SupervisorTest do
       refute_receive {:later_cleanup_called, ^source}
       refute_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
 
-      assert Enum.any?(DynamicSupervisor.which_children(ctx.supervisor), fn
-               {_id, ^runtime, _type, _modules} -> true
-               _child -> false
-             end)
+      assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
 
       {:ok, quiescing_entry} = ExtRegistry.get(ctx.registry, name)
-      assert quiescing_entry.status == :stopped
+      assert quiescing_entry.status == :load_error
       assert quiescing_entry.pid == runtime
-      assert quiescing_entry.lifecycle_ref == nil
 
-      assert {:ok, ^runtime} =
+      assert {:error, {:cleanup_retry_required, _reason}} =
                ExtSupervisor.start_extension(
                  ctx.supervisor,
                  ctx.registry,
@@ -963,11 +954,6 @@ defmodule Minga.Extension.SupervisorTest do
                  quiescing_entry,
                  authorities.opts
                )
-
-      assert Enum.count(DynamicSupervisor.which_children(ctx.supervisor), fn
-               {_id, ^runtime, _type, _modules} -> true
-               _child -> false
-             end) == 1
 
       assert :ok =
                ExtSupervisor.stop_extension(
@@ -982,7 +968,7 @@ defmodule Minga.Extension.SupervisorTest do
                )
 
       assert_receive {:source_finalizer_called, ^source, 1}
-      assert_receive {:source_finalizer_called, ^source, 2}
+      refute_receive {:source_finalizer_called, ^source, 2}
       assert_receive {:later_cleanup_called, ^source}
       assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
     end
@@ -1034,6 +1020,96 @@ defmodule Minga.Extension.SupervisorTest do
 
       assert restarted_pid != pid
       refute restarted_pid == nil
+    end
+  end
+
+  describe "start failure contracts" do
+    test "option and modeline preparation failures publish exact load errors", ctx do
+      {option_path, option_cleanup} =
+        make_extension("OptionContractFailure", """
+        defmodule Minga.TestExtensions.OptionContractFailure do
+          use Minga.Extension
+
+          option :positive_count, :pos_integer,
+            default: 1,
+            description: "Positive count"
+
+          @impl true
+          def name, do: :option_contract_failure
+          @impl true
+          def description, do: "Option contract failure"
+          @impl true
+          def version, do: "1.0.0"
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      {modeline_path, modeline_cleanup} =
+        make_extension("ModelineContractFailure", """
+        defmodule Minga.TestExtensions.ModelineContractFailure do
+          use Minga.Extension
+
+          modeline_segment :mode do
+            _ctx = ctx
+            {" invalid ", :default, :default, [], nil}
+          end
+
+          @impl true
+          def name, do: :modeline_contract_failure
+          @impl true
+          def description, do: "Modeline contract failure"
+          @impl true
+          def version, do: "1.0.0"
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        option_cleanup.()
+        modeline_cleanup.()
+        :code.purge(Minga.TestExtensions.OptionContractFailure)
+        :code.delete(Minga.TestExtensions.OptionContractFailure)
+        :code.purge(Minga.TestExtensions.ModelineContractFailure)
+        :code.delete(Minga.TestExtensions.ModelineContractFailure)
+      end)
+
+      :ok =
+        ExtRegistry.register(ctx.registry, :option_contract_failure, option_path,
+          positive_count: 0
+        )
+
+      {:ok, option_entry} = ExtRegistry.get(ctx.registry, :option_contract_failure)
+
+      assert {:error, option_reason} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :option_contract_failure,
+                 option_entry
+               )
+
+      assert is_binary(option_reason)
+      assert option_reason =~ "positive_count"
+
+      assert {:ok, %{status: :load_error, pid: nil, last_error: ^option_reason}} =
+               ExtRegistry.get(ctx.registry, :option_contract_failure)
+
+      :ok = ExtRegistry.register(ctx.registry, :modeline_contract_failure, modeline_path, [])
+      {:ok, modeline_entry} = ExtRegistry.get(ctx.registry, :modeline_contract_failure)
+
+      assert {:error,
+              {:modeline_segment_rejected, :mode, {:reserved_name, :mode}} = modeline_reason} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :modeline_contract_failure,
+                 modeline_entry
+               )
+
+      assert {:ok, %{status: :load_error, pid: nil, last_error: ^modeline_reason}} =
+               ExtRegistry.get(ctx.registry, :modeline_contract_failure)
     end
   end
 
@@ -1152,13 +1228,17 @@ defmodule Minga.Extension.SupervisorTest do
 
       assert {:error, failures} = ExtSupervisor.start_all(ctx.supervisor, ctx.registry)
 
-      assert Enum.any?(failures, fn
-               %{extension: :git_start_fail, reason: reason} ->
-                 is_binary(reason) and reason =~ "git clone failed"
+      assert %{extension: :git_start_fail, reason: clone_reason} =
+               Enum.find(failures, &(&1.extension == :git_start_fail))
 
-               _ ->
-                 false
-             end)
+      assert is_binary(clone_reason) and clone_reason =~ "git clone failed"
+      {:ok, failed_entry} = ExtRegistry.get(ctx.registry, :git_start_fail)
+      assert failed_entry.status == :load_error
+      assert failed_entry.last_error == clone_reason
+
+      instance_registry = InstanceRegistry.registry_for_root(ctx.supervisor)
+      assert InstanceRegistry.whereis(instance_registry, :root, :git_start_fail)
+      assert InstanceRegistry.whereis(instance_registry, :instance, :git_start_fail)
 
       {:ok, success_entry} = ExtRegistry.get(ctx.registry, :git_start_ok)
       assert success_entry.status == :running
@@ -1404,6 +1484,12 @@ defmodule Minga.Extension.SupervisorTest do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec runtime_supervisor(map(), atom()) :: GenServer.server()
+  defp runtime_supervisor(ctx, name) do
+    registry = InstanceRegistry.registry_for_root(ctx.supervisor)
+    InstanceRegistry.via(registry, :runtime, name)
+  end
 
   @spec wait_until((-> term()), non_neg_integer()) :: term()
   defp wait_until(fun, attempts \\ 100)

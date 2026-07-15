@@ -447,18 +447,6 @@ defmodule MingaEditor do
     {:reply, :ok, Renderer.render_or_async(state)}
   end
 
-  def handle_call({:unload_extension_source, source, context}, _from, state) do
-    {:ok, new_state} = SourceFinalizer.finalize_unload(state, source, context)
-    {:reply, :ok, Renderer.render_or_async(new_state)}
-  end
-
-  def handle_call({:finalize_extension_source, source}, _from, state) do
-    case SourceFinalizer.finalize(state, source) do
-      {:ok, new_state} -> {:reply, :ok, Renderer.render_or_async(new_state)}
-      {{:error, reason}, new_state} -> {:reply, {:error, reason}, new_state}
-    end
-  end
-
   @spec handle_open_native(state(), String.t(), boolean()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp handle_open_native(state, path, editor_mode?) do
@@ -541,6 +529,30 @@ defmodule MingaEditor do
 
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
+  def handle_cast({:finalize_extension_source_request, source, {caller, ref}}, state) do
+    case SourceFinalizer.finalize(state, source) do
+      {:ok, new_state} ->
+        send(caller, {:extension_source_finalized, ref, :ok})
+        {:noreply, Renderer.render_or_async(new_state)}
+
+      {{:error, reason}, new_state} ->
+        send(caller, {:extension_source_finalized, ref, {:error, reason}})
+        {:noreply, new_state}
+    end
+  end
+
+  def handle_cast({:unload_extension_source_request, source, context, {caller, ref}}, state) do
+    case SourceFinalizer.finalize_unload(state, source, context) do
+      {:ok, new_state} ->
+        send(caller, {:extension_source_finalized, ref, :ok})
+        {:noreply, Renderer.render_or_async(new_state)}
+
+      {{:error, failures}, new_state} ->
+        send(caller, {:extension_source_finalized, ref, {:error, failures}})
+        {:noreply, Renderer.render_or_async(new_state)}
+    end
+  end
+
   def handle_cast({:register_background_buffer, pid, abs_path}, state) do
     # Register a buffer that was started by Buffer.ensure_for_path (called
     # from agent tools or Editor.ensure_buffer_for_path). Only register if

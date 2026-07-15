@@ -54,6 +54,11 @@ defmodule Minga.Extension.ContributionCleanup do
     :ok
   end
 
+  @doc false
+  @spec merge_callbacks(%{atom() => registered_cleanup_fun()}) ::
+          %{atom() => registered_cleanup_fun()}
+  def merge_callbacks(overrides) when is_map(overrides), do: Map.merge(callbacks(), overrides)
+
   @doc "Runs one targeted source finalizer before runtime termination."
   @spec finalize_source(contribution_source(), atom(), cleanup_opts()) ::
           :ok | {:error, cleanup_failure()}
@@ -111,11 +116,19 @@ defmodule Minga.Extension.ContributionCleanup do
     ]
     |> Kernel.++(
       cbs
-      |> Enum.filter(fn {_family, fun} -> is_function(fun, 1) end)
+      |> Enum.filter(fn {family, fun} ->
+        is_function(fun, 1) and include_full_cleanup_family?(source, family)
+      end)
       |> Enum.sort_by(fn {family, _fun} -> Atom.to_string(family) end)
       |> Enum.map(fn {family, fun} -> {family, fn -> fun.(source) end} end)
     )
   end
+
+  @spec include_full_cleanup_family?(contribution_source(), atom()) :: boolean()
+  defp include_full_cleanup_family?({:extension, _name}, family),
+    do: family not in [:editor_effects, :editor_extension_unload]
+
+  defp include_full_cleanup_family?(_source, _family), do: true
 
   @spec put_callback(atom(), registered_cleanup_fun()) :: :ok
   defp put_callback(name, fun) do

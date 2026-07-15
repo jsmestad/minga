@@ -7,8 +7,11 @@ defmodule MingaGitPorcelain.LifecycleTest do
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Extension.ArtifactAdmission
   alias Minga.Extension.CodeLease
+  alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Extension.RuntimeSupervisor
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias Minga.Keymap.Bindings
@@ -161,8 +164,16 @@ defmodule MingaGitPorcelain.LifecycleTest do
   test "reload terminates the old child and replaces source-owned contributions without duplicates" do
     ctx = start_lifecycle_context()
 
+    code_locations =
+      Map.new([MingaGitPorcelain, MingaGitPorcelain.Commands], &{&1, :code.which(&1)})
+
     first_pid = start_git_porcelain!(ctx)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx)) == {:ok, first_pid}
     assert_git_porcelain_contributions_registered(ctx)
+    assert {:ok, admitted} = ArtifactAdmission.source_modules(@source)
+    assert MingaGitPorcelain in admitted
+    assert MingaGitPorcelain.Commands in admitted
+    assert Map.new(Map.keys(code_locations), &{&1, :code.which(&1)}) == code_locations
 
     ref = Process.monitor(first_pid)
     stop_git_porcelain!(ctx)
@@ -170,6 +181,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
     assert_git_porcelain_contributions_removed(ctx)
 
     second_pid = start_git_porcelain!(ctx)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx)) == {:ok, second_pid}
     assert second_pid != first_pid
     assert_git_porcelain_contributions_registered(ctx)
     assert Enum.count(Input.surface_handlers(), &(&1 == MingaGitPorcelain.Input.GitStatus)) == 1
@@ -202,6 +214,11 @@ defmodule MingaGitPorcelain.LifecycleTest do
 
   defp unique_name(prefix) do
     :"#{prefix}_#{System.unique_integer([:positive])}"
+  end
+
+  defp runtime_supervisor(ctx) do
+    registry = InstanceRegistry.registry_for_root(ctx.supervisor)
+    InstanceRegistry.via(registry, :runtime, :minga_git_porcelain)
   end
 
   defp start_git_porcelain!(ctx) do

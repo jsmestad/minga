@@ -1,2071 +1,2030 @@
 defmodule Minga.Extension.LifecycleContractTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
-
   alias Minga.Command.Registry, as: CommandRegistry
-  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.ArtifactAdmission
+  alias Minga.Extension.ArtifactGenerationState
   alias Minga.Extension.CallbackRegistry
   alias Minga.Extension.CodeLease
+  alias Minga.Extension.DeferredBatchCompleteEvent
+  alias Minga.Extension.Instance
+  alias Minga.Extension.Instance.Worker
+  alias Minga.Extension.InstanceRegistry
+  alias Minga.Extension.Lazy
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Extension.RuntimeSupervisor
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
-  alias MingaEditor.Extension.Sidebar
+
+  defmodule Runtime do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :instance_runtime
+    @impl true
+    def description, do: "Instance lifecycle runtime"
+    @impl true
+    def version, do: "1.0.0"
+
+    @impl true
+    def init(config) do
+      case Keyword.get(config, :init_gate) do
+        {test_pid, result} ->
+          send(test_pid, {:init_entered, self()})
+
+          receive do
+            :continue_init -> resolve_init_result(result)
+          end
+
+        nil ->
+          {:ok, %{}}
+      end
+    end
+
+    @spec resolve_init_result(term()) :: term()
+    defp resolve_init_result(result) when is_function(result, 0), do: result.()
+    defp resolve_init_result(result), do: result
+
+    @impl true
+    def child_spec(config) do
+      restart = Keyword.get(config, :restart, :permanent)
+      test_pid = Keyword.get(config, :runtime_test_pid)
+
+      %{
+        id: __MODULE__,
+        start: {__MODULE__, :start_runtime, [test_pid]},
+        restart: restart,
+        type: :worker
+      }
+    end
+
+    @spec start_runtime(pid() | nil) :: Agent.on_start()
+    def start_runtime(test_pid) do
+      result = Agent.start_link(fn -> %{test_pid: test_pid} end)
+      if is_pid(test_pid), do: send(test_pid, {:runtime_child_started, elem(result, 1)})
+      result
+    end
+  end
+
+  defmodule RuntimeTwo do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :instance_runtime_two
+    @impl true
+    def description, do: "Second Instance lifecycle runtime"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @impl true
+    def child_spec(config) do
+      %{
+        id: __MODULE__,
+        start: {__MODULE__, :start_runtime, [Keyword.get(config, :runtime_test_pid)]},
+        restart: Keyword.get(config, :restart, :permanent),
+        type: :worker
+      }
+    end
+
+    @spec start_runtime(pid() | nil) :: Agent.on_start()
+    def start_runtime(test_pid) do
+      result = Agent.start_link(fn -> :runtime_two end)
+      if is_pid(test_pid), do: send(test_pid, {:runtime_child_started, elem(result, 1)})
+      result
+    end
+  end
+
+  defmodule ChildSpecFailure do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :child_spec_failure
+    @impl true
+    def description, do: "Child spec failure"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+    @impl true
+    def child_spec(_config), do: raise("child spec exploded")
+  end
+
+  defmodule BlockedThenStarts do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :blocked_then_starts
+    @impl true
+    def description, do: "Blocks its first child start MFA"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @impl true
+    def child_spec(config) do
+      %{
+        id: __MODULE__,
+        start:
+          {__MODULE__, :start_runtime,
+           [Keyword.fetch!(config, :attempts), Keyword.fetch!(config, :runtime_test_pid)]},
+        restart: :temporary,
+        type: :worker
+      }
+    end
+
+    @spec start_runtime(Agent.agent(), pid()) :: Agent.on_start()
+    def start_runtime(attempts, test_pid) do
+      case Agent.get_and_update(attempts, &{&1, &1 + 1}) do
+        0 ->
+          send(test_pid, {:blocked_child_start_mfa, self()})
+          receive do: (:never -> {:error, :unexpected_release})
+
+        _attempt ->
+          send(test_pid, {:retry_child_start_mfa, self()})
+
+          receive do
+            :release_retry_child_start -> Runtime.start_runtime(test_pid)
+          end
+      end
+    end
+  end
+
+  defmodule InfiniteShutdownThenStops do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :infinite_shutdown_then_stops
+    @impl true
+    def description, do: "Ignores its first shutdown request"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @impl true
+    def child_spec(config) do
+      %{
+        id: __MODULE__,
+        start:
+          {__MODULE__, :start_runtime,
+           [Keyword.fetch!(config, :attempts), Keyword.fetch!(config, :runtime_test_pid)]},
+        restart: :temporary,
+        shutdown: :infinity,
+        type: :worker
+      }
+    end
+
+    @spec start_runtime(Agent.agent(), pid()) :: {:ok, pid()} | Agent.on_start()
+    def start_runtime(attempts, test_pid) do
+      case Agent.get_and_update(attempts, &{&1, &1 + 1}) do
+        0 ->
+          pid = spawn_link(fn -> ignore_shutdown(test_pid) end)
+          send(test_pid, {:runtime_child_started, pid})
+          {:ok, pid}
+
+        _attempt ->
+          Runtime.start_runtime(test_pid)
+      end
+    end
+
+    @spec ignore_shutdown(pid()) :: no_return()
+    defp ignore_shutdown(test_pid) do
+      Process.flag(:trap_exit, true)
+      send(test_pid, {:infinite_shutdown_ready, self()})
+
+      receive do
+        {:EXIT, _from, :shutdown} -> ignore_shutdown(test_pid)
+        _message -> ignore_shutdown(test_pid)
+      end
+    end
+  end
+
+  defmodule ChildStartFailure do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :child_start_failure
+    @impl true
+    def description, do: "Child start failure"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @impl true
+    def child_spec(_config) do
+      %{
+        id: __MODULE__,
+        start: {__MODULE__, :refuse_start, []},
+        restart: :temporary,
+        type: :worker
+      }
+    end
+
+    @spec refuse_start() :: {:error, :child_refused_start}
+    def refuse_start, do: {:error, :child_refused_start}
+  end
+
+  defmodule CommandRegistrationFailure do
+    use Minga.Extension
+
+    command(:authority_duplicate_command, "Duplicate authority command",
+      execute: {__MODULE__, :run}
+    )
+
+    @impl true
+    def name, do: :command_registration_failure
+    @impl true
+    def description, do: "Command registration failure"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+    @spec run(term()) :: term()
+    def run(state), do: state
+  end
+
+  defmodule OptionFailure do
+    use Minga.Extension
+
+    option(:positive_count, :pos_integer, default: 1, description: "Positive count")
+
+    @impl true
+    def name, do: :option_failure
+    @impl true
+    def description, do: "Option failure"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+  end
+
+  defmodule ModelineFailure do
+    use Minga.Extension
+
+    modeline_segment :mode do
+      _context = ctx
+      {" invalid ", :default, :default, [], nil}
+    end
+
+    @impl true
+    def name, do: :modeline_failure
+    @impl true
+    def description, do: "Modeline failure"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+  end
+
+  defmodule KeybindRuntime do
+    use Minga.Extension
+
+    keybind(:normal, "SPC z z", :noop, "Keybind registration probe")
+
+    @impl true
+    def name, do: :keybind_runtime
+    @impl true
+    def description, do: "Keybind runtime"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+  end
+
+  defmodule EventRuntime do
+    use Minga.Extension
+
+    editor_event_handler(__MODULE__, [:buffer_saved])
+
+    @impl true
+    def name, do: :event_runtime
+    @impl true
+    def description, do: "Event runtime"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @spec handle_editor_event(term(), term()) :: {:handled, term()}
+    def handle_editor_event(state, _event), do: {:handled, state}
+  end
+
+  defmodule CrashContributionRuntime do
+    use Minga.Extension
+
+    command(:crash_contribution_command, "Crash contribution command",
+      execute: {__MODULE__, :run}
+    )
+
+    editor_event_handler(__MODULE__, [:buffer_saved])
+
+    @impl true
+    def name, do: :crash_contribution_runtime
+    @impl true
+    def description, do: "Crash contribution runtime"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @impl true
+    def child_spec(config) do
+      %{
+        id: __MODULE__,
+        start: {__MODULE__, :start_runtime, [Keyword.get(config, :runtime_test_pid)]},
+        restart: :temporary,
+        type: :worker
+      }
+    end
+
+    @spec start_runtime(pid() | nil) :: Agent.on_start()
+    def start_runtime(test_pid) do
+      result = Agent.start_link(fn -> :crash_contribution_runtime end)
+      if is_pid(test_pid), do: send(test_pid, {:runtime_child_started, elem(result, 1)})
+      result
+    end
+
+    @spec run(term()) :: term()
+    def run(state), do: state
+
+    @spec handle_editor_event(term(), term()) :: {:handled, term()}
+    def handle_editor_event(state, _event), do: {:handled, state}
+  end
+
+  defmodule LeaseRuntime do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :lease_runtime
+    @impl true
+    def description, do: "Lease runtime"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+  end
+
+  defmodule RuntimeThree do
+    use Minga.Extension
+
+    @impl true
+    def name, do: :instance_runtime_three
+    @impl true
+    def description, do: "Third Instance lifecycle runtime"
+    @impl true
+    def version, do: "1.0.0"
+    @impl true
+    def init(_config), do: {:ok, %{}}
+
+    @impl true
+    def child_spec(config) do
+      %{
+        id: __MODULE__,
+        start: {Agent, :start_link, [fn -> :runtime_three end]},
+        restart: Keyword.get(config, :restart, :permanent),
+        type: :worker
+      }
+    end
+  end
 
   setup do
-    reg_name = :"ext_lifecycle_reg_#{System.unique_integer([:positive])}"
-    sup_name = :"ext_lifecycle_sup_#{System.unique_integer([:positive])}"
-    cmd_reg_name = :"ext_lifecycle_cmd_#{System.unique_integer([:positive])}"
-    keymap_name = :"ext_lifecycle_keymap_#{System.unique_integer([:positive])}"
+    suffix = System.unique_integer([:positive])
+    registry = :"instance_contract_registry_#{suffix}"
+    roots = :"instance_contract_roots_#{suffix}"
+    commands = :"instance_contract_commands_#{suffix}"
+    keymap = :"instance_contract_keymap_#{suffix}"
+    callback_registry = :"instance_contract_callbacks_#{suffix}"
+    owner = :"instance_contract_artifacts_#{suffix}"
+    persistence_key = {__MODULE__, suffix}
+    runtime_application = :"instance_contract_app_#{suffix}"
 
-    {:ok, _} = ExtRegistry.start_link(name: reg_name)
-    {:ok, _} = ExtSupervisor.start_link(name: sup_name)
-    {:ok, _} = CommandRegistry.start_link(name: cmd_reg_name)
-    {:ok, _} = KeymapActive.start_link(name: keymap_name)
+    :ok =
+      :application.load(
+        {:application, runtime_application,
+         [
+           description: ~c"instance contract",
+           vsn: ~c"1",
+           modules: [Runtime, RuntimeTwo, RuntimeThree],
+           registered: [],
+           applications: [:kernel, :stdlib]
+         ]}
+      )
 
-    {:ok,
-     registry: reg_name, supervisor: sup_name, command_registry: cmd_reg_name, keymap: keymap_name}
-  end
+    fixture_applications =
+      Enum.map(
+        [
+          ChildSpecFailure,
+          BlockedThenStarts,
+          InfiniteShutdownThenStops,
+          ChildStartFailure,
+          CommandRegistrationFailure,
+          OptionFailure,
+          ModelineFailure,
+          KeybindRuntime,
+          EventRuntime,
+          CrashContributionRuntime,
+          LeaseRuntime
+        ],
+        fn module ->
+          application =
+            :"instance_contract_#{module |> Module.split() |> List.last() |> Macro.underscore()}_#{suffix}"
 
-  test "default child stores config and init return is setup-only", ctx do
-    {path, cleanup} =
-      make_extension("DefaultChildState", """
-      defmodule Minga.TestExtensions.DefaultChildState do
-        use Minga.Extension
+          :ok =
+            :application.load(
+              {:application, application,
+               [
+                 description: ~c"instance contract fixture",
+                 vsn: ~c"1",
+                 modules: [module],
+                 registered: [],
+                 applications: [:kernel, :stdlib]
+               ]}
+            )
 
-        @impl true
-        def name, do: :default_child_state
-
-        @impl true
-        def description, do: "Default child state contract"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{runtime_state: true}}
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.DefaultChildState)
-      :code.delete(Minga.TestExtensions.DefaultChildState)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :default_child_state, path, greeting: "hello")
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :default_child_state)
-
-    assert {:ok, pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :default_child_state,
-               entry
-             )
-
-    assert Agent.get(pid, & &1) == [greeting: "hello"]
-  end
-
-  test "manifest is recorded before init side effects can fail", ctx do
-    {path, cleanup} =
-      make_extension("ManifestBeforeInit", """
-      defmodule Minga.TestExtensions.ManifestBeforeInit do
-        use Minga.Extension
-
-        command :manifest_before_init_cmd, "Manifest command", execute: {__MODULE__, :noop}
-        keybind :normal, "SPC m i", :manifest_before_init_cmd, "Manifest keybind"
-        modeline_segment :manifest_before_init_segment, side: :right do
-          _ = ctx
-          nil
+          application
         end
-        capability :ui, [:modeline]
-        capability :ui, [:sidebar]
-        capability :ui, [:modeline]
-
-        @impl true
-        def name, do: :manifest_before_init
-
-        @impl true
-        def description, do: "Manifest before init"
-
-        @impl true
-        def version, do: "1.2.3"
-
-        @impl true
-        def init(_config), do: {:error, :intentional_failure}
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
+      )
 
     on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.ManifestBeforeInit)
-      :code.delete(Minga.TestExtensions.ManifestBeforeInit)
+      :application.unload(runtime_application)
+      Enum.each(fixture_applications, &:application.unload/1)
     end)
 
-    :ok = ExtRegistry.register(ctx.registry, :manifest_before_init, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :manifest_before_init)
+    start_supervised!({ExtRegistry, name: registry})
+    {:ok, _root_pid} = ExtSupervisor.start_link(name: roots)
+    start_supervised!({CommandRegistry, name: commands})
+    start_supervised!({KeymapActive, name: keymap})
+    start_supervised!({CallbackRegistry, name: callback_registry})
 
-    assert {:error, _reason} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :manifest_before_init,
-               entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
-             )
+    start_supervised!(
+      {ArtifactGenerationState, name: owner, persistence_key: persistence_key},
+      id: {ArtifactGenerationState, suffix}
+    )
 
-    {:ok, failed_entry} = ExtRegistry.get(ctx.registry, :manifest_before_init)
-    assert failed_entry.status == :load_error
-    assert failed_entry.manifest.name == :manifest_before_init
-    assert failed_entry.manifest.version == "1.2.3"
-    assert failed_entry.manifest.source == :path
+    admission =
+      start_supervised!(
+        {ArtifactAdmission, name: nil, state_owner: owner},
+        id: {ArtifactAdmission, suffix}
+      )
 
-    assert [{:manifest_before_init_cmd, "Manifest command", _opts}] =
-             failed_entry.manifest.commands
+    code_lease = start_supervised!({CodeLease, name: nil}, id: {CodeLease, suffix})
 
-    assert [{:normal, "SPC m i", :manifest_before_init_cmd, "Manifest keybind", []}] =
-             failed_entry.manifest.keybindings
+    on_exit(fn -> ArtifactGenerationState.reset_for_test(persistence_key) end)
 
-    assert [{:manifest_before_init_segment, [side: :right], _mfa}] =
-             failed_entry.manifest.modeline_segments
-
-    assert failed_entry.manifest.capabilities == [
-             ui: [:modeline],
-             ui: [:sidebar],
-             ui: [:modeline]
-           ]
-  end
-
-  test "same-generation restart uses the admitted artifact after source removal", ctx do
-    {path, cleanup} =
-      make_extension("StaleManifestCleared", """
-      defmodule Minga.TestExtensions.StaleManifestCleared do
-        use Minga.Extension
-
-        @impl true
-        def name, do: :stale_manifest_cleared
-
-        @impl true
-        def description, do: "Stale manifest cleared"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.StaleManifestCleared)
-      :code.delete(Minga.TestExtensions.StaleManifestCleared)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :stale_manifest_cleared, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
-
-    assert {:ok, _pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_manifest_cleared,
-               entry
-             )
-
-    {:ok, running_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
-    assert running_entry.manifest.name == :stale_manifest_cleared
-
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_manifest_cleared,
-               running_entry
-             )
-
-    File.rm!(Path.join(path, "extension.ex"))
-
-    {:ok, stopped_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
-
-    assert {:ok, _pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_manifest_cleared,
-               stopped_entry
-             )
-
-    {:ok, restarted_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
-    assert restarted_entry.status == :running
-    assert restarted_entry.module == Minga.TestExtensions.StaleManifestCleared
-    assert restarted_entry.manifest.name == :stale_manifest_cleared
-  end
-
-  test "manifest introspection failures become load errors", ctx do
-    cases = [
-      {"ManifestNameRaise", :name, "raise(\"name boom\")", :manifest_name_raise},
-      {"ManifestVersionExit", :version, "exit(:version_boom)", :manifest_version_exit},
-      {"ManifestDescriptionThrow", :description, "throw(:description_boom)",
-       :manifest_description_throw}
+    opts = [
+      command_registry: commands,
+      keymap: keymap,
+      callback_registry: callback_registry,
+      artifact_admission: admission,
+      code_lease: code_lease
     ]
 
-    for {module_name, callback, body, ext_name} <- cases do
-      source =
-        case callback do
-          :name ->
-            """
-            defmodule Minga.TestExtensions.#{module_name} do
-              use Minga.Extension
+    {:ok,
+     registry: registry,
+     roots: roots,
+     commands: commands,
+     keymap: keymap,
+     callback_registry: callback_registry,
+     admission: admission,
+     code_lease: code_lease,
+     runtime_application: runtime_application,
+     opts: opts}
+  end
 
-              @impl true
-              def name, do: #{body}
+  test "module and path declarations publish lifecycle through their Instance", ctx do
+    module_name = unique_name(:module_source)
+    module_entry = register_module(ctx, module_name, [])
+    assert {:ok, module_pid} = start_extension(ctx, module_name, module_entry)
+    assert InstanceRegistry.whereis(instance_registry(ctx), :instance, module_name)
+    assert {:ok, module_projection} = ExtRegistry.get(ctx.registry, module_name)
+    assert module_projection.status == :running
+    assert module_projection.pid == module_pid
+    assert module_projection.module == Runtime
+    assert module_projection.manifest.source == :module
+    assert :ok = stop_extension(ctx, module_name, ctx.opts)
 
-              @impl true
-              def description, do: "Manifest failure #{module_name}"
+    path_name = unique_name(:path_source)
+    path_dir = Path.join(System.tmp_dir!(), Atom.to_string(path_name))
+    path_module = Module.concat(Minga.TestExtensions, Macro.camelize(Atom.to_string(path_name)))
+    File.mkdir_p!(path_dir)
 
-              @impl true
-              def version, do: "1.0.0"
+    on_exit(fn -> File.rm_rf!(path_dir) end)
 
-              @impl true
-              def init(_config), do: {:ok, %{}}
-            end
-            """
+    File.write!(Path.join(path_dir, "extension.ex"), """
+    defmodule #{inspect(path_module)} do
+      use Minga.Extension
+      @impl true
+      def name, do: #{inspect(path_name)}
+      @impl true
+      def description, do: "Path lifecycle"
+      @impl true
+      def version, do: "1.0.0"
+      @impl true
+      def init(_config), do: {:ok, %{}}
+    end
+    """)
 
-          :version ->
-            """
-            defmodule Minga.TestExtensions.#{module_name} do
-              use Minga.Extension
+    :ok = ExtRegistry.register(ctx.registry, path_name, path_dir, [])
+    {:ok, path_entry} = ExtRegistry.get(ctx.registry, path_name)
+    assert {:ok, path_pid} = start_extension(ctx, path_name, path_entry)
+    assert InstanceRegistry.whereis(instance_registry(ctx), :instance, path_name)
+    assert {:ok, path_projection} = ExtRegistry.get(ctx.registry, path_name)
+    assert path_projection.status == :running
+    assert path_projection.pid == path_pid
+    assert path_projection.module == path_module
+    assert path_projection.manifest.source == :path
+    assert :ok = stop_extension(ctx, path_name, ctx.opts)
+  end
 
-              @impl true
-              def name, do: :#{ext_name}
+  test "Hex application declarations use the same Instance lifecycle", ctx do
+    name = unique_name(:hex_application_source)
 
-              @impl true
-              def description, do: "Manifest failure #{module_name}"
+    :ok =
+      ExtRegistry.register_hex(ctx.registry, name, Atom.to_string(ctx.runtime_application),
+        app: ctx.runtime_application
+      )
 
-              @impl true
-              def version, do: #{body}
+    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+    assert {:ok, pid} = start_extension(ctx, name, entry)
+    assert InstanceRegistry.whereis(instance_registry(ctx), :instance, name)
+    assert {:ok, projection} = ExtRegistry.get(ctx.registry, name)
+    assert projection.status == :running
+    assert projection.pid == pid
+    assert projection.module == Runtime
+    assert projection.manifest.source == :hex
 
-              @impl true
-              def init(_config), do: {:ok, %{}}
-            end
-            """
+    assert {:ok, modules} =
+             ArtifactAdmission.source_modules({:extension, name}, server: ctx.admission)
 
-          :description ->
-            """
-            defmodule Minga.TestExtensions.#{module_name} do
-              use Minga.Extension
+    assert modules == Enum.sort([Runtime, RuntimeTwo, RuntimeThree])
 
-              @impl true
-              def name, do: :#{ext_name}
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+    assert {:ok, %{status: :stopped, pid: nil}} = ExtRegistry.get(ctx.registry, name)
+  end
 
-              @impl true
-              def description, do: #{body}
+  test "JSON and resolved Git declarations use the same Instance lifecycle", ctx do
+    json_name = unique_name(:json_source)
+    json_dir = Path.join(System.tmp_dir!(), Atom.to_string(json_name))
+    File.mkdir_p!(json_dir)
 
-              @impl true
-              def version, do: "1.0.0"
+    File.write!(Path.join(json_dir, "plugin.json"), """
+    {"name":"#{json_name}","version":"1.0.0","description":"JSON lifecycle"}
+    """)
 
-              @impl true
-              def init(_config), do: {:ok, %{}}
-            end
-            """
-        end
+    :ok = ExtRegistry.register(ctx.registry, json_name, json_dir, [])
+    {:ok, json_entry} = ExtRegistry.get(ctx.registry, json_name)
+    assert {:ok, json_pid} = start_extension(ctx, json_name, json_entry)
+    assert InstanceRegistry.whereis(instance_registry(ctx), :instance, json_name)
+    assert {:ok, json_projection} = ExtRegistry.get(ctx.registry, json_name)
+    assert json_projection.pid == json_pid
+    assert json_projection.manifest.source == :path
+    assert :ok = stop_extension(ctx, json_name, ctx.opts)
+    refute Process.alive?(json_pid)
 
-      {path, cleanup} = make_extension(module_name, source)
+    git_name = unique_name(:resolved_git_source)
+    git_dir = Path.join(System.tmp_dir!(), Atom.to_string(git_name))
+    git_module = Module.concat(Minga.TestExtensions, Macro.camelize(Atom.to_string(git_name)))
+    File.mkdir_p!(git_dir)
 
-      on_exit(fn ->
-        cleanup.()
-        :code.purge(Module.concat(Minga.TestExtensions, String.to_atom(module_name)))
-        :code.delete(Module.concat(Minga.TestExtensions, String.to_atom(module_name)))
+    File.write!(Path.join(git_dir, "extension.ex"), """
+    defmodule #{inspect(git_module)} do
+      use Minga.Extension
+      @impl true
+      def name, do: #{inspect(git_name)}
+      @impl true
+      def description, do: "Resolved Git lifecycle"
+      @impl true
+      def version, do: "1.0.0"
+      @impl true
+      def init(_config), do: {:ok, %{}}
+    end
+    """)
+
+    :ok = ExtRegistry.register_git(ctx.registry, git_name, "https://example.invalid/repo", [])
+    :ok = ExtRegistry.update(ctx.registry, git_name, path: git_dir)
+    {:ok, git_entry} = ExtRegistry.get(ctx.registry, git_name)
+    assert {:ok, git_pid} = start_extension(ctx, git_name, git_entry)
+    assert InstanceRegistry.whereis(instance_registry(ctx), :instance, git_name)
+    assert {:ok, git_projection} = ExtRegistry.get(ctx.registry, git_name)
+    assert git_projection.pid == git_pid
+    assert git_projection.manifest.source == :git
+    assert :ok = stop_extension(ctx, git_name, ctx.opts)
+    refute Process.alive?(git_pid)
+
+    File.rm_rf!(json_dir)
+    File.rm_rf!(git_dir)
+  end
+
+  test "first concurrent callers synchronize through root and Instance registration", ctx do
+    name = unique_name(:concurrent_root_start)
+    entry = register_module(ctx, name, init_gate: {self(), {:ok, %{}}})
+    parent = self()
+
+    callers =
+      for _index <- 1..12 do
+        Task.async(fn ->
+          send(parent, {:root_start_ready, self()})
+          receive do: (:start_now -> start_extension(ctx, name, entry))
+        end)
+      end
+
+    caller_pids =
+      Enum.map(callers, fn _caller ->
+        assert_receive {:root_start_ready, caller_pid}
+        caller_pid
       end)
 
-      :ok = ExtRegistry.register(ctx.registry, ext_name, path, [])
-      {:ok, entry} = ExtRegistry.get(ctx.registry, ext_name)
+    Enum.each(caller_pids, &send(&1, :start_now))
+    assert_receive {:init_entered, workflow}, 5_000
+    send(workflow, :continue_init)
 
-      assert {:error, reason} =
-               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, ext_name, entry)
-
-      assert reason =~ "manifest introspection failed"
-
-      assert {:ok, %{status: :load_error, pid: nil}} = ExtRegistry.get(ctx.registry, ext_name)
-    end
+    results = Enum.map(callers, &Task.await(&1, 5_000))
+    assert [{:ok, runtime}] = Enum.uniq(results)
+    assert is_pid(runtime)
+    refute Enum.any?(results, &match?({:error, {:instance_not_started, _}}, &1))
+    refute_receive {:init_entered, _duplicate_workflow}
   end
 
-  test "direct manifest construction propagates raised declaration failures", _ctx do
-    {path, cleanup} =
-      make_extension("ManifestDirectRaise", """
-      defmodule Minga.TestExtensions.ManifestDirectRaise do
-        use Minga.Extension
+  test "concurrent starts join one transition and return the same runtime PID", ctx do
+    name = unique_name(:concurrent_start)
+    config = [init_gate: {self(), {:ok, %{}}}]
+    entry = register_module(ctx, name, config)
 
-        @impl true
-        def name, do: raise("direct manifest name boom")
+    first = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert_receive {:init_entered, workflow}, 5_000
 
-        @impl true
-        def description, do: "Direct manifest raise"
+    second = Task.async(fn -> start_extension(ctx, name, entry) end)
+    refute Task.yield(second, 50)
 
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-      end
-      """)
-
-    Code.compile_file(Path.join(path, "extension.ex"))
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.ManifestDirectRaise)
-      :code.delete(Minga.TestExtensions.ManifestDirectRaise)
-    end)
-
-    assert_raise RuntimeError, "direct manifest name boom", fn ->
-      Minga.Extension.manifest(Minga.TestExtensions.ManifestDirectRaise, :path)
-    end
+    send(workflow, :continue_init)
+    assert {:ok, pid} = Task.await(first)
+    assert {:ok, ^pid} = Task.await(second)
+    assert {:running, %{pid: ^pid}} = Instance.phase(instance(ctx, name))
   end
 
-  test "legacy behavior-only extensions receive default manifest schemas", ctx do
-    {path, cleanup} =
-      make_extension("LegacyManifestDefaults", """
-      defmodule Minga.TestExtensions.LegacyManifestDefaults do
-        @spec name() :: atom()
-        def name, do: :legacy_manifest_defaults
+  test "concurrent failed starts converge through one rollback", ctx do
+    name = unique_name(:failed_start)
+    config = [init_gate: {self(), {:error, :boom}}]
+    entry = register_module(ctx, name, config)
 
-        @spec description() :: String.t()
-        def description, do: "Legacy manifest defaults"
+    first = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert_receive {:init_entered, workflow}, 5_000
+    second = Task.async(fn -> start_extension(ctx, name, entry) end)
+    send(workflow, :continue_init)
 
-        @spec version() :: String.t()
-        def version, do: "1.0.0"
+    assert {:error, reason} = Task.await(first)
+    assert {:error, ^reason} = Task.await(second)
+    assert {:load_error, %{reason: ^reason}} = Instance.phase(instance(ctx, name))
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+  end
 
-        @spec init(keyword()) :: {:ok, map()}
-        def init(_config), do: {:ok, %{}}
+  test "child-spec and child-start failures keep exact facade tuples and safe retry state", ctx do
+    child_spec_name = unique_name(:child_spec_failure)
+    child_spec_entry = register_module(ctx, child_spec_name, [], ChildSpecFailure)
 
-        @spec child_spec(keyword()) :: Supervisor.child_spec()
-        def child_spec(config) do
-          %{id: __MODULE__, start: {Agent, :start_link, [fn -> config end]}, restart: :permanent, type: :worker}
-        end
-      end
-      """)
+    assert {:error, {:child_spec_failed, "child spec exploded"}} =
+             start_extension(ctx, child_spec_name, child_spec_entry)
 
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.LegacyManifestDefaults)
-      :code.delete(Minga.TestExtensions.LegacyManifestDefaults)
-    end)
+    assert {:ok,
+            %{
+              status: :load_error,
+              pid: nil,
+              last_error: {:child_spec_failed, "child spec exploded"}
+            }} = ExtRegistry.get(ctx.registry, child_spec_name)
 
-    :ok = ExtRegistry.register(ctx.registry, :legacy_manifest_defaults, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :legacy_manifest_defaults)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, child_spec_name)) == :empty
 
-    assert {:ok, _pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :legacy_manifest_defaults,
-               entry
+    child_start_name = unique_name(:child_start_failure)
+    child_start_entry = register_module(ctx, child_start_name, [], ChildStartFailure)
+
+    assert {:error, :child_refused_start} =
+             start_extension(ctx, child_start_name, child_start_entry)
+
+    assert {:ok, %{status: :load_error, pid: nil, last_error: :child_refused_start}} =
+             ExtRegistry.get(ctx.registry, child_start_name)
+
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, child_start_name)) == :empty
+  end
+
+  test "contribution registration failure rolls back exactly once and retry is safe", ctx do
+    name = unique_name(:command_registration_failure)
+    entry = register_module(ctx, name, [], CommandRegistrationFailure)
+
+    assert :ok =
+             CommandRegistry.register(
+               ctx.commands,
+               :config,
+               :authority_duplicate_command,
+               "Existing command",
+               fn state -> state end
              )
 
-    {:ok, started_entry} = ExtRegistry.get(ctx.registry, :legacy_manifest_defaults)
-    assert started_entry.manifest.name == :legacy_manifest_defaults
-    assert started_entry.manifest.commands == []
-    assert started_entry.manifest.keybindings == []
-    assert started_entry.manifest.modeline_segments == []
-    assert started_entry.manifest.capabilities == []
+    reason =
+      {:duplicate_name, :authority_duplicate_command, :config, {:extension, name}}
+
+    assert {:error, ^reason} = start_extension(ctx, name, entry)
+
+    assert {:ok, %{status: :load_error, pid: nil, last_error: ^reason}} =
+             ExtRegistry.get(ctx.registry, name)
+
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+    assert :ok = CommandRegistry.unregister(ctx.commands, :authority_duplicate_command)
+    assert {:ok, runtime} = start_extension(ctx, name, entry)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+    assert {:ok, _command} = CommandRegistry.lookup(ctx.commands, :authority_duplicate_command)
   end
 
-  test "failed child start removes contributions registered during init", ctx do
-    {path, cleanup} =
-      make_extension("FailedChildStart", """
-      defmodule Minga.TestExtensions.FailedChildStart do
-        use Minga.Extension
+  test "failed stub cleanup blocks activation until cleanup retry succeeds", ctx do
+    name = unique_name(:stub_cleanup_failure)
 
-        @impl true
-        def name, do: :failed_child_start
+    entry =
+      register_module(
+        ctx,
+        name,
+        [load_policy: {:on_command, [:authority_duplicate_command]}],
+        CommandRegistrationFailure
+      )
 
-        @impl true
-        def description, do: "Failed child start"
+    assert :ok =
+             CommandRegistry.register(
+               ctx.commands,
+               :config,
+               :authority_duplicate_command,
+               "Existing command",
+               fn state -> state end
+             )
 
-        @impl true
-        def version, do: "1.0.0"
+    cleanup = fn _source -> {:error, :stub_cleanup_busy} end
+    opts = Keyword.put(ctx.opts, :callbacks, %{stub_cleanup_failure: cleanup})
 
-        @impl true
-        def init(config) do
-          source = {:extension, :failed_child_start}
-          command_registry = Keyword.fetch!(config, :command_registry)
-          command = %Minga.Command{name: :failed_child_start_cmd, description: "Failed child command", execute: &__MODULE__.noop/1}
-          :ok = Minga.Command.Registry.register_command(command_registry, source, command)
-          {:ok, %{}}
-        end
-
-        @impl true
-        def child_spec(_config) do
-          %{id: __MODULE__, start: {__MODULE__, :start_link, []}, restart: :permanent, type: :worker}
-        end
-
-        @spec start_link() :: {:error, atom()}
-        def start_link, do: {:error, :intentional_child_failure}
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.FailedChildStart)
-      :code.delete(Minga.TestExtensions.FailedChildStart)
-    end)
-
-    config = [command_registry: ctx.command_registry, keymap: ctx.keymap]
-    :ok = ExtRegistry.register(ctx.registry, :failed_child_start, path, config)
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :failed_child_start)
-
-    assert {:error, :intentional_child_failure} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
+    assert {:error, {:cleanup_failed, _stub_reason, failures}} =
+             ExtSupervisor.register_lazy_extension(
+               ctx.roots,
                ctx.registry,
-               :failed_child_start,
+               name,
                entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
+               opts
              )
 
-    assert :error = CommandRegistry.lookup(ctx.command_registry, :failed_child_start_cmd)
+    assert Enum.any?(failures, &match?(%{family: :stub_cleanup_failure}, &1))
+    assert {:cleanup_failed, _context} = Instance.phase(instance(ctx, name))
 
-    assert {:ok, failed_entry = %{status: :load_error, pid: nil}} =
-             ExtRegistry.get(ctx.registry, :failed_child_start)
+    assert {:error, {:cleanup_retry_required, _reason}} =
+             start_extension(ctx, name, entry, opts)
+
+    assert :ok = stop_extension(ctx, name, Keyword.put(ctx.opts, :callbacks, %{}))
+    assert :ok = CommandRegistry.unregister(ctx.commands, :authority_duplicate_command)
 
     assert :ok =
-             ExtSupervisor.stop_extension(
-               ctx.supervisor,
+             ExtSupervisor.register_lazy_extension(
+               ctx.roots,
                ctx.registry,
-               :failed_child_start,
-               failed_entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
+               name,
+               entry,
+               ctx.opts
              )
   end
 
-  test "reload order cleans old source-owned contributions before restart", ctx do
-    {path, cleanup} =
-      make_extension("ReloadOrder", """
-      defmodule Minga.TestExtensions.ReloadOrder do
-        use Minga.Extension
+  test "keybind event and lease registration failures retain exact projection and retry safely",
+       ctx do
+    cases = [
+      {:keybind, KeybindRuntime, [keymap: :missing_keymap_authority]},
+      {:event, EventRuntime, [callback_registry: :missing_callback_authority]},
+      {:lease, LeaseRuntime, [code_lease: :missing_lease_authority]}
+    ]
 
-        @impl true
-        def name, do: :reload_order
+    Enum.each(cases, fn {family, module, failing_opts} ->
+      name = unique_name(family)
+      entry = register_module(ctx, name, [], module)
+      opts = Keyword.merge(ctx.opts, failing_opts)
+      assert {:error, reason} = start_extension(ctx, name, entry, opts)
+      assert {:ok, projection} = ExtRegistry.get(ctx.registry, name)
+      assert projection.status == :load_error
+      assert projection.last_error == reason
 
-        @impl true
-        def description, do: "Reload order"
+      case projection.pid do
+        pid when is_pid(pid) ->
+          assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, pid}
 
-        @impl true
-        def version, do: "1.0.0"
+        nil ->
+          assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+      end
 
-        @impl true
-        def init(config) do
-          source = {:extension, :reload_order}
-          command_registry = Keyword.fetch!(config, :command_registry)
-          command = %Minga.Command{name: :reload_order_cmd, description: "Reload order command", execute: &__MODULE__.noop/1}
-          :ok = Minga.Command.Registry.register_command(command_registry, source, command)
-          {:ok, %{}}
+      if match?({:cleanup_failed, _, _}, reason) do
+        assert :ok = stop_extension(ctx, name, ctx.opts)
+      end
+
+      assert {:ok, runtime} = start_extension(ctx, name, entry, ctx.opts)
+      assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+      assert :ok = stop_extension(ctx, name, ctx.opts)
+    end)
+  end
+
+  test "a safely rolled back failed start can retry through the same Instance", ctx do
+    name = unique_name(:failed_start_retry)
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    init_result = fn ->
+      Agent.get_and_update(attempts, fn
+        0 -> {{:error, :first_attempt_failed}, 1}
+        count -> {{:ok, %{}}, count + 1}
+      end)
+    end
+
+    entry = register_module(ctx, name, init_gate: {self(), init_result})
+    first = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert_receive {:init_entered, first_workflow}, 5_000
+    send(first_workflow, :continue_init)
+    assert {:error, _reason} = Task.await(first)
+    assert {:load_error, _context} = Instance.phase(instance(ctx, name))
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+
+    second = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert_receive {:init_entered, second_workflow}, 5_000
+    send(second_workflow, :continue_init)
+    assert {:ok, replacement} = Task.await(second)
+    assert {:running, %{pid: ^replacement}} = Instance.phase(instance(ctx, name))
+  end
+
+  test "stop during a successful start replies both callers and cleans once", ctx do
+    name = unique_name(:stop_during_successful_start)
+    entry = register_module(ctx, name, init_gate: {self(), {:ok, %{}}})
+    parent = self()
+
+    cleanup = fn source ->
+      send(parent, {:stop_during_start_cleanup, source})
+      :ok
+    end
+
+    opts = Keyword.put(ctx.opts, :callbacks, %{cleanup_probe: cleanup})
+    start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    assert_receive {:init_entered, workflow}, 5_000
+    stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    send(workflow, :continue_init)
+
+    assert {:ok, runtime} = Task.await(start_task)
+    runtime_ref = Process.monitor(runtime)
+    assert :ok = Task.await(stop_task)
+    assert_receive {:stop_during_start_cleanup, {:extension, ^name}}
+    refute_receive {:stop_during_start_cleanup, {:extension, ^name}}
+    assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}
+  end
+
+  test "stop during a failed start reports incomplete rollback to both callers", ctx do
+    name = unique_name(:stop_during_failed_start)
+    entry = register_module(ctx, name, init_gate: {self(), {:error, :start_failed}})
+
+    cleanup = fn _source -> {:error, :rollback_cleanup_failed} end
+    opts = Keyword.put(ctx.opts, :callbacks, %{cleanup_failure: cleanup})
+    start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    assert_receive {:init_entered, workflow}, 5_000
+    stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    send(workflow, :continue_init)
+
+    assert {:error, {:cleanup_failed, "init failed: :start_failed", failures}} =
+             Task.await(start_task)
+
+    assert Enum.any?(failures, &match?(%{family: :cleanup_failure}, &1))
+
+    assert {:error, {:cleanup_failed, "init failed: :start_failed", ^failures}} =
+             Task.await(stop_task)
+
+    assert {:cleanup_failed, _context} = Instance.phase(instance(ctx, name))
+  end
+
+  test "concurrent stops finalize once", ctx do
+    name = unique_name(:concurrent_stop)
+    entry = register_module(ctx, name, [])
+    assert {:ok, _pid} = start_extension(ctx, name, entry)
+    test_pid = self()
+
+    finalizer = fn source ->
+      send(test_pid, {:finalizer_entered, self(), source})
+
+      receive do
+        :finish_finalizer -> :ok
+      end
+    end
+
+    opts = Keyword.put(ctx.opts, :callbacks, %{editor_effects: finalizer})
+    first = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    assert_receive {:finalizer_entered, finalizer_pid, {:extension, ^name}}
+    second = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    refute Task.yield(second, 50)
+    send(finalizer_pid, :finish_finalizer)
+
+    assert :ok = Task.await(first)
+    assert :ok = Task.await(second)
+    refute_receive {:finalizer_entered, _, _}
+    assert :stopped = Instance.phase(instance(ctx, name))
+  end
+
+  test "start during stop queues one deterministic intent", ctx do
+    name = unique_name(:start_during_stop)
+    entry = register_module(ctx, name, [])
+    assert {:ok, first_pid} = start_extension(ctx, name, entry)
+    test_pid = self()
+
+    finalizer = fn _source ->
+      send(test_pid, {:stop_barrier, self()})
+      receive do: (:release -> :ok)
+    end
+
+    opts = Keyword.put(ctx.opts, :callbacks, %{editor_effects: finalizer})
+    stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    assert_receive {:stop_barrier, barrier}
+    start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    refute Task.yield(start_task, 50)
+    send(barrier, :release)
+
+    assert :ok = Task.await(stop_task)
+    assert {:ok, replacement} = Task.await(start_task)
+    refute replacement == first_pid
+    assert {:running, %{pid: ^replacement}} = Instance.phase(instance(ctx, name))
+  end
+
+  test "failed finalization keeps retry context and start cannot bypass it", ctx do
+    name = unique_name(:finalizer_retry)
+    entry = register_module(ctx, name, [])
+    assert {:ok, runtime} = start_extension(ctx, name, entry)
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    finalizer = fn _source ->
+      Agent.get_and_update(attempts, fn
+        0 -> {{:error, :editor_busy}, 1}
+        count -> {:ok, count + 1}
+      end)
+    end
+
+    opts = Keyword.put(ctx.opts, :callbacks, %{editor_effects: finalizer})
+
+    assert {:error, {:source_quiesce_failed, %{reason: :editor_busy}}} =
+             stop_extension(ctx, name, opts)
+
+    assert {:error, {:cleanup_retry_required, _reason}} = start_extension(ctx, name, entry, opts)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+    assert :ok = stop_extension(ctx, name, opts)
+    assert :stopped = Instance.phase(instance(ctx, name))
+  end
+
+  test "second unload finalizer failure preserves an exact retry contract", ctx do
+    name = unique_name(:unload_finalizer_retry)
+    entry = register_module(ctx, name, [])
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    unload_finalizer = fn _source ->
+      Agent.get_and_update(attempts, fn
+        0 -> {{:error, :unload_editor_busy}, 1}
+        count -> {:ok, count + 1}
+      end)
+    end
+
+    opts = Keyword.put(ctx.opts, :callbacks, %{editor_extension_unload: unload_finalizer})
+    assert {:ok, runtime} = start_extension(ctx, name, entry, opts)
+
+    assert {:error, {:source_quiesce_failed, %{reason: :unload_editor_busy}}} =
+             stop_extension(ctx, name, opts)
+
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+    assert CodeLease.source_status({:extension, name}, server: ctx.code_lease) == :active
+    assert {:error, {:cleanup_retry_required, _reason}} = start_extension(ctx, name, entry, opts)
+    assert :ok = stop_extension(ctx, name, opts)
+    assert :stopped = Instance.phase(instance(ctx, name))
+  end
+
+  test "cleanup failure blocks start until a successful stop retry", ctx do
+    name = unique_name(:cleanup_retry)
+    entry = register_module(ctx, name, [])
+    assert {:ok, _runtime} = start_extension(ctx, name, entry)
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    cleanup = fn _source ->
+      Agent.get_and_update(attempts, fn
+        0 -> {{:error, :cleanup_busy}, 1}
+        count -> {:ok, count + 1}
+      end)
+    end
+
+    opts = Keyword.put(ctx.opts, :callbacks, %{custom_cleanup: cleanup})
+    assert {:error, {:cleanup_failed, _failures}} = stop_extension(ctx, name, opts)
+    assert {:error, {:cleanup_retry_required, _reason}} = start_extension(ctx, name, entry, opts)
+    assert :ok = stop_extension(ctx, name, opts)
+    assert {:ok, _replacement} = start_extension(ctx, name, entry, opts)
+  end
+
+  test "racing lazy triggers activate one captured artifact", ctx do
+    name = unique_name(:lazy_race)
+    config = [load_policy: {:on_command, [:lazy_race]}, init_gate: {self(), {:ok, %{}}}]
+    _entry = register_module(ctx, name, config)
+    assert :ok = ExtSupervisor.start_all(ctx.roots, ctx.registry, ctx.opts)
+    authority = instance(ctx, name)
+
+    first = Task.async(fn -> Instance.start(authority) end)
+    assert_receive {:init_entered, workflow}, 5_000
+    second = Task.async(fn -> Instance.start(authority) end)
+    send(workflow, :continue_init)
+
+    assert {:ok, pid} = Task.await(first)
+    assert {:ok, ^pid} = Task.await(second)
+  end
+
+  test "deferred batch logs one authority exit and continues later declarations", ctx do
+    name = unique_name(:deferred_continues)
+    entry = register_module(ctx, name, load_policy: :deferred, runtime_test_pid: self())
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+    Minga.Events.subscribe(:extension_deferred_batch_complete)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert :ok =
+                 Lazy.schedule_deferred_loads([
+                   {:missing_deferred_authority, :missing_deferred, entry},
+                   {instance(ctx, name), name, entry}
+                 ])
+
+        assert_receive {:runtime_child_started, _runtime}, 5_000
+
+        assert_receive {:minga_event, :extension_deferred_batch_complete,
+                        %DeferredBatchCompleteEvent{count: 2}}
+      end)
+
+    assert log =~ "Extension missing_deferred deferred load failed"
+    assert log =~ "instance_call_exit"
+  end
+
+  test "deferred activation rejects a re-registered declaration identity", ctx do
+    name = unique_name(:deferred_identity)
+    original = register_module(ctx, name, load_policy: :deferred)
+    assert :ok = ExtSupervisor.start_all(ctx.roots, ctx.registry, ctx.opts)
+    authority = instance(ctx, name)
+
+    :ok = ExtRegistry.register_module(ctx.registry, name, RuntimeTwo, load_policy: :deferred)
+    {:ok, replacement} = ExtRegistry.get(ctx.registry, name)
+    assert :ok = Instance.declare(authority, replacement, ctx.registry, ctx.opts)
+    assert {:error, :stale_deferred_declaration} = Instance.start_deferred(authority, original)
+
+    receive do
+    after
+      150 -> :ok
+    end
+
+    assert :stopped = Instance.phase(authority)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+  end
+
+  test "stale monitor and acknowledgement messages cannot alter a later runtime", ctx do
+    name = unique_name(:stale_messages)
+    entry = register_module(ctx, name, [])
+    assert {:ok, pid} = start_extension(ctx, name, entry)
+    authority = instance(ctx, name)
+    authority_pid = instance_pid(ctx, name)
+
+    send(authority_pid, {:DOWN, make_ref(), :process, pid, :kill})
+    send(authority_pid, {:extension_finalizer_ack, make_ref(), :editor_effects, {:error, :stale}})
+    send(authority_pid, {CodeLease, :drained, {:extension, name}, make_ref()})
+    _ = Instance.phase(authority)
+
+    assert {:running, %{pid: ^pid}} = Instance.phase(authority)
+    assert {:ok, ^pid} = Instance.start(authority)
+  end
+
+  test "lifecycle spans preserve phases and structured failure metadata", ctx do
+    telemetry_id = {__MODULE__, unique_name(:lifecycle_spans)}
+    recipient = self()
+
+    :telemetry.attach(
+      telemetry_id,
+      [:minga, :extension, :lifecycle, :stop],
+      fn event, measurements, metadata, test_pid ->
+        send(test_pid, {:lifecycle_span, event, measurements, metadata})
+      end,
+      recipient
+    )
+
+    on_exit(fn -> :telemetry.detach(telemetry_id) end)
+    success_name = unique_name(:span_success)
+    success_entry = register_module(ctx, success_name, [], Runtime)
+    assert {:ok, _runtime} = start_extension(ctx, success_name, success_entry)
+    assert :ok = stop_extension(ctx, success_name, ctx.opts)
+
+    for phase <- [:init, :child_start, :load, :stop, :cleanup] do
+      assert_receive {:lifecycle_span, [:minga, :extension, :lifecycle, :stop],
+                      %{duration: _duration},
+                      %{extension: ^success_name, phase: ^phase, outcome: :ok}}
+    end
+
+    failure_name = unique_name(:span_failure)
+    failure_entry = register_module(ctx, failure_name, [], ChildStartFailure)
+    assert {:error, :child_refused_start} = start_extension(ctx, failure_name, failure_entry)
+
+    assert_receive {:lifecycle_span, [:minga, :extension, :lifecycle, :stop],
+                    %{duration: _duration},
+                    %{
+                      extension: ^failure_name,
+                      phase: :child_start,
+                      outcome: :error,
+                      reason: :child_refused_start
+                    }}
+
+    assert_receive {:lifecycle_span, [:minga, :extension, :lifecycle, :stop],
+                    %{duration: _duration},
+                    %{
+                      extension: ^failure_name,
+                      phase: :load,
+                      outcome: :error,
+                      reason: :child_refused_start
+                    }}
+  end
+
+  test "permanent runtime crashes publish replacement telemetry before the next request", ctx do
+    name = unique_name(:permanent_restart)
+    telemetry_id = {__MODULE__, name}
+    test_pid = self()
+
+    :telemetry.attach(
+      telemetry_id,
+      [:minga, :extension, :lifecycle, :crash_restart_count],
+      fn _event, measurements, metadata, recipient ->
+        send(recipient, {:restart_telemetry, measurements, metadata})
+      end,
+      test_pid
+    )
+
+    on_exit(fn -> :telemetry.detach(telemetry_id) end)
+    entry = register_module(ctx, name, restart: :permanent)
+    assert {:ok, pid} = start_extension(ctx, name, entry)
+    assert_receive {:restart_telemetry, %{count: 0}, %{extension: ^name}}
+    Process.exit(pid, :kill)
+
+    replacement = await_runtime_replacement(ctx, name, pid)
+    assert_receive {:restart_telemetry, %{count: 1}, %{extension: ^name}}
+
+    assert {:ok, ^replacement} = Instance.start(instance(ctx, name))
+    assert {:ok, projected} = ExtRegistry.get(ctx.registry, name)
+    assert projected.pid == replacement
+  end
+
+  test "temporary and transient policies are interpreted only by Instance", ctx do
+    temporary = unique_name(:temporary_runtime)
+    temporary_entry = register_module(ctx, temporary, restart: :temporary)
+    assert {:ok, temporary_pid} = start_extension(ctx, temporary, temporary_entry)
+    Process.exit(temporary_pid, :kill)
+    assert_eventually_phase(ctx, temporary, :crashed)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, temporary)) == :empty
+
+    transient = unique_name(:transient_runtime)
+    transient_entry = register_module(ctx, transient, [restart: :transient], RuntimeTwo)
+    assert {:ok, transient_pid} = start_extension(ctx, transient, transient_entry)
+    assert :ok = Agent.stop(transient_pid, :normal)
+    assert_eventually_phase(ctx, transient, :stopped)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, transient)) == :empty
+  end
+
+  test "transient policy replaces an abnormally exited runtime", ctx do
+    name = unique_name(:transient_runtime_crash)
+    entry = register_module(ctx, name, [restart: :transient], RuntimeTwo)
+    assert {:ok, crashed_pid} = start_extension(ctx, name, entry)
+    Process.exit(crashed_pid, :kill)
+    replacement = await_runtime_replacement(ctx, name, crashed_pid)
+    assert {:ok, ^replacement} = Instance.start(instance(ctx, name))
+  end
+
+  test "Instance death cancels blocked start work before a child exists", ctx do
+    name = unique_name(:blocked_start_crash)
+    entry = register_module(ctx, name, init_gate: {self(), {:ok, %{}}})
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        result = start_extension(ctx, name, entry)
+        send(parent, {:blocked_start_caller, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    assert_receive {:init_entered, worker}, 5_000
+    worker_ref = Process.monitor(worker)
+    authority = instance_pid(ctx, name)
+    Process.exit(authority, :kill)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:blocked_start_caller, {:error, {:authority_unavailable, ^name, _reason}}}
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+  end
+
+  test "Instance and RuntimeSupervisor death after child start clean without duplication", ctx do
+    for crash_target <- [:instance, :runtime_supervisor] do
+      name = unique_name(:"child_started_crash_#{crash_target}")
+      module = if crash_target == :instance, do: Runtime, else: RuntimeTwo
+      entry = register_module(ctx, name, [runtime_test_pid: self()], module)
+      callback_registry = Process.whereis(ctx.callback_registry)
+      :ok = :sys.suspend(callback_registry)
+      parent = self()
+
+      _caller =
+        spawn(fn ->
+          result = start_extension(ctx, name, entry)
+          send(parent, {:child_started_caller, crash_target, result})
+        end)
+
+      assert_receive {:runtime_child_started, runtime}, 5_000
+      runtime_ref = Process.monitor(runtime)
+
+      target =
+        case crash_target do
+          :instance -> instance_pid(ctx, name)
+          :runtime_supervisor -> runtime_supervisor_pid(ctx, name)
         end
 
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
+      Process.exit(target, :kill)
 
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.ReloadOrder)
-      :code.delete(Minga.TestExtensions.ReloadOrder)
-    end)
+      assert_receive {:child_started_caller, ^crash_target,
+                      {:error, {:authority_unavailable, ^name, _reason}}}
 
-    config = [command_registry: ctx.command_registry, keymap: ctx.keymap]
-    :ok = ExtRegistry.register(ctx.registry, :reload_order, path, config)
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :reload_order)
+      assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}, 5_000
+      refute_receive {:runtime_child_started, _duplicate}
 
-    assert {:ok, _pid} =
-             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :reload_order, entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
-             )
+      :ok = :sys.resume(callback_registry)
+      assert :ok = stop_extension(ctx, name, ctx.opts)
+      assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
 
-    assert {:ok, _} = CommandRegistry.lookup(ctx.command_registry, :reload_order_cmd)
-
-    {:ok, running_entry} = ExtRegistry.get(ctx.registry, :reload_order)
-
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :reload_order,
-               running_entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
-             )
-
-    assert :error = CommandRegistry.lookup(ctx.command_registry, :reload_order_cmd)
-
-    {:ok, stopped_entry} = ExtRegistry.get(ctx.registry, :reload_order)
-
-    assert {:ok, _pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :reload_order,
-               stopped_entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
-             )
-
-    assert {:ok, _} = CommandRegistry.lookup(ctx.command_registry, :reload_order_cmd)
+      assert {:ok, replacement} = start_extension(ctx, name, entry)
+      assert_receive {:runtime_child_started, ^replacement}
+      refute_receive {:runtime_child_started, _duplicate}
+      assert :ok = stop_extension(ctx, name, ctx.opts)
+    end
   end
 
-  test "lifecycle telemetry covers start, stop, cleanup, and restart count", ctx do
-    telemetry_id = {__MODULE__, self(), :telemetry}
+  test "Instance and RuntimeSupervisor crashes resume a blocked stop without leaks", ctx do
+    for crash_target <- [:instance, :runtime_supervisor] do
+      name = unique_name(crash_target)
+      module = if crash_target == :instance, do: Runtime, else: RuntimeTwo
+      entry = register_module(ctx, name, [], module)
+      assert {:ok, runtime} = start_extension(ctx, name, entry)
+      runtime_ref = Process.monitor(runtime)
+      parent = self()
+
+      finalizer = fn _source ->
+        send(parent, {:blocked_finalizer, crash_target, self()})
+        receive do: (:release -> :ok)
+      end
+
+      opts = Keyword.put(ctx.opts, :callbacks, %{editor_effects: finalizer})
+
+      caller =
+        spawn(fn ->
+          result = stop_extension(ctx, name, opts)
+          send(parent, {:blocked_stop_caller, crash_target, result})
+        end)
+
+      caller_ref = Process.monitor(caller)
+      assert_receive {:blocked_finalizer, ^crash_target, worker}
+      worker_ref = Process.monitor(worker)
+
+      target =
+        case crash_target do
+          :instance -> instance_pid(ctx, name)
+          :runtime_supervisor -> runtime_supervisor_pid(ctx, name)
+        end
+
+      Process.exit(target, :kill)
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker, _worker_reason}
+
+      assert_receive {:blocked_stop_caller, ^crash_target,
+                      {:error, {:authority_unavailable, ^name, _reason}}}
+
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
+      assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}, 5_000
+      assert :ok = stop_extension(ctx, name, ctx.opts)
+      assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+    end
+  end
+
+  test "runtime DOWN before start completion rolls back and rejects stale success", ctx do
+    name = unique_name(:runtime_down_during_start)
+    source = {:extension, name}
+    parent = self()
+
+    cleanup = fn cleanup_source ->
+      send(parent, {:runtime_down_start_cleanup, cleanup_source})
+      :ok
+    end
+
+    entry = register_module(ctx, name, [runtime_test_pid: self()], CrashContributionRuntime)
+    callback_registry = Process.whereis(ctx.callback_registry)
+    :ok = :sys.suspend(callback_registry)
+    opts = Keyword.put(ctx.opts, :callbacks, %{runtime_down_cleanup: cleanup})
+
+    first_start = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    assert_receive {:runtime_child_started, runtime}, 5_000
+    authority = instance(ctx, name)
+    authority_pid = instance_pid(ctx, name)
+
+    assert {:starting,
+            %{
+              runtime: %{pid: ^runtime},
+              worker: %Worker{id: transition_id, pid: start_worker}
+            }} =
+             eventually(fn ->
+               case Instance.phase(authority) do
+                 {:starting, %{runtime: %{pid: ^runtime}, worker: %Worker{}}} = phase -> phase
+                 _phase -> nil
+               end
+             end)
+
+    stale_prepared = :sys.get_state(authority_pid)
+    worker_ref = Process.monitor(start_worker)
+    second_start = Task.async(fn -> Instance.start(authority) end)
+    stop = Task.async(fn -> stop_extension(ctx, name, opts) end)
+
+    assert {:starting, %{waiters: [_, _] = waiters, stop_waiters: [_] = stop_waiters}} =
+             eventually(fn ->
+               case Instance.phase(authority) do
+                 {:starting, %{waiters: [_, _], stop_waiters: [_]}} = phase -> phase
+                 _phase -> nil
+               end
+             end)
+
+    assert [_, _] = waiters
+    assert [_] = stop_waiters
+
+    runtime_ref = Process.monitor(runtime)
+    Process.exit(runtime, :kill)
+    assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, :killed}
+
+    assert {:stopping, _context} =
+             eventually(fn ->
+               case Instance.phase(authority) do
+                 {:stopping, _context} = phase -> phase
+                 _phase -> nil
+               end
+             end)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^start_worker, :killed}
+
+    send(
+      authority_pid,
+      {Worker, :done, transition_id, {:ok, {:ok, runtime, stale_prepared}}}
+    )
+
+    assert {:stopping, _context} = Instance.phase(authority)
+    :ok = :sys.resume(callback_registry)
+
+    assert {:error, :killed} = Task.await(first_start)
+    assert {:error, :killed} = Task.await(second_start)
+    assert :ok = Task.await(stop)
+    assert_receive {:runtime_down_start_cleanup, ^source}
+    refute_receive {:runtime_down_start_cleanup, ^source}
+
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+    assert :error = CommandRegistry.lookup(ctx.commands, :crash_contribution_command)
+
+    assert CallbackRegistry.callbacks_for_source(:buffer_saved, source, ctx.callback_registry) ==
+             []
+
+    assert CodeLease.source_status(source, server: ctx.code_lease) == :unknown
+    assert CodeLease.active_leases(source: source, server: ctx.code_lease) == []
+    assert {:load_error, %{reason: :killed}} = Instance.phase(authority)
+
+    assert {:ok, %{status: :load_error, pid: nil, last_error: :killed}} =
+             ExtRegistry.get(ctx.registry, name)
+
+    retry_opts = Keyword.put(ctx.opts, :callbacks, %{})
+    assert {:ok, replacement} = start_extension(ctx, name, entry, retry_opts)
+    assert_receive {:runtime_child_started, ^replacement}
+    assert {:running, %{pid: ^replacement}} = Instance.phase(authority)
+    assert :ok = stop_extension(ctx, name, retry_opts)
+  end
+
+  test "transition timeout after child start rolls back the known runtime without duplication",
+       ctx do
+    name = unique_name(:known_runtime_timeout)
+    entry = register_module(ctx, name, [runtime_test_pid: self()], CrashContributionRuntime)
+    callback_registry = Process.whereis(ctx.callback_registry)
+    :ok = :sys.suspend(callback_registry)
+
+    opts = Keyword.put(ctx.opts, :transition_timeout_ms, 25)
+    start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    assert_receive {:runtime_child_started, runtime}, 5_000
+    runtime_ref = Process.monitor(runtime)
+    Process.send_after(self(), :resume_callback_registry, 50)
+    assert_receive :resume_callback_registry
+    :ok = :sys.resume(callback_registry)
+
+    assert {:error, {:transition_timeout, :start, 25}} = Task.await(start_task)
+    assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}, 5_000
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+    assert :error = CommandRegistry.lookup(ctx.commands, :crash_contribution_command)
+    assert {:ok, projection} = ExtRegistry.get(ctx.registry, name)
+    assert projection.status == :load_error
+    assert projection.pid == nil
+
+    assert {:ok, replacement} = start_extension(ctx, name, entry)
+    assert_receive {:runtime_child_started, ^replacement}
+    assert {:ok, _command} = CommandRegistry.lookup(ctx.commands, :crash_contribution_command)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, replacement}
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+  end
+
+  test "blocked child start MFA replaces the wedged runtime branch within the authority deadline",
+       ctx do
+    name = unique_name(:blocked_child_start)
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    entry =
+      register_module(
+        ctx,
+        name,
+        [attempts: attempts, runtime_test_pid: self()],
+        BlockedThenStarts
+      )
+
+    opts =
+      ctx.opts
+      |> Keyword.put(:transition_timeout_ms, 25)
+      |> Keyword.put(:runtime_query_timeout_ms, 10)
+
+    start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    assert_receive {:blocked_child_start_mfa, old_runtime_supervisor}
+    old_instance = instance_pid(ctx, name)
+    supervisor_ref = Process.monitor(old_runtime_supervisor)
+
+    assert {:error, {:transition_timeout, :start, 25}} = Task.await(start_task, 1_000)
+    assert_receive {:DOWN, ^supervisor_ref, :process, ^old_runtime_supervisor, :killed}
+    _new_instance = await_new_instance(ctx, name, old_instance)
+
+    assert eventually(fn ->
+             RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+           end)
+
+    retry_task = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert_receive {:retry_child_start_mfa, retry_runtime_supervisor}, 5_000
+    refute Task.yield(retry_task, 50)
+
+    state = :sys.get_state(instance(ctx, name))
+
+    assert Minga.Extension.Instance.TransitionHandler.transition_timeout(state) == 120_000
+
+    send(retry_runtime_supervisor, :release_retry_child_start)
+    assert {:ok, runtime} = Task.await(retry_task)
+    assert_receive {:runtime_child_started, ^runtime}
+    refute_receive {:runtime_child_started, _duplicate}
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+  end
+
+  test "infinite runtime shutdown returns a typed failure and replaces the wedged branch", ctx do
+    name = unique_name(:infinite_shutdown)
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    entry =
+      register_module(
+        ctx,
+        name,
+        [attempts: attempts, runtime_test_pid: self()],
+        InfiniteShutdownThenStops
+      )
+
+    assert {:ok, runtime} = start_extension(ctx, name, entry)
+    assert_receive {:runtime_child_started, ^runtime}
+    assert_receive {:infinite_shutdown_ready, ^runtime}
+    runtime_ref = Process.monitor(runtime)
+    old_instance = instance_pid(ctx, name)
+    old_runtime_supervisor = runtime_supervisor_pid(ctx, name)
+    supervisor_ref = Process.monitor(old_runtime_supervisor)
+    opts = Keyword.put(ctx.opts, :callback_timeout_ms, 25)
+
+    stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+
+    assert {:error, {:runtime_termination_failed, {:transition_timeout, :terminate, 25}}} =
+             Task.await(stop_task, 1_000)
+
+    assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, :killed}
+    assert_receive {:DOWN, ^supervisor_ref, :process, ^old_runtime_supervisor, :killed}
+    _new_instance = await_new_instance(ctx, name, old_instance)
+
+    assert {:ok, replacement} =
+             eventually(fn ->
+               case start_extension(ctx, name, entry) do
+                 {:ok, _pid} = started -> started
+                 {:error, _reason} -> nil
+               end
+             end)
+
+    assert_receive {:runtime_child_started, ^replacement}
+    refute replacement == runtime
+    refute_receive {:runtime_child_started, _duplicate}
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+  end
+
+  test "bounded finalizer and cleanup workers reply queued callers with typed failures", ctx do
+    finalizer_name = unique_name(:finalizer_timeout)
+    finalizer_entry = register_module(ctx, finalizer_name, [])
+    assert {:ok, runtime} = start_extension(ctx, finalizer_name, finalizer_entry)
+    parent = self()
+
+    blocked_finalizer = fn _source ->
+      send(parent, {:timeout_worker, :finalizer, self()})
+      receive do: (:never -> :ok)
+    end
+
+    finalizer_opts =
+      ctx.opts
+      |> Keyword.put(:callback_timeout_ms, 25)
+      |> Keyword.put(:callbacks, %{editor_effects: blocked_finalizer})
+
+    finalizer_stop = Task.async(fn -> stop_extension(ctx, finalizer_name, finalizer_opts) end)
+    assert_receive {:timeout_worker, :finalizer, finalizer_worker}
+    finalizer_ref = Process.monitor(finalizer_worker)
+
+    assert {:error,
+            {:source_quiesce_failed, {:transition_timeout, {:finalizer, :editor_effects}, 25}}} =
+             Task.await(finalizer_stop)
+
+    assert_receive {:DOWN, ^finalizer_ref, :process, ^finalizer_worker, :killed}
+
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, finalizer_name)) ==
+             {:ok, runtime}
+
+    assert :ok = stop_extension(ctx, finalizer_name, Keyword.put(ctx.opts, :callbacks, %{}))
+
+    cleanup_name = unique_name(:cleanup_timeout)
+    cleanup_entry = register_module(ctx, cleanup_name, [], RuntimeTwo)
+    assert {:ok, _runtime} = start_extension(ctx, cleanup_name, cleanup_entry)
+
+    blocked_cleanup = fn _source ->
+      send(parent, {:timeout_worker, :cleanup, self()})
+      receive do: (:never -> :ok)
+    end
+
+    cleanup_opts =
+      ctx.opts
+      |> Keyword.put(:callback_timeout_ms, 25)
+      |> Keyword.put(:callbacks, %{blocked_cleanup: blocked_cleanup})
+
+    cleanup_stop = Task.async(fn -> stop_extension(ctx, cleanup_name, cleanup_opts) end)
+    assert_receive {:timeout_worker, :cleanup, cleanup_worker}
+    cleanup_ref = Process.monitor(cleanup_worker)
+
+    assert {:error,
+            {:cleanup_failed,
+             [
+               %{
+                 family: :cleanup_worker,
+                 reason: {:transition_timeout, :cleanup, 25}
+               }
+             ]}} = Task.await(cleanup_stop)
+
+    assert_receive {:DOWN, ^cleanup_ref, :process, ^cleanup_worker, :killed}
+    assert :ok = stop_extension(ctx, cleanup_name, Keyword.put(ctx.opts, :callbacks, %{}))
+  end
+
+  test "declaration removal after child start fails projection and rolls back", ctx do
+    name = unique_name(:projection_removal)
+    entry = register_module(ctx, name, runtime_test_pid: self())
+    callback_registry = Process.whereis(ctx.callback_registry)
+    :ok = :sys.suspend(callback_registry)
+    start_task = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert_receive {:runtime_child_started, runtime}, 5_000
+    runtime_ref = Process.monitor(runtime)
+    :ok = ExtRegistry.unregister(ctx.registry, name)
+    :ok = :sys.resume(callback_registry)
+
+    assert {:error, {:extension_not_declared, ^name}} = Task.await(start_task)
+    assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}, 5_000
+    assert :error = ExtRegistry.get(ctx.registry, name)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
+  end
+
+  test "replacement Instance reads the current redeclared config", ctx do
+    name = unique_name(:current_declaration)
+    original = register_module(ctx, name, [])
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+    :ok = ExtRegistry.register_module(ctx.registry, name, RuntimeTwo, marker: :current)
+    {:ok, replacement} = ExtRegistry.get(ctx.registry, name)
+    assert :ok = Instance.declare(instance(ctx, name), replacement, ctx.registry, ctx.opts)
+
+    on_exit(fn ->
+      case InstanceRegistry.whereis(instance_registry(ctx), :root, name) do
+        pid when is_pid(pid) -> :sys.resume(pid)
+        nil -> :ok
+      end
+    end)
+
+    race = start_supervised!({Agent, fn -> :armed end})
+
+    after_located = fn ^name, _instance ->
+      case Agent.get_and_update(race, fn
+             :armed -> {:kill, :killed}
+             state -> {:skip, state}
+           end) do
+        :kill ->
+          root = InstanceRegistry.whereis(instance_registry(ctx), :root, name)
+          authority = instance_pid(ctx, name)
+          ref = Process.monitor(authority)
+          :ok = :sys.suspend(root)
+          Process.exit(authority, :kill)
+          assert_receive {:DOWN, ^ref, :process, ^authority, :killed}
+
+        :skip ->
+          :ok
+      end
+    end
+
+    before_retry = fn ^name ->
+      root = InstanceRegistry.whereis(instance_registry(ctx), :root, name)
+      :ok = :sys.resume(root)
+      Agent.update(race, fn :killed -> :retried end)
+    end
+
+    opts =
+      Keyword.put(ctx.opts, :test_hooks, %{
+        after_authority_located: after_located,
+        before_authority_retry: before_retry
+      })
+
+    assert {:ok, runtime} = start_extension(ctx, name, replacement, opts)
+    assert Agent.get(race, & &1) == :retried
+    assert Agent.get(runtime, & &1) == :runtime_two
+    refute_receive {:runtime_child_started, _duplicate}
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+    refute replacement == original
+  end
+
+  test "restart policies cover normal shutdown tuple-shutdown and abnormal reasons", ctx do
+    telemetry_id = {__MODULE__, unique_name(:restart_matrix)}
+    recipient = self()
 
     :telemetry.attach_many(
       telemetry_id,
       [
+        [:minga, :extension, :lifecycle, :crash_restart_count],
         [:minga, :extension, :lifecycle, :stop],
-        [:minga, :extension, :lifecycle, :crash_restart_count]
+        [:minga, :extension, :lifecycle, :terminal]
       ],
       fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
+        send(test_pid, {:policy_telemetry, event, measurements, metadata})
       end,
-      self()
+      recipient
     )
 
     on_exit(fn -> :telemetry.detach(telemetry_id) end)
 
-    {path, cleanup} =
-      make_extension("TelemetryExt", """
-      defmodule Minga.TestExtensions.TelemetryExt do
-        use Minga.Extension
+    permanent = unique_name(:permanent_matrix)
+    transient = unique_name(:transient_matrix)
+    temporary = unique_name(:temporary_matrix)
 
-        @impl true
-        def name, do: :telemetry_ext
+    permanent_entry = register_module(ctx, permanent, [restart: :permanent], Runtime)
+    transient_entry = register_module(ctx, transient, [restart: :transient], RuntimeTwo)
+    temporary_entry = register_module(ctx, temporary, [restart: :temporary], RuntimeThree)
 
-        @impl true
-        def description, do: "Telemetry extension"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.TelemetryExt)
-      :code.delete(Minga.TestExtensions.TelemetryExt)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :telemetry_ext, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :telemetry_ext)
-
-    assert {:ok, _pid} =
-             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :telemetry_ext, entry)
-
-    {:ok, running_entry} = ExtRegistry.get(ctx.registry, :telemetry_ext)
-
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :telemetry_ext,
-               running_entry
-             )
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: duration},
-                    %{extension: :telemetry_ext, phase: :load}}
-
-    assert is_integer(duration)
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: _},
-                    %{extension: :telemetry_ext, phase: :init}}
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: _},
-                    %{extension: :telemetry_ext, phase: :child_start}}
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0}, %{extension: :telemetry_ext, phase: :crash_restart_count}}
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: _},
-                    %{extension: :telemetry_ext, phase: :stop}}
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: _},
-                    %{extension: :telemetry_ext, phase: :cleanup}}
+    assert_policy_matrix(ctx, permanent, permanent_entry, :permanent)
+    assert_policy_matrix(ctx, transient, transient_entry, :transient)
+    assert_policy_matrix(ctx, temporary, temporary_entry, :temporary)
   end
 
-  test "crash restart telemetry increments when a supervised extension child restarts", ctx do
-    telemetry_id = {__MODULE__, self(), :restart_telemetry}
+  test "an Instance crash adopts only its own local runtime", ctx do
+    first = unique_name(:adopt_first)
+    second = unique_name(:adopt_second)
+    first_entry = register_module(ctx, first, [])
+    second_entry = register_module(ctx, second, [], RuntimeTwo)
+    assert {:ok, first_runtime} = start_extension(ctx, first, first_entry)
+    assert {:ok, second_runtime} = start_extension(ctx, second, second_entry)
 
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:minga, :extension, :lifecycle, :crash_restart_count]],
-      fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
-      end,
-      self()
-    )
+    old_instance = instance_pid(ctx, first)
+    Process.exit(old_instance, :kill)
+    new_instance = await_new_instance(ctx, first, old_instance)
 
-    on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    {path, cleanup} =
-      make_extension("RestartTelemetry", """
-      defmodule Minga.TestExtensions.RestartTelemetry do
-        use Minga.Extension
-
-        @impl true
-        def name, do: :restart_telemetry
-
-        @impl true
-        def description, do: "Restart telemetry"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.RestartTelemetry)
-      :code.delete(Minga.TestExtensions.RestartTelemetry)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :restart_telemetry, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_telemetry)
-
-    assert {:ok, pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :restart_telemetry,
-               entry
-             )
-
-    Process.exit(pid, :kill)
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0}, %{extension: :restart_telemetry, phase: :crash_restart_count}}
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 1}, %{extension: :restart_telemetry, phase: :crash_restart_count}}
-
-    {:ok, restarted_entry} = ExtRegistry.get(ctx.registry, :restart_telemetry)
-    assert restarted_entry.pid != pid
-
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :restart_telemetry,
-               restarted_entry
-             )
-
-    assert DynamicSupervisor.count_children(ctx.supervisor).active == 0
+    assert {:ok, ^first_runtime} = Instance.start(new_instance)
+    refute first_runtime == second_runtime
+    assert {:ok, ^second_runtime} = Instance.start(instance(ctx, second))
   end
 
-  test "concurrent double start with the same stale stopped entry is idempotent", ctx do
-    opts = [command_registry: ctx.command_registry, keymap: ctx.keymap]
+  test "RuntimeSupervisor replacement restarts Instance after an empty local supervisor", ctx do
+    name = unique_name(:runtime_supervisor_crash)
+    entry = register_module(ctx, name, [])
+    assert {:ok, runtime} = start_extension(ctx, name, entry)
+    old_instance = instance_pid(ctx, name)
+    old_runtime_supervisor = runtime_supervisor_pid(ctx, name)
 
-    :ok =
-      ExtRegistry.register_module(
-        ctx.registry,
-        :concurrent_double_start,
-        Minga.TestExtensions.ConcurrentDoubleStart,
-        test_pid: self()
-      )
-
-    {:ok, stale_stopped_entry} = ExtRegistry.get(ctx.registry, :concurrent_double_start)
-    parent_pid = self()
-
-    task_a =
-      Task.async(fn ->
-        ExtSupervisor.start_extension(
-          ctx.supervisor,
-          ctx.registry,
-          :concurrent_double_start,
-          stale_stopped_entry,
-          opts
-        )
-      end)
-
-    assert_receive {:concurrent_double_start_init_entered, init_pid}, 5_000
-
-    task_b =
-      Task.async(fn ->
-        send(parent_pid, {:concurrent_double_start_caller_ready, self()})
-
-        ExtSupervisor.start_extension(
-          ctx.supervisor,
-          ctx.registry,
-          :concurrent_double_start,
-          stale_stopped_entry,
-          opts
-        )
-      end)
-
-    assert_receive {:concurrent_double_start_caller_ready, task_b_pid}, 5_000
-    assert task_b_pid == task_b.pid
-    refute Task.yield(task_b, 50)
-    refute_receive {:concurrent_double_start_init_entered, _second_init_pid}, 50
-
-    send(init_pid, :release_concurrent_double_start_init)
-
-    assert [{:ok, pid_a}, {:ok, pid_b}] = [Task.await(task_a), Task.await(task_b)]
-    assert pid_a == pid_b
-    pid = pid_a
-
-    refute_receive {:concurrent_double_start_init_entered, _second_init_pid}, 50
-    assert {:ok, _} = CommandRegistry.lookup(ctx.command_registry, :concurrent_double_start_cmd)
-
-    {:ok, final_entry} = ExtRegistry.get(ctx.registry, :concurrent_double_start)
-    assert final_entry.status == :running
-    assert final_entry.pid == pid
-    assert is_reference(final_entry.lifecycle_ref)
-
-    children = DynamicSupervisor.which_children(ctx.supervisor)
-
-    assert 1 ==
-             Enum.count(children, fn
-               {_id, child_pid, _type, [Minga.TestExtensions.ConcurrentDoubleStart]} ->
-                 child_pid == pid
-
-               _child ->
-                 false
-             end)
+    Process.exit(old_runtime_supervisor, :kill)
+    new_instance = await_new_instance(ctx, name, old_instance)
+    assert {:ok, replacement} = eventually(fn -> Instance.start(new_instance) end)
+    refute replacement == runtime
+    refute runtime_supervisor_pid(ctx, name) == old_runtime_supervisor
   end
 
-  test "stale stopped-entry stop does not stop or clean a newer lifecycle", ctx do
-    {path, cleanup} =
-      make_extension("StaleStoppedStop", """
-      defmodule Minga.TestExtensions.StaleStoppedStop do
-        use Minga.Extension
+  test "live CodeLease owner triggers a bounded retryable drain failure", ctx do
+    name = unique_name(:lease_drain_timeout)
+    entry = register_module(ctx, name, [])
+    assert {:ok, runtime} = start_extension(ctx, name, entry)
+    owner = spawn(fn -> receive do: (:done -> :ok) end)
+    on_exit(fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end)
 
-        command :stale_stopped_stop_cmd, "Stale stopped stop command",
-          execute: {__MODULE__, :noop}
-
-        @impl true
-        def name, do: :stale_stopped_stop
-
-        @impl true
-        def description, do: "Stale stopped stop"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.StaleStoppedStop)
-      :code.delete(Minga.TestExtensions.StaleStoppedStop)
-    end)
-
-    opts = [command_registry: ctx.command_registry, keymap: ctx.keymap]
-
-    :ok = ExtRegistry.register(ctx.registry, :stale_stopped_stop, path, [])
-    {:ok, stale_stopped_entry} = ExtRegistry.get(ctx.registry, :stale_stopped_stop)
-
-    assert {:ok, pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_stopped_stop,
-               stale_stopped_entry,
-               opts
+    assert {:ok, lease} =
+             CodeLease.admit_callback({:extension, name}, Runtime, :editor_event,
+               server: ctx.code_lease,
+               owner: owner
              )
 
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_stopped_stop,
-               stale_stopped_entry,
-               opts
-             )
+    opts = Keyword.put(ctx.opts, :drain_timeout_ms, 25)
 
-    assert {:ok, _} = CommandRegistry.lookup(ctx.command_registry, :stale_stopped_stop_cmd)
+    assert {:error, {:code_lease_drain_timeout, 25}} =
+             stop_extension(ctx, name, opts)
 
-    {:ok, final_entry} = ExtRegistry.get(ctx.registry, :stale_stopped_stop)
-    assert final_entry.status == :running
-    assert final_entry.pid == pid
-    assert is_reference(final_entry.lifecycle_ref)
+    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
+    assert CodeLease.source_status({:extension, name}, server: ctx.code_lease) == :active
+
+    assert {:error, {:cleanup_retry_required, {:code_lease_drain_timeout, 25}}} =
+             start_extension(ctx, name, entry, opts)
+
+    assert :ok = CodeLease.release(lease)
+    send(owner, :done)
+    assert :ok = stop_extension(ctx, name, opts)
   end
 
-  test "stale terminal cleanup cannot remove newer lifecycle contributions", ctx do
-    test_pid = self()
-
-    {path, cleanup} =
-      make_extension("StaleTerminalCleanupRace", """
-      defmodule Minga.TestExtensions.StaleTerminalCleanupRace do
-        use Minga.Extension
-
-        command :stale_terminal_cleanup_race_cmd, "Stale terminal cleanup race command",
-          execute: {__MODULE__, :noop}
-
-        @impl true
-        def name, do: :stale_terminal_cleanup_race
-
-        @impl true
-        def description, do: "Stale terminal cleanup race"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :stale_terminal_cleanup_race end]},
-            restart: :temporary,
-            type: :worker
-          }
-        end
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.StaleTerminalCleanupRace)
-      :code.delete(Minga.TestExtensions.StaleTerminalCleanupRace)
-    end)
-
-    callbacks = %{
-      blocking_cleanup: fn source ->
-        send(test_pid, {:cleanup_started, self(), source})
-
-        receive do
-          :release_cleanup -> :ok
-        end
-      end
-    }
-
-    opts = [command_registry: ctx.command_registry, keymap: ctx.keymap, callbacks: callbacks]
-
-    :ok = ExtRegistry.register(ctx.registry, :stale_terminal_cleanup_race, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_terminal_cleanup_race)
-
-    assert {:ok, pid_a} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_terminal_cleanup_race,
-               entry,
-               opts
-             )
-
-    assert {:ok, _} =
-             CommandRegistry.lookup(ctx.command_registry, :stale_terminal_cleanup_race_cmd)
-
-    assert :ok = Agent.stop(pid_a, :normal)
-
-    assert_receive {:cleanup_started, cleanup_pid, {:extension, :stale_terminal_cleanup_race}}
-
-    start_task =
-      Task.async(fn ->
-        {:ok, current_entry} = ExtRegistry.get(ctx.registry, :stale_terminal_cleanup_race)
-
-        result =
-          ExtSupervisor.start_extension(
-            ctx.supervisor,
-            ctx.registry,
-            :stale_terminal_cleanup_race,
-            current_entry,
-            opts
-          )
-
-        send(test_pid, {:new_lifecycle_started, result})
-        result
-      end)
-
-    refute_receive {:new_lifecycle_started, _result}, 100
-
-    send(cleanup_pid, :release_cleanup)
-    assert {:ok, pid_b} = Task.await(start_task)
-    assert_receive {:new_lifecycle_started, {:ok, ^pid_b}}
-
-    assert {:ok, _} =
-             CommandRegistry.lookup(ctx.command_registry, :stale_terminal_cleanup_race_cmd)
-
-    {:ok, final_entry} = ExtRegistry.get(ctx.registry, :stale_terminal_cleanup_race)
-    assert final_entry.pid == pid_b
-    assert final_entry.pid != pid_a
-    assert final_entry.status == :running
-    assert is_reference(final_entry.lifecycle_ref)
-  end
-
-  test "terminal cleanup failure is surfaced without clean stopped finalization", ctx do
-    telemetry_id = {__MODULE__, self(), :terminal_cleanup_failure_telemetry}
-
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:minga, :extension, :lifecycle, :stop]],
-      fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
-      end,
-      self()
-    )
-
-    on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    {path, cleanup} =
-      make_extension("TerminalCleanupFailure", """
-      defmodule Minga.TestExtensions.TerminalCleanupFailure do
-        use Minga.Extension
-
-        command :terminal_cleanup_failure_cmd, "Terminal cleanup failure command",
-          execute: {__MODULE__, :noop}
-
-        @impl true
-        def name, do: :terminal_cleanup_failure
-
-        @impl true
-        def description, do: "Terminal cleanup failure"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :terminal_cleanup_failure end]},
-            restart: :temporary,
-            type: :worker
-          }
-        end
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.TerminalCleanupFailure)
-      :code.delete(Minga.TestExtensions.TerminalCleanupFailure)
-    end)
-
-    callbacks = %{failing_cleanup: fn _source -> {:error, :intentional_cleanup_failure} end}
-
-    :ok = ExtRegistry.register(ctx.registry, :terminal_cleanup_failure, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :terminal_cleanup_failure)
-
-    assert {:ok, pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :terminal_cleanup_failure,
-               entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap,
-               callbacks: callbacks
-             )
-
-    assert :ok = Agent.stop(pid, :normal)
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :stop], %{duration: _},
-                    %{extension: :terminal_cleanup_failure, phase: :cleanup}}
-
-    failed_entry = wait_for_entry_status(ctx.registry, :terminal_cleanup_failure, :load_error)
-    assert failed_entry.pid == nil
-    assert failed_entry.lifecycle_ref == nil
-    assert failed_entry.module == Minga.TestExtensions.TerminalCleanupFailure
-  end
-
-  test "crashed child without replacement marks the registry crashed", ctx do
-    telemetry_id = {__MODULE__, self(), :crash_without_replacement_telemetry}
-
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:minga, :extension, :lifecycle, :crash_restart_count]],
-      fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
-      end,
-      self()
-    )
-
-    on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    {path, cleanup} =
-      make_extension("CrashWithoutReplacement", """
-      defmodule Minga.TestExtensions.CrashWithoutReplacement do
-        use Minga.Extension
-
-        command :crash_without_replacement_cmd, "Crash cleanup command",
-          execute: {__MODULE__, :return_state}
-
-        editor_event_handler __MODULE__, [:editor_action]
-
-        @impl true
-        def name, do: :crash_without_replacement
-
-        @impl true
-        def description, do: "Crash without replacement"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :crash_without_replacement end]},
-            restart: :temporary,
-            type: :worker
-          }
-        end
-
-        @spec return_state(term()) :: term()
-        def return_state(state), do: state
-
-        @spec block(pid()) :: :settled
-        def block(test_pid) do
-          send(test_pid, {:crash_callback_running, self()})
-
-          receive do
-            :settle_crash_callback -> :settled
-          end
-        end
-
-        @spec handle_editor_event(term(), term()) :: :not_matched
-        def handle_editor_event(_state, _event), do: :not_matched
-
-        @spec handle_sidebar_action(term(), String.t(), map()) :: term()
-        def handle_sidebar_action(state, _action, _context), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.CrashWithoutReplacement)
-      :code.delete(Minga.TestExtensions.CrashWithoutReplacement)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :crash_without_replacement, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :crash_without_replacement)
-
-    assert {:ok, pid} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :crash_without_replacement,
-               entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
-             )
-
-    source = {:extension, :crash_without_replacement}
-    callback = Minga.TestExtensions.CrashWithoutReplacement
-    sidebar_id = "crash_cleanup_#{System.unique_integer([:positive])}"
-
-    assert :ok =
-             Sidebar.register(source, %{
-               id: sidebar_id,
-               display_name: "Crash cleanup",
-               description: "Removed after terminal crash",
-               action_handler: {callback, :handle_sidebar_action}
-             })
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, :crash_without_replacement_cmd)
-
-    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
-    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
-
-    test_pid = self()
-
-    callback_task =
-      Task.async(fn ->
-        CallbackInvoker.invoke(source, callback, :block, [test_pid], :command)
-      end)
-
-    assert_receive {:crash_callback_running, callback_owner}
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0},
-                    %{extension: :crash_without_replacement, phase: :crash_restart_count}}
-
-    Process.exit(pid, :kill)
-
-    assert wait_for_admission_denial(source, callback) == :denied
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, :crash_without_replacement_cmd)
-
-    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
-    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
-
-    send(callback_owner, :settle_crash_callback)
-    assert {:ok, :settled} = Task.await(callback_task)
-
-    refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 1},
-                    %{extension: :crash_without_replacement, phase: :crash_restart_count}},
-                   150
-
-    crashed_entry = wait_for_entry_status(ctx.registry, :crash_without_replacement, :crashed)
-    assert crashed_entry.pid == nil
-    assert crashed_entry.lifecycle_ref == nil
-    assert :error = CommandRegistry.lookup(ctx.command_registry, :crash_without_replacement_cmd)
-    assert Sidebar.get(sidebar_id) == nil
-    refute {source, callback} in CallbackRegistry.callbacks(:editor_action)
-
-    assert {:error, {:source_unavailable, ^source, ^callback, :return_state, _reason}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
-
-    unrelated_source =
-      {:extension,
-       String.to_atom("crash_cleanup_unrelated_#{System.unique_integer([:positive])}")}
-
-    assert :ok = CodeLease.activate_source(unrelated_source, [callback])
-
-    assert {:ok, :unrelated} =
-             CallbackInvoker.invoke(
-               unrelated_source,
-               callback,
-               :return_state,
-               [:unrelated],
-               :command
-             )
-
-    assert {:ok, unrelated_token} = CodeLease.quiesce_source(unrelated_source)
-    assert :ok = CodeLease.complete_unload(unrelated_token)
-  end
-
-  test "terminal crash finalizer failure drains callbacks without reopening admission", ctx do
-    test_pid = self()
-    name = :crash_finalizer_failure
-    source = {:extension, name}
-
-    {path, cleanup} =
-      make_extension("CrashFinalizerFailure", """
-      defmodule Minga.TestExtensions.CrashFinalizerFailure do
-        use Minga.Extension
-
-        command :crash_finalizer_failure_cmd, "Crash finalizer failure command",
-          execute: {__MODULE__, :return_state}
-
-        editor_event_handler __MODULE__, [:editor_action]
-
-        @impl true
-        def name, do: :crash_finalizer_failure
-
-        @impl true
-        def description, do: "Crash finalizer failure"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :crash_finalizer_failure end]},
-            restart: :temporary,
-            type: :worker
-          }
-        end
-
-        @spec return_state(term()) :: term()
-        def return_state(state), do: state
-
-        @spec block(pid()) :: :settled
-        def block(test_pid) do
-          send(test_pid, {:failed_finalizer_callback_running, self()})
-
-          receive do
-            :settle_failed_finalizer_callback -> :settled
-          end
-        end
-
-        @spec handle_editor_event(term(), term()) :: :not_matched
-        def handle_editor_event(_state, _event), do: :not_matched
-
-        @spec handle_sidebar_action(term(), String.t(), map()) :: term()
-        def handle_sidebar_action(state, _action, _context), do: state
-      end
-      """)
-
-    callback = Minga.TestExtensions.CrashFinalizerFailure
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(callback)
-      :code.delete(callback)
-    end)
-
-    callbacks = %{
-      editor_effects: fn ^source, context ->
-        send(test_pid, {:terminal_crash_finalizer_failed, self(), context})
-        {:error, :editor_effects_unavailable}
-      end,
-      editor_sidebars: fn cleaned_source -> Sidebar.unregister_source(cleaned_source) end,
-      extension_callbacks: fn cleaned_source ->
-        CallbackRegistry.unregister_source(cleaned_source)
-      end,
-      zz_cleanup_observer: fn cleaned_source ->
-        send(test_pid, {:terminal_crash_cleanup_waiting, self(), cleaned_source})
-
-        receive do
-          :finish_terminal_crash_cleanup -> :ok
-        end
-      end
-    }
-
-    opts = [
-      command_registry: ctx.command_registry,
-      keymap: ctx.keymap,
-      callbacks: callbacks
-    ]
-
-    :ok = ExtRegistry.register(ctx.registry, name, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
-
-    assert {:ok, runtime} =
-             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry, opts)
-
-    sidebar_id = "crash_finalizer_failure_#{System.unique_integer([:positive])}"
-
-    assert :ok =
-             Sidebar.register(source, %{
-               id: sidebar_id,
-               display_name: "Crash finalizer failure",
-               description: "Removed after terminal crash",
-               action_handler: {callback, :handle_sidebar_action}
-             })
-
-    unrelated_name =
-      String.to_atom("crash_finalizer_unrelated_#{System.unique_integer([:positive])}")
-
-    unrelated_source = {:extension, unrelated_name}
-    unrelated_sidebar_id = "#{sidebar_id}_unrelated"
-
-    unrelated_command_name =
-      String.to_atom("crash_finalizer_unrelated_cmd_#{System.unique_integer([:positive])}")
-
-    unrelated_command = %Minga.Command{
-      name: unrelated_command_name,
-      description: "Unrelated crash cleanup command",
-      execute: fn state -> state end
-    }
-
-    assert :ok = CodeLease.activate_source(unrelated_source, [callback])
-
-    assert :ok =
-             CommandRegistry.register_command(
-               ctx.command_registry,
-               unrelated_source,
-               unrelated_command
-             )
-
-    assert :ok =
-             Sidebar.register(unrelated_source, %{
-               id: unrelated_sidebar_id,
-               display_name: "Unrelated crash cleanup",
-               description: "Must survive another source's crash",
-               action_handler: {callback, :handle_sidebar_action}
-             })
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, :crash_finalizer_failure_cmd)
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, unrelated_command_name)
-
-    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
-    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
-    assert %Sidebar.Entry{} = Sidebar.get(unrelated_sidebar_id)
-
-    callback_task =
-      Task.async(fn ->
-        CallbackInvoker.invoke(source, callback, :block, [test_pid], :command)
-      end)
-
-    assert_receive {:failed_finalizer_callback_running, callback_owner}
-    Process.exit(runtime, :kill)
-
-    assert_receive {:terminal_crash_finalizer_failed, cleanup_owner,
-                    %{
-                      callback_admission: callback_admission,
-                      callback_registry: callback_registry,
-                      token: token
-                    }}
-
-    assert callback_admission == CodeLease
-    assert callback_registry == CallbackRegistry.default_table()
-    assert is_reference(token)
-
-    assert {:error,
-            {:source_unavailable, ^source, ^callback, :return_state, {:source_quiescing, ^source}}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
-
-    refute_receive {:terminal_crash_cleanup_waiting, _, ^source}
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, :crash_finalizer_failure_cmd)
-
-    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
-    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
-
-    send(callback_owner, :settle_failed_finalizer_callback)
-    assert {:ok, :settled} = Task.await(callback_task)
-
-    assert_receive {:terminal_crash_cleanup_waiting, ^cleanup_owner, ^source}
-
-    assert {:error,
-            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
-
-    assert :error = CommandRegistry.lookup(ctx.command_registry, :crash_finalizer_failure_cmd)
-    assert Sidebar.get(sidebar_id) == nil
-    refute {source, callback} in CallbackRegistry.callbacks(:editor_action)
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, unrelated_command_name)
-
-    assert %Sidebar.Entry{} = Sidebar.get(unrelated_sidebar_id)
-
-    assert {:ok, :unrelated} =
-             CallbackInvoker.invoke(
-               unrelated_source,
-               callback,
-               :return_state,
-               [:unrelated],
-               :command
-             )
-
-    send(cleanup_owner, :finish_terminal_crash_cleanup)
-
-    failed_entry = wait_for_entry_status(ctx.registry, name, :load_error)
-    assert failed_entry.pid == nil
-    assert failed_entry.lifecycle_ref == nil
-
-    assert {:terminal_crash_cleanup_failed,
-            [
-              quiesce:
-                {:source_quiesce_failed,
-                 {:terminal_crash_quiesce_failed,
-                  [
-                    finalizers:
-                      {:terminal_finalizers_failed,
-                       [editor_effects: %{reason: :editor_effects_unavailable}]}
-                  ]}}
-            ]} = failed_entry.last_error
-
-    assert {:error,
-            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
-
-    assert :ok = CommandRegistry.unregister_source(ctx.command_registry, unrelated_source)
-    assert :ok = Sidebar.unregister_source(unrelated_source)
-    assert {:ok, unrelated_token} = CodeLease.quiesce_source(unrelated_source)
-    assert :ok = CodeLease.complete_unload(unrelated_token)
-  end
-
-  test "normal terminal finalizer failure drains callbacks without reopening admission", ctx do
-    test_pid = self()
-    name = :normal_exit_finalizer_failure
-    source = {:extension, name}
-
-    {path, cleanup} =
-      make_extension("NormalExitFinalizerFailure", """
-      defmodule Minga.TestExtensions.NormalExitFinalizerFailure do
-        use Minga.Extension
-
-        command :normal_exit_finalizer_failure_cmd, "Normal exit finalizer failure command",
-          execute: {__MODULE__, :return_state}
-
-        editor_event_handler __MODULE__, [:editor_action]
-
-        @impl true
-        def name, do: :normal_exit_finalizer_failure
-
-        @impl true
-        def description, do: "Normal exit finalizer failure"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :normal_exit_finalizer_failure end]},
-            restart: :temporary,
-            type: :worker
-          }
-        end
-
-        @spec return_state(term()) :: term()
-        def return_state(state), do: state
-
-        @spec block(pid()) :: :settled
-        def block(test_pid) do
-          send(test_pid, {:normal_exit_callback_running, self()})
-
-          receive do
-            :settle_normal_exit_callback -> :settled
-          end
-        end
-
-        @spec handle_editor_event(term(), term()) :: :not_matched
-        def handle_editor_event(_state, _event), do: :not_matched
-
-        @spec handle_sidebar_action(term(), String.t(), map()) :: term()
-        def handle_sidebar_action(state, _action, _context), do: state
-      end
-      """)
-
-    callback = Minga.TestExtensions.NormalExitFinalizerFailure
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(callback)
-      :code.delete(callback)
-    end)
-
-    callbacks = %{
-      editor_effects: fn ^source, context ->
-        send(test_pid, {:normal_exit_finalizer_failed, self(), context})
-        {:error, :editor_effects_unavailable}
-      end,
-      editor_sidebars: fn cleaned_source -> Sidebar.unregister_source(cleaned_source) end,
-      extension_callbacks: fn cleaned_source ->
-        CallbackRegistry.unregister_source(cleaned_source)
-      end,
-      zz_cleanup_observer: fn cleaned_source ->
-        send(test_pid, {:normal_exit_cleanup_waiting, self(), cleaned_source})
-
-        receive do
-          :finish_normal_exit_cleanup -> :ok
-        end
-      end
-    }
-
-    opts = [
-      command_registry: ctx.command_registry,
-      keymap: ctx.keymap,
-      callbacks: callbacks
-    ]
-
-    :ok = ExtRegistry.register(ctx.registry, name, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
-
-    assert {:ok, runtime} =
-             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry, opts)
-
-    sidebar_id = "normal_exit_finalizer_failure_#{System.unique_integer([:positive])}"
-
-    assert :ok =
-             Sidebar.register(source, %{
-               id: sidebar_id,
-               display_name: "Normal exit finalizer failure",
-               description: "Removed after terminal normal exit",
-               action_handler: {callback, :handle_sidebar_action}
-             })
-
-    unrelated_name =
-      String.to_atom("normal_exit_unrelated_#{System.unique_integer([:positive])}")
-
-    unrelated_source = {:extension, unrelated_name}
-    unrelated_sidebar_id = "#{sidebar_id}_unrelated"
-
-    unrelated_command_name =
-      String.to_atom("normal_exit_unrelated_cmd_#{System.unique_integer([:positive])}")
-
-    unrelated_command = %Minga.Command{
-      name: unrelated_command_name,
-      description: "Unrelated normal exit cleanup command",
-      execute: fn state -> state end
-    }
-
-    assert :ok = CodeLease.activate_source(unrelated_source, [callback])
-
-    assert :ok =
-             CommandRegistry.register_command(
-               ctx.command_registry,
-               unrelated_source,
-               unrelated_command
-             )
-
-    assert :ok =
-             Sidebar.register(unrelated_source, %{
-               id: unrelated_sidebar_id,
-               display_name: "Unrelated normal exit cleanup",
-               description: "Must survive another source's normal exit",
-               action_handler: {callback, :handle_sidebar_action}
-             })
-
-    callback_task =
-      Task.async(fn ->
-        CallbackInvoker.invoke(source, callback, :block, [test_pid], :command)
-      end)
-
-    assert_receive {:normal_exit_callback_running, callback_owner}
-    runtime_monitor = Process.monitor(runtime)
-    assert :ok = Agent.stop(runtime, :normal)
-    assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, :normal}
-
-    assert_receive {:normal_exit_finalizer_failed, cleanup_owner,
-                    %{
-                      callback_admission: callback_admission,
-                      callback_registry: callback_registry,
-                      token: token
-                    }}
-
-    assert callback_admission == CodeLease
-    assert callback_registry == CallbackRegistry.default_table()
-    assert is_reference(token)
-
-    assert {:error,
-            {:source_unavailable, ^source, ^callback, :return_state, {:source_quiescing, ^source}}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [%{}], :command)
-
-    refute_receive {:normal_exit_cleanup_waiting, _, ^source}
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, :normal_exit_finalizer_failure_cmd)
-
-    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
-    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
-
-    send(callback_owner, :settle_normal_exit_callback)
-    assert {:ok, :settled} = Task.await(callback_task)
-
-    assert_receive {:normal_exit_cleanup_waiting, ^cleanup_owner, ^source}
-
-    assert {:error,
-            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [%{}], :command)
-
-    assert :error =
-             CommandRegistry.lookup(ctx.command_registry, :normal_exit_finalizer_failure_cmd)
-
-    assert Sidebar.get(sidebar_id) == nil
-    refute {source, callback} in CallbackRegistry.callbacks(:editor_action)
-
-    assert {:ok, _command} =
-             CommandRegistry.lookup(ctx.command_registry, unrelated_command_name)
-
-    assert %Sidebar.Entry{} = Sidebar.get(unrelated_sidebar_id)
-
-    assert {:ok, :unrelated} =
-             CallbackInvoker.invoke(
-               unrelated_source,
-               callback,
-               :return_state,
-               [:unrelated],
-               :command
-             )
-
-    send(cleanup_owner, :finish_normal_exit_cleanup)
-
-    failed_entry = wait_for_entry_status(ctx.registry, name, :load_error)
-    assert failed_entry.pid == nil
-    assert failed_entry.lifecycle_ref == nil
-
-    assert {:terminal_exit_cleanup_failed,
-            [
-              quiesce:
-                {:source_quiesce_failed,
-                 {:terminal_exit_quiesce_failed,
-                  [
-                    finalizers:
-                      {:terminal_finalizers_failed,
-                       [editor_effects: %{reason: :editor_effects_unavailable}]}
-                  ]}}
-            ]} = failed_entry.last_error
-
-    assert {:error,
-            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
-             CallbackInvoker.invoke(source, callback, :return_state, [%{}], :command)
-
-    assert :ok = CommandRegistry.unregister_source(ctx.command_registry, unrelated_source)
-    assert :ok = Sidebar.unregister_source(unrelated_source)
-    assert {:ok, unrelated_token} = CodeLease.quiesce_source(unrelated_source)
-    assert :ok = CodeLease.complete_unload(unrelated_token)
-  end
-
-  test "delayed crash restart does not mark the lifecycle crashed before replacement starts",
-       ctx do
-    telemetry_id = {__MODULE__, self(), :restart_start_race_telemetry}
-    parent_pid = self()
-
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:minga, :extension, :lifecycle, :crash_restart_count]],
-      fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
-      end,
-      self()
-    )
-
-    on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    {path, cleanup} =
-      make_extension("RestartStartRace", """
-      defmodule Minga.TestExtensions.RestartStartRace do
-        use Minga.Extension
-
-        command :restart_start_race_cmd, "Restart start race command", execute: {__MODULE__, :noop}
-
-        @impl true
-        def name, do: :restart_start_race
-
-        @impl true
-        def description, do: "Restart/start race"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :restart_start_race end]},
-            restart: :permanent,
-            type: :worker
-          }
-        end
-
-        @spec noop(map()) :: map()
-        def noop(state), do: state
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.RestartStartRace)
-      :code.delete(Minga.TestExtensions.RestartStartRace)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :restart_start_race, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
-    lookup_gate = start_supervised!({Agent, fn -> false end})
-
-    before_restart_lookup = fn ->
-      if Agent.get_and_update(lookup_gate, fn seen? -> {seen?, true} end) do
-        :ok
-      else
-        send(parent_pid, {:restart_lookup_blocked, self()})
-
-        receive do
-          :release_restart_lookup -> :ok
-        after
-          5_000 -> raise "restart lookup test hook timed out"
-        end
-      end
-    end
-
-    start_task =
-      Task.async(fn ->
-        ExtSupervisor.start_extension(
-          ctx.supervisor,
-          ctx.registry,
-          :restart_start_race,
-          entry,
-          command_registry: ctx.command_registry,
-          keymap: ctx.keymap,
-          test_hooks: %{before_restart_lookup: before_restart_lookup}
-        )
-      end)
-
-    assert {:ok, pid_a} = Task.await(start_task)
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0}, %{extension: :restart_start_race, phase: :crash_restart_count}}
-
-    pid_a_ref = Process.monitor(pid_a)
-    Process.exit(pid_a, :kill)
-    assert_receive {:DOWN, ^pid_a_ref, :process, ^pid_a, _reason}, 1_000
-    assert_receive {:restart_lookup_blocked, restart_monitor_pid}, 1_000
-
-    {:ok, stale_running_entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
-    assert stale_running_entry.status == :running
-    assert stale_running_entry.pid == pid_a
-
-    refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 1}, %{extension: :restart_start_race, phase: :crash_restart_count}},
-                   150
-
-    send(restart_monitor_pid, :release_restart_lookup)
-
-    pid_b = wait_for_child_pid(ctx.supervisor, Minga.TestExtensions.RestartStartRace, pid_a)
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 1}, %{extension: :restart_start_race, phase: :crash_restart_count}}
-
-    {:ok, final_entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
-    assert final_entry.status == :running
-    assert final_entry.pid == pid_b
-    assert 1 == count_children(ctx.supervisor, Minga.TestExtensions.RestartStartRace)
-    assert {:ok, _command} = CommandRegistry.lookup(ctx.command_registry, :restart_start_race_cmd)
-  end
-
-  test "restart reconciliation handles a dead supervisor without leaving stale state", ctx do
-    telemetry_id = {__MODULE__, self(), :restart_missing_replacement_telemetry}
-    parent_pid = self()
-
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:minga, :extension, :lifecycle, :crash_restart_count]],
-      fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
-      end,
-      self()
-    )
-
-    on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    {path, cleanup} =
-      make_extension("RestartMissingReplacement", """
-      defmodule Minga.TestExtensions.RestartMissingReplacement do
-        use Minga.Extension
-
-        @impl true
-        def name, do: :restart_missing_replacement
-
-        @impl true
-        def description, do: "Restart missing replacement"
-
-        @impl true
-        def version, do: "1.0.0"
-
-        @impl true
-        def init(_config), do: {:ok, %{}}
-
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :restart_missing_replacement end]},
-            restart: :permanent,
-            type: :worker
-          }
-        end
-      end
-      """)
-
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.RestartMissingReplacement)
-      :code.delete(Minga.TestExtensions.RestartMissingReplacement)
-    end)
-
-    :ok = ExtRegistry.register(ctx.registry, :restart_missing_replacement, path, [])
-
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_missing_replacement)
-    lookup_gate = start_supervised!({Agent, fn -> false end})
-
-    before_restart_lookup = fn ->
-      if Agent.get_and_update(lookup_gate, fn seen? -> {seen?, true} end) do
-        :ok
-      else
-        send(parent_pid, {:restart_missing_replacement_lookup_blocked, self()})
-
-        receive do
-          :release_restart_lookup -> :ok
-        after
-          5_000 -> raise "restart lookup test hook timed out"
-        end
-      end
-    end
-
-    start_task =
-      Task.async(fn ->
-        ExtSupervisor.start_extension(
-          ctx.supervisor,
-          ctx.registry,
-          :restart_missing_replacement,
-          entry,
-          command_registry: ctx.command_registry,
-          keymap: ctx.keymap,
-          test_hooks: %{before_restart_lookup: before_restart_lookup}
-        )
-      end)
-
-    assert {:ok, pid} = Task.await(start_task)
-
-    pid_ref = Process.monitor(pid)
-    Process.exit(pid, :kill)
-    assert_receive {:DOWN, ^pid_ref, :process, ^pid, _reason}, 1_000
-    assert_receive {:restart_missing_replacement_lookup_blocked, restart_monitor_pid}, 1_000
-    previous_trap_exit = Process.flag(:trap_exit, true)
-    Process.exit(Process.whereis(ctx.supervisor), :kill)
-    assert_receive {:EXIT, _supervisor_pid, :killed}, 1_000
-    Process.flag(:trap_exit, previous_trap_exit)
-
-    {:ok, running_entry} = ExtRegistry.get(ctx.registry, :restart_missing_replacement)
-    assert running_entry.status == :running
-    assert running_entry.pid == pid
-
-    refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 1},
-                    %{extension: :restart_missing_replacement, phase: :crash_restart_count}},
-                   150
-
-    send(restart_monitor_pid, :release_restart_lookup)
-
-    crashed_entry =
-      wait_for_entry_status(ctx.registry, :restart_missing_replacement, :crashed, 20)
-
-    assert crashed_entry.pid == nil
-    assert crashed_entry.lifecycle_ref == nil
-  end
-
-  test "stale crash monitor does not overwrite a newer lifecycle", ctx do
-    telemetry_id = {__MODULE__, self(), :stale_monitor_race_telemetry}
-    test_pid = self()
-
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:minga, :extension, :lifecycle, :crash_restart_count]],
-      fn event, measurements, metadata, test_pid ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
-      end,
-      self()
-    )
-
-    on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    stale_monitor_gate = fn ->
-      send(test_pid, {:stale_monitor_terminal_exit_blocked, self()})
+  test "terminal crash replies queued stop and start waiters exactly once", ctx do
+    name = unique_name(:terminal_queued_waiters)
+    parent = self()
+
+    finalizer = fn _source ->
+      send(parent, {:terminal_finalizer_blocked, self()})
 
       receive do
-        :release_stale_monitor_terminal_exit -> :ok
-      after
-        5_000 -> raise "timed out waiting to release stale monitor terminal exit"
+        :release -> {:error, :terminal_editor_failure}
       end
-
-      send(test_pid, {:stale_monitor_terminal_exit_released, self()})
-      :ok
     end
 
-    {path, cleanup} =
-      make_extension("StaleMonitorRace", """
-      defmodule Minga.TestExtensions.StaleMonitorRace do
-        use Minga.Extension
+    opts = Keyword.put(ctx.opts, :callbacks, %{editor_effects: finalizer})
+    entry = register_module(ctx, name, restart: :temporary)
+    assert {:ok, runtime} = start_extension(ctx, name, entry, opts)
+    GenServer.stop(runtime, :abnormal)
+    assert_receive {:terminal_finalizer_blocked, finalizer_worker}
 
-        @impl true
-        def name, do: :stale_monitor_race
+    start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
+    stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    refute Task.yield(start_task, 25)
+    refute Task.yield(stop_task, 25)
+    send(finalizer_worker, :release)
 
-        @impl true
-        def description, do: "Stale monitor race"
+    expected =
+      {:terminal_crash_cleanup_failed,
+       [
+         quiesce: %{
+           family: :editor_effects,
+           source: {:extension, name},
+           reason: :terminal_editor_failure
+         }
+       ]}
 
-        @impl true
-        def version, do: "1.0.0"
+    assert {:error, ^expected} = Task.await(start_task)
+    assert {:error, ^expected} = Task.await(stop_task)
+    assert {:load_error, %{reason: ^expected}} = Instance.phase(instance(ctx, name))
+    refute_receive {:terminal_finalizer_blocked, _duplicate}
+  end
 
-        @impl true
-        def init(_config), do: {:ok, %{}}
+  test "non-restarting abnormal crash removes contributions and publishes exact crash", ctx do
+    name = unique_name(:terminal_crash_projection)
+    entry = register_module(ctx, name, [], CrashContributionRuntime)
+    source = {:extension, name}
+    assert {:ok, runtime} = start_extension(ctx, name, entry)
+    assert {:ok, _command} = CommandRegistry.lookup(ctx.commands, :crash_contribution_command)
 
-        @impl true
-        def child_spec(_config) do
-          %{
-            id: __MODULE__,
-            start: {Agent, :start_link, [fn -> :stale_monitor_race end]},
-            restart: :temporary,
-            type: :worker
-          }
-        end
-      end
-      """)
+    assert CallbackRegistry.callbacks_for_source(:buffer_saved, source, ctx.callback_registry) !=
+             []
 
-    on_exit(fn ->
-      cleanup.()
-      :code.purge(Minga.TestExtensions.StaleMonitorRace)
-      :code.delete(Minga.TestExtensions.StaleMonitorRace)
-    end)
+    GenServer.stop(runtime, :abnormal)
 
-    opts = [test_hooks: %{before_terminal_child_exit: stale_monitor_gate}]
+    assert {:crashed, %{reason: :abnormal}} =
+             eventually(fn ->
+               case Instance.phase(instance(ctx, name)) do
+                 {:crashed, %{reason: :abnormal}} = phase -> phase
+                 _phase -> nil
+               end
+             end)
 
-    :ok = ExtRegistry.register(ctx.registry, :stale_monitor_race, path, [])
-    {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_monitor_race)
+    assert {:ok, projection} = ExtRegistry.get(ctx.registry, name)
+    assert projection.status == :crashed
+    assert projection.pid == nil
+    assert projection.last_error == :abnormal
+    assert :error = CommandRegistry.lookup(ctx.commands, :crash_contribution_command)
 
-    assert {:ok, pid_a} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :stale_monitor_race,
-               entry,
-               opts
+    assert CallbackRegistry.callbacks_for_source(:buffer_saved, source, ctx.callback_registry) ==
+             []
+
+    assert CodeLease.source_status(source, server: ctx.code_lease) == :inactive
+  end
+
+  test "CodeLease drain completion is event-driven", ctx do
+    source = {:extension, unique_name(:lease_drain)}
+    assert :ok = CodeLease.activate_source(source, [Runtime], server: ctx.code_lease)
+    owner = spawn(fn -> receive do: (:done -> :ok) end)
+
+    assert {:ok, lease} =
+             CodeLease.admit_callback(source, Runtime, :editor_event,
+               server: ctx.code_lease,
+               owner: owner
              )
 
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0}, %{extension: :stale_monitor_race, phase: :crash_restart_count}}
+    assert {:ok, _token} = CodeLease.quiesce_source(source, server: ctx.code_lease)
+    ref = make_ref()
+    assert :ok = CodeLease.notify_when_drained(source, self(), ref, server: ctx.code_lease)
+    refute_receive {CodeLease, :drained, ^source, ^ref}
+    assert :ok = CodeLease.release(lease)
+    assert_receive {CodeLease, :drained, ^source, ^ref}
+    send(owner, :done)
+  end
 
-    Process.exit(pid_a, :kill)
+  @spec assert_policy_matrix(
+          map(),
+          atom(),
+          ExtRegistry.entry(),
+          :permanent | :transient | :temporary
+        ) :: :ok
+  defp assert_policy_matrix(ctx, name, entry, policy) do
+    assert {:ok, initial_pid} = start_extension(ctx, name, entry)
 
-    assert_receive {:stale_monitor_terminal_exit_blocked, monitor_pid}, 5_000
+    assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: 0}, %{extension: ^name}}
 
-    restart_log =
-      capture_log(fn ->
-        result =
-          ExtSupervisor.start_extension(
-            ctx.supervisor,
-            ctx.registry,
-            :stale_monitor_race,
-            entry
-          )
+    final_pid =
+      Enum.reduce([:normal, :shutdown, {:shutdown, :policy}, :abnormal], initial_pid, fn reason,
+                                                                                         pid ->
+        terminate_with_reason(pid, reason)
 
-        send(test_pid, {:stale_monitor_restart_result, result})
+        assert_policy_transition(
+          ctx,
+          name,
+          entry,
+          reason,
+          pid,
+          restart_expected?(policy, reason)
+        )
       end)
 
-    assert_receive {:stale_monitor_restart_result, {:ok, pid_b}}, 5_000
-    refute restart_log =~ "redefining module Minga.TestExtensions.StaleMonitorRace"
-
-    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0}, %{extension: :stale_monitor_race, phase: :crash_restart_count}}
-
-    send(monitor_pid, :release_stale_monitor_terminal_exit)
-    assert_receive {:stale_monitor_terminal_exit_released, ^monitor_pid}, 5_000
-
-    refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 1}, %{extension: :stale_monitor_race, phase: :crash_restart_count}},
-                   200
-
-    {:ok, final_entry} = ExtRegistry.get(ctx.registry, :stale_monitor_race)
-    assert final_entry.pid == pid_b
-    assert final_entry.status == :running
+    assert is_pid(final_pid)
+    assert :ok = stop_extension(ctx, name, ctx.opts)
+    :ok
   end
 
-  @spec wait_for_child_pid(GenServer.server(), module(), pid() | nil) :: pid()
-  defp wait_for_child_pid(supervisor, module, excluded_pid),
-    do: wait_for_child_pid(supervisor, module, excluded_pid, 50)
-
-  @spec wait_for_child_pid(GenServer.server(), module(), pid() | nil, non_neg_integer()) :: pid()
-  defp wait_for_child_pid(supervisor, module, excluded_pid, attempts_left) do
-    case child_pid(supervisor, module, excluded_pid) do
-      pid when is_pid(pid) ->
-        pid
-
-      nil when attempts_left > 0 ->
-        receive do
-        after
-          10 -> wait_for_child_pid(supervisor, module, excluded_pid, attempts_left - 1)
-        end
-
-      nil ->
-        flunk("expected #{inspect(module)} child to start")
-    end
-  end
-
-  @spec child_pid(GenServer.server(), module(), pid() | nil) :: pid() | nil
-  defp child_pid(supervisor, module, excluded_pid) do
-    supervisor
-    |> DynamicSupervisor.which_children()
-    |> Enum.find_value(fn
-      {_id, pid, _type, [^module]} when is_pid(pid) and pid != excluded_pid -> pid
-      _child -> nil
-    end)
-  end
-
-  @spec count_children(GenServer.server(), module()) :: non_neg_integer()
-  defp count_children(supervisor, module) do
-    supervisor
-    |> DynamicSupervisor.which_children()
-    |> Enum.count(fn
-      {_id, pid, _type, [^module]} when is_pid(pid) -> true
-      _child -> false
-    end)
-  end
-
-  @spec wait_for_admission_denial(CallbackInvoker.source(), module(), non_neg_integer()) ::
-          :denied
-  defp wait_for_admission_denial(source, callback, attempts \\ 100)
-
-  defp wait_for_admission_denial(source, callback, attempts) when attempts > 0 do
-    case CallbackInvoker.invoke(source, callback, :return_state, [:still_active], :command) do
-      {:error, {:source_unavailable, ^source, ^callback, :return_state, _reason}} ->
-        :denied
-
-      {:ok, :still_active} ->
-        receive do
-        after
-          5 -> wait_for_admission_denial(source, callback, attempts - 1)
-        end
-    end
-  end
-
-  defp wait_for_admission_denial(source, callback, 0) do
-    flunk("expected callback admission denial for #{inspect(source)} #{inspect(callback)}")
-  end
-
-  @spec wait_for_entry_status(GenServer.server(), atom(), Minga.Extension.extension_status()) ::
-          ExtRegistry.entry()
-  defp wait_for_entry_status(registry, name, status),
-    do: wait_for_entry_status(registry, name, status, 20)
-
-  @spec wait_for_entry_status(
-          GenServer.server(),
+  @spec assert_policy_transition(
+          map(),
           atom(),
-          Minga.Extension.extension_status(),
-          non_neg_integer()
-        ) ::
-          ExtRegistry.entry()
-  defp wait_for_entry_status(registry, name, status, attempts_left) do
-    case ExtRegistry.get(registry, name) do
-      {:ok, %{status: ^status} = entry} ->
-        entry
+          ExtRegistry.entry(),
+          term(),
+          pid(),
+          boolean()
+        ) :: pid()
+  defp assert_policy_transition(ctx, name, _entry, _reason, pid, true) do
+    assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: _count}, %{extension: ^name}}
 
-      _other when attempts_left > 0 ->
+    assert {:ok, replacement} = Instance.start(instance(ctx, name))
+    refute replacement == pid
+    replacement
+  end
+
+  defp assert_policy_transition(ctx, name, entry, reason, _pid, false) do
+    assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :stop],
+                    %{duration: _duration}, %{extension: ^name, phase: :cleanup, outcome: :ok}}
+
+    expected_phase = terminal_policy_phase(reason)
+
+    assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :terminal], %{count: 1},
+                    %{extension: ^name, phase: ^expected_phase}}
+
+    assert {:ok, replacement} = start_extension(ctx, name, entry)
+
+    assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: _count}, %{extension: ^name}}
+
+    replacement
+  end
+
+  @spec terminal_policy_phase(term()) :: Minga.Extension.Instance.State.phase()
+  defp terminal_policy_phase(:abnormal), do: {:crashed, %{reason: :abnormal}}
+  defp terminal_policy_phase(_reason), do: :stopped
+
+  @spec terminate_with_reason(pid(), term()) :: :ok
+  defp terminate_with_reason(pid, :normal), do: Agent.stop(pid, :normal)
+  defp terminate_with_reason(pid, reason), do: GenServer.stop(pid, reason)
+
+  @spec restart_expected?(:permanent | :transient | :temporary, term()) :: boolean()
+  defp restart_expected?(:permanent, _reason), do: true
+  defp restart_expected?(:transient, :abnormal), do: true
+  defp restart_expected?(_policy, _reason), do: false
+
+  @spec register_module(map(), atom(), keyword(), module()) :: ExtRegistry.entry()
+  defp register_module(ctx, name, config, module \\ Runtime) do
+    :ok = ExtRegistry.register_module(ctx.registry, name, module, config)
+    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+    entry
+  end
+
+  @spec start_extension(map(), atom(), ExtRegistry.entry(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  defp start_extension(ctx, name, entry, opts \\ []) do
+    ExtSupervisor.start_extension(
+      ctx.roots,
+      ctx.registry,
+      name,
+      entry,
+      Keyword.merge(ctx.opts, opts)
+    )
+  end
+
+  @spec stop_extension(map(), atom(), keyword()) :: :ok | {:error, term()}
+  defp stop_extension(ctx, name, opts) do
+    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+    ExtSupervisor.stop_extension(ctx.roots, ctx.registry, name, entry, opts)
+  end
+
+  @spec instance_registry(map()) :: atom()
+  defp instance_registry(ctx), do: InstanceRegistry.registry_for_root(ctx.roots)
+
+  @spec instance(map(), atom()) :: GenServer.server()
+  defp instance(ctx, name) do
+    InstanceRegistry.via(instance_registry(ctx), :instance, name)
+  end
+
+  @spec instance_pid(map(), atom()) :: pid()
+  defp instance_pid(ctx, name) do
+    InstanceRegistry.whereis(InstanceRegistry.registry_for_root(ctx.roots), :instance, name)
+  end
+
+  @spec runtime_supervisor(map(), atom()) :: GenServer.server()
+  defp runtime_supervisor(ctx, name) do
+    InstanceRegistry.via(InstanceRegistry.registry_for_root(ctx.roots), :runtime, name)
+  end
+
+  @spec runtime_supervisor_pid(map(), atom()) :: pid()
+  defp runtime_supervisor_pid(ctx, name) do
+    InstanceRegistry.whereis(InstanceRegistry.registry_for_root(ctx.roots), :runtime, name)
+  end
+
+  @spec await_runtime_replacement(map(), atom(), pid()) :: pid()
+  defp await_runtime_replacement(ctx, name, old_pid) do
+    eventually(fn ->
+      case RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) do
+        {:ok, pid} when pid != old_pid -> pid
+        _other -> nil
+      end
+    end)
+  end
+
+  @spec await_new_instance(map(), atom(), pid()) :: GenServer.server()
+  defp await_new_instance(ctx, name, old_pid) do
+    eventually(fn ->
+      case instance_pid(ctx, name) do
+        pid when is_pid(pid) and pid != old_pid -> instance(ctx, name)
+        _other -> nil
+      end
+    end)
+  end
+
+  @spec assert_eventually_phase(map(), atom(), atom()) :: :ok
+  defp assert_eventually_phase(ctx, name, tag) do
+    _ =
+      eventually(fn ->
+        case Instance.phase(instance(ctx, name)) do
+          {^tag, _context} -> :ok
+          ^tag -> :ok
+          _phase -> nil
+        end
+      end)
+
+    :ok
+  end
+
+  @spec eventually((-> result), non_neg_integer()) :: result when result: var
+  defp eventually(fun, attempts \\ 100)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    case fun.() do
+      nil ->
         receive do
         after
-          10 -> wait_for_entry_status(registry, name, status, attempts_left - 1)
+          10 -> eventually(fun, attempts - 1)
         end
 
-      other ->
-        flunk("expected #{inspect(name)} to reach #{inspect(status)}, got #{inspect(other)}")
+      false ->
+        receive do
+        after
+          10 -> eventually(fun, attempts - 1)
+        end
+
+      result ->
+        result
     end
   end
 
-  @spec make_extension(String.t(), String.t()) :: {String.t(), (-> :ok)}
-  defp make_extension(dir_name, source) do
-    dir =
-      Path.join(System.tmp_dir!(), "minga_ext_#{dir_name}_#{System.unique_integer([:positive])}")
+  defp eventually(fun, 0), do: flunk("condition not met: #{inspect(fun.())}")
 
-    File.mkdir_p!(dir)
-    File.write!(Path.join(dir, "extension.ex"), source)
-    {dir, fn -> File.rm_rf!(dir) end}
-  end
+  @spec unique_name(atom()) :: atom()
+  defp unique_name(prefix), do: :"#{prefix}_#{System.unique_integer([:positive])}"
 end

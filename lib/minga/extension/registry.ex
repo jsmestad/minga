@@ -137,25 +137,27 @@ defmodule Minga.Extension.Registry do
     Agent.get(server, &Map.fetch(&1, name))
   end
 
-  @doc "Updates fields on an existing extension entry."
-  @spec update(atom(), keyword()) :: :ok
-  @spec update(GenServer.server(), atom(), keyword()) :: :ok
+  @doc "Updates an existing declaration or reports that projection authority disappeared."
+  @spec update(atom(), keyword()) :: :ok | {:error, {:extension_not_declared, atom()}}
+  @spec update(GenServer.server(), atom(), keyword()) ::
+          :ok | {:error, {:extension_not_declared, atom()}}
   def update(name, updates) when is_atom(name) and is_list(updates),
     do: update(__MODULE__, name, updates)
 
   def update(server, name, updates) when is_atom(name) and is_list(updates) do
-    Agent.update(server, &apply_updates(&1, name, updates))
+    Agent.get_and_update(server, &apply_updates(&1, name, updates))
   end
 
-  @spec apply_updates(state(), atom(), keyword()) :: state()
+  @spec apply_updates(state(), atom(), keyword()) ::
+          {:ok | {:error, {:extension_not_declared, atom()}}, state()}
   defp apply_updates(state, name, updates) do
     case Map.fetch(state, name) do
       {:ok, entry} ->
         updated = struct!(entry, updates)
-        Map.put(state, name, updated)
+        {:ok, Map.put(state, name, updated)}
 
       :error ->
-        state
+        {{:error, {:extension_not_declared, name}}, state}
     end
   end
 

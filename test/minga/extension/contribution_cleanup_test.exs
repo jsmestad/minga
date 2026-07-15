@@ -18,7 +18,7 @@ defmodule Minga.Extension.ContributionCleanupTest do
     {:ok, keymap: keymap}
   end
 
-  test "targeted finalization runs one family and full cleanup remains idempotent", %{
+  test "targeted finalization runs once and full cleanup skips targeted families", %{
     keymap: keymap
   } do
     source = {:extension, :cleanup_test}
@@ -48,8 +48,34 @@ defmodule Minga.Extension.ContributionCleanupTest do
                callbacks: callbacks
              )
 
-    assert_receive {:editor_effects_finalized, ^source}
+    refute_receive {:editor_effects_finalized, ^source}
     assert_receive {:later_family_cleaned, ^source}
+  end
+
+  test "config full cleanup includes Editor effects and presentation families", %{keymap: keymap} do
+    source = :config
+    test_pid = self()
+
+    callbacks = %{
+      editor_effects: fn callback_source ->
+        send(test_pid, {:config_editor_effects_cleaned, callback_source})
+        :ok
+      end,
+      editor_presentation: fn callback_source ->
+        send(test_pid, {:config_editor_presentation_cleaned, callback_source})
+        :ok
+      end
+    }
+
+    assert :ok =
+             ContributionCleanup.unregister_source(source,
+               command_registry: Minga.Command.Registry,
+               keymap: keymap,
+               callbacks: callbacks
+             )
+
+    assert_receive {:config_editor_effects_cleaned, :config}
+    assert_receive {:config_editor_presentation_cleaned, :config}
   end
 
   test "contextual finalizers receive authority only during targeted finalization", %{

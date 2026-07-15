@@ -41,16 +41,18 @@ defmodule Minga.Extension.CodeLease do
           reason: reason()
         }
 
-  @typep source_status :: :active | {:quiescing, unload_token()} | :inactive
+  @type source_status :: :active | {:quiescing, unload_token()} | :inactive
   @typep source_record :: %{status: source_status(), modules: MapSet.t(module())}
 
+  @typep drain_waiter :: {pid(), reference()}
   @typep state :: %{
            leases: %{reference() => t()},
            owner_refs: %{pid() => MapSet.t(reference())},
            owner_monitors: %{pid() => reference()},
            monitor_owners: %{reference() => pid()},
            sources: %{ContributionCleanup.contribution_source() => source_record()},
-           token_sources: %{unload_token() => ContributionCleanup.contribution_source()}
+           token_sources: %{unload_token() => ContributionCleanup.contribution_source()},
+           drain_waiters: %{ContributionCleanup.contribution_source() => [drain_waiter()]}
          }
 
   @doc "Starts the code lease service."
@@ -74,6 +76,19 @@ defmodule Minga.Extension.CodeLease do
   def quiesce_source(source, opts \\ []) do
     server = Keyword.get(opts, :server, __MODULE__)
     safe_call(server, {:quiesce_source, source}, {:error, :not_started})
+  end
+
+  @doc "Sends an event as soon as a source has no active callback leases."
+  @spec notify_when_drained(
+          ContributionCleanup.contribution_source(),
+          pid(),
+          reference(),
+          keyword()
+        ) :: :ok | {:error, term()}
+  def notify_when_drained(source, recipient, ref, opts \\ [])
+      when is_pid(recipient) and is_reference(ref) do
+    server = Keyword.get(opts, :server, __MODULE__)
+    safe_call(server, {:notify_when_drained, source, recipient, ref}, {:error, :not_started})
   end
 
   @doc "Marks a quiescing source inactive after unload callbacks finish."
@@ -138,6 +153,14 @@ defmodule Minga.Extension.CodeLease do
     safe_call(server, {:release, id}, :ok)
   end
 
+  @doc "Returns one source's admission status for lifecycle crash recovery."
+  @spec source_status(ContributionCleanup.contribution_source(), keyword()) ::
+          source_status() | :unknown
+  def source_status(source, opts \\ []) do
+    server = Keyword.get(opts, :server, __MODULE__)
+    safe_call(server, {:source_status, source}, :unknown)
+  end
+
   @doc "Returns active leases matching a module, source, or both."
   @spec active_leases(keyword()) :: [summary()]
   def active_leases(opts \\ []) do
@@ -157,7 +180,8 @@ defmodule Minga.Extension.CodeLease do
        owner_monitors: %{},
        monitor_owners: %{},
        sources: %{},
-       token_sources: %{}
+       token_sources: %{},
+       drain_waiters: %{}
      }}
   end
 
@@ -197,6 +221,20 @@ defmodule Minga.Extension.CodeLease do
     end
   end
 
+  def handle_call({:notify_when_drained, source, recipient, ref}, _from, state) do
+    case matching_leases(state, source, :_) do
+      [] ->
+        send(recipient, {__MODULE__, :drained, source, ref})
+        {:reply, :ok, state}
+
+      [_lease | _rest] ->
+        waiters =
+          Map.update(state.drain_waiters, source, [{recipient, ref}], &[{recipient, ref} | &1])
+
+        {:reply, :ok, %{state | drain_waiters: waiters}}
+    end
+  end
+
   def handle_call({:complete_unload, token}, _from, state) do
     transition_unload_token(state, token, :inactive)
   end
@@ -224,7 +262,17 @@ defmodule Minga.Extension.CodeLease do
   end
 
   def handle_call({:release, id}, _from, state) do
-    {:reply, :ok, drop_lease(state, id)}
+    {:reply, :ok, state |> drop_lease(id) |> notify_drained_sources()}
+  end
+
+  def handle_call({:source_status, source}, _from, state) do
+    status =
+      case Map.get(state.sources, source) do
+        %{status: source_status} -> source_status
+        nil -> :unknown
+      end
+
+    {:reply, status, state}
   end
 
   def handle_call({:active_leases, source, module}, _from, state) do
@@ -234,7 +282,7 @@ defmodule Minga.Extension.CodeLease do
   @impl true
   def handle_info({:DOWN, ref, :process, owner, _reason}, state) do
     case Map.get(state.monitor_owners, ref) do
-      ^owner -> {:noreply, drop_owner_leases(state, owner)}
+      ^owner -> {:noreply, state |> drop_owner_leases(owner) |> notify_drained_sources()}
       _other -> {:noreply, state}
     end
   end
@@ -412,6 +460,30 @@ defmodule Minga.Extension.CodeLease do
       {nil, _owner_monitors} ->
         state
     end
+  end
+
+  @spec notify_drained_sources(state()) :: state()
+  defp notify_drained_sources(state) do
+    Enum.reduce(Map.keys(state.drain_waiters), state, &notify_drained_source/2)
+  end
+
+  @spec notify_drained_source(ContributionCleanup.contribution_source(), state()) :: state()
+  defp notify_drained_source(source, current) do
+    case matching_leases(current, source, :_) do
+      [] -> notify_drain_waiters(current, source)
+      [_lease | _rest] -> current
+    end
+  end
+
+  @spec notify_drain_waiters(state(), ContributionCleanup.contribution_source()) :: state()
+  defp notify_drain_waiters(current, source) do
+    {waiters, remaining} = Map.pop(current.drain_waiters, source, [])
+
+    Enum.each(waiters, fn {recipient, ref} ->
+      send(recipient, {__MODULE__, :drained, source, ref})
+    end)
+
+    %{current | drain_waiters: remaining}
   end
 
   @spec matching_leases(state(), ContributionCleanup.contribution_source() | :_, module() | :_) ::

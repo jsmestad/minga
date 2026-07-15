@@ -246,9 +246,18 @@ graph TD
     INDEP --> TASKSUP["Eval.TaskSupervisor"]
     INDEP --> CMDREG["Command.Registry"]
     INDEP --> DIAG["Diagnostics"]
-    SVC --> EXTREG["Extension.Registry"]
+    SVC --> EXTREG["Extension.Registry<br/><i>declaration/status projection</i>"]
+    SVC --> EXTINFRA["Artifact admission, code leases,<br/>and callback registries"]
+    SVC --> INSTREG["Extension.InstanceRegistry<br/><i>stable process names</i>"]
+    SVC --> ROOTSUP["Extension.RootSupervisor<br/><i>DynamicSupervisor</i>"]
+    ROOTSUP --> ROOT1["Extension.Root: git_porcelain<br/><i>rest_for_one</i>"]
+    ROOT1 --> RTSUP1["RuntimeSupervisor<br/><i>temporary runtime children</i>"]
+    ROOT1 --> INST1["Instance<br/><i>lifecycle authority</i>"]
+    RTSUP1 --> EXT1["Extension runtime child"]
+    ROOTSUP --> ROOT2["Extension.Root: user_extension<br/><i>rest_for_one</i>"]
+    ROOT2 --> RTSUP2["RuntimeSupervisor"]
+    ROOT2 --> INST2["Instance"]
     SVC --> AGENTREG["Agent contribution registries"]
-    SVC --> EXTSUP["Extension.Supervisor"]
     SVC --> LOADER["Config.Loader"]
     SVC --> LSPSUP["LSP.Supervisor<br/><i>DynamicSupervisor</i>"]
     LSPSUP --> LSP1["LSP Client: elixir-ls"]
@@ -262,6 +271,14 @@ graph TD
 
     style SVC fill:#6c3483,stroke:#4a235a,color:#fff
     style INDEP fill:#6c3483,stroke:#4a235a,color:#fff
+    style ROOTSUP fill:#1a5276,stroke:#154360,color:#fff
+    style ROOT1 fill:#6c3483,stroke:#4a235a,color:#fff
+    style ROOT2 fill:#6c3483,stroke:#4a235a,color:#fff
+    style INST1 fill:#884ea0,stroke:#6c3483,color:#fff
+    style INST2 fill:#884ea0,stroke:#6c3483,color:#fff
+    style RTSUP1 fill:#1a5276,stroke:#154360,color:#fff
+    style RTSUP2 fill:#1a5276,stroke:#154360,color:#fff
+    style EXT1 fill:#2471a3,stroke:#1a5276,color:#fff
     style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
     style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
     style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
@@ -271,6 +288,8 @@ graph TD
     style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
     style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
 ```
+
+Each extension declaration gets one ordered root beneath `Minga.Extension.RootSupervisor`. The root starts its local `RuntimeSupervisor` before its permanent `Instance`, using `rest_for_one` so replacing the runtime supervisor also replaces the Instance only after an empty local runtime supervisor exists. An Instance crash leaves its own runtime supervisor in place, allowing the replacement Instance to adopt only that extension's local runtime. Runtime children never serve as lifecycle identities.
 
 `Minga.Project` only starts recursive file inventory for an explicit directory workspace root. Root paths are canonicalized before authorization so symlink aliases cannot bypass broad-root protection. Each inventory runs in a monitored `Minga.Project.FileFind.Worker` that owns the external `git`, `fd`, or `find` process, bounds command output, and enforces a timeout for synchronous callers. Switching or closing the workspace, timing out, or stopping the Project service waits for the worker to terminate the external process tree.
 
@@ -316,7 +335,7 @@ graph TD
 
 ### Why this structure matters
 
-The nested supervisors constrain blast radius. Losing your LSP connection doesn't affect editing. A plugin error doesn't corrupt your buffers. A filesystem watcher flake restarts only FileWatcher, not the renderer. The `rest_for_one` chains within Foundation and Services preserve real dependency ordering (Events → Config subscribers, Extension.Registry → Config.Loader) while preventing unrelated siblings from cascading into each other.
+The nested supervisors constrain blast radius. Losing your LSP connection doesn't affect editing. A plugin error doesn't corrupt your buffers. A filesystem watcher flake restarts only FileWatcher, not the renderer. The `rest_for_one` chains within Foundation and Services preserve real dependency ordering, including Events before Config subscribers and extension admission, callback, registry, and root authorities before Config.Loader, while preventing unrelated siblings from cascading into each other.
 
 The system degrades in pieces rather than failing all at once. The BEAM was designed for telecom systems that run for years without downtime. The same supervision engineering applies here.
 
@@ -859,7 +878,17 @@ The custom Credo check `Minga.Credo.DependencyDirectionCheck` enforces both maps
 
 Safety-critical ownership does not move to optional packs. Credentials, approval, plan-mode refusal, retry, cost, compaction, session orchestration, event and message types, `MingaAgent.ToolRouter`, changesets, buffer forks, edit boundaries, and extension callback code leases stay in Level 0 or Level 1.
 
-### Extension artifact ownership and callback admission
+### Extension lifecycle, artifact, and callback ownership
+
+Every declared extension has one stable `Minga.Extension.Instance` mailbox that serializes eager start, lazy or deferred activation, stop, failure rollback, runtime exit, restart, and unload. The runtime child PID is an observed implementation detail. `Minga.Extension.Registry` is only the compatible declaration and status projection: `Instance` publishes the current PID, status, module, manifest, and error from its tagged phase, while callers never consult registry lifecycle fields to decide the next transition. `Minga.Extension.Supervisor` remains the compatible public facade for bulk prerequisites and the existing start, stop, list, and deferred APIs, but routes individual lifecycle requests to the Instance.
+
+Each `Minga.Extension.Root(name)` is a `rest_for_one` supervisor whose first child is a local `Minga.Extension.RuntimeSupervisor(name)` and whose second child is the permanent Instance. The runtime supervisor handles child mechanics only. It forces every runtime child spec to `:temporary`; the Instance preserves and interprets the extension's original `:permanent`, `:transient`, or `:temporary` restart policy exactly once. Runtime exits arrive through the Instance monitor, so replacement publication and restart telemetry are event-driven. If an Instance crashes, its replacement may adopt only the sole child of its own local runtime supervisor. If that supervisor crashes, `rest_for_one` stops the old Instance and starts a new Instance against a new empty runtime supervisor.
+
+Source resolution, artifact identity, and runtime admission are separate boundaries. Module, Hex/application, and bundled trusted-application declarations adopt verified resident application inventories. Resolved Git and path declarations compile from bounded immutable snapshots, and deterministic JSON is the fallback only when a path contains no Elixir source. All paths converge on one immutable current-generation artifact containing the module, manifest, owned modules, normalized child spec, and declared restart policy. Artifact admission owns code provenance for the BEAM generation; the Instance owns whether that admitted artifact has a stub, is starting, running, stopping, failed, or stopped.
+
+Lazy command races and deferred work call the same Instance mailbox as eager startup. A lazy stub captures the admitted artifact, concurrent triggers join one start, and deferred work verifies the captured declaration identity before activation. Stop joins concurrent callers, queues a start that arrives during finalization, and retains explicit retry state if safe cleanup cannot complete. Editor-owned effect cancellation, unload callbacks, and presentation cleanup are requested by cast and acknowledged asynchronously, so the Editor never blocks its mailbox waiting for an Instance that is itself waiting for Editor finalization.
+
+Runtime stop, disable, and restart keep admitted modules resident. Source edits and Git updates only report pending restart state; they do not compile, purge, or replace live code in the current VM. The same rule applies after lazy admission and after failure cleanup. A fresh BEAM process is the only activation boundary for changed code.
 
 Path and Git source is copied from verified regular-file descriptors into a bounded private snapshot, and that same immutable snapshot supplies both the cache key and a standalone disposable compiler OS process. Standard output and error cross only a bounded, discarded byte Port; extension source shares no ETF-capable host control channel. Compiler reports use bounded descriptor-verified UTF-8 files. A separate standalone validator process structurally parses untrusted BEAM atom tables and compressed Attr/LitT ETF against a private artifact snapshot before semantic decoding. Inflation is streaming and bounded, actual and declared sizes must agree, every external term is consumed exactly, and atom/decompressed totals are enforced per artifact and inventory. `Minga.Extension.ArtifactInventory` receives bounded binary metadata before the host creates module atoms or loads code: module identity and filenames must agree, duplicate emissions and symlink/non-regular entries are rejected, cache manifests must be complete, and artifact count, per/total bytes, atoms, manifest bytes, and reserved host atom headroom are limited. This isolates host validation; trusted extension execution still has the OS user's filesystem and network authority. `Minga.Extension.ArtifactAdmission` then claims the full set atomically for one source. Host/application and cross-extension collisions fail before any artifact is loaded. Cache hits and misses use this same admission path.
 

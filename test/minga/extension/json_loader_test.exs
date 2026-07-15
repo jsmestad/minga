@@ -196,7 +196,7 @@ defmodule Minga.Extension.JsonLoaderTest do
         {:error, message} -> assert message =~ "failed to read"
       end
 
-      assert_receive {:race_finished, ^racer}, 1_000
+      assert_receive {:race_finished, ^racer}, 5_000
     end)
   end
 

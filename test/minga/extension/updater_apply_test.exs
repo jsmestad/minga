@@ -44,8 +44,8 @@ defmodule Minga.Extension.UpdaterApplyTest do
 
     git!(root, ["init", "--bare", origin])
     git!(root, ["clone", origin, work])
-    git!(work, ["config", "user.email", "justin.smestad@gmail.com"])
-    git!(work, ["config", "user.name", "Justin Smestad"])
+    git!(work, ["config", "user.email", git_config("user.email", "minga-tests@example.invalid")])
+    git!(work, ["config", "user.name", git_config("user.name", "Minga Tests")])
     git!(work, ["config", "commit.gpgsign", "false"])
     File.write!(Path.join(work, "version.txt"), "v1")
     git!(work, ["add", "version.txt"])
@@ -127,6 +127,14 @@ defmodule Minga.Extension.UpdaterApplyTest do
 
     assert {:ok, ^admitted_before} =
              ArtifactAdmission.source_modules(admission_source, server: admission)
+  end
+
+  @spec git_config(String.t(), String.t()) :: String.t()
+  defp git_config(key, fallback) do
+    case System.cmd("git", ["config", "--get", key], stderr_to_stdout: true) do
+      {value, 0} -> String.trim(value)
+      {_output, _status} -> fallback
+    end
   end
 
   defp git!(directory, args) do

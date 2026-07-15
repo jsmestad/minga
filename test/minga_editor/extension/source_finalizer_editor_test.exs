@@ -23,6 +23,8 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
   defmodule RootPickerExtension do
     use Minga.Extension
 
+    @unload_attempts :source_finalizer_unload_attempts
+
     command(:open_differently_nested_picker, "Open extension picker",
       execute: {__MODULE__, :open_picker}
     )
@@ -52,13 +54,27 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     @spec handle_editor_event(
             MingaEditor.State.t(),
             MingaEditor.Extension.EventHandler.event()
-          ) :: MingaEditor.Extension.EventHandler.callback_result()
+          ) :: MingaEditor.Extension.EventHandler.callback_result() | :invalid_unload_return
     def handle_editor_event(state, {:source_unload, {:extension, :finalized_picker}}) do
-      theme = MingaEditor.UI.Theme.get!(:doom_one)
-      {:handled, MingaEditor.State.apply_theme(state, theme)}
+      case Process.whereis(@unload_attempts) do
+        nil ->
+          apply_unload_theme(state)
+
+        _pid ->
+          case Agent.get_and_update(@unload_attempts, &{&1, &1 + 1}) do
+            0 -> :invalid_unload_return
+            _attempt -> apply_unload_theme(state)
+          end
+      end
     end
 
     def handle_editor_event(_state, _event), do: :not_matched
+
+    @spec apply_unload_theme(MingaEditor.State.t()) :: {:handled, MingaEditor.State.t()}
+    defp apply_unload_theme(state) do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      {:handled, MingaEditor.State.apply_theme(state, theme)}
+    end
   end
 
   defmodule Remote.Picker do
@@ -265,6 +281,64 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     unrelated_monitor = Process.monitor(unrelated_worker)
     assert :ok = EffectScheduler.cancel_source(scheduler, unrelated_source)
     assert_receive {:DOWN, ^unrelated_monitor, :process, ^unrelated_worker, _reason}
+    _barrier = :sys.get_state(ctx.editor)
+  end
+
+  test "Editor unload callback failure reaches Instance and preserves retry semantics" do
+    {:ok, attempts} = Agent.start_link(fn -> 0 end, name: :source_finalizer_unload_attempts)
+    on_exit(fn -> if Process.alive?(attempts), do: Agent.stop(attempts) end)
+    :ok = ExtensionRegistry.unregister(:finalized_picker)
+    :ok = ExtensionRegistry.register_module(:finalized_picker, RootPickerExtension, [])
+    {:ok, entry} = ExtensionRegistry.get(:finalized_picker)
+    ctx = start_editor("scratch", name: MingaEditor)
+
+    assert {:ok, runtime} =
+             ExtensionSupervisor.start_extension(
+               ExtensionSupervisor,
+               ExtensionRegistry,
+               :finalized_picker,
+               entry,
+               runtime_owned_modules: callback_modules()
+             )
+
+    source = {:extension, :finalized_picker}
+
+    callback_failure =
+      {:invalid_return, source, RootPickerExtension, :handle_editor_event, :invalid_unload_return}
+
+    finalizer_failure = %{
+      family: :editor_extension_unload,
+      source: source,
+      reason: [callback_failure]
+    }
+
+    assert {:error, {:source_quiesce_failed, ^finalizer_failure}} =
+             ExtensionSupervisor.stop_extension(
+               ExtensionSupervisor,
+               ExtensionRegistry,
+               :finalized_picker,
+               entry,
+               runtime_owned_modules: callback_modules()
+             )
+
+    assert {:ok, ^runtime} =
+             Minga.Extension.RuntimeSupervisor.local_child(
+               Minga.Extension.InstanceRegistry.via(
+                 Minga.Extension.InstanceRegistry,
+                 :runtime,
+                 :finalized_picker
+               )
+             )
+
+    assert :ok =
+             ExtensionSupervisor.stop_extension(
+               ExtensionSupervisor,
+               ExtensionRegistry,
+               :finalized_picker,
+               entry,
+               runtime_owned_modules: callback_modules()
+             )
+
     _barrier = :sys.get_state(ctx.editor)
   end
 

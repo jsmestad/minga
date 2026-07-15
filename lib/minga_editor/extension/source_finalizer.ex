@@ -2,9 +2,9 @@ defmodule MingaEditor.Extension.SourceFinalizer do
   @moduledoc """
   Finalizes Editor-owned work and presentation for one contribution source.
 
-  Extension cleanup calls this workflow before the source is considered
-  disabled. The generation-owned effect scheduler is drained synchronously
-  first; only then may the live picker owned by that source be dismissed.
+  Extension cleanup requests this workflow asynchronously and waits for an
+  explicit Editor acknowledgement outside the lifecycle authority mailbox. The
+  generation-owned effect scheduler drains before source presentation is removed.
   """
 
   alias Minga.Extension.CallbackInvoker
@@ -72,7 +72,7 @@ defmodule MingaEditor.Extension.SourceFinalizer do
 
   @doc "Runs source-filtered unload callbacks and preserves their last successful state."
   @spec finalize_unload(EditorState.t(), CallbackInvoker.source(), unload_context()) ::
-          {:ok, EditorState.t()}
+          {:ok, EditorState.t()} | {{:error, term()}, EditorState.t()}
   def finalize_unload(%EditorState{} = state, {:extension, _name} = source, context) do
     token = Map.fetch!(context, :token)
     registry = Map.get(context, :callback_registry, CallbackRegistry.default_table())
@@ -80,7 +80,7 @@ defmodule MingaEditor.Extension.SourceFinalizer do
 
     case EventDispatcher.dispatch_source_unload(state, source, token, registry, admission) do
       {:ok, updated_state} -> {:ok, updated_state}
-      {:error, _failures, updated_state} -> {:ok, updated_state}
+      {:error, failures, updated_state} -> {{:error, failures}, updated_state}
     end
   end
 
@@ -95,15 +95,26 @@ defmodule MingaEditor.Extension.SourceFinalizer do
 
   @spec call_editor(pid(), source()) :: result()
   defp call_editor(pid, source) do
-    GenServer.call(pid, {:finalize_extension_source, source}, :infinity)
-  catch
-    :exit, reason -> {:error, {:editor_unavailable, reason}}
+    request_editor(pid, {:finalize_extension_source_request, source})
   end
 
   @spec call_editor_unload(pid(), source(), unload_context()) :: result()
   defp call_editor_unload(pid, source, context) do
-    GenServer.call(pid, {:unload_extension_source, source, context}, :infinity)
-  catch
-    :exit, reason -> {:error, {:editor_unavailable, reason}}
+    request_editor(pid, {:unload_extension_source_request, source, context})
+  end
+
+  @spec request_editor(pid(), tuple()) :: result()
+  defp request_editor(pid, request) do
+    ref = Process.monitor(pid)
+    GenServer.cast(pid, Tuple.insert_at(request, tuple_size(request), {self(), ref}))
+
+    receive do
+      {:extension_source_finalized, ^ref, result} ->
+        Process.demonitor(ref, [:flush])
+        result
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        {:error, {:editor_unavailable, reason}}
+    end
   end
 end

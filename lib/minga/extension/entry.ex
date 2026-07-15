@@ -35,7 +35,6 @@ defmodule Minga.Extension.Entry do
     :pid,
     :manifest,
     :last_error,
-    lifecycle_ref: nil,
     config: [],
     status: :stopped,
     load_policy: nil
@@ -50,7 +49,6 @@ defmodule Minga.Extension.Entry do
           pid: pid() | nil,
           manifest: Extension.Manifest.t() | nil,
           last_error: term() | nil,
-          lifecycle_ref: reference() | nil,
           config: keyword(),
           status: Extension.extension_status(),
           load_policy: Extension.load_policy() | nil

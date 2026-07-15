@@ -415,7 +415,7 @@ defmodule Minga.Config.Loader do
         plugin_error = discover_and_register_plugins(config_home)
 
         start_all_error =
-          if Process.whereis(Minga.Extension.Supervisor) != nil &&
+          if Process.whereis(Minga.Extension.RootSupervisor) != nil &&
                Application.get_env(:minga, :load_extensions, true) do
             start_all_extensions(cleanup_callbacks)
           end
