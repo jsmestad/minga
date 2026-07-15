@@ -774,14 +774,22 @@ defmodule MingaEditor.Commands do
 
   @doc "Returns the existing buffer for a file path, or starts one if needed."
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
+  def start_buffer(file_path), do: start_buffer(file_path, nil, [])
+
   @spec start_buffer(String.t(), Minga.Config.Options.server() | nil) ::
           {:ok, pid()} | {:error, term()}
-  def start_buffer(file_path, options_server \\ nil) do
+  def start_buffer(file_path, options_server), do: start_buffer(file_path, options_server, [])
+
+  @spec start_buffer(String.t(), Minga.Config.Options.server() | nil, keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  def start_buffer(file_path, options_server, opts) do
     options_server = normalize_options_server(options_server)
+    history_attribution = Keyword.get(opts, :history_attribution, :active_workspace)
 
     MingaEditor.HugeFile.guard(file_path, options_server, fn ->
       Buffer.ensure_for_path(file_path, Minga.Events.default_registry(),
-        options_server: options_server
+        options_server: options_server,
+        history_attribution: history_attribution
       )
     end)
   end

@@ -159,7 +159,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp open_selected_file({:ok, abs_path}, candidate, state) do
     case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil ->
-        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
+        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server,
+               history_attribution: :caller_managed
+             ) do
           {:ok, pid} ->
             Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
             new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)

@@ -492,6 +492,14 @@ defmodule Minga.Project do
     {:noreply, clear_rebuild(state)}
   end
 
+  def handle_info(
+        {:minga_event, :buffer_opened,
+         %Minga.Events.BufferEvent{history_attribution: :caller_managed}},
+        state
+      ) do
+    {:noreply, state}
+  end
+
   def handle_info({:minga_event, :buffer_opened, %Minga.Events.BufferEvent{path: path}}, state) do
     {:noreply, do_record_file(state, path)}
   end

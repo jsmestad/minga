@@ -155,6 +155,44 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     assert Project.frecency_scores()["single.txt"] > 0
   end
 
+  test "a stale nested-root candidate attributes a new buffer open only to its captured root", %{
+    tmp_dir: tmp_dir
+  } do
+    project_b = Path.join(tmp_dir, "live_project")
+    project_a = Path.join(project_b, "stale_nested_project")
+    relative_path = "nested.txt"
+    absolute_path = Path.join(project_a, relative_path)
+
+    File.mkdir_p!(project_a)
+    File.write!(absolute_path, "nested")
+    {:ok, root_a} = Root.directory(project_a)
+    {:ok, root_b} = Root.directory(project_b)
+    {:ok, stale_candidate} = ProjectFileCandidate.new(root_a, relative_path)
+
+    activate_project!(root_b)
+
+    initial_state =
+      TestHelpers.base_state(content: "initial")
+      |> set_file_tree(%FileTree{project_root: project_b})
+
+    selected_state =
+      FileSource.on_select(
+        %Picker.Item{id: stale_candidate, label: relative_path},
+        initial_state
+      )
+
+    on_exit(fn -> stop_added_buffers(selected_state, initial_state) end)
+    _ = :sys.get_state(Project)
+
+    assert Minga.Buffer.file_path(selected_state.workspace.buffers.active) == absolute_path
+    assert Project.recent_files() == []
+    assert Project.frecency_scores() == %{}
+
+    activate_project!(root_a)
+    assert Project.recent_files() == [relative_path]
+    assert Project.frecency_scores() == %{relative_path => 100}
+  end
+
   @spec activate_project!(Root.t()) :: :ok
   defp activate_project!(%Root{path: path} = root) do
     Minga.Events.subscribe(:project_rebuilt)
