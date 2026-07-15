@@ -50,14 +50,12 @@ defmodule MingaEditor.Handlers.Notifications do
   defp put_notification(state, %Notification{} = notification) do
     notification = maybe_schedule_notification_dismiss(notification, state.frontend.backend)
 
-    state
-    |> log_notification(notification)
-    |> then(fn state ->
-      %{
-        state
-        | feedback: MingaEditor.State.Feedback.upsert_notification(state.feedback, notification)
-      }
-    end)
+    state = log_notification(state, notification)
+
+    %{
+      state
+      | feedback: MingaEditor.State.Feedback.upsert_notification(state.feedback, notification)
+    }
   end
 
   @spec maybe_schedule_notification_dismiss(Notification.t(), EditorState.backend()) ::

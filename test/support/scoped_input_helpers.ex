@@ -95,7 +95,7 @@ defmodule Minga.Test.ScopedInputHelpers do
         1,
         file_buffer,
         state.workspace.windows,
-        EditorState.file_tree_state(state),
+        state.workspace.file_tree,
         :editor,
         false
       )
@@ -104,7 +104,7 @@ defmodule Minga.Test.ScopedInputHelpers do
       UIState.activate(
         state.workspace.agent_ui,
         state.workspace.windows,
-        EditorState.file_tree_state(state),
+        state.workspace.file_tree,
         return_target
       )
 
@@ -112,31 +112,27 @@ defmodule Minga.Test.ScopedInputHelpers do
     {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent", session)
     workspace = Workspace.set_agent_ui(workspace, agent_ui)
 
+    agent_tab = agent_tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
+
     tab_bar =
       tab_bar
-      |> TabBar.update_workspace(workspace.id, fn _ -> workspace end)
-      |> TabBar.update_tab(agent_tab.id, fn tab ->
-        tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
-      end)
+      |> TabBar.accept_workspace(workspace)
+      |> TabBar.accept_tab(agent_tab)
 
     workspace_state = %{state.workspace | agent_ui: agent_ui, keymap_scope: :agent}
 
-    state =
-      state
-      |> then(fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            tab_bar
-          )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tab_bar
+      )
 
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
-      |> then(fn state -> %{state | workspace: workspace_state} end)
+    state = %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state),
+        workspace: workspace_state
+    }
 
     {state, session, file_buffer}
   end
@@ -174,7 +170,7 @@ defmodule Minga.Test.ScopedInputHelpers do
   end
 
   @spec ft(EditorState.t()) :: FileTreeState.t()
-  def ft(state), do: EditorState.file_tree_state(state)
+  def ft(state), do: state.workspace.file_tree
 
   @spec walk_surface_mouse(
           EditorState.t(),

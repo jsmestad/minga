@@ -114,6 +114,24 @@ defmodule MingaEditor.Session.State do
   @spec active_window_struct(t()) :: Window.t() | nil
   def active_window_struct(%__MODULE__{windows: ws}), do: Windows.active_struct(ws)
 
+  @doc "Returns the focused window viewport or the supplied terminal fallback."
+  @spec current_viewport(t(), Viewport.t()) :: Viewport.t()
+  def current_viewport(%__MODULE__{} = workspace, %Viewport{} = fallback) do
+    case active_window_struct(workspace) do
+      %Window{viewport: viewport} -> viewport
+      nil -> fallback
+    end
+  end
+
+  @doc "Finds the semantic agent chat window, when one exists."
+  @spec find_agent_chat_window(t()) :: {Window.id(), Window.t()} | nil
+  def find_agent_chat_window(%__MODULE__{windows: windows}) do
+    Enum.find_value(windows.map, fn
+      {id, %Window{content: {:agent_chat, _}} = window} -> {id, window}
+      _other -> nil
+    end)
+  end
+
   @doc "Returns true if the workspace has more than one window."
   @spec split?(t()) :: boolean()
   def split?(%__MODULE__{windows: ws}), do: Windows.split?(ws)
@@ -629,6 +647,12 @@ defmodule MingaEditor.Session.State do
   @spec set_agent_ui(t(), UIState.t()) :: t()
   def set_agent_ui(%__MODULE__{} = wspace, agent_ui) do
     %{wspace | agent_ui: agent_ui}
+  end
+
+  @doc "Forgets a retired process when it owns the agent prompt buffer."
+  @spec retire_agent_prompt_buffer(t(), pid()) :: t()
+  def retire_agent_prompt_buffer(%__MODULE__{} = workspace, pid) when is_pid(pid) do
+    %{workspace | agent_ui: UIState.retire_prompt_buffer(workspace.agent_ui, pid)}
   end
 
   @doc "Sets or clears the launchpad (zero-buffers empty state)."

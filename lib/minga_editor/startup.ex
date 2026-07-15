@@ -218,20 +218,17 @@ defmodule MingaEditor.Startup do
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
-    state =
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            initial_tab_bar(active_buf, keymap_scope, project_root)
-          )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        initial_tab_bar(active_buf, keymap_scope, project_root)
+      )
 
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
+    state = %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
 
     state =
       case agent_state_update do
@@ -245,23 +242,21 @@ defmodule MingaEditor.Startup do
     # Snapshot the fully assembled state into the initial tab's context.
     # Without this, the first tab starts with an empty context, and
     # restore_tab_context falls back to file defaults (wrong for agent tabs).
-    context = EditorState.snapshot_tab_context(state)
+    context = MingaEditor.State.Tab.Context.snapshot(state.workspace)
     current_tb = state.shell_runtime.state.tab_bar
     tb = TabBar.update_context(current_tb, current_tb.active_id, context)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   @spec rendering_policy(keyword()) :: EditorState.rendering_policy()

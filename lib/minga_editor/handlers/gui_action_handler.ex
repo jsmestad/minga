@@ -43,6 +43,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Session.State
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.Window
 
   alias MingaEditor.State, as: EditorState
@@ -116,12 +117,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     LspSupervisor.restart_all_clients()
     LspSyncServer.resync_buffers(buffers_for_lsp_resync(state))
 
-    state
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
-    |> Layout.invalidate()
-    |> Renderer.render_or_async()
+    workspace = State.invalidate_all_windows(state.workspace)
+    state = %{state | workspace: workspace}
+    state |> Layout.invalidate() |> Renderer.render_or_async()
   end
 
   defp dispatch_action(state, {:system_will_unmount, volume_path}) do
@@ -290,7 +288,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:select_tab, id}) do
-    EditorState.switch_tab(state, id)
+    MingaEditor.TabWorkflow.switch(state, id)
   end
 
   defp dispatch_action(state, {:tab_copy_path, id}) do
@@ -325,9 +323,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     # Delegate to the shell: Traditional switches to the target tab when needed; tab-bar-less shells return unchanged.
     state = handle_shell_gui_action(state, {:close_tab, id})
 
-    # Only close the buffer when the shell has a tab bar.
-    # EditorState.active_tab/1 returns nil when there are no tabs.
-    case EditorState.active_tab(state) do
+    # Only close the buffer when the active shell exposes a tab.
+    # The shell runtime returns nil when there are no tabs.
+    case MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) do
       # Closing the last file tab lands on the launchpad, never quits the
       # app (#2689): kill the buffer so the empty state has zero buffers.
       %MingaEditor.State.Tab{kind: :file} ->
@@ -438,19 +436,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:toggle_panel, 1}) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_bottom_panel(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_bottom_panel(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp dispatch_action(state, {:toggle_panel, 2}) do
@@ -488,57 +484,51 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:panel_switch_tab, tab_index}) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_bottom_panel(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.BottomPanel.switch_tab(
-            state.shell_runtime.state.bottom_panel,
-            tab_index
-          )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_bottom_panel(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        MingaEditor.BottomPanel.switch_tab(
+          state.shell_runtime.state.bottom_panel,
+          tab_index
         )
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp dispatch_action(state, :panel_dismiss) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_bottom_panel(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.BottomPanel.dismiss(state.shell_runtime.state.bottom_panel)
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_bottom_panel(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        MingaEditor.BottomPanel.dismiss(state.shell_runtime.state.bottom_panel)
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp dispatch_action(state, {:panel_resize, height_percent}) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_bottom_panel(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.BottomPanel.resize(
-            state.shell_runtime.state.bottom_panel,
-            height_percent
-          )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_bottom_panel(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        MingaEditor.BottomPanel.resize(
+          state.shell_runtime.state.bottom_panel,
+          height_percent
         )
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp dispatch_action(state, {:open_file, path}) do
@@ -720,17 +710,21 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:workspace_close, _ws_id} = action) do
+    transitioned = handle_shell_gui_action(state, action)
+
     state
-    |> handle_shell_gui_action(action)
-    |> EditorState.sync_agent_ui_from_active_workspace()
+    |> WorkspaceWorkflow.persist_changes(transitioned)
+    |> MingaEditor.TabWorkflow.sync_active_workspace_agent_ui()
   end
 
   defp dispatch_action(state, {:workspace_rename, _ws_id, _name} = action) do
-    handle_shell_gui_action(state, action)
+    transitioned = handle_shell_gui_action(state, action)
+    WorkspaceWorkflow.persist_changes(state, transitioned)
   end
 
   defp dispatch_action(state, {:workspace_set_icon, _ws_id, _icon} = action) do
-    handle_shell_gui_action(state, action)
+    transitioned = handle_shell_gui_action(state, action)
+    WorkspaceWorkflow.persist_changes(state, transitioned)
   end
 
   defp dispatch_action(state, {:space_leader_chord, codepoint, modifiers}) do
@@ -1039,10 +1033,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         action
       )
 
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state -> %{state | workspace: workspace} end)
-    |> after_shell_gui_action(shell, action)
+    state = %{state | shell_runtime: runtime, workspace: workspace}
+    after_shell_gui_action(state, shell, action)
   end
 
   @spec after_shell_gui_action(EditorState.t(), module(), term()) :: EditorState.t()
@@ -1136,62 +1128,39 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec focus_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
   defp focus_visible_sidebar(state, "file_tree") do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.focus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
-      }
-    end)
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    file_tree = FileTreeState.focus(state.workspace.file_tree)
+
+    workspace =
+      state.workspace
+      |> State.set_file_tree(file_tree)
+      |> State.set_keymap_scope(:file_tree)
+
+    state = %{state | workspace: workspace}
+    state = Layout.invalidate(state)
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   defp focus_visible_sidebar(state, "git_status") do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_keymap_scope(state.workspace, :git_status)
-      }
-    end)
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    workspace = State.set_keymap_scope(state.workspace, :git_status)
+    state = %{state | workspace: workspace}
+    state = Layout.invalidate(state)
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   defp focus_visible_sidebar(state, "observatory") do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.unfocus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{state | workspace: State.set_keymap_scope(state.workspace, :editor)}
-    end)
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    file_tree = FileTreeState.unfocus(state.workspace.file_tree)
+
+    workspace =
+      state.workspace
+      |> State.set_file_tree(file_tree)
+      |> State.set_keymap_scope(:editor)
+
+    state = %{state | workspace: workspace}
+    state = Layout.invalidate(state)
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   @spec remember_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
@@ -1205,8 +1174,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec sidebar_visible?(EditorState.t(), String.t()) :: boolean()
   defp sidebar_visible?(state, "file_tree") do
-    state
-    |> EditorState.file_tree_state()
+    state.workspace.file_tree
     |> FileTreeState.status()
     |> FileTreeState.visible_status?()
   end
@@ -1629,20 +1597,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec unfocus_file_tree_for_split(state()) :: state()
   defp unfocus_file_tree_for_split(state) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&MingaEditor.State.FileTree.unfocus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{state | workspace: State.set_keymap_scope(state.workspace, :editor)}
-    end)
+    file_tree = MingaEditor.State.FileTree.unfocus(state.workspace.file_tree)
+
+    workspace =
+      state.workspace
+      |> State.set_file_tree(file_tree)
+      |> State.set_keymap_scope(:editor)
+
+    %{state | workspace: workspace}
   end
 
   # ── Hover open action ──────────────────────────────────────────────
@@ -1682,9 +1644,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         action
       )
 
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state -> %{state | workspace: workspace} end)
+    %{state | shell_runtime: runtime, workspace: workspace}
   end
 
   # ── Tab helpers ───────────────────────────────────────────────────
@@ -1700,22 +1660,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     case state.shell_runtime.state.tab_bar do
       %TabBar{} = tb ->
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              fun.(tb)
-            )
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(state.shell_runtime),
+            fun.(tb)
+          )
 
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
+        %{
+          state
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(
+                state.shell_runtime,
+                shell_state
+              )
+        }
 
       nil ->
         state

@@ -6,7 +6,6 @@ defmodule MingaEditor.FileTree.FeatureTest do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -121,7 +120,7 @@ defmodule MingaEditor.FileTree.FeatureTest do
       end)
 
     state = MingaEditor.Commands.FileTree.toggle(state)
-    file_tree = EditorState.file_tree_state(state)
+    file_tree = state.workspace.file_tree
 
     assert file_tree.tree.root == Path.expand(missing_root)
     assert {:error, reason} = FileTreeState.status(file_tree)
@@ -152,10 +151,10 @@ defmodule MingaEditor.FileTree.FeatureTest do
         %{state | workspace: then(state.workspace, &MingaEditor.Session.State.drop_file_tree/1)}
       end)
 
-    assert EditorState.file_tree_state(state).tree == nil
+    assert state.workspace.file_tree.tree == nil
 
     state = MingaEditor.Commands.FileTree.toggle(state)
 
-    assert %FileTree{} = EditorState.file_tree_state(state).tree
+    assert %FileTree{} = state.workspace.file_tree.tree
   end
 end

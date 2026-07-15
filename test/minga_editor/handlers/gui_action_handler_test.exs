@@ -22,7 +22,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window
   alias MingaEditor.State.ExtensionSurfaces
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -32,12 +31,14 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.Notification
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
   alias Minga.Project.FileTree, as: ProjectFileTree
+  alias MingaEditor.WorkspaceWorkflow
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -113,20 +114,20 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       end)
 
     pinned = GuiActionHandler.dispatch(state, {:tab_pin, 3})
-    pinned_tab_bar = EditorState.tab_bar(pinned)
+    pinned_tab_bar = pinned.shell_runtime.state.tab_bar
 
     assert pinned_tab_bar.active_id == 1
     assert TabBar.get(pinned_tab_bar, 3).pinned?
     assert Enum.map(TabBar.visible_file_tabs(pinned_tab_bar), & &1.id) == [3, 1, 2]
 
     moved = GuiActionHandler.dispatch(pinned, {:tab_move_left, 2})
-    moved_tab_bar = EditorState.tab_bar(moved)
+    moved_tab_bar = moved.shell_runtime.state.tab_bar
 
     assert moved_tab_bar.active_id == 1
     assert Enum.map(TabBar.visible_file_tabs(moved_tab_bar), & &1.id) == [3, 2, 1]
 
     unpinned = GuiActionHandler.dispatch(moved, {:tab_unpin, 3})
-    unpinned_tab_bar = EditorState.tab_bar(unpinned)
+    unpinned_tab_bar = unpinned.shell_runtime.state.tab_bar
 
     assert unpinned_tab_bar.active_id == 1
     refute TabBar.get(unpinned_tab_bar, 3).pinned?
@@ -161,8 +162,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     switched = GuiActionHandler.dispatch(state, {:execute_command, "workspace_goto_id:7"})
 
-    assert EditorState.tab_bar(switched).active_id == 2
-    assert TabBar.active_workspace_id(EditorState.tab_bar(switched)) == 7
+    assert switched.shell_runtime.state.tab_bar.active_id == 2
+    assert TabBar.active_workspace_id(switched.shell_runtime.state.tab_bar) == 7
   end
 
   test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do
@@ -237,7 +238,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         {:sidebar_action, "file_tree", "file_tree", "activate"}
       )
 
-    assert EditorState.file_tree_state(focused).focused
+    assert focused.workspace.file_tree.focused
     assert focused.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(focused) == "file_tree"
 
@@ -247,7 +248,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     # Toggling off now hides the sidebar without tearing down the tree (#2626):
     # the data stays loaded so re-showing is a pure layout change, but the
     # sidebar is no longer visible/focused and its contribution is deregistered.
-    hidden_state = EditorState.file_tree_state(hidden)
+    hidden_state = hidden.workspace.file_tree
     assert hidden_state.tree != nil
     refute FileTreeState.visible?(hidden_state)
     refute hidden_state.focused
@@ -614,6 +615,80 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
       assert UIState.set_pinned(unpinned, true).panel.scroll.offset == 3
     end
+  end
+
+  @tag :tmp_dir
+  test "GUI workspace close, rename, and icon actions persist their durable transitions", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    state = base_state(table)
+    initial_tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "file.ex"))
+    {tab_bar, workspace} = TabBar.add_workspace(initial_tab_bar, "Agent")
+    workspace = Workspace.with_project_root(workspace, root)
+    tab_bar = TabBar.accept_workspace(tab_bar, workspace)
+    state = WorkspaceWorkflow.install_tab_bar(state, tab_bar)
+    path = WorkspacePersistence.path_for(root, workspace.id)
+    assert :ok = WorkspacePersistence.write(workspace, root)
+    assert File.exists?(path)
+
+    renamed = GuiActionHandler.dispatch(state, {:workspace_rename, workspace.id, "Renamed"})
+    assert {:ok, persisted} = WorkspacePersistence.read(path, root)
+    assert persisted.label == "Renamed"
+
+    assert TabBar.get_workspace(renamed.shell_runtime.state.tab_bar, workspace.id).label ==
+             "Renamed"
+
+    reiconed = GuiActionHandler.dispatch(renamed, {:workspace_set_icon, workspace.id, "sparkles"})
+    assert {:ok, persisted} = WorkspacePersistence.read(path, root)
+    assert persisted.icon == "sparkles"
+
+    assert TabBar.get_workspace(reiconed.shell_runtime.state.tab_bar, workspace.id).icon ==
+             "sparkles"
+
+    closed = GuiActionHandler.dispatch(reiconed, {:workspace_close, workspace.id})
+    refute File.exists?(path)
+    refute TabBar.get_workspace(closed.shell_runtime.state.tab_bar, workspace.id)
+  end
+
+  @tag :tmp_dir
+  test "GUI persistence errors are logged without rolling back visible state", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    invalid_root = Path.join(root, "missing")
+    state = base_state(table)
+    initial_tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "file.ex"))
+    {tab_bar, workspace} = TabBar.add_workspace(initial_tab_bar, "Agent")
+    workspace = Workspace.with_project_root(workspace, invalid_root)
+    tab_bar = TabBar.accept_workspace(tab_bar, workspace)
+
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        Runtime.state(state.shell_runtime),
+        tab_bar
+      )
+
+    state = %{
+      state
+      | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+
+    parent = self()
+
+    log =
+      capture_log(fn ->
+        result = GuiActionHandler.dispatch(state, {:workspace_rename, workspace.id, "Visible"})
+        send(parent, {:gui_persistence_result, result})
+      end)
+
+    assert_receive {:gui_persistence_result, result}
+
+    assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace.id).label ==
+             "Visible"
+
+    assert log =~ "Workspace persistence write failed"
+    assert log =~ "invalid_project_root"
   end
 
   defp base_state(sidebar_registry, opts \\ []) do

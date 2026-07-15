@@ -119,6 +119,8 @@ defmodule MingaEditor.LspActions do
   end
 
   def find_references(%{workspace: %{buffers: %{active: buf}}} = state) do
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+
     case lsp_client_for(state, buf) do
       nil ->
         NoticeWorkflow.publish(state, "No language server")
@@ -313,6 +315,8 @@ defmodule MingaEditor.LspActions do
   end
 
   def rename(%{workspace: %{buffers: %{active: buf}}} = state, new_name) do
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+
     case lsp_client_for(state, buf) do
       nil ->
         NoticeWorkflow.publish(state, "No language server")
@@ -719,7 +723,7 @@ defmodule MingaEditor.LspActions do
   # active window transition boundary; render-shaped maps carry the frontend viewport directly.
   @spec effective_viewport_top(state()) :: non_neg_integer()
   defp effective_viewport_top(%EditorState{} = state) do
-    EditorState.current_viewport(state).top
+    MingaEditor.Session.State.current_viewport(state.workspace, state.frontend.terminal_viewport).top
   end
 
   defp effective_viewport_top(state), do: state.frontend.terminal_viewport.top
@@ -1019,23 +1023,20 @@ defmodule MingaEditor.LspActions do
         }
 
       {uri, line, col} ->
-        state
-        |> jump_to_location(uri, line, col)
-        |> then(fn state ->
-          %{
-            state
-            | feedback:
-                Feedback.accept_operation_feedback(
-                  state.feedback,
-                  OperationFeedback.finish(
-                    state.feedback.operation_feedback,
-                    operation_id,
-                    :success,
-                    "Reference found"
-                  )
-                )
-          }
-        end)
+        state = jump_to_location(state, uri, line, col)
+
+        feedback =
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :success,
+              "Reference found"
+            )
+          )
+
+        %{state | feedback: feedback}
     end
   end
 
@@ -1065,23 +1066,21 @@ defmodule MingaEditor.LspActions do
   defp finish_references_picker(state, operation_id, items) do
     count = Enum.count(items)
 
-    state
-    |> PickerUI.open(LocationSource, %{locations: items, title: "References (#{count})"})
-    |> then(fn state ->
-      %{
-        state
-        | feedback:
-            Feedback.accept_operation_feedback(
-              state.feedback,
-              OperationFeedback.finish(
-                state.feedback.operation_feedback,
-                operation_id,
-                :success,
-                "Found #{count} references"
-              )
-            )
-      }
-    end)
+    state =
+      PickerUI.open(state, LocationSource, %{locations: items, title: "References (#{count})"})
+
+    feedback =
+      Feedback.accept_operation_feedback(
+        state.feedback,
+        OperationFeedback.finish(
+          state.feedback.operation_feedback,
+          operation_id,
+          :success,
+          "Found #{count} references"
+        )
+      )
+
+    %{state | feedback: feedback}
   end
 
   # ── Document highlight response ───────────────────────────────────────────
@@ -1886,7 +1885,7 @@ defmodule MingaEditor.LspActions do
 
   @spec active_tab_id(state()) :: pos_integer() | nil
   defp active_tab_id(state) do
-    case EditorState.active_tab(state) do
+    case MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) do
       %{id: id} -> id
       nil -> nil
     end

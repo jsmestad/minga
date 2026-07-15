@@ -23,6 +23,7 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Git, as: GitState
   alias Minga.Git
   alias Minga.Git.MergeConflict
   alias Minga.Git.MergeConflict.Region
@@ -90,10 +91,10 @@ defmodule MingaGitPorcelain.Commands do
 
   def execute(state, :git_status_toggle) do
     if state.workspace.keymap_scope == :git_status do
+      workspace = MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+      state = %{state | workspace: workspace}
+
       state
-      |> then(fn state ->
-        %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
-      end)
       |> SidebarWorkflow.close_git_status()
       |> Layout.invalidate()
       |> invalidate_all_windows()
@@ -257,7 +258,7 @@ defmodule MingaGitPorcelain.Commands do
   def execute(state, :git_stage_hunk) do
     active_buf = state.workspace.buffers.active
 
-    case EditorState.diff_view_info(state, active_buf) do
+    case GitState.diff_view_info(state.git, active_buf) do
       nil -> stage_hunk_from_source_buffer(state)
       diff_info -> stage_hunk_from_diff_view(state, active_buf, diff_info)
     end
@@ -328,7 +329,7 @@ defmodule MingaGitPorcelain.Commands do
   def execute(state, :git_revert_hunk) do
     active_buf = state.workspace.buffers.active
 
-    case EditorState.diff_view_info(state, active_buf) do
+    case GitState.diff_view_info(state.git, active_buf) do
       nil -> revert_hunk_from_source_buffer(state)
       diff_info -> revert_hunk_from_diff_view(state, active_buf, diff_info)
     end
@@ -530,7 +531,7 @@ defmodule MingaGitPorcelain.Commands do
   # Mutual exclusivity: close file tree when opening git status.
   @spec close_file_tree_if_open(state()) :: state()
   defp close_file_tree_if_open(state) do
-    if EditorState.file_tree_state(state).tree == nil do
+    if state.workspace.file_tree.tree == nil do
       state
     else
       Commands.FileTree.close(state)
@@ -577,10 +578,10 @@ defmodule MingaGitPorcelain.Commands do
           pane_width: diff_pane_width(state)
         }
 
+        git = MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)
+        state = %{state | git: git}
+
         state
-        |> then(fn state ->
-          %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)}
-        end)
         |> Commands.add_buffer(diff_buf)
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
@@ -638,10 +639,10 @@ defmodule MingaGitPorcelain.Commands do
           pane_width: diff_pane_width(state)
         }
 
+        git = MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)
+        state = %{state | git: git}
+
         state
-        |> then(fn state ->
-          %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)}
-        end)
         |> Commands.add_buffer(diff_buf)
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
@@ -955,7 +956,7 @@ defmodule MingaGitPorcelain.Commands do
   @spec diff_hunk_position(state(), pid(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   def diff_hunk_position(state, buf, cursor_line) do
-    case EditorState.diff_view_info(state, buf) do
+    case GitState.diff_view_info(state.git, buf) do
       nil ->
         nil
 
@@ -971,7 +972,7 @@ defmodule MingaGitPorcelain.Commands do
 
   @spec toggle_diff_staged(state(), pid()) :: state()
   defp toggle_diff_staged(state, active_buf) do
-    case EditorState.diff_view_info(state, active_buf) do
+    case GitState.diff_view_info(state.git, active_buf) do
       nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not a diff view")
 
@@ -1001,7 +1002,7 @@ defmodule MingaGitPorcelain.Commands do
 
   @spec toggle_diff_layout(state(), pid()) :: state()
   defp toggle_diff_layout(state, active_buf) do
-    case EditorState.diff_view_info(state, active_buf) do
+    case GitState.diff_view_info(state.git, active_buf) do
       nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not a diff view")
 
@@ -1026,14 +1027,14 @@ defmodule MingaGitPorcelain.Commands do
   """
   @spec refresh_diff_views_for_buffer(state(), pid()) :: state()
   def refresh_diff_views_for_buffer(state, saved_buf) do
-    diff_views = EditorState.diff_views_for_source(state, saved_buf)
+    diff_views = GitState.diff_views_for_source(state.git, saved_buf)
 
     Enum.reduce(diff_views, state, fn {diff_buf, diff_info}, acc ->
       refresh_diff_buffer(acc, diff_buf, saved_buf, diff_info)
     end)
   end
 
-  @spec refresh_diff_buffer(state(), pid(), pid(), EditorState.diff_view_info()) :: state()
+  @spec refresh_diff_buffer(state(), pid(), pid(), GitState.diff_view_info()) :: state()
   defp refresh_diff_buffer(state, diff_buf, source_buf, diff_info) do
     %{git_root: git_root, rel_path: rel_path, staged: staged} = diff_info
     view_mode = Map.get(diff_info, :view_mode, :unified)
@@ -1233,19 +1234,16 @@ defmodule MingaGitPorcelain.Commands do
             send(editor_pid, {:git_remote_result, ref, result})
           end)
 
-        state
-        |> GitToastWorkflow.dismiss()
-        |> then(fn state ->
-          %{
-            state
-            | git:
-                MingaEditor.State.Git.report_remote_operation(
-                  state.git,
-                  {ref, monitor_ref, {git_root, success_msg, error_prefix}}
-                )
-          }
-        end)
-        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(progress_msg)
+        state = GitToastWorkflow.dismiss(state)
+
+        git =
+          MingaEditor.State.Git.report_remote_operation(
+            state.git,
+            {ref, monitor_ref, {git_root, success_msg, error_prefix}}
+          )
+
+        state = %{state | git: git}
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, progress_msg)
 
       :not_git ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
@@ -1450,7 +1448,7 @@ defmodule MingaGitPorcelain.Commands do
     end
   end
 
-  @spec stage_hunk_from_diff_view(state(), pid(), EditorState.diff_view_info()) :: state()
+  @spec stage_hunk_from_diff_view(state(), pid(), GitState.diff_view_info()) :: state()
   defp stage_hunk_from_diff_view(state, diff_buf, %{staged: true}) do
     _ = diff_buf
 
@@ -1470,7 +1468,7 @@ defmodule MingaGitPorcelain.Commands do
     end
   end
 
-  @spec stage_diff_view_hunk(state(), pid(), EditorState.diff_view_info(), non_neg_integer()) ::
+  @spec stage_diff_view_hunk(state(), pid(), GitState.diff_view_info(), non_neg_integer()) ::
           state()
   defp stage_diff_view_hunk(state, diff_buf, diff_info, hunk_idx) do
     current_content = current_content_for_diff(diff_info)
@@ -1503,7 +1501,7 @@ defmodule MingaGitPorcelain.Commands do
   @spec apply_diff_view_stage(
           state(),
           pid(),
-          EditorState.diff_view_info(),
+          GitState.diff_view_info(),
           non_neg_integer(),
           {[String.t()], [String.t()], [Diff.hunk()], String.t()},
           Diff.hunk()
@@ -1535,7 +1533,7 @@ defmodule MingaGitPorcelain.Commands do
     end
   end
 
-  @spec revert_hunk_from_diff_view(state(), pid(), EditorState.diff_view_info()) :: state()
+  @spec revert_hunk_from_diff_view(state(), pid(), GitState.diff_view_info()) :: state()
   defp revert_hunk_from_diff_view(state, _diff_buf, %{source_buf: nil}) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
@@ -1560,7 +1558,7 @@ defmodule MingaGitPorcelain.Commands do
     end
   end
 
-  @spec revert_diff_view_hunk(state(), pid(), EditorState.diff_view_info(), non_neg_integer()) ::
+  @spec revert_diff_view_hunk(state(), pid(), GitState.diff_view_info(), non_neg_integer()) ::
           state()
   defp revert_diff_view_hunk(state, diff_buf, %{source_buf: source_buf} = diff_info, hunk_idx) do
     {current_content, _cursor} = Buffer.content_and_cursor(source_buf)
@@ -1593,7 +1591,7 @@ defmodule MingaGitPorcelain.Commands do
   @spec apply_diff_view_revert(
           state(),
           pid(),
-          EditorState.diff_view_info(),
+          GitState.diff_view_info(),
           non_neg_integer(),
           {[String.t()], [String.t()], [Diff.hunk()]},
           Diff.hunk()
@@ -1624,7 +1622,7 @@ defmodule MingaGitPorcelain.Commands do
 
   @spec stale_diff_view?(
           pid(),
-          EditorState.diff_view_info(),
+          GitState.diff_view_info(),
           [String.t()],
           [String.t()],
           [Diff.hunk()]
@@ -1637,7 +1635,7 @@ defmodule MingaGitPorcelain.Commands do
       diff_info.hunk_lines != fresh.hunk_lines
   end
 
-  @spec diff_result_from_hunks(EditorState.diff_view_info(), [String.t()], [String.t()], [
+  @spec diff_result_from_hunks(GitState.diff_view_info(), [String.t()], [String.t()], [
           Diff.hunk()
         ]) :: DiffView.diff_view_result()
   defp diff_result_from_hunks(
@@ -1658,7 +1656,7 @@ defmodule MingaGitPorcelain.Commands do
     DiffView.build_from_hunks(base_lines, current_lines, hunks)
   end
 
-  @spec diff_view_lines(EditorState.diff_view_info(), String.t()) ::
+  @spec diff_view_lines(GitState.diff_view_info(), String.t()) ::
           {[String.t()], [String.t()], [Diff.hunk()]}
   defp diff_view_lines(%{git_root: git_root, rel_path: rel_path}, current_content) do
     base_lines = git_root |> head_content(rel_path) |> split_lines()
@@ -1701,7 +1699,7 @@ defmodule MingaGitPorcelain.Commands do
     |> Enum.find_index(fn line -> cursor_line <= line end)
   end
 
-  @spec current_content_for_diff(EditorState.diff_view_info()) :: String.t()
+  @spec current_content_for_diff(GitState.diff_view_info()) :: String.t()
   defp current_content_for_diff(%{source_buf: nil, git_root: git_root, rel_path: rel_path}) do
     abs_path = Path.join(git_root, rel_path)
 
@@ -1716,7 +1714,7 @@ defmodule MingaGitPorcelain.Commands do
     content
   end
 
-  @spec invalidate_source_git_buffer(EditorState.diff_view_info(), String.t()) :: :ok
+  @spec invalidate_source_git_buffer(GitState.diff_view_info(), String.t()) :: :ok
   defp invalidate_source_git_buffer(%{source_buf: nil}, _content), do: :ok
 
   defp invalidate_source_git_buffer(%{source_buf: source_buf}, content) do
@@ -1726,7 +1724,7 @@ defmodule MingaGitPorcelain.Commands do
     end
   end
 
-  @spec refresh_diff_view_content(state(), pid(), EditorState.diff_view_info()) :: state()
+  @spec refresh_diff_view_content(state(), pid(), GitState.diff_view_info()) :: state()
   defp refresh_diff_view_content(state, diff_buf, diff_info) do
     %{git_root: git_root, rel_path: rel_path, staged: staged} = diff_info
     view_mode = Map.get(diff_info, :view_mode, :unified)
@@ -1754,7 +1752,7 @@ defmodule MingaGitPorcelain.Commands do
     %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, updated_info)}
   end
 
-  @spec diff_view_current_content(EditorState.diff_view_info(), String.t(), String.t(), boolean()) ::
+  @spec diff_view_current_content(GitState.diff_view_info(), String.t(), String.t(), boolean()) ::
           String.t()
   defp diff_view_current_content(_diff_info, git_root, rel_path, true) do
     staged_content(git_root, rel_path)
@@ -1845,11 +1843,10 @@ defmodule MingaGitPorcelain.Commands do
         timeout = MingaGitPorcelain.Git.CommitMessageGenerator.timeout_ms()
         Process.send_after(self(), :git_generate_timeout, timeout)
 
-        state
-        |> then(fn state ->
-          %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, ref)}
-        end)
-        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Generating commit message…")
+        git = MingaEditor.State.Git.await_commit_generation(state.git, ref)
+        state = %{state | git: git}
+
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Generating commit message…")
 
       {:error, reason} ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(

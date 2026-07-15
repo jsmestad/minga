@@ -1,6 +1,6 @@
 defmodule MingaEditor.State.TabSwitchTest do
   @moduledoc """
-  Pure-function tests for tab switching via `switch_tab_pure/2`.
+  Pure-function tests for tab switching via `switch_tab/2`.
 
   Tests snapshot/restore of workspace context across tab switches without
   starting any GenServer. Uses `base_state/1` from `RenderPipeline.TestHelpers`
@@ -67,7 +67,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     # Set up tab bar with tab 1 active
     tab1 = Tab.new_file(1, "one.ex")
     tb = TabBar.new(tab1)
-    context1 = EditorState.snapshot_tab_context(state)
+    context1 = Context.snapshot(state.workspace)
     tb = TabBar.update_context(tb, 1, context1)
 
     # Create tab 2 with buf2 in its context
@@ -142,7 +142,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     # Set up tab bar: file tab 1 active, agent tab 2
     file_tab = Tab.new_file(1, "app.ex")
     tb = TabBar.new(file_tab)
-    file_context = EditorState.snapshot_tab_context(state)
+    file_context = Context.snapshot(state.workspace)
     tb = TabBar.update_context(tb, 1, file_context)
 
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
@@ -235,14 +235,14 @@ defmodule MingaEditor.State.TabSwitchTest do
     {state, references, rename}
   end
 
-  # ── switch_tab_pure/2 ─────────────────────────────────────────────────────────
+  # ── switch_tab/2 ──────────────────────────────────────────────────────────────
 
-  describe "switch_tab_pure/2" do
+  describe "switch_tab/2" do
     test "no-op when tab bar is nil" do
       state = base_state()
-      assert EditorState.tab_bar(state) == nil
+      assert state.shell_runtime.state.tab_bar == nil
 
-      {new_state, result} = EditorState.switch_tab_pure(state, 42)
+      {new_state, result} = EditorState.switch_tab(state, 42)
 
       assert new_state == state
       assert result == :unchanged
@@ -250,10 +250,10 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "no-op when switching to already active tab" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       active_id = tb.active_id
 
-      {new_state, result} = EditorState.switch_tab_pure(state, active_id)
+      {new_state, result} = EditorState.switch_tab(state, active_id)
 
       assert new_state == state
       assert result == :unchanged
@@ -261,11 +261,11 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "missing target leaves current references and rename requests pending" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
-      current_id = EditorState.tab_bar(state).active_id
+      current_id = state.shell_runtime.state.tab_bar.active_id
       {state, references, rename} = track_tab_operations(state, current_id)
       requests = state.lsp.operation_requests
 
-      {unchanged, result} = EditorState.switch_tab_pure(state, 999_999)
+      {unchanged, result} = EditorState.switch_tab(state, 999_999)
 
       assert result == :unchanged
       assert unchanged.lsp.operation_requests == requests
@@ -283,7 +283,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "file-to-file preserves both tab contexts" do
       {state, buf1, buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
       # Confirm starting state
@@ -291,7 +291,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert state.workspace.keymap_scope == :editor
 
       # Switch to tab 2
-      {new_state, result} = EditorState.switch_tab_pure(state, tab2_id)
+      {new_state, result} = EditorState.switch_tab(state, tab2_id)
 
       # Active buffer should now be buf2 (restored from tab 2's context)
       assert new_state.workspace.buffers.active == buf2
@@ -299,7 +299,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert {:switched, %Tab{id: ^tab2_id}} = result
 
       # Tab 1's context should be snapshotted (preserved for later restore)
-      tb = EditorState.tab_bar(new_state)
+      tb = new_state.shell_runtime.state.tab_bar
       tab1 = TabBar.get(tb, 1)
       assert tab1.context.buffers.active == buf1
     end
@@ -312,13 +312,13 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert state.workspace.keymap_scope == :editor
 
       # Switch to agent tab
-      {new_state, _effects} = EditorState.switch_tab_pure(state, agent_tab_id)
+      {new_state, _effects} = EditorState.switch_tab(state, agent_tab_id)
 
       # The restored workspace should have :agent scope (from the agent tab's context)
       assert new_state.workspace.keymap_scope == :agent
 
       # The tab bar should show the agent tab as active
-      tb = EditorState.tab_bar(new_state)
+      tb = new_state.shell_runtime.state.tab_bar
       assert tb.active_id == agent_tab_id
       active_tab = TabBar.active(tb)
       assert active_tab.kind == :agent
@@ -333,24 +333,24 @@ defmodule MingaEditor.State.TabSwitchTest do
         state_with_file_and_agent_tabs()
 
       # First switch to agent tab to set up the agent-active state
-      {state, _effects} = EditorState.switch_tab_pure(state, agent_tab_id)
+      {state, _effects} = EditorState.switch_tab(state, agent_tab_id)
       assert state.workspace.keymap_scope == :agent
 
       # Now switch back to file tab
-      {new_state, _effects} = EditorState.switch_tab_pure(state, file_tab_id)
+      {new_state, _effects} = EditorState.switch_tab(state, file_tab_id)
 
       # Should restore :editor scope
       assert new_state.workspace.keymap_scope == :editor
 
       # The agent tab's context should be preserved
-      tb = EditorState.tab_bar(new_state)
+      tb = new_state.shell_runtime.state.tab_bar
       agent_tab = TabBar.get(tb, agent_tab_id)
       assert agent_tab.context.keymap_scope == :agent
     end
 
     test "round-trip invariant: switch away and back restores equivalent state" do
       {state, _buf1, buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
       # Capture the workspace state before any switch
@@ -359,11 +359,11 @@ defmodule MingaEditor.State.TabSwitchTest do
       original_editing = state.workspace.editing
 
       # Switch to tab 2
-      {state_after_switch, _effects1} = EditorState.switch_tab_pure(state, tab2_id)
+      {state_after_switch, _effects1} = EditorState.switch_tab(state, tab2_id)
       assert state_after_switch.workspace.buffers.active == buf2
 
       # Switch back to tab 1
-      {state_after_roundtrip, _effects2} = EditorState.switch_tab_pure(state_after_switch, 1)
+      {state_after_roundtrip, _effects2} = EditorState.switch_tab(state_after_switch, 1)
 
       # The workspace should be equivalent to the original
       assert state_after_roundtrip.workspace.buffers.active == original_buffers.active
@@ -380,17 +380,17 @@ defmodule MingaEditor.State.TabSwitchTest do
       {state, _file_tab_id, agent_tab_id, _file_buf} =
         state_with_file_and_agent_tabs()
 
-      {_new_state, result} = EditorState.switch_tab_pure(state, agent_tab_id)
+      {_new_state, result} = EditorState.switch_tab(state, agent_tab_id)
 
       assert {:switched, %Tab{id: ^agent_tab_id, kind: :agent}} = result
     end
 
     test "invalidates layout after switch" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
-      {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
+      {new_state, _effects} = EditorState.switch_tab(state, tab2_id)
 
       # Layout should be cleared after a tab switch
       assert new_state.render.layout == nil
@@ -398,7 +398,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "tab switch restores the target tab's pending LSP refs" do
       {state, _buf1, buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
@@ -427,30 +427,30 @@ defmodule MingaEditor.State.TabSwitchTest do
           }
         end)
 
-      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+      {switched, _effects} = EditorState.switch_tab(state, target_id)
 
       assert switched.workspace.lsp_pending == pending_target
 
-      assert TabBar.get(EditorState.tab_bar(switched), current_id).context.lsp_pending ==
+      assert TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.lsp_pending ==
                pending_current
 
-      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+      {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
       assert switched_back.workspace.lsp_pending == pending_current
 
-      assert TabBar.get(EditorState.tab_bar(switched_back), target_id).context.lsp_pending ==
+      assert TabBar.get(switched_back.shell_runtime.state.tab_bar, target_id).context.lsp_pending ==
                pending_target
     end
 
     test "tab switch retires outgoing references and rename requests" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
-      tab_bar = EditorState.tab_bar(state)
+      tab_bar = state.shell_runtime.state.tab_bar
       current_id = tab_bar.active_id
       target_id = Enum.find(tab_bar.tabs, &(&1.id != current_id)).id
 
       {state, references, rename} = track_tab_operations(state, current_id)
 
-      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+      {switched, _effects} = EditorState.switch_tab(state, target_id)
 
       assert switched.lsp.operation_requests == %{}
 
@@ -472,12 +472,12 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "closing the active tab retires its references and rename requests" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
-      current_id = EditorState.tab_bar(state).active_id
+      current_id = state.shell_runtime.state.tab_bar.active_id
       {state, references, rename} = track_tab_operations(state, current_id)
 
       closed = BufferManagement.execute(state, :force_quit)
 
-      assert TabBar.get(EditorState.tab_bar(closed), current_id) == nil
+      assert TabBar.get(closed.shell_runtime.state.tab_bar, current_id) == nil
       assert closed.lsp.operation_requests == %{}
 
       assert {:ok, closed_references} =
@@ -493,7 +493,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "entering empty state retires operations for every removed file tab" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
-      tab_bar = EditorState.tab_bar(state)
+      tab_bar = state.shell_runtime.state.tab_bar
       [first_tab, second_tab] = tab_bar.tabs
 
       {state, first_references, first_rename} = track_tab_operations(state, first_tab.id)
@@ -501,7 +501,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       empty = EditorState.enter_empty_state(state)
 
-      assert EditorState.tab_bar(empty).tabs == []
+      assert empty.shell_runtime.state.tab_bar.tabs == []
       assert empty.lsp.operation_requests == %{}
 
       for operation <- [first_references, first_rename, second_references, second_rename] do
@@ -514,7 +514,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "tab switch preserves Editor-global formatting ownership" do
       {state, buf1, _buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != current_id)).id
       ref = make_ref()
@@ -533,18 +533,18 @@ defmodule MingaEditor.State.TabSwitchTest do
       state =
         %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
 
-      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+      {switched, _effects} = EditorState.switch_tab(state, target_id)
 
       assert {:ok, ^operation} = LSPState.fetch_format(switched.lsp, ref)
 
-      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+      {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
       assert {:ok, ^operation} = LSPState.fetch_format(switched_back.lsp, ref)
     end
 
     test "format responses remain isolated across a tab switch" do
       {state, buf_a, buf_b} = state_with_two_file_tabs()
-      tab_bar = EditorState.tab_bar(state)
+      tab_bar = state.shell_runtime.state.tab_bar
       target_id = Enum.find(tab_bar.tabs, &(&1.id != 1)).id
       ref_a = make_ref()
       ref_b = make_ref()
@@ -563,7 +563,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       state =
         %{state | lsp: (&LSPState.track_format(&1, operation_a)).(state.lsp)}
 
-      {state, _effects} = EditorState.switch_tab_pure(state, target_id)
+      {state, _effects} = EditorState.switch_tab(state, target_id)
 
       operation_b = %FormatOperation{
         client: self(),
@@ -609,7 +609,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "tab switch preserves live highlighting and ignores stale target parser state" do
       {state, buf1, buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
@@ -651,20 +651,20 @@ defmodule MingaEditor.State.TabSwitchTest do
           }
         end)
 
-      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+      {switched, _effects} = EditorState.switch_tab(state, target_id)
 
       assert switched.parser.highlighting == live_highlight
 
-      refute :highlight in TabBar.get(EditorState.tab_bar(switched), current_id).context.present_fields
+      refute :highlight in TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.present_fields
 
-      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+      {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
       assert switched_back.parser.highlighting == live_highlight
     end
 
     test "tab switch preserves live injection ranges and ignores stale target ranges" do
       {state, buf1, buf2} = state_with_two_file_tabs()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
@@ -701,13 +701,13 @@ defmodule MingaEditor.State.TabSwitchTest do
           }
         end)
 
-      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+      {switched, _effects} = EditorState.switch_tab(state, target_id)
 
       assert switched.parser.injection_ranges == live_ranges
 
-      refute :injection_ranges in TabBar.get(EditorState.tab_bar(switched), current_id).context.present_fields
+      refute :injection_ranges in TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.present_fields
 
-      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+      {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
       assert switched_back.parser.injection_ranges == live_ranges
     end

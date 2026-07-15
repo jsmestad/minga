@@ -13,7 +13,6 @@ defmodule MingaEditor.LaunchpadIntegrationTest do
   alias Minga.Config.Options
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Startup
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Launchpad
 
   test "killing the last buffer enters the launchpad with zero buffers", %{tmp_dir: tmp} do
@@ -25,7 +24,9 @@ defmodule MingaEditor.LaunchpadIntegrationTest do
     assert state.workspace.buffers.active == nil
     assert state.workspace.buffers.list == []
     assert %Launchpad{} = state.workspace.launchpad
-    assert EditorState.active_window_struct(state).content == {:empty, :semantic}
+
+    assert MingaEditor.Session.State.active_window_struct(state.workspace).content ==
+             {:empty, :semantic}
   end
 
   defp initial_state(buffer, tmp) do

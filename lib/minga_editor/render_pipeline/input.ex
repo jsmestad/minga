@@ -165,7 +165,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           focus_tree: MingaEditor.FocusTree.t() | nil,
           lsp: LSPState.t(),
           parser_status: atom(),
-          diff_views: %{pid() => EditorState.diff_view_info()},
+          diff_views: %{pid() => MingaEditor.State.Git.diff_view_info()},
           git_remote_op: MingaEditor.State.Git.remote_op(),
           effect_scheduler: GenServer.server() | nil,
           status_bar_data: StatusBarData.t() | nil,

@@ -17,7 +17,6 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
   alias MingaEditor.Startup
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.WindowTree
@@ -531,7 +530,10 @@ defmodule MingaEditor.MouseTest do
       state =
         mouse(state, row, col + MingaEditor.Renderer.Gutter.fold_column_offset(), :left, :press)
 
-      assert FoldMap.fold_start?(EditorState.active_window_struct(state).fold_map, 0)
+      assert FoldMap.fold_start?(
+               MingaEditor.Session.State.active_window_struct(state.workspace).fold_map,
+               0
+             )
 
       {state, _buffer} = start_mouse_state("defmodule Example do\n  def run, do: :ok\nend")
       state = set_active_fold_ranges(state, [FoldRange.new!(0, 2)])
@@ -541,7 +543,10 @@ defmodule MingaEditor.MouseTest do
       state =
         mouse(state, row, col + MingaEditor.Renderer.Gutter.fold_column_offset(), :left, :press)
 
-      refute FoldMap.fold_start?(EditorState.active_window_struct(state).fold_map, 0)
+      refute FoldMap.fold_start?(
+               MingaEditor.Session.State.active_window_struct(state.workspace).fold_map,
+               0
+             )
     end
 
     test "clicking a decoration fold indicator opens the folded region" do
@@ -639,7 +644,7 @@ defmodule MingaEditor.MouseTest do
 
     test "switching tabs clears a standing link preview" do
       {state, _buf1, _buf2} = start_two_tab_state()
-      [first_tab_id | _] = Enum.map(EditorState.tab_bar(state).tabs, & &1.id)
+      [first_tab_id | _] = Enum.map(state.shell_runtime.state.tab_bar.tabs, & &1.id)
       {row, col} = buffer_screen_pos(state, 0, 2)
 
       state = mouse(state, row, col, :none, :motion, @super)
@@ -647,7 +652,7 @@ defmodule MingaEditor.MouseTest do
 
       # A keyboard tab switch swaps the active buffer with no intervening motion;
       # the link preview must not carry over to the new buffer's coordinates.
-      state = EditorState.switch_tab(state, first_tab_id)
+      state = MingaEditor.TabWorkflow.switch(state, first_tab_id)
       assert state.workspace.hover_observation.link == nil
       assert state.workspace.hover_observation.cell == nil
     end
@@ -791,7 +796,8 @@ defmodule MingaEditor.MouseTest do
     end)
   end
 
-  defp active_viewport(state), do: EditorState.active_window_struct(state).viewport
+  defp active_viewport(state),
+    do: MingaEditor.Session.State.active_window_struct(state.workspace).viewport
 
   defp active_window_layout(state), do: Layout.active_window_layout(Layout.get(state), state)
 

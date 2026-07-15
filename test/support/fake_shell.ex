@@ -78,11 +78,16 @@ defmodule MingaEditor.Test.FakeShell do
           map(),
           MingaEditor.Session.State.t(),
           MingaEditor.Session.State.t(),
-          pid(),
-          atom()
+          MingaEditor.Shell.BufferMetadata.t()
         ) ::
           {map(), MingaEditor.Session.State.t()}
-  def on_buffer_added(shell_state, _prev_workspace, workspace, _buffer_pid, _context) do
+  def on_buffer_added(
+        shell_state,
+        _prev_workspace,
+        workspace,
+        %MingaEditor.Shell.BufferMetadata{} = metadata
+      ) do
+    notify_probe(shell_state, {:buffer_added, metadata.buffer_pid})
     {shell_state, workspace}
   end
 
@@ -94,7 +99,10 @@ defmodule MingaEditor.Test.FakeShell do
   @impl true
   @spec on_buffer_died(map(), MingaEditor.Session.State.t(), pid()) ::
           {map(), MingaEditor.Session.State.t()}
-  def on_buffer_died(shell_state, workspace, _dead_pid), do: {shell_state, workspace}
+  def on_buffer_died(shell_state, workspace, dead_pid) do
+    notify_probe(shell_state, {:buffer_died, dead_pid})
+    {shell_state, workspace}
+  end
 
   @impl true
   @spec on_agent_event(map(), MingaEditor.Session.State.t(), pid(), term()) ::
@@ -203,6 +211,7 @@ defmodule MingaEditor.Test.FakeShell do
   def active_session(%{session: session}) when is_pid(session), do: session
   def active_session(_shell_state), do: nil
 
+  @impl true
   @spec drop_feature_state_source(map(), MingaEditor.FeatureState.source()) :: map()
   def drop_feature_state_source(%{contexts: contexts} = shell_state, source)
       when is_list(contexts) do
@@ -211,6 +220,7 @@ defmodule MingaEditor.Test.FakeShell do
 
   def drop_feature_state_source(shell_state, _source), do: shell_state
 
+  @impl true
   @spec drop_extension_feature_state_sources(map()) :: map()
   def drop_extension_feature_state_sources(%{contexts: contexts} = shell_state)
       when is_list(contexts) do
@@ -238,4 +248,12 @@ defmodule MingaEditor.Test.FakeShell do
     |> MingaEditor.Session.State.drop_extension_feature_state_sources()
     |> MingaEditor.Session.State.to_tab_context()
   end
+
+  @spec notify_probe(map(), term()) :: :ok
+  defp notify_probe(%{effect_probe: probe}, event) when is_pid(probe) do
+    send(probe, event)
+    :ok
+  end
+
+  defp notify_probe(_shell_state, _event), do: :ok
 end

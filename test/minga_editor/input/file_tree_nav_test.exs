@@ -44,7 +44,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
     }
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   describe "vim navigation in file tree" do
     test "j moves tree cursor down", %{tmp_dir: tmp_dir, sidebar_registry: table} do

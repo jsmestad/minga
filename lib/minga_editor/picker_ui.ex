@@ -778,11 +778,12 @@ defmodule MingaEditor.PickerUI do
 
   @spec dismiss(state()) :: state()
   defp dismiss(state) do
-    state
-    |> then(fn state ->
-      %{state | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :open)}
-    end)
-    |> MingaEditor.Shell.Traditional.ModalWorkflow.dismiss()
+    state = %{
+      state
+      | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :open)
+    }
+
+    MingaEditor.Shell.Traditional.ModalWorkflow.dismiss(state)
   end
 
   @doc """

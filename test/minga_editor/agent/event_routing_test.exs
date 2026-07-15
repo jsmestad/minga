@@ -371,11 +371,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       tb =
-        TabBar.update_workspace(tb, workspace.id, fn ws ->
-          ws
-          |> Workspace.add_file(active_ref)
-          |> Workspace.set_active_file(active_ref)
-        end)
+        tb
+        |> TabBar.add_workspace_file(workspace.id, active_ref)
+        |> TabBar.set_workspace_active_file(workspace.id, active_ref)
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},

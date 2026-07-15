@@ -6,7 +6,6 @@ defmodule MingaEditor.WindowFocusTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
@@ -43,7 +42,7 @@ defmodule MingaEditor.WindowFocusTest do
     assert focused.workspace.buffers.active_index == 1
     assert Map.fetch!(focused.workspace.windows.map, 1).cursor == {2, 0}
     assert BufferProcess.cursor(second_buffer) == {0, 1}
-    refute BottomPanel.focused?(EditorState.bottom_panel(focused))
+    refute BottomPanel.focused?(focused.shell_runtime.state.bottom_panel)
   end
 
   test "focusing a surviving split commits the same session and presentation invariant" do
@@ -94,7 +93,7 @@ defmodule MingaEditor.WindowFocusTest do
     assert focused.workspace.hover_observation.link == nil
     assert focused.workspace.hover_observation.cell == nil
     assert BufferProcess.cursor(second_buffer) == {0, 1}
-    refute BottomPanel.focused?(EditorState.bottom_panel(focused))
+    refute BottomPanel.focused?(focused.shell_runtime.state.bottom_panel)
   end
 
   test "active-shell blur dispatches through an alternate shell contract" do
@@ -138,7 +137,7 @@ defmodule MingaEditor.WindowFocusTest do
     focused = WindowFocus.focus(state, state.workspace.windows.active)
 
     assert focused.workspace == state.workspace
-    refute BottomPanel.focused?(EditorState.bottom_panel(focused))
+    refute BottomPanel.focused?(focused.shell_runtime.state.bottom_panel)
   end
 
   test "missing windows and dead buffer processes leave focus state unchanged" do

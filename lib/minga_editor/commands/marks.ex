@@ -63,14 +63,12 @@ defmodule MingaEditor.Commands.Marks do
         target = Minga.Editing.first_non_blank(tmp_buf, {mark_line, 0})
         Buffer.move_to(buf, target)
 
-        state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-          }
-        end)
-        |> Helpers.save_jump_pos(current_pos, target)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+        }
+
+        Helpers.save_jump_pos(state, current_pos, target)
     end
   end
 
@@ -89,14 +87,12 @@ defmodule MingaEditor.Commands.Marks do
         current_pos = Buffer.cursor(buf)
         Buffer.move_to(buf, mark_pos)
 
-        state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-          }
-        end)
-        |> Helpers.save_jump_pos(current_pos, mark_pos)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+        }
+
+        Helpers.save_jump_pos(state, current_pos, mark_pos)
     end
   end
 
@@ -112,20 +108,9 @@ defmodule MingaEditor.Commands.Marks do
     target = Minga.Editing.first_non_blank(tmp_buf, {last_line, 0})
     Buffer.move_to(buf, target)
 
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            MingaEditor.Session.State.set_editing(
-              state.workspace,
-              MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, current_pos)
-            )
-      }
-    end)
+    workspace = MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+    editing = MingaEditor.VimState.set_last_jump_pos(workspace.editing, current_pos)
+    %{state | workspace: MingaEditor.Session.State.set_editing(workspace, editing)}
   end
 
   def execute(state, :jump_to_last_pos_line), do: state
@@ -138,20 +123,9 @@ defmodule MingaEditor.Commands.Marks do
     current_pos = Buffer.cursor(buf)
     Buffer.move_to(buf, last_pos)
 
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            MingaEditor.Session.State.set_editing(
-              state.workspace,
-              MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, current_pos)
-            )
-      }
-    end)
+    workspace = MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+    editing = MingaEditor.VimState.set_last_jump_pos(workspace.editing, current_pos)
+    %{state | workspace: MingaEditor.Session.State.set_editing(workspace, editing)}
   end
 
   def execute(state, :jump_to_last_pos_exact), do: state

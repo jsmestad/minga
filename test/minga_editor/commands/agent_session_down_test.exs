@@ -19,7 +19,6 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Viewport
   alias MingaEditor.Session
@@ -51,28 +50,20 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
   defp tab_bar_with_session(session_pid) do
     {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
-    TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
+    TabBar.set_tab_session(tb, agent_tab.id, session_pid)
   end
 
   defp tab_bar_with_remote_session(session_pid) do
     {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
 
-    TabBar.update_tab(
-      tb,
-      agent_tab.id,
-      &Tab.set_remote_session(&1, "home", "session-1", session_pid)
-    )
+    TabBar.set_tab_remote_session(tb, agent_tab.id, "home", "session-1", session_pid)
   end
 
   defp workspace_state_with_project_view(session_pid, project_view) do
     {tb, workspace} = TabBar.add_workspace(empty_tab_bar(), "Workgroup", session_pid)
 
     tb =
-      TabBar.update_workspace(
-        tb,
-        workspace.id,
-        &WorkspaceModel.set_project_view(&1, project_view)
-      )
+      TabBar.set_workspace_project_view(tb, workspace.id, project_view)
 
     {build_state(tb), workspace.id}
   end
@@ -95,7 +86,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       assert result.shell_runtime.state.notice.message == "original message",
              "notice must not be overwritten by crashes from other editors' sessions"
 
-      assert EditorState.tab_bar(result) == EditorState.tab_bar(state),
+      assert result.shell_runtime.state.tab_bar == state.shell_runtime.state.tab_bar,
              "tab_bar must be untouched when no tab references the crashed session"
     end
 
@@ -174,7 +165,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       {state, workspace_id} = workspace_state_with_project_view(session_pid, project_view)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :normal)
-      workspace = TabBar.get_workspace(EditorState.tab_bar(result), workspace_id)
+      workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace_id)
 
       assert workspace.session == nil
       assert workspace.agent_status == :error
@@ -196,7 +187,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       {state, workspace_id} = workspace_state_with_project_view(session_pid, project_view)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :normal)
-      workspace = TabBar.get_workspace(EditorState.tab_bar(result), workspace_id)
+      workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace_id)
 
       assert_receive {:project_view_close_called, ^dir}
       assert workspace.session == nil
@@ -220,7 +211,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       {state, workspace_id} = workspace_state_with_project_view(session_pid, project_view)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
-      workspace = TabBar.get_workspace(EditorState.tab_bar(result), workspace_id)
+      workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace_id)
 
       assert workspace.session == nil
       assert workspace.agent_status == :error
@@ -237,7 +228,9 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       state = build_state(tab_bar_with_remote_session(session_pid))
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
-      remote_tab = Enum.find(EditorState.tab_bar(result).tabs, &(&1.session == session_pid))
+
+      remote_tab =
+        Enum.find(result.shell_runtime.state.tab_bar.tabs, &(&1.session == session_pid))
 
       assert remote_tab.connection_status == :disconnected
       assert result.shell_runtime.state.notice.message == "[home] disconnected, reconnecting..."

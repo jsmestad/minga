@@ -4,7 +4,6 @@ defmodule MingaEditor.Session.ChromeStateReviewTest do
   alias Minga.Project.FileRef
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Session.ChromeState
 
@@ -20,7 +19,7 @@ defmodule MingaEditor.Session.ChromeStateReviewTest do
       conflict_files: [conflict_ref]
     }
 
-    tb = TabBar.update_workspace(tb, workspace.id, &WorkspaceModel.set_review(&1, review))
+    tb = TabBar.set_workspace_review(tb, workspace.id, review)
     chrome = ChromeState.from_editor_state(%{tab_bar: tb})
     agent_summary = Enum.find(chrome.workspaces, &(&1.id == workspace.id))
 

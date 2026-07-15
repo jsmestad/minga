@@ -33,7 +33,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         (&put_prompt(&1, "draft one")).(state.workspace.agent_ui)
       )
 
-    state = EditorState.switch_tab(state, 2)
+    state = MingaEditor.TabWorkflow.switch(state, 2)
 
     assert prompt_text(state.workspace.agent_ui) == "draft one"
 
@@ -50,7 +50,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       tab_bar
       |> TabBar.move_tab_to_workspace(2, workspace_two.id)
       |> TabBar.switch_to(2)
-      |> TabBar.update_workspace(workspace_two.id, &Workspace.set_agent_ui(&1, ui_two))
+      |> TabBar.set_workspace_agent_ui(workspace_two.id, ui_two)
 
     state =
       state
@@ -77,7 +77,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         }
       end)
 
-    state = EditorState.switch_tab(state, 1)
+    state = MingaEditor.TabWorkflow.switch(state, 1)
 
     assert prompt_text(state.workspace.agent_ui) == ""
   end
@@ -91,7 +91,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       tab_bar
       |> TabBar.move_tab_to_workspace(2, workspace_two.id)
       |> TabBar.switch_to(2)
-      |> TabBar.update_workspace(workspace_two.id, &Workspace.set_agent_ui(&1, ui_two))
+      |> TabBar.set_workspace_agent_ui(workspace_two.id, ui_two)
 
     state =
       state
@@ -135,11 +135,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     tab_bar =
       tab_bar
       |> TabBar.move_tab_to_workspace(agent_tab.id, remote_workspace.id)
-      |> TabBar.update_workspace(remote_workspace.id, fn workspace ->
-        workspace
-        |> Workspace.set_agent_ui(UIState.new())
-        |> Workspace.set_pending_catchup_events(catchup)
-      end)
+      |> TabBar.set_workspace_agent_ui(remote_workspace.id, UIState.new())
+      |> TabBar.set_workspace_pending_catchup_events(remote_workspace.id, catchup)
       |> TabBar.switch_to(initial_tab_id)
 
     state =
@@ -159,7 +156,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     initial_version = panel_message_version(state)
 
-    {state, _effects} = EditorState.switch_tab_pure(state, agent_tab.id)
+    state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
 
     drained_workspace =
       TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id)
@@ -169,8 +166,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert first_version == initial_version + 1
     assert drained_workspace.pending_catchup_events == []
 
-    {state, _effects} = EditorState.switch_tab_pure(state, initial_tab_id)
-    {state, _effects} = EditorState.switch_tab_pure(state, agent_tab.id)
+    state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
+    state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
 
     assert panel_message_version(state) == first_version
 
@@ -206,12 +203,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     tab_bar =
       tab_bar
       |> TabBar.move_tab_to_workspace(2, workspace_two.id)
-      |> TabBar.update_workspace(workspace_one_id, fn workspace ->
-        workspace
-        |> Workspace.set_session(session_one)
-        |> Workspace.set_agent_ui(ui_one)
-      end)
-      |> TabBar.update_workspace(workspace_two.id, &Workspace.set_agent_ui(&1, ui_two))
+      |> TabBar.set_workspace_session(workspace_one_id, session_one)
+      |> TabBar.set_workspace_agent_ui(workspace_one_id, ui_one)
+      |> TabBar.set_workspace_agent_ui(workspace_two.id, ui_two)
 
     state =
       state
@@ -238,7 +232,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         }
       end)
 
-    state = EditorState.switch_tab(state, 2)
+    state = MingaEditor.TabWorkflow.switch(state, 2)
 
     assert prompt_text(state.workspace.agent_ui) == "workspace two"
 
@@ -278,7 +272,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(old_session)
     agent_tab_id = TabBar.active(state.shell_runtime.state.tab_bar).id
 
-    state = EditorState.switch_tab(state, 1)
+    state = MingaEditor.TabWorkflow.switch(state, 1)
     assert TabBar.active(state.shell_runtime.state.tab_bar).kind == :file
     assert TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == workspace_id
 
@@ -339,10 +333,10 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert prompt_text(workspace.agent_ui) == "restart draft"
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
 
-    state = EditorState.switch_tab(state, 2)
+    state = MingaEditor.TabWorkflow.switch(state, 2)
     assert prompt_text(state.workspace.agent_ui) == ""
 
-    state = EditorState.switch_tab(state, 3)
+    state = MingaEditor.TabWorkflow.switch(state, 3)
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
   end
 
@@ -350,7 +344,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {:ok, _session_id, session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(session) end)
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(session)
-    state = EditorState.switch_tab(state, 1)
+    state = MingaEditor.TabWorkflow.switch(state, 1)
 
     state = BufferManagement.execute(state, :force_quit)
     tab_bar = state.shell_runtime.state.tab_bar
@@ -423,7 +417,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> BufferManagement.execute(:force_quit)
-      |> EditorState.switch_tab(1)
+      |> MingaEditor.TabWorkflow.switch(1)
 
     tab_bar = state.shell_runtime.state.tab_bar
     workspace = TabBar.get_workspace(tab_bar, workspace_id)
@@ -454,7 +448,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {:ok, _session_id, session} = SessionManager.start_session([])
     ref = Process.monitor(session)
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(session)
-    state = EditorState.switch_tab(state, 1)
+    state = MingaEditor.TabWorkflow.switch(state, 1)
 
     state = AgentSession.stop_current_session(state)
     assert_receive {:DOWN, ^ref, :process, ^session, _reason}
@@ -475,7 +469,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       tab_bar
       |> TabBar.move_tab_to_workspace(1, workspace.id)
       |> TabBar.move_tab_to_workspace(2, workspace.id)
-      |> TabBar.update_workspace(workspace.id, &Workspace.set_agent_ui(&1, UIState.new()))
+      |> TabBar.set_workspace_agent_ui(workspace.id, UIState.new())
 
     then(state, fn root ->
       shell_state =
@@ -502,14 +496,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     tab_bar =
       tab_bar
-      |> TabBar.update_tab(agent_tab.id, &MingaEditor.State.Tab.set_session(&1, session))
+      |> TabBar.set_tab_session(agent_tab.id, session)
       |> TabBar.move_tab_to_workspace(1, workspace.id)
       |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
-      |> TabBar.update_workspace(workspace.id, fn workspace ->
-        workspace
-        |> Workspace.add_file(file_ref)
-        |> Workspace.set_agent_ui(ui)
-      end)
+      |> TabBar.add_workspace_file(workspace.id, file_ref)
+      |> TabBar.set_workspace_agent_ui(workspace.id, ui)
       |> TabBar.switch_to(agent_tab.id)
 
     state =
@@ -545,11 +536,16 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(session)
     agent_tab_id = TabBar.active(state.shell_runtime.state.tab_bar).id
 
+    tab_bar = state.shell_runtime.state.tab_bar
+
+    workspace =
+      tab_bar
+      |> TabBar.get_workspace(workspace_id)
+      |> Workspace.put_remote_session("home", remote_session_id, :connected)
+
     tab_bar =
-      state.shell_runtime.state.tab_bar
-      |> TabBar.update_workspace(workspace_id, fn workspace ->
-        Workspace.put_remote_session(workspace, "home", remote_session_id, :connected)
-      end)
+      tab_bar
+      |> TabBar.accept_workspace(workspace)
       |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
     state =

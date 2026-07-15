@@ -429,6 +429,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
 
   test "rejects external boundary calls in every converged pure owner" do
     owners = [
+      "MingaEditor.State",
       "MingaEditor.State.Frontend",
       "MingaEditor.State.Render",
       "MingaEditor.State.Parser",
@@ -456,6 +457,39 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
       |> assert_issue(fn issue ->
         assert issue.trigger == "Process.send_after"
         assert issue.message =~ "Pure owner #{owner}"
+      end)
+    end)
+  end
+
+  test "rejects every forbidden external-work category from the root owner" do
+    calls = [
+      "MingaEditor.Shell.Workflow.ensure_available(value)",
+      "Registry.lookup(Minga.Registry, value)",
+      "MingaEditor.Replay.run(value)",
+      "MingaAgent.Session.snapshot(value)",
+      "Process.monitor(self())",
+      "MingaEditor.State.Workspace.Persistence.write(value, \"/tmp\")",
+      "Minga.Log.info(:editor, \"changed\")",
+      "MingaEditor.Renderer.render(value)",
+      "Minga.Buffer.content(value)"
+    ]
+
+    Enum.each(calls, fn call ->
+      source = """
+      defmodule MingaEditor.State do
+        def violate(value) do
+          #{call}
+          value
+        end
+      end
+      """
+
+      issues = check(source, "lib/minga_editor/state.ex")
+      assert issues != [], "expected root purity issue for #{call}"
+
+      assert_issue(issues, fn issue ->
+        assert issue.message =~ "Pure owner MingaEditor.State"
+        assert issue.message =~ "prohibited external boundary"
       end)
     end)
   end

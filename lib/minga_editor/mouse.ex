@@ -440,14 +440,9 @@ defmodule MingaEditor.Mouse do
   end
 
   defp update_cmd_hover_link(state, row, col) do
-    state
-    |> set_cmd_hover_link_if_changed(navigable_link_at(state, row, col))
-    |> then(fn state ->
-      %{
-        state
-        | workspace: MingaEditor.Session.State.set_cmd_hover_cell(state.workspace, {row, col})
-      }
-    end)
+    state = set_cmd_hover_link_if_changed(state, navigable_link_at(state, row, col))
+    workspace = MingaEditor.Session.State.set_cmd_hover_cell(state.workspace, {row, col})
+    %{state | workspace: workspace}
   end
 
   @spec set_cmd_hover_link_if_changed(state(), EditorState.cmd_hover_link()) :: state()
@@ -474,11 +469,9 @@ defmodule MingaEditor.Mouse do
   end
 
   defp clear_cmd_hover_link_then_hover(state, row, col) do
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)}
-    end)
-    |> handle_hover_motion(row, col)
+    workspace = MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)
+    state = %{state | workspace: workspace}
+    handle_hover_motion(state, row, col)
   end
 
   # Returns the full word range `{start, end_exclusive}` for a navigable symbol at
@@ -1194,16 +1187,12 @@ defmodule MingaEditor.Mouse do
         windows = Windows.set_tree(state.workspace.windows, new_tree)
         mouse = MouseState.update_resize(state.workspace.mouse, dir, new_pos)
 
-        state =
-          state
-          |> then(fn state ->
-            %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
-          end)
-          |> then(fn state ->
-            %{state | workspace: MingaEditor.Session.State.set_mouse(state.workspace, mouse)}
-          end)
+        workspace =
+          state.workspace
+          |> MingaEditor.Session.State.set_windows(windows)
+          |> MingaEditor.Session.State.set_mouse(mouse)
 
-        resize_windows_to_layout(state)
+        resize_windows_to_layout(%{state | workspace: workspace})
 
       :error ->
         state
@@ -1302,11 +1291,9 @@ defmodule MingaEditor.Mouse do
   defp handle_context_click_at_buffer_pos(state, target_line, target_col, false) do
     Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
 
-    state
-    |> cancel_mode_for_mouse()
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
-    end)
+    state = cancel_mode_for_mouse(state)
+    workspace = MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+    %{state | workspace: workspace}
   end
 
   @spec context_click_targets_active_buffer?(state(), non_neg_integer(), non_neg_integer()) ::
@@ -1581,20 +1568,14 @@ defmodule MingaEditor.Mouse do
   defp maybe_unfocus_file_tree_for_content_click(
          %{workspace: %{keymap_scope: :file_tree}} = state
        ) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            MingaEditor.Session.State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.unfocus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
-    end)
+    file_tree = FileTreeState.unfocus(state.workspace.file_tree)
+
+    workspace =
+      state.workspace
+      |> MingaEditor.Session.State.set_file_tree(file_tree)
+      |> MingaEditor.Session.State.set_keymap_scope(:editor)
+
+    %{state | workspace: workspace}
   end
 
   defp maybe_unfocus_file_tree_for_content_click(state), do: state
@@ -1978,7 +1959,7 @@ defmodule MingaEditor.Mouse do
   defp close_tab_by_command(state, cmd) do
     case parse_tab_id(cmd) do
       {:ok, tab_id} ->
-        state = EditorState.switch_tab(state, tab_id)
+        state = MingaEditor.TabWorkflow.switch(state, tab_id)
         MingaEditor.dispatch_command(state, :kill_buffer)
 
       :error ->
@@ -2088,7 +2069,12 @@ defmodule MingaEditor.Mouse do
   defp scroll_cols(_state), do: @scroll_cols
 
   # Delegates to EditorState shared helpers.
-  defp current_viewport(state), do: EditorState.current_viewport(state)
+  defp current_viewport(state),
+    do:
+      MingaEditor.Session.State.current_viewport(
+        state.workspace,
+        state.frontend.terminal_viewport
+      )
 
   defp update_current_viewport(state, new_vp),
     do: %{

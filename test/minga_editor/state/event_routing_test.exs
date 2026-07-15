@@ -7,7 +7,7 @@ defmodule MingaEditor.State.EventRoutingTest do
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.{Tab, TabBar, Workspace}
+  alias MingaEditor.State.{Tab, TabBar}
   alias MingaEditor.Viewport
 
   defp make_state(opts \\ []) do
@@ -113,7 +113,7 @@ defmodule MingaEditor.State.EventRoutingTest do
           MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
         )
 
-      ctx = EditorState.snapshot_tab_context(state)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state.workspace)
 
       refute Map.has_key?(ctx, :agent)
       refute Map.has_key?(ctx, :agentic)
@@ -131,8 +131,8 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       tb =
         tb
-        |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
-        |> TabBar.update_workspace(agent_tab.group_id, &Workspace.set_session(&1, session))
+        |> TabBar.set_tab_session(agent_tab.id, session)
+        |> TabBar.set_workspace_session(agent_tab.group_id, session)
 
       state =
         then(state, fn root ->
@@ -165,8 +165,8 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       tb =
         tb
-        |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
-        |> TabBar.update_workspace(agent_tab.group_id, &Workspace.set_session(&1, session))
+        |> TabBar.set_tab_session(agent_tab.id, session)
+        |> TabBar.set_workspace_session(agent_tab.group_id, session)
 
       state =
         then(state, fn root ->

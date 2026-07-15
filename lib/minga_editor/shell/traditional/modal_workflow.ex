@@ -4,6 +4,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
@@ -108,7 +109,8 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
         %EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state,
         trigger
       ) do
-    active_tab_id = active_tab_id(state)
+    {state, active_tab} = ShellWorkflow.resolve_active_tab(state)
+    active_tab_id = if match?(%Tab{}, active_tab), do: active_tab.id, else: nil
 
     update_shell_state(
       state,
@@ -135,7 +137,8 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   @doc "Dismisses completion owned by a different active tab."
   @spec dismiss_if_stale(EditorState.t()) :: EditorState.t()
   def dismiss_if_stale(%EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state) do
-    active_tab_id = active_tab_id(state)
+    {state, active_tab} = ShellWorkflow.resolve_active_tab(state)
+    active_tab_id = if match?(%Tab{}, active_tab), do: active_tab.id, else: nil
 
     update_shell_state(
       state,
@@ -161,14 +164,6 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
 
     _trigger = modal |> ModalOverlay.completion_trigger() |> CompletionTrigger.dismiss()
     :ok
-  end
-
-  @spec active_tab_id(EditorState.t()) :: Tab.id() | nil
-  defp active_tab_id(%EditorState{shell_runtime: %Runtime{} = runtime}) do
-    case Runtime.active_tab(runtime) do
-      %Tab{id: id} -> id
-      nil -> nil
-    end
   end
 
   @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->

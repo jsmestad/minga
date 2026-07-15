@@ -169,11 +169,11 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   @spec install_auto_name(EditorState.t(), Workspace.t(), Workspace.t()) :: EditorState.t()
   defp install_auto_name(state, %Workspace{label: label}, %Workspace{label: label}), do: state
 
-  defp install_auto_name(state, workspace, updated_workspace) do
+  defp install_auto_name(state, _workspace, updated_workspace) do
     case traditional_tab_bar(state) do
       %TabBar{} = tab_bar ->
         tab_bar =
-          TabBar.update_workspace(tab_bar, workspace.id, fn _current -> updated_workspace end)
+          TabBar.accept_workspace(tab_bar, updated_workspace)
 
         install_tab_bar(state, tab_bar)
 
@@ -191,12 +191,8 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   defp traditional_tab_bar(%EditorState{}), do: nil
 
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
-  defp install_tab_bar(
-         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state,
-         %TabBar{} = tab_bar
-       ) do
-    shell_state = TraditionalState.install_tab_bar(shell_state, tab_bar)
-    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
   end
 
   @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()

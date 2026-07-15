@@ -50,7 +50,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     }
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   defp complete_current_filter(state) do
     request_id = ft(state).filter_request.token
@@ -283,7 +283,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
                 then(state.workspace, fn workspace ->
                   MingaEditor.Session.State.set_file_tree(
                     workspace,
-                    FileTreeState.replace_tree(EditorState.file_tree_state(state), tree)
+                    FileTreeState.replace_tree(state.workspace.file_tree, tree)
                   )
                 end)
           }

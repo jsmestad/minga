@@ -147,15 +147,12 @@ defmodule MingaEditor.Commands.Dired do
          {:ok, pid} <- start_dired_buffer(state, dired) do
       dired_state = DiredState.activate(%DiredState{}, dired, pid)
 
-      state
-      |> Commands.add_buffer(pid)
-      |> then(fn state ->
-        %{state | workspace: State.set_dired(state.workspace, dired_state)}
-      end)
-      |> then(fn state ->
-        %{state | workspace: State.set_keymap_scope(state.workspace, :dired)}
-      end)
-      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Dired: #{dired.directory}")
+      state = Commands.add_buffer(state, pid)
+
+      workspace = State.set_dired(state.workspace, dired_state)
+      state = %{state | workspace: State.set_keymap_scope(workspace, :dired)}
+
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Dired: #{dired.directory}")
     else
       {:error, reason} ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
@@ -211,14 +208,9 @@ defmodule MingaEditor.Commands.Dired do
     Buffer.move_to(buf, {0, 0})
     dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_dired(state.workspace, dired_state)
-      }
-    end)
-    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Dired: #{new_dired.directory}")
+    state = %{state | workspace: State.set_dired(state.workspace, dired_state)}
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Dired: #{new_dired.directory}")
   end
 
   defp apply_directory_navigation({:error, reason}, state, _buf) do
@@ -253,25 +245,10 @@ defmodule MingaEditor.Commands.Dired do
   defp close_dired(state) do
     case state.workspace.dired do
       %{active?: true, buffer: buf} when is_pid(buf) ->
-        state =
-          state
-          |> then(fn state ->
-            %{
-              state
-              | workspace:
-                  State.set_dired(
-                    state.workspace,
-                    (&DiredState.deactivate/1).(state.workspace.dired)
-                  )
-            }
-          end)
-          |> then(fn state ->
-            %{
-              state
-              | workspace: State.set_keymap_scope(state.workspace, :editor)
-            }
-          end)
+        dired = DiredState.deactivate(state.workspace.dired)
 
+        workspace = State.set_dired(state.workspace, dired)
+        state = %{state | workspace: State.set_keymap_scope(workspace, :editor)}
         Commands.execute(state, :kill_buffer)
 
       _ ->
@@ -304,14 +281,9 @@ defmodule MingaEditor.Commands.Dired do
     Buffer.move_to(buf, {0, 0})
     dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_dired(state.workspace, dired_state)
-      }
-    end)
-    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(status_for_dired(new_dired))
+    state = %{state | workspace: State.set_dired(state.workspace, dired_state)}
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status_for_dired(new_dired))
   end
 
   defp apply_dired_update_result({:error, reason}, state, _buf) do
@@ -346,18 +318,10 @@ defmodule MingaEditor.Commands.Dired do
   defp maybe_enter_confirmation(state, ops) do
     summary = format_operations_summary(ops)
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_dired(
-              state.workspace,
-              (&DiredState.enter_confirmation(&1, ops)).(state.workspace.dired)
-            )
-      }
-    end)
-    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("#{summary} — apply? (y/n)")
+    dired = DiredState.enter_confirmation(state.workspace.dired, ops)
+    state = %{state | workspace: State.set_dired(state.workspace, dired)}
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "#{summary} — apply? (y/n)")
   end
 
   @spec spawn_external_open(String.t()) :: {:ok, pid()}

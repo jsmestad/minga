@@ -113,7 +113,7 @@ defmodule MingaEditor.FeatureStateTest do
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
-    cleaned = EditorState.drop_feature_state_source(state, @source)
+    cleaned = MingaEditor.FeatureStateWorkflow.drop_source(state, @source)
 
     assert MingaEditor.Session.State.get_feature_state(cleaned.workspace, @source, @feature) ==
              nil
@@ -121,7 +121,7 @@ defmodule MingaEditor.FeatureStateTest do
     assert MingaEditor.Session.State.get_feature_state(cleaned.workspace, @other_source, @feature) ==
              :live_other
 
-    cleaned_tab = TabBar.get(EditorState.tab_bar(cleaned), 1)
+    cleaned_tab = TabBar.get(cleaned.shell_runtime.state.tab_bar, 1)
     restored = SessionState.restore_tab_context(workspace(), cleaned_tab.context)
 
     assert SessionState.get_feature_state(restored, @source, @feature) == nil
@@ -272,7 +272,12 @@ defmodule MingaEditor.FeatureStateTest do
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
-    context = EditorState.build_agent_tab_defaults(state, %MingaEditor.State.Windows{})
+    context =
+      MingaEditor.State.Tab.Context.new_agent(
+        state.frontend.terminal_viewport,
+        state.workspace.file_tree.project_root,
+        %MingaEditor.State.Windows{}
+      )
 
     restored = SessionState.restore_tab_context(live_workspace, context)
 

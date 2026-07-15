@@ -12,7 +12,6 @@ defmodule MingaEditor.Agent.CompactionTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
 
   test "request is zero-queue FIFO keyed by session pid" do
@@ -55,7 +54,7 @@ defmodule MingaEditor.Agent.CompactionTest do
     active_session = fake_session()
     background_session = fake_session()
     state = state_for(active_session)
-    tab_bar = EditorState.tab_bar(state)
+    tab_bar = state.shell_runtime.state.tab_bar
 
     {tab_bar, background_workspace} =
       TabBar.add_workspace(tab_bar, "Background", background_session)
@@ -65,11 +64,7 @@ defmodule MingaEditor.Agent.CompactionTest do
       |> then(fn ui -> %{ui | view: %{ui.view | compaction_in_progress: true}} end)
 
     tab_bar =
-      TabBar.update_workspace(
-        tab_bar,
-        background_workspace.id,
-        &Workspace.set_agent_ui(&1, background_ui)
-      )
+      TabBar.set_workspace_agent_ui(tab_bar, background_workspace.id, background_ui)
 
     state =
       then(state, fn root ->
@@ -92,8 +87,7 @@ defmodule MingaEditor.Agent.CompactionTest do
       Compaction.apply(state, Outcome.failed(request, :provider_error))
 
     background =
-      updated
-      |> EditorState.tab_bar()
+      updated.shell_runtime.state.tab_bar
       |> TabBar.find_workspace_by_session(background_session)
 
     refute background.agent_ui.view.compaction_in_progress

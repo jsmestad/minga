@@ -8,7 +8,6 @@ defmodule MingaEditor.State.Workspace do
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.WorkspaceReview
 
@@ -252,9 +251,7 @@ defmodule MingaEditor.State.Workspace do
   @doc "Sets review state through the owning workspace module."
   @spec set_review(t(), WorkspaceReview.t()) :: t()
   def set_review(%__MODULE__{} = workspace, %WorkspaceReview{} = review) do
-    workspace
-    |> Map.put(:review, review)
-    |> persist()
+    %{workspace | review: review}
   end
 
   @doc "Returns true when drafts or conflicts require user action before close."
@@ -275,17 +272,13 @@ defmodule MingaEditor.State.Workspace do
   @doc "Renames the workspace and protects it from future auto-naming."
   @spec rename(t(), String.t()) :: t()
   def rename(%__MODULE__{} = workspace, name) when is_binary(name) do
-    workspace
-    |> Map.merge(%{label: name, custom_name: name})
-    |> persist()
+    %{workspace | label: name, custom_name: name}
   end
 
   @doc "Sets the workspace icon."
   @spec set_icon(t(), String.t()) :: t()
   def set_icon(%__MODULE__{} = workspace, icon) when is_binary(icon) do
-    workspace
-    |> Map.put(:icon, icon)
-    |> persist()
+    %{workspace | icon: icon}
   end
 
   @doc "Auto-names an agent workspace from an agent prompt unless the user renamed it."
@@ -305,9 +298,7 @@ defmodule MingaEditor.State.Workspace do
     if has_file?(workspace, file_ref) do
       workspace
     else
-      workspace
-      |> Map.put(:files, Enum.concat(workspace.files, [file_ref]))
-      |> persist()
+      %{workspace | files: Enum.concat(workspace.files, [file_ref])}
     end
   end
 
@@ -316,10 +307,7 @@ defmodule MingaEditor.State.Workspace do
   def remove_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
     files = Enum.reject(workspace.files, &FileRef.equal?(&1, file_ref))
     active_file = remove_active_file(workspace.active_file, file_ref)
-
-    workspace
-    |> Map.merge(%{files: files, active_file: active_file})
-    |> persist()
+    %{workspace | files: files, active_file: active_file}
   end
 
   @doc "Rebinds the active file membership from one logical file ref to another."
@@ -366,6 +354,24 @@ defmodule MingaEditor.State.Workspace do
     maybe_rebind_active_file(workspace, new_file_ref, is_active_tab or was_active_file)
   end
 
+  @doc "Retires every workspace-owned reference to a dead buffer process."
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{} = workspace, buffer_pid) when is_pid(buffer_pid) do
+    files = Enum.reject(workspace.files, &buffer_ref?(&1, buffer_pid))
+
+    active_file =
+      if buffer_ref?(workspace.active_file, buffer_pid), do: nil, else: workspace.active_file
+
+    agent_ui =
+      case workspace.agent_ui do
+        %UIState{} = agent_ui -> UIState.retire_prompt_buffer(agent_ui, buffer_pid)
+        nil -> nil
+      end
+
+    workspace = %__MODULE__{workspace | files: files, active_file: active_file}
+    set_agent_ui(workspace, agent_ui)
+  end
+
   @doc "Returns true when the workspace already contains the file membership."
   @spec has_file?(t(), FileRef.t()) :: boolean()
   def has_file?(%__MODULE__{files: files}, %FileRef{} = file_ref) do
@@ -374,17 +380,11 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Sets the active file membership for the workspace."
   @spec set_active_file(t(), FileRef.t() | nil) :: t()
-  def set_active_file(%__MODULE__{} = workspace, nil) do
-    workspace
-    |> Map.put(:active_file, nil)
-    |> persist()
-  end
+  def set_active_file(%__MODULE__{} = workspace, nil), do: %{workspace | active_file: nil}
 
   def set_active_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
-    workspace
-    |> add_file(file_ref)
-    |> Map.put(:active_file, file_ref)
-    |> persist()
+    workspace = add_file(workspace, file_ref)
+    %{workspace | active_file: file_ref}
   end
 
   @doc "Serializes the persisted workspace fields to a JSON-ready map."
@@ -580,12 +580,6 @@ defmodule MingaEditor.State.Workspace do
   defp persisted_review_state("conflict"), do: :conflict
   defp persisted_review_state(_state), do: :clean
 
-  @spec persist(t()) :: t()
-  defp persist(%__MODULE__{project_root: project_root} = workspace) do
-    Persistence.write(workspace, project_root)
-    workspace
-  end
-
   @spec normalize_project_root(String.t() | nil) :: String.t() | nil
   defp normalize_project_root(project_root) when is_binary(project_root),
     do: Path.expand(project_root)
@@ -606,6 +600,10 @@ defmodule MingaEditor.State.Workspace do
   end
 
   defp active_file_matches?(_active_file, _old_file_ref), do: false
+
+  @spec buffer_ref?(FileRef.t() | nil, pid()) :: boolean()
+  defp buffer_ref?(%FileRef{kind: :buffer, buffer_pid: buffer_pid}, buffer_pid), do: true
+  defp buffer_ref?(_file_ref, _buffer_pid), do: false
 
   @spec remove_active_file(FileRef.t() | nil, FileRef.t()) :: FileRef.t() | nil
   defp remove_active_file(%FileRef{} = active_file, %FileRef{} = removed_file) do
@@ -640,11 +638,7 @@ defmodule MingaEditor.State.Workspace do
   @spec apply_auto_name(String.t(), t()) :: t()
   defp apply_auto_name("", workspace), do: workspace
 
-  defp apply_auto_name(name, workspace) do
-    workspace
-    |> Map.put(:label, name)
-    |> persist()
-  end
+  defp apply_auto_name(name, workspace), do: %{workspace | label: name}
 
   @workspace_colors [
     0xC678DD,

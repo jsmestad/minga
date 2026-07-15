@@ -310,7 +310,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     tab_bar =
       case TabBar.find_workspace_by_session(tab_bar, session) do
         %Workspace{id: workspace_id} ->
-          TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_status(&1, status))
+          TabBar.set_workspace_agent_status(tab_bar, workspace_id, status)
 
         nil ->
           tab_bar
@@ -318,7 +318,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
 
     tab_bar =
       case TabBar.find_by_session(tab_bar, session) do
-        %Tab{id: tab_id} -> TabBar.update_tab(tab_bar, tab_id, &Tab.set_agent_status(&1, status))
+        %Tab{id: tab_id} -> TabBar.set_tab_agent_status(tab_bar, tab_id, status)
         nil -> tab_bar
       end
 
@@ -334,13 +334,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   end
 
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
-  defp install_tab_bar(
-         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state,
-         %TabBar{} = tab_bar
-       ) do
-    shell_state = TraditionalState.install_tab_bar(shell_state, tab_bar)
-    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
   end
-
-  defp install_tab_bar(%EditorState{} = state, %TabBar{}), do: state
 end

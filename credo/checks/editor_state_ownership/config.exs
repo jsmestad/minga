@@ -145,7 +145,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State",
       owners: ["MingaEditor.State"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State root transition API for a documented root-wide invariant",
       workflow: "the focused Editor workflow that owns the external action"
     ],
@@ -296,8 +295,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.TabBar",
       owners: ["MingaEditor.State.TabBar"],
       paths: [[:tab_bar]],
-      pure: false,
-      generic_api: false,
       boundary: "MingaEditor.State.TabBar tab and workspace transition API",
       workflow: "a focused tab or workspace workflow"
     ],
@@ -406,6 +403,7 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
   ]
   @boundary_segments ~w(Workflow Workflows Registry Replay Renderer Rendering Persistence Storage Service Services)
   @value_modules [
+    "MingaEditor.Renderer.ReceiptProjection",
     "MingaEditor.Renderer.RenderReceipt",
     "Minga.Keymap.Scope",
     "MingaAgent.Branch",

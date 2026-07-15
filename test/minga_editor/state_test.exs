@@ -216,7 +216,6 @@ defmodule MingaEditor.StateTest do
   describe "window content synchronization" do
     test "screen rect and buffer activation update buffer windows without rewriting agent chat content" do
       {state, buf1} = state_with_buffer("hello")
-      assert EditorState.screen_rect(state) == {0, 0, 80, 23}
 
       unchanged =
         MingaEditor.BufferActivation.activate(state, state.workspace.buffers,
@@ -349,20 +348,23 @@ defmodule MingaEditor.StateTest do
 
       {tab_bar, agent_workspace} = TabBar.add_workspace(tab_bar, "Agent")
 
+      manual_workspace =
+        tab_bar
+        |> TabBar.get_workspace(0)
+        |> WorkspaceModel.add_file(old_active_ref)
+        |> WorkspaceModel.add_file(old_list_ref)
+        |> WorkspaceModel.set_active_file(old_active_ref)
+
+      agent_workspace =
+        agent_workspace
+        |> WorkspaceModel.add_file(agent_ref)
+        |> WorkspaceModel.set_active_file(agent_ref)
+
       tab_bar =
         tab_bar
         |> TabBar.move_tab_to_workspace(agent_tab.id, agent_workspace.id)
-        |> TabBar.update_workspace(0, fn ws ->
-          ws
-          |> WorkspaceModel.add_file(old_active_ref)
-          |> WorkspaceModel.add_file(old_list_ref)
-          |> WorkspaceModel.set_active_file(old_active_ref)
-        end)
-        |> TabBar.update_workspace(agent_workspace.id, fn ws ->
-          ws
-          |> WorkspaceModel.add_file(agent_ref)
-          |> WorkspaceModel.set_active_file(agent_ref)
-        end)
+        |> TabBar.accept_workspace(manual_workspace)
+        |> TabBar.accept_workspace(agent_workspace)
 
       state = %EditorState{
         frontend: FrontendState.new(port_manager: self()),
@@ -373,7 +375,7 @@ defmodule MingaEditor.StateTest do
       }
 
       updated_state =
-        EditorState.rebind_buffer_file_identity(state, target_buffer, target_path)
+        MingaEditor.BufferFileIdentity.rebind(state, target_buffer, target_path)
 
       updated_tb = updated_state.shell_runtime.state.tab_bar
 
@@ -445,12 +447,13 @@ defmodule MingaEditor.StateTest do
           next_id: 3
       }
 
-      tab_bar =
-        TabBar.update_workspace(tab_bar, 0, fn ws ->
-          ws
-          |> WorkspaceModel.add_file(active_ref)
-          |> WorkspaceModel.set_active_file(active_ref)
-        end)
+      manual_workspace =
+        tab_bar
+        |> TabBar.get_workspace(0)
+        |> WorkspaceModel.add_file(active_ref)
+        |> WorkspaceModel.set_active_file(active_ref)
+
+      tab_bar = TabBar.accept_workspace(tab_bar, manual_workspace)
 
       state = %EditorState{
         frontend: FrontendState.new(port_manager: self()),
@@ -463,7 +466,7 @@ defmodule MingaEditor.StateTest do
         shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
       }
 
-      updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer, path)
+      updated_state = MingaEditor.BufferFileIdentity.rebind(state, target_buffer, path)
       updated_tb = updated_state.shell_runtime.state.tab_bar
 
       assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
@@ -506,13 +509,13 @@ defmodule MingaEditor.StateTest do
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf1)
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf2)
 
-      removed_inactive = EditorState.close_buffer_pure(state, buf1)
+      removed_inactive = EditorState.remove_buffer(state, buf1)
       refute buf1 in removed_inactive.workspace.buffers.list
       assert buf2 in removed_inactive.workspace.buffers.list
       refute Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf1)
       assert Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf2)
 
-      removed_active = EditorState.close_buffer_pure(state, buf2)
+      removed_active = EditorState.remove_buffer(state, buf2)
       assert removed_active.workspace.buffers.active == buf1
       assert removed_active.workspace.buffers.list == [buf1]
     end

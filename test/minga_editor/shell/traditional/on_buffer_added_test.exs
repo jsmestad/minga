@@ -1,16 +1,16 @@
 defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
   @moduledoc """
-  Focused tests for `Shell.Traditional.on_buffer_added/4`.
+  Focused tests for the Traditional shell's pure buffer-added calculation.
 
-  Covers the shell's buffer-added hooks: when a buffer becomes active the
-  shell wires its tab and file-ref state so the workspace does not
-  stick visually behind the buffer view.
+  Buffer identity is prepared by the workflow before the shell wires its tab
+  and file-ref state.
   """
 
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
+  alias MingaEditor.Shell.BufferMetadata
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State.Buffers
@@ -54,16 +54,14 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       File.write!(path, "hello")
       buf = start_supervised!({BufferProcess, file_path: path})
 
-      workspace =
-        %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
-        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
-
+      workspace = workspace_for(buf, root)
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
+      assert {:ok, expected_ref} = FileRef.from_path(root, path)
+      metadata = BufferMetadata.new(buf, :open, "user.ex", path, expected_ref)
 
-      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, metadata)
 
       active_tab = TabBar.active(new_shell.tab_bar)
-      assert {:ok, expected_ref} = FileRef.from_path(root, path)
       assert active_tab.file_ref == expected_ref
       assert Workspace.has_file?(TabBar.get_workspace(new_shell.tab_bar, 0), expected_ref)
     end
@@ -71,15 +69,12 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
     test "falls back to a buffer ref for unsaved scratch buffers" do
       root = Path.join(System.tmp_dir!(), "minga-on-buffer-added-scratch")
       buf = start_supervised!({BufferProcess, content: "scratch", buffer_name: "*scratch*"})
-      expected_ref = FileRef.from_buffer(buf)
-
-      workspace =
-        %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
-        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
-
+      expected_ref = FileRef.from_buffer(buf, "*scratch*")
+      metadata = BufferMetadata.new(buf, :open, "*scratch*", nil, expected_ref)
+      workspace = workspace_for(buf, root)
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
-      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, metadata)
 
       active_tab = TabBar.active(new_shell.tab_bar)
       workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
@@ -95,15 +90,13 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       File.mkdir_p!(Path.dirname(path))
       File.write!(path, "hello")
       buf = start_supervised!({BufferProcess, file_path: path})
-      expected_ref = FileRef.from_buffer(buf)
-
-      workspace =
-        %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
-        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
-
+      label = Path.basename(path)
+      expected_ref = FileRef.from_buffer(buf, label)
+      metadata = BufferMetadata.new(buf, :open, label, path, expected_ref)
+      workspace = workspace_for(buf, root)
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
-      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, metadata)
 
       active_tab = TabBar.active(new_shell.tab_bar)
       workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
@@ -112,5 +105,14 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       assert workspace.active_file == expected_ref
       assert Workspace.has_file?(workspace, expected_ref)
     end
+  end
+
+  @spec workspace_for(pid(), String.t()) :: SessionState.t()
+  defp workspace_for(buffer, root) do
+    %SessionState{
+      viewport: Viewport.new(24, 80),
+      buffers: %Buffers{active: buffer, list: [buffer]}
+    }
+    |> SessionState.set_file_tree(%FileTreeState{project_root: root})
   end
 end

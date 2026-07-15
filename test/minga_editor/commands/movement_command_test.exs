@@ -261,7 +261,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
       BufferProcess.move_to(buffer, {0, Enum.at(hd(wrap_map), -1).byte_offset})
 
       state = Movement.execute(state, :scroll_cursor_top)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
 
       assert win.viewport.top == 0
       assert win.viewport.visual_row_offset == 0
@@ -296,7 +296,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
       BufferProcess.move_to(buffer, {0, Enum.at(penultimate_entry, -1).byte_offset})
 
       state = Movement.execute(state, :scroll_cursor_top)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
 
       assert win.viewport.top == 0
 

@@ -93,12 +93,12 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   describe "toggle_agent_split/1" do
     test "switches to agent tab when on file tab" do
       state = make_state()
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
 
       new_state = AgentCommands.toggle_agent_split(state)
 
-      assert EditorState.active_tab_kind(new_state) == :agent
-      assert EditorState.tab_bar(new_state).active_id == 2
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
+      assert new_state.shell_runtime.state.tab_bar.active_id == 2
     end
 
     test "switches back to file tab when on agent tab" do
@@ -106,12 +106,12 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
       # Toggle on (switch to agent)
       state = AgentCommands.toggle_agent_split(state)
-      assert EditorState.active_tab_kind(state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :agent
 
       # Toggle off (switch to file)
       state = AgentCommands.toggle_agent_split(state)
-      assert EditorState.active_tab_kind(state) == :file
-      assert EditorState.tab_bar(state).active_id == 1
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
+      assert state.shell_runtime.state.tab_bar.active_id == 1
     end
 
     test "agent tab has agent_chat window in context" do
@@ -128,12 +128,12 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     test "round-trip toggle restores file state" do
       state = make_state()
       original_buf = state.workspace.buffers.active
-      original_active = EditorState.tab_bar(state).active_id
+      original_active = state.shell_runtime.state.tab_bar.active_id
 
       state = AgentCommands.toggle_agent_split(state)
       state = AgentCommands.toggle_agent_split(state)
 
-      assert EditorState.tab_bar(state).active_id == original_active
+      assert state.shell_runtime.state.tab_bar.active_id == original_active
       assert state.workspace.buffers.active == original_buf
     end
   end

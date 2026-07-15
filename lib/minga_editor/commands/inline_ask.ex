@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.InlineAsk
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Windows
@@ -104,24 +105,28 @@ defmodule MingaEditor.Commands.InlineAsk do
       next_id: win_id + 1
     }
 
-    context = EditorState.build_agent_tab_defaults(state, windows)
+    context =
+      TabContext.new_agent(
+        state.frontend.terminal_viewport,
+        state.workspace.file_tree.project_root,
+        windows
+      )
+
     {tb, tab} = TabBar.insert(tb, :agent, "Inline Ask")
     tb = TabBar.update_context(tb, tab.id, context)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
-    |> EditorState.switch_tab(tab.id)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+    |> MingaEditor.TabWorkflow.switch(tab.id)
   end
 
   defp create_agent_tab(state), do: state
@@ -147,12 +152,12 @@ defmodule MingaEditor.Commands.InlineAsk do
          %FileRef{} = file_ref
        ) do
     case TabBar.active_workspace(tb) do
-      %Workspace{id: workspace_id} = workspace ->
+      %Workspace{} = workspace ->
         workspace = Workspace.add_file(workspace, file_ref)
 
         install_tab_bar(
           state,
-          MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ -> workspace end)
+          MingaEditor.State.TabBar.accept_workspace(tb, workspace)
         )
 
       nil ->
@@ -164,17 +169,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec install_tab_bar(state(), TabBar.t()) :: state()
   defp install_tab_bar(state, tab_bar) do
-    shell_state =
-      MingaEditor.Shell.Traditional.State.install_tab_bar(
-        MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        tab_bar
-      )
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
   end
 
   @spec dismiss_without_stop(state(), pid()) :: state()

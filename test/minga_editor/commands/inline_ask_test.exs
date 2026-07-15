@@ -236,7 +236,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     tb =
       tb
-      |> TabBar.update_tab(active_tab.id, &Tab.set_session(&1, session_pid))
+      |> TabBar.set_tab_session(active_tab.id, session_pid)
       |> TabBar.move_tab_to_workspace(active_tab.id, workspace.id)
 
     then(state, fn root ->

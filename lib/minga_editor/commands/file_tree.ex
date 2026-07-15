@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Session.State
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -58,56 +59,26 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec focus_visible_tree(state()) :: state()
   defp focus_visible_tree(state) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.focus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
-      }
-    end)
-    |> SidebarWorkflow.select("file_tree")
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    state = update_file_tree(state, &FileTreeState.focus/1)
+    workspace = State.set_keymap_scope(state.workspace, :file_tree)
+    state = %{state | workspace: workspace}
+
+    state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   # Reveals a hidden-but-loaded tree. The data, buffer, and watchers are still
   # alive, so this is a pure layout change with no filesystem rebuild (#2626).
   @spec show_tree(state()) :: state()
   defp show_tree(state) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.show/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
-      }
-    end)
-    |> SidebarWorkflow.select("file_tree")
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    state = update_file_tree(state, &FileTreeState.show/1)
+    workspace = State.set_keymap_scope(state.workspace, :file_tree)
+    state = %{state | workspace: workspace}
+
+    state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   # Hides the sidebar without tearing down the tree. The backing buffer keeps
@@ -116,26 +87,13 @@ defmodule MingaEditor.Commands.FileTree do
   @spec hide_tree(state()) :: state()
   defp hide_tree(state) do
     scope = restore_scope(state)
+    state = update_file_tree(state, &FileTreeState.hide/1)
+    workspace = State.set_keymap_scope(state.workspace, scope)
+    state = %{state | workspace: workspace}
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.hide/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{state | workspace: State.set_keymap_scope(state.workspace, scope)}
-    end)
-    |> SidebarWorkflow.select(nil)
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    state = state |> SidebarWorkflow.select(nil) |> Layout.invalidate()
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   @spec restore_scope(state()) :: atom()
@@ -673,18 +631,11 @@ defmodule MingaEditor.Commands.FileTree do
         state = sync_and_update(state, tree)
         state = update_file_tree(state, &FileTreeState.show/1)
 
-        state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: State.set_keymap_scope(state.workspace, :file_tree)
-          }
-        end)
-        |> SidebarWorkflow.select("file_tree")
-        |> Layout.invalidate()
-        |> then(fn state ->
-          %{state | workspace: State.invalidate_all_windows(state.workspace)}
-        end)
+        workspace = State.set_keymap_scope(state.workspace, :file_tree)
+        state = %{state | workspace: workspace}
+        state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+        workspace = State.invalidate_all_windows(state.workspace)
+        %{state | workspace: workspace}
     end
   end
 
@@ -705,22 +656,11 @@ defmodule MingaEditor.Commands.FileTree do
 
     scope = restore_scope(state)
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.close/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> FileTreeFreshness.synchronize_watchers()
-    |> then(fn state ->
-      %{state | workspace: State.set_keymap_scope(state.workspace, scope)}
-    end)
-    |> SidebarWorkflow.select(nil)
+    state = update_file_tree(state, &FileTreeState.close/1)
+    state = FileTreeFreshness.synchronize_watchers(state)
+    workspace = State.set_keymap_scope(state.workspace, scope)
+    state = %{state | workspace: workspace}
+    SidebarWorkflow.select(state, nil)
   end
 
   # ── Private helpers ───────────────────────────────────────────────────────
@@ -939,14 +879,9 @@ defmodule MingaEditor.Commands.FileTree do
         state
 
       _panel ->
-        state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: State.set_keymap_scope(state.workspace, :editor)
-          }
-        end)
-        |> SidebarWorkflow.close_git_status()
+        workspace = State.set_keymap_scope(state.workspace, :editor)
+        state = %{state | workspace: workspace}
+        SidebarWorkflow.close_git_status(state)
     end
   end
 
@@ -980,11 +915,11 @@ defmodule MingaEditor.Commands.FileTree do
         # If the buffer already has a tab, switch to that tab (correctly
         # leaves agent view if needed). Otherwise fall back to buffer switch.
         pid = Enum.at(state.workspace.buffers.list, idx)
-        tab = EditorState.find_tab_by_buffer(state, pid)
+        {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
 
         state =
           if tab do
-            EditorState.switch_tab(state, tab.id)
+            MingaEditor.TabWorkflow.switch(state, tab.id)
           else
             MingaEditor.BufferActivation.activate(state, idx)
           end
@@ -1064,35 +999,22 @@ defmodule MingaEditor.Commands.FileTree do
   @spec install_open_tree(state(), FileTree.t(), File.posix() | nil) :: state()
   defp install_open_tree(state, tree, error_reason) do
     buf = BufferSync.start_buffer(tree, state.interaction.options_server)
+    file_tree = FileTreeState.open(state.workspace.file_tree, tree, buf)
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (fn file_tree ->
-                 file_tree = FileTreeState.open(file_tree, tree, buf)
+    file_tree =
+      if error_reason,
+        do: FileTreeState.refresh_failed(file_tree, error_reason),
+        else: file_tree
 
-                 if error_reason,
-                   do: FileTreeState.refresh_failed(file_tree, error_reason),
-                   else: file_tree
-               end).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
-      }
-    end)
-    |> SidebarWorkflow.select("file_tree")
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    workspace =
+      state.workspace
+      |> State.set_file_tree(file_tree)
+      |> State.set_keymap_scope(:file_tree)
+
+    state = %{state | workspace: workspace}
+    state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+    workspace = State.invalidate_all_windows(state.workspace)
+    %{state | workspace: workspace}
   end
 
   @spec install_tree_error(state(), FileTree.t(), File.posix()) :: state()
@@ -1490,7 +1412,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp update_buffer_path(state, old_path, new_path) do
     old_path = Path.expand(old_path)
     new_path = Path.expand(new_path)
-    buffer_pids = EditorState.known_open_buffer_pids(state)
+    buffer_pids = MingaEditor.BufferFileIdentity.known_open_pids(state)
 
     Enum.reduce(buffer_pids, {state, []}, fn pid, {acc_state, errors} ->
       update_buffer_pid_path(pid, acc_state, errors, old_path, new_path)
@@ -1527,7 +1449,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   defp retarget_moved_buffer(pid, state, errors, path, moved_path) do
     case safe_retarget_path(pid, moved_path) do
-      :ok -> {EditorState.rebind_buffer_file_identity(state, pid, moved_path), errors}
+      :ok -> {MingaEditor.BufferFileIdentity.rebind(state, pid, moved_path), errors}
       {:error, reason} -> {state, [{path, reason} | errors]}
     end
   end

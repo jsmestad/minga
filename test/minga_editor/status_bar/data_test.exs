@@ -20,7 +20,6 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -247,23 +246,22 @@ defmodule MingaEditor.StatusBar.DataTest do
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
     {tb, tab1} = TabBar.add(tb, :agent, "subagent tests")
 
-    tb =
-      TabBar.update_tab(tb, tab1.id, fn tab ->
-        tab
-        |> Tab.set_session(handle1.pid)
-        |> Tab.set_agent_status(:thinking)
-        |> Tab.mark_background_subagent(handle1)
-      end)
+    tab1 =
+      tab1
+      |> Tab.set_session(handle1.pid)
+      |> Tab.set_agent_status(:thinking)
+      |> Tab.mark_background_subagent(handle1)
 
+    tb = TabBar.accept_tab(tb, tab1)
     {tb, tab2} = TabBar.add(tb, :agent, "subagent docs")
 
-    tb =
-      TabBar.update_tab(tb, tab2.id, fn tab ->
-        tab
-        |> Tab.set_session(handle2.pid)
-        |> Tab.set_agent_status(:idle)
-        |> Tab.mark_background_subagent(handle2)
-      end)
+    tab2 =
+      tab2
+      |> Tab.set_session(handle2.pid)
+      |> Tab.set_agent_status(:idle)
+      |> Tab.mark_background_subagent(handle2)
+
+    tb = TabBar.accept_tab(tb, tab2)
 
     state = state_with_tab_bar(TabBar.switch_to(tb, tab1.id))
     data = Data.from_state(state) |> Data.to_modeline_data()
@@ -281,10 +279,10 @@ defmodule MingaEditor.StatusBar.DataTest do
     tb =
       tb
       |> TabBar.switch_to(agent_tab.id)
-      |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
+      |> TabBar.set_tab_session(agent_tab.id, session)
 
     workspace_id = TabBar.active_workspace_id(tb)
-    tb = TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session))
+    tb = TabBar.set_workspace_session(tb, workspace_id, session)
 
     state = state_with_agent_window(tb)
 

@@ -4,12 +4,21 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
   import ExUnit.CaptureLog
 
   alias Minga.Project.FileRef
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Identity
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.StateStash
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Startup
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.WorkspaceReview
+  alias MingaEditor.Viewport
+  alias MingaEditor.WorkspaceWorkflow
 
   @moduletag :tmp_dir
 
@@ -115,15 +124,16 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert restored.label == "Original"
   end
 
-  test "workspace owner mutations write persisted fields when a project root is present", %{
+  test "workspace owner mutations stay pure and the workflow writes changed projections", %{
     tmp_dir: dir
   } do
-    workspace = Workspace.new_agent(1, "Agent", nil, dir)
+    tab_bar = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+    {previous, workspace} = TabBar.add_workspace(tab_bar, "Agent")
+    current = TabBar.rename_workspace(previous, workspace.id, "Renamed")
     path = Persistence.path_for(dir, 1)
     refute File.exists?(path)
 
-    Workspace.rename(workspace, "Renamed")
-
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(tab_bar, current)
     assert {:ok, restored} = Persistence.read(path, dir)
     assert restored.label == "Renamed"
   end
@@ -191,53 +201,118 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert agent.color == Workspace.new_agent(1, "Agent 1", nil, dir).color
   end
 
-  test "tab bar add and remove workspace writes and deletes persisted files", %{tmp_dir: dir} do
-    tab_bar = TabBar.new(Tab.new_file(1, "a.ex"), dir)
-
-    {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent")
+  test "workspace workflow writes additions and deletes removals", %{tmp_dir: dir} do
+    initial = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+    {added, workspace} = TabBar.add_workspace(initial, "Agent")
     path = Persistence.path_for(dir, workspace.id)
 
+    refute File.exists?(path)
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(initial, added)
     assert File.exists?(path)
 
-    tab_bar = TabBar.remove_workspace(tab_bar, workspace.id)
-
-    refute TabBar.get_workspace(tab_bar, workspace.id)
+    removed = TabBar.remove_workspace(added, workspace.id)
+    refute TabBar.get_workspace(removed, workspace.id)
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(added, removed)
     refute File.exists?(path)
   end
 
-  test "tab bar keeps workspace in memory when persisted delete fails", %{tmp_dir: dir} do
-    tab_bar = TabBar.new(Tab.new_file(1, "a.ex"), dir)
-    {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent")
-    path = Persistence.path_for(dir, workspace.id)
+  test "stashed Traditional retirement persists cleanup and restores without dead identities", %{
+    tmp_dir: dir
+  } do
+    retired = spawn(fn -> receive do: (:stop -> :ok) end)
+    file_ref = FileRef.from_buffer(retired, "scratch")
+    initial = TabBar.new(Tab.new_file(1, "scratch"), dir)
+    {tab_bar, workspace} = TabBar.add_workspace(initial, "Agent")
 
-    File.rm!(path)
+    tab_bar =
+      tab_bar
+      |> TabBar.add_workspace_file(workspace.id, file_ref)
+      |> TabBar.set_workspace_active_file(workspace.id, file_ref)
+
+    traditional_entry = Runtime.default_entry()
+    traditional = TraditionalState.install_tab_bar(%TraditionalState{}, tab_bar)
+
+    foreign_entry = %Entry{
+      id: :foreign,
+      source: {:extension, :foreign},
+      module: MingaEditor.Test.FakeShell,
+      display_name: "Foreign",
+      description: "Foreign shell",
+      capabilities: [],
+      generation: 7
+    }
+
+    previous_runtime =
+      traditional_entry
+      |> Runtime.new(traditional)
+      |> Runtime.activate(foreign_entry, %{marker: :foreign})
+
+    previous = %EditorState{
+      workspace: %SessionState{viewport: Viewport.new(1, 1)},
+      shell_runtime: previous_runtime
+    }
+
+    path = Persistence.path_for(dir, workspace.id)
+    assert :ok = Persistence.write(TabBar.get_workspace(tab_bar, workspace.id), dir)
+    assert %{"files" => [_], "active_file" => %{}} = path |> File.read!() |> JSON.decode!()
+
+    current = EditorState.remove_buffer(previous, retired)
+    assert Runtime.state(current.shell_runtime) == %{marker: :foreign}
+
+    %StateStash{state: %TraditionalState{tab_bar: cleaned_tab_bar}} =
+      Map.fetch!(Runtime.stash(current.shell_runtime), Identity.new(traditional_entry))
+
+    cleaned_workspace = TabBar.get_workspace(cleaned_tab_bar, workspace.id)
+    assert cleaned_workspace.files == []
+    assert cleaned_workspace.active_file == nil
+
+    assert ^current = WorkspaceWorkflow.persist_changes(previous, current)
+    assert %{"files" => [], "active_file" => nil} = path |> File.read!() |> JSON.decode!()
+
+    restored_runtime =
+      Runtime.activate(current.shell_runtime, traditional_entry, %TraditionalState{})
+
+    restored_tab_bar = Runtime.state(restored_runtime).tab_bar
+    restored_workspace = TabBar.get_workspace(restored_tab_bar, workspace.id)
+    assert restored_workspace.files == []
+    assert restored_workspace.active_file == nil
+    refute Enum.any?(restored_tab_bar.tabs, &(&1.file_ref == file_ref))
+
+    send(retired, :stop)
+  end
+
+  test "pure removal is not rolled back when persistence delete fails", %{tmp_dir: dir} do
+    initial = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+    {added, workspace} = TabBar.add_workspace(initial, "Agent")
+    path = Persistence.path_for(dir, workspace.id)
     File.mkdir_p!(path)
 
-    updated = TabBar.remove_workspace(tab_bar, workspace.id)
+    removed = TabBar.remove_workspace(added, workspace.id)
 
-    assert TabBar.get_workspace(updated, workspace.id)
+    refute TabBar.get_workspace(removed, workspace.id)
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(added, removed)
     assert File.dir?(path)
   end
 
   test "tab bar workspace mutations persist changed fields but ignore live-only fields", %{
     tmp_dir: dir
   } do
-    tab_bar = TabBar.new(Tab.new_file(1, "a.ex"), dir)
-    {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent")
+    initial = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+    {tab_bar, workspace} = TabBar.add_workspace(initial, "Agent")
     path = Persistence.path_for(dir, workspace.id)
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(initial, tab_bar)
     original_json = File.read!(path)
 
-    tab_bar =
-      TabBar.update_workspace(tab_bar, workspace.id, &Workspace.set_agent_status(&1, :error))
-
+    status_changed = TabBar.set_workspace_agent_status(tab_bar, workspace.id, :error)
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(tab_bar, status_changed)
     assert File.read!(path) == original_json
 
-    tab_bar =
-      TabBar.update_workspace(tab_bar, workspace.id, &Workspace.set_project_view(&1, :live_view))
-
+    view_changed = TabBar.set_workspace_project_view(status_changed, workspace.id, :live_view)
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(status_changed, view_changed)
     assert File.read!(path) == original_json
 
-    TabBar.update_workspace(tab_bar, workspace.id, &Workspace.rename(&1, "Renamed"))
+    renamed = TabBar.rename_workspace(view_changed, workspace.id, "Renamed")
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(view_changed, renamed)
 
     assert {:ok, restored} = Persistence.read(path, dir)
     assert restored.label == "Renamed"

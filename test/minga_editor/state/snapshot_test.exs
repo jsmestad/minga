@@ -51,7 +51,7 @@ defmodule MingaEditor.State.SnapshotTest do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :agent)
 
-      ctx = EditorState.snapshot_tab_context(state)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state.workspace)
 
       # Per-tab fields stored directly
       assert ctx.keymap_scope == :agent
@@ -83,7 +83,7 @@ defmodule MingaEditor.State.SnapshotTest do
             MingaEditor.State.Parser.accept_injection_ranges(state.parser, %{buf => [:range]})
       }
 
-      ctx = EditorState.snapshot_tab_context(state)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state.workspace)
 
       assert ctx.buffers.active == buf
       assert ctx.editing == state.workspace.editing
@@ -112,7 +112,7 @@ defmodule MingaEditor.State.SnapshotTest do
             })
       }
 
-      ctx = EditorState.snapshot_tab_context(state)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state.workspace)
 
       assert ctx.editing.mode == :normal
       assert match?(%Mode.State{}, ctx.editing.mode_state)
@@ -127,7 +127,7 @@ defmodule MingaEditor.State.SnapshotTest do
       state = make_state(buffer: buf_a)
 
       state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :editor)
-      ctx = EditorState.snapshot_tab_context(state_b)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state_b.workspace)
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.workspace.editing.mode == :insert
@@ -142,7 +142,7 @@ defmodule MingaEditor.State.SnapshotTest do
       state = make_state(buffer: buf_a)
 
       state_b = make_state(buffer: buf_b, keymap_scope: :agent)
-      ctx = EditorState.snapshot_tab_context(state_b)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state_b.workspace)
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.workspace.keymap_scope == :agent
@@ -220,7 +220,7 @@ defmodule MingaEditor.State.SnapshotTest do
         )
 
       file_restored = EditorState.restore_tab_context(file_state, %{})
-      file_ctx = TabBar.active(EditorState.tab_bar(file_restored)).context
+      file_ctx = TabBar.active(file_restored.shell_runtime.state.tab_bar).context
 
       assert file_ctx.file_tree.project_root == file_tree.project_root
       assert file_ctx.file_tree.tree == nil
@@ -234,7 +234,7 @@ defmodule MingaEditor.State.SnapshotTest do
         )
 
       agent_restored = EditorState.restore_tab_context(agent_state, %{})
-      agent_ctx = TabBar.active(EditorState.tab_bar(agent_restored)).context
+      agent_ctx = TabBar.active(agent_restored.shell_runtime.state.tab_bar).context
 
       assert agent_ctx.file_tree.project_root == file_tree.project_root
       assert agent_ctx.file_tree.tree == nil
@@ -253,7 +253,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
       restored = EditorState.restore_tab_context(state, %{})
 
-      updated_tb = EditorState.tab_bar(restored)
+      updated_tb = restored.shell_runtime.state.tab_bar
       stored_ctx = TabBar.get(updated_tb, tab.id).context
 
       refute Context.empty?(stored_ctx)
@@ -338,7 +338,7 @@ defmodule MingaEditor.State.SnapshotTest do
         end)
 
       # Snapshot the context
-      ctx = EditorState.snapshot_tab_context(state_with_both)
+      ctx = MingaEditor.State.Tab.Context.snapshot(state_with_both.workspace)
 
       # Kill the active buffer
       GenServer.stop(buf_a)
@@ -365,7 +365,7 @@ defmodule MingaEditor.State.SnapshotTest do
       {tb, tab_b} = TabBar.add(tb, :file, "b.ex")
 
       state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :editor)
-      tab_b_context = EditorState.snapshot_tab_context(state_b)
+      tab_b_context = MingaEditor.State.Tab.Context.snapshot(state_b.workspace)
 
       tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
 
@@ -375,15 +375,15 @@ defmodule MingaEditor.State.SnapshotTest do
       state = make_state(buffer: buf_a, tab_bar: tb, mode: :normal, keymap_scope: :editor)
 
       # Switch to tab b
-      switched = EditorState.switch_tab(state, tab_b.id)
+      switched = MingaEditor.TabWorkflow.switch(state, tab_b.id)
 
       # Should have restored tab b's context
       assert switched.workspace.editing.mode == :insert
       assert switched.workspace.buffers.active == buf_b
-      assert EditorState.tab_bar(switched).active_id == tab_b.id
+      assert switched.shell_runtime.state.tab_bar.active_id == tab_b.id
 
       # Tab a should have been snapshotted with flat context
-      saved_a = TabBar.get(EditorState.tab_bar(switched), tab_a.id)
+      saved_a = TabBar.get(switched.shell_runtime.state.tab_bar, tab_a.id)
       assert saved_a.context.keymap_scope == :editor
       assert saved_a.context.editing.mode == :normal
       assert saved_a.context.buffers.active == buf_a
@@ -392,7 +392,7 @@ defmodule MingaEditor.State.SnapshotTest do
     test "switching to the current tab is a no-op" do
       tb = TabBar.new(Tab.new_file(1, "a"))
       state = make_state(tab_bar: tb)
-      assert EditorState.switch_tab(state, 1) == state
+      assert MingaEditor.TabWorkflow.switch(state, 1) == state
     end
 
     test "switching to a brand-new tab writes context into tab bar immediately" do
@@ -406,9 +406,9 @@ defmodule MingaEditor.State.SnapshotTest do
       assert Context.empty?(TabBar.get(tb, tab_b.id).context)
 
       state = make_state(buffer: buf, tab_bar: tb, mode: :normal, keymap_scope: :editor)
-      switched = EditorState.switch_tab(state, tab_b.id)
+      switched = MingaEditor.TabWorkflow.switch(state, tab_b.id)
 
-      stored_ctx = TabBar.get(EditorState.tab_bar(switched), tab_b.id).context
+      stored_ctx = TabBar.get(switched.shell_runtime.state.tab_bar, tab_b.id).context
       refute Context.empty?(stored_ctx)
       assert stored_ctx.keymap_scope == :editor
       assert stored_ctx.buffers.active == buf
@@ -416,7 +416,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
     test "switching with nil tab_bar is a no-op" do
       state = make_state(tab_bar: nil)
-      assert EditorState.switch_tab(state, 1) == state
+      assert MingaEditor.TabWorkflow.switch(state, 1) == state
     end
   end
 
@@ -542,18 +542,18 @@ defmodule MingaEditor.State.SnapshotTest do
     end
   end
 
-  describe "active_tab/1 and active_tab_kind/1" do
+  describe "shell runtime active tab queries" do
     test "returns the active tab" do
       tb = TabBar.new(Tab.new_file(1, "a"))
       state = make_state(tab_bar: tb)
-      assert EditorState.active_tab(state).label == "a"
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab(state.shell_runtime).label == "a"
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
     end
 
     test "returns nil / :file for nil tab_bar" do
       state = make_state(tab_bar: nil)
-      assert EditorState.active_tab(state) == nil
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) == nil
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
     end
   end
 end

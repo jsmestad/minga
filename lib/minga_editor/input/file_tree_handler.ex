@@ -144,23 +144,14 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec focus_file_tree_for_mouse(EditorState.t(), atom()) :: EditorState.t()
   defp focus_file_tree_for_mouse(state, :left) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            MingaEditor.Session.State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.focus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{
-        state
-        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :file_tree)
-      }
-    end)
+    file_tree = FileTreeState.focus(state.workspace.file_tree)
+
+    workspace = MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)
+
+    %{
+      state
+      | workspace: MingaEditor.Session.State.set_keymap_scope(workspace, :file_tree)
+    }
   end
 
   defp focus_file_tree_for_mouse(state, _button), do: state
@@ -213,11 +204,12 @@ defmodule MingaEditor.Input.FileTreeHandler do
     state = MingaEditor.do_handle_key(state, cp, mods)
 
     if state.workspace.buffers.active != real_active do
-      state
-      |> update_file_tree(&FileTreeState.unfocus/1)
-      |> then(fn state ->
-        %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
-      end)
+      state = update_file_tree(state, &FileTreeState.unfocus/1)
+
+      %{
+        state
+        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+      }
     else
       state
     end

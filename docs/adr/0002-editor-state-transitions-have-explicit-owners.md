@@ -35,9 +35,9 @@ Scheduler lifecycle state is not copied into Editor values. A domain value may r
 
 File-tree refresh applies this rule through four owners. `MingaEditor.State.FileTree.Refresh` owns debounce and current-result correlation, `MingaEditor.State.FileTree` owns tree and root acceptance, `MingaEditor.FileTree.Freshness` owns workflow ordering, and `MingaEditor.FileTree.Refresh` owns typed scan execution and outcome application. The scheduler owns the running scan and at most one coalesced follow-up.
 
-Render correlation follows the same boundary. `MingaEditor.State.RenderCorrelation` owns the render timer token, semantic intent revisions, receipt ordering, and pending keyframe request. `MingaEditor.State` retains atomic receipt integration because shell identity, workspace observations, layout, focus, and click regions must agree. Timer creation, renderer submission, frontend communication, and stale-receipt logging stay in Editor workflows. `MingaEditor.Renderer.Server` remains authoritative for resident rows, render caches, acknowledgement credit, and renderer-private state.
+Render correlation follows the same boundary. `MingaEditor.State.RenderCorrelation` owns the render timer token, semantic intent revisions, receipt ordering, and pending keyframe request. `MingaEditor.State` retains atomic receipt acceptance because shell identity, workspace observations, layout, focus, and click regions must agree, while the pure `MingaEditor.Renderer.ReceiptProjection` applies an already-accepted receipt through the workspace, shell runtime, and render owner APIs. Timer creation, renderer submission, frontend communication, and stale-receipt logging stay in Editor workflows. `MingaEditor.Renderer.Server` remains authoritative for resident rows, render caches, acknowledgement credit, and renderer-private state.
 
-Buffer activation and window focus use a session aggregate plus focused workflows. `MingaEditor.Session.State.activate_buffer/3` coordinates buffer selection with the active window, keymap scope, launchpad, and hover observations. `MingaEditor.Session.State.focus_window/3` commits focus only after `MingaEditor.WindowFocus` saves and restores process-owned cursors. `MingaEditor.BufferActivation` coordinates shell callbacks and their external work. No buffer call, monitor, log, render request, or shell presentation effect runs inside the pure session transitions.
+Buffer activation and window focus use a session aggregate plus focused workflows. `MingaEditor.Session.State.activate_buffer/3` coordinates buffer selection with the active window, keymap scope, launchpad, and hover observations. `MingaEditor.Session.State.focus_window/3` commits focus only after `MingaEditor.WindowFocus` saves and restores process-owned cursors. `MingaEditor.BufferActivation` coordinates shell callbacks and their external work. Root buffer registration and removal return immutable transition results; `MingaEditor.Handlers.BufferRegistry` creates monitors, unregisters parser state, logs retirement, and installs the returned root once in the Editor callback. No buffer call, monitor, log, render request, or shell presentation effect runs inside the pure transitions.
 
 ## Final root ownership ledger
 
@@ -70,12 +70,12 @@ Root transitions remain only where one atomic operation crosses at least two row
 
 - Applying a theme updates `appearance` and parser-owned highlight presentation together.
 - Integrating a renderer receipt validates render correlation and shell identity before committing render, workspace, and Traditional click-region observations.
-- Resetting frontend render state coordinates frontend connection state, render correlation and layout observations, and window render caches.
-- Buffer registration, removal, and empty-state entry coordinate workspace membership, buffer monitors, shell state, and render invalidation.
-- Tab snapshot, restore, and switching coordinate workspace state, Traditional tab state, active agent presentation, and retiring tab-scoped LSP operations.
-- Extension feature cleanup coordinates active workspace state and stashed shell or tab contexts.
+- Resetting frontend render state coordinates workspace window observations with render correlation and semantic message state.
+- Buffer registration, removal, and empty-state entry coordinate workspace membership, buffer monitor correlation values, shell state, parser or Git references, and tab snapshots where applicable.
+- Tab snapshot, restore, and switching coordinate workspace state, Traditional tab state, render invalidation, and retiring tab-scoped LSP operations. `MingaEditor.TabWorkflow` owns shell resolution, remote replay, session and transcript synchronization, timers, and modal presentation around the pure switch result.
+- Extension feature cleanup coordinates active workspace state and stashed shell or tab contexts after `MingaEditor.FeatureStateWorkflow` resolves registered shell entries.
 
-Leaf changes call their owner APIs directly. Contributors must not add a root wrapper solely to avoid naming the leaf owner.
+Leaf changes call their owner APIs directly. Contributors must not add a root wrapper solely to avoid naming the leaf owner. Root query facades and broad `TabBar` function mappers do not exist: callers query the owning workspace, shell runtime, Git value, tab context, or tab bar directly and use identity-preserving named tab or workspace operations. `MingaEditor.BufferFileIdentity` derives project-aware file references outside the root and asks `TabBar` to rebind every matching tab and workspace reference without changing tab or workspace identity.
 
 ## Mechanical enforcement
 

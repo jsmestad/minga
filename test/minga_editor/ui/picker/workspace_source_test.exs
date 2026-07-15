@@ -113,7 +113,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
 
       target_context =
         editor_state(nil, buf_b, :insert)
-        |> EditorState.snapshot_tab_context()
+        |> then(&MingaEditor.State.Tab.Context.snapshot(&1.workspace))
 
       tb = TabBar.update_context(tb, tab2.id, target_context)
       state = editor_state(tb, buf_a, :normal)
@@ -122,10 +122,12 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
 
       assert switched.workspace.buffers.active == buf_b
       assert switched.workspace.editing.mode == :insert
-      assert EditorState.tab_bar(switched).active_id == tab2.id
-      assert EditorState.active_tab(switched).id == tab2.id
-      assert TabBar.get(EditorState.tab_bar(switched), 1).context.buffers.active == buf_a
-      assert TabBar.get(EditorState.tab_bar(switched), tab2.id).context.buffers.active == buf_b
+      assert switched.shell_runtime.state.tab_bar.active_id == tab2.id
+      assert MingaEditor.Shell.Runtime.active_tab(switched.shell_runtime).id == tab2.id
+      assert TabBar.get(switched.shell_runtime.state.tab_bar, 1).context.buffers.active == buf_a
+
+      assert TabBar.get(switched.shell_runtime.state.tab_bar, tab2.id).context.buffers.active ==
+               buf_b
     end
   end
 

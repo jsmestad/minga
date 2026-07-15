@@ -14,7 +14,6 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
   alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
   alias MingaEditor.FileTree.WatcherSync
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -339,7 +338,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     outcome
   end
 
-  defp file_tree(state), do: EditorState.file_tree_state(state)
+  defp file_tree(state), do: state.workspace.file_tree
 
   defp cancel_render_timer(state) do
     case state.render.render_correlation.timer do

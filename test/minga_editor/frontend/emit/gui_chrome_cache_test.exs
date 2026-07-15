@@ -6,7 +6,8 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
   that the adapter correctly handles fingerprint caching and change detection.
   """
 
-  use ExUnit.Case, async: true
+  # Not async: frame construction reads the process-wide extension panel and semantic UI registries.
+  use ExUnit.Case, async: false
 
   alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
   alias Minga.Frontend.Adapter.GUI.Caches, as: AdapterCaches

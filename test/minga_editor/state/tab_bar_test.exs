@@ -3,7 +3,6 @@ defmodule MingaEditor.State.TabBarTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
-  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -211,7 +210,7 @@ defmodule MingaEditor.State.TabBarTest do
       {tb, group} = TabBar.add_workspace(tb, "Agent")
       {tb, tab2} = TabBar.add(tb, :agent, "agent")
       tb = TabBar.move_tab_to_workspace(tb, tab2.id, group.id)
-      tb = TabBar.update_workspace(tb, 0, &Workspace.rename(&1, "Manual Root"))
+      tb = TabBar.rename_workspace(tb, 0, "Manual Root")
       tb = TabBar.keep_only(tb, tab2.id)
       tb = TabBar.move_tab_to_workspace(tb, tab2.id, 0)
 
@@ -354,15 +353,24 @@ defmodule MingaEditor.State.TabBarTest do
       manual_buffer = buffer_for_path(path)
       agent_file_buffer = buffer_for_path(path)
 
-      manual_tab = tab_with_active_buffer(file_tab(1, "same.ex"), manual_buffer)
+      file_ref = FileRef.from_file_path(path)
+
+      manual_tab =
+        file_tab(1, "same.ex")
+        |> tab_with_active_buffer(manual_buffer)
+        |> Tab.set_file_ref(file_ref)
+
       agent_tab = Tab.new_agent(2, "Agent")
-      agent_file_tab = tab_with_active_buffer(file_tab(3, "same.ex"), agent_file_buffer)
+
+      agent_file_tab =
+        file_tab(3, "same.ex")
+        |> tab_with_active_buffer(agent_file_buffer)
+        |> Tab.set_file_ref(file_ref)
 
       tb = %TabBar{tabs: [manual_tab, agent_tab, agent_file_tab], active_id: 2, next_id: 4}
       {tb, group} = TabBar.add_workspace(tb, "Agent")
       tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
       tb = TabBar.move_tab_to_workspace(tb, 3, group.id)
-      file_ref = FileRef.from_file_path(path)
 
       assert TabBar.find_file_tab_in_workspace(tb, 0, file_ref).id == 1
       assert TabBar.find_file_tab_in_workspace(tb, group.id, file_ref).id == 3
@@ -427,7 +435,7 @@ defmodule MingaEditor.State.TabBarTest do
       refute TabBar.any_attention?(tb)
 
       {tb, agent} = TabBar.add(tb, :agent, "Agent")
-      tb = TabBar.update_tab(tb, agent.id, &Tab.set_session(&1, self()))
+      tb = TabBar.set_tab_session(tb, agent.id, self())
       tb = TabBar.set_attention_by_session(tb, self(), true)
 
       assert TabBar.any_attention?(tb)
@@ -569,7 +577,7 @@ defmodule MingaEditor.State.TabBarTest do
     test "updates a workspace through the owning function" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, group} = TabBar.add_workspace(tb, "Agent")
-      tb = TabBar.update_workspace(tb, group.id, &Workspace.set_agent_status(&1, :error))
+      tb = TabBar.set_workspace_agent_status(tb, group.id, :error)
 
       assert TabBar.get_workspace(tb, group.id).agent_status == :error
     end
@@ -577,8 +585,8 @@ defmodule MingaEditor.State.TabBarTest do
 
   describe "scrub_dead_buffer/2" do
     test "removes dead pid from inactive tab context buffers" do
-      dead = :dead_pid
-      live = :live_pid
+      {:ok, dead} = BufferProcess.start_link(content: "dead")
+      {:ok, live} = BufferProcess.start_link(content: "live")
 
       tab1 = file_tab(1, "active")
 
@@ -605,7 +613,8 @@ defmodule MingaEditor.State.TabBarTest do
     end
 
     test "scrubs multiple tabs in one pass" do
-      dead = :dead_pid
+      {:ok, dead} = BufferProcess.start_link(content: "dead")
+      {:ok, live} = BufferProcess.start_link(content: "live")
 
       tab1 =
         file_tab(1, "a")
@@ -614,7 +623,7 @@ defmodule MingaEditor.State.TabBarTest do
       tab2 =
         file_tab(2, "b")
         |> Tab.set_context(%{
-          buffers: %Buffers{list: [:live, dead], active: :live, active_index: 0}
+          buffers: %Buffers{list: [live, dead], active: live, active_index: 0}
         })
 
       tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
@@ -622,7 +631,7 @@ defmodule MingaEditor.State.TabBarTest do
 
       assert TabBar.get(result, 1).context.buffers.list == []
       assert TabBar.get(result, 1).context.buffers.active == nil
-      assert TabBar.get(result, 2).context.buffers.list == [:live]
+      assert TabBar.get(result, 2).context.buffers.list == [live]
       refute dead in TabBar.get(result, 2).context.buffers.list
     end
   end

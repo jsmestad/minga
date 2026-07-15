@@ -394,6 +394,15 @@ defmodule MingaEditor.Shell.Traditional.State do
   def install_tab_bar(%__MODULE__{} = state, %TabBar{} = tab_bar),
     do: %{state | tab_bar: tab_bar}
 
+  @doc "Retires every exact reference to a dead buffer from the Traditional tab bar."
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{tab_bar: %TabBar{} = tab_bar} = state, buffer_pid)
+      when is_pid(buffer_pid) do
+    %{state | tab_bar: TabBar.scrub_dead_buffer(tab_bar, buffer_pid)}
+  end
+
+  def retire_buffer(%__MODULE__{} = state, buffer_pid) when is_pid(buffer_pid), do: state
+
   # ── Agent presentation and inline surfaces ────────────────────────────────
 
   @doc "Returns the focused agent-surface owner."

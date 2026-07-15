@@ -41,6 +41,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.State.Windows
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -69,7 +70,9 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec toggle_agent_split(state()) :: state()
   def toggle_agent_split(state) do
-    case EditorState.active_tab_kind(state) do
+    state = ShellWorkflow.ensure_available(state)
+
+    case MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) do
       :agent ->
         return_to_editor(state)
 
@@ -84,7 +87,7 @@ defmodule MingaEditor.Commands.Agent do
             # is per-tab, so the start-if-missing check must run after the
             # switch — otherwise it would always see nil from the file tab.
             state
-            |> EditorState.switch_tab(agent_id)
+            |> MingaEditor.TabWorkflow.switch(agent_id)
             |> maybe_start_session()
             |> activate_agent_view(return_target)
 
@@ -108,13 +111,14 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec open_session(state(), String.t(), String.t() | nil) :: state()
   def open_session(state, session_id, tool_call_id \\ nil) when is_binary(session_id) do
+    state = ShellWorkflow.ensure_available(state)
     origin = capture_origin(state)
     state = ensure_agent_state(state)
     return_target = build_return_target(state)
 
     case find_agent_tab(state) do
       %Tab{id: agent_id} ->
-        state = state |> EditorState.switch_tab(agent_id) |> maybe_start_session()
+        state = state |> MingaEditor.TabWorkflow.switch(agent_id) |> maybe_start_session()
 
         case Runtime.active_session(state.shell_runtime) do
           nil ->
@@ -218,7 +222,12 @@ defmodule MingaEditor.Commands.Agent do
         }
 
         # Build complete context with all @per_tab_fields populated.
-        context = EditorState.build_agent_tab_defaults(state, windows)
+        context =
+          MingaEditor.State.Tab.Context.new_agent(
+            state.frontend.terminal_viewport,
+            state.workspace.file_tree.project_root,
+            windows
+          )
 
         # Create agent tab in the background (don't switch to it).
         # Group creation happens later in start_agent_session when the session pid is available.
@@ -230,22 +239,20 @@ defmodule MingaEditor.Commands.Agent do
         # Switch back to the original active tab
         tb = TabBar.switch_to(tb, original_active_id)
 
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              tb
-            )
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(state.shell_runtime),
+            tb
+          )
 
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
+        %{
+          state
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(
+                state.shell_runtime,
+                shell_state
+              )
+        }
 
       _existing ->
         state
@@ -293,7 +300,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec active_tab_id(state()) :: pos_integer() | nil
   defp active_tab_id(state) do
-    case EditorState.active_tab(state) do
+    case MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) do
       %Tab{id: id} -> id
       nil -> nil
     end
@@ -310,19 +317,20 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Returns from the agent view to the recorded editor context without stopping the session."
   @spec return_to_editor(state()) :: state()
   def return_to_editor(state) do
+    state = ShellWorkflow.ensure_available(state)
     return_target = state.workspace.agent_ui.view |> UIState.View.return_target()
 
     case target_file_tab_id(state.shell_runtime.state.tab_bar, return_target) do
       {:exact, id} ->
         state
         |> mark_agent_view_inactive()
-        |> EditorState.switch_tab(id)
+        |> MingaEditor.TabWorkflow.switch(id)
         |> restore_return_keymap_scope(return_target)
 
       {:fallback, id} ->
         state
         |> mark_agent_view_inactive()
-        |> EditorState.switch_tab(id)
+        |> MingaEditor.TabWorkflow.switch(id)
 
       nil ->
         restore_return_target_without_tab(state, return_target)
@@ -363,12 +371,10 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_target_without_tab(state, nil) do
-    state
-    |> mark_agent_view_inactive()
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
-    end)
-    |> NoticeWorkflow.publish("No file tabs in this workspace")
+    state = mark_agent_view_inactive(state)
+    workspace = MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+    state = %{state | workspace: workspace}
+    NoticeWorkflow.publish(state, "No file tabs in this workspace")
   end
 
   defp restore_return_target_without_tab(state, return_target) do
@@ -1013,24 +1019,29 @@ defmodule MingaEditor.Commands.Agent do
     rows = max(state.frontend.terminal_viewport.rows, 1)
     cols = max(state.frontend.terminal_viewport.cols, 1)
     windows = agent_tab_windows(rows, cols)
-    context = EditorState.build_agent_tab_defaults(state, windows)
+
+    context =
+      MingaEditor.State.Tab.Context.new_agent(
+        state.frontend.terminal_viewport,
+        state.workspace.file_tree.project_root,
+        windows
+      )
+
     {tb, tab} = TabBar.insert(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, tab.id, context)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
-    |> EditorState.switch_tab(tab.id)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+    |> MingaEditor.TabWorkflow.switch(tab.id)
   end
 
   defp create_active_agent_tab(state), do: state

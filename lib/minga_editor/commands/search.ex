@@ -93,13 +93,12 @@ defmodule MingaEditor.Commands.Search do
       {line, col} ->
         Buffer.move_to(buf, {line, col})
 
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+        }
+
         state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-          }
-        end)
         |> auto_unfold_at(line)
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
@@ -138,14 +137,12 @@ defmodule MingaEditor.Commands.Search do
       {line, col} ->
         Buffer.move_to(buf, {line, col})
 
-        state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-          }
-        end)
-        |> auto_unfold_at(line)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+        }
+
+        auto_unfold_at(state, line)
     end
   end
 
@@ -177,14 +174,12 @@ defmodule MingaEditor.Commands.Search do
       {line, col} ->
         Buffer.move_to(buf, {line, col})
 
-        state
-        |> then(fn state ->
-          %{
-            state
-            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-          }
-        end)
-        |> auto_unfold_at(line)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+        }
+
+        auto_unfold_at(state, line)
     end
   end
 
@@ -368,19 +363,17 @@ defmodule MingaEditor.Commands.Search do
           original_content: content
         }
 
-        state
-        |> put_in_search(:last_pattern, pattern)
-        |> then(fn state ->
-          %{
-            state
-            | workspace:
-                MingaEditor.Session.State.transition_mode(
-                  state.workspace,
-                  :substitute_confirm,
-                  ms
-                )
-          }
-        end)
+        state = put_in_search(state, :last_pattern, pattern)
+
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(
+                state.workspace,
+                :substitute_confirm,
+                ms
+              )
+        }
     end
   end
 
@@ -442,13 +435,12 @@ defmodule MingaEditor.Commands.Search do
   defp word_search_found(state, buf, word, direction, line, col) do
     Buffer.move_to(buf, {line, col})
 
+    state = %{
+      state
+      | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+    }
+
     state
-    |> then(fn state ->
-      %{
-        state
-        | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-      }
-    end)
     |> auto_unfold_at(line)
     |> put_in_search(:last_pattern, word)
     |> put_in_search(:last_direction, direction)

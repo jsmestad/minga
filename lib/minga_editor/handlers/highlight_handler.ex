@@ -450,20 +450,15 @@ defmodule MingaEditor.Handlers.HighlightHandler do
         {pid, reset}
       end)
 
-    new_state =
-      state
-      |> then(fn state ->
-        highlighting = Highlighting.set_highlights(state.parser.highlighting, reset_highlights)
+    highlighting = Highlighting.set_highlights(state.parser.highlighting, reset_highlights)
+    parser = MingaEditor.State.Parser.accept_highlighting(state.parser, highlighting)
 
-        %{
-          state
-          | parser: MingaEditor.State.Parser.accept_highlighting(state.parser, highlighting)
-        }
-      end)
-      |> then(fn state ->
-        %{state | parser: MingaEditor.State.Parser.report_status(state.parser, :available)}
-      end)
-      |> EditorState.reset_frontend_render_state()
+    state = %{
+      state
+      | parser: MingaEditor.State.Parser.report_status(parser, :available)
+    }
+
+    new_state = EditorState.reset_frontend_render_state(state)
 
     {new_state, [{:log_message, "Parser restarted, syntax highlighting recovered"}]}
   end

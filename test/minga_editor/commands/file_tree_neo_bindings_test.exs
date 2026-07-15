@@ -154,16 +154,16 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       {tab_bar, active_tab} = TabBar.add(TabBar.new(inactive_tab, tmp_dir), :file, "active.txt")
 
+      active_tab =
+        active_tab
+        |> Tab.set_file_ref(active_ref)
+        |> Tab.set_context(SessionState.to_tab_context(active_workspace))
+
       tab_bar =
         tab_bar
-        |> TabBar.update_tab(active_tab.id, fn tab ->
-          tab
-          |> Tab.set_file_ref(active_ref)
-          |> Tab.set_context(SessionState.to_tab_context(active_workspace))
-        end)
-        |> TabBar.update_workspace(0, fn ws ->
-          WorkspaceModel.add_file(ws, active_ref) |> WorkspaceModel.set_active_file(active_ref)
-        end)
+        |> TabBar.accept_tab(active_tab)
+        |> TabBar.add_workspace_file(0, active_ref)
+        |> TabBar.set_workspace_active_file(0, active_ref)
 
       state =
         tmp_dir
@@ -192,17 +192,17 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       assert BufferProcess.file_path(target_buffer) == target
       assert File.read!(target) == "source"
       assert {:ok, ^target_buffer} = BufferProcess.pid_for_path(target)
-      assert TabBar.active(EditorState.tab_bar(state)).id == active_tab.id
-      assert TabBar.get(EditorState.tab_bar(state), inactive_tab.id).file_ref == new_ref
-      assert TabBar.get_workspace(EditorState.tab_bar(state), 0).active_file == active_ref
+      assert TabBar.active(state.shell_runtime.state.tab_bar).id == active_tab.id
+      assert TabBar.get(state.shell_runtime.state.tab_bar, inactive_tab.id).file_ref == new_ref
+      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0).active_file == active_ref
 
       assert WorkspaceModel.has_file?(
-               TabBar.get_workspace(EditorState.tab_bar(state), 0),
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
                new_ref
              )
 
       refute WorkspaceModel.has_file?(
-               TabBar.get_workspace(EditorState.tab_bar(state), 0),
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
                old_ref
              )
     end
@@ -274,16 +274,16 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       assert BufferProcess.file_path(buffer) == target
       assert File.read!(target) == "source"
-      assert TabBar.active(EditorState.tab_bar(state)).file_ref == new_ref
-      assert TabBar.get_workspace(EditorState.tab_bar(state), 0).active_file == new_ref
+      assert TabBar.active(state.shell_runtime.state.tab_bar).file_ref == new_ref
+      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0).active_file == new_ref
 
       assert WorkspaceModel.has_file?(
-               TabBar.get_workspace(EditorState.tab_bar(state), 0),
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
                new_ref
              )
 
       refute WorkspaceModel.has_file?(
-               TabBar.get_workspace(EditorState.tab_bar(state), 0),
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
                old_ref
              )
 
@@ -480,7 +480,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     tab_bar =
       TabBar.new(tab, root)
-      |> TabBar.update_workspace(0, fn ws -> WorkspaceModel.set_active_file(ws, file_ref) end)
+      |> TabBar.set_workspace_active_file(0, file_ref)
 
     then(state, fn root ->
       shell_state =
@@ -508,7 +508,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
     }
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   defp expand_path(state, path) do
     tree = FileTree.expand_path(ft(state).tree, path)

@@ -78,14 +78,8 @@ defmodule MingaEditor.Commands.RemoteFiles do
            options_server: state.interaction.options_server
          ) do
       {:ok, buffer} ->
-        state
-        |> MingaEditor.Handlers.BufferRegistry.add_buffer(buffer)
-        |> then(fn state ->
-          %{
-            state
-            | remote: (&Remote.put_buffer(&1, server_name, remote_path, buffer)).(state.remote)
-          }
-        end)
+        state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buffer)
+        %{state | remote: Remote.put_buffer(state.remote, server_name, remote_path, buffer)}
 
       {:error, reason} ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(

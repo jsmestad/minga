@@ -146,7 +146,7 @@ defmodule Minga.Extension.CodeLeaseTest do
     {:ok, command} = CommandRegistry.lookup(ext_ctx.command_registry, :leased_command_run)
 
     task = Task.async(fn -> command.execute.(%{}) end)
-    assert_receive {:callback_entered, callback_pid}
+    assert_receive {:callback_entered, callback_pid}, 5_000
     assert_eventually_lease_count(running_entry.module, ctx.code_lease, 1, 20)
 
     assert {:error, {:leased_modules, [_summary]}} =

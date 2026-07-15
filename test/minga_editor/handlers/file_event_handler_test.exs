@@ -319,7 +319,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       tab_bar =
         TabBar.new(tab, root)
-        |> TabBar.update_workspace(0, fn ws -> WorkspaceModel.set_active_file(ws, old_ref) end)
+        |> TabBar.set_workspace_active_file(0, old_ref)
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -351,16 +351,16 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
-      assert TabBar.active(EditorState.tab_bar(new_state)).file_ref == new_ref
-      assert TabBar.get_workspace(EditorState.tab_bar(new_state), 0).active_file == new_ref
+      assert TabBar.active(new_state.shell_runtime.state.tab_bar).file_ref == new_ref
+      assert TabBar.get_workspace(new_state.shell_runtime.state.tab_bar, 0).active_file == new_ref
 
       assert WorkspaceModel.has_file?(
-               TabBar.get_workspace(EditorState.tab_bar(new_state), 0),
+               TabBar.get_workspace(new_state.shell_runtime.state.tab_bar, 0),
                new_ref
              )
 
       refute WorkspaceModel.has_file?(
-               TabBar.get_workspace(EditorState.tab_bar(new_state), 0),
+               TabBar.get_workspace(new_state.shell_runtime.state.tab_bar, 0),
                old_ref
              )
 
@@ -413,11 +413,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         |> Map.put(:tabs, [tab, inactive_tab])
         |> Map.put(:active_id, tab.id)
         |> Map.put(:next_id, 3)
-        |> TabBar.update_workspace(0, fn ws ->
-          ws
-          |> WorkspaceModel.add_file(active_ref)
-          |> WorkspaceModel.set_active_file(active_ref)
-        end)
+        |> TabBar.add_workspace_file(0, active_ref)
+        |> TabBar.set_workspace_active_file(0, active_ref)
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -454,7 +451,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
          %Minga.Events.BufferEvent{buffer: target_buffer, path: path}}
 
       {new_state, _effects} = FileEventHandler.handle(state, event)
-      updated_tb = EditorState.tab_bar(new_state)
+      updated_tb = new_state.shell_runtime.state.tab_bar
 
       assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
       assert TabBar.get_workspace(updated_tb, 0).active_file == active_ref
@@ -523,7 +520,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     end
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   defp state_with_tree(root) do
     tree = FileTree.new(root)

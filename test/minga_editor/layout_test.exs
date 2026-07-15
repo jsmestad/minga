@@ -99,7 +99,7 @@ defmodule MingaEditor.LayoutTest do
     agent_ctx = %{keymap_scope: :agent}
 
     file_tab = %MingaEditor.State.Tab{id: 1, kind: :file, label: "scratch"}
-    tb = MingaEditor.State.tab_bar(state) || TabBar.new(file_tab)
+    tb = state.shell_runtime.state.tab_bar || TabBar.new(file_tab)
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
     tb = TabBar.switch_to(tb, file_tab.id)

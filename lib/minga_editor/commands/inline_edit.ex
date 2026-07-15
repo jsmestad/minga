@@ -91,11 +91,12 @@ defmodule MingaEditor.Commands.InlineEdit do
     {state, _session_pid} =
       MingaEditor.Shell.Traditional.Workflow.cancel_inline_edit(state, edit.buffer_pid)
 
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
-    end)
-    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline edit accepted")
+    state = %{
+      state
+      | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+    }
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Inline edit accepted")
   end
 
   @doc "Dismisses an inline edit without mutating the buffer."

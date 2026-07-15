@@ -25,6 +25,28 @@ defmodule MingaEditor.Shell.Workflow do
     end
   end
 
+  @doc "Reconciles shell registration and resolves the active tab from the updated runtime."
+  @spec resolve_active_tab(EditorState.t()) :: {EditorState.t(), MingaEditor.State.Tab.t() | nil}
+  def resolve_active_tab(%EditorState{} = state) do
+    state = ensure_available(state)
+    {state, Runtime.active_tab(state.shell_runtime)}
+  end
+
+  @doc "Reconciles shell registration and resolves the tab currently presenting a buffer."
+  @spec resolve_tab_by_buffer(EditorState.t(), pid()) ::
+          {EditorState.t(), MingaEditor.State.Tab.t() | nil}
+  def resolve_tab_by_buffer(%EditorState{} = state, buffer_pid) when is_pid(buffer_pid) do
+    state = ensure_available(state)
+    {state, Runtime.find_tab_by_buffer(state.shell_runtime, buffer_pid)}
+  end
+
+  @doc "Reconciles shell registration and resolves the updated active tab kind."
+  @spec resolve_active_tab_kind(EditorState.t()) :: {EditorState.t(), atom()}
+  def resolve_active_tab_kind(%EditorState{} = state) do
+    state = ensure_available(state)
+    {state, Runtime.active_tab_kind(state.shell_runtime)}
+  end
+
   @doc "Switches to a registry-resolved shell id, preserving exact-identity state restoration."
   @spec switch(EditorState.t(), atom()) :: EditorState.t()
   def switch(%EditorState{} = state, shell_id) when is_atom(shell_id) do
@@ -55,12 +77,9 @@ defmodule MingaEditor.Shell.Workflow do
       "Shell #{inspect(resolved.id)} registry identity changed; resetting shell state"
     )
 
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state ->
-      %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
-    end)
-    |> NoticeWorkflow.publish("Shell #{resolved.display_name} reloaded")
+    render = MingaEditor.State.Render.invalidate_layout(state.render)
+    state = %{state | shell_runtime: runtime, render: render}
+    NoticeWorkflow.publish(state, "Shell #{resolved.display_name} reloaded")
   end
 
   @spec fall_back_from_removed_entry(EditorState.t(), Runtime.t(), Entry.t()) :: EditorState.t()
@@ -74,13 +93,9 @@ defmodule MingaEditor.Shell.Workflow do
     runtime = state.shell_runtime
     initialized_state = initialize_shell_state(default.module, Runtime.state(runtime))
     runtime = Runtime.fallback_from_removed(runtime, default, initialized_state)
-
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state ->
-      %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
-    end)
-    |> NoticeWorkflow.publish("Shell unavailable, switched to #{default.display_name}")
+    render = MingaEditor.State.Render.invalidate_layout(state.render)
+    state = %{state | shell_runtime: runtime, render: render}
+    NoticeWorkflow.publish(state, "Shell unavailable, switched to #{default.display_name}")
   end
 
   @spec switch_resolved(EditorState.t(), atom(), [Entry.t()]) :: EditorState.t()
@@ -113,12 +128,8 @@ defmodule MingaEditor.Shell.Workflow do
     state = DeactivationWorkflow.run(state)
     initialized_state = activation_default(state.shell_runtime, target)
     runtime = Runtime.activate(state.shell_runtime, target, initialized_state)
-
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state ->
-      %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
-    end)
+    render = MingaEditor.State.Render.invalidate_layout(state.render)
+    %{state | shell_runtime: runtime, render: render}
   end
 
   @spec activation_default(Runtime.t(), Entry.t()) :: term()

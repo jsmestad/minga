@@ -25,7 +25,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
-  alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Session.State, as: SessionState
 
@@ -33,7 +33,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   # Builds an EditorState with a manual workspace file tab and two agent workspaces.
   # The manual tab is id 1 / workspace 0; agent tabs are ids 2 and 3 / workspaces 1 and 2.
-  defp make_state do
+  defp make_state(project_root \\ nil) do
     {:ok, buf} = start_supervised({BufferProcess, content: "hello"})
 
     window = Window.new(1, buf, 24, 80)
@@ -43,7 +43,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     agent_tab_2 = %{Tab.new_agent(3, "Agent 2") | group_id: 2}
 
     tb = %{
-      TabBar.new(file_tab)
+      TabBar.new(file_tab, project_root)
       | tabs: [file_tab, agent_tab_1, agent_tab_2],
         active_id: 1,
         next_id: 4
@@ -107,11 +107,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       shell_state =
         MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          TabBar.update_workspace(
-            tb,
-            workspace_id,
-            &WorkspaceModel.set_project_view(&1, project_view)
-          )
+          TabBar.set_workspace_project_view(tb, workspace_id, project_view)
         )
 
       %{
@@ -130,7 +126,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       shell_state =
         MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session_pid))
+          TabBar.set_workspace_session(tb, workspace_id, session_pid)
         )
 
       %{
@@ -149,7 +145,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       shell_state =
         MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_review(&1, review))
+          TabBar.set_workspace_review(tb, workspace_id, review)
         )
 
       %{
@@ -286,6 +282,34 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   describe "workspace_close/1" do
+    test "persists command review updates and deletes command-removed workspaces", %{
+      tmp_dir: root
+    } do
+      state = make_state(root) |> Workspace.workspace_next()
+      tab_bar = state.shell_runtime.state.tab_bar
+      workspace = TabBar.get_workspace(tab_bar, 1)
+      path = WorkspacePersistence.path_for(root, workspace.id)
+      assert :ok = WorkspacePersistence.write(workspace, root)
+
+      review = %WorkspaceReview{state: :needs_review, changed_files: []}
+      reviewed_state = put_active_workspace_review(state, review)
+
+      assert :ok =
+               WorkspacePersistence.write(
+                 TabBar.get_workspace(reviewed_state.shell_runtime.state.tab_bar, 1),
+                 root
+               )
+
+      discarded = Workspace.workspace_discard(reviewed_state)
+      assert {:ok, persisted} = WorkspacePersistence.read(path, root)
+      assert persisted.review.state == :clean
+      assert TabBar.get_workspace(discarded.shell_runtime.state.tab_bar, 1).review.state == :clean
+
+      closed = Workspace.workspace_close(discarded)
+      refute File.exists?(path)
+      refute TabBar.get_workspace(closed.shell_runtime.state.tab_bar, 1)
+    end
+
     test "migrates the active agent workspace tabs back to manual" do
       state = make_state() |> Workspace.workspace_next()
       result = Workspace.workspace_close(state)

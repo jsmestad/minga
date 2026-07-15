@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   alias Minga.Project.Root
   alias Minga.Project.WorkspaceSnapshot
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Language
@@ -178,7 +179,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp switch_existing_buffer(state, idx) do
     # Prefer existing tabs when opening from normal picker flow so agentic view exits cleanly.
     pid = Enum.at(state.workspace.buffers.list, idx)
-    tab = EditorState.find_tab_by_buffer(state, pid)
+    {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
 
     Log.debug(
       :editor,
@@ -195,7 +196,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   defp switch_existing_buffer_target(state, _idx, %{id: tab_id}) do
-    EditorState.switch_tab(state, tab_id)
+    MingaEditor.TabWorkflow.switch(state, tab_id)
   end
 
   defp switch_existing_buffer_target(state, idx, _tab) do

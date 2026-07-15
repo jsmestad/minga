@@ -383,22 +383,18 @@ defmodule MingaEditor.AgentLifecycle do
       text ->
         label = truncate_label(text, 30)
 
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              MingaEditor.State.TabBar.update_label(tb, active_id, label)
-            )
+        shell_state = MingaEditor.Shell.Runtime.state(state.shell_runtime)
+        tab_bar = MingaEditor.State.TabBar.update_label(tb, active_id, label)
+        shell_state = MingaEditor.Shell.Traditional.State.install_tab_bar(shell_state, tab_bar)
 
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
+        %{
+          state
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(
+                state.shell_runtime,
+                shell_state
+              )
+        }
     end
   end
 

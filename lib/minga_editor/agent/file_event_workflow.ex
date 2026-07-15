@@ -431,9 +431,12 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
       tab_bar =
         tab_bar
         |> TabBar.move_tab_to_workspace(tab_id, workspace_id)
-        |> TabBar.update_workspace(workspace_id, fn workspace ->
-          Workspace.retarget_file(workspace, nil, file_ref, tab_id == tab_bar.active_id)
-        end)
+        |> TabBar.retarget_workspace_file(
+          workspace_id,
+          nil,
+          file_ref,
+          tab_id == tab_bar.active_id
+        )
 
       install_tab_bar(state, tab_bar)
     else
@@ -450,15 +453,9 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   end
 
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
-  defp install_tab_bar(
-         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state,
-         %TabBar{} = tab_bar
-       ) do
-    shell_state = TraditionalState.install_tab_bar(shell_state, tab_bar)
-    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
   end
-
-  defp install_tab_bar(%EditorState{} = state, %TabBar{}), do: state
 
   @spec file_ref_for_path(EditorState.t(), String.t()) :: {:ok, FileRef.t()} | {:error, term()}
   defp file_ref_for_path(state, path) do

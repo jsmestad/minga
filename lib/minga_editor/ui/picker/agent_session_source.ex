@@ -14,7 +14,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Commands.Agent
@@ -48,7 +47,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {_id, {:tab, tab_id}}}, state) do
-    EditorState.switch_tab(state, tab_id)
+    MingaEditor.TabWorkflow.switch(state, tab_id)
   end
 
   def on_select(%Item{id: {_id, {:remote, server_name, session_id, remote_pid, token}}}, state) do

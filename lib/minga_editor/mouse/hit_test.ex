@@ -229,7 +229,7 @@ defmodule MingaEditor.Mouse.HitTest do
   defp window_context_at(state, row, col) do
     layout = Layout.get(state)
 
-    if EditorState.split?(state) do
+    if MingaEditor.Session.State.split?(state.workspace) do
       with {:ok, id, _rect} <-
              WindowTree.window_at(state.workspace.windows.tree, layout.editor_area, row, col) do
         context_from_window(state, layout, id, row, col)
