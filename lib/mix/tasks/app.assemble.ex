@@ -70,6 +70,7 @@ defmodule Mix.Tasks.App.Assemble do
     install_cli_launchers(app_bundle_path)
 
     codesign_bundle(app_bundle_path)
+    verify_bundle_linkage!(app_bundle_path)
 
     report_size(app_bundle_path)
 
@@ -243,6 +244,18 @@ defmodule Mix.Tasks.App.Assemble do
          ) do
       {_output, 0} -> :ok
       {output, _} -> Mix.shell().error("codesign warning: #{output}")
+    end
+
+    :ok
+  end
+
+  @spec verify_bundle_linkage!(String.t()) :: :ok
+  defp verify_bundle_linkage!(app_bundle_path) do
+    script = Path.join([File.cwd!(), "scripts", "check_macos_bundle_linkage"])
+
+    case System.cmd(script, [app_bundle_path], stderr_to_stdout: true) do
+      {output, 0} -> Mix.shell().info(String.trim(output))
+      {output, _code} -> Mix.raise("Bundle linkage verification failed:\n#{output}")
     end
 
     :ok

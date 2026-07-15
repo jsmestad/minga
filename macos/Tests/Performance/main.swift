@@ -205,34 +205,128 @@ private func summary(_ measurement: RenderPerformanceMeasurement) -> String {
 
 enum BenchmarkError: Error { case invalidDelta }
 
-guard CommandLine.arguments.count == 2 else {
-    FileHandle.standardError.write(Data("usage: minga-render-performance <baseline.json>\n".utf8))
+private enum BenchmarkMode {
+    case baseline(URL)
+    case measurementOutput(URL)
+    case comparison(base: [URL], head: [URL], output: URL?)
+}
+
+private func usage() -> Never {
+    let message = """
+    usage: minga-render-performance <baseline.json>
+           minga-render-performance --measurement-output <measurement.json> --absolute-only
+           minga-render-performance --compare [--comparison-output <comparison.json>] --base <measurement.json>... --head <measurement.json>...
+    """
+    FileHandle.standardError.write(Data("\(message)\n".utf8))
     exit(2)
 }
 
-requireInteractiveQoS()
+private func parseMode(_ arguments: [String]) -> BenchmarkMode {
+    if arguments.count == 1, arguments[0].hasPrefix("--") == false {
+        return .baseline(URL(fileURLWithPath: arguments[0]))
+    }
+    if arguments.count == 3, arguments[0] == "--measurement-output",
+       arguments[2] == "--absolute-only" {
+        return .measurementOutput(URL(fileURLWithPath: arguments[1]))
+    }
+    guard arguments.first == "--compare" else { usage() }
 
-private let fixture = try Fixture.make()
-var sink: UInt64 = 0
-var batches: [RenderPerformanceMeasurement] = []
-batches.reserveCapacity(RenderPerformanceGate.requiredBatchCount)
-
-for index in 0..<RenderPerformanceGate.requiredBatchCount {
-    let batch = try measureBatch(fixture, sink: &sink)
-    batches.append(batch)
-    let batchOutput = try JSONEncoder().encode(batch)
-    print("batch=\(index + 1) \(String(decoding: batchOutput, as: UTF8.self))")
-    print("batch=\(index + 1) \(summary(batch))")
+    var base: [URL] = []
+    var head: [URL] = []
+    var output: URL?
+    var index = 1
+    while index < arguments.count {
+        guard index + 1 < arguments.count else { usage() }
+        let value = URL(fileURLWithPath: arguments[index + 1])
+        switch arguments[index] {
+        case "--base": base.append(value)
+        case "--head": head.append(value)
+        case "--comparison-output":
+            guard output == nil else { usage() }
+            output = value
+        default: usage()
+        }
+        index += 2
+    }
+    return .comparison(base: base, head: head, output: output)
 }
 
-let measurement = try RenderPerformanceGate.aggregate(measurements: batches)
-let baselineURL = URL(fileURLWithPath: CommandLine.arguments[1])
-let baseline = try JSONDecoder().decode(RenderPerformanceBaseline.self, from: Data(contentsOf: baselineURL))
-let output = try JSONEncoder().encode(measurement)
-print(String(decoding: output, as: UTF8.self))
-print("aggregate \(summary(measurement))")
-print("fixture=resident-ordinary-edit-v2 clock=thread_cpu rows=\(fixtureRows) visible=\(visibleRows) overscan=\(overscanRows * 2) batches=\(RenderPerformanceGate.requiredBatchCount) warmup_per_batch=\(warmupIterations) iterations_per_batch=\(measuredIterations) compiler=swiftc-O os=\(ProcessInfo.processInfo.operatingSystemVersionString) sink=\(sink)")
+private func emitFailures(_ failures: [String]) {
+    for failure in failures {
+        FileHandle.standardError.write(Data("error: \(failure)\n".utf8))
+    }
+}
 
-let failures = RenderPerformanceGate.failures(measurement: measurement, baseline: baseline)
-for failure in failures { FileHandle.standardError.write(Data("error: \(failure)\n".utf8)) }
-if !failures.isEmpty { exit(1) }
+private func collectMeasurement() throws -> RenderPerformanceMeasurement {
+    requireInteractiveQoS()
+    let fixture = try Fixture.make()
+    var sink: UInt64 = 0
+    var batches: [RenderPerformanceMeasurement] = []
+    batches.reserveCapacity(RenderPerformanceGate.requiredBatchCount)
+
+    for index in 0..<RenderPerformanceGate.requiredBatchCount {
+        let batch = try measureBatch(fixture, sink: &sink)
+        batches.append(batch)
+        let batchOutput = try JSONEncoder().encode(batch)
+        print("batch=\(index + 1) \(String(decoding: batchOutput, as: UTF8.self))")
+        print("batch=\(index + 1) \(summary(batch))")
+    }
+
+    let measurement = try RenderPerformanceGate.aggregate(measurements: batches)
+    let output = try JSONEncoder().encode(measurement)
+    print(String(decoding: output, as: UTF8.self))
+    print("aggregate \(summary(measurement))")
+    print("fixture=resident-ordinary-edit-v2 clock=thread_cpu rows=\(fixtureRows) visible=\(visibleRows) overscan=\(overscanRows * 2) batches=\(RenderPerformanceGate.requiredBatchCount) warmup_per_batch=\(warmupIterations) iterations_per_batch=\(measuredIterations) compiler=swiftc-O os=\(ProcessInfo.processInfo.operatingSystemVersionString) sink=\(sink)")
+    return measurement
+}
+
+private func decodeMeasurements(_ urls: [URL]) throws -> [RenderPerformanceMeasurement] {
+    try urls.map { url in
+        try JSONDecoder().decode(RenderPerformanceMeasurement.self, from: Data(contentsOf: url))
+    }
+}
+
+private let mode = parseMode(Array(CommandLine.arguments.dropFirst()))
+switch mode {
+case .baseline(let baselineURL):
+    let measurement = try collectMeasurement()
+    let baseline = try JSONDecoder().decode(
+        RenderPerformanceBaseline.self,
+        from: Data(contentsOf: baselineURL)
+    )
+    let failures = RenderPerformanceGate.failures(measurement: measurement, baseline: baseline)
+    emitFailures(failures)
+    if !failures.isEmpty { exit(1) }
+
+case .measurementOutput(let outputURL):
+    let measurement = try collectMeasurement()
+    let output = try JSONEncoder().encode(measurement)
+    try output.write(to: outputURL, options: .atomic)
+    let failures = RenderPerformanceGate.absoluteFailures(measurement: measurement)
+    emitFailures(failures)
+    if !failures.isEmpty { exit(1) }
+
+case .comparison(let baseURLs, let headURLs, let outputURL):
+    let baseMeasurements = try decodeMeasurements(baseURLs)
+    let headMeasurements = try decodeMeasurements(headURLs)
+    let comparison = try? RenderPerformanceGate.pairedComparison(
+        baseMeasurements: baseMeasurements,
+        headMeasurements: headMeasurements
+    )
+    if let comparison {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let output = try encoder.encode(comparison)
+        print(String(decoding: output, as: UTF8.self))
+        print("paired combined p50 median ratio \(String(format: "%.3f", comparison.medianCombinedP50Ratio))x across \(comparison.pairCount) pairs")
+        print("base median \(summary(comparison.medianBaseMeasurement))")
+        print("HEAD median \(summary(comparison.medianHeadMeasurement))")
+        if let outputURL { try output.write(to: outputURL, options: .atomic) }
+    }
+    let failures = RenderPerformanceGate.pairedFailures(
+        baseMeasurements: baseMeasurements,
+        headMeasurements: headMeasurements
+    )
+    emitFailures(failures)
+    if !failures.isEmpty { exit(1) }
+}

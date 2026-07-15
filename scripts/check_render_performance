@@ -1,54 +1,111 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="${ROOT}/_build/render-performance"
-MODULE_DIR="${BUILD_DIR}/module"
-BINARY="${BUILD_DIR}/minga-render-performance"
-BASELINE="${1:-${ROOT}/performance/baselines/macos_render_release.json}"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${MINGA_RENDER_ROOT:-$SCRIPT_ROOT}"
+ROOT="$(cd "$ROOT" && pwd)"
+DEFAULT_BUILD_DIR="${ROOT}/_build/render-performance"
 
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "error: optimized native render gate requires macOS" >&2
+usage() {
+  cat >&2 <<EOF
+usage: $0 [baseline.json]
+       $0 --build BUILD_DIR
+       $0 --measure BUILD_DIR OUTPUT.json
+       $0 --compare BUILD_DIR [--comparison-output OUTPUT.json] --base BASE.json... --head HEAD.json...
+EOF
   exit 2
-fi
-if [[ ! -f "${BASELINE}" ]]; then
-  echo "error: baseline not found: ${BASELINE}" >&2
-  exit 2
-fi
+}
 
-mkdir -p "${MODULE_DIR}"
-cd "${ROOT}"
-mix protocol.gen >/dev/null
-swiftc --version
+require_macos() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "error: optimized native render gate requires macOS" >&2
+    exit 2
+  fi
+}
 
-# Build the exact Metal-free production resident types with optimization. The
-# benchmark executable then compiles the shipping ProtocolDecoder against this
-# module and measures real A2 decode/apply plus shared renderer preparation.
-swiftc -O -emit-library -emit-module -module-name MingaProtocol \
-  macos/Sources/Protocol/ProtocolTypes.swift \
-  macos/Sources/Protocol/StatusBarUpdate.swift \
-  macos/Sources/Protocol/GUIColorSlots.swift \
-  macos/Sources/Protocol/FrameResourcePolicy.swift \
-  macos/Sources/Renderer/WindowContent.swift \
-  macos/Sources/Renderer/ResidentRowStore.swift \
-  macos/Sources/Renderer/ResidentRenderPreparation.swift \
-  macos/Sources/Protocol/AgentSurfaceTypes.swift \
-  macos/Sources/Protocol/LatencyRecorder.swift \
-  macos/Sources/Protocol/RenderPerformanceGate.swift \
-  macos/Sources/Protocol/FrontendExtensionRuntimeMessage.swift \
-  -emit-module-path "${MODULE_DIR}/MingaProtocol.swiftmodule" \
-  -o "${MODULE_DIR}/libMingaProtocol.dylib"
+build_harness() {
+  local build_dir=$1
+  local module_dir="${build_dir}/module"
+  local binary="${build_dir}/minga-render-performance"
 
-swiftc -O -I "${MODULE_DIR}" -L "${MODULE_DIR}" -lMingaProtocol \
-  macos/.generated/protocol/ProtocolOpcodes.generated.swift \
-  macos/.generated/protocol/ProtocolCommandSize.generated.swift \
-  macos/.generated/protocol/ProtocolSemanticDecode.generated.swift \
-  macos/Sources/Protocol/ProtocolConstants.swift \
-  macos/Sources/Protocol/ByteCursor.swift \
-  macos/Sources/Protocol/DecodedFrame.swift \
-  macos/Sources/Protocol/ProtocolDecoder.swift \
-  macos/Tests/Performance/main.swift \
-  -o "${BINARY}"
+  rm -rf "$build_dir"
+  mkdir -p "$module_dir"
+  cd "$ROOT"
+  if [[ "${MINGA_RENDER_SKIP_PROTOCOL_GEN:-0}" != "1" ]]; then
+    mix protocol.gen >/dev/null
+  fi
+  swiftc --version
 
-DYLD_LIBRARY_PATH="${MODULE_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" \
-  "${BINARY}" "${BASELINE}"
+  # Build the exact Metal-free production resident types with optimization. The
+  # benchmark executable then compiles the shipping ProtocolDecoder against this
+  # module and measures real A2 decode/apply plus shared renderer preparation.
+  swiftc -O -emit-library -emit-module -module-name MingaProtocol \
+    macos/Sources/Protocol/ProtocolTypes.swift \
+    macos/Sources/Protocol/StatusBarUpdate.swift \
+    macos/Sources/Protocol/GUIColorSlots.swift \
+    macos/Sources/Protocol/FrameResourcePolicy.swift \
+    macos/Sources/Renderer/WindowContent.swift \
+    macos/Sources/Renderer/ResidentRowStore.swift \
+    macos/Sources/Renderer/ResidentRenderPreparation.swift \
+    macos/Sources/Protocol/AgentSurfaceTypes.swift \
+    macos/Sources/Protocol/LatencyRecorder.swift \
+    macos/Sources/Protocol/RenderPerformanceGate.swift \
+    macos/Sources/Protocol/FrontendExtensionRuntimeMessage.swift \
+    -emit-module-path "${module_dir}/MingaProtocol.swiftmodule" \
+    -o "${module_dir}/libMingaProtocol.dylib"
+
+  swiftc -O -I "$module_dir" -L "$module_dir" -lMingaProtocol \
+    macos/.generated/protocol/ProtocolOpcodes.generated.swift \
+    macos/.generated/protocol/ProtocolCommandSize.generated.swift \
+    macos/.generated/protocol/ProtocolSemanticDecode.generated.swift \
+    macos/Sources/Protocol/ProtocolConstants.swift \
+    macos/Sources/Protocol/ByteCursor.swift \
+    macos/Sources/Protocol/DecodedFrame.swift \
+    macos/Sources/Protocol/ProtocolDecoder.swift \
+    macos/Tests/Performance/main.swift \
+    -o "$binary"
+}
+
+run_harness() {
+  local build_dir=$1
+  shift
+  local module_dir="${build_dir}/module"
+  local binary="${build_dir}/minga-render-performance"
+
+  if [[ ! -x "$binary" ]]; then
+    echo "error: render benchmark binary not found: $binary" >&2
+    exit 2
+  fi
+  DYLD_LIBRARY_PATH="${module_dir}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" "$binary" "$@"
+}
+
+require_macos
+case "${1:-}" in
+  --build)
+    [[ $# -eq 2 ]] || usage
+    build_harness "$2"
+    ;;
+  --measure)
+    [[ $# -eq 3 ]] || usage
+    mkdir -p "$(dirname "$3")"
+    run_harness "$2" --measurement-output "$3" --absolute-only
+    ;;
+  --compare)
+    [[ $# -ge 6 ]] || usage
+    build_dir=$2
+    shift 2
+    run_harness "$build_dir" --compare "$@"
+    ;;
+  --*) usage ;;
+  *)
+    [[ $# -le 1 ]] || usage
+    baseline="${1:-${ROOT}/performance/baselines/macos_render_release.json}"
+    if [[ ! -f "$baseline" ]]; then
+      echo "error: baseline not found: $baseline" >&2
+      exit 2
+    fi
+    baseline="$(cd "$(dirname "$baseline")" && pwd)/$(basename "$baseline")"
+    build_harness "$DEFAULT_BUILD_DIR"
+    run_harness "$DEFAULT_BUILD_DIR" "$baseline"
+    ;;
+esac

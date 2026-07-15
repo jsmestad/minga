@@ -90,6 +90,46 @@ public enum RenderPerformanceAggregationError: Error, Equatable, Sendable {
     case invalidBatchMeasurement(index: Int)
 }
 
+/// Side of a paired render-performance comparison containing invalid input.
+public enum RenderPerformanceComparisonSide: String, Equatable, Sendable {
+    /// The merge-base measurement is invalid.
+    case base
+    /// The candidate measurement is invalid.
+    case head
+}
+
+/// Validation failures while comparing same-runner measurement pairs.
+public enum RenderPerformanceComparisonError: Error, Equatable, Sendable {
+    /// Base and HEAD must contain the same number of measurements.
+    case unequalPairCounts(base: Int, head: Int)
+    /// A comparison requires an odd number of at least three adjacent pairs.
+    case invalidPairCount(actual: Int)
+    /// Every percentile in every source measurement must be finite and greater than zero.
+    case invalidMeasurement(side: RenderPerformanceComparisonSide, index: Int)
+}
+
+/// Aggregate values reported for one same-runner paired comparison.
+public struct RenderPerformancePairedComparison: Codable, Equatable, Sendable {
+    /// Number of adjacent base/HEAD pairs included in the decision.
+    public let pairCount: Int
+    /// Median of each pair's `HEAD combinedP50 / BASE combinedP50` ratio.
+    public let medianCombinedP50Ratio: Double
+    /// Metric-by-metric median of the base measurements.
+    public let medianBaseMeasurement: RenderPerformanceMeasurement
+    /// Metric-by-metric median of the HEAD measurements.
+    public let medianHeadMeasurement: RenderPerformanceMeasurement
+
+    /// Creates the report for a validated same-runner paired comparison.
+    public init(pairCount: Int, medianCombinedP50Ratio: Double,
+                medianBaseMeasurement: RenderPerformanceMeasurement,
+                medianHeadMeasurement: RenderPerformanceMeasurement) {
+        self.pairCount = pairCount
+        self.medianCombinedP50Ratio = medianCombinedP50Ratio
+        self.medianBaseMeasurement = medianBaseMeasurement
+        self.medianHeadMeasurement = medianHeadMeasurement
+    }
+}
+
 /// Fail-closed production policy for optimized native rendering measurements.
 public enum RenderPerformanceGate {
     /// Baseline schema version accepted by the gate.
@@ -144,6 +184,74 @@ public enum RenderPerformanceGate {
         )
     }
 
+    /// Returns hard-ceiling failures for one measurement without consulting a static baseline.
+    public static func absoluteFailures(measurement: RenderPerformanceMeasurement) -> [String] {
+        var failures = measurementValidationFailures(measurement, prefix: "measurement")
+        guard failures.isEmpty else { return failures }
+
+        checkAbsolute("decode_apply", measurement.decodeApplyP95Ms, stageAbsoluteBudgetMs, &failures)
+        checkAbsolute(
+            "command_preparation",
+            measurement.commandPreparationP95Ms,
+            stageAbsoluteBudgetMs,
+            &failures
+        )
+        checkAbsolute("combined", measurement.combinedP95Ms, combinedAbsoluteBudgetMs, &failures)
+        return failures
+    }
+
+    /// Compares adjacent same-runner base/HEAD measurements after validating pair symmetry.
+    public static func pairedComparison(
+        baseMeasurements: [RenderPerformanceMeasurement],
+        headMeasurements: [RenderPerformanceMeasurement]
+    ) throws -> RenderPerformancePairedComparison {
+        guard baseMeasurements.count == headMeasurements.count else {
+            throw RenderPerformanceComparisonError.unequalPairCounts(
+                base: baseMeasurements.count,
+                head: headMeasurements.count
+            )
+        }
+        guard baseMeasurements.count >= 3, baseMeasurements.count % 2 == 1 else {
+            throw RenderPerformanceComparisonError.invalidPairCount(actual: baseMeasurements.count)
+        }
+        try validateComparisonMeasurements(baseMeasurements, side: .base)
+        try validateComparisonMeasurements(headMeasurements, side: .head)
+
+        let pairedRatios = zip(baseMeasurements, headMeasurements).map { base, head in
+            head.combinedP50Ms / base.combinedP50Ms
+        }
+        return RenderPerformancePairedComparison(
+            pairCount: baseMeasurements.count,
+            medianCombinedP50Ratio: median(pairedRatios),
+            medianBaseMeasurement: medianMeasurement(baseMeasurements),
+            medianHeadMeasurement: medianMeasurement(headMeasurements)
+        )
+    }
+
+    /// Returns relative combined-p50 and absolute HEAD failures for paired measurements.
+    public static func pairedFailures(
+        baseMeasurements: [RenderPerformanceMeasurement],
+        headMeasurements: [RenderPerformanceMeasurement]
+    ) -> [String] {
+        let comparison: RenderPerformancePairedComparison
+        do {
+            comparison = try pairedComparison(
+                baseMeasurements: baseMeasurements,
+                headMeasurements: headMeasurements
+            )
+        } catch {
+            return ["invalid paired comparison: \(error)"]
+        }
+
+        var failures = absoluteFailures(measurement: comparison.medianHeadMeasurement)
+        if comparison.medianCombinedP50Ratio > maximumRegressionRatio {
+            failures.append(
+                "combined p50 paired median ratio \(format(comparison.medianCombinedP50Ratio))x exceeds \(format(maximumRegressionRatio))x"
+            )
+        }
+        return failures
+    }
+
     /// Returns every policy or baseline validation failure for one measurement.
     public static func failures(measurement: RenderPerformanceMeasurement,
                                 baseline: RenderPerformanceBaseline) -> [String] {
@@ -175,13 +283,32 @@ public enum RenderPerformanceGate {
         validate("baseline decode_apply p95", baseline.decodeApplyP95Ms, &failures)
         validate("baseline command_preparation p95", baseline.commandPreparationP95Ms, &failures)
         validate("baseline combined p95", baseline.combinedP95Ms, &failures)
-        validate("measurement decode_apply p50", measurement.decodeApplyP50Ms, &failures)
-        validate("measurement decode_apply p95", measurement.decodeApplyP95Ms, &failures)
-        validate("measurement command_preparation p50", measurement.commandPreparationP50Ms, &failures)
-        validate("measurement command_preparation p95", measurement.commandPreparationP95Ms, &failures)
-        validate("measurement combined p50", measurement.combinedP50Ms, &failures)
-        validate("measurement combined p95", measurement.combinedP95Ms, &failures)
+        failures.append(contentsOf: measurementValidationFailures(measurement, prefix: "measurement"))
         return failures
+    }
+
+    private static func measurementValidationFailures(
+        _ measurement: RenderPerformanceMeasurement,
+        prefix: String
+    ) -> [String] {
+        var failures: [String] = []
+        validate("\(prefix) decode_apply p50", measurement.decodeApplyP50Ms, &failures)
+        validate("\(prefix) decode_apply p95", measurement.decodeApplyP95Ms, &failures)
+        validate("\(prefix) command_preparation p50", measurement.commandPreparationP50Ms, &failures)
+        validate("\(prefix) command_preparation p95", measurement.commandPreparationP95Ms, &failures)
+        validate("\(prefix) combined p50", measurement.combinedP50Ms, &failures)
+        validate("\(prefix) combined p95", measurement.combinedP95Ms, &failures)
+        return failures
+    }
+
+    private static func validateComparisonMeasurements(
+        _ measurements: [RenderPerformanceMeasurement],
+        side: RenderPerformanceComparisonSide
+    ) throws {
+        for (index, measurement) in measurements.enumerated()
+            where !measurementValidationFailures(measurement, prefix: side.rawValue).isEmpty {
+            throw RenderPerformanceComparisonError.invalidMeasurement(side: side, index: index)
+        }
     }
 
     private static func validate(_ name: String, _ value: Double, _ failures: inout [String]) {
@@ -192,15 +319,37 @@ public enum RenderPerformanceGate {
 
     private static func check(_ stage: String, _ measured: Double, _ baseline: Double,
                               _ absolute: Double, _ failures: inout [String]) {
-        if measured > absolute {
-            failures.append("\(stage) p95 \(format(measured))ms exceeds absolute \(format(absolute))ms")
-        }
+        checkAbsolute(stage, measured, absolute, &failures)
         let ratioLimit = baseline * maximumRegressionRatio
         let noiseLimit = baseline + minimumRegressionAllowanceMs
         let relative = max(ratioLimit, noiseLimit)
         if measured > relative {
             failures.append("\(stage) p95 \(format(measured))ms exceeds relative limit \(format(relative))ms (\(format(maximumRegressionRatio))x baseline or +\(format(minimumRegressionAllowanceMs))ms noise allowance)")
         }
+    }
+
+    private static func checkAbsolute(
+        _ stage: String,
+        _ measured: Double,
+        _ absolute: Double,
+        _ failures: inout [String]
+    ) {
+        if measured > absolute {
+            failures.append("\(stage) p95 \(format(measured))ms exceeds absolute \(format(absolute))ms")
+        }
+    }
+
+    private static func medianMeasurement(
+        _ measurements: [RenderPerformanceMeasurement]
+    ) -> RenderPerformanceMeasurement {
+        RenderPerformanceMeasurement(
+            decodeApplyP50Ms: median(measurements.map(\.decodeApplyP50Ms)),
+            decodeApplyP95Ms: median(measurements.map(\.decodeApplyP95Ms)),
+            commandPreparationP50Ms: median(measurements.map(\.commandPreparationP50Ms)),
+            commandPreparationP95Ms: median(measurements.map(\.commandPreparationP95Ms)),
+            combinedP50Ms: median(measurements.map(\.combinedP50Ms)),
+            combinedP95Ms: median(measurements.map(\.combinedP95Ms))
+        )
     }
 
     private static func median(_ values: [Double]) -> Double {

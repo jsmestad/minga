@@ -45,6 +45,96 @@ struct RenderPerformanceGateTests {
             .contains { $0.contains("noise allowance") })
     }
 
+    @Test("common-mode three-times host slowdown passes paired comparison")
+    func commonModeHostSlowdownPasses() {
+        let base = [0.30, 0.60, 0.90].map { pairedMeasurement(combinedP50: $0) }
+        let head = [0.30, 0.60, 0.90].map { pairedMeasurement(combinedP50: $0) }
+
+        #expect(RenderPerformanceGate.pairedFailures(
+            baseMeasurements: base,
+            headMeasurements: head
+        ).isEmpty)
+    }
+
+    @Test("HEAD combined-p50 regression above 1.20x fails")
+    func pairedCombinedP50RegressionFails() {
+        let base = Array(repeating: pairedMeasurement(combinedP50: 1.0), count: 3)
+        let head = Array(repeating: pairedMeasurement(combinedP50: 1.21), count: 3)
+        let failures = RenderPerformanceGate.pairedFailures(
+            baseMeasurements: base,
+            headMeasurements: head
+        )
+
+        #expect(failures.contains { $0.contains("combined p50 paired median ratio") })
+    }
+
+    @Test("one noisy pair does not fail a three-pair median")
+    func oneNoisyPairPasses() {
+        let base = Array(repeating: pairedMeasurement(combinedP50: 1.0), count: 3)
+        let head = [2.0, 1.0, 1.0].map { pairedMeasurement(combinedP50: $0) }
+
+        #expect(RenderPerformanceGate.pairedFailures(
+            baseMeasurements: base,
+            headMeasurements: head
+        ).isEmpty)
+    }
+
+    @Test("five-pair confirmation decides over all pair ratios")
+    func fivePairConfirmationMedianPasses() {
+        let base = Array(repeating: pairedMeasurement(combinedP50: 1.0), count: 5)
+        let ratios = [1.30, 1.30, 1.0, 1.0, 1.0]
+        let head = ratios.map { pairedMeasurement(combinedP50: $0) }
+        let initialFailures = RenderPerformanceGate.pairedFailures(
+            baseMeasurements: Array(base.prefix(3)),
+            headMeasurements: Array(head.prefix(3))
+        )
+
+        #expect(initialFailures.contains { $0.contains("combined p50 paired median ratio") })
+        #expect(RenderPerformanceGate.pairedFailures(
+            baseMeasurements: base,
+            headMeasurements: head
+        ).isEmpty)
+    }
+
+    @Test("hard p95 ceilings fail despite equal paired ratios")
+    func hardCeilingsStillFailPairedComparison() {
+        let base = Array(repeating: pairedMeasurement(combinedP50: 1.0), count: 3)
+        let head = Array(
+            repeating: pairedMeasurement(combinedP50: 1.0, stageP95: 4.01, combinedP95: 8.01),
+            count: 3
+        )
+        let failures = RenderPerformanceGate.pairedFailures(
+            baseMeasurements: base,
+            headMeasurements: head
+        )
+
+        #expect(failures.contains { $0.contains("absolute 4.00ms") })
+        #expect(failures.contains { $0.contains("absolute 8.00ms") })
+        #expect(failures.contains { $0.contains("paired median ratio") } == false)
+    }
+
+    @Test("invalid and unequal pair sets fail closed")
+    func invalidPairSetsFailClosed() {
+        let valid = pairedMeasurement(combinedP50: 1.0)
+
+        #expect(RenderPerformanceGate.pairedFailures(
+            baseMeasurements: [valid, valid, valid],
+            headMeasurements: [valid, valid, valid, valid, valid]
+        ).isEmpty == false)
+        #expect(RenderPerformanceGate.pairedFailures(
+            baseMeasurements: [valid, valid],
+            headMeasurements: [valid, valid]
+        ).isEmpty == false)
+
+        for invalidValue in [Double.nan, 0, -1] {
+            let invalid = pairedMeasurement(combinedP50: invalidValue)
+            #expect(RenderPerformanceGate.pairedFailures(
+                baseMeasurements: [valid, valid, valid],
+                headMeasurements: [valid, invalid, valid]
+            ).isEmpty == false)
+        }
+    }
+
     @Test("two noisy batches do not fail the median aggregate")
     func minorityNoisyBatchesPass() throws {
         let good = batch(decode: 1.0, command: 1.0, combined: 2.0)
@@ -201,6 +291,21 @@ struct RenderPerformanceGateTests {
             commandPreparationP95Ms: command,
             combinedP50Ms: combined / 2,
             combinedP95Ms: combined
+        )
+    }
+
+    private func pairedMeasurement(
+        combinedP50: Double,
+        stageP95: Double = 1.0,
+        combinedP95: Double = 2.0
+    ) -> RenderPerformanceMeasurement {
+        RenderPerformanceMeasurement(
+            decodeApplyP50Ms: 0.25,
+            decodeApplyP95Ms: stageP95,
+            commandPreparationP50Ms: 0.25,
+            commandPreparationP95Ms: stageP95,
+            combinedP50Ms: combinedP50,
+            combinedP95Ms: combinedP95
         )
     }
 

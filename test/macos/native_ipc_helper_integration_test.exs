@@ -53,17 +53,21 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     owner = self()
 
     open_wait = fn path, editor_mode?, request_id, waiter, _editor, wait_tracker ->
-      send(owner, {:opened, path, editor_mode?, request_id, self()})
-
       if String.ends_with?(path, "before-acceptance.txt") do
+        send(owner, {:opened, path, editor_mode?, request_id, self()})
+
         receive do
           {:continue_open, ^request_id} -> :ok
         after
           5_000 -> raise "timed out waiting to release pre-acceptance IPC test"
         end
-      end
 
-      WaitRequests.register(buffer, path, request_id, waiter, wait_tracker)
+        WaitRequests.register(buffer, path, request_id, waiter, wait_tracker)
+      else
+        :ok = WaitRequests.register(buffer, path, request_id, waiter, wait_tracker)
+        send(owner, {:opened, path, editor_mode?, request_id, self()})
+        :ok
+      end
     end
 
     sleeper =
