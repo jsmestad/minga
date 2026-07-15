@@ -334,26 +334,38 @@ defmodule Minga.ProjectTest do
   end
 
   describe "invalidate/1" do
-    test "clears cache and triggers rebuild", %{tmp_dir: tmp} do
+    test "immediately clears stale files while rebuilding the same root", %{tmp_dir: tmp} do
       project = Path.join(tmp, "invalidate_test")
       File.mkdir_p!(project)
-      File.write!(Path.join(project, "mix.exs"), "")
-      File.write!(Path.join(project, "file.ex"), "")
-      init_git_repo!(project)
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+      Minga.Events.subscribe(:project_rebuilt)
 
-      {_pid, name} = start_project!()
-      Project.switch(name, project)
-      await_rebuild(name)
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      initial_worker = flush(name).rebuild_pid
+      :ok = Minga.Project.SlowFileFind.complete(initial_worker, {:ok, ["old.ex"]})
 
-      # Should have files
-      assert Project.files(name) != []
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                     1_000
 
-      # Invalidate
+      assert %WorkspaceSnapshot{root: ^root, files: ["old.ex"], rebuilding?: false} =
+               Project.snapshot(name)
+
       Project.invalidate(name)
-      await_rebuild(name)
+      replacement_worker = flush(name).rebuild_pid
 
-      # Should have files again after rebuild
-      assert Project.files(name) != []
+      assert %WorkspaceSnapshot{root: ^root, files: [], rebuilding?: true} =
+               Project.snapshot(name)
+
+      :ok = Minga.Project.SlowFileFind.complete(replacement_worker, {:ok, ["new.ex"]})
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                     1_000
+
+      assert %WorkspaceSnapshot{root: ^root, files: ["new.ex"], rebuilding?: false} =
+               Project.snapshot(name)
     end
   end
 
