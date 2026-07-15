@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# Collect a stable same-runner Swift render-performance A/B comparison.
+#
+# Usage: scripts/bench_render_performance_ab BASE_SHA HEAD_SHA
+#        scripts/bench_render_performance_ab --head-only HEAD_SHA
+#
+# Both revisions are built once. Three adjacent measurement pairs alternate
+# revision order to cancel host-frequency and order drift. A first breach adds
+# two more alternating pairs and decides over the median ratio of all five.
+set -uo pipefail
+
+original_head=$(git rev-parse HEAD) || exit 2
+original_checkout=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || printf '%s' "$original_head")
+repo_root=$(git rev-parse --show-toplevel) || exit 2
+cd "$repo_root" || exit 2
+
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  echo "error: render A/B benchmark requires a clean tracked worktree because it checks out both revisions" >&2
+  exit 2
+fi
+
+if [[ $# -eq 2 && $1 == "--head-only" ]]; then
+  base_available=0
+  head_only=1
+  base_sha=""
+  head_sha=$(git rev-parse "$2") || exit 2
+elif [[ $# -eq 2 ]]; then
+  base_available=1
+  head_only=0
+  base_sha=$1
+  head_sha=$(git rev-parse "$2") || exit 2
+else
+  echo "usage: $0 BASE_SHA HEAD_SHA | --head-only HEAD_SHA" >&2
+  exit 2
+fi
+
+artifact_dir="${GITHUB_WORKSPACE:-$repo_root}"
+metrics_file="$artifact_dir/render_performance_metrics.txt"
+head_output="$artifact_dir/render_performance.json"
+comparison_output="$artifact_dir/render_performance_comparison.json"
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-render-performance.XXXXXX")
+runner_script="$work_dir/check_render_performance"
+base_build="$work_dir/base-build"
+head_build="$work_dir/head-build"
+base_runs=()
+head_runs=()
+measurement_status=0
+
+cleanup() {
+  git checkout -f --quiet "$original_checkout" || true
+  rm -rf "$work_dir"
+}
+trap cleanup EXIT
+
+if ! git show "$head_sha:scripts/check_render_performance" > "$runner_script"; then
+  echo "error: render benchmark runner is unavailable at HEAD $head_sha" >&2
+  exit 2
+fi
+chmod +x "$runner_script"
+: > "$metrics_file"
+rm -f "$head_output" "$comparison_output"
+
+echo "Swift render performance A/B: base=$base_sha head=$head_sha"
+if (( head_only )); then
+  echo "::warning::base revision was not requested; running HEAD with absolute render ceilings only."
+fi
+
+ruler_paths=(
+  scripts/check_render_performance
+  macos/Tests/Performance/main.swift
+  macos/Sources/Protocol/RenderPerformanceGate.swift
+)
+
+if (( base_available )) && ! git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
+  echo "::warning::merge-base $base_sha is unavailable; relative render gate will be skipped (HEAD absolute ceilings only)."
+  base_available=0
+fi
+
+if (( base_available )); then
+  for path in "${ruler_paths[@]}"; do
+    if ! git cat-file -e "$base_sha:$path" 2>/dev/null || ! git cat-file -e "$head_sha:$path" 2>/dev/null; then
+      echo "::warning::render benchmark ruler input $path is unavailable at base or HEAD; relative gate will be skipped (HEAD absolute ceilings only)."
+      base_available=0
+      break
+    fi
+  done
+fi
+
+if (( base_available )) && ! git diff --quiet "$base_sha" "$head_sha" -- "${ruler_paths[@]}"; then
+  echo "::warning::render benchmark ruler inputs changed between base and HEAD; relative gate will be skipped because the benchmark ruler differs (HEAD absolute ceilings only)."
+  base_available=0
+fi
+
+build_revision() {
+  local revision=$1
+  local side=$2
+  local build_dir=$3
+
+  echo "::group::Build Swift render benchmark ${side} (${revision})"
+  if ! git checkout -f --quiet "$revision"; then
+    echo "::endgroup::"
+    return 1
+  fi
+  if ! MINGA_RENDER_ROOT="$repo_root" "$runner_script" --build "$build_dir"; then
+    echo "::endgroup::"
+    return 1
+  fi
+  echo "::endgroup::"
+}
+
+measure_revision() {
+  local side=$1
+  local round=$2
+  local build_dir=$3
+  local output="$work_dir/${side}-${round}.json"
+  local status=0
+
+  echo "::group::Measure Swift render benchmark ${side}, pair ${round}"
+  MINGA_RENDER_ROOT="$repo_root" "$runner_script" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
+  echo "::endgroup::"
+  if [[ ! -s "$output" ]]; then
+    return 1
+  fi
+  measurement_status=$status
+  if (( status != 0 )); then
+    echo "Measurement reported an absolute breach; deferring the decision to the median HEAD comparison." | tee -a "$metrics_file"
+  fi
+
+  if [[ "$side" == "base" ]]; then
+    base_runs+=("$output")
+  else
+    head_runs+=("$output")
+  fi
+}
+
+run_pairs() {
+  local first_pair=$1
+  local count=$2
+  local pair
+
+  for ((pair = first_pair; pair < first_pair + count; pair++)); do
+    if (( pair % 2 == 1 )); then
+      measure_revision base "$pair" "$base_build" || return 1
+      measure_revision head "$pair" "$head_build" || return 1
+    else
+      measure_revision head "$pair" "$head_build" || return 1
+      measure_revision base "$pair" "$base_build" || return 1
+    fi
+  done
+}
+
+run_comparison() {
+  local args=(--comparison-output "$comparison_output")
+  local path
+  for path in "${base_runs[@]}"; do args+=(--base "$path"); done
+  for path in "${head_runs[@]}"; do args+=(--head "$path"); done
+  MINGA_RENDER_ROOT="$repo_root" "$runner_script" --compare "$head_build" "${args[@]}"
+}
+
+preserve_head_artifact() {
+  local last_head_index=$((${#head_runs[@]} - 1))
+  cp "${head_runs[$last_head_index]}" "$head_output"
+}
+
+if (( base_available )); then
+  if ! build_revision "$base_sha" base "$base_build"; then
+    echo "::warning::merge-base render benchmark could not be built; relative gate will be skipped (HEAD absolute ceilings only)."
+    base_available=0
+  fi
+fi
+
+if ! build_revision "$head_sha" head "$head_build"; then
+  echo "HEAD render benchmark could not be built" >&2
+  exit 1
+fi
+
+if (( ! base_available )); then
+  if ! measure_revision head 1 "$head_build"; then
+    echo "HEAD render benchmark failed" >&2
+    exit 1
+  fi
+  preserve_head_artifact
+  # Measurement mode already enforced the hard 4 ms stage and 8 ms combined p95 ceilings.
+  exit "$measurement_status"
+fi
+
+if ! run_pairs 1 3; then
+  echo "Paired render benchmark failed" >&2
+  exit 1
+fi
+preserve_head_artifact
+
+if run_comparison; then
+  exit 0
+fi
+
+echo "Initial three-pair comparison breached; collecting two paired confirmation measurements."
+if ! run_pairs 4 2; then
+  echo "Paired render confirmation benchmark failed" >&2
+  exit 1
+fi
+preserve_head_artifact
+run_comparison

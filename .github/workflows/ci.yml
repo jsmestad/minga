@@ -288,6 +288,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need the merge-base revision available for the same-runner render A/B gate.
+          fetch-depth: 0
 
       - uses: erlef/setup-beam@v1
         with:
@@ -326,7 +329,15 @@ jobs:
         run: scripts/check_macos_release_optimization
 
       - name: Gate optimized native render preparation
-        run: scripts/check_render_performance
+        run: |
+          HEAD_REF=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA=$(git merge-base origin/main "$HEAD_REF")
+            echo "Merge-base: $BASE_SHA"
+            bash scripts/bench_render_performance_ab "$BASE_SHA" "$HEAD_REF"
+          else
+            bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
+          fi
 
       - name: Build
         run: |
