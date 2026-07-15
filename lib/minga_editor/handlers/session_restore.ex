@@ -90,7 +90,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
   defp restore_active_file(state, active_file) do
     case BufferRegistry.file_tab_for_path_in_active_workspace(state, active_file) do
       %{id: tab_id} ->
-        EditorState.switch_tab(state, tab_id)
+        MingaEditor.TabWorkflow.switch(state, tab_id)
 
       nil ->
         Minga.Log.warning(:editor, "Session active file no longer exists: #{active_file}")

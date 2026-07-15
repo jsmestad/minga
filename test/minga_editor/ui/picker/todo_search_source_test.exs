@@ -11,7 +11,6 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.PickerUI
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
@@ -244,7 +243,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       item = %Item{id: %{path: path, line: 3}, label: "todo"}
       new_state = TodoSearchSource.on_select(item, state)
 
-      assert EditorState.active_buffer(new_state) == 1
+      assert new_state.workspace.buffers.active_index == 1
       assert BufferProcess.cursor(path_buffer) == {2, 0}
     end
   end

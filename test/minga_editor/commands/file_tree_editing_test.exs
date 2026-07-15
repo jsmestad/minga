@@ -247,16 +247,16 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       {tab_bar, active_tab} = TabBar.add(TabBar.new(inactive_tab, dir), :file, "active.txt")
 
+      active_tab =
+        active_tab
+        |> Tab.set_file_ref(active_ref)
+        |> Tab.set_context(SessionState.to_tab_context(active_workspace))
+
       tab_bar =
         tab_bar
-        |> TabBar.update_tab(active_tab.id, fn tab ->
-          tab
-          |> Tab.set_file_ref(active_ref)
-          |> Tab.set_context(SessionState.to_tab_context(active_workspace))
-        end)
-        |> TabBar.update_workspace(0, fn ws ->
-          WorkspaceModel.add_file(ws, active_ref) |> WorkspaceModel.set_active_file(active_ref)
-        end)
+        |> TabBar.accept_tab(active_tab)
+        |> TabBar.add_workspace_file(0, active_ref)
+        |> TabBar.set_workspace_active_file(0, active_ref)
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -453,9 +453,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
           tab_bar =
             TabBar.new(tab, dir)
-            |> TabBar.update_workspace(0, fn ws ->
-              WorkspaceModel.set_active_file(ws, file_ref)
-            end)
+            |> TabBar.set_workspace_active_file(0, file_ref)
 
           {workspace, %ShellState{tab_bar: tab_bar}}
       end
@@ -500,7 +498,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   defp buffers_for_active_buffer(nil), do: %Buffers{}
   defp buffers_for_active_buffer(buffer) when is_pid(buffer), do: Buffers.add(%Buffers{}, buffer)
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   defp replace_editing_text(%EditorState{} = state, text) when is_binary(text) do
     ft = FileTreeState.update_editing_text(ft(state), text)

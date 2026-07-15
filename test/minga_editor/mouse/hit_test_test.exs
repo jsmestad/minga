@@ -15,7 +15,6 @@ defmodule MingaEditor.Mouse.HitTestTest do
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Startup
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window.Content
   alias MingaEditor.Window
 
@@ -33,7 +32,9 @@ defmodule MingaEditor.Mouse.HitTestTest do
       assert BufferTarget.position(target) == {1, 2}
       assert target.local_row == 1
       assert target.local_col == 2
-      assert target.viewport == EditorState.active_window_struct(state).viewport
+
+      assert target.viewport ==
+               MingaEditor.Session.State.active_window_struct(state.workspace).viewport
     end
 
     test "resolves clicks just after a merged multi-line conceal replacement to the line end" do

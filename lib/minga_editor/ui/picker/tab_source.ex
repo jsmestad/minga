@@ -13,7 +13,6 @@ defmodule MingaEditor.UI.Picker.TabSource do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias Minga.Language.Devicon
 
@@ -39,7 +38,7 @@ defmodule MingaEditor.UI.Picker.TabSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: tab_id}, state) do
-    EditorState.switch_tab(state, tab_id)
+    MingaEditor.TabWorkflow.switch(state, tab_id)
   end
 
   @impl true

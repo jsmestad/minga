@@ -131,6 +131,19 @@ defmodule MingaEditor.Shell.Runtime do
 
   def install_traditional_state(%__MODULE__{} = runtime, %TraditionalState{}), do: runtime
 
+  @doc "Retires a dead buffer from active and exact-identity stashed Traditional values."
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{} = runtime, buffer_pid) when is_pid(buffer_pid) do
+    state = retire_active_traditional_buffer(runtime.entry, runtime.state, buffer_pid)
+
+    stash =
+      Map.new(runtime.stash, fn {identity, stashed} ->
+        {identity, retire_stashed_traditional_buffer(identity, stashed, buffer_pid)}
+      end)
+
+    %__MODULE__{runtime | state: state, stash: stash}
+  end
+
   @doc "Installs shell state returned by a render for the exact active identity."
   @spec accept_rendered_state(t(), atom(), Identity.t(), shell_state()) :: t()
   def accept_rendered_state(
@@ -223,28 +236,25 @@ defmodule MingaEditor.Shell.Runtime do
     {%__MODULE__{runtime | stash: stash}, workspace, changes}
   end
 
-  @doc "Routes buffer-added lifecycle through the active shell."
+  @doc "Routes workflow-prepared buffer metadata through the active shell outside root transitions."
   @spec route_buffer_added(
           t(),
           MingaEditor.Shell.workspace(),
           MingaEditor.Shell.workspace(),
-          pid(),
-          MingaEditor.Shell.buffer_add_context()
+          MingaEditor.Shell.BufferMetadata.t()
         ) :: {t(), MingaEditor.Shell.workspace()}
   def route_buffer_added(
         %__MODULE__{} = runtime,
         previous_workspace,
         workspace,
-        buffer_pid,
-        context
+        %MingaEditor.Shell.BufferMetadata{} = metadata
       ) do
     {shell_state, workspace} =
       runtime.entry.module.on_buffer_added(
         runtime.state,
         previous_workspace,
         workspace,
-        buffer_pid,
-        context
+        metadata
       )
 
     {%__MODULE__{runtime | state: shell_state}, workspace}
@@ -354,13 +364,13 @@ defmodule MingaEditor.Shell.Runtime do
   @doc "Drops extension feature state through active and exact-identity stashed shell callbacks."
   @spec drop_extension_feature_state_sources(t(), [Entry.t()]) :: t()
   def drop_extension_feature_state_sources(%__MODULE__{} = runtime, entries) do
-    route_optional_state_update(runtime, entries, :drop_extension_feature_state_sources, [])
+    route_feature_state_cleanup(runtime, entries, :drop_extension_feature_state_sources, [])
   end
 
   @doc "Drops one feature-state source through active and exact-identity stashed callbacks."
   @spec drop_feature_state_source(t(), [Entry.t()], MingaEditor.FeatureState.source()) :: t()
   def drop_feature_state_source(%__MODULE__{} = runtime, entries, source) do
-    route_optional_state_update(runtime, entries, :drop_feature_state_source, [source])
+    route_feature_state_cleanup(runtime, entries, :drop_feature_state_source, [source])
   end
 
   @doc "Returns the active tab through the active shell contract."
@@ -561,6 +571,40 @@ defmodule MingaEditor.Shell.Runtime do
     end
   end
 
+  @spec route_feature_state_cleanup(t(), [Entry.t()], atom(), [term()]) :: t()
+  defp route_feature_state_cleanup(%__MODULE__{} = runtime, entries, callback, args) do
+    state = apply(runtime.entry.module, callback, [runtime.state | args])
+    runtime = %__MODULE__{runtime | state: state}
+
+    Enum.reduce(entries, runtime, fn entry, runtime_acc ->
+      route_stashed_feature_state_cleanup(runtime_acc, entry, callback, args)
+    end)
+  end
+
+  @spec route_stashed_feature_state_cleanup(t(), Entry.t(), atom(), [term()]) :: t()
+  defp route_stashed_feature_state_cleanup(
+         %__MODULE__{} = runtime,
+         %Entry{} = entry,
+         callback,
+         args
+       ) do
+    case Map.get(runtime.stash, Identity.new(entry)) do
+      %StateStash{} = stashed ->
+        case StateStash.restore(stashed, entry) do
+          {:ok, old_state} ->
+            new_state = apply(entry.module, callback, [old_state | args])
+            updated = StateStash.new(entry, new_state)
+            %__MODULE__{runtime | stash: Map.put(runtime.stash, updated.identity, updated)}
+
+          :mismatch ->
+            runtime
+        end
+
+      nil ->
+        runtime
+    end
+  end
+
   @spec route_optional_state_update(t(), [Entry.t()], atom(), [term()]) :: t()
   defp route_optional_state_update(%__MODULE__{} = runtime, entries, callback, args) do
     runtime = route_active_optional_state_update(runtime, callback, args)
@@ -618,6 +662,30 @@ defmodule MingaEditor.Shell.Runtime do
         runtime
     end
   end
+
+  @spec retire_active_traditional_buffer(Entry.t(), shell_state(), pid()) :: shell_state()
+  defp retire_active_traditional_buffer(
+         %Entry{module: MingaEditor.Shell.Traditional},
+         %TraditionalState{} = state,
+         buffer_pid
+       ) do
+    TraditionalState.retire_buffer(state, buffer_pid)
+  end
+
+  defp retire_active_traditional_buffer(%Entry{}, state, _buffer_pid), do: state
+
+  @spec retire_stashed_traditional_buffer(Identity.t(), StateStash.t(), pid()) :: StateStash.t()
+  defp retire_stashed_traditional_buffer(
+         %Identity{module: MingaEditor.Shell.Traditional} = key,
+         %StateStash{identity: identity, state: %TraditionalState{}} = stashed,
+         buffer_pid
+       )
+       when key == identity do
+    StateStash.retire_buffer(stashed, buffer_pid)
+  end
+
+  defp retire_stashed_traditional_buffer(%Identity{}, %StateStash{} = stashed, _buffer_pid),
+    do: stashed
 
   @spec persistence_change(Entry.t(), shell_state(), shell_state()) :: persistence_change() | nil
   defp persistence_change(_entry, state, state), do: nil

@@ -648,7 +648,7 @@ defmodule Minga.Test.EditorCase do
   def active_window_buffer(%{editor: editor}) do
     editor
     |> get_editor_state()
-    |> MingaEditor.State.active_window_struct()
+    |> then(&MingaEditor.Session.State.active_window_struct(&1.workspace))
     |> case do
       %{content: content} -> Content.pid(content)
       _ -> nil
@@ -715,8 +715,7 @@ defmodule Minga.Test.EditorCase do
   def file_tree_open?(%{editor: editor}) do
     editor
     |> get_editor_state()
-    |> MingaEditor.State.file_tree_state()
-    |> MingaEditor.State.FileTree.visible?()
+    |> then(&MingaEditor.State.FileTree.visible?(&1.workspace.file_tree))
   end
 
   @doc "Returns true if the completion menu is visible."
@@ -746,14 +745,14 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the tab bar labels."
   @spec tab_labels(editor_ctx()) :: [String.t()]
   def tab_labels(%{editor: editor}) do
-    Enum.map(MingaEditor.State.tab_bar(get_editor_state(editor)).tabs, & &1.label)
+    Enum.map(get_editor_state(editor).shell_runtime.state.tab_bar.tabs, & &1.label)
   end
 
   @doc "Returns the active workspace ID."
   @spec active_workspace_id(editor_ctx()) :: non_neg_integer()
   def active_workspace_id(%{editor: editor}) do
     MingaEditor.State.TabBar.active_workspace_id(
-      MingaEditor.State.tab_bar(get_editor_state(editor))
+      get_editor_state(editor).shell_runtime.state.tab_bar
     )
   end
 
@@ -761,7 +760,7 @@ defmodule Minga.Test.EditorCase do
   @spec visible_file_tabs(editor_ctx(), non_neg_integer()) :: [map()]
   def visible_file_tabs(%{editor: editor}, workspace_id) do
     MingaEditor.State.TabBar.visible_file_tabs(
-      MingaEditor.State.tab_bar(get_editor_state(editor)),
+      get_editor_state(editor).shell_runtime.state.tab_bar,
       workspace_id
     )
   end

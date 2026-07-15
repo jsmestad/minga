@@ -30,10 +30,10 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
     for {label, caps} <- [{"GUI", @gui}, {"Go TUI", @go_tui}] do
       test "#{label} opens bottom panel on messages tab without stealing focus" do
         state = BufferManagement.execute(base_state(unquote(Macro.escape(caps))), :view_messages)
-        assert EditorState.bottom_panel(state).visible == true
-        assert EditorState.bottom_panel(state).active_tab == :messages
-        assert EditorState.bottom_panel(state).filter == nil
-        assert EditorState.bottom_panel(state).focused == false
+        assert state.shell_runtime.state.bottom_panel.visible == true
+        assert state.shell_runtime.state.bottom_panel.active_tab == :messages
+        assert state.shell_runtime.state.bottom_panel.filter == nil
+        assert state.shell_runtime.state.bottom_panel.focused == false
       end
     end
 
@@ -59,7 +59,7 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
         end)
 
       state = BufferManagement.execute(state, :view_messages)
-      assert EditorState.bottom_panel(state).dismissed == false
+      assert state.shell_runtime.state.bottom_panel.dismissed == false
     end
   end
 
@@ -67,10 +67,10 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
     for {label, caps} <- [{"GUI", @gui}, {"Go TUI", @go_tui}] do
       test "#{label} opens bottom panel with warnings filter without stealing focus" do
         state = BufferManagement.execute(base_state(unquote(Macro.escape(caps))), :view_warnings)
-        assert EditorState.bottom_panel(state).visible == true
-        assert EditorState.bottom_panel(state).active_tab == :messages
-        assert EditorState.bottom_panel(state).filter == :warnings
-        assert EditorState.bottom_panel(state).focused == false
+        assert state.shell_runtime.state.bottom_panel.visible == true
+        assert state.shell_runtime.state.bottom_panel.active_tab == :messages
+        assert state.shell_runtime.state.bottom_panel.filter == :warnings
+        assert state.shell_runtime.state.bottom_panel.focused == false
       end
     end
   end

@@ -649,29 +649,21 @@ defmodule MingaEditor.Commands.Movement do
     if BottomPanel.focused?(state.shell_runtime.state.bottom_panel) do
       panel = state.shell_runtime.state.bottom_panel |> BottomPanel.blur()
 
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_bottom_panel(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            panel
-          )
+      shell_state =
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
+          MingaEditor.Shell.Runtime.state(state.shell_runtime),
+          panel
+        )
 
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
-      |> then(fn state ->
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.set_keymap_scope(
-                state.workspace,
-                MingaEditor.Session.State.scope_for_active_window(state.workspace)
-              )
-        }
-      end)
+      state = %{
+        state
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      scope = MingaEditor.Session.State.scope_for_active_window(state.workspace)
+      workspace = MingaEditor.Session.State.set_keymap_scope(state.workspace, scope)
+      %{state | workspace: workspace}
     else
       navigate_window_to_neighbor(state, :up)
     end
@@ -717,30 +709,22 @@ defmodule MingaEditor.Commands.Movement do
     panel = state.shell_runtime.state.bottom_panel
 
     if panel.visible do
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_bottom_panel(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            MingaEditor.BottomPanel.focus(panel)
-          )
+      shell_state =
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
+          MingaEditor.Shell.Runtime.state(state.shell_runtime),
+          MingaEditor.BottomPanel.focus(panel)
+        )
 
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
-      |> update_file_tree(&FileTreeState.unfocus/1)
-      |> then(fn state ->
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.set_keymap_scope(
-                state.workspace,
-                MingaEditor.Session.State.scope_for_active_window(state.workspace)
-              )
-        }
-      end)
+      state = %{
+        state
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      state = update_file_tree(state, &FileTreeState.unfocus/1)
+      scope = MingaEditor.Session.State.scope_for_active_window(state.workspace)
+      workspace = MingaEditor.Session.State.set_keymap_scope(state.workspace, scope)
+      %{state | workspace: workspace}
     else
       state
     end
@@ -1220,7 +1204,12 @@ defmodule MingaEditor.Commands.Movement do
   # ── Viewport helpers for scroll commands ──────────────────────────────────
 
   # Delegates to EditorState shared helpers.
-  defp active_viewport(state), do: EditorState.current_viewport(state)
+  defp active_viewport(state),
+    do:
+      MingaEditor.Session.State.current_viewport(
+        state.workspace,
+        state.frontend.terminal_viewport
+      )
 
   defp put_active_viewport(state, new_vp),
     do: %{

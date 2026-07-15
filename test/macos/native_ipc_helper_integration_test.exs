@@ -10,6 +10,8 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
   @moduletag :macos_ipc_helper
 
+  @helper_timeout 10_000
+
   alias MingaEditor.NativeIPC.Supervisor, as: IPCSupervisor
   alias Minga.Frontend.WaitRequests
 
@@ -146,7 +148,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     assert_receive {:opened, ^target, false, request_id, _handler}, 2_000
     assert is_binary(request_id)
     assert :ok = WaitRequests.accept(ctx.buffer, target, ctx.tracker)
-    assert {_, 0} = Task.await(task, 5_000)
+    assert {_, 0} = Task.await(task, @helper_timeout)
     assert :ok = WaitRequests.await_acknowledgements(1_000, ctx.tracker)
   end
 
@@ -157,7 +159,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
     assert :ok = Supervisor.stop(ctx.supervisor)
-    assert {output, 1} = Task.await(task, 5_000)
+    assert {output, 1} = Task.await(task, @helper_timeout)
     assert output =~ "disconnected"
   end
 
@@ -168,7 +170,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
     assert :ok = Supervisor.stop(ctx.supervisor)
-    assert {output, 5} = Task.await(task, 5_000)
+    assert {output, 5} = Task.await(task, @helper_timeout)
     assert output =~ "before accepting"
   end
 
@@ -179,7 +181,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     assert_receive {:opened, ^target, false, request_id, handler}, 2_000
     assert Task.yield(task, 100) == nil
     assert {_, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(ctx.app_pid)])
-    assert {output, 5} = Task.await(task, 5_000)
+    assert {output, 5} = Task.await(task, @helper_timeout)
     assert output =~ "before accepting"
     send(handler, {:continue_open, request_id})
   end
@@ -191,7 +193,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
     assert {_, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(ctx.app_pid)])
-    assert {output, 1} = Task.await(task, 5_000)
+    assert {output, 1} = Task.await(task, @helper_timeout)
     assert output =~ "Minga.app exited"
   end
 

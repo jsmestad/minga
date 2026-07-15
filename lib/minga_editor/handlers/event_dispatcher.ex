@@ -34,6 +34,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Face
   alias MingaEditor.UI.Theme.Loader, as: ThemeLoader
+  alias MingaEditor.WorkspaceWorkflow
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent
@@ -215,12 +216,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
             {:background_subagent_started, handle}
           )
 
-        state =
-          state
-          |> then(fn state -> %{state | shell_runtime: runtime} end)
-          |> then(fn state -> %{state | workspace: workspace} end)
+        transitioned = %{state | shell_runtime: runtime, workspace: workspace}
 
-        MingaEditor.schedule_render(state, 16)
+        state
+        |> WorkspaceWorkflow.persist_changes(transitioned)
+        |> MingaEditor.schedule_render(16)
 
       {:error, reason} ->
         Minga.Log.warning(
@@ -430,6 +430,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec handle_node_disconnected(EditorState.t(), NodeDisconnectedEvent.t()) :: EditorState.t()
   defp handle_node_disconnected(state, %{server_name: server_name}) do
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+
     state =
       %{
         state
@@ -555,20 +557,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
        ) do
     tb = set_workspace_remote_state(tb, workspace, nil, :ended)
 
-    state =
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            tb
-          )
-
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
+    state = install_tab_bar(state, tb)
 
     if active_workspace?(tb, workspace_id) do
       state
@@ -615,10 +604,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           tb =
             tb
             |> set_workspace_remote_state(workspace, pid, :connected, latest_event_id)
-            |> TabBar.update_workspace(
-              workspace_id,
-              &Workspace.set_pending_catchup_events(&1, events)
-            )
+            |> TabBar.set_workspace_pending_catchup_events(workspace_id, events)
 
           install_tab_bar(state, tb)
         end
@@ -634,17 +620,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
   defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
-    shell_state =
-      MingaEditor.Shell.Traditional.State.install_tab_bar(
-        MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        tab_bar
-      )
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
   end
 
   @spec mark_remote_tabs(EditorState.t(), String.t(), Tab.connection_status()) :: EditorState.t()
@@ -653,19 +629,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          server_name,
          status
        ) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.State.TabBar.set_remote_connection_status(tb, server_name, status)
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    install_tab_bar(
+      state,
+      MingaEditor.State.TabBar.set_remote_connection_status(tb, server_name, status)
+    )
   end
 
   defp mark_remote_tabs(state, _server_name, _status), do: state
@@ -685,19 +652,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          %Workspace{} = workspace,
          status
        ) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          set_workspace_remote_state(tb, workspace, workspace.session, status)
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    install_tab_bar(state, set_workspace_remote_state(tb, workspace, workspace.session, status))
   end
 
   defp mark_remote_workspace_status(state, %Workspace{}, _status), do: state
@@ -712,19 +667,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          %Workspace{} = workspace,
          status
        ) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          set_workspace_remote_state(tb, workspace, nil, status)
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    install_tab_bar(state, set_workspace_remote_state(tb, workspace, nil, status))
   end
 
   defp mark_remote_workspace_without_live_session(state, %Workspace{}, _status), do: state
@@ -744,13 +687,16 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          status,
          latest_event_id \\ nil
        ) do
-    tb
-    |> TabBar.update_workspace(workspace_id, fn workspace ->
+    workspace = TabBar.get_workspace(tb, workspace_id)
+
+    workspace =
       workspace
       |> set_workspace_live_session(session)
       |> Workspace.set_remote_connection_status(status)
       |> maybe_set_remote_last_seen_event_id(latest_event_id)
-    end)
+
+    tb
+    |> TabBar.accept_workspace(workspace)
     |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
   end
 

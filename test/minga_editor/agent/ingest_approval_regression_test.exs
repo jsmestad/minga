@@ -36,7 +36,6 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaAgent.RuntimeState
 
@@ -161,7 +160,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     tb = TabBar.move_tab_to_workspace(tb, 1, ws.id) |> Map.put(:active_id, 1)
 
     tb =
-      TabBar.update_workspace(tb, ws.id, &Workspace.set_session(&1, session))
+      TabBar.set_workspace_session(tb, ws.id, session)
 
     agent = %AgentState{
       runtime: %RuntimeState{status: :idle},

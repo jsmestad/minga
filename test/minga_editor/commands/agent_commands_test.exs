@@ -32,7 +32,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Windows
   alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Viewport
@@ -94,11 +93,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     tb =
       agent_tab
       |> TabBar.new()
-      |> TabBar.update_workspace(0, fn workspace ->
-        workspace
-        |> WorkspaceModel.set_session(default_session)
-        |> WorkspaceModel.set_agent_ui(agentic)
-      end)
+      |> TabBar.set_workspace_session(0, default_session)
+      |> TabBar.set_workspace_agent_ui(0, agentic)
 
     %EditorState{
       frontend: %Frontend{port_manager: nil},
@@ -141,11 +137,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     tab_bar =
       file_tab
       |> TabBar.new()
-      |> TabBar.update_workspace(0, fn workspace ->
-        workspace
-        |> WorkspaceModel.add_file(source_ref)
-        |> WorkspaceModel.set_active_file(source_ref)
-      end)
+      |> TabBar.add_workspace_file(0, source_ref)
+      |> TabBar.set_workspace_active_file(0, source_ref)
 
     then(state, fn root ->
       shell_state =
@@ -1003,7 +996,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.new_agent_session(state)
 
-      {_win_id, agent_window} = EditorState.find_agent_chat_window(new_state)
+      {_win_id, agent_window} =
+        MingaEditor.Session.State.find_agent_chat_window(new_state.workspace)
+
       assert agent_window.content == {:agent_chat, :semantic}
       assert new_state.workspace.buffers.active == nil
     end
@@ -1020,7 +1015,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert active_workspace.files == []
       assert active_workspace.active_file == nil
       assert is_pid(active_workspace.session)
-      assert EditorState.active_tab_kind(new_state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
       assert new_state.workspace.buffers.active == nil
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
@@ -1034,10 +1029,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       file_tab_id = state.shell_runtime.state.tab_bar.active_id
 
       new_state = AgentCommands.new_agent_session(state)
-      switched = EditorState.switch_tab(new_state, file_tab_id)
+      switched = MingaEditor.TabWorkflow.switch(new_state, file_tab_id)
       active_window = switched.workspace.windows.map[switched.workspace.windows.active]
 
-      assert EditorState.active_tab_kind(switched) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(switched.shell_runtime) == :file
       assert active_window.content == {:buffer, switched.workspace.buffers.active}
       refute MingaEditor.Window.Content.agent_chat?(active_window.content)
     end
@@ -1073,14 +1068,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                 )
           }
         end)
-        |> EditorState.switch_tab(file_tab_id)
+        |> MingaEditor.TabWorkflow.switch(file_tab_id)
 
       active_window = switched.workspace.windows.map[switched.workspace.windows.active]
 
       assert TabBar.active_workspace_id(switched.shell_runtime.state.tab_bar) ==
                agent_workspace_id
 
-      assert EditorState.active_tab_kind(switched) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(switched.shell_runtime) == :file
       assert active_window.content == {:buffer, switched.workspace.buffers.active}
       refute MingaEditor.Window.Content.agent_chat?(active_window.content)
     end
@@ -1100,7 +1095,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert old_session != nil
       assert new_session != old_session
       assert new_state.workspace.buffers.active == nil
-      {_win_id, agent_window} = EditorState.find_agent_chat_window(new_state)
+
+      {_win_id, agent_window} =
+        MingaEditor.Session.State.find_agent_chat_window(new_state.workspace)
+
       assert agent_window.content == {:agent_chat, :semantic}
     end
 

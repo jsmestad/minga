@@ -16,6 +16,8 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
 
   @version 1
@@ -160,6 +162,86 @@ defmodule MingaEditor.State.Tab.Context do
     }
   end
 
+  @doc "Captures a complete tab snapshot, including a non-default shared agent projection."
+  @spec snapshot(SessionState.t()) :: t()
+  def snapshot(%SessionState{} = workspace) do
+    context = from_workspace(workspace)
+
+    if workspace.agent_ui == UIState.new() do
+      context
+    else
+      put_field(context, :agent_ui, workspace.agent_ui)
+    end
+  end
+
+  @doc "Builds the initial context for a new file tab from the current workspace and viewport."
+  @spec new_file(SessionState.t(), Viewport.t()) :: t()
+  def new_file(%SessionState{} = workspace, %Viewport{} = viewport) do
+    buffer = workspace.buffers.active
+    windows = file_windows(workspace.windows.next_id, buffer, viewport)
+
+    from_workspace_values(
+      :editor,
+      %Buffers{
+        active: buffer,
+        list: if(buffer, do: [buffer], else: []),
+        active_index: workspace.buffers.active_index
+      },
+      windows,
+      viewport,
+      workspace.file_tree.project_root
+    )
+  end
+
+  @doc "Builds the initial context for a semantic agent tab."
+  @spec new_agent(Viewport.t(), String.t() | nil) :: t()
+  def new_agent(%Viewport{} = viewport, project_root)
+      when is_binary(project_root) or is_nil(project_root) do
+    rows = max(viewport.rows, 1)
+    cols = max(viewport.cols, 1)
+    window_id = 1
+    window = Window.new_agent_chat(window_id, rows, cols)
+
+    windows = %Windows{
+      tree: WindowTree.new(window_id),
+      map: %{window_id => window},
+      active: window_id,
+      next_id: window_id + 1
+    }
+
+    new_agent(viewport, project_root, windows)
+  end
+
+  @doc "Builds an agent context around an already-constructed semantic window set."
+  @spec new_agent(Viewport.t(), String.t() | nil, Windows.t()) :: t()
+  def new_agent(%Viewport{} = viewport, project_root, %Windows{} = windows)
+      when is_binary(project_root) or is_nil(project_root) do
+    from_workspace_values(:agent, %Buffers{}, windows, viewport, project_root)
+  end
+
+  @doc "Returns the active buffer pid represented by this context, when present."
+  @spec active_buffer_pid(t() | legacy()) :: pid() | nil
+  def active_buffer_pid(context) when is_map(context) do
+    case to_workspace_map(context) do
+      %{buffers: %Buffers{active: active}} when is_pid(active) -> active
+      _other -> nil
+    end
+  end
+
+  @doc "Returns live buffer pids represented by this context."
+  @spec buffer_pids(t() | legacy()) :: [pid()]
+  def buffer_pids(context) when is_map(context) do
+    case to_workspace_map(context) do
+      %{buffers: %Buffers{active: active, list: buffers}} ->
+        [active | buffers]
+        |> Enum.filter(&is_pid/1)
+        |> Enum.uniq()
+
+      _other ->
+        []
+    end
+  end
+
   @doc deprecated:
          "Use from_workspace/1 for struct inputs. This remains for legacy map inputs only."
   @spec from_workspace_map(map()) :: t()
@@ -212,12 +294,53 @@ defmodule MingaEditor.State.Tab.Context do
     |> to_workspace_map()
   end
 
-  @doc "Returns a context with the dead buffer removed from its `buffers` snapshot when present."
+  @doc "Returns a context with every exact reference to the dead buffer retired when present."
   @spec scrub_buffer(t() | legacy(), pid()) :: t()
   def scrub_buffer(context, pid) do
     context
     |> from_map()
     |> scrub_context_buffer(pid)
+    |> scrub_context_prompt_buffer(pid)
+  end
+
+  @spec file_windows(pos_integer(), pid() | nil, Viewport.t()) :: Windows.t()
+  defp file_windows(_window_id, nil, %Viewport{}), do: %Windows{}
+
+  defp file_windows(window_id, buffer, %Viewport{} = viewport) when is_pid(buffer) do
+    window = Window.new(window_id, buffer, max(viewport.rows, 1), max(viewport.cols, 1))
+
+    %Windows{
+      tree: WindowTree.new(window_id),
+      map: %{window_id => window},
+      active: window_id,
+      next_id: window_id + 1
+    }
+  end
+
+  @spec from_workspace_values(
+          Scope.scope_name(),
+          Buffers.t(),
+          Windows.t(),
+          Viewport.t(),
+          String.t() | nil
+        ) :: t()
+  defp from_workspace_values(scope, buffers, windows, viewport, project_root) do
+    %__MODULE__{
+      version: @version,
+      present_fields: @snapshot_fields,
+      keymap_scope: scope,
+      buffers: buffers,
+      windows: windows,
+      dired: %DiredState{},
+      file_tree: %FileTreeState{project_root: project_root},
+      viewport: viewport,
+      mouse: %Mouse{},
+      lsp_pending: %{},
+      search: %Search{},
+      editing: VimState.new(),
+      feature_state: FeatureState.new(),
+      document_highlights: nil
+    }
   end
 
   @spec scrub_context_buffer(t(), pid()) :: t()
@@ -226,6 +349,13 @@ defmodule MingaEditor.State.Tab.Context do
   end
 
   defp scrub_context_buffer(%__MODULE__{} = context, _pid), do: context
+
+  @spec scrub_context_prompt_buffer(t(), pid()) :: t()
+  defp scrub_context_prompt_buffer(%__MODULE__{agent_ui: %UIState{} = agent_ui} = context, pid) do
+    put_field(context, :agent_ui, UIState.retire_prompt_buffer(agent_ui, pid))
+  end
+
+  defp scrub_context_prompt_buffer(%__MODULE__{} = context, _pid), do: context
 
   @spec migrate_legacy_file_tree(t(), map()) :: t()
   defp migrate_legacy_file_tree(%__MODULE__{} = context, map) do

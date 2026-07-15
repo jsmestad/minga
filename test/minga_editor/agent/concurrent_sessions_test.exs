@@ -11,14 +11,17 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaAgent.EventLog.EventRecord
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.ModalOverlay.Completion, as: ModalCompletion
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -30,7 +33,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     tb = build_tab_bar(tabs, active_id)
 
     %EditorState{
-      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      frontend: %MingaEditor.State.Frontend{rendering: :disabled},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -183,7 +186,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       # Use the public switch_tab/2 aggregate transition so presentation state
       # refreshes from the target session as it does in production.
-      switched = EditorState.switch_tab(state, 2)
+      switched = MingaEditor.TabWorkflow.switch(state, 2)
 
       # Tab 2's session is now in scope; tab 1's session is still alive
       # and still owned by tab 1.
@@ -194,7 +197,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert tab_one.session == streaming
 
       # Switching back restores the streaming session as the active one.
-      back = EditorState.switch_tab(switched, 1)
+      back = MingaEditor.TabWorkflow.switch(switched, 1)
       assert MingaEditor.Shell.Runtime.active_session(back.shell_runtime) == streaming
     end
 
@@ -226,7 +229,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
            end).(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
         )
 
-      switched = EditorState.switch_tab(state, 2)
+      switched = MingaEditor.TabWorkflow.switch(state, 2)
       cache = MingaEditor.Shell.Traditional.State.agent(switched.shell_runtime.state)
 
       assert cache.error == nil
@@ -428,6 +431,80 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert block.kind == :paragraph
     end
 
+    test "tab workflow orders restored replay modal spinner and incoming session presentation" do
+      {:ok, incoming_session} =
+        StubServer.start_link(
+          status: :tool_executing,
+          active_tool_name: "read_file",
+          messages: [{:user, "incoming question"}, {:assistant, "incoming answer"}]
+        )
+
+      tabs = [
+        Tab.new_file(1, "main.ex"),
+        Tab.new_agent(2, "Incoming")
+        |> Tab.set_session(incoming_session)
+        |> Tab.set_context(agent_tab_context())
+      ]
+
+      state = base_state(tabs, 1)
+
+      incoming_workspace =
+        TabBar.find_workspace_by_session(state.shell_runtime.state.tab_bar, incoming_session)
+
+      incoming_ui = bump_ui_message_version(UIState.new(), 7)
+      catchup = [EventRecord.new("incoming", :message_changed, %{})]
+
+      tab_bar =
+        state.shell_runtime.state.tab_bar
+        |> TabBar.set_workspace_agent_ui(incoming_workspace.id, incoming_ui)
+        |> TabBar.set_workspace_pending_catchup_events(incoming_workspace.id, catchup)
+
+      outgoing_ui = bump_ui_message_version(UIState.new(), 100)
+
+      outgoing_agent =
+        %AgentState{}
+        |> AgentState.set_status(:thinking)
+        |> AgentState.start_spinner_timer()
+
+      outgoing_spinner = outgoing_agent.spinner_timer
+
+      shell_state =
+        state.shell_runtime.state
+        |> TraditionalState.install_tab_bar(tab_bar)
+        |> TraditionalState.open_modal({:completion, ModalCompletion.new(1)})
+        |> TraditionalState.replace_agent(outgoing_agent)
+
+      state = %{
+        state
+        | workspace: MingaEditor.Session.State.set_agent_ui(state.workspace, outgoing_ui),
+          shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      switched = MingaEditor.TabWorkflow.switch(state, 2)
+      agent = TraditionalState.agent(switched.shell_runtime.state)
+      drained = TabBar.get_workspace(switched.shell_runtime.state.tab_bar, incoming_workspace.id)
+
+      assert switched.workspace.agent_ui.panel.message_version > 7
+      assert switched.workspace.agent_ui.panel.message_version < 100
+      assert drained.pending_catchup_events == []
+      assert TraditionalState.modal(switched.shell_runtime.state) == :none
+      assert agent.spinner_timer != nil
+      assert agent.spinner_timer != outgoing_spinner
+      assert AgentState.status(agent) == :tool_executing
+      assert agent.runtime.active_tool_name == "read_file"
+
+      assert switched.workspace.agent_ui.panel.cached_display_messages == [
+               {:user, "incoming question"},
+               {:assistant, "incoming answer"}
+             ]
+
+      _cleaned =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_stop(switched)
+
+      drain_spinner_ticks()
+      refute_receive :agent_spinner_tick, 150
+    end
+
     test "switch_tab rebuilds a background agent tab's semantic transcript cache" do
       {:ok, background_session} =
         StubServer.start_link(
@@ -456,7 +533,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           )
         end)
 
-      switched = EditorState.switch_tab(state, 2)
+      switched = MingaEditor.TabWorkflow.switch(state, 2)
 
       active_window =
         Map.fetch!(switched.workspace.windows.map, switched.workspace.windows.active)
@@ -471,5 +548,22 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
                {:assistant, "unique background answer"}
              ]
     end
+  end
+
+  @spec drain_spinner_ticks() :: :ok
+  defp drain_spinner_ticks do
+    receive do
+      :agent_spinner_tick -> drain_spinner_ticks()
+    after
+      0 -> :ok
+    end
+  end
+
+  @spec bump_ui_message_version(UIState.t(), non_neg_integer()) :: UIState.t()
+  defp bump_ui_message_version(%UIState{} = ui, count) do
+    panel =
+      Enum.reduce(1..count//1, ui.panel, fn _step, panel -> Panel.bump_message_version(panel) end)
+
+    UIState.replace_panel(ui, panel)
   end
 end

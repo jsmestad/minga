@@ -72,19 +72,17 @@ defmodule MingaEditor.Commands.AgentSession do
        ) do
     tb = tb |> clear_tab_sessions(session) |> clear_workspace_sessions(session)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp clear_restart_session(state, _session), do: state
@@ -93,7 +91,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp clear_tab_sessions(%TabBar{} = tb, session) do
     Enum.reduce(tb.tabs, tb, fn
       %Tab{id: tab_id, session: ^session}, acc ->
-        TabBar.update_tab(acc, tab_id, &Tab.set_session(&1, nil))
+        TabBar.set_tab_session(acc, tab_id, nil)
 
       _tab, acc ->
         acc
@@ -104,7 +102,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp clear_workspace_sessions(%TabBar{} = tb, session) do
     Enum.reduce(tb.workspaces, tb, fn
       %Workspace{id: workspace_id, session: ^session}, acc ->
-        TabBar.update_workspace(acc, workspace_id, &Workspace.clear_session/1)
+        TabBar.clear_workspace_session(acc, workspace_id)
 
       _workspace, acc ->
         acc
@@ -350,9 +348,8 @@ defmodule MingaEditor.Commands.AgentSession do
         buffers = MingaEditor.State.Buffers.set_active_override(state.workspace.buffers, buf)
         workspace = MingaEditor.Session.State.set_buffers(state.workspace, buffers)
 
-        state
-        |> then(&%{&1 | workspace: workspace})
-        |> maybe_log_code_block_opened(language)
+        state = %{state | workspace: workspace}
+        maybe_log_code_block_opened(state, language)
 
       {:error, reason} ->
         NoticeWorkflow.publish(
@@ -513,24 +510,27 @@ defmodule MingaEditor.Commands.AgentSession do
       next_id: win_id + 1
     }
 
-    context = EditorState.build_agent_tab_defaults(state, windows)
+    context =
+      MingaEditor.State.Tab.Context.new_agent(
+        state.frontend.terminal_viewport,
+        state.workspace.file_tree.project_root,
+        windows
+      )
+
     {tb, tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, tab.id, context)
 
-    state =
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            tb
-          )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
+    state = %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
 
     {state, tab.id}
   end
@@ -547,26 +547,19 @@ defmodule MingaEditor.Commands.AgentSession do
          session_id,
          remote_pid
        ) do
-    tb =
-      TabBar.update_tab(
-        tb,
-        tab_id,
-        &Tab.set_remote_session(&1, server_name, session_id, remote_pid)
+    tb = TabBar.set_tab_remote_session(tb, tab_id, server_name, session_id, remote_pid)
+
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
       )
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp set_remote_tab(state, _tab_id, _server_name, _session_id, _remote_pid), do: state
@@ -589,31 +582,32 @@ defmodule MingaEditor.Commands.AgentSession do
        ) do
     case TabBar.find_workspace_by_session(tb, remote_pid) do
       %Workspace{id: workspace_id} ->
+        workspace = TabBar.get_workspace(tb, workspace_id)
+
+        workspace =
+          workspace
+          |> Workspace.set_session(remote_pid)
+          |> Workspace.put_remote_session(server_name, session_id, status, latest_event_id)
+
         tb =
           tb
-          |> TabBar.update_workspace(workspace_id, fn workspace ->
-            workspace
-            |> Workspace.set_session(remote_pid)
-            |> Workspace.put_remote_session(server_name, session_id, status, latest_event_id)
-          end)
+          |> TabBar.accept_workspace(workspace)
           |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              tb
-            )
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(state.shell_runtime),
+            tb
+          )
 
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
+        %{
+          state
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(
+                state.shell_runtime,
+                shell_state
+              )
+        }
 
       nil ->
         state
@@ -710,29 +704,23 @@ defmodule MingaEditor.Commands.AgentSession do
     tb =
       Enum.reduce(tb.workspaces, tb, fn
         %Workspace{id: workspace_id, remote_session: %{session_id: ^session_id}}, acc ->
-          TabBar.update_workspace(
-            acc,
-            workspace_id,
-            &Workspace.set_remote_connection_status(&1, :disconnected)
-          )
+          TabBar.set_workspace_remote_connection_status(acc, workspace_id, :disconnected)
 
         _workspace, acc ->
           acc
       end)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp mark_remote_session_disconnected(state, _session_id), do: state
@@ -873,14 +861,16 @@ defmodule MingaEditor.Commands.AgentSession do
       %Workspace{id: workspace_id} ->
         agent_ui = state.workspace.agent_ui
 
+        workspace =
+          tb
+          |> TabBar.get_workspace(workspace_id)
+          |> Workspace.set_session(session_pid)
+          |> Workspace.set_agent_ui(agent_ui)
+
         tb =
           tb
           |> bind_session_to_workspace_agent_tab(workspace_id, session_pid)
-          |> TabBar.update_workspace(workspace_id, fn workspace ->
-            workspace
-            |> Workspace.set_session(session_pid)
-            |> Workspace.set_agent_ui(agent_ui)
-          end)
+          |> TabBar.accept_workspace(workspace)
 
         sync_state_to_workspace(state, tb, workspace_id)
 
@@ -919,7 +909,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec bind_session_to_workspace_agent_tab(TabBar.t(), non_neg_integer(), pid()) :: TabBar.t()
   defp bind_session_to_workspace_agent_tab(%TabBar{} = tb, workspace_id, session_pid) do
     case sessionless_agent_in_workspace(tb, workspace_id) do
-      %Tab{id: tab_id} -> TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))
+      %Tab{id: tab_id} -> TabBar.set_tab_session(tb, tab_id, session_pid)
       nil -> tb
     end
   end
@@ -938,7 +928,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
     tb =
       tb
-      |> TabBar.update_workspace(ws.id, &Workspace.set_agent_ui(&1, agent_ui))
+      |> TabBar.set_workspace_agent_ui(ws.id, agent_ui)
       |> then(fn tb ->
         case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
           %Tab{id: tab_id} = tab ->
@@ -965,22 +955,9 @@ defmodule MingaEditor.Commands.AgentSession do
         _ -> MingaEditor.Agent.UIState.new()
       end
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.set_agent_ui(state.workspace, agent_ui)}
-    end)
+    state = MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
+    workspace = MingaEditor.Session.State.set_agent_ui(state.workspace, agent_ui)
+    %{state | workspace: workspace}
   end
 
   @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::
@@ -1065,21 +1042,19 @@ defmodule MingaEditor.Commands.AgentSession do
          workspace_id,
          project_view
        ) do
-    tb = TabBar.update_workspace(tb, workspace_id, &Workspace.set_project_view(&1, project_view))
+    tb = TabBar.set_workspace_project_view(tb, workspace_id, project_view)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tb
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   defp update_workspace_project_view(state, _workspace_id, _project_view), do: state

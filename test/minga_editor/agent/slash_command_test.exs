@@ -218,10 +218,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       tab_bar =
         tab
         |> MingaEditor.State.TabBar.new()
-        |> MingaEditor.State.TabBar.update_workspace(
-          0,
-          &MingaEditor.State.Workspace.set_session(&1, session)
-        )
+        |> MingaEditor.State.TabBar.set_workspace_session(0, session)
 
       %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},

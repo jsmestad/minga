@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.UI.Picker.Context
@@ -40,9 +41,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
     tb =
       tb
-      |> TabBar.update_workspace(0, &Workspace.add_file(&1, ref))
-      |> TabBar.update_workspace(agent_a.id, &Workspace.add_file(&1, ref))
-      |> TabBar.update_workspace(agent_b.id, &Workspace.add_file(&1, ref))
+      |> TabBar.add_workspace_file(0, ref)
+      |> TabBar.add_workspace_file(agent_a.id, ref)
+      |> TabBar.add_workspace_file(agent_b.id, ref)
       |> TabBar.switch_to(1)
 
     {%EditorState{
@@ -126,11 +127,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
           shell_state =
             MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              TabBar.update_workspace(
-                state.shell_runtime.state.tab_bar,
-                agent_a.id,
-                &Workspace.remove_file(&1, ref)
-              )
+              TabBar.remove_workspace_file(state.shell_runtime.state.tab_bar, agent_a.id, ref)
             )
 
           %{
@@ -147,6 +144,11 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, 0), ref)
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
+
+      assert {:ok, persisted} =
+               WorkspacePersistence.read(WorkspacePersistence.path_for(root, agent_a.id), root)
+
+      assert Workspace.has_file?(persisted, ref)
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Copied `auth.ex` to `Agent: refactor`"
@@ -174,11 +176,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
           shell_state =
             MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              TabBar.update_workspace(
-                state.shell_runtime.state.tab_bar,
-                agent_a.id,
-                &Workspace.remove_file(&1, ref)
-              )
+              TabBar.remove_workspace_file(state.shell_runtime.state.tab_bar, agent_a.id, ref)
             )
 
           %{
@@ -411,6 +409,13 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert review.changed_files == [ref]
       assert review.conflict_files == [ref]
 
+      assert {:ok, persisted} =
+               WorkspacePersistence.read(WorkspacePersistence.path_for(root, agent_a.id), root)
+
+      assert persisted.review.state == :conflict
+      assert persisted.review.changed_files == [ref]
+      assert persisted.review.conflict_files == [ref]
+
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
                "Workspace promote found conflicts"
 
@@ -601,13 +606,15 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   defp agent_a_id_placeholder, do: 1
 
   defp activate_workspace(state, workspace_id, file_ref) do
-    tb =
-      state.shell_runtime.state.tab_bar
-      |> TabBar.update_tab(1, fn tab ->
-        tab
-        |> Tab.set_group(workspace_id)
-        |> Tab.set_file_ref(file_ref)
-      end)
+    tab_bar = state.shell_runtime.state.tab_bar
+
+    tab =
+      tab_bar
+      |> TabBar.get(1)
+      |> Tab.set_group(workspace_id)
+      |> Tab.set_file_ref(file_ref)
+
+    tb = TabBar.accept_tab(tab_bar, tab)
 
     then(state, fn root ->
       shell_state =
@@ -625,11 +632,14 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   end
 
   defp update_workspace(state, workspace_id, fun) do
+    tab_bar = state.shell_runtime.state.tab_bar
+    workspace = tab_bar |> TabBar.get_workspace(workspace_id) |> fun.()
+
     then(state, fn root ->
       shell_state =
         MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          TabBar.update_workspace(state.shell_runtime.state.tab_bar, workspace_id, fun)
+          TabBar.accept_workspace(tab_bar, workspace)
         )
 
       %{

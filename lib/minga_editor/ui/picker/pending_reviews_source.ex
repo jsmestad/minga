@@ -7,7 +7,6 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
@@ -59,7 +58,10 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
         switch_to_restored_workspace(state, tab_bar, workspace_id)
 
       [_tab | _] ->
-        EditorState.switch_tab(state, TabBar.switch_to_workspace(tab_bar, workspace_id).active_id)
+        MingaEditor.TabWorkflow.switch(
+          state,
+          TabBar.switch_to_workspace(tab_bar, workspace_id).active_id
+        )
     end
   end
 
@@ -70,23 +72,21 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
         {tab_bar, tab} = TabBar.insert(tab_bar, :agent, workspace.label)
         tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace_id)
 
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              tab_bar
-            )
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(state.shell_runtime),
+            tab_bar
+          )
 
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
-        |> EditorState.switch_tab(tab.id)
+        %{
+          state
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(
+                state.shell_runtime,
+                shell_state
+              )
+        }
+        |> MingaEditor.TabWorkflow.switch(tab.id)
 
       nil ->
         state

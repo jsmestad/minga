@@ -18,6 +18,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.WorkspaceWorkflow
 
   @type operation :: :move | :copy
   @type target_context :: %{
@@ -162,21 +163,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       )
     else
       tab_bar =
-        TabBar.update_workspace(tab_bar, destination.id, &Workspace.add_file(&1, file_ref))
+        TabBar.add_workspace_file(tab_bar, destination.id, file_ref)
 
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            tab_bar
-          )
-
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
+      state
+      |> WorkspaceWorkflow.install_tab_bar(tab_bar)
       |> NoticeWorkflow.publish(
         "Copied `#{FileRef.display_label(file_ref)}` to `#{destination.label}`"
       )
@@ -195,23 +185,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
     case refresh_agent_source_review(tab_bar, source) do
       {:ok, refreshed_tab_bar, refreshed_source, _fresh_files} ->
-        refreshed_state =
-          then(state, fn root ->
-            shell_state =
-              MingaEditor.Shell.Traditional.State.install_tab_bar(
-                MingaEditor.Shell.Runtime.state(root.shell_runtime),
-                refreshed_tab_bar
-              )
-
-            %{
-              root
-              | shell_runtime:
-                  MingaEditor.Shell.Runtime.install_traditional_state(
-                    root.shell_runtime,
-                    shell_state
-                  )
-            }
-          end)
+        refreshed_state = WorkspaceWorkflow.install_tab_bar(state, refreshed_tab_bar)
 
         if draft_for_file?(refreshed_source, file_ref) do
           PickerUI.open(refreshed_state, __MODULE__, Map.put(context, :confirm?, true))
@@ -250,27 +224,15 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
            ) do
       file_ref = Map.fetch!(context, :file_ref)
 
+      source = remove_source_file(source, file_ref, Map.get(context, :discard_drafts?, false))
+
       tab_bar =
         tab_bar
-        |> TabBar.update_workspace(
-          source.id,
-          &remove_source_file(&1, file_ref, Map.get(context, :discard_drafts?, false))
-        )
-        |> TabBar.update_workspace(destination.id, &Workspace.add_file(&1, file_ref))
+        |> TabBar.accept_workspace(source)
+        |> TabBar.add_workspace_file(destination.id, file_ref)
 
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            tab_bar
-          )
-
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
+      state
+      |> WorkspaceWorkflow.install_tab_bar(tab_bar)
       |> NoticeWorkflow.publish(
         "Moved `#{FileRef.display_label(file_ref)}` to `#{destination.label}`"
       )
@@ -292,32 +254,11 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
          %ProjectView{} = view <- source.project_view,
          :ok <- safe_project_view_promote(view) do
       tab_bar =
-        TabBar.update_workspace(
-          tab_bar,
-          source.id,
-          &Workspace.set_review(&1, WorkspaceReview.clean(&1.review))
-        )
+        TabBar.set_workspace_review(tab_bar, source.id, WorkspaceReview.clean(source.review))
 
       context
       |> Map.delete(:confirm?)
-      |> do_move(
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              tab_bar
-            )
-
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
-      )
+      |> do_move(WorkspaceWorkflow.install_tab_bar(state, tab_bar))
     else
       nil ->
         NoticeWorkflow.publish(
@@ -342,21 +283,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
            fetch_transfer_workspaces(state, context),
          %ProjectView{} = view <- source.project_view,
          {:ok, review} <- promote_conflict_review(source, view, details) do
-      tab_bar = TabBar.update_workspace(tab_bar, source.id, &Workspace.set_review(&1, review))
+      tab_bar = TabBar.set_workspace_review(tab_bar, source.id, review)
 
-      then(state, fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            tab_bar
-          )
-
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
+      state
+      |> WorkspaceWorkflow.install_tab_bar(tab_bar)
       |> NoticeWorkflow.publish("Workspace promote found conflicts: #{inspect(details)}")
     else
       {:error, reason} ->
@@ -397,7 +327,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       refreshed_source = Workspace.set_review(source, review)
 
       refreshed_tab_bar =
-        TabBar.update_workspace(tab_bar, source.id, fn _ -> refreshed_source end)
+        TabBar.accept_workspace(tab_bar, refreshed_source)
 
       {:ok, refreshed_tab_bar, refreshed_source, fresh_files}
     end

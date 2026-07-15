@@ -8,7 +8,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitChangedSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
-  alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Language
   alias Minga.Log
@@ -63,10 +62,10 @@ defmodule MingaGitPorcelain.UI.Picker.GitChangedSource do
 
       idx ->
         pid = Enum.at(state.workspace.buffers.list, idx)
-        tab = EditorState.find_tab_by_buffer(state, pid)
+        {state, tab} = MingaEditor.Shell.Workflow.resolve_tab_by_buffer(state, pid)
 
         if tab do
-          EditorState.switch_tab(state, tab.id)
+          MingaEditor.TabWorkflow.switch(state, tab.id)
         else
           MingaEditor.BufferActivation.activate(state, idx)
         end

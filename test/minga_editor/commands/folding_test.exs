@@ -16,7 +16,7 @@ defmodule MingaEditor.Commands.FoldingTest do
       state = editor_state_with_fold_range(FoldRange.new!(5, 9))
 
       state = Folding.execute_at_line(state, 5)
-      window = EditorState.active_window_struct(state)
+      window = MingaEditor.Session.State.active_window_struct(state.workspace)
 
       assert FoldMap.fold_at(window.fold_map, 5) != :none
       assert FoldMap.fold_at(window.fold_map, 0) == :none
@@ -27,7 +27,7 @@ defmodule MingaEditor.Commands.FoldingTest do
 
       state = Folding.execute_at_line(state, 5)
       state = Folding.execute_at_line(state, 5)
-      window = EditorState.active_window_struct(state)
+      window = MingaEditor.Session.State.active_window_struct(state.workspace)
 
       assert FoldMap.fold_at(window.fold_map, 5) == :none
     end

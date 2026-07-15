@@ -133,41 +133,28 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
 
   @spec focus_git_status(EditorState.t()) :: EditorState.t()
   defp focus_git_status(state) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace: State.set_keymap_scope(state.workspace, :git_status)
-      }
-    end)
-    |> SidebarWorkflow.select(@git_status_id)
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    state = %{state | workspace: State.set_keymap_scope(state.workspace, :git_status)}
+
+    state =
+      state
+      |> SidebarWorkflow.select(@git_status_id)
+      |> Layout.invalidate()
+
+    %{state | workspace: State.invalidate_all_windows(state.workspace)}
   end
 
   @spec focus_observatory(EditorState.t()) :: EditorState.t()
   defp focus_observatory(state) do
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            State.set_file_tree(
-              state.workspace,
-              (&FileTreeState.unfocus/1).(state.workspace.file_tree)
-            )
-      }
-    end)
-    |> then(fn state ->
-      %{state | workspace: State.set_keymap_scope(state.workspace, :editor)}
-    end)
-    |> SidebarWorkflow.select(@observatory_id)
-    |> Layout.invalidate()
-    |> then(fn state ->
-      %{state | workspace: State.invalidate_all_windows(state.workspace)}
-    end)
+    file_tree = FileTreeState.unfocus(state.workspace.file_tree)
+    workspace = State.set_file_tree(state.workspace, file_tree)
+    state = %{state | workspace: State.set_keymap_scope(workspace, :editor)}
+
+    state =
+      state
+      |> SidebarWorkflow.select(@observatory_id)
+      |> Layout.invalidate()
+
+    %{state | workspace: State.invalidate_all_windows(state.workspace)}
   end
 
   @spec normalize_command_result(EditorState.t() | {EditorState.t(), term()}) :: EditorState.t()

@@ -7,15 +7,20 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
+  alias Minga.Project.FileRef
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.BufferLifecycle
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Git, as: GitState
+  alias MingaEditor.State.Parser, as: ParserState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -29,7 +34,10 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   defp state_with_file_tab(opts \\ []) do
     state = base_state(opts)
     tab = Tab.new_file(1, "test.ex")
-    tb = TabBar.new(tab) |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
+
+    tb =
+      TabBar.new(tab)
+      |> TabBar.update_context(1, MingaEditor.State.Tab.Context.snapshot(state.workspace))
 
     then(state, fn root ->
       shell_state =
@@ -51,7 +59,10 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     buf = start_file_buffer(path, content)
     state = state_for_buffer(buf)
     tab = Tab.new_file(1, Path.basename(path))
-    tb = TabBar.new(tab) |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
+
+    tb =
+      TabBar.new(tab)
+      |> TabBar.update_context(1, MingaEditor.State.Tab.Context.snapshot(state.workspace))
 
     {then(state, fn root ->
        shell_state =
@@ -91,7 +102,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
     tb =
       TabBar.new(Tab.new_agent(1, "Agent"))
-      |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
+      |> TabBar.update_context(1, MingaEditor.State.Tab.Context.snapshot(state.workspace))
 
     then(state, fn root ->
       shell_state =
@@ -121,11 +132,14 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     pid
   end
 
-  describe "add_buffer_pure/2" do
+  describe "register_buffer/3" do
     test "adds buffers with no tab bar, opens file tabs, previews without overwriting context, and avoids duplicate monitors" do
       no_tab = base_state()
       new_buf = start_buffer("new file")
-      {new_state, result} = EditorState.add_buffer_pure(no_tab, new_buf)
+
+      {new_state, result} =
+        register_buffer(no_tab, new_buf, no_tab.buffer_lifecycle.buffer_add_context)
+
       assert new_buf in new_state.workspace.buffers.list
       assert new_state.workspace.buffers.active == new_buf
       assert result == {:monitor, new_buf}
@@ -133,8 +147,8 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       state = state_with_file_tab()
       original_buf = state.workspace.buffers.active
       opened_buf = start_buffer("opened")
-      {opened, result} = EditorState.add_buffer_pure(state, opened_buf, context: :open)
-      tb = EditorState.tab_bar(opened)
+      {opened, result} = register_buffer(state, opened_buf, :open)
+      tb = opened.shell_runtime.state.tab_bar
       assert result == {:monitor, opened_buf}
       assert TabBar.count(tb) == 2
       assert tb.active_id == 2
@@ -145,22 +159,32 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       preview_buf = start_buffer("preview")
 
       {previewed, {:monitor, ^preview_buf}} =
-        EditorState.add_buffer_pure(state, preview_buf, context: :preview)
+        register_buffer(state, preview_buf, :preview)
 
-      assert TabBar.count(EditorState.tab_bar(previewed)) == 1
+      assert TabBar.count(previewed.shell_runtime.state.tab_bar) == 1
       assert previewed.workspace.buffers.active == preview_buf
 
       assert %Buffers{active: ^original_buf} =
-               TabBar.get(EditorState.tab_bar(previewed), 1).context.buffers
+               TabBar.get(previewed.shell_runtime.state.tab_bar, 1).context.buffers
 
       assert previewed.buffer_lifecycle.buffer_add_context == :open
 
       duplicate = MingaEditor.Handlers.BufferRegistry.add_buffer(state, opened_buf)
 
       {switched_back, :already_registered} =
-        EditorState.add_buffer_pure(duplicate, original_buf)
+        register_buffer(duplicate, original_buf, duplicate.buffer_lifecycle.buffer_add_context)
 
       assert switched_back.workspace.buffers.active == original_buf
+    end
+
+    test "focused registration workflow creates the monitor requested by the pure transition" do
+      state = base_state()
+      buffer = start_buffer("workflow monitored")
+
+      registered = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buffer)
+
+      assert is_reference(registered.buffer_lifecycle.buffer_monitors[buffer])
+      assert buffer in registered.workspace.buffers.list
     end
 
     test "opening from an agent tab snapshots agent state, creates a file tab, switches scope, and stops the spinner" do
@@ -168,9 +192,9 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       file_buf = start_buffer("file content")
 
       {new_state, {:monitor, ^file_buf}} =
-        EditorState.add_buffer_pure(state, file_buf, context: :open)
+        register_buffer(state, file_buf, :open)
 
-      tb = EditorState.tab_bar(new_state)
+      tb = new_state.shell_runtime.state.tab_bar
       agent_tab = TabBar.get(tb, 1)
       file_tab = TabBar.active(tb)
       window = active_window(new_state)
@@ -196,19 +220,19 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       {state, buf1} = state_with_file_tab_for_path(path1, "one")
       buf2 = start_file_buffer(path2, "two")
 
-      {state, {:monitor, ^buf2}} = EditorState.add_buffer_pure(state, buf2, context: :open)
+      {state, {:monitor, ^buf2}} = register_buffer(state, buf2, :open)
 
       {reactivated, :already_registered} =
-        EditorState.add_buffer_pure(state, buf1, context: :open)
+        register_buffer(state, buf1, :open)
 
-      assert EditorState.tab_bar(reactivated).active_id == 1
+      assert reactivated.shell_runtime.state.tab_bar.active_id == 1
       assert reactivated.workspace.buffers.active == buf1
 
       assert %Buffers{active: ^buf1} =
-               TabBar.get(EditorState.tab_bar(reactivated), 1).context.buffers
+               TabBar.get(reactivated.shell_runtime.state.tab_bar, 1).context.buffers
 
       assert %Buffers{active: ^buf2} =
-               TabBar.get(EditorState.tab_bar(reactivated), 2).context.buffers
+               TabBar.get(reactivated.shell_runtime.state.tab_bar, 2).context.buffers
 
       dir1 = Path.join(tmp_dir, "one")
       dir2 = Path.join(tmp_dir, "two")
@@ -220,17 +244,17 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       same_buf2 = start_file_buffer(same2, "two")
 
       {distinct, {:monitor, ^same_buf2}} =
-        EditorState.add_buffer_pure(state, same_buf2, context: :open)
+        register_buffer(state, same_buf2, :open)
 
-      assert TabBar.count(EditorState.tab_bar(distinct)) == 2
-      assert TabBar.get(EditorState.tab_bar(distinct), 1).label == "same.ex"
-      assert TabBar.get(EditorState.tab_bar(distinct), 2).label == "same.ex"
+      assert TabBar.count(distinct.shell_runtime.state.tab_bar) == 2
+      assert TabBar.get(distinct.shell_runtime.state.tab_bar, 1).label == "same.ex"
+      assert TabBar.get(distinct.shell_runtime.state.tab_bar, 2).label == "same.ex"
 
       assert %Buffers{active: ^same_buf1} =
-               TabBar.get(EditorState.tab_bar(distinct), 1).context.buffers
+               TabBar.get(distinct.shell_runtime.state.tab_bar, 1).context.buffers
 
       assert %Buffers{active: ^same_buf2} =
-               TabBar.get(EditorState.tab_bar(distinct), 2).context.buffers
+               TabBar.get(distinct.shell_runtime.state.tab_bar, 2).context.buffers
     end
 
     test "agent chat windows without tab bars keep their content when a file buffer is added" do
@@ -252,7 +276,10 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       }
 
       file_buf = start_buffer("file content")
-      {new_state, {:monitor, ^file_buf}} = EditorState.add_buffer_pure(state, file_buf)
+
+      {new_state, {:monitor, ^file_buf}} =
+        register_buffer(state, file_buf, state.buffer_lifecycle.buffer_add_context)
+
       window = active_window(new_state)
 
       assert file_buf in new_state.workspace.buffers.list
@@ -273,7 +300,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert opened.workspace.buffers.active == other_buf
 
       assert %Buffers{active: ^other_buf} =
-               TabBar.active(EditorState.tab_bar(opened)).context.buffers
+               TabBar.active(opened.shell_runtime.state.tab_bar).context.buffers
 
       preview_buf = start_buffer("preview")
 
@@ -296,11 +323,11 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert previewed.buffer_lifecycle.buffer_add_context == :open
 
       assert %Buffers{active: ^original_buf} =
-               TabBar.active(EditorState.tab_bar(previewed)).context.buffers
+               TabBar.active(previewed.shell_runtime.state.tab_bar).context.buffers
     end
   end
 
-  describe "close_buffer_pure/2" do
+  describe "remove_buffer/2" do
     test "closing active, only, inactive, and special buffers updates buffers and monitor refs" do
       state = base_state()
       buf1 = state.workspace.buffers.active
@@ -312,7 +339,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf1)
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf2)
 
-      closed_active = EditorState.close_buffer_pure(state, buf2)
+      closed_active = EditorState.remove_buffer(state, buf2)
       refute buf2 in closed_active.workspace.buffers.list
       assert closed_active.workspace.buffers.active == buf1
       refute Map.has_key?(closed_active.buffer_lifecycle.buffer_monitors, buf2)
@@ -324,14 +351,14 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         |> MingaEditor.Handlers.BufferRegistry.add_buffer(buf3)
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf3)
 
-      closed_inactive = EditorState.close_buffer_pure(inactive_state, buf1)
+      closed_inactive = EditorState.remove_buffer(inactive_state, buf1)
       assert closed_inactive.workspace.buffers.active == buf3
       refute buf1 in closed_inactive.workspace.buffers.list
 
       only_state = base_state()
       only_buf = only_state.workspace.buffers.active
       only_state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(only_state, only_buf)
-      closed_only = EditorState.close_buffer_pure(only_state, only_buf)
+      closed_only = EditorState.remove_buffer(only_state, only_buf)
       assert closed_only.workspace.buffers.list == []
       assert closed_only.workspace.buffers.active == nil
       refute Map.has_key?(closed_only.buffer_lifecycle.buffer_monitors, only_buf)
@@ -347,8 +374,8 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       {state, tab_b} = state_with_inactive_tab_buffer(state, buf_b)
 
-      new_state = EditorState.close_buffer_pure(state, buf_b)
-      tab_b_after = TabBar.get(EditorState.tab_bar(new_state), tab_b.id)
+      new_state = EditorState.remove_buffer(state, buf_b)
+      tab_b_after = TabBar.get(new_state.shell_runtime.state.tab_bar, tab_b.id)
       refute buf_b in tab_b_after.context.buffers.list
       assert tab_b_after.context.buffers.active != buf_b
 
@@ -362,10 +389,96 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         state_for_buffer(only) |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(only)
 
       {only_state, only_tab} = state_with_inactive_tab_buffer(only_state, only)
-      closed_only = EditorState.close_buffer_pure(only_state, only)
-      only_tab_after = TabBar.get(EditorState.tab_bar(closed_only), only_tab.id)
+      closed_only = EditorState.remove_buffer(only_state, only)
+      only_tab_after = TabBar.get(closed_only.shell_runtime.state.tab_bar, only_tab.id)
       assert only_tab_after.context.buffers.list == []
       assert only_tab_after.context.buffers.active == nil
+    end
+
+    test "removal scrubs parser git prompt tab and workspace owners atomically" do
+      retired = start_buffer("retired")
+      survivor = start_buffer("survivor")
+      file_ref = FileRef.from_buffer(retired, "retired")
+      prompt_ui = UIState.new() |> UIState.attach_prompt_buffer(retired)
+
+      workspace =
+        state_for_buffer(retired, list: [retired, survivor]).workspace
+        |> SessionState.set_agent_ui(prompt_ui)
+
+      active_tab =
+        Tab.new_file(1, "retired")
+        |> Tab.set_file_ref(file_ref)
+        |> Tab.set_context(MingaEditor.State.Tab.Context.snapshot(workspace))
+
+      inactive_tab =
+        Tab.new_file(2, "inactive")
+        |> Tab.set_file_ref(file_ref)
+        |> Tab.set_context(MingaEditor.State.Tab.Context.snapshot(workspace))
+
+      tab_bar = %TabBar{tabs: [active_tab, inactive_tab], active_id: 1, next_id: 3}
+      {tab_bar, agent_workspace} = TabBar.add_workspace(tab_bar, "Agent")
+
+      tab_bar =
+        tab_bar
+        |> TabBar.add_workspace_file(0, file_ref)
+        |> TabBar.set_workspace_active_file(0, file_ref)
+        |> TabBar.set_workspace_agent_ui(0, prompt_ui)
+        |> TabBar.add_workspace_file(agent_workspace.id, file_ref)
+        |> TabBar.set_workspace_active_file(agent_workspace.id, file_ref)
+        |> TabBar.set_workspace_agent_ui(agent_workspace.id, prompt_ui)
+
+      shell_state =
+        TraditionalState.install_tab_bar(
+          MingaEditor.Shell.Runtime.state(resolved_traditional_runtime()),
+          tab_bar
+        )
+
+      parser =
+        ParserState.accept_injection_ranges(%ParserState{}, %{retired => []})
+
+      info = %{
+        source_buf: retired,
+        git_root: "/tmp",
+        rel_path: "retired",
+        staged: false,
+        line_metadata: [],
+        hunk_lines: []
+      }
+
+      git =
+        %GitState{}
+        |> GitState.register_diff_view(retired, info)
+        |> GitState.register_diff_view(survivor, info)
+
+      state = %EditorState{
+        workspace: workspace,
+        shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(
+            resolved_traditional_runtime(),
+            shell_state
+          ),
+        parser: parser,
+        git: git
+      }
+
+      removed = EditorState.remove_buffer(state, retired)
+      tab_bar = removed.shell_runtime.state.tab_bar
+
+      assert removed.workspace.agent_ui.panel.prompt_buffer == nil
+      refute Map.has_key?(removed.parser.injection_ranges, retired)
+      assert removed.git.diff_views == %{}
+
+      Enum.each(tab_bar.tabs, fn tab ->
+        refute retired in tab.context.buffers.list
+        assert tab.context.agent_ui.panel.prompt_buffer == nil
+        assert tab.file_ref == nil
+      end)
+
+      Enum.each(tab_bar.workspaces, fn %Workspace{} = owner ->
+        refute Enum.any?(owner.files, &FileRef.equal?(&1, file_ref))
+        assert owner.active_file == nil
+        assert is_nil(owner.agent_ui) or owner.agent_ui.panel.prompt_buffer == nil
+      end)
     end
 
     @tag :tmp_dir
@@ -392,6 +505,18 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       refute_receive {:minga_event, :buffer_saved,
                       %Minga.Events.BufferEvent{buffer: ^active_buf, path: ^active_path}}
     end
+  end
+
+  @spec register_buffer(EditorState.t(), pid(), MingaEditor.Shell.buffer_add_context()) ::
+          {EditorState.t(), EditorState.buffer_registration_result()}
+  defp register_buffer(%EditorState{} = state, buffer, context) do
+    already_registered? = buffer in state.workspace.buffers.list
+
+    next_state =
+      MingaEditor.Handlers.BufferRegistry.add_buffer(state, buffer, context: context)
+
+    result = if already_registered?, do: :already_registered, else: {:monitor, buffer}
+    {next_state, result}
   end
 
   defp state_for_buffer(buf, opts \\ []) do
@@ -470,7 +595,12 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         }
       end)
 
-    tb = TabBar.update_context(tb, 1, EditorState.snapshot_tab_context(state_with_tb))
+    tb =
+      TabBar.update_context(
+        tb,
+        1,
+        MingaEditor.State.Tab.Context.snapshot(state_with_tb.workspace)
+      )
 
     {then(state, fn root ->
        shell_state =

@@ -13,12 +13,9 @@ defmodule MingaEditor.State.TabBar do
   - Tab ids are unique and monotonically increasing.
   """
 
-  alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaEditor.FeatureState
-  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Workspace
-  alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
 
@@ -271,6 +268,59 @@ defmodule MingaEditor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
+  @doc "Snapshots the outgoing tab and activates an existing target tab atomically."
+  @spec snapshot_and_switch(t(), Tab.id(), Tab.context(), Tab.id()) :: t()
+  def snapshot_and_switch(%__MODULE__{} = tab_bar, current_id, context, target_id) do
+    if has_tab?(tab_bar, target_id) do
+      tab_bar
+      |> update_context(current_id, context)
+      |> switch_to(target_id)
+    else
+      tab_bar
+    end
+  end
+
+  @doc "Records attention for the identified tab without changing tab identity or order."
+  @spec set_tab_attention(t(), Tab.id(), boolean()) :: t()
+  def set_tab_attention(%__MODULE__{} = tab_bar, tab_id, attention?)
+      when is_boolean(attention?) do
+    replace_matching_tab(tab_bar, tab_id, &Tab.set_attention(&1, attention?))
+  end
+
+  @doc "Clears attention for the identified tab without changing tab identity or order."
+  @spec clear_attention(t(), Tab.id()) :: t()
+  def clear_attention(%__MODULE__{} = tab_bar, tab_id) do
+    set_tab_attention(tab_bar, tab_id, false)
+  end
+
+  @doc "Rebinds every matching file tab and workspace reference to one logical file identity."
+  @spec rebind_buffer_file(t(), pid(), FileRef.t()) :: t()
+  def rebind_buffer_file(%__MODULE__{} = tab_bar, buffer_pid, %FileRef{} = file_ref)
+      when is_pid(buffer_pid) do
+    matching_tabs = Enum.filter(tab_bar.tabs, &tab_matches_buffer?(&1, buffer_pid))
+    active_id = tab_bar.active_id
+
+    Enum.reduce(matching_tabs, tab_bar, fn %Tab{} = tab, acc ->
+      acc
+      |> replace_matching_tab(tab.id, &Tab.set_file_ref(&1, file_ref))
+      |> retarget_matching_workspace(tab, file_ref, tab.id == active_id)
+    end)
+  end
+
+  @doc "Returns every live buffer pid represented by tab snapshots."
+  @spec buffer_pids(t()) :: [pid()]
+  def buffer_pids(%__MODULE__{tabs: tabs}) do
+    tabs
+    |> Enum.flat_map(&TabContext.buffer_pids(&1.context))
+    |> Enum.uniq()
+  end
+
+  @doc "Clears replayed catch-up events for the identified workspace."
+  @spec clear_workspace_catchup_events(t(), non_neg_integer()) :: t()
+  def clear_workspace_catchup_events(%__MODULE__{} = tab_bar, workspace_id) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.clear_pending_catchup_events/1)
+  end
+
   @doc "Returns the first tab matching the given kind, or nil."
   @spec find_by_kind(t(), Tab.kind()) :: Tab.t() | nil
   def find_by_kind(%__MODULE__{tabs: tabs}, kind) do
@@ -307,38 +357,113 @@ defmodule MingaEditor.State.TabBar do
     end)
   end
 
-  @doc """
-  Applies `fun` to the tab with `id`, replacing it in the list.
-
-  Returns the updated tab bar. If no tab matches, returns unchanged.
-  """
-  @spec update_tab(t(), Tab.id(), (Tab.t() -> Tab.t())) :: t()
-  def update_tab(%__MODULE__{tabs: tabs} = tb, id, fun) when is_function(fun, 1) do
-    new_tabs =
+  @spec replace_matching_tab(t(), Tab.id(), (Tab.t() -> Tab.t())) :: t()
+  defp replace_matching_tab(%__MODULE__{tabs: tabs} = tab_bar, tab_id, transition) do
+    tabs =
       Enum.map(tabs, fn
-        %Tab{id: ^id} = tab -> fun.(tab)
+        %Tab{id: ^tab_id} = tab -> transition.(tab)
         tab -> tab
       end)
 
-    %{tb | tabs: new_tabs}
+    %{tab_bar | tabs: tabs}
+  end
+
+  @spec tab_matches_buffer?(Tab.t(), pid()) :: boolean()
+  defp tab_matches_buffer?(
+         %Tab{kind: :file, file_ref: %FileRef{kind: :buffer, buffer_pid: buffer_pid}},
+         buffer_pid
+       ),
+       do: true
+
+  defp tab_matches_buffer?(%Tab{kind: :file, context: context}, buffer_pid) do
+    TabContext.active_buffer_pid(context) == buffer_pid
+  end
+
+  defp tab_matches_buffer?(%Tab{}, _buffer_pid), do: false
+
+  @spec retarget_matching_workspace(t(), Tab.t(), FileRef.t(), boolean()) :: t()
+  defp retarget_matching_workspace(
+         %__MODULE__{} = tab_bar,
+         %Tab{group_id: workspace_id, file_ref: old_file_ref},
+         %FileRef{} = file_ref,
+         active?
+       ) do
+    replace_matching_workspace(tab_bar, workspace_id, fn workspace ->
+      Workspace.retarget_file(workspace, old_file_ref, file_ref, active?)
+    end)
+  end
+
+  @doc "Accepts a concrete tab only at its existing stable identity."
+  @spec accept_tab(t(), Tab.t()) :: t()
+  def accept_tab(%__MODULE__{} = tab_bar, %Tab{id: tab_id} = accepted) do
+    replace_matching_tab(tab_bar, tab_id, fn _current -> accepted end)
+  end
+
+  @doc "Records an agent status on the identified tab."
+  @spec set_tab_agent_status(t(), Tab.id(), Tab.agent_status()) :: t()
+  def set_tab_agent_status(%__MODULE__{} = tab_bar, tab_id, status) do
+    replace_matching_tab(tab_bar, tab_id, &Tab.set_agent_status(&1, status))
+  end
+
+  @doc "Binds or clears the session owned by the identified tab."
+  @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
+  def set_tab_session(%__MODULE__{} = tab_bar, tab_id, session) do
+    replace_matching_tab(tab_bar, tab_id, &Tab.set_session(&1, session))
+  end
+
+  @doc "Refreshes a restarted session identity and status on the identified tab."
+  @spec refresh_tab_session(t(), Tab.id(), pid(), pid(), Tab.agent_status()) :: t()
+  def refresh_tab_session(%__MODULE__{} = tab_bar, tab_id, old_pid, new_pid, status) do
+    replace_matching_tab(tab_bar, tab_id, fn tab ->
+      tab = Tab.refresh_session_pid(tab, old_pid, new_pid)
+      if is_nil(status), do: tab, else: Tab.set_agent_status(tab, status)
+    end)
+  end
+
+  @doc "Records a remote session identity on the identified tab."
+  @spec set_tab_remote_session(t(), Tab.id(), String.t(), String.t(), pid()) :: t()
+  def set_tab_remote_session(tab_bar, tab_id, server_name, session_id, remote_pid) do
+    replace_matching_tab(tab_bar, tab_id, fn tab ->
+      Tab.set_remote_session(tab, server_name, session_id, remote_pid)
+    end)
+  end
+
+  @doc "Records remote connection status on the identified tab."
+  @spec set_tab_connection_status(t(), Tab.id(), Tab.connection_status()) :: t()
+  def set_tab_connection_status(tab_bar, tab_id, status) do
+    replace_matching_tab(tab_bar, tab_id, &Tab.set_connection_status(&1, status))
+  end
+
+  @doc "Retargets one tab and its workspace to a concrete file identity."
+  @spec retarget_tab_file(t(), Tab.id(), FileRef.t(), boolean()) :: t()
+  def retarget_tab_file(%__MODULE__{} = tab_bar, tab_id, %FileRef{} = file_ref, active?) do
+    case get(tab_bar, tab_id) do
+      %Tab{} = tab ->
+        tab_bar
+        |> replace_matching_tab(tab_id, &Tab.set_file_ref(&1, file_ref))
+        |> retarget_matching_workspace(tab, file_ref, active?)
+
+      nil ->
+        tab_bar
+    end
   end
 
   @doc "Pins the tab with the given id. Returns unchanged when the tab is missing."
   @spec pin_tab(t(), Tab.id()) :: t()
   def pin_tab(%__MODULE__{} = tb, id) do
-    update_tab(tb, id, &Tab.set_pinned(&1, true))
+    replace_matching_tab(tb, id, &Tab.set_pinned(&1, true))
   end
 
   @doc "Unpins the tab with the given id. Returns unchanged when the tab is missing."
   @spec unpin_tab(t(), Tab.id()) :: t()
   def unpin_tab(%__MODULE__{} = tb, id) do
-    update_tab(tb, id, &Tab.set_pinned(&1, false))
+    replace_matching_tab(tb, id, &Tab.set_pinned(&1, false))
   end
 
   @doc "Toggles the pinned state of the active tab."
   @spec toggle_active_pin(t()) :: t()
   def toggle_active_pin(%__MODULE__{active_id: id} = tb) do
-    update_tab(tb, id, &Tab.toggle_pinned/1)
+    replace_matching_tab(tb, id, &Tab.toggle_pinned/1)
   end
 
   @doc "Moves the active tab one visible slot left within its workspace."
@@ -370,11 +495,18 @@ defmodule MingaEditor.State.TabBar do
     end
   end
 
-  @doc "Removes a dead buffer pid from all tab context snapshots."
+  @doc "Removes a dead buffer pid from every tab and workspace projection."
   @spec scrub_dead_buffer(t(), pid()) :: t()
-  def scrub_dead_buffer(%__MODULE__{tabs: tabs} = tb, pid) do
-    %{tb | tabs: Enum.map(tabs, &Tab.scrub_buffer(&1, pid))}
+  def scrub_dead_buffer(%__MODULE__{tabs: tabs, workspaces: workspaces} = tb, pid)
+      when is_pid(pid) do
+    %{
+      tb
+      | tabs: Enum.map(tabs, &Tab.scrub_buffer(&1, pid)),
+        workspaces: Enum.map(workspaces, &Workspace.retire_buffer(&1, pid))
+    }
   end
+
+  def scrub_dead_buffer(%__MODULE__{} = tb, _pid), do: tb
 
   @doc "Drops snapshotted feature state owned by a source from every tab context."
   @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
@@ -477,15 +609,15 @@ defmodule MingaEditor.State.TabBar do
   def set_remote_connection_status(%__MODULE__{} = tb, server_name, status)
       when is_binary(server_name) and status in [:connected, :disconnected, :ended, :unavailable] do
     tb
-    |> set_workspace_remote_connection_status(server_name, status)
+    |> set_server_workspace_connection_status(server_name, status)
     |> set_projected_tab_remote_connection_status(server_name, status)
   end
 
-  @spec set_workspace_remote_connection_status(t(), String.t(), Workspace.connection_status()) ::
+  @spec set_server_workspace_connection_status(t(), String.t(), Workspace.connection_status()) ::
           t()
-  defp set_workspace_remote_connection_status(%__MODULE__{} = tb, server_name, status) do
+  defp set_server_workspace_connection_status(%__MODULE__{} = tb, server_name, status) do
     Enum.reduce(remote_workspaces_for_server(tb, server_name), tb, fn %Workspace{id: id}, acc ->
-      update_workspace(acc, id, &Workspace.set_remote_connection_status(&1, status))
+      replace_matching_workspace(acc, id, &Workspace.set_remote_connection_status(&1, status))
     end)
   end
 
@@ -548,7 +680,7 @@ defmodule MingaEditor.State.TabBar do
   def set_attention_by_session(%__MODULE__{} = tb, session_pid, value)
       when is_pid(session_pid) and is_boolean(value) do
     case find_by_session(tb, session_pid) do
-      %Tab{id: id} -> update_tab(tb, id, &Tab.set_attention(&1, value))
+      %Tab{id: id} -> replace_matching_tab(tb, id, &Tab.set_attention(&1, value))
       nil -> tb
     end
   end
@@ -756,22 +888,8 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @spec tab_file_ref(Tab.t()) :: FileRef.t() | nil
-  defp tab_file_ref(%Tab{context: context}) when is_map(context) do
-    case TabContext.to_workspace_map(context) do
-      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> buffer_file_ref(pid)
-      _ -> nil
-    end
-  end
-
-  @spec buffer_file_ref(pid()) :: FileRef.t() | nil
-  defp buffer_file_ref(pid) do
-    case Buffer.file_path(pid) do
-      path when is_binary(path) -> FileRef.from_file_path(path)
-      _ -> nil
-    end
-  catch
-    :exit, _ -> nil
-  end
+  defp tab_file_ref(%Tab{file_ref: %FileRef{} = file_ref}), do: file_ref
+  defp tab_file_ref(%Tab{}), do: nil
 
   @spec cycle_visible_file_tab(t(), 1 | -1) :: t()
   defp cycle_visible_file_tab(%__MODULE__{} = tb, step) do
@@ -805,7 +923,6 @@ defmodule MingaEditor.State.TabBar do
   @spec add_workspace(t(), String.t(), pid() | nil) :: {t(), Workspace.t()}
   def add_workspace(%__MODULE__{} = tb, label, session \\ nil) do
     ws = Workspace.new_agent(tb.next_workspace_id, label, session, project_root(tb))
-    WorkspacePersistence.write(ws, ws.project_root)
 
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     workspaces = tb.workspaces ++ [ws]
@@ -822,10 +939,7 @@ defmodule MingaEditor.State.TabBar do
   def remove_workspace(%__MODULE__{} = tb, 0), do: tb
 
   def remove_workspace(%__MODULE__{} = tb, workspace_id) do
-    case WorkspacePersistence.delete(workspace_id, project_root(tb)) do
-      :ok -> remove_workspace_in_memory(tb, workspace_id)
-      {:error, _reason} -> tb
-    end
+    remove_workspace_in_memory(tb, workspace_id)
   end
 
   @spec remove_workspace_in_memory(t(), non_neg_integer()) :: t()
@@ -857,7 +971,7 @@ defmodule MingaEditor.State.TabBar do
   @doc "Moves a tab to a different workspace."
   @spec move_tab_to_workspace(t(), Tab.id(), non_neg_integer()) :: t()
   def move_tab_to_workspace(%__MODULE__{} = tb, tab_id, workspace_id) do
-    update_tab(tb, tab_id, &Tab.set_group(&1, workspace_id))
+    replace_matching_tab(tb, tab_id, &Tab.set_group(&1, workspace_id))
   end
 
   @doc """
@@ -937,21 +1051,129 @@ defmodule MingaEditor.State.TabBar do
     end)
   end
 
-  @doc """
-  Updates a workspace by applying `fun` to it.
-
-  Returns unchanged tab bar if no workspace matches.
-  """
-  @spec update_workspace(t(), non_neg_integer(), (Workspace.t() -> Workspace.t())) :: t()
-  def update_workspace(%__MODULE__{workspaces: workspaces} = tb, id, fun)
-      when is_function(fun, 1) do
-    new_workspaces =
+  @spec replace_matching_workspace(t(), non_neg_integer(), (Workspace.t() -> Workspace.t())) ::
+          t()
+  defp replace_matching_workspace(
+         %__MODULE__{workspaces: workspaces} = tab_bar,
+         workspace_id,
+         transition
+       ) do
+    workspaces =
       Enum.map(workspaces, fn
-        %Workspace{id: ^id} = ws -> persist_if_changed(ws, fun.(ws))
-        ws -> ws
+        %Workspace{id: ^workspace_id} = workspace ->
+          transition.(workspace)
+
+        workspace ->
+          workspace
       end)
 
-    %{tb | workspaces: new_workspaces}
+    %{tab_bar | workspaces: workspaces}
+  end
+
+  @doc "Accepts a concrete workspace only at its existing stable identity."
+  @spec accept_workspace(t(), Workspace.t()) :: t()
+  def accept_workspace(%__MODULE__{} = tab_bar, %Workspace{id: workspace_id} = accepted) do
+    replace_matching_workspace(tab_bar, workspace_id, fn _current -> accepted end)
+  end
+
+  @doc "Renames the identified workspace."
+  @spec rename_workspace(t(), non_neg_integer(), String.t()) :: t()
+  def rename_workspace(tab_bar, workspace_id, name) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.rename(&1, name))
+  end
+
+  @doc "Sets the icon of the identified workspace."
+  @spec set_workspace_icon(t(), non_neg_integer(), String.t()) :: t()
+  def set_workspace_icon(tab_bar, workspace_id, icon) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_icon(&1, icon))
+  end
+
+  @doc "Records agent status on the identified workspace."
+  @spec set_workspace_agent_status(t(), non_neg_integer(), Tab.agent_status()) :: t()
+  def set_workspace_agent_status(tab_bar, workspace_id, status) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_agent_status(&1, status))
+  end
+
+  @doc "Binds or clears the identified workspace session."
+  @spec set_workspace_session(t(), non_neg_integer(), pid() | nil) :: t()
+  def set_workspace_session(tab_bar, workspace_id, session) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_session(&1, session))
+  end
+
+  @doc "Clears session state from the identified workspace."
+  @spec clear_workspace_session(t(), non_neg_integer()) :: t()
+  def clear_workspace_session(tab_bar, workspace_id) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.clear_session/1)
+  end
+
+  @doc "Records the agent UI projection on the identified workspace."
+  @spec set_workspace_agent_ui(t(), non_neg_integer(), MingaEditor.Agent.UIState.t()) :: t()
+  def set_workspace_agent_ui(tab_bar, workspace_id, agent_ui) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, agent_ui))
+  end
+
+  @doc "Records project-view state on the identified workspace."
+  @spec set_workspace_project_view(t(), non_neg_integer(), term()) :: t()
+  def set_workspace_project_view(tab_bar, workspace_id, project_view) do
+    replace_matching_workspace(
+      tab_bar,
+      workspace_id,
+      &Workspace.set_project_view(&1, project_view)
+    )
+  end
+
+  @doc "Adds a file identity to the identified workspace."
+  @spec add_workspace_file(t(), non_neg_integer(), FileRef.t()) :: t()
+  def add_workspace_file(tab_bar, workspace_id, %FileRef{} = file_ref) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.add_file(&1, file_ref))
+  end
+
+  @doc "Removes a file identity from the identified workspace."
+  @spec remove_workspace_file(t(), non_neg_integer(), FileRef.t()) :: t()
+  def remove_workspace_file(tab_bar, workspace_id, %FileRef{} = file_ref) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.remove_file(&1, file_ref))
+  end
+
+  @doc "Selects the active file identity in the identified workspace."
+  @spec set_workspace_active_file(t(), non_neg_integer(), FileRef.t() | nil) :: t()
+  def set_workspace_active_file(tab_bar, workspace_id, file_ref) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_active_file(&1, file_ref))
+  end
+
+  @doc "Records pending durable catch-up events on the identified workspace."
+  @spec set_workspace_pending_catchup_events(t(), non_neg_integer(), [term()]) :: t()
+  def set_workspace_pending_catchup_events(tab_bar, workspace_id, events) when is_list(events) do
+    replace_matching_workspace(
+      tab_bar,
+      workspace_id,
+      &Workspace.set_pending_catchup_events(&1, events)
+    )
+  end
+
+  @doc "Records remote connection status on the identified workspace."
+  @spec set_workspace_remote_connection_status(t(), non_neg_integer(), Tab.connection_status()) ::
+          t()
+  def set_workspace_remote_connection_status(tab_bar, workspace_id, status) do
+    replace_matching_workspace(
+      tab_bar,
+      workspace_id,
+      &Workspace.set_remote_connection_status(&1, status)
+    )
+  end
+
+  @doc "Retargets one file identity in the identified workspace."
+  @spec retarget_workspace_file(t(), non_neg_integer(), FileRef.t() | nil, FileRef.t(), boolean()) ::
+          t()
+  def retarget_workspace_file(tab_bar, workspace_id, old_file_ref, %FileRef{} = file_ref, active?) do
+    replace_matching_workspace(tab_bar, workspace_id, fn workspace ->
+      Workspace.retarget_file(workspace, old_file_ref, file_ref, active?)
+    end)
+  end
+
+  @doc "Records review state on the identified workspace."
+  @spec set_workspace_review(t(), non_neg_integer(), MingaEditor.State.WorkspaceReview.t()) :: t()
+  def set_workspace_review(tab_bar, workspace_id, review) do
+    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_review(&1, review))
   end
 
   @doc "Replaces restored workspaces and recalculates the next workspace id."
@@ -987,16 +1209,6 @@ defmodule MingaEditor.State.TabBar do
       1 -> 1
       n when n <= 4 -> 2
       _ -> 3
-    end
-  end
-
-  @spec persist_if_changed(Workspace.t(), Workspace.t()) :: Workspace.t()
-  defp persist_if_changed(%Workspace{} = old, %Workspace{} = new) do
-    if Workspace.to_persisted_map(old) == Workspace.to_persisted_map(new) do
-      new
-    else
-      WorkspacePersistence.write(new, new.project_root)
-      new
     end
   end
 

@@ -159,7 +159,7 @@ defmodule MingaEditor.Commands do
   # Tab bar mouse selection uses id-scoped tuple commands so click targets stay
   # stable even when visible positions are reordered by pinning.
   def execute(state, {:tab_goto_id, tab_id}) when is_integer(tab_id) and tab_id > 0 do
-    EditorState.switch_tab(state, tab_id)
+    MingaEditor.TabWorkflow.switch(state, tab_id)
   end
 
   # ── Leader / which-key (return action tuples) ─────────────────────────────
@@ -339,11 +339,9 @@ defmodule MingaEditor.Commands do
     # goto-line is an authoritative jump (#2652): mark before delegating so a jump
     # to a line already on screen still discards a frontend-held local offset.
     guard_buffer(state, fn ->
-      state
-      |> then(fn state ->
-        %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
-      end)
-      |> Movement.execute(cmd)
+      workspace = MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+      state = %{state | workspace: workspace}
+      Movement.execute(state, cmd)
     end)
   end
 
@@ -821,19 +819,16 @@ defmodule MingaEditor.Commands do
         |> Minga.Mode.BranchDeleteConfirmState.new(name)
         |> Minga.Mode.BranchDeleteConfirmState.to_force(reason)
 
-      state
-      |> NoticeWorkflow.publish("Delete failed: #{reason}")
-      |> then(fn state ->
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.transition_mode(
-                state.workspace,
-                :branch_delete_confirm,
-                mode_state
-              )
-        }
-      end)
+      state = NoticeWorkflow.publish(state, "Delete failed: #{reason}")
+
+      workspace =
+        MingaEditor.Session.State.transition_mode(
+          state.workspace,
+          :branch_delete_confirm,
+          mode_state
+        )
+
+      %{state | workspace: workspace}
     else
       NoticeWorkflow.publish(state, "Delete failed: #{reason}")
     end

@@ -262,10 +262,12 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   @spec close_panel(EditorState.t()) :: EditorState.t()
   defp close_panel(state) do
+    state = %{
+      state
+      | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+    }
+
     state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
-    end)
     |> SidebarWorkflow.close_git_status()
     |> Layout.invalidate()
     |> invalidate_all_windows()

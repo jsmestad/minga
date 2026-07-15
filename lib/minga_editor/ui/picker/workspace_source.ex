@@ -11,7 +11,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
 
@@ -68,7 +67,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state
       ) do
     target_id = TabBar.switch_to_workspace(tb, workspace_id).active_id
-    EditorState.switch_tab(state, target_id)
+    MingaEditor.TabWorkflow.switch(state, target_id)
   end
 
   def on_select(_, state), do: state

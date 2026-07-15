@@ -6,6 +6,7 @@ defmodule MingaEditor.BufferActivation do
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.BufferLifecycle
+  alias MingaEditor.WorkspaceWorkflow
 
   @type state :: EditorState.t()
   @type option :: {:notify_shell?, boolean()} | {:replace_window_content?, boolean()}
@@ -42,11 +43,11 @@ defmodule MingaEditor.BufferActivation do
         %{state | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :open)}
 
       :open ->
+        previous = state
         {runtime, workspace} = Runtime.route_buffer_switched(state.shell_runtime, state.workspace)
 
-        state
-        |> then(fn state -> %{state | shell_runtime: runtime} end)
-        |> then(fn state -> %{state | workspace: workspace} end)
+        state = %{state | shell_runtime: runtime, workspace: workspace}
+        WorkspaceWorkflow.persist_changes(previous, state)
     end
   end
 end

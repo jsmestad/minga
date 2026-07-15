@@ -7,6 +7,7 @@ defmodule MingaEditor.Shell.StateStash do
 
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Identity
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @enforce_keys [:identity, :state]
   defstruct [:identity, :state]
@@ -33,4 +34,13 @@ defmodule MingaEditor.Shell.StateStash do
   def restore(%__MODULE__{} = stash, %Entry{} = entry) do
     if matches?(stash, entry), do: {:ok, stash.state}, else: :mismatch
   end
+
+  @doc "Retires a dead buffer from a stashed Traditional value without changing its identity."
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{state: %TraditionalState{} = state} = stash, buffer_pid)
+      when is_pid(buffer_pid) do
+    %__MODULE__{stash | state: TraditionalState.retire_buffer(state, buffer_pid)}
+  end
+
+  def retire_buffer(%__MODULE__{} = stash, buffer_pid) when is_pid(buffer_pid), do: stash
 end

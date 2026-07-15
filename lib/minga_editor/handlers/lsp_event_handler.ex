@@ -275,7 +275,9 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp dispatch_lsp_response({kind, operation_id, origin_tab_id}, state, result)
        when kind in [:references, :rename] do
-    if active_tab_id(state) == origin_tab_id do
+    {state, active_tab} = MingaEditor.Shell.Workflow.resolve_active_tab(state)
+
+    if operation_response_current?(origin_tab_id, active_tab) do
       dispatch_lsp_response({kind, operation_id}, state, result)
     else
       %{
@@ -350,13 +352,13 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     state
   end
 
-  @spec active_tab_id(EditorState.t()) :: pos_integer() | nil
-  defp active_tab_id(state) do
-    case EditorState.active_tab(state) do
-      %{id: id} -> id
-      nil -> nil
-    end
-  end
+  @spec operation_response_current?(
+          MingaEditor.State.Tab.id() | nil,
+          MingaEditor.State.Tab.t() | nil
+        ) :: boolean()
+  defp operation_response_current?(nil, nil), do: true
+  defp operation_response_current?(tab_id, %{id: tab_id}), do: true
+  defp operation_response_current?(_origin_tab_id, _active_tab), do: false
 
   @spec operation_tab_changed_message(:references | :rename) :: String.t()
   defp operation_tab_changed_message(:references),

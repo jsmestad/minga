@@ -63,13 +63,12 @@ defmodule MingaEditor.Shell do
   @doc "Runs after `handle_gui_action/3` has been applied to full editor state."
   @callback after_gui_action(editor_state :: term(), action :: term()) :: term()
 
-  @doc "A buffer was added to the workspace."
+  @doc "Calculates shell state after a workflow has prepared inert buffer metadata."
   @callback on_buffer_added(
               shell_state(),
               prev_workspace :: workspace(),
               workspace(),
-              buffer_pid :: pid(),
-              context :: buffer_add_context()
+              MingaEditor.Shell.BufferMetadata.t()
             ) :: {shell_state(), workspace()}
 
   @doc "The active buffer changed."
@@ -112,6 +111,15 @@ defmodule MingaEditor.Shell do
   @doc "Tracks an agent-touched file in optional shell state."
   @callback track_agent_file(shell_state(), session_pid :: pid(), path :: String.t()) ::
               shell_state()
+
+  @doc "Drops one source from feature state retained inside opaque shell state."
+  @callback drop_feature_state_source(
+              shell_state(),
+              MingaEditor.FeatureState.source()
+            ) :: shell_state()
+
+  @doc "Drops extension sources from feature state retained inside opaque shell state."
+  @callback drop_extension_feature_state_sources(shell_state()) :: shell_state()
 
   @doc "Returns the currently active tab, or nil if the shell has no tabs."
   @callback active_tab(shell_state()) :: MingaEditor.State.Tab.t() | nil

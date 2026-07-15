@@ -184,24 +184,21 @@ defmodule MingaEditor.Agent.Compaction do
   defp update_background_ui(state, workspace_id, fun) do
     tab_bar = state.shell_runtime.state.tab_bar
 
-    tab_bar =
-      TabBar.update_workspace(tab_bar, workspace_id, fn workspace ->
-        Workspace.set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
-      end)
+    workspace = TabBar.get_workspace(tab_bar, workspace_id)
+    workspace = Workspace.set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
+    tab_bar = TabBar.accept_workspace(tab_bar, workspace)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tab_bar
-        )
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tab_bar
+      )
 
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   @spec background_workspace(EditorState.t(), pid()) :: Workspace.t() | nil

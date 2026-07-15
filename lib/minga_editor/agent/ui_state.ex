@@ -54,6 +54,14 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | prompt_buffer: nil}}
   end
 
+  @doc "Forgets a prompt buffer only when the retiring process owns it."
+  @spec retire_prompt_buffer(t(), pid()) :: t()
+  def retire_prompt_buffer(%__MODULE__{panel: %{prompt_buffer: pid}} = state, pid) do
+    detach_prompt_buffer(state)
+  end
+
+  def retire_prompt_buffer(%__MODULE__{} = state, _pid), do: state
+
   @doc "Records metadata shared by ordinary prompt edits."
   @spec record_prompt_edit(t()) :: t()
   def record_prompt_edit(%__MODULE__{panel: panel} = state) do

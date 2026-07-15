@@ -228,7 +228,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
     end
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   defp open_file_tree(dir, events_registry, active_file \\ nil) do
     tree = reveal_active_file(FileTree.new(dir), active_file)

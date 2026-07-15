@@ -7,7 +7,6 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
   """
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
 
@@ -99,10 +98,10 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
     test "workspace status tracks agent activity" do
       {tb, _session, ws} = build_agent_scenario()
 
-      tb = TabBar.update_workspace(tb, ws.id, &Workspace.set_agent_status(&1, :thinking))
+      tb = TabBar.set_workspace_agent_status(tb, ws.id, :thinking)
       assert TabBar.get_workspace(tb, ws.id).agent_status == :thinking
 
-      tb = TabBar.update_workspace(tb, ws.id, &Workspace.set_agent_status(&1, :idle))
+      tb = TabBar.set_workspace_agent_status(tb, ws.id, :idle)
       assert TabBar.get_workspace(tb, ws.id).agent_status == :idle
     end
 

@@ -30,11 +30,11 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert :ok = Session.save(snapshot, session_dir: dir)
 
     restored = dir |> initial_state() |> SessionRestore.restore_session()
-    assert [_, _] = TabBar.visible_file_tabs(EditorState.tab_bar(restored))
+    assert [_, _] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == first_path
 
     second_tab =
-      Enum.find(TabBar.visible_file_tabs(EditorState.tab_bar(restored)), fn tab ->
+      Enum.find(TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar), fn tab ->
         tab.label == "second.ex"
       end)
 
@@ -57,7 +57,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
         {:minga_highlight, {:highlight_spans, second_buffer, spans}}
       )
 
-    switched = EditorState.switch_tab(with_spans, second_tab.id)
+    switched = MingaEditor.TabWorkflow.switch(with_spans, second_tab.id)
     highlight = HighlightSync.get_highlight(switched, second_buffer)
 
     assert highlight.capture_names == {"keyword"}
@@ -97,7 +97,8 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert Minga.Project.files() == []
     assert Minga.Project.known_projects() == known_before
     refute fake_home in Minga.Project.known_projects()
-    assert EditorState.file_tree_state(restored).project_root == nil
+    assert restored.workspace.file_tree.project_root == nil
+    assert Minga.Buffer.file_path(restored.workspace.buffers.active) == first_path
   end
 
   test "already-read recovered contents are applied by the SessionRestore owner", %{tmp_dir: dir} do
@@ -128,7 +129,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
 
     restored = dir |> initial_state() |> SessionRestore.restore_session()
 
-    assert [_] = TabBar.visible_file_tabs(EditorState.tab_bar(restored))
+    assert [_] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == existing_path
     refute File.exists?(missing_path)
   end

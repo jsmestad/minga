@@ -288,14 +288,12 @@ defmodule MingaEditor.Input.AgentMouse do
         )
       end
 
-    state
-    |> unpin_agent_chat_window(win_id)
-    |> then(fn state ->
-      %{
-        state
-        | workspace: MingaEditor.Session.State.scroll_agent_chat_window(state.workspace, delta)
-      }
-    end)
+    state = unpin_agent_chat_window(state, win_id)
+
+    %{
+      state
+      | workspace: MingaEditor.Session.State.scroll_agent_chat_window(state.workspace, delta)
+    }
   end
 
   # Side panel chat scroll: updates UIState.scroll (used by the panel

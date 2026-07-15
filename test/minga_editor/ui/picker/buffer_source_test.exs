@@ -6,7 +6,6 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
   alias MingaEditor.VimState
@@ -182,7 +181,9 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       assert selected.workspace.buffers.list == []
       assert selected.workspace.buffers.active == nil
       assert selected.workspace.launchpad != nil
-      assert EditorState.active_window_struct(selected).content == {:empty, :semantic}
+
+      assert MingaEditor.Session.State.active_window_struct(selected.workspace).content ==
+               {:empty, :semantic}
     end
 
     test "bulk actions expose kill all marked" do

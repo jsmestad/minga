@@ -185,11 +185,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
             {:git_status_changed, entries}
           )
 
-        new_state =
-          state
-          |> then(fn state -> %{state | shell_runtime: runtime} end)
-          |> then(fn state -> %{state | workspace: workspace} end)
-
+        new_state = %{state | shell_runtime: runtime, workspace: workspace}
         {new_state, [{:render, 16}]}
     end
   end
@@ -202,7 +198,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
       state
       |> FileTreeFreshness.refresh_git_status_from_cache()
       |> refresh_git_diff_views_for_buffer(saved_buf)
-      |> EditorState.rebind_buffer_file_identity(saved_buf, saved_path)
+      |> MingaEditor.BufferFileIdentity.rebind(saved_buf, saved_path)
 
     effects = [
       {:request_code_lens},

@@ -13,7 +13,6 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -108,9 +107,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       tb =
         tb
-        |> TabBar.update_tab(at.id, &Tab.set_session(&1, session_pid))
+        |> TabBar.set_tab_session(at.id, session_pid)
         |> TabBar.move_tab_to_workspace(at.id, agent_workspace.id)
-        |> TabBar.update_workspace(agent_workspace.id, &Workspace.set_agent_ui(&1, agentic))
+        |> TabBar.set_workspace_agent_ui(agent_workspace.id, agentic)
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)
 
@@ -134,7 +133,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
           }
         end)
 
-      EditorState.switch_tab(state, at.id)
+      MingaEditor.TabWorkflow.switch(state, at.id)
     else
       # Create background agent tab with agent context
       agent_win = Window.new_agent_chat(1, 24, 80)
@@ -154,9 +153,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       tb =
         tb
-        |> TabBar.update_tab(at.id, &Tab.set_session(&1, session_pid))
+        |> TabBar.set_tab_session(at.id, session_pid)
         |> TabBar.move_tab_to_workspace(at.id, agent_workspace.id)
-        |> TabBar.update_workspace(agent_workspace.id, &Workspace.set_agent_ui(&1, agentic))
+        |> TabBar.set_workspace_agent_ui(agent_workspace.id, agentic)
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)
 
@@ -179,11 +178,11 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   describe "toggle_agent_split/1 — activating (tab switch)" do
     test "switches to agent tab" do
       state = base_state()
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
 
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      assert EditorState.active_tab_kind(new_state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
     end
 
     test "keymap_scope becomes :agent" do
@@ -215,7 +214,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
     test "agent tab exists after toggle" do
       state = base_state()
-      agent_tab_before = TabBar.find_by_kind(MingaEditor.State.tab_bar(state), :agent)
+      agent_tab_before = TabBar.find_by_kind(state.shell_runtime.state.tab_bar, :agent)
       assert agent_tab_before != nil
 
       new_state = AgentCommands.toggle_agentic_view(state)
@@ -230,10 +229,10 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     test "switches back to file tab" do
       state = base_state()
       with_agent = AgentCommands.toggle_agentic_view(state)
-      assert EditorState.active_tab_kind(with_agent) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(with_agent.shell_runtime) == :agent
 
       without_agent = AgentCommands.toggle_agentic_view(with_agent)
-      assert EditorState.active_tab_kind(without_agent) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(without_agent.shell_runtime) == :file
     end
 
     test "restores :editor keymap_scope" do
@@ -250,7 +249,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       without_agent = AgentCommands.scope_close(state)
 
-      assert EditorState.active_tab_kind(without_agent) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(without_agent.shell_runtime) == :file
       assert without_agent.workspace.keymap_scope == :editor
       refute_process_down(session)
       assert TabBar.find_by_session(without_agent.shell_runtime.state.tab_bar, session) != nil
@@ -262,7 +261,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       without_agent = AgentCommands.scope_dismiss_or_noop(state)
 
-      assert EditorState.active_tab_kind(without_agent) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(without_agent.shell_runtime) == :file
       assert without_agent.workspace.keymap_scope == :editor
       refute_process_down(session)
       assert TabBar.find_by_session(without_agent.shell_runtime.state.tab_bar, session) != nil
@@ -274,23 +273,23 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
     test "closes agent tab and switches to file tab" do
       state = base_state(active: true)
-      assert EditorState.active_tab_kind(state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :agent
 
       new_state = BufferManagement.execute(state, :kill_buffer)
 
-      assert EditorState.active_tab_kind(new_state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :file
       assert new_state.workspace.keymap_scope == :editor
     end
 
     test "does not crash when agent tab has no session" do
       state = base_state(active: true, session: nil)
       new_state = BufferManagement.execute(state, :kill_buffer)
-      assert EditorState.active_tab_kind(new_state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :file
     end
 
     test "removes agent tab from tab bar" do
       state = base_state(active: true)
-      assert Enum.count(TabBar.filter_by_kind(MingaEditor.State.tab_bar(state), :agent)) == 1
+      assert Enum.count(TabBar.filter_by_kind(state.shell_runtime.state.tab_bar, :agent)) == 1
 
       new_state = BufferManagement.execute(state, :kill_buffer)
       assert TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :agent) == []
@@ -307,11 +306,11 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     test "opens the agent view and resumes the requested session" do
       {:ok, session} = StubServer.start_link(notify: self())
       state = base_state(session: session)
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
 
       new_state = AgentCommands.open_session(state, "sess-42")
 
-      assert EditorState.active_tab_kind(new_state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
       assert_receive {:stub_loaded_session, "sess-42"}
     end
 
@@ -373,11 +372,11 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
           (&Panel.set_provenance_jump(&1, jump)).(state.workspace.agent_ui.panel)
         )
 
-      assert EditorState.active_tab_kind(state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :agent
 
       new_state = AgentCommands.scope_provenance_return(state)
 
-      assert EditorState.active_tab_kind(new_state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :file
       assert new_state.workspace.agent_ui.panel.provenance_jump == nil
     end
 
@@ -388,7 +387,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       new_state = AgentCommands.scope_provenance_return(state)
 
       assert %EditorState{} = new_state
-      assert EditorState.active_tab_kind(new_state) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
     end
   end
 
@@ -406,19 +405,19 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   describe "round-trip toggle" do
     test "toggle cycle returns to file tab" do
       state = base_state()
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
 
       with_agent = AgentCommands.toggle_agentic_view(state)
-      assert EditorState.active_tab_kind(with_agent) == :agent
+      assert MingaEditor.Shell.Runtime.active_tab_kind(with_agent.shell_runtime) == :agent
 
       restored = AgentCommands.toggle_agentic_view(with_agent)
-      assert EditorState.active_tab_kind(restored) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(restored.shell_runtime) == :file
       assert restored.workspace.keymap_scope == :editor
     end
 
     test "agent tab persists through toggle cycles" do
       state = base_state()
-      agent_tab_id = TabBar.find_by_kind(MingaEditor.State.tab_bar(state), :agent).id
+      agent_tab_id = TabBar.find_by_kind(state.shell_runtime.state.tab_bar, :agent).id
 
       first = AgentCommands.toggle_agentic_view(state)
       assert TabBar.get(first.shell_runtime.state.tab_bar, agent_tab_id) != nil

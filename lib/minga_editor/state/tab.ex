@@ -309,11 +309,16 @@ defmodule MingaEditor.State.Tab do
 
   def background_subagent?(%__MODULE__{}), do: false
 
-  @doc "Removes a dead buffer pid from this tab's context snapshot."
+  @doc "Removes a dead buffer pid from this tab's context and logical file projection."
   @spec scrub_buffer(t(), pid()) :: t()
   def scrub_buffer(%__MODULE__{context: context} = tab, pid) do
-    %{tab | context: Context.scrub_buffer(context, pid)}
+    file_ref = retire_buffer_file_ref(tab.file_ref, pid)
+    %{tab | context: Context.scrub_buffer(context, pid), file_ref: file_ref}
   end
+
+  @spec retire_buffer_file_ref(FileRef.t() | nil, pid()) :: FileRef.t() | nil
+  defp retire_buffer_file_ref(%FileRef{kind: :buffer, buffer_pid: pid}, pid), do: nil
+  defp retire_buffer_file_ref(file_ref, _pid), do: file_ref
 
   @spec update_context_feature_state(t(), (FeatureState.t() -> FeatureState.t())) :: t()
   defp update_context_feature_state(%__MODULE__{context: %Context{} = context} = tab, fun) do

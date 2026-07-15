@@ -137,13 +137,10 @@ defmodule MingaEditor.Commands.Testing do
 
     Minga.Log.info(:editor, "[Build] Building Minga: #{command}")
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | feedback: MingaEditor.State.Feedback.upsert_notification(state.feedback, notification)
-      }
-    end)
+    %{
+      state
+      | feedback: MingaEditor.State.Feedback.upsert_notification(state.feedback, notification)
+    }
   end
 
   @spec show_output(state()) :: state()

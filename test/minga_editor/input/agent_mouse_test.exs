@@ -178,7 +178,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
       # Window should be unpinned so viewport follows cursor
-      case EditorState.find_agent_chat_window(new_state) do
+      case MingaEditor.Session.State.find_agent_chat_window(new_state.workspace) do
         nil -> :ok
         {_win_id, window} -> refute window.pinned
       end
@@ -387,7 +387,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
       # Window should be unpinned
-      case EditorState.find_agent_chat_window(new_state) do
+      case MingaEditor.Session.State.find_agent_chat_window(new_state.workspace) do
         nil -> :ok
         {_win_id, window} -> refute window.pinned
       end

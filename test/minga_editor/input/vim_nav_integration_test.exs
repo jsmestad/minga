@@ -40,7 +40,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     :ok
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
+  defp ft(state), do: state.workspace.file_tree
 
   defp make_tree_state(tmp_dir, file_count \\ 10) do
     if file_count > 0 do

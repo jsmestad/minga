@@ -2,7 +2,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   @moduledoc """
   Tests for shell callback dispatch in `EditorState`.
 
-  Verifies that `switch_buffer`, `close_buffer_pure`, and the tab delegate
+  Verifies that buffer activation, removal, and shell-owned tab queries
   functions correctly dispatch through the Shell behaviour. Tests both
   Traditional (with tab bar) and tab-less extension shell paths.
 
@@ -13,14 +13,17 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project.FileRef
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
+  alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -43,7 +46,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     state = base_state(opts)
     tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(tab)
-    context = EditorState.snapshot_tab_context(state)
+    context = MingaEditor.State.Tab.Context.snapshot(state.workspace)
     tb = TabBar.update_context(tb, 1, context)
 
     then(state, fn root ->
@@ -110,7 +113,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
     agent_tab = Tab.new_agent(1, "Agent")
     tb = TabBar.new(agent_tab)
-    context = EditorState.snapshot_tab_context(state)
+    context = MingaEditor.State.Tab.Context.snapshot(state.workspace)
     tb = TabBar.update_context(tb, 1, context)
 
     state =
@@ -143,9 +146,73 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       assert new_state.workspace.buffers.active == buf2
 
-      active_tab = TabBar.active(EditorState.tab_bar(new_state))
+      active_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       assert active_tab.context.buffers.active == buf2
       assert active_tab.context.buffers.active == new_state.workspace.buffers.active
+    end
+
+    @tag :tmp_dir
+    test "Traditional: workspace file retargeting persists after buffer activation", %{
+      tmp_dir: dir
+    } do
+      first_path = Path.join(dir, "first.ex")
+      second_path = Path.join(dir, "second.ex")
+      {:ok, first_ref} = FileRef.from_path(dir, first_path)
+      {:ok, second_ref} = FileRef.from_path(dir, second_path)
+
+      first_buffer =
+        start_supervised!(
+          Supervisor.child_spec(
+            {BufferProcess, content: "first", file_path: first_path},
+            id: make_ref()
+          )
+        )
+
+      second_buffer =
+        start_supervised!(
+          Supervisor.child_spec(
+            {BufferProcess, content: "second", file_path: second_path},
+            id: make_ref()
+          )
+        )
+
+      state = base_state()
+
+      workspace =
+        state.workspace
+        |> SessionState.set_buffers(%Buffers{
+          active: first_buffer,
+          list: [first_buffer, second_buffer],
+          active_index: 0
+        })
+        |> SessionState.set_file_tree(%FileTreeState{project_root: dir})
+
+      tab = Tab.new_file(1, "first.ex") |> Tab.set_file_ref(first_ref)
+      tab_bar = TabBar.new(tab, dir)
+      {tab_bar, agent_workspace} = TabBar.add_workspace(tab_bar, "Agent")
+
+      tab_bar =
+        tab_bar
+        |> TabBar.move_tab_to_workspace(tab.id, agent_workspace.id)
+        |> TabBar.retarget_tab_file(tab.id, first_ref, true)
+        |> TabBar.update_context(tab.id, MingaEditor.State.Tab.Context.snapshot(workspace))
+
+      shell_state = TraditionalState.install_tab_bar(state.shell_runtime.state, tab_bar)
+
+      state = %{
+        state
+        | workspace: workspace,
+          shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      activated = MingaEditor.BufferActivation.activate(state, 1)
+
+      assert activated.workspace.buffers.active == second_buffer
+
+      assert {:ok, persisted} =
+               Persistence.read(Persistence.path_for(dir, agent_workspace.id), dir)
+
+      assert FileRef.equal?(persisted.active_file, second_ref)
     end
 
     test "Traditional: agent tab context.buffers.active tracks workspace after switch" do
@@ -176,7 +243,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       assert new_state.workspace.buffers.active == buf2
 
-      active_tab = TabBar.active(EditorState.tab_bar(new_state))
+      active_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       assert active_tab.kind == :agent
       assert active_tab.context.buffers.active == buf2
       assert active_tab.context.buffers.active == new_state.workspace.buffers.active
@@ -189,9 +256,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       new_state = MingaEditor.BufferActivation.activate(state, 1)
 
-      tab = EditorState.find_tab_by_buffer(new_state, buf2)
+      tab = MingaEditor.Shell.Runtime.find_tab_by_buffer(new_state.shell_runtime, buf2)
       assert %Tab{kind: :file} = tab
-      assert tab.id == EditorState.tab_bar(new_state).active_id
+      assert tab.id == new_state.shell_runtime.state.tab_bar.active_id
     end
 
     test "Traditional: dirty marker queries correct buffer after switch" do
@@ -206,7 +273,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       new_state = MingaEditor.BufferActivation.activate(state, 1)
 
-      active_tab = TabBar.active(EditorState.tab_bar(new_state))
+      active_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       tab_buf = active_tab.context.buffers.active
       assert tab_buf == buf2
       refute BufferProcess.dirty?(tab_buf)
@@ -220,16 +287,16 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf3)
 
       state = MingaEditor.BufferActivation.activate(state, 1)
-      assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf2
+      assert TabBar.active(state.shell_runtime.state.tab_bar).context.buffers.active == buf2
 
       state = MingaEditor.BufferActivation.activate(state, 2)
-      assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf3
+      assert TabBar.active(state.shell_runtime.state.tab_bar).context.buffers.active == buf3
 
       state = MingaEditor.BufferActivation.activate(state, 0)
       buf1 = state.workspace.buffers.active
-      assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf1
+      assert TabBar.active(state.shell_runtime.state.tab_bar).context.buffers.active == buf1
 
-      assert EditorState.find_tab_by_buffer(state, buf1) != nil
+      assert MingaEditor.Shell.Runtime.find_tab_by_buffer(state.shell_runtime, buf1) != nil
     end
 
     test "no tab bar: switch_buffer still works" do
@@ -266,9 +333,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     end
   end
 
-  # ── on_buffer_died via close_buffer_pure/2 ───────────────────────────────────
+  # ── on_buffer_died via remove_buffer/2 ───────────────────────────────────────
 
-  describe "close_buffer_pure/2 dispatches on_buffer_died" do
+  describe "remove_buffer/2 dispatches on_buffer_died" do
     test "Traditional: syncs active window after buffer death" do
       state = state_with_file_tab()
       buf1 = state.workspace.buffers.active
@@ -278,7 +345,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, buf2)
 
       # Close the active buffer (buf2)
-      new_state = EditorState.close_buffer_pure(state, buf2)
+      new_state = EditorState.remove_buffer(state, buf2)
 
       # buf1 should become active
       assert new_state.workspace.buffers.active == buf1
@@ -303,7 +370,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert Content.agent_chat?(window.content)
 
       # Close the file buffer
-      new_state = EditorState.close_buffer_pure(state, file_buf)
+      new_state = EditorState.remove_buffer(state, file_buf)
 
       # Window should still show agent_chat (on_buffer_died respects content guard)
       window = Map.fetch!(new_state.workspace.windows.map, win_id)
@@ -315,50 +382,50 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   # ── Tab delegate callbacks ──────────────────────────────────────────────────
 
-  describe "active_tab/1 delegates to shell" do
+  describe "Runtime.active_tab/1 delegates to shell" do
     test "Traditional: returns active tab" do
       state = state_with_file_tab()
-      tab = EditorState.active_tab(state)
+      tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
       assert %Tab{kind: :file} = tab
     end
 
     test "no tab bar: returns nil" do
       state = base_state()
-      assert EditorState.active_tab(state) == nil
+      assert MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) == nil
     end
   end
 
-  describe "find_tab_by_buffer/2 delegates to shell" do
+  describe "Runtime.find_tab_by_buffer/2 delegates to shell" do
     test "Traditional: finds tab by buffer pid" do
       state = state_with_file_tab()
       buf = state.workspace.buffers.active
 
-      tab = EditorState.find_tab_by_buffer(state, buf)
+      tab = MingaEditor.Shell.Runtime.find_tab_by_buffer(state.shell_runtime, buf)
       assert %Tab{kind: :file} = tab
     end
 
     test "Traditional: returns nil for unknown buffer" do
       state = state_with_file_tab()
       fake_pid = spawn(fn -> :ok end)
-      assert EditorState.find_tab_by_buffer(state, fake_pid) == nil
+      assert MingaEditor.Shell.Runtime.find_tab_by_buffer(state.shell_runtime, fake_pid) == nil
     end
 
     test "no tab bar: returns nil" do
       state = base_state()
       buf = state.workspace.buffers.active
-      assert EditorState.find_tab_by_buffer(state, buf) == nil
+      assert MingaEditor.Shell.Runtime.find_tab_by_buffer(state.shell_runtime, buf) == nil
     end
   end
 
   describe "active_tab_kind/1 delegates to shell" do
     test "Traditional: returns :file for file tab" do
       state = state_with_file_tab()
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
     end
 
     test "no tab bar: returns :file (default)" do
       state = base_state()
-      assert EditorState.active_tab_kind(state) == :file
+      assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
     end
   end
 
@@ -366,7 +433,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     test "Traditional: associates session pid with tab" do
       state = state_with_file_tab()
       session_pid = spawn(fn -> :ok end)
-      tab = EditorState.active_tab(state)
+      tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
 
       new_state =
         then(state, fn state ->
@@ -381,7 +448,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
           }
         end)
 
-      updated_tab = EditorState.active_tab(new_state)
+      updated_tab = MingaEditor.Shell.Runtime.active_tab(new_state.shell_runtime)
       assert updated_tab.session == session_pid
     end
 
@@ -403,22 +470,22 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     end
   end
 
-  # ── switch_tab_pure/2 no longer pattern-matches tab_bar ─────────────────────
+  # ── switch_tab/2 no longer pattern-matches tab_bar ──────────────────────────
 
-  describe "switch_tab_pure/2 accessor-based dispatch" do
+  describe "switch_tab/2 accessor-based dispatch" do
     test "no-op when tab bar is nil" do
       state = base_state()
-      {new_state, result} = EditorState.switch_tab_pure(state, 999)
+      {new_state, result} = EditorState.switch_tab(state, 999)
       assert new_state == state
       assert result == :unchanged
     end
 
     test "no-op when switching to already active tab" do
       state = state_with_file_tab()
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
       active_id = tb.active_id
 
-      {new_state, result} = EditorState.switch_tab_pure(state, active_id)
+      {new_state, result} = EditorState.switch_tab(state, active_id)
       assert new_state == state
       assert result == :unchanged
     end

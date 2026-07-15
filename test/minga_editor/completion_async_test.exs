@@ -25,7 +25,6 @@ defmodule MingaEditor.CompletionAsyncTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Shell.Traditional.ModalWorkflow
@@ -44,7 +43,7 @@ defmodule MingaEditor.CompletionAsyncTest do
   end
 
   defp open_completion_modal(state, completion, gen) do
-    owner = EditorState.tab_bar(state).active_id
+    owner = state.shell_runtime.state.tab_bar.active_id
     trigger = %{CompletionTrigger.new() | gen: gen}
     payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
     ModalWorkflow.open(state, {:completion, payload})
@@ -193,7 +192,7 @@ defmodule MingaEditor.CompletionAsyncTest do
     # {:completion_processed, ...} -> the Editor's handle_info apply clause.
     defp inject_pending_completion(ctx, ref) do
       :sys.replace_state(ctx.editor, fn state ->
-        owner = EditorState.tab_bar(state).active_id
+        owner = state.shell_runtime.state.tab_bar.active_id
 
         trigger = %{
           CompletionTrigger.new()

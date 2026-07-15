@@ -14,7 +14,6 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Frontend
 
@@ -431,7 +430,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
               MingaEditor.Session.State.set_file_tree(
                 workspace,
                 FileTreeState.track_refresh_request(
-                  EditorState.file_tree_state(state),
+                  state.workspace.file_tree,
                   request.effect.root,
                   request.id
                 )
@@ -450,7 +449,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
               then(state.workspace, fn workspace ->
                 MingaEditor.Session.State.set_file_tree(
                   workspace,
-                  FileTreeState.close(EditorState.file_tree_state(state))
+                  FileTreeState.close(state.workspace.file_tree)
                 )
               end)
         }
@@ -464,7 +463,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     outcome
   end
 
-  defp file_tree(state), do: EditorState.file_tree_state(state)
+  defp file_tree(state), do: state.workspace.file_tree
 
   defp start_scheduler(opts \\ []) do
     task_supervisor =

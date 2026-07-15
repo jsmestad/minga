@@ -41,7 +41,12 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     }
   end
 
-  defp active_viewport(state), do: EditorState.current_viewport(state)
+  defp active_viewport(state),
+    do:
+      MingaEditor.Session.State.current_viewport(
+        state.workspace,
+        state.frontend.terminal_viewport
+      )
 
   @wrapped_cursor_col 500
 
@@ -192,7 +197,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       cursor_visual_row = wrapped_cursor_visual_row(state, buffer)
 
       state = Movement.execute(state, :scroll_center)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
       visible = MingaEditor.Viewport.content_rows(win.viewport)
       centered_row = win.viewport.top + win.viewport.visual_row_offset + div(visible, 2)
 
@@ -225,13 +230,18 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
       head_rows = Enum.count(head_entry)
       eof_visual_rows = Enum.count(eof_entry)
-      visible = Viewport.content_rows(EditorState.active_window_struct(state).viewport)
+
+      visible =
+        Viewport.content_rows(
+          MingaEditor.Session.State.active_window_struct(state.workspace).viewport
+        )
+
       expected_top_offset = head_rows + max(eof_visual_rows - visible, 0)
 
       BufferProcess.move_to(buffer, {1, Enum.at(eof_entry, -1).byte_offset})
 
       state = Movement.execute(state, :scroll_center)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
       bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
 
       assert win.viewport.top + win.viewport.visual_row_offset == expected_top_offset
@@ -252,7 +262,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
         |> WrapMap.visual_row_count()
 
       state = Movement.execute(state, :scroll_cursor_top)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
       visible = MingaEditor.Viewport.content_rows(win.viewport)
       expected = min(cursor_visual_row, max(total_visual_rows - visible, 0))
 
@@ -267,7 +277,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       cursor_visual_row = wrapped_cursor_visual_row(state, buffer)
 
       state = Movement.execute(state, :scroll_cursor_bottom)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
       visible = MingaEditor.Viewport.content_rows(win.viewport)
       bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
 
@@ -300,12 +310,16 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
       head_rows = Enum.count(head_entry)
       eof_visual_rows = Enum.count(eof_entry)
-      visible = Viewport.content_rows(EditorState.active_window_struct(state).viewport)
+
+      visible =
+        Viewport.content_rows(
+          MingaEditor.Session.State.active_window_struct(state.workspace).viewport
+        )
 
       BufferProcess.move_to(buffer, {1, Enum.at(eof_entry, -1).byte_offset})
 
       state = Movement.execute(state, :scroll_cursor_bottom)
-      win = EditorState.active_window_struct(state)
+      win = MingaEditor.Session.State.active_window_struct(state.workspace)
       bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
 
       assert bottom_row == head_rows + eof_visual_rows - 1

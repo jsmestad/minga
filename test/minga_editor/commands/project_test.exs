@@ -42,7 +42,7 @@ defmodule MingaEditor.Commands.ProjectTest do
 
     assert Project.root() == root
     assert %Minga.Project.Root{kind: :directory, path: ^root} = Project.workspace_root()
-    assert EditorState.file_tree_state(state).project_root == root
+    assert state.workspace.file_tree.project_root == root
     assert root in Project.known_projects()
 
     assert_receive {:minga_event, :project_rebuilt,
@@ -78,7 +78,7 @@ defmodule MingaEditor.Commands.ProjectTest do
 
     assert Project.root() == nil
     assert Project.workspace_root() == nil
-    assert EditorState.file_tree_state(state).project_root == nil
+    assert state.workspace.file_tree.project_root == nil
   end
 
   @spec set_file_tree_root(EditorState.t(), String.t()) :: EditorState.t()

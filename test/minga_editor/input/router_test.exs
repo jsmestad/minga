@@ -254,7 +254,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       new_state = Router.dispatch(state, ?q, 0)
 
-      refute EditorState.bottom_panel(new_state).visible
+      refute new_state.shell_runtime.state.bottom_panel.visible
     end
 
     test "focused bottom panel handles CUA Escape" do
@@ -281,7 +281,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       new_state = Router.dispatch(state, 27, 0)
 
-      refute EditorState.bottom_panel(new_state).visible
+      refute new_state.shell_runtime.state.bottom_panel.visible
     end
 
     test "focused bottom panel consumes CUA q without closing or editing the buffer" do
@@ -309,7 +309,7 @@ defmodule MingaEditor.Input.RouterTest do
       before_content = BufferProcess.content(state.workspace.buffers.active)
       new_state = Router.dispatch(state, ?q, 0)
 
-      assert EditorState.bottom_panel(new_state).visible
+      assert new_state.shell_runtime.state.bottom_panel.visible
       assert BufferProcess.content(new_state.workspace.buffers.active) == before_content
     end
   end
@@ -445,7 +445,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       new_state = Router.dispatch_mouse(state, 8, 10, :left, 0, :press, 1)
 
-      assert BottomPanel.focused?(EditorState.bottom_panel(new_state))
+      assert BottomPanel.focused?(new_state.shell_runtime.state.bottom_panel)
       refute_receive {:mouse_probe, :buffer_content, :editor}, 20
     end
 

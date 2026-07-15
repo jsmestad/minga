@@ -1151,17 +1151,13 @@ defmodule MingaEditor.Shell.RegistryTest do
     replacement = Registry.get(:fake)
     refute Runtime.active_entry?(state.shell_runtime, replacement)
 
-    active_session =
-      if Runtime.active_entry?(state.shell_runtime, replacement),
-        do: Runtime.active_session(state.shell_runtime),
-        else: nil
-
-    assert active_session == nil
-    assert EditorState.active_tab(state) == nil
-    assert EditorState.find_tab_by_buffer(state, self()) == nil
-    assert EditorState.active_tab_kind(state) == :none
-
     state = MingaEditor.Shell.Workflow.ensure_available(state)
+
+    assert Runtime.active_session(state.shell_runtime) == nil
+    assert MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) == nil
+    assert MingaEditor.Shell.Runtime.find_tab_by_buffer(state.shell_runtime, self()) == nil
+    assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :none
+
     runtime = MingaEditor.Shell.Runtime.set_tab_session(state.shell_runtime, 1, self())
     updated = %{state | shell_runtime: runtime}
     assert Runtime.active_entry?(updated.shell_runtime, replacement)

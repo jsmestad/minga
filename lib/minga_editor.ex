@@ -445,7 +445,7 @@ defmodule MingaEditor do
   end
 
   def handle_call({:cleanup_feature_state, source}, _from, state) do
-    state = EditorState.drop_feature_state_source(state, source)
+    state = MingaEditor.FeatureStateWorkflow.drop_source(state, source)
     {:reply, :ok, Renderer.render_or_async(state)}
   end
 
@@ -575,9 +575,9 @@ defmodule MingaEditor do
       state
       |> EditorState.accept_frontend_ready(vp, caps)
       |> EditorState.reset_frontend_render_state()
-      |> then(fn state ->
-        %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
-      end)
+
+    render = MingaEditor.State.Render.invalidate_layout(new_state.render)
+    new_state = %{new_state | render: render}
 
     Startup.send_font_config(new_state)
     new_state = refresh_gui_config_state(new_state)
@@ -952,13 +952,7 @@ defmodule MingaEditor do
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case classify_down(state, ref, pid, reason) do
       :buffer ->
-        Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
-
-        state =
-          state
-          |> HighlightSync.close_buffer(pid)
-          |> EditorState.close_buffer_pure(pid)
-
+        state = MingaEditor.Handlers.BufferRegistry.retire_dead_buffer(state, pid)
         {:noreply, Renderer.render_or_async(state)}
 
       {:git_remote_task, updated_state} ->
@@ -1244,12 +1238,10 @@ defmodule MingaEditor do
         )
         |> MingaEditor.RenderModel.UI.ConfigStateBuilder.from_wire()
 
-      then(state, fn %MingaEditor.State{} = state ->
-        %{
-          state
-          | appearance: MingaEditor.State.Appearance.cache_gui_config(state.appearance, snapshot)
-        }
-      end)
+      %{
+        state
+        | appearance: MingaEditor.State.Appearance.cache_gui_config(state.appearance, snapshot)
+      }
     else
       state
     end
@@ -1266,12 +1258,10 @@ defmodule MingaEditor do
     # ThemeEncoder re-emits gui_theme semantically (the new theme changes the
     # adapter cache fingerprint). A keyframe re-emits it for free. See
     # MingaEditor.RuntimeThemePushTest for the proof.
-    state
-    |> EditorState.apply_theme(theme)
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.invalidate_all_windows(state.workspace)}
-    end)
-    |> Layout.invalidate()
+    state = EditorState.apply_theme(state, theme)
+    workspace = MingaEditor.Session.State.invalidate_all_windows(state.workspace)
+    state = %{state | workspace: workspace}
+    Layout.invalidate(state)
   end
 
   def apply_runtime_config_option(state, name, _value)
@@ -1291,19 +1281,15 @@ defmodule MingaEditor do
       Buffer.set_option(buffer, name, value)
     end)
 
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.invalidate_all_windows(state.workspace)}
-    end)
-    |> Layout.invalidate()
+    workspace = MingaEditor.Session.State.invalidate_all_windows(state.workspace)
+    state = %{state | workspace: workspace}
+    Layout.invalidate(state)
   end
 
   def apply_runtime_config_option(state, :cursorline, _value) do
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.invalidate_all_windows(state.workspace)}
-    end)
-    |> Layout.invalidate()
+    workspace = MingaEditor.Session.State.invalidate_all_windows(state.workspace)
+    state = %{state | workspace: workspace}
+    Layout.invalidate(state)
   end
 
   def apply_runtime_config_option(state, _name, _value), do: state
@@ -1379,9 +1365,7 @@ defmodule MingaEditor do
 
     runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
 
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state -> %{state | workspace: workspace} end)
+    %{state | shell_runtime: runtime, workspace: workspace}
   end
 
   @spec route_stashed_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
@@ -1397,9 +1381,7 @@ defmodule MingaEditor do
 
     runtime = persist_shell_changes(runtime, persistence_changes)
 
-    state
-    |> then(fn state -> %{state | shell_runtime: runtime} end)
-    |> then(fn state -> %{state | workspace: workspace} end)
+    %{state | shell_runtime: runtime, workspace: workspace}
   end
 
   @spec persist_shell_changes(

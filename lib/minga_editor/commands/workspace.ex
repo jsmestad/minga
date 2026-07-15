@@ -21,6 +21,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
+  alias MingaEditor.WorkspaceWorkflow
 
   @type state :: EditorState.t()
 
@@ -40,7 +41,7 @@ defmodule MingaEditor.Commands.Workspace do
   @spec switch_to_manual_workspace(state()) :: state()
   def switch_to_manual_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     case TabBar.tabs_in_workspace(tb, 0) do
-      [first | _] -> EditorState.switch_tab(state, first.id)
+      [first | _] -> MingaEditor.TabWorkflow.switch(state, first.id)
       [] -> state
     end
   end
@@ -89,24 +90,10 @@ defmodule MingaEditor.Commands.Workspace do
         case review_drafts_workspace(workspace) do
           {:ok, updated} ->
             state =
-              then(state, fn root ->
-                shell_state =
-                  MingaEditor.Shell.Traditional.State.install_tab_bar(
-                    MingaEditor.Shell.Runtime.state(root.shell_runtime),
-                    MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ ->
-                      updated
-                    end)
-                  )
-
-                %{
-                  root
-                  | shell_runtime:
-                      MingaEditor.Shell.Runtime.install_traditional_state(
-                        root.shell_runtime,
-                        shell_state
-                      )
-                }
-              end)
+              WorkspaceWorkflow.install_tab_bar(
+                state,
+                MingaEditor.State.TabBar.accept_workspace(tb, updated)
+              )
 
             NoticeWorkflow.publish(
               state,
@@ -159,24 +146,10 @@ defmodule MingaEditor.Commands.Workspace do
           case discard_workspace(workspace) do
             {:ok, updated} ->
               state =
-                then(state, fn root ->
-                  shell_state =
-                    MingaEditor.Shell.Traditional.State.install_tab_bar(
-                      MingaEditor.Shell.Runtime.state(root.shell_runtime),
-                      MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ ->
-                        updated
-                      end)
-                    )
-
-                  %{
-                    root
-                    | shell_runtime:
-                        MingaEditor.Shell.Runtime.install_traditional_state(
-                          root.shell_runtime,
-                          shell_state
-                        )
-                  }
-                end)
+                WorkspaceWorkflow.install_tab_bar(
+                  state,
+                  MingaEditor.State.TabBar.accept_workspace(tb, updated)
+                )
 
               close_discarded_active_workspace(state)
 
@@ -405,20 +378,11 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec remove_workspace_and_sync_agent_ui(state(), TabBar.t(), non_neg_integer()) :: state()
   defp remove_workspace_and_sync_agent_ui(state, tb, workspace_id) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.State.TabBar.remove_workspace(tb, workspace_id)
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
-    |> EditorState.sync_agent_ui_from_active_workspace()
+    state
+    |> WorkspaceWorkflow.install_tab_bar(
+      MingaEditor.State.TabBar.remove_workspace(tb, workspace_id)
+    )
+    |> MingaEditor.TabWorkflow.sync_active_workspace_agent_ui()
   end
 
   @spec close_discarded_active_workspace(state()) :: state()
@@ -477,21 +441,10 @@ defmodule MingaEditor.Commands.Workspace do
       |> WorkspaceModel.set_agent_status(:error)
       |> WorkspaceModel.set_review(review)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.State.TabBar.update_workspace(tb, workspace.id, fn _ ->
-            updated_workspace
-          end)
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    state
+    |> WorkspaceWorkflow.install_tab_bar(
+      MingaEditor.State.TabBar.accept_workspace(tb, updated_workspace)
+    )
     |> NoticeWorkflow.publish("Workspace close failed: #{inspect(reason)}")
   end
 
@@ -543,20 +496,11 @@ defmodule MingaEditor.Commands.Workspace do
           TabBar.t(),
           non_neg_integer()
         ) :: state()
-  defp put_workspace_review_result({:ok, updated}, state, tb, workspace_id) do
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ -> updated end)
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+  defp put_workspace_review_result({:ok, updated}, state, tb, _workspace_id) do
+    WorkspaceWorkflow.install_tab_bar(
+      state,
+      MingaEditor.State.TabBar.accept_workspace(tb, updated)
+    )
   end
 
   defp put_workspace_review_result({:error, reason}, state, _tb, _workspace_id) do
@@ -723,7 +667,7 @@ defmodule MingaEditor.Commands.Workspace do
     if new_id == state.shell_runtime.state.tab_bar.active_id do
       state
     else
-      EditorState.switch_tab(state, new_id)
+      MingaEditor.TabWorkflow.switch(state, new_id)
     end
   end
 

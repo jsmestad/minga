@@ -56,11 +56,17 @@ defmodule Minga.Project.FileRef do
   @doc "Builds a buffer-backed logical file ref for an unsaved or special buffer."
   @spec from_buffer(pid()) :: t()
   def from_buffer(buffer_pid) when is_pid(buffer_pid) do
+    from_buffer(buffer_pid, buffer_display_name(buffer_pid))
+  end
+
+  @doc "Builds a buffer ref from a display name already resolved by a workflow."
+  @spec from_buffer(pid(), String.t()) :: t()
+  def from_buffer(buffer_pid, display_name) when is_pid(buffer_pid) and is_binary(display_name) do
     %__MODULE__{
       kind: :buffer,
       project_root: nil,
       relative_path: nil,
-      display_name: buffer_display_name(buffer_pid),
+      display_name: display_name,
       buffer_pid: buffer_pid
     }
   end

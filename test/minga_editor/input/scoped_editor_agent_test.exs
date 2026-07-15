@@ -8,7 +8,6 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.Scoped
@@ -133,11 +132,11 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert EditorState.tab_bar(new_state).active_id == 1
-      assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :agent) != []
+      assert new_state.shell_runtime.state.tab_bar.active_id == 1
+      assert TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :agent) != []
 
       assert Enum.any?(
-               EditorState.tab_bar(new_state).tabs,
+               new_state.shell_runtime.state.tab_bar.tabs,
                &(&1.kind == :agent and &1.session == session)
              )
     end
@@ -150,14 +149,14 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert EditorState.tab_bar(new_state).active_id == 1
-      assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :agent) != []
+      assert new_state.shell_runtime.state.tab_bar.active_id == 1
+      assert TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :agent) != []
     end
 
     test "return falls back to the most recent remaining file tab when the target closed", %{
       state: state
     } do
-      {tb, fallback_tab} = TabBar.insert(EditorState.tab_bar(state), :file, "fallback.ex")
+      {tb, fallback_tab} = TabBar.insert(state.shell_runtime.state.tab_bar, :file, "fallback.ex")
       {:ok, tb} = TabBar.remove(tb, 1)
 
       state =
@@ -180,14 +179,14 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert EditorState.tab_bar(new_state).active_id == fallback_tab.id
+      assert new_state.shell_runtime.state.tab_bar.active_id == fallback_tab.id
     end
 
     test "return without file tabs does not create an untitled fallback", %{
       state: state,
       file_buffer: file_buffer
     } do
-      {:ok, tb} = TabBar.remove(EditorState.tab_bar(state), 1)
+      {:ok, tb} = TabBar.remove(state.shell_runtime.state.tab_bar, 1)
 
       state =
         then(state, fn root ->
@@ -209,7 +208,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :file) == []
+      assert TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :file) == []
       assert new_state.workspace.buffers.active == file_buffer
       assert hd(new_state.workspace.buffers.list) == file_buffer
       assert new_state.shell_runtime.state.notice.message == "No file tabs in this workspace"
@@ -272,12 +271,14 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       refute new_state.workspace.agent_ui.view.help_visible
       assert new_state.workspace.keymap_scope == :agent
-      assert EditorState.tab_bar(new_state).active_id == EditorState.tab_bar(state).active_id
+
+      assert new_state.shell_runtime.state.tab_bar.active_id ==
+               state.shell_runtime.state.tab_bar.active_id
     end
 
     test "ESC leaves prompt focus without clearing prompt text before returning", %{state: state} do
       state = focus_prompt(state, "keep this")
-      agent_tab_id = TabBar.find_by_kind(EditorState.tab_bar(state), :agent).id
+      agent_tab_id = TabBar.find_by_kind(state.shell_runtime.state.tab_bar, :agent).id
 
       {:handled, unfocused_state} = Scoped.handle_key(state, 27, 0)
       refute unfocused_state.workspace.agent_ui.panel.input_focused
@@ -289,9 +290,9 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, returned_state} = Scoped.handle_key(unfocused_state, 27, 0)
       assert returned_state.workspace.keymap_scope == :editor
-      assert EditorState.tab_bar(returned_state).active_id == 1
+      assert returned_state.shell_runtime.state.tab_bar.active_id == 1
 
-      reopened_state = EditorState.switch_tab(returned_state, agent_tab_id)
+      reopened_state = MingaEditor.TabWorkflow.switch(returned_state, agent_tab_id)
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(reopened_state.workspace.agent_ui) ==
                "keep this"

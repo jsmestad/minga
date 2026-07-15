@@ -9,7 +9,6 @@ defmodule MingaEditor.FileTree.RefreshTest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -263,7 +262,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
               MingaEditor.Session.State.set_file_tree(
                 workspace,
                 FileTreeState.track_refresh_request(
-                  EditorState.file_tree_state(state),
+                  state.workspace.file_tree,
                   request.effect.root,
                   request.id
                 )
@@ -289,14 +288,14 @@ defmodule MingaEditor.FileTree.RefreshTest do
                      FileTreeState.refresh_debounce_elapsed(file_tree, token)
 
                    elapsed
-                 end).(EditorState.file_tree_state(state))
+                 end).(state.workspace.file_tree)
               )
             end)
       }
     end)
   end
 
-  defp file_tree(state), do: EditorState.file_tree_state(state)
+  defp file_tree(state), do: state.workspace.file_tree
 
   defp assert_lifecycle(request_id, status) do
     assert %Outcome{} = receive_lifecycle(request_id, status)

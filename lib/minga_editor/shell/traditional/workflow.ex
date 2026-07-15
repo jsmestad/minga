@@ -40,11 +40,7 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
           tab_bar =
             case TabBar.active_workspace(tab_bar) do
               %Workspace{id: workspace_id} ->
-                TabBar.update_workspace(
-                  tab_bar,
-                  workspace_id,
-                  &Workspace.set_agent_ui(&1, agent_ui)
-                )
+                TabBar.set_workspace_agent_ui(tab_bar, workspace_id, agent_ui)
 
               _ ->
                 tab_bar
@@ -56,9 +52,9 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
           shell_state
       end
 
-    state
-    |> install_traditional_state(shell_state)
-    |> then(&%{&1 | workspace: SessionState.set_agent_ui(&1.workspace, agent_ui)})
+    state = install_traditional_state(state, shell_state)
+    workspace = SessionState.set_agent_ui(state.workspace, agent_ui)
+    %{state | workspace: workspace}
   end
 
   def install_agent_ui(%EditorState{} = state, %UIState{} = agent_ui),

@@ -12,12 +12,17 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.HighlightSync
+  alias MingaEditor.Shell.BufferMetadata
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.TabWorkflow
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.WorkspaceWorkflow
   alias Minga.Project.FileTree
 
   @typedoc "Editor state (same as `MingaEditor.state()`)."
@@ -28,26 +33,60 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @doc "Applies the pure buffer-registration transition and creates its requested monitor."
   @spec add_buffer(state(), pid(), keyword()) :: state()
   def add_buffer(%EditorState{} = state, pid, opts \\ []) when is_pid(pid) and is_list(opts) do
-    case EditorState.add_buffer_pure(state, pid, opts) do
-      {next_state, :already_registered} -> next_state
-      {next_state, {:monitor, monitored_pid}} -> monitor_buffer(next_state, monitored_pid)
+    state = ShellWorkflow.ensure_available(state)
+    context = Keyword.get(opts, :context, state.buffer_lifecycle.buffer_add_context)
+    metadata = prepare_buffer_metadata(state, pid, context)
+    {transitioned, result} = EditorState.register_buffer(state, pid, context)
+
+    {runtime, workspace} =
+      Runtime.route_buffer_added(
+        state.shell_runtime,
+        state.workspace,
+        transitioned.workspace,
+        metadata
+      )
+
+    transitioned =
+      EditorState.install_buffer_shell_transition(transitioned, runtime, workspace)
+
+    next_state = WorkspaceWorkflow.persist_changes(state, transitioned)
+
+    log_buffer_shell_transition(state, next_state, metadata)
+
+    case result do
+      :already_registered -> next_state
+      {:monitor, monitored_pid} -> monitor_buffer(next_state, monitored_pid)
     end
+  end
+
+  @doc "Runs external cleanup around the pure retired-buffer root transition."
+  @spec retire_dead_buffer(state(), pid()) :: state()
+  def retire_dead_buffer(%EditorState{} = state, pid) when is_pid(pid) do
+    state = ShellWorkflow.ensure_available(state)
+    Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
+
+    transitioned =
+      state
+      |> release_buffer_monitor(pid)
+      |> HighlightSync.close_buffer(pid)
+      |> EditorState.remove_buffer(pid)
+
+    {runtime, workspace} =
+      Runtime.route_buffer_died(transitioned.shell_runtime, transitioned.workspace, pid)
+
+    transitioned =
+      EditorState.install_buffer_shell_transition(transitioned, runtime, workspace)
+
+    WorkspaceWorkflow.persist_changes(state, transitioned)
   end
 
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
 
-    %{
-      new_state
-      | workspace:
-          MingaEditor.Session.State.set_file_tree(
-            new_state.workspace,
-            (fn file_tree ->
-               FileTreeState.set_tree(file_tree, FileTree.reveal(tree, path))
-             end).(new_state.workspace.file_tree)
-          )
-    }
+    file_tree = FileTreeState.set_tree(new_state.workspace.file_tree, FileTree.reveal(tree, path))
+    workspace = MingaEditor.Session.State.set_file_tree(new_state.workspace, file_tree)
+    %{new_state | workspace: workspace}
   end
 
   @spec open_file_by_path(state(), String.t()) :: state()
@@ -63,8 +102,10 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   @spec open_file_by_path_result(state(), String.t()) :: {:ok, state()} | {:error, term()}
   def open_file_by_path_result(state, abs_path) do
+    state = ShellWorkflow.ensure_available(state)
+
     case file_tab_for_path_in_active_workspace(state, abs_path) do
-      %Tab{id: id} -> {:ok, EditorState.switch_tab(state, id)}
+      %Tab{id: id} -> {:ok, TabWorkflow.switch(state, id)}
       nil -> start_and_register_file(state, abs_path)
     end
   end
@@ -86,12 +127,15 @@ defmodule MingaEditor.Handlers.BufferRegistry do
         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
         path
       ) do
-    file_ref = FileRef.from_file_path(path)
+    file_ref = file_ref_for_path(state, path)
 
     if active_buffer_matches_file_ref?(state, file_ref) do
-      EditorState.active_tab(state)
+      Runtime.active_tab(state.shell_runtime)
     else
-      TabBar.find_file_tab_in_workspace(tb, TabBar.active_workspace_id(tb), file_ref)
+      workspace_id = TabBar.active_workspace_id(tb)
+
+      TabBar.find_file_tab_in_workspace(tb, workspace_id, file_ref) ||
+        find_file_tab_by_live_path(tb, workspace_id, path)
     end
   end
 
@@ -141,15 +185,9 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   # the user explicitly opens the buffer.
   @spec register_buffer_background(state(), pid(), String.t()) :: state()
   def register_buffer_background(state, buffer_pid, file_path) do
-    state =
-      %{
-        state
-        | workspace:
-            MingaEditor.Session.State.set_buffers(
-              state.workspace,
-              (&Buffers.add_background(&1, buffer_pid)).(state.workspace.buffers)
-            )
-      }
+    buffers = Buffers.add_background(state.workspace.buffers, buffer_pid)
+    workspace = MingaEditor.Session.State.set_buffers(state.workspace, buffers)
+    state = %{state | workspace: workspace}
 
     state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, buffer_pid)
     Minga.Log.info(:editor, "Opened (agent): #{file_path}")
@@ -189,6 +227,104 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────
+
+  @spec release_buffer_monitor(state(), pid()) :: state()
+  defp release_buffer_monitor(%EditorState{} = state, buffer_pid) do
+    case Map.get(state.buffer_lifecycle.buffer_monitors, buffer_pid) do
+      ref when is_reference(ref) ->
+        Process.demonitor(ref, [:flush])
+        state
+
+      nil ->
+        state
+    end
+  end
+
+  @spec prepare_buffer_metadata(
+          state(),
+          pid(),
+          MingaEditor.Shell.buffer_add_context()
+        ) :: BufferMetadata.t()
+  defp prepare_buffer_metadata(%EditorState{} = state, buffer_pid, context) do
+    path = live_buffer_path(buffer_pid)
+    label = live_buffer_label(buffer_pid, path)
+    file_ref = buffer_file_ref(state, buffer_pid, path, label)
+    BufferMetadata.new(buffer_pid, context, label, path, file_ref)
+  end
+
+  @spec live_buffer_path(pid()) :: String.t() | nil
+  defp live_buffer_path(buffer_pid) do
+    Buffer.file_path(buffer_pid)
+  catch
+    :exit, _reason -> nil
+  end
+
+  @spec live_buffer_label(pid(), String.t() | nil) :: String.t()
+  defp live_buffer_label(buffer_pid, path) do
+    case Buffer.buffer_name(buffer_pid) do
+      name when is_binary(name) -> name
+      _missing when is_binary(path) -> Path.basename(path)
+      _missing -> "[no file]"
+    end
+  catch
+    :exit, _reason -> "[dead]"
+  end
+
+  @spec buffer_file_ref(state(), pid(), String.t() | nil, String.t()) :: FileRef.t()
+  defp buffer_file_ref(state, buffer_pid, path, label) do
+    root = state.workspace.file_tree.project_root
+
+    case {path, root} do
+      {path, root} when is_binary(path) and is_binary(root) ->
+        case FileRef.from_path(root, path) do
+          {:ok, file_ref} -> file_ref
+          {:error, :outside_project} -> FileRef.from_buffer(buffer_pid, label)
+        end
+
+      _missing_path_or_root ->
+        FileRef.from_buffer(buffer_pid, label)
+    end
+  end
+
+  @spec find_file_tab_by_live_path(TabBar.t(), non_neg_integer(), String.t()) :: Tab.t() | nil
+  defp find_file_tab_by_live_path(tab_bar, workspace_id, path) do
+    tab_bar
+    |> TabBar.visible_file_tabs(workspace_id)
+    |> Enum.find(fn tab -> Enum.any?(tab_buffer_list(tab), &buffer_path_matches?(&1, path)) end)
+  end
+
+  @spec file_ref_for_path(state(), String.t()) :: FileRef.t()
+  defp file_ref_for_path(state, path) when is_binary(path) do
+    case state.workspace.file_tree.project_root do
+      root when is_binary(root) ->
+        case FileRef.from_path(root, path) do
+          {:ok, file_ref} -> file_ref
+          {:error, :outside_project} -> FileRef.from_file_path(path)
+        end
+
+      nil ->
+        FileRef.from_file_path(path)
+    end
+  end
+
+  @spec log_buffer_shell_transition(state(), state(), BufferMetadata.t()) :: :ok
+  defp log_buffer_shell_transition(previous, current, %BufferMetadata{} = metadata) do
+    previous_id = active_tab_id(previous)
+    current_id = active_tab_id(current)
+
+    Minga.Log.debug(:editor, fn ->
+      "[tab] buffer_added label=#{metadata.label} path=#{inspect(metadata.path)} " <>
+        "context=#{metadata.context} tab=#{inspect(previous_id)}->#{inspect(current_id)}"
+    end)
+  end
+
+  @spec active_tab_id(state()) :: Tab.id() | nil
+  defp active_tab_id(%EditorState{} = state) do
+    case Runtime.active_tab(state.shell_runtime) do
+      %Tab{id: id} -> id
+      nil -> nil
+    end
+  end
 
   @spec buffer_tracked_in_tabs?(state(), pid()) :: boolean()
   defp buffer_tracked_in_tabs?(%{shell_runtime: %{state: %{tab_bar: %{tabs: tabs}}}}, pid) do

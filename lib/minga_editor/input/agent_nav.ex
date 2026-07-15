@@ -125,7 +125,7 @@ defmodule MingaEditor.Input.AgentNav do
 
   @spec unpin_agent_chat_window(EditorState.t()) :: EditorState.t()
   defp unpin_agent_chat_window(state) do
-    case EditorState.find_agent_chat_window(state) do
+    case MingaEditor.Session.State.find_agent_chat_window(state.workspace) do
       nil ->
         state
 

@@ -12,7 +12,6 @@ defmodule MingaEditor.CompletionHandling do
   alias Minga.Config
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
-  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
@@ -459,21 +458,16 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec open_completion(EditorState.t(), Completion.t()) :: EditorState.t()
   defp open_completion(state, completion) do
+    {state, active_tab} = MingaEditor.Shell.Workflow.resolve_active_tab(state)
+    active_tab_id = if match?(%Tab{}, active_tab), do: active_tab.id, else: nil
+
     payload =
-      MingaEditor.State.ModalOverlay.Completion.new(active_tab_id(state),
+      MingaEditor.State.ModalOverlay.Completion.new(active_tab_id,
         completion: completion,
         trigger: ModalWorkflow.completion_trigger(state)
       )
 
     ModalWorkflow.open(state, {:completion, payload})
-  end
-
-  @spec active_tab_id(EditorState.t()) :: Tab.id() | nil
-  defp active_tab_id(%EditorState{shell_runtime: %Runtime{} = runtime}) do
-    case Runtime.active_tab(runtime) do
-      %Tab{id: id} -> id
-      nil -> nil
-    end
   end
 
   @typedoc "Config contexts that produce completion items (excludes :none)."

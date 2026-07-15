@@ -239,11 +239,12 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
 
   @spec update_popup_windows(state(), Windows.t(), Window.id(), boolean()) :: state()
   defp update_popup_windows(state, windows, next_id, true) do
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
-    end)
-    |> MingaEditor.WindowFocus.focus(next_id)
+    state = %{
+      state
+      | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)
+    }
+
+    MingaEditor.WindowFocus.focus(state, next_id)
   end
 
   defp update_popup_windows(state, windows, _next_id, false) do
@@ -330,11 +331,12 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     # but that clobbers any other popups that were opened after this one.
     new_windows = remove_popup_window(state.workspace.windows, window_id, meta)
 
-    state
-    |> then(fn state ->
-      %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, new_windows)}
-    end)
-    |> Layout.invalidate()
+    state = %{
+      state
+      | workspace: MingaEditor.Session.State.set_windows(state.workspace, new_windows)
+    }
+
+    Layout.invalidate(state)
   end
 
   @spec split_direction(Rule.side()) :: WindowTree.direction()
