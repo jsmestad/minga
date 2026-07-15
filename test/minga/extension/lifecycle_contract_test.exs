@@ -137,7 +137,7 @@ defmodule Minga.Extension.LifecycleContractTest do
            ]
   end
 
-  test "failed start before manifest recording clears stale manifests", ctx do
+  test "same-generation restart uses the admitted artifact after source removal", ctx do
     {path, cleanup} =
       make_extension("StaleManifestCleared", """
       defmodule Minga.TestExtensions.StaleManifestCleared do
@@ -189,7 +189,7 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     {:ok, stopped_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
 
-    assert {:error, _reason} =
+    assert {:ok, _pid} =
              ExtSupervisor.start_extension(
                ctx.supervisor,
                ctx.registry,
@@ -197,9 +197,10 @@ defmodule Minga.Extension.LifecycleContractTest do
                stopped_entry
              )
 
-    {:ok, failed_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
-    assert failed_entry.status == :load_error
-    assert failed_entry.manifest == nil
+    {:ok, restarted_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
+    assert restarted_entry.status == :running
+    assert restarted_entry.module == Minga.TestExtensions.StaleManifestCleared
+    assert restarted_entry.manifest.name == :stale_manifest_cleared
   end
 
   test "manifest introspection failures become load errors", ctx do

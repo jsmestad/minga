@@ -32,6 +32,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Config.Writer
+  alias Minga.Extension.ArtifactAdmission
   alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
@@ -92,6 +93,7 @@ defmodule Minga.Config.Loader do
 
     cleanup_callbacks = Keyword.get(opts, :cleanup_callbacks)
     config_home = Keyword.get(opts, :config_home)
+    artifact_admission = Keyword.get(opts, :artifact_admission, ArtifactAdmission)
 
     Agent.start_link(
       fn ->
@@ -104,11 +106,24 @@ defmodule Minga.Config.Loader do
             config_home
           )
 
+        :ok =
+          maybe_seal_artifact_generation(
+            artifact_admission,
+            Application.get_env(:minga, :seal_extension_artifact_generation, true)
+          )
+
         if config_home, do: Map.put(state, :config_home, config_home), else: state
       end,
       name: name
     )
   end
+
+  @spec maybe_seal_artifact_generation(GenServer.server(), boolean()) :: :ok
+  defp maybe_seal_artifact_generation(server, true) do
+    :ok = ArtifactAdmission.seal(server: server)
+  end
+
+  defp maybe_seal_artifact_generation(_server, false), do: :ok
 
   @doc """
   Returns the resolved global config file path.
@@ -215,6 +230,21 @@ defmodule Minga.Config.Loader do
 
   @spec do_reload(GenServer.server()) :: :ok | {:error, String.t()}
   defp do_reload(server) do
+    case ExtSupervisor.pending_artifact_restarts(Minga.Extension.Registry) do
+      [] ->
+        do_reload_unchanged_generation(server)
+
+      changed ->
+        message =
+          "Extension restart required before config reload: #{Enum.map_join(changed, ", ", &Atom.to_string/1)}"
+
+        Agent.update(server, fn state -> %{state | load_error: message} end)
+        {:error, message}
+    end
+  end
+
+  @spec do_reload_unchanged_generation(GenServer.server()) :: :ok | {:error, String.t()}
+  defp do_reload_unchanged_generation(server) do
     # Stop all running extensions first. If that fails, do not tear down
     # registries or start a new load, because the old extension tree is still
     # partially live and a reset would orphan it.

@@ -430,7 +430,7 @@ defmodule Minga.Extension.SupervisorTest do
       refute Process.alive?(restarted_entry.pid)
     end
 
-    test "stops a running extension and purges the module", ctx do
+    test "stops a running extension while retaining its admitted module", ctx do
       {path, cleanup} =
         make_extension("StopMe", """
         defmodule Minga.TestExtensions.StopMe do
@@ -469,7 +469,78 @@ defmodule Minga.Extension.SupervisorTest do
       {:ok, stopped} = ExtRegistry.get(ctx.registry, :stop_me)
       assert stopped.status == :stopped
       assert stopped.pid == nil
-      assert stopped.module == nil
+      assert stopped.module == Minga.TestExtensions.StopMe
+      assert Code.ensure_loaded?(Minga.TestExtensions.StopMe)
+    end
+
+    test "same-VM restart uses the admitted artifact after source changes", ctx do
+      module = Minga.TestExtensions.GenerationPinned
+
+      {path, cleanup} =
+        make_extension("GenerationPinned", """
+        defmodule #{inspect(module)} do
+          use Minga.Extension
+          @impl true
+          def name, do: :generation_pinned
+          @impl true
+          def description, do: "Pinned generation"
+          @impl true
+          def version, do: Atom.to_string(:v1)
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(module)
+        :code.delete(module)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :generation_pinned, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :generation_pinned)
+
+      assert {:ok, _pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :generation_pinned,
+                 entry
+               )
+
+      {:ok, running} = ExtRegistry.get(ctx.registry, :generation_pinned)
+
+      assert :ok =
+               ExtSupervisor.stop_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :generation_pinned,
+                 running
+               )
+
+      source_file = Path.join(path, "extension.ex")
+      source = File.read!(source_file) |> String.replace(":v1", ":v2")
+      File.write!(source_file, source)
+      Minga.Events.subscribe(:extension_restart_required)
+
+      {:ok, stopped} = ExtRegistry.get(ctx.registry, :generation_pinned)
+
+      assert {:ok, _pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :generation_pinned,
+                 stopped
+               )
+
+      assert [{:generation_pinned, "v1", :running}] =
+               ExtSupervisor.list_extensions(ctx.registry)
+
+      assert_receive {:minga_event, :extension_restart_required,
+                      %Minga.Events.ExtensionRestartRequiredEvent{
+                        extension: :generation_pinned,
+                        reason: :source_changed
+                      }}
     end
 
     test "quiesces source work after admission closes and before runtime termination", ctx do
@@ -934,7 +1005,8 @@ defmodule Minga.Extension.SupervisorTest do
           if current.status == :stopped and current.pid == nil, do: current, else: nil
         end)
 
-      assert stopped_entry.module == nil
+      assert stopped_entry.module == Minga.TestExtensions.TemporaryNormalExit
+      assert Code.ensure_loaded?(Minga.TestExtensions.TemporaryNormalExit)
       assert :error = CommandRegistry.lookup(ctx.command_registry, :temporary_normal_exit_cmd)
     end
 

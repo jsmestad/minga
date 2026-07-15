@@ -15,6 +15,7 @@ defmodule Minga.Extension.Lazy do
   """
 
   alias Minga.Command
+  alias Minga.Extension.BundledApplications
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
@@ -40,7 +41,7 @@ defmodule Minga.Extension.Lazy do
           ExtSupervisor.start_opts()
         ) :: stub_result()
   def register_stubs(supervisor, registry, name, entry, opts) do
-    case compile_extension(entry) do
+    case compile_extension(name, entry, opts) do
       {:ok, module} ->
         do_register_stubs(supervisor, registry, name, module, entry, opts, set_module: true)
 
@@ -235,27 +236,28 @@ defmodule Minga.Extension.Lazy do
   defp canonical_registry_id({:via, module, reg_name}), do: {:via, module, reg_name}
   defp canonical_registry_id(registry), do: registry
 
-  @spec compile_extension(ExtRegistry.entry()) :: {:ok, module()} | {:error, term()}
-  defp compile_extension(%{source_type: :path, path: path}) when is_binary(path) do
-    compile_from_path(Path.expand(path))
+  @spec compile_extension(atom(), ExtRegistry.entry(), ExtSupervisor.start_opts()) ::
+          {:ok, module()} | {:error, term()}
+  defp compile_extension(name, %{source_type: :path, path: path}, opts) when is_binary(path) do
+    compile_from_path(name, Path.expand(path), opts)
   end
 
-  defp compile_extension(%{source_type: :git, path: path}) when is_binary(path) do
-    compile_from_path(Path.expand(path))
+  defp compile_extension(name, %{source_type: :git, path: path}, opts) when is_binary(path) do
+    compile_from_path(name, Path.expand(path), opts)
   end
 
-  defp compile_extension(%{source_type: :git, path: nil}) do
+  defp compile_extension(_name, %{source_type: :git, path: nil}, _opts) do
     {:error, :clone_failed}
   end
 
-  defp compile_extension(%{source_type: :module, module: module}) do
+  defp compile_extension(_name, %{source_type: :module, module: module}, _opts) do
     case Code.ensure_loaded(module) do
       {:module, ^module} -> {:ok, module}
       {:error, reason} -> {:error, {:module_load_failed, reason}}
     end
   end
 
-  defp compile_extension(%{source_type: :hex, hex: %{app: app}} = entry) do
+  defp compile_extension(_name, %{source_type: :hex, hex: %{app: app}} = entry, _opts) do
     app_atom =
       if is_atom(app) and app != nil, do: app, else: entry.manifest && entry.manifest.name
 
@@ -289,28 +291,66 @@ defmodule Minga.Extension.Lazy do
     end
   end
 
-  @spec compile_from_path(String.t()) :: {:ok, module()} | {:error, term()}
-  defp compile_from_path(expanded) do
+  @spec compile_from_path(atom(), String.t(), ExtSupervisor.start_opts()) ::
+          {:ok, module()} | {:error, term()}
+  defp compile_from_path(name, expanded, opts) do
     if File.dir?(expanded) do
-      files =
-        expanded
-        |> Path.join("**/*.ex")
-        |> Path.wildcard()
-        |> Enum.sort()
-
-      compile_source_files(expanded, files)
+      files = expanded |> Path.join("**/*.ex") |> Path.wildcard() |> Enum.sort()
+      compile_source_files(name, expanded, files, opts)
     else
       {:error, "extension path does not exist: #{expanded}"}
     end
   end
 
-  @spec compile_source_files(String.t(), [String.t()]) :: {:ok, module()} | {:error, term()}
-  defp compile_source_files(_expanded, []), do: {:error, "no .ex files found"}
+  @spec compile_source_files(atom(), String.t(), [String.t()], ExtSupervisor.start_opts()) ::
+          {:ok, module()} | {:error, term()}
+  defp compile_source_files(_name, _expanded, [], _opts), do: {:error, "no .ex files found"}
 
-  defp compile_source_files(expanded, files) do
-    case CompileCache.load_or_compile(expanded, files) do
-      {:ok, %{modules: modules}} -> find_extension_module(modules)
-      {:error, reason} -> {:error, reason}
+  defp compile_source_files(name, expanded, files, opts) do
+    admission = Keyword.get(opts, :artifact_admission, Minga.Extension.ArtifactAdmission)
+    source = {:extension, name}
+
+    case Minga.Extension.ArtifactAdmission.source_modules(source, server: admission) do
+      {:ok, modules} ->
+        report_staged_source_change(name, expanded, files, source, admission, opts)
+        find_extension_module(modules)
+
+      :error ->
+        case CompileCache.load_or_compile(expanded, files,
+               source: source,
+               artifact_admission: admission,
+               trusted_application: BundledApplications.trusted_application(name)
+             ) do
+          {:ok, %{modules: modules}} -> find_extension_module(modules)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  @spec report_staged_source_change(
+          atom(),
+          String.t(),
+          [String.t()],
+          term(),
+          GenServer.server(),
+          ExtSupervisor.start_opts()
+        ) :: :ok
+  defp report_staged_source_change(name, expanded, files, source, admission, opts) do
+    with {:ok, admitted} <-
+           Minga.Extension.ArtifactAdmission.source_fingerprint(source, server: admission),
+         {:ok, current} <- CompileCache.source_fingerprint(expanded, files, opts),
+         false <- admitted == current do
+      Minga.Events.broadcast(
+        :extension_restart_required,
+        %Minga.Events.ExtensionRestartRequiredEvent{
+          extension: name,
+          reason: :source_changed,
+          old_ref: Base.encode16(admitted, case: :lower),
+          new_ref: Base.encode16(current, case: :lower)
+        }
+      )
+    else
+      _unchanged_or_unavailable -> :ok
     end
   end
 
@@ -524,14 +564,14 @@ defmodule Minga.Extension.Lazy do
   Compiles a path/git extension to discover the module's declared
   load policy when no config-level override is set.
 
-  Returns `{:ok, policy, module}` on success so the caller can avoid
-  a redundant recompile. Returns `{:error, reason}` if compilation
-  fails, in which case the caller should fall back to `:eager`.
+  Returns `{:ok, policy, module}` on success so the caller can reuse the
+  artifact admitted for this VM generation. Returns `{:error, reason}` if
+  boot-time admission fails, in which case the caller falls back to `:eager`.
   """
-  @spec discover_load_policy(ExtRegistry.entry()) ::
+  @spec discover_load_policy(atom(), ExtRegistry.entry(), ExtSupervisor.start_opts()) ::
           {:ok, Minga.Extension.load_policy(), module()} | {:error, term()}
-  def discover_load_policy(entry) do
-    case compile_extension(entry) do
+  def discover_load_policy(name, entry, opts) do
+    case compile_extension(name, entry, opts) do
       {:ok, module} ->
         policy = module_load_policy(module)
         {:ok, policy, module}

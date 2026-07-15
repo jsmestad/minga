@@ -7,9 +7,11 @@ defmodule Minga.Extension.JsonLoader do
   The generated module name is deterministic: `Minga.Extension.Plugin.<CamelizedName>` where the name comes from the JSON's `"name"` field (or the directory basename as fallback).
   """
 
-  alias Minga.Extension.CodeLease
+  alias Minga.Extension.ArtifactAdmission
+  alias Minga.Extension.SecureFile
 
   @placeholder "${MINGA_PLUGIN_ROOT}"
+  @max_manifest_bytes 1_048_576
 
   @doc """
   Loads a plugin bundle from the given directory.
@@ -20,21 +22,35 @@ defmodule Minga.Extension.JsonLoader do
   """
   @spec load(String.t()) :: {:ok, module()} | {:error, String.t()}
   @spec load(String.t(), atom() | nil) :: {:ok, module()} | {:error, String.t()}
-  def load(plugin_dir, extension_name \\ nil) do
+  def load(plugin_dir, extension_name \\ nil), do: load(plugin_dir, extension_name, [])
+
+  @doc false
+  @spec load(String.t(), atom() | nil, keyword()) :: {:ok, module()} | {:error, String.t()}
+  def load(plugin_dir, extension_name, opts) do
     json_path = Path.join(plugin_dir, "plugin.json")
+    artifact_admission = Keyword.get(opts, :artifact_admission, ArtifactAdmission)
+    module_creator = Keyword.get(opts, :module_creator, &Module.create/3)
 
     with {:ok, raw} <- read_file(json_path),
          {:ok, parsed} <- decode_json(raw),
          manifest = substitute_root(parsed, plugin_dir),
          {:ok, module_name} <- build_module_name(manifest, plugin_dir, extension_name),
-         {:ok, _module} <- create_module(module_name, manifest, plugin_dir, extension_name) do
+         {:ok, _module} <-
+           create_module(
+             module_name,
+             manifest,
+             plugin_dir,
+             extension_name,
+             artifact_admission,
+             module_creator
+           ) do
       {:ok, module_name}
     end
   end
 
   @spec read_file(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp read_file(path) do
-    case File.read(path) do
+    case SecureFile.read(path, @max_manifest_bytes) do
       {:ok, contents} -> {:ok, contents}
       {:error, reason} -> {:error, "failed to read #{path}: #{inspect(reason)}"}
     end
@@ -87,9 +103,22 @@ defmodule Minga.Extension.JsonLoader do
 
   defp substitute_root(value, _plugin_dir), do: value
 
-  @spec create_module(module(), map(), String.t(), atom() | nil) ::
-          {:ok, module()} | {:error, String.t()}
-  defp create_module(module_name, manifest, plugin_dir, extension_name) do
+  @spec create_module(
+          module(),
+          map(),
+          String.t(),
+          atom() | nil,
+          GenServer.server(),
+          function()
+        ) :: {:ok, module()} | {:error, String.t()}
+  defp create_module(
+         module_name,
+         manifest,
+         plugin_dir,
+         extension_name,
+         artifact_admission,
+         module_creator
+       ) do
     with {:ok, hooks} <- build_hook_declarations(manifest),
          {:ok, skills} <- build_skill_declarations(manifest),
          {:ok, mcp_servers} <- build_mcp_server_declarations(manifest),
@@ -120,26 +149,135 @@ defmodule Minga.Extension.JsonLoader do
           def init(_config), do: {:ok, %{}}
         end
 
-      with :ok <- purge_if_loaded(module_name) do
-        Module.create(module_name, contents, Macro.Env.location(__ENV__))
-        {:ok, module_name}
+      source = {:extension, extension_name || module_name}
+      fingerprint = generated_fingerprint(module_name, manifest, plugin_dir)
+
+      case ArtifactAdmission.claim_source_modules(source, [module_name], fingerprint,
+             server: artifact_admission
+           ) do
+        {:ok, claim} ->
+          create_claimed_module(
+            module_name,
+            contents,
+            claim,
+            artifact_admission,
+            module_creator
+          )
+
+        {:error, reason} ->
+          {:error, "plugin module provenance rejected: #{inspect(reason)}"}
       end
     end
   end
 
-  @spec purge_if_loaded(module()) :: :ok | {:error, String.t()}
-  defp purge_if_loaded(module) do
-    if :code.is_loaded(module) do
-      case CodeLease.purge_module(nil, module) do
-        :ok ->
-          :ok
+  @spec generated_fingerprint(module(), map(), String.t()) :: binary()
+  defp generated_fingerprint(module_name, manifest, plugin_dir) do
+    payload =
+      :erlang.term_to_binary(
+        {Atom.to_string(module_name), Path.expand(plugin_dir), manifest},
+        [:deterministic]
+      )
 
-        {:error, reason} ->
-          {:error, "plugin module #{inspect(module)} is leased: #{inspect(reason)}"}
-      end
+    :crypto.hash(:sha256, payload)
+  end
+
+  @spec create_claimed_module(
+          module(),
+          Macro.t(),
+          ArtifactAdmission.claim(),
+          GenServer.server(),
+          function()
+        ) :: {:ok, module()} | {:error, String.t()}
+  defp create_claimed_module(
+         module_name,
+         _contents,
+         %{acquired?: false} = claim,
+         artifact_admission,
+         _module_creator
+       ) do
+    with true <- Code.ensure_loaded?(module_name),
+         :ok <- ArtifactAdmission.commit_attempt(claim, server: artifact_admission) do
+      {:ok, module_name}
     else
-      :ok
+      false ->
+        {:error, "admitted plugin module #{inspect(module_name)} is unavailable"}
+
+      {:error, reason} ->
+        {:error, "plugin module provenance commit failed: #{inspect(reason)}"}
     end
+  end
+
+  defp create_claimed_module(
+         module_name,
+         contents,
+         claim,
+         artifact_admission,
+         module_creator
+       ) do
+    case ArtifactAdmission.mark_loading(claim, server: artifact_admission) do
+      :ok ->
+        create_and_commit_module(
+          module_name,
+          contents,
+          claim,
+          artifact_admission,
+          module_creator
+        )
+
+      {:error, reason} ->
+        ArtifactAdmission.abort_attempt(claim, server: artifact_admission)
+        {:error, "plugin module creation admission failed: #{inspect(reason)}"}
+    end
+  end
+
+  @spec create_and_commit_module(
+          module(),
+          Macro.t(),
+          ArtifactAdmission.claim(),
+          GenServer.server(),
+          function()
+        ) :: {:ok, module()} | {:error, String.t()}
+  defp create_and_commit_module(
+         module_name,
+         contents,
+         claim,
+         artifact_admission,
+         module_creator
+       ) do
+    case module_creator.(module_name, contents, Macro.Env.location(__ENV__)) do
+      {:module, ^module_name, _bytecode, _result} ->
+        commit_created_module(module_name, claim, artifact_admission)
+
+      result ->
+        ArtifactAdmission.abort_attempt(claim, server: artifact_admission)
+        {:error, "plugin module creation failed: #{inspect(result)}"}
+    end
+  rescue
+    error ->
+      ArtifactAdmission.abort_attempt(claim, server: artifact_admission)
+      {:error, "plugin module creation failed: #{Exception.message(error)}"}
+  end
+
+  @spec commit_created_module(module(), ArtifactAdmission.claim(), GenServer.server()) ::
+          {:ok, module()} | {:error, String.t()}
+  defp commit_created_module(module_name, claim, artifact_admission) do
+    case ArtifactAdmission.commit_attempt(claim, server: artifact_admission) do
+      :ok ->
+        {:ok, module_name}
+
+      {:error, reason} ->
+        unload_created_module(module_name)
+        ArtifactAdmission.abort_attempt(claim, server: artifact_admission)
+        {:error, "plugin module provenance commit failed: #{inspect(reason)}"}
+    end
+  end
+
+  @spec unload_created_module(module()) :: :ok
+  defp unload_created_module(module_name) do
+    :code.delete(module_name)
+    :code.purge(module_name)
+    :code.delete(module_name)
+    :ok
   end
 
   # --- Hook declarations ---

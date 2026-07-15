@@ -2,10 +2,13 @@ defmodule Minga.Extension.CodeLeaseTest do
   use ExUnit.Case, async: true
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Extension.ArtifactAdmission
   alias Minga.Extension.CodeLease
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
+
+  @event_timeout 5_000
 
   setup do
     lease_name = :"ext_code_lease_#{System.unique_integer([:positive])}"
@@ -13,43 +16,21 @@ defmodule Minga.Extension.CodeLeaseTest do
     {:ok, code_lease: lease_name}
   end
 
-  test "leases block module purge until explicitly released", ctx do
+  test "leases expose callback ownership until explicitly released", ctx do
     module = Minga.TestExtensions.LeasedCallback
 
     {:ok, lease} =
       CodeLease.lease({:extension, :leased_callback}, module, :tool, server: ctx.code_lease)
 
-    assert {:error, {:leased_modules, [summary]}} =
-             CodeLease.ensure_purge_allowed({:extension, :leased_callback}, module,
-               server: ctx.code_lease
-             )
+    assert [summary] =
+             CodeLease.active_leases(module: module, server: ctx.code_lease)
 
     assert summary.source == {:extension, :leased_callback}
     assert summary.module == module
     assert summary.reason == :tool
 
     assert :ok = CodeLease.release(lease)
-
-    assert :ok =
-             CodeLease.ensure_purge_allowed({:extension, :leased_callback}, module,
-               server: ctx.code_lease
-             )
-  end
-
-  test "purge checks fail closed when lease service is unavailable" do
-    assert {:error, {:lease_service_unavailable, :missing_code_lease}} =
-             CodeLease.ensure_purge_allowed(
-               {:extension, :missing},
-               Minga.TestExtensions.MissingLeaseService,
-               server: :missing_code_lease
-             )
-
-    assert {:error, {:lease_service_unavailable, :missing_code_lease}} =
-             CodeLease.purge_module(
-               {:extension, :missing},
-               Minga.TestExtensions.MissingLeaseService,
-               server: :missing_code_lease
-             )
+    assert CodeLease.active_leases(module: module, server: ctx.code_lease) == []
   end
 
   test "owner exit releases leases for provider tool hook mcp and ui action owners", ctx do
@@ -74,7 +55,7 @@ defmodule Minga.Extension.CodeLeaseTest do
 
     ref = Process.monitor(owner)
     Process.exit(owner, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^owner, :killed}
+    assert_receive {:DOWN, ^ref, :process, ^owner, :killed}, @event_timeout
     assert_eventually_no_leases(module, ctx.code_lease, 20)
   end
 
@@ -139,7 +120,8 @@ defmodule Minga.Extension.CodeLeaseTest do
                entry,
                command_registry: ext_ctx.command_registry,
                keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease
+               code_lease: ctx.code_lease,
+               artifact_admission: ext_ctx.artifact_admission
              )
 
     {:ok, running_entry} = ExtRegistry.get(ext_ctx.registry, :leased_command)
@@ -149,7 +131,7 @@ defmodule Minga.Extension.CodeLeaseTest do
     assert_receive {:callback_entered, callback_pid}, 5_000
     assert_eventually_lease_count(running_entry.module, ctx.code_lease, 1, 20)
 
-    assert {:error, {:leased_modules, [_summary]}} =
+    assert :ok =
              ExtSupervisor.stop_extension(
                ext_ctx.supervisor,
                ext_ctx.registry,
@@ -157,15 +139,21 @@ defmodule Minga.Extension.CodeLeaseTest do
                running_entry,
                command_registry: ext_ctx.command_registry,
                keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease
+               code_lease: ctx.code_lease,
+               artifact_admission: ext_ctx.artifact_admission
              )
+
+    assert Code.ensure_loaded?(running_entry.module)
+    {:ok, stopped_entry} = ExtRegistry.get(ext_ctx.registry, :leased_command)
+    assert stopped_entry.status == :stopped
+    assert stopped_entry.module == running_entry.module
 
     send(callback_pid, :continue)
     assert %{} = Task.await(task)
     assert_eventually_no_leases(running_entry.module, ctx.code_lease, 20)
   end
 
-  test "extension stop rejects unload while callback module is leased", ctx do
+  test "extension stop retains admitted code while callback module is leased", ctx do
     ext_ctx = start_extension_context()
 
     {path, cleanup} =
@@ -204,7 +192,8 @@ defmodule Minga.Extension.CodeLeaseTest do
                entry,
                command_registry: ext_ctx.command_registry,
                keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease
+               code_lease: ctx.code_lease,
+               artifact_admission: ext_ctx.artifact_admission
              )
 
     {:ok, running_entry} = ExtRegistry.get(ext_ctx.registry, :leased_stop)
@@ -214,7 +203,7 @@ defmodule Minga.Extension.CodeLeaseTest do
                server: ctx.code_lease
              )
 
-    assert {:error, {:leased_modules, [_summary]}} =
+    assert :ok =
              ExtSupervisor.stop_extension(
                ext_ctx.supervisor,
                ext_ctx.registry,
@@ -222,29 +211,19 @@ defmodule Minga.Extension.CodeLeaseTest do
                running_entry,
                command_registry: ext_ctx.command_registry,
                keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease
-             )
-
-    {:ok, still_running} = ExtRegistry.get(ext_ctx.registry, :leased_stop)
-    assert still_running.status == :running
-    assert is_pid(still_running.pid)
-
-    assert :ok = CodeLease.release(lease)
-
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ext_ctx.supervisor,
-               ext_ctx.registry,
-               :leased_stop,
-               still_running,
-               command_registry: ext_ctx.command_registry,
-               keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease
+               code_lease: ctx.code_lease,
+               artifact_admission: ext_ctx.artifact_admission
              )
 
     {:ok, stopped} = ExtRegistry.get(ext_ctx.registry, :leased_stop)
     assert stopped.status == :stopped
-    assert stopped.module == nil
+    assert stopped.module == running_entry.module
+    assert Code.ensure_loaded?(running_entry.module)
+
+    assert [_summary] =
+             CodeLease.active_leases(module: running_entry.module, server: ctx.code_lease)
+
+    assert :ok = CodeLease.release(lease)
   end
 
   @spec start_extension_context() :: map()
@@ -258,12 +237,14 @@ defmodule Minga.Extension.CodeLeaseTest do
     {:ok, _supervisor} = ExtSupervisor.start_link(name: sup_name)
     {:ok, _command_registry} = CommandRegistry.start_link(name: cmd_reg_name)
     {:ok, _keymap} = KeymapActive.start_link(name: keymap_name)
+    {:ok, artifact_admission} = ArtifactAdmission.start_link(name: nil)
 
     %{
       registry: reg_name,
       supervisor: sup_name,
       command_registry: cmd_reg_name,
-      keymap: keymap_name
+      keymap: keymap_name,
+      artifact_admission: artifact_admission
     }
   end
 

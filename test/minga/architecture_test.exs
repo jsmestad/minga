@@ -27,7 +27,6 @@ defmodule Minga.ArchitectureTest do
     registry = Process.whereis(MingaEditor.Shell.Registry)
     foundation = Process.whereis(Minga.Foundation.Supervisor)
     services = Process.whereis(Minga.Services.Supervisor)
-
     registry_ref = Process.monitor(registry)
     foundation_ref = Process.monitor(foundation)
     services_ref = Process.monitor(services)
@@ -43,9 +42,11 @@ defmodule Minga.ArchitectureTest do
                    @supervision_timeout
 
     children =
-      Minga.Supervisor
-      |> Supervisor.which_children()
-      |> Map.new(fn {id, pid, _type, _modules} -> {id, pid} end)
+      await_restarted_children([
+        MingaEditor.Shell.Registry,
+        Minga.Foundation.Supervisor,
+        Minga.Services.Supervisor
+      ])
 
     new_registry = children[MingaEditor.Shell.Registry]
     new_foundation = children[Minga.Foundation.Supervisor]
@@ -76,5 +77,39 @@ defmodule Minga.ArchitectureTest do
     services_children = Supervisor.which_children(Minga.Services.Supervisor)
     services_ids = Enum.map(services_children, &elem(&1, 0))
     refute MingaAgent.Supervisor in services_ids
+  end
+
+  @spec await_restarted_children([term()], non_neg_integer()) :: %{term() => pid()}
+  defp await_restarted_children(ids, attempts \\ 500)
+
+  defp await_restarted_children(ids, attempts) when attempts > 0 do
+    case Process.whereis(Minga.Supervisor) do
+      supervisor when is_pid(supervisor) ->
+        children =
+          supervisor
+          |> Supervisor.which_children()
+          |> Map.new(fn {id, pid, _type, _modules} -> {id, pid} end)
+
+        if Enum.all?(ids, &is_pid(children[&1])) do
+          children
+        else
+          await_restarted_children_after(ids, attempts)
+        end
+
+      nil ->
+        await_restarted_children_after(ids, attempts)
+    end
+  end
+
+  defp await_restarted_children(ids, 0) do
+    flunk("supervision children did not restart: #{inspect(ids)}")
+  end
+
+  @spec await_restarted_children_after([term()], pos_integer()) :: %{term() => pid()}
+  defp await_restarted_children_after(ids, attempts) do
+    receive do
+    after
+      10 -> await_restarted_children(ids, attempts - 1)
+    end
   end
 end

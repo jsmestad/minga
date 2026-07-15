@@ -15,6 +15,8 @@ defmodule Minga.Extension.Supervisor do
 
   use DynamicSupervisor
 
+  alias Minga.Extension.ArtifactAdmission
+  alias Minga.Extension.BundledApplications
   alias Minga.Extension.CodeLease
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
@@ -151,12 +153,12 @@ defmodule Minga.Extension.Supervisor do
          {failures, deferred},
          opts
        ) do
-    case resolve_load_policy(entry) do
+    case resolve_load_policy(name, entry, opts) do
       :eager ->
         start_eager(supervisor, registry, name, entry, opts, failures, deferred)
 
       :deferred ->
-        case validate_deferred_extension(name, entry) do
+        case validate_deferred_extension(name, entry, opts) do
           :ok ->
             {failures, [{name, entry} | deferred]}
 
@@ -177,15 +179,17 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec resolve_load_policy(ExtRegistry.entry()) :: Minga.Extension.load_policy()
-  defp resolve_load_policy(%{load_policy: nil} = entry) do
-    case Lazy.discover_load_policy(entry) do
+  @spec resolve_load_policy(atom(), ExtRegistry.entry(), start_opts()) ::
+          Minga.Extension.load_policy()
+  defp resolve_load_policy(name, %{load_policy: nil} = entry, opts) do
+    case Minga.Extension.Lazy.discover_load_policy(name, entry, opts) do
       {:ok, policy, _module} -> validate_load_policy(policy)
       {:error, _reason} -> :eager
     end
   end
 
-  defp resolve_load_policy(%{load_policy: policy}), do: validate_load_policy(policy)
+  defp resolve_load_policy(_name, %{load_policy: policy}, _opts),
+    do: validate_load_policy(policy)
 
   @valid_policy_atoms [:eager, :deferred]
   @valid_trigger_tags [:on_command, :on_filetype, :on_key]
@@ -228,9 +232,10 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec validate_deferred_extension(atom(), ExtRegistry.entry()) :: :ok | {:error, term()}
-  defp validate_deferred_extension(name, entry) do
-    case Lazy.discover_load_policy(entry) do
+  @spec validate_deferred_extension(atom(), ExtRegistry.entry(), start_opts()) ::
+          :ok | {:error, term()}
+  defp validate_deferred_extension(name, entry, opts) do
+    case Minga.Extension.Lazy.discover_load_policy(name, entry, opts) do
       {:ok, _policy, module} ->
         with :ok <- validate_behaviour(module, name) do
           register_and_validate_options(name, module, entry.config)
@@ -278,7 +283,7 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @doc """
-  Stops all running extensions and purges their modules.
+  Stops all running extensions while retaining this VM generation's code.
 
   Used by config reload to cleanly tear down before re-loading.
   """
@@ -310,6 +315,35 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @doc """
+  Reports path and Git sources whose on-disk bytes differ from this VM
+  generation's admitted artifacts.
+
+  This is a read-only preflight for config reload. It fingerprints immutable
+  source snapshots and emits one restart-required event per changed source;
+  it never compiles, stops, or replaces the running extension.
+  """
+  @spec pending_artifact_restarts(GenServer.server(), start_opts()) :: [atom()]
+  def pending_artifact_restarts(registry, opts \\ []) do
+    registry
+    |> ExtRegistry.all()
+    |> Enum.reduce([], fn
+      {name, %{source_type: source_type, path: path}}, changed
+      when source_type in [:path, :git] and is_binary(path) ->
+        expanded = Path.expand(path)
+        files = expanded |> Path.join("**/*.ex") |> Path.wildcard() |> Enum.sort()
+        source = {:extension, name}
+
+        if report_staged_source_change(name, expanded, files, source, opts),
+          do: [name | changed],
+          else: changed
+
+      {_name, _entry}, changed ->
+        changed
+    end)
+    |> Enum.reverse()
+  end
+
+  @doc """
   Starts a single extension by name.
 
   For path extensions, compiles the module from the local directory.
@@ -325,14 +359,15 @@ defmodule Minga.Extension.Supervisor do
     with (default: `Minga.Keymap.Active`)
   * `:callbacks` — cleanup callbacks map, injected for test isolation
     (default: reads from `ContributionCleanup` persistent_term)
-  * `:code_lease` — the `Minga.Extension.CodeLease` server to consult before purging
-    extension callback modules (default: `Minga.Extension.CodeLease`)
+  * `:code_lease` — the `Minga.Extension.CodeLease` server used by active callbacks
+  * `:artifact_admission` — the VM-generation module provenance authority
   """
   @type start_opts :: [
           command_registry: GenServer.server(),
           keymap: GenServer.server(),
           callbacks: %{atom() => Minga.Extension.ContributionCleanup.cleanup_fun()},
           code_lease: GenServer.server(),
+          artifact_admission: GenServer.server(),
           slow_lifecycle_threshold_ms: non_neg_integer(),
           test_hooks: map()
         ]
@@ -461,8 +496,7 @@ defmodule Minga.Extension.Supervisor do
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     mark_start_attempt(registry, name)
 
-    with :ok <- purge_recompilable_module(name, entry, opts),
-         {:ok, module} <-
+    with {:ok, module} <-
            run_lifecycle_phase(name, :load, opts, fn ->
              compile_extension(name, entry.path, opts)
            end),
@@ -741,9 +775,7 @@ defmodule Minga.Extension.Supervisor do
 
   defp extension_root(_entry), do: nil
 
-  @doc """
-  Stops a single extension, terminates its process, and purges the module.
-  """
+  @doc "Stops one extension runtime without replacing or purging its admitted code."
   @spec stop_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
           :ok | {:error, term()}
   @spec stop_extension(
@@ -779,22 +811,19 @@ defmodule Minga.Extension.Supervisor do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
-    with :ok <- ensure_extension_unload_allowed(name, entry, opts) do
-      # Close source admission before stopping runtime code or running cleanup.
-      # The final stopped/load-error projection is published after every cleanup
-      # family has had a chance to settle its source-owned work.
-      ExtRegistry.update(registry, name, status: :stopped, lifecycle_ref: nil)
+    # Runtime disable closes contribution admission and stops the process tree,
+    # but admitted modules remain resident for this VM generation.
+    ExtRegistry.update(registry, name, status: :stopped, lifecycle_ref: nil)
 
-      quiesce_and_stop_extension(
-        supervisor,
-        registry,
-        name,
-        entry,
-        cmd_registry,
-        keymap,
-        opts
-      )
-    end
+    quiesce_and_stop_extension(
+      supervisor,
+      registry,
+      name,
+      entry,
+      cmd_registry,
+      keymap,
+      opts
+    )
   end
 
   @spec quiesce_and_stop_extension(
@@ -833,28 +862,6 @@ defmodule Minga.Extension.Supervisor do
       )
     end
   end
-
-  @spec ensure_extension_unload_allowed(atom(), ExtRegistry.entry(), start_opts()) ::
-          :ok | {:error, term()}
-  defp ensure_extension_unload_allowed(name, %{source_type: source_type, module: module}, opts)
-       when source_type != :module and is_atom(module) and module != nil do
-    case CodeLease.ensure_purge_allowed({:extension, name}, module,
-           server: code_lease_server(opts)
-         ) do
-      :ok ->
-        :ok
-
-      {:error, reason} = error ->
-        Log.warning(
-          :config,
-          "Extension #{name} unload rejected because callback module #{inspect(module)} is still leased: #{inspect(reason)}"
-        )
-
-        error
-    end
-  end
-
-  defp ensure_extension_unload_allowed(_name, _entry, _opts), do: :ok
 
   @doc """
   Returns a summary of all extensions: `[{name, version, status}]`.
@@ -905,6 +912,10 @@ defmodule Minga.Extension.Supervisor do
 
   @spec code_lease_server(start_opts()) :: GenServer.server()
   defp code_lease_server(opts), do: Keyword.get(opts, :code_lease, CodeLease)
+
+  @spec artifact_admission_server(start_opts()) :: GenServer.server()
+  defp artifact_admission_server(opts),
+    do: Keyword.get(opts, :artifact_admission, ArtifactAdmission)
 
   @spec leased_callback(atom(), module(), CodeLease.reason(), GenServer.server(), (-> result)) ::
           result
@@ -1659,29 +1670,6 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec purge_recompilable_module(atom(), ExtRegistry.entry(), start_opts()) ::
-          :ok | {:error, term()}
-  defp purge_recompilable_module(name, %{source_type: source_type, module: module}, opts)
-       when source_type in [:path, :git] and is_atom(module) and module != nil do
-    purge_extension_module(name, module, opts)
-  end
-
-  defp purge_recompilable_module(_name, _entry, _opts), do: :ok
-
-  @spec purge_extension_module(atom(), module(), start_opts()) :: :ok | {:error, term()}
-  defp purge_extension_module(name, module, opts) do
-    CodeLease.purge_module({:extension, name}, module, server: code_lease_server(opts))
-  end
-
-  @spec purge_stopped_extension_module(atom(), ExtRegistry.entry(), start_opts()) ::
-          :ok | {:error, term()}
-  defp purge_stopped_extension_module(name, %{source_type: source_type, module: module}, opts)
-       when source_type != :module and is_atom(module) and module != nil do
-    purge_extension_module(name, module, opts)
-  end
-
-  defp purge_stopped_extension_module(_name, _entry, _opts), do: :ok
-
   @spec compile_extension(atom(), String.t(), start_opts()) ::
           {:ok, module()} | {:error, String.t()}
   defp compile_extension(name, path, opts) do
@@ -1697,24 +1685,58 @@ defmodule Minga.Extension.Supervisor do
   @spec compile_extension_files(atom(), String.t(), start_opts()) ::
           {:ok, module()} | {:error, String.t()}
   defp compile_extension_files(name, expanded, opts) do
-    files =
-      expanded
-      |> Path.join("**/*.ex")
-      |> Path.wildcard()
-      |> Enum.sort()
+    source = {:extension, name}
+    files = expanded |> Path.join("**/*.ex") |> Path.wildcard() |> Enum.sort()
 
+    case ArtifactAdmission.source_modules(source, server: artifact_admission_server(opts)) do
+      {:ok, modules} ->
+        report_staged_source_change(name, expanded, files, source, opts)
+        find_extension_in_compiled(modules)
+
+      :error ->
+        compile_unadmitted_extension_files(name, expanded, files, source, opts)
+    end
+  end
+
+  @spec report_staged_source_change(atom(), String.t(), [String.t()], term(), start_opts()) ::
+          boolean()
+  defp report_staged_source_change(name, expanded, files, source, opts) do
+    admission = artifact_admission_server(opts)
+
+    with {:ok, admitted} <- ArtifactAdmission.source_fingerprint(source, server: admission),
+         {:ok, current} <- CompileCache.source_fingerprint(expanded, files, opts),
+         false <- admitted == current do
+      Minga.Events.broadcast(
+        :extension_restart_required,
+        %Minga.Events.ExtensionRestartRequiredEvent{
+          extension: name,
+          reason: :source_changed,
+          old_ref: Base.encode16(admitted, case: :lower),
+          new_ref: Base.encode16(current, case: :lower)
+        }
+      )
+
+      true
+    else
+      _unchanged_or_unavailable -> false
+    end
+  end
+
+  @spec compile_unadmitted_extension_files(atom(), String.t(), [String.t()], term(), start_opts()) ::
+          {:ok, module()} | {:error, String.t()}
+  defp compile_unadmitted_extension_files(name, expanded, files, source, opts) do
     case files do
       [] ->
         compile_extension_files_fallback(name, expanded)
 
-      _ ->
-        # The compile cache loads precompiled beams on a hit and recompiles
-        # (writing fresh beams) on a miss, so editing extension source still
-        # hot-reloads via a changed content hash.
-        case CompileCache.load_or_compile(expanded, files,
-               source: {:extension, name},
-               code_lease: code_lease_server(opts)
-             ) do
+      _files ->
+        compile_opts = [
+          source: source,
+          artifact_admission: artifact_admission_server(opts),
+          trusted_application: BundledApplications.trusted_application(name)
+        ]
+
+        case CompileCache.load_or_compile(expanded, files, compile_opts) do
           {:ok, %{modules: modules, diagnostics: diagnostics}} ->
             log_diagnostics(diagnostics)
             find_extension_in_compiled(modules)
@@ -1728,13 +1750,7 @@ defmodule Minga.Extension.Supervisor do
   @spec compile_extension_files_fallback(atom(), String.t()) ::
           {:ok, module()} | {:error, String.t()}
   defp compile_extension_files_fallback(name, expanded) do
-    json_path = Path.join(expanded, "plugin.json")
-
-    if File.exists?(json_path) do
-      Minga.Extension.JsonLoader.load(expanded, name)
-    else
-      {:error, "no .ex files found in #{expanded}"}
-    end
+    Minga.Extension.JsonLoader.load(expanded, name)
   end
 
   @spec find_extension_in_compiled([module()]) :: {:ok, module()} | {:error, String.t()}
@@ -1888,10 +1904,8 @@ defmodule Minga.Extension.Supervisor do
   end
 
   defp finalize_explicit_stop_result({:error, reason}, :ok, registry, name, entry, opts) do
-    case finalize_stopped_extension(registry, name, entry, opts) do
-      :ok -> {:error, reason}
-      {:error, purge_reason} -> {:error, {:stop_failed_and_purge_blocked, reason, purge_reason}}
-    end
+    :ok = finalize_stopped_extension(registry, name, entry, opts)
+    {:error, reason}
   end
 
   defp finalize_explicit_stop_result(
@@ -1907,36 +1921,10 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @spec finalize_stopped_extension(GenServer.server(), atom(), ExtRegistry.entry(), start_opts()) ::
-          :ok | {:error, term()}
-  defp finalize_stopped_extension(registry, name, entry, opts) do
-    purge_result = purge_stopped_extension_module(name, entry, opts)
-
-    if match?({:error, _reason}, purge_result) do
-      {:error, reason} = purge_result
-
-      Log.warning(
-        :config,
-        "Extension #{name} module purge skipped: #{inspect(reason)}"
-      )
-    end
-
-    update_fields = stopped_update_fields(entry, purge_result)
-    ExtRegistry.update(registry, name, update_fields)
-
-    purge_result
-  end
-
-  @spec stopped_update_fields(ExtRegistry.entry(), :ok | {:error, term()}) :: keyword()
-  defp stopped_update_fields(%{source_type: :module}, _purge_result) do
-    [status: :stopped, pid: nil, lifecycle_ref: nil]
-  end
-
-  defp stopped_update_fields(_entry, :ok) do
-    [module: nil, status: :stopped, pid: nil, lifecycle_ref: nil]
-  end
-
-  defp stopped_update_fields(_entry, {:error, _reason}) do
-    [status: :load_error, pid: nil, lifecycle_ref: nil]
+          :ok
+  defp finalize_stopped_extension(registry, name, _entry, _opts) do
+    ExtRegistry.update(registry, name, status: :stopped, pid: nil, lifecycle_ref: nil)
+    :ok
   end
 
   @spec mark_hex_entries_load_error(GenServer.server()) :: :ok

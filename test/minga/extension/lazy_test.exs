@@ -294,6 +294,71 @@ defmodule Minga.Extension.LazyTest do
       assert result == %{autoload_ran: true}
     end
 
+    test "autoload ignores changed disk source and uses the admitted VM generation", ctx do
+      module = Minga.TestExtensions.LazyGenerationPinned
+
+      {path, cleanup} =
+        make_extension("LazyGenerationPinned", """
+        defmodule #{inspect(module)} do
+          use Minga.Extension
+          load_policy {:on_command, [:lazy_generation_cmd]}
+          command :lazy_generation_cmd, "Generation", execute: {#{inspect(module)}, :run}
+          @impl true
+          def name, do: :lazy_generation_pinned
+          @impl true
+          def description, do: "Lazy generation"
+          @impl true
+          def version, do: "1"
+          @impl true
+          def init(_config), do: {:ok, %{}}
+          def run(state), do: Map.put(state, :generation, :v1)
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(module)
+        :code.delete(module)
+      end)
+
+      :ok =
+        ExtRegistry.register(ctx.registry, :lazy_generation_pinned, path,
+          load_policy: {:on_command, [:lazy_generation_cmd]}
+        )
+
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :lazy_generation_pinned)
+
+      assert :ok =
+               Lazy.register_stubs(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :lazy_generation_pinned,
+                 entry,
+                 start_opts(ctx)
+               )
+
+      source_file = Path.join(path, "extension.ex")
+      File.write!(source_file, File.read!(source_file) |> String.replace(":v1", ":v2"))
+      Minga.Events.subscribe(:extension_restart_required)
+
+      assert {:ok, _pid} =
+               Lazy.autoload(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :lazy_generation_pinned,
+                 start_opts(ctx)
+               )
+
+      assert {:ok, command} = CommandRegistry.lookup(ctx.command_registry, :lazy_generation_cmd)
+      assert command.execute.(%{}) == %{generation: :v1}
+
+      assert_receive {:minga_event, :extension_restart_required,
+                      %Minga.Events.ExtensionRestartRequiredEvent{
+                        extension: :lazy_generation_pinned,
+                        reason: :source_changed
+                      }}
+    end
+
     test "autoload is idempotent (returns running pid on second call)", ctx do
       {path, cleanup} =
         make_extension("AutoloadIdempotent", """

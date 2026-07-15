@@ -1,6 +1,6 @@
 defmodule Minga.Extension.Updater do
   @moduledoc """
-  Orchestrates extension update checks, application, and rollback.
+  Orchestrates extension update checks and next-generation source staging.
 
   The update lifecycle has two phases:
 
@@ -8,17 +8,16 @@ defmodule Minga.Extension.Updater do
      build a list of available updates, and send it to the Editor to
      enter confirmation mode.
 
-  2. **Apply** (after user confirms): for each accepted update, fast-forward
-     git repos or reinstall hex packages, recompile, and rollback on failure.
+  2. **Apply** (after user confirms): stage accepted source updates for the
+     next BEAM VM generation. Running extension code is never recompiled or
+     replaced in this process.
 
   All check functions run in a background `Task` so they don't block the
   editor. Results are communicated back via `Events` broadcasts.
   """
 
   alias Minga.Extension.Git, as: ExtGit
-  alias Minga.Extension.Hex, as: ExtHex
   alias Minga.Extension.Registry, as: ExtRegistry
-  alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Mode.ExtensionConfirmState
   alias Minga.Events
 
@@ -212,87 +211,27 @@ defmodule Minga.Extension.Updater do
   end
 
   defp apply_single_update(%{source_type: :hex, name: name}) do
-    case ExtHex.reinstall_all() do
-      :ok -> {:updated, name, "", "latest"}
-      {:error, reason} -> {:error, name, reason}
-    end
+    {:error, name, "Hex dependency updates require a fresh Minga process"}
   end
 
   @spec apply_git_update(atom(), Minga.Extension.Entry.t()) :: update_result()
-  defp apply_git_update(name, entry) do
+  defp apply_git_update(name, _entry) do
     with {:ok, old_ref} <- ExtGit.current_ref(name),
          :ok <- ExtGit.apply_update(name),
-         :ok <- recompile_extension(name, entry) do
-      {:ok, new_ref} = ExtGit.current_ref(name)
+         {:ok, new_ref} <- ExtGit.current_ref(name) do
+      Events.broadcast(
+        :extension_restart_required,
+        %Events.ExtensionRestartRequiredEvent{
+          extension: name,
+          reason: :updated,
+          old_ref: old_ref,
+          new_ref: new_ref
+        }
+      )
+
       {:updated, name, old_ref, new_ref}
     else
-      {:error, :compile_failed, reason} ->
-        handle_compile_failure(name, reason)
-
-      {:error, reason} when is_binary(reason) ->
-        {:error, name, reason}
-    end
-  end
-
-  @spec recompile_extension(atom(), Minga.Extension.Entry.t()) ::
-          :ok | {:error, :compile_failed, String.t()}
-  defp recompile_extension(name, entry) do
-    path = entry.path || ExtGit.extension_path(name)
-
-    # Stop the running extension first
-    case ExtRegistry.get(name) do
-      {:ok, %{pid: pid} = current_entry} when is_pid(pid) ->
-        ExtSupervisor.stop_extension(ExtSupervisor, ExtRegistry, name, current_entry)
-
-      _ ->
-        :ok
-    end
-
-    # Recompile and restart
-    updated_entry = %{entry | path: path}
-
-    case ExtSupervisor.start_extension(ExtSupervisor, ExtRegistry, name, updated_entry) do
-      {:ok, _pid} -> :ok
-      {:error, reason} -> {:error, :compile_failed, inspect(reason)}
-    end
-  end
-
-  @spec handle_compile_failure(atom(), String.t()) :: update_result()
-  defp handle_compile_failure(name, reason) do
-    Minga.Log.warning(
-      :config,
-      "Extension #{name} failed to compile after update, rolling back..."
-    )
-
-    case ExtGit.current_ref(name) do
-      {:ok, bad_ref} ->
-        case rollback_to_previous(name) do
-          :ok ->
-            msg = "rolled back from #{bad_ref} due to compile failure: #{reason}"
-            {:rolled_back, name, msg}
-
-          {:error, rollback_reason} ->
-            {:error, name, "compile failed (#{reason}) and rollback failed (#{rollback_reason})"}
-        end
-
-      {:error, _} ->
-        {:error, name, "compile failed: #{reason}"}
-    end
-  end
-
-  @spec rollback_to_previous(atom()) :: :ok | {:error, String.t()}
-  defp rollback_to_previous(name) do
-    dest = ExtGit.extension_path(name)
-
-    case System.cmd("git", ["rev-parse", "--short", "HEAD@{1}"],
-           cd: dest,
-           stderr_to_stdout: true
-         ) do
-      {ref, 0} ->
-        ExtGit.rollback(name, String.trim(ref))
-
-      {output, _} ->
-        {:error, "could not find previous ref: #{String.trim(output)}"}
+      {:error, reason} when is_binary(reason) -> {:error, name, reason}
     end
   end
 
@@ -314,7 +253,7 @@ defmodule Minga.Extension.Updater do
 
   @spec format_result(update_result()) :: String.t()
   defp format_result({:updated, name, old_ref, new_ref}) do
-    "  #{name}: updated #{old_ref} -> #{new_ref}"
+    "  #{name}: staged #{old_ref} -> #{new_ref}; restart Minga to activate"
   end
 
   defp format_result({:up_to_date, name}) do

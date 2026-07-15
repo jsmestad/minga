@@ -4,6 +4,12 @@
 
 All functions are safe to call with dead PIDs, stopped sessions, or when no session manager is running. They return empty results rather than crashing.
 
+## Extension code activation
+
+Path and Git extensions compile only in a standalone disposable BEAM OS process. Its standard streams are bounded, discarded byte data rather than an ETF-capable host control channel. Source is bounded and copied into a private immutable snapshot before hashing or compilation. A second standalone process structurally validates bounded BEAM/ETF data and writes a descriptor-verified UTF-8 report before the host creates atoms or loads code. The complete validated BEAM artifact set establishes module ownership before host loading; direct, nested, atom-targeted, macro-generated, runtime-generated, and spawned-process-generated ordinary Elixir modules are supported when conflict-free. Cache hits enforce the same metadata, completeness, resource-limit, and ownership checks as fresh compilation. This protects host validation but does not sandbox trusted extension filesystem or network authority.
+
+Stopping or lazily starting an extension in the current session uses only the artifact admitted for that source when the VM generation began. Source edits and Git updates require a fresh Minga OS process and never purge, recompile, or replace active extension code.
+
 ## Listing sessions
 
 `list_sessions/0` returns a summary for every active agent session.

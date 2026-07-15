@@ -1052,17 +1052,11 @@ use Minga.Config
 set :tab_width, TodoTools.preferred_tab_width()
 ```
 
-## Hot reload
+## Config reload
 
-Press `SPC h r` to reload your config without restarting the editor. This:
+Press `SPC h r` to reload ordinary configuration without restarting the editor. Before changing runtime state, Minga fingerprints every admitted path and Git extension from a private source snapshot. If any source differs from the artifact admitted for the current VM generation, reload reports that a restart is required and leaves the running extension module, process, manifest version, and contributions unchanged. It does not compile the changed source.
 
-1. Stops all running extensions
-2. Purges user modules
-3. Resets options, keybindings, hooks, advice, and commands to defaults
-4. Re-compiles modules, re-evaluates config.exs, .minga.exs, and after.exs
-5. Restarts extensions
-
-Changed keybindings and options take effect immediately. The status bar shows "Config reloaded" on success or an error message if something went wrong.
+When admitted extension sources are unchanged, reload stops their runtime processes without purging code, purges user modules from `modules/`, resets config-owned options, keybindings, hooks, advice, and commands, re-evaluates `config.exs`, `.minga.exs`, and `after.exs`, then starts extensions from their already admitted artifacts. Changed keybindings and options take effect immediately. The status bar shows "Config reloaded" on success or an error message if something went wrong.
 
 You can also reload from the command line with `:reload-config` (not yet wired as an ex command, use `SPC h r`).
 
@@ -1266,15 +1260,15 @@ The confirmation dialog supports three keys:
 
 Pinned extensions (`ref: "v1.0.0"`) are shown as "pinned, skipped" and cannot be updated.
 
-After you confirm, accepted updates are applied in the background: git repos are fast-forwarded, extensions are recompiled and restarted. Results appear in `*Messages*` (`SPC b m`).
+After you confirm, accepted updates are staged in the background by fast-forwarding their Git checkouts. Running modules and processes are not replaced. Minga emits a restart-required event and reports the staged revision in `*Messages*` (`SPC b m`); restart Minga to compile and activate it.
 
 **Update a single extension:** Press `SPC h e U` (or run `:ExtUpdate`). A picker opens listing all extensions. Select one to check and update just that extension.
 
-**Hex extensions:** Hex packages are cached by `Mix.install/2`. To pick up version changes, update the version constraint in your config and run `SPC h r` (config reload), which calls `Mix.install/2` with `force: true` to re-resolve and recompile.
+**Hex extensions:** Hex packages are cached by `Mix.install/2`. Dependency or version-constraint changes require a fresh Minga process; config reload does not reinstall or replace Hex code in the running VM.
 
-### Rollback on failure
+### Staging failures
 
-If an extension fails to compile after a git update, Minga automatically rolls back to the previous commit using the git reflog. The error is reported in `*Messages*` and the extension stays at its last working version. Other extensions continue updating normally.
+If a Git update cannot fast-forward, Minga reports the error in `*Messages*` and leaves the running generation unchanged. Compilation and admission happen only during a fresh Minga process, so an update never needs to roll active code back in place.
 
 ### Crash isolation
 
@@ -1282,9 +1276,9 @@ Each extension runs under its own supervisor. If an extension process crashes, i
 
 ### Extension lifecycle
 
-- Extensions are compiled and started after all config files are evaluated
-- `SPC h r` stops all extensions, reloads config, then restarts them
-- Extension state is lost on reload (the process restarts fresh)
+- Extensions are compiled, validated, admitted, and started after all config files are evaluated at VM startup
+- `SPC h r` refuses to disturb a running path or Git extension whose source changed and reports restart required
+- With unchanged admitted artifacts, reload may restart runtime state but never purges or replaces extension code
 - Git extensions cache at `~/.local/share/minga/extensions/`
 - Hex extensions cache at `~/.cache/mix/installs/`
 

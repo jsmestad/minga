@@ -25,6 +25,8 @@ defmodule Minga.Services.Supervisor do
       │   └── Minga.Diagnostics              ETS-backed diagnostics store
       ├── Minga.Extension.Registry           Extension metadata (Agent)
       ├── MingaEditor.Extension.Sidebar      Source-owned editor sidebar registry
+      ├── Minga.Extension.ArtifactGenerationState Persistent VM-generation provenance owner
+      ├── Minga.Extension.ArtifactAdmission  VM-generation module admission serializer
       ├── Minga.Extension.CodeLease          Process-owned leases for extension callback modules
       ├── MingaAgent.ProviderRegistry        Source-owned provider declarations
       ├── MingaAgent.ProviderPacks.Native    Bundled native provider declaration
@@ -69,6 +71,14 @@ defmodule Minga.Services.Supervisor do
       StartupTimer.timed_child_spec(:svc_independent, Minga.Services.Independent),
       StartupTimer.timed_child_spec(:svc_ext_registry, Minga.Extension.Registry),
       StartupTimer.timed_child_spec(:svc_sidebar, MingaEditor.Extension.Sidebar),
+      StartupTimer.timed_child_spec(
+        :svc_artifact_generation_state,
+        Minga.Extension.ArtifactGenerationState
+      ),
+      StartupTimer.timed_child_spec(
+        :svc_artifact_admission,
+        Minga.Extension.ArtifactAdmission
+      ),
       StartupTimer.timed_child_spec(:svc_code_lease, Minga.Extension.CodeLease),
       StartupTimer.timed_child_spec(:svc_provider_registry, MingaAgent.ProviderRegistry),
       StartupTimer.timed_child_spec(:svc_provider_packs, MingaAgent.ProviderPacks.Native),

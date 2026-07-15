@@ -212,6 +212,19 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{text: String.t(), level: level()}
   end
 
+  defmodule ExtensionRestartRequiredEvent do
+    @moduledoc "Payload for staged extension code that cannot replace the current VM generation."
+    @enforce_keys [:extension, :reason]
+    defstruct [:extension, :reason, :old_ref, :new_ref]
+
+    @type t :: %__MODULE__{
+            extension: atom(),
+            reason: :source_changed | :updated | :installed,
+            old_ref: String.t() | nil,
+            new_ref: String.t() | nil
+          }
+  end
+
   defmodule AgentHookEvent do
     @moduledoc "Payload for `:agent_hook` lifecycle telemetry events."
     @enforce_keys [:event, :phase]
@@ -326,6 +339,7 @@ defmodule Minga.Events do
           | :buffer_fork_conflict
           | :file_written
           | :extension_updates_available
+          | :extension_restart_required
           | :ghost_cursor_removed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
@@ -343,6 +357,7 @@ defmodule Minga.Events do
           | LspStatusEvent.t()
           | SupervisorRestartedEvent.t()
           | LogMessageEvent.t()
+          | ExtensionRestartRequiredEvent.t()
           | AgentHookEvent.t()
           | FaceOverridesChangedEvent.t()
           | LoadUserThemesEvent.t()
@@ -466,6 +481,7 @@ defmodule Minga.Events do
   @spec broadcast(:lsp_status_changed, LspStatusEvent.t()) :: :ok
   @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok
   @spec broadcast(:log_message, LogMessageEvent.t()) :: :ok
+  @spec broadcast(:extension_restart_required, ExtensionRestartRequiredEvent.t()) :: :ok
   @spec broadcast(:option_changed, OptionChangedEvent.t()) :: :ok
   @spec broadcast(:power_thermal_state_changed, PowerThermalStateEvent.t()) :: :ok
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
