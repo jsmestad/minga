@@ -2,6 +2,7 @@ defmodule Minga.Mode.BranchDeleteConfirmTest do
   @moduledoc "Tests for git branch delete confirmation mode."
   use ExUnit.Case, async: true
 
+  alias Minga.Mode
   alias Minga.Mode.BranchDeleteConfirm
   alias Minga.Mode.BranchDeleteConfirmState
 
@@ -10,7 +11,7 @@ defmodule Minga.Mode.BranchDeleteConfirmTest do
       state = BranchDeleteConfirmState.new("/repo", "feature")
 
       assert {:execute_then_transition, [{:branch_delete_confirm, "/repo", "feature", false}],
-              :normal, ^state} = BranchDeleteConfirm.handle_key({?y, 0}, state)
+              :normal, %Mode.State{}} = BranchDeleteConfirm.handle_key({?y, 0}, state)
     end
 
     test "y confirms force branch deletion in force phase" do
@@ -20,16 +21,16 @@ defmodule Minga.Mode.BranchDeleteConfirmTest do
         |> BranchDeleteConfirmState.to_force("not fully merged")
 
       assert {:execute_then_transition, [{:branch_delete_confirm, "/repo", "feature", true}],
-              :normal, ^state} = BranchDeleteConfirm.handle_key({?y, 0}, state)
+              :normal, %Mode.State{}} = BranchDeleteConfirm.handle_key({?y, 0}, state)
     end
 
     test "n and escape cancel" do
       state = BranchDeleteConfirmState.new("/repo", "feature")
 
-      assert {:execute_then_transition, [:branch_delete_cancel], :normal, ^state} =
+      assert {:execute_then_transition, [:branch_delete_cancel], :normal, %Mode.State{}} =
                BranchDeleteConfirm.handle_key({?n, 0}, state)
 
-      assert {:execute_then_transition, [:branch_delete_cancel], :normal, ^state} =
+      assert {:execute_then_transition, [:branch_delete_cancel], :normal, %Mode.State{}} =
                BranchDeleteConfirm.handle_key({27, 0}, state)
     end
 

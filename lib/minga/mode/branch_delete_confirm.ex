@@ -17,20 +17,20 @@ defmodule Minga.Mode.BranchDeleteConfirm do
 
   def handle_key({?y, _mods}, %BranchDeleteConfirmState{phase: :delete} = state) do
     commands = [{:branch_delete_confirm, state.git_root, state.name, false}]
-    {:execute_then_transition, commands, :normal, state}
+    {:execute_then_transition, commands, :normal, Mode.initial_state()}
   end
 
   def handle_key({?y, _mods}, %BranchDeleteConfirmState{phase: :force} = state) do
     commands = [{:branch_delete_confirm, state.git_root, state.name, true}]
-    {:execute_then_transition, commands, :normal, state}
+    {:execute_then_transition, commands, :normal, Mode.initial_state()}
   end
 
-  def handle_key({?n, _mods}, %BranchDeleteConfirmState{} = state) do
-    {:execute_then_transition, [:branch_delete_cancel], :normal, state}
+  def handle_key({?n, _mods}, %BranchDeleteConfirmState{}) do
+    {:execute_then_transition, [:branch_delete_cancel], :normal, Mode.initial_state()}
   end
 
-  def handle_key({@escape, _mods}, %BranchDeleteConfirmState{} = state) do
-    {:execute_then_transition, [:branch_delete_cancel], :normal, state}
+  def handle_key({@escape, _mods}, %BranchDeleteConfirmState{}) do
+    {:execute_then_transition, [:branch_delete_cancel], :normal, Mode.initial_state()}
   end
 
   def handle_key(_key, %BranchDeleteConfirmState{} = state) do

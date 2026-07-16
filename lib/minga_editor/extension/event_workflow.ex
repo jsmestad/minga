@@ -76,6 +76,10 @@ defmodule MingaEditor.Extension.EventWorkflow do
   defp admission_failure(state, {:editor_action, :execute_git_command, _command}, reason),
     do: NoticeWorkflow.publish(state, "Git command not scheduled: #{inspect(reason)}")
 
+  defp admission_failure(state, {:editor_action, action, _arguments}, reason)
+       when action in [:branch_delete_confirm, :branch_delete_cancel],
+       do: NoticeWorkflow.publish(state, "Branch delete action not scheduled: #{inspect(reason)}")
+
   defp admission_failure(state, _event, _reason), do: state
 
   @spec admit(EditorState.t(), MingaEditor.Effect.Request.t()) :: :ok | {:error, term()}

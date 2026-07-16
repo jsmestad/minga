@@ -71,6 +71,11 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   def actions(_item), do: []
 
   @impl true
+  @spec shortcut_action(Item.t(), MingaEditor.UI.Picker.Source.shortcut()) :: atom() | nil
+  def shortcut_action(%Item{id: {:branch, _name, _current?, false}}, {:ctrl, ?d}), do: :delete
+  def shortcut_action(_item, _shortcut), do: nil
+
+  @impl true
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:delete, %Item{id: {:branch, _name, true, false}}, state) do
     NoticeWorkflow.publish(state, "Cannot delete current branch")
