@@ -2,7 +2,7 @@ defmodule Minga.Extension.Agent do
   @moduledoc """
   Agent surface for Minga extensions.
 
-  This module provides the DSL macros and compile-time wiring for agent-specific extension components: hooks, skills, MCP servers, and slash commands.
+  This module provides the DSL macros and compile-time wiring for agent-specific extension components: hooks, skills, MCP servers, slash commands, and semantic UI contributions.
 
   `use Minga.Extension.Agent` is the recommended way to define an extension that contributes agent-side features. It injects the `Minga.Extension` behaviour, registers compile-time accumulate attributes for each agent component, provides a default `child_spec/1`, and imports the agent DSL macros.
 
@@ -14,9 +14,11 @@ defmodule Minga.Extension.Agent do
 
   Skill specs are path strings pointing to a skill directory on disk.
 
-  MCP server specs are `{name, opts}` tuples where `name` is an atom identifier and `opts` is a keyword list with keys like `:command` and `:args`.
+  MCP server specs are `{name, opts}` tuples where `name` is an atom or string identifier and `opts` is a keyword list with keys like `:command` and `:args`.
 
-  Slash command specs are `{name, description, opts}` tuples where `name` is an atom, `description` is a human-readable string, and `opts` is a keyword list with keys like `:command`.
+  Slash command specs are `{name, description, opts}` tuples where `name` is an atom or string, `description` is a human-readable string, and `opts` is a keyword list with keys like `:command`.
+
+  Agent UI specs are maps or keyword lists that already contain semantic render-model values. The semantic UI registry validates that payloads are existing `Minga.RenderModel.UI.*` values before render builders read them.
 
   ## Usage
 
@@ -35,6 +37,8 @@ defmodule Minga.Extension.Agent do
         mcp_server :my_mcp, command: "servers/my-mcp", args: ["--port", "3000"]
 
         slash_command :my_cmd, "Runs my custom command", command: "commands/my-cmd.sh"
+
+        agent_ui id: "status", surface: :panel, payload: %Minga.RenderModel.UI.ExtensionPanel.Panel{...}
 
         @impl true
         def name, do: :minga_lint
@@ -55,9 +59,9 @@ defmodule Minga.Extension.Agent do
   @doc """
   Injects the `Minga.Extension` behaviour, agent DSL macros, and a default `child_spec/1`.
 
-  The injected macros are: `option/3`, `hook/2`, `skill/1`, `mcp_server/2`, and `slash_command/3`.
+  The injected macros are: `option/3`, `hook/2`, `skill/1`, `mcp_server/2`, `slash_command/3`, and `agent_ui/1`.
 
-  At compile time, each macro accumulates declarations into module attributes. The `__before_compile__` hook then generates `__option_schema__/0`, `__hook_schema__/0`, `__skill_schema__/0`, `__mcp_server_schema__/0`, and `__slash_command_schema__/0` functions that the framework reads at load time.
+  At compile time, each macro accumulates declarations into module attributes. The `__before_compile__` hook then generates `__option_schema__/0`, `__hook_schema__/0`, `__skill_schema__/0`, `__mcp_server_schema__/0`, `__slash_command_schema__/0`, and `__agent_ui_schema__/0` functions that the framework reads at load time.
   """
   defmacro __using__(_opts) do
     quote do
@@ -70,6 +74,7 @@ defmodule Minga.Extension.Agent do
       Module.register_attribute(__MODULE__, :__extension_skills__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_mcp_servers__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_slash_commands__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__extension_agent_ui__, accumulate: true)
       @before_compile Minga.Extension.Agent
 
       unless Module.defines?(__MODULE__, {:child_spec, 1}) do
@@ -94,7 +99,8 @@ defmodule Minga.Extension.Agent do
           hook: 2,
           skill: 1,
           mcp_server: 2,
-          slash_command: 3
+          slash_command: 3,
+          agent_ui: 1
         ]
     end
   end
@@ -187,40 +193,70 @@ defmodule Minga.Extension.Agent do
     end
   end
 
+  @doc """
+  Declares a semantic agent UI contribution.
+
+  The payload must be an existing render-model value accepted by `MingaEditor.Agent.SemanticUI.Entry`, such as an agent chat message body, extension-panel content, or an extension-panel panel.
+
+  ## Examples
+
+      agent_ui id: "status", surface: :panel, payload: %Minga.RenderModel.UI.ExtensionPanel.Panel{...}
+      agent_ui id: "note", surface: :transcript_enrichment, payload: {:system, "Ready", :info}
+  """
+  defmacro agent_ui(attrs) do
+    quote do
+      @__extension_agent_ui__ unquote(attrs)
+    end
+  end
+
   @doc false
   defmacro __before_compile__(env) do
-    options = Module.get_attribute(env.module, :__extension_options__) || []
-    hooks = Module.get_attribute(env.module, :__extension_hooks__) || []
-    skills = Module.get_attribute(env.module, :__extension_skills__) || []
-    mcp_servers = Module.get_attribute(env.module, :__extension_mcp_servers__) || []
-    slash_commands = Module.get_attribute(env.module, :__extension_slash_commands__) || []
-    # Accumulated attributes are in reverse order; restore declaration order
-    options = Enum.reverse(options)
-    hooks = Enum.reverse(hooks)
-    skills = Enum.reverse(skills)
-    mcp_servers = Enum.reverse(mcp_servers)
-    slash_commands = Enum.reverse(slash_commands)
+    schemas = agent_schemas(env.module)
 
     quote do
-      @doc false
       @spec __option_schema__() :: [Minga.Extension.option_spec()]
-      def __option_schema__, do: unquote(Macro.escape(options))
+      def __option_schema__, do: unquote(Macro.escape(schemas.options))
 
-      @doc false
       @spec __hook_schema__() :: [{atom(), keyword()}]
-      def __hook_schema__, do: unquote(Macro.escape(hooks))
+      def __hook_schema__, do: unquote(Macro.escape(schemas.hooks))
 
-      @doc false
       @spec __skill_schema__() :: [String.t()]
-      def __skill_schema__, do: unquote(Macro.escape(skills))
+      def __skill_schema__, do: unquote(Macro.escape(schemas.skills))
 
-      @doc false
-      @spec __mcp_server_schema__() :: [{atom(), keyword()}]
-      def __mcp_server_schema__, do: unquote(Macro.escape(mcp_servers))
+      @spec __mcp_server_schema__() :: [{atom() | String.t(), keyword()}]
+      def __mcp_server_schema__, do: unquote(Macro.escape(schemas.mcp_servers))
 
-      @doc false
-      @spec __slash_command_schema__() :: [{atom(), String.t(), keyword()}]
-      def __slash_command_schema__, do: unquote(Macro.escape(slash_commands))
+      @spec __slash_command_schema__() :: [{atom() | String.t(), String.t(), keyword()}]
+      def __slash_command_schema__, do: unquote(Macro.escape(schemas.slash_commands))
+
+      @spec __agent_ui_schema__() :: [map() | keyword()]
+      def __agent_ui_schema__, do: unquote(Macro.escape(schemas.agent_ui))
     end
+  end
+
+  @spec agent_schemas(module()) :: %{
+          options: list(),
+          hooks: list(),
+          skills: list(),
+          mcp_servers: list(),
+          slash_commands: list(),
+          agent_ui: list()
+        }
+  defp agent_schemas(module) do
+    %{
+      options: schema_attribute(module, :__extension_options__),
+      hooks: schema_attribute(module, :__extension_hooks__),
+      skills: schema_attribute(module, :__extension_skills__),
+      mcp_servers: schema_attribute(module, :__extension_mcp_servers__),
+      slash_commands: schema_attribute(module, :__extension_slash_commands__),
+      agent_ui: schema_attribute(module, :__extension_agent_ui__)
+    }
+  end
+
+  @spec schema_attribute(module(), atom()) :: list()
+  defp schema_attribute(module, attribute) do
+    module
+    |> Module.get_attribute(attribute, [])
+    |> Enum.reverse()
   end
 end

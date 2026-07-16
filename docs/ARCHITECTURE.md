@@ -247,7 +247,10 @@ graph TD
     INDEP --> CMDREG["Command.Registry"]
     INDEP --> DIAG["Diagnostics"]
     SVC --> EXTREG["Extension.Registry<br/><i>declaration/status projection</i>"]
-    SVC --> EXTINFRA["Artifact admission, code leases,<br/>and callback registries"]
+    SVC --> ARTGEN["Extension.ArtifactGenerationState<br/><i>persistent provenance</i>"]
+    SVC --> ARTADM["Extension.ArtifactAdmission<br/><i>generation serializer</i>"]
+    SVC --> LEASE["Extension.CodeLease<br/><i>callback work drain</i>"]
+    SVC --> CALLBACKS["Extension.CallbackRegistry<br/><i>declarative callbacks</i>"]
     SVC --> INSTREG["Extension.InstanceRegistry<br/><i>stable process names</i>"]
     SVC --> ROOTSUP["Extension.RootSupervisor<br/><i>DynamicSupervisor</i>"]
     ROOTSUP --> ROOT1["Extension.Root: git_porcelain<br/><i>rest_for_one</i>"]
@@ -265,9 +268,6 @@ graph TD
     SVC --> SYNC["LSP.SyncServer"]
     SVC --> PROJ["Project"]
     PROJ -. "one per active inventory" .-> DISC["Project.FileFind.Worker<br/><i>monitored, cancellable</i>"]
-    SVC --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
-    AGENTSUP --> AS1["Agent.Session<br/><i>Claude (refactoring)</i>"]
-    AGENTSUP --> AS2["Agent.Session<br/><i>Claude (tests)</i>"]
 
     style SVC fill:#6c3483,stroke:#4a235a,color:#fff
     style INDEP fill:#6c3483,stroke:#4a235a,color:#fff
@@ -280,11 +280,8 @@ graph TD
     style RTSUP2 fill:#1a5276,stroke:#154360,color:#fff
     style EXT1 fill:#2471a3,stroke:#1a5276,color:#fff
     style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
-    style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
     style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
     style DISC fill:#1a5276,stroke:#154360,color:#fff
-    style AS1 fill:#884ea0,stroke:#6c3483,color:#fff
-    style AS2 fill:#884ea0,stroke:#6c3483,color:#fff
     style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
     style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
 ```
@@ -767,11 +764,11 @@ Each layer lives in a different process. Setting a buffer-local override is a me
 
 This extends beyond simple options. Keybindings, mode behavior, auto-pair rules, highlight themes: anything that lives in process state can be customized per-buffer at runtime. Open a Markdown file and want different keybindings? That buffer's process holds its own keymap overlay. Working in a monorepo where one subdirectory uses different formatting? Those buffers carry their own formatter config. The process model makes "buffer-local everything" the default architecture, not a special case bolted on later.
 
-And because the BEAM supports hot code reloading, the customization story goes even deeper: you can redefine *functions* at runtime, not just data. Load a new module, replace a motion implementation, add a command, in a running editor, without restarting. This is the same capability that lets Erlang telecom systems upgrade without dropping calls. In Minga, it means your editor is as malleable as Emacs, but with process isolation that Emacs Lisp never had.
+The BEAM can replace running code, but Minga deliberately does not use that capability for extension or user-module updates. Runtime disable and restart keep admitted modules resident, while changed source activates only in a fresh Minga OS process. This trades ad hoc same-VM replacement for one artifact owner and predictable callback cleanup.
 
-### Hot code reloading
+### Code updates
 
-The BEAM supports replacing running code without restarting the VM. In the future, Minga could update its editor logic, add new commands, or fix bugs in a running session without closing files or losing state.
+Configuration data can be re-evaluated in the running editor, but compiled user modules and extension artifacts belong to the current BEAM generation. Editing either source makes config reload report that a restart is required. Git extension updates are staged on disk for the next process and never replace active code.
 
 ### Distributed editing
 
@@ -880,9 +877,22 @@ Safety-critical ownership does not move to optional packs. Credentials, approval
 
 ### Extension lifecycle, artifact, and callback ownership
 
-Every declared extension has one stable `Minga.Extension.Instance` mailbox that serializes eager start, lazy or deferred activation, stop, failure rollback, runtime exit, restart, and unload. The runtime child PID is an observed implementation detail. `Minga.Extension.Registry` is only the compatible declaration and status projection: `Instance` publishes the current PID, status, module, manifest, and error from its tagged phase, while callers never consult registry lifecycle fields to decide the next transition. `Minga.Extension.Supervisor` remains the compatible public facade for bulk prerequisites and the existing start, stop, list, and deferred APIs, but routes individual lifecycle requests to the Instance.
+Every declared extension has one stable `Minga.Extension.Instance` mailbox that serializes eager start, lazy or deferred activation, stop, failure rollback, runtime exit, restart, and unload. The runtime child PID is an observed implementation detail. `Minga.Extension.Registry` is only the compatible declaration and status projection: `Instance` publishes the current PID, status, module, manifest, and error from its tagged phase, while callers never consult registry lifecycle fields to decide the next transition. `Minga.Extension.Supervisor` remains the compatible public facade for bulk prerequisites and the existing start, stop, list, and deferred APIs, but routes individual lifecycle requests to the Instance without caller-side restart polling or retries.
 
 Each `Minga.Extension.Root(name)` is a `rest_for_one` supervisor whose first child is a local `Minga.Extension.RuntimeSupervisor(name)` and whose second child is the permanent Instance. The runtime supervisor handles child mechanics only. It forces every runtime child spec to `:temporary`; the Instance preserves and interprets the extension's original `:permanent`, `:transient`, or `:temporary` restart policy exactly once. Runtime exits arrive through the Instance monitor, so replacement publication and restart telemetry are event-driven. If an Instance crashes, its replacement may adopt only the sole child of its own local runtime supervisor. If that supervisor crashes, `rest_for_one` stops the old Instance and starts a new Instance against a new empty runtime supervisor.
+
+The lifecycle order is explicit and owned rather than inferred from registry snapshots:
+
+| Transition | Owner | Order |
+|---|---|---|
+| Start, eager or lazy | `Minga.Extension.Instance` | prepare or reuse the admitted artifact; remove any lazy stub; validate options and run `init/1`; start the temporary runtime child; register source-owned contributions and callback leases; publish `:running`; acknowledge callers |
+| Failed start | `Minga.Extension.Instance` | publish `:stopping`; quiesce callback admission and drain leases; ask the Editor finalizer to cancel source work; run source-filtered unload callbacks when a token exists; terminate any runtime child; remove contributions once; publish `:load_error`; acknowledge with the original diagnostic or cleanup wrapper |
+| Explicit stop or source disable | `Minga.Extension.Instance` | publish `:stopping`; quiesce and drain leases while Editor effect cancellation runs; run unload callbacks; close unload admission; terminate the runtime child; remove contributions and callback registrations once; publish `:stopped`; acknowledge waiters |
+| Terminal runtime exit | `Minga.Extension.Instance` | interpret the declared restart policy; either start one replacement child and publish it, or run the same quiesce, finalization, cleanup, and terminal publication order with distinct normal-exit or crash diagnostics |
+| Config reload | `MingaEditor.EffectScheduler`, then `Minga.Config.Loader` | serialize one typed reload effect; reject changed user-module or extension source; ask every Instance to stop; reset config-owned registries; re-evaluate data declarations without recompiling resident modules; ask the same Instances to start from admitted artifacts; apply one Editor outcome |
+| Git update and rollback | `Minga.Extension.Updater` | stage the accepted checkout for the next OS process; restore the previous checkout if staging fails; emit restart-required state; never stop, compile, or replace the active artifact |
+
+`Minga.Extension.ContributionCleanup` is the only upward-dependency seam for source cleanup. It removes core registries directly and invokes registered higher-layer cleanup callbacks without enumerating extension manifests a second time. `MingaEditor.Extension.SourceFinalizer` is retained only as that layer-safe Editor endpoint adapter. It owns no lifecycle state: the Instance owns correlation and ordering, while the adapter casts a request to the Editor, waits outside the Instance mailbox, and returns the acknowledgement to the Instance-owned bounded transition worker.
 
 Source resolution, artifact identity, and runtime admission are separate boundaries. Module, Hex/application, and bundled trusted-application declarations adopt verified resident application inventories. Resolved Git and path declarations compile from bounded immutable snapshots, and deterministic JSON is the fallback only when a path contains no Elixir source. All paths converge on one immutable current-generation artifact containing the module, manifest, owned modules, normalized child spec, and declared restart policy. Artifact admission owns code provenance for the BEAM generation; the Instance owns whether that admitted artifact has a stub, is starting, running, stopping, failed, or stopped.
 

@@ -4,7 +4,7 @@ defmodule Minga.Config.Loader do
 
   ## Load order (both startup and reload)
 
-  1. `~/.config/minga/modules/*.ex` (compile user modules)
+  1. `~/.config/minga/modules/*.ex` (compile at OS-process startup; retain on reload)
   2. `~/.config/minga/themes/*.exs` (load user themes, before config eval)
   3. `~/.config/minga/config.exs` (global config)
   4. `.minga.exs` in the current working directory (project-local config)
@@ -42,6 +42,7 @@ defmodule Minga.Config.Loader do
 
   @type keymap_server :: Keymap.server()
   @type options_server :: Options.server()
+  @typep user_module_mode :: :compile | {:reuse, [module()], [String.t()]}
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -49,6 +50,8 @@ defmodule Minga.Config.Loader do
           load_error: String.t() | nil,
           loaded_modules: [module()],
           modules_errors: [String.t()],
+          modules_fingerprint: binary(),
+          extension_declarations_fingerprint: binary(),
           project_config_path: String.t() | nil,
           project_config_error: String.t() | nil,
           gui_settings_path: String.t(),
@@ -103,7 +106,8 @@ defmodule Minga.Config.Loader do
             options_server,
             Minga.SafeMode.active?(),
             cleanup_callbacks,
-            config_home
+            config_home,
+            :compile
           )
 
         :ok =
@@ -207,11 +211,11 @@ defmodule Minga.Config.Loader do
   def lsp_settings(server), do: get_lsp_settings(server)
 
   @doc """
-  Reloads all config from scratch.
+  Reloads data declarations while keeping user modules resident.
 
-  Purges previously loaded user modules, resets Options, Hooks,
-  Keymap.Active, and Command.Registry to defaults, then re-runs the
-  full load sequence. Returns `:ok` on success or `{:error, reason}`
+  Resets Options, Hooks, Keymap.Active, and Command.Registry to defaults,
+  then re-runs the config scripts. User module or extension source changes
+  require a fresh Minga process. Returns `:ok` on success or `{:error, reason}`
   if something went wrong (errors are also stored in state).
   """
   @spec reload() :: :ok | {:error, String.t()}
@@ -230,17 +234,192 @@ defmodule Minga.Config.Loader do
 
   @spec do_reload(GenServer.server()) :: :ok | {:error, String.t()}
   defp do_reload(server) do
+    with nil <- user_module_restart_required(server),
+         nil <- extension_declaration_restart_required(server) do
+      reload_current_extension_generation(server)
+    else
+      message when is_binary(message) -> reject_reload(server, message)
+    end
+  end
+
+  @spec reload_current_extension_generation(GenServer.server()) :: :ok | {:error, String.t()}
+  defp reload_current_extension_generation(server) do
     case ExtSupervisor.pending_artifact_restarts(Minga.Extension.Registry) do
       [] ->
         do_reload_unchanged_generation(server)
 
       changed ->
-        message =
-          "Extension restart required before config reload: #{Enum.map_join(changed, ", ", &Atom.to_string/1)}"
-
-        Agent.update(server, fn state -> %{state | load_error: message} end)
-        {:error, message}
+        names = Enum.map_join(changed, ", ", &Atom.to_string/1)
+        reject_reload(server, "Extension restart required before config reload: #{names}")
     end
+  end
+
+  @spec user_module_restart_required(GenServer.server()) :: String.t() | nil
+  defp user_module_restart_required(server) do
+    {config_path, admitted_fingerprint} =
+      Agent.get(server, fn state -> {state.config_path, state.modules_fingerprint} end)
+
+    current_fingerprint = user_modules_fingerprint(Path.dirname(config_path))
+
+    if current_fingerprint == admitted_fingerprint do
+      nil
+    else
+      "User module restart required before config reload"
+    end
+  end
+
+  @spec extension_declaration_restart_required(GenServer.server()) :: String.t() | nil
+  defp extension_declaration_restart_required(server) do
+    {config_path, gui_settings_path, admitted_fingerprint} =
+      Agent.get(server, fn state ->
+        {
+          state.config_path,
+          state.gui_settings_path,
+          state.extension_declarations_fingerprint
+        }
+      end)
+
+    current_fingerprint =
+      extension_declarations_fingerprint(
+        config_path,
+        resolve_project_config_path(),
+        gui_settings_path
+      )
+
+    if current_fingerprint == admitted_fingerprint do
+      nil
+    else
+      "Extension declarations changed; restart Minga before config reload"
+    end
+  end
+
+  @spec extension_declarations_fingerprint(String.t(), String.t() | nil, String.t()) :: binary()
+  defp extension_declarations_fingerprint(config_path, project_config_path, gui_settings_path) do
+    after_path = Path.join(Path.dirname(config_path), "after.exs")
+
+    declarations =
+      [config_path, project_config_path, gui_settings_path, after_path]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.flat_map(&extension_declarations/1)
+
+    :crypto.hash(:sha256, :erlang.term_to_binary({File.cwd!(), declarations}))
+  end
+
+  @spec extension_declarations(String.t()) :: [term()]
+  defp extension_declarations(path) do
+    case File.read(path) do
+      {:ok, source} -> extension_declarations(path, source)
+      {:error, :enoent} -> []
+      {:error, reason} -> [{path, {:read_error, reason}}]
+    end
+  end
+
+  @spec extension_declarations(String.t(), String.t()) :: [term()]
+  defp extension_declarations(path, source) do
+    case Code.string_to_quoted(source, file: path) do
+      {:ok, ast} ->
+        {_ast, {declarations, dynamic?}} =
+          Macro.prewalk(ast, {[], false}, fn
+            {:extension, _meta, [name, opts]} = node, acc ->
+              {node, collect_extension_declaration(path, name, opts, acc)}
+
+            {:extension, _meta, [module]} = node, acc ->
+              {node, collect_extension_declaration(path, module, [], acc)}
+
+            {{:., _dot_meta, [_module, :extension]}, _meta, [name, opts]} = node, acc ->
+              {node, collect_extension_declaration(path, name, opts, acc)}
+
+            {{:., _dot_meta, [_module, :extension]}, _meta, [module]} = node, acc ->
+              {node, collect_extension_declaration(path, module, [], acc)}
+
+            node, acc ->
+              {node, acc}
+          end)
+
+        if dynamic? do
+          [{path, {:dynamic_source_file, :crypto.hash(:sha256, source)}}]
+        else
+          Enum.reverse(declarations)
+        end
+
+      {:error, _reason} ->
+        [{path, {:invalid_config, :crypto.hash(:sha256, source)}}]
+    end
+  end
+
+  @spec collect_extension_declaration(
+          String.t(),
+          Macro.t(),
+          Macro.t(),
+          {[term()], boolean()}
+        ) :: {[term()], boolean()}
+  defp collect_extension_declaration(path, name, opts, {declarations, dynamic?}) do
+    case extension_source_identity(name, opts) do
+      {:ok, identity} -> {[{path, identity} | declarations], dynamic?}
+      :dynamic -> {declarations, true}
+    end
+  end
+
+  @spec extension_source_identity(Macro.t(), Macro.t()) :: {:ok, term()} | :dynamic
+  defp extension_source_identity(name_ast, opts) when is_list(opts) do
+    with true <- Keyword.keyword?(opts),
+         {:ok, name} <- extension_name_identity(name_ast) do
+      source_identity(name, opts)
+    else
+      _invalid -> :dynamic
+    end
+  end
+
+  defp extension_source_identity(_name_ast, _opts), do: :dynamic
+
+  @spec extension_name_identity(Macro.t()) :: {:ok, term()} | :dynamic
+  defp extension_name_identity(name) when is_atom(name), do: {:ok, name}
+  defp extension_name_identity({:__aliases__, _meta, parts}), do: {:ok, {:module, parts}}
+  defp extension_name_identity(_name), do: :dynamic
+
+  @spec source_identity(term(), keyword()) :: {:ok, term()} | :dynamic
+  defp source_identity(name, opts) do
+    source_keys = Enum.filter([:path, :git, :hex], &Keyword.has_key?(opts, &1))
+
+    case source_keys do
+      [] ->
+        {:ok, {:module, name}}
+
+      [:path] ->
+        with {:ok, path} <- literal_source_value(Keyword.fetch!(opts, :path)) do
+          {:ok, {:path, name, path}}
+        end
+
+      [:git] ->
+        with {:ok, url} <- literal_source_value(Keyword.fetch!(opts, :git)),
+             {:ok, branch} <- literal_source_value(Keyword.get(opts, :branch)),
+             {:ok, ref} <- literal_source_value(Keyword.get(opts, :ref)) do
+          {:ok, {:git, name, url, branch, ref}}
+        end
+
+      [:hex] ->
+        with {:ok, package} <- literal_source_value(Keyword.fetch!(opts, :hex)),
+             {:ok, version} <- literal_source_value(Keyword.get(opts, :version)),
+             {:ok, app} <- literal_source_value(Keyword.get(opts, :app)) do
+          {:ok, {:hex, name, package, version, app}}
+        end
+
+      _multiple_sources ->
+        :dynamic
+    end
+  end
+
+  @spec literal_source_value(Macro.t()) :: {:ok, term()} | :dynamic
+  defp literal_source_value(value)
+       when is_binary(value) or is_atom(value) or is_integer(value),
+       do: {:ok, value}
+
+  defp literal_source_value(_value), do: :dynamic
+
+  @spec reject_reload(GenServer.server(), String.t()) :: {:error, String.t()}
+  defp reject_reload(server, message) do
+    Agent.update(server, fn state -> %{state | load_error: message} end)
+    {:error, message}
   end
 
   @spec do_reload_unchanged_generation(GenServer.server()) :: :ok | {:error, String.t()}
@@ -255,37 +434,17 @@ defmodule Minga.Config.Loader do
       Agent.update(server, fn state -> %{state | load_error: stop_all_error} end)
       {:error, stop_all_error}
     else
-      # Get the old modules so we can purge them
-      old_modules = Agent.get(server, & &1.loaded_modules)
-
-      # Purge old user modules
-      for mod <- old_modules do
-        :code.purge(mod)
-        :code.delete(mod)
-      end
-
-      # Reset all registries to defaults
-      {keymap_server, options_server} =
-        Agent.get(server, fn
-          %{keymap_server: keymap_server, options_server: options_server} ->
-            {keymap_server, options_server}
-
-          # Defensive fallback: state shape predates the *_server fields.
-          # Unreachable in single-version processes; logged so a real schema
-          # mismatch doesn't degrade silently.
-          _ ->
-            Log.warning(
-              :config,
-              "loader state missing :keymap_server/:options_server; using defaults"
-            )
-
-            {
-              Process.get(:minga_config_keymap, Keymap.default_server()),
-              Process.get(:minga_config_options, Options.default_server())
-            }
+      # Reset all registries to defaults while preserving this VM's admitted user modules.
+      {keymap_server, options_server, config_home, loaded_modules, modules_errors} =
+        Agent.get(server, fn %{
+                               keymap_server: keymap_server,
+                               options_server: options_server,
+                               loaded_modules: loaded_modules,
+                               modules_errors: modules_errors
+                             } = state ->
+          {keymap_server, options_server, Map.get(state, :config_home), loaded_modules,
+           modules_errors}
         end)
-
-      config_home = Agent.get(server, &Map.get(&1, :config_home))
 
       maybe_reset_options(options_server)
       Hooks.reset()
@@ -298,7 +457,15 @@ defmodule Minga.Config.Loader do
 
       # Re-run the full load sequence (includes starting extensions).
       # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
-      new_state = load_all(keymap_server, options_server, false, cleanup_callbacks, config_home)
+      new_state =
+        load_all(
+          keymap_server,
+          options_server,
+          false,
+          cleanup_callbacks,
+          config_home,
+          {:reuse, loaded_modules, modules_errors}
+        )
 
       Agent.update(server, fn _ -> new_state end)
 
@@ -334,9 +501,17 @@ defmodule Minga.Config.Loader do
           options_server(),
           boolean(),
           %{atom() => ContributionCleanup.cleanup_fun()} | nil,
-          String.t() | nil
+          String.t() | nil,
+          user_module_mode()
         ) :: state()
-  defp load_all(keymap_server, options_server, safe_mode?, cleanup_callbacks, config_home)
+  defp load_all(
+         keymap_server,
+         options_server,
+         safe_mode?,
+         cleanup_callbacks,
+         config_home,
+         user_module_mode
+       )
        when is_boolean(safe_mode?) do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
@@ -359,8 +534,9 @@ defmodule Minga.Config.Loader do
 
         StartupTimer.mark(:config_loader_start)
 
-        # 1. Compile user modules
-        {loaded_modules, modules_errors} = compile_user_modules(config_dir)
+        # 1. Compile user modules only at OS-process startup. Reload reuses residents.
+        {loaded_modules, modules_errors} = resolve_user_modules(config_dir, user_module_mode)
+        modules_fingerprint = user_modules_fingerprint(config_dir)
         StartupTimer.mark(:config_user_modules)
 
         # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
@@ -438,6 +614,9 @@ defmodule Minga.Config.Loader do
           load_error: load_error,
           loaded_modules: loaded_modules,
           modules_errors: modules_errors,
+          modules_fingerprint: modules_fingerprint,
+          extension_declarations_fingerprint:
+            extension_declarations_fingerprint(config_path, project_path, gui_settings_path),
           project_config_path: project_path,
           project_config_error: project_config_error,
           gui_settings_path: gui_settings_path,
@@ -469,6 +648,13 @@ defmodule Minga.Config.Loader do
       load_error: nil,
       loaded_modules: [],
       modules_errors: [],
+      modules_fingerprint: user_modules_fingerprint(config_dir),
+      extension_declarations_fingerprint:
+        extension_declarations_fingerprint(
+          config_path,
+          nil,
+          Path.join(config_dir, "gui_settings.exs")
+        ),
       project_config_path: nil,
       project_config_error: nil,
       gui_settings_path: Path.join(config_dir, "gui_settings.exs"),
@@ -761,6 +947,31 @@ defmodule Minga.Config.Loader do
     # singleton hasn't booted under test). Other failure modes — wrong
     # log_level value, Logger crashes — are real bugs and should propagate.
     ArgumentError -> :ok
+  end
+
+  @spec resolve_user_modules(String.t(), user_module_mode()) :: {[module()], [String.t()]}
+  defp resolve_user_modules(config_dir, :compile), do: compile_user_modules(config_dir)
+
+  defp resolve_user_modules(_config_dir, {:reuse, loaded_modules, modules_errors}),
+    do: {loaded_modules, modules_errors}
+
+  @spec user_modules_fingerprint(String.t()) :: binary()
+  defp user_modules_fingerprint(config_dir) do
+    modules_dir = Path.join(config_dir, "modules")
+
+    snapshot =
+      case File.ls(modules_dir) do
+        {:ok, files} ->
+          files
+          |> Enum.filter(&String.ends_with?(&1, ".ex"))
+          |> Enum.sort()
+          |> Enum.map(fn file -> {file, File.read(Path.join(modules_dir, file))} end)
+
+        {:error, reason} ->
+          {:directory_error, reason}
+      end
+
+    :crypto.hash(:sha256, :erlang.term_to_binary(snapshot, [:deterministic]))
   end
 
   @spec compile_user_modules(String.t()) :: {[module()], [String.t()]}

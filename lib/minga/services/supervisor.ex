@@ -15,6 +15,11 @@ defmodule Minga.Services.Supervisor do
   service crash restarts only that service without cascading into its
   siblings or the dependency chains below.
 
+  `InstanceRegistry` and `RootSupervisor` are direct service children. Each
+  dynamic `Root(name)` uses `rest_for_one` with `RuntimeSupervisor(name)` first
+  and the permanent `Instance(name)` second. Runtime children are temporary;
+  the Instance is the only process that interprets extension restart policy.
+
   ## Children
 
       Services.Supervisor (rest_for_one)

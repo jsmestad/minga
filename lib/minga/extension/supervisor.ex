@@ -21,8 +21,6 @@ defmodule Minga.Extension.Supervisor do
   @type start_failure :: %{extension: atom(), reason: term()}
   @type stop_failure :: %{extension: atom(), reason: term()}
 
-  @authority_retry_attempts 2
-
   @typedoc "Injected lifecycle collaborators."
   @type start_opts :: [
           command_registry: GenServer.server(),
@@ -38,8 +36,7 @@ defmodule Minga.Extension.Supervisor do
           transition_timeout_ms: pos_integer(),
           callback_timeout_ms: pos_integer(),
           runtime_query_timeout_ms: pos_integer(),
-          drain_timeout_ms: pos_integer(),
-          test_hooks: map()
+          drain_timeout_ms: pos_integer()
         ]
 
   @doc false
@@ -169,15 +166,8 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @spec start_instance(atom(), GenServer.server()) :: {:ok, pid()} | {:error, term()}
-  defp start_instance(name, instance) do
-    case safe_instance_call(name, fn -> Instance.start(instance) end) do
-      {:error, {:interrupted_lifecycle, _phase}} ->
-        safe_instance_call(name, fn -> Instance.start(instance) end)
-
-      result ->
-        result
-    end
-  end
+  defp start_instance(name, instance),
+    do: safe_instance_call(name, fn -> Instance.start(instance) end)
 
   @doc "Registers one lazy declaration and its activation stubs through its stable authority."
   @spec register_lazy_extension(
@@ -649,41 +639,13 @@ defmodule Minga.Extension.Supervisor do
         ) :: result | {:error, term()}
         when result: var
   defp call_declared_instance(supervisor, registry, name, entry, opts, fun) do
-    call_declared_instance(
-      supervisor,
-      registry,
-      name,
-      entry,
-      opts,
-      fun,
-      @authority_retry_attempts
-    )
-  end
-
-  @spec call_declared_instance(
-          GenServer.server(),
-          GenServer.server(),
-          atom(),
-          ExtRegistry.entry(),
-          start_opts(),
-          (GenServer.server() -> result),
-          non_neg_integer()
-        ) :: result | {:error, term()}
-        when result: var
-  defp call_declared_instance(supervisor, registry, name, entry, opts, fun, retries) do
-    result =
-      with {:ok, instance} <- locate_instance(supervisor, registry, name, entry, opts),
-           :ok <- run_test_hook(opts, :after_authority_located, [name, instance]),
-           :ok <-
-             safe_instance_call(name, fn ->
-               Instance.declare(instance, entry, registry, opts)
-             end) do
-        safe_instance_call(name, fn -> fun.(instance) end)
-      end
-
-    maybe_retry_authority(result, name, opts, retries, fn ->
-      call_declared_instance(supervisor, registry, name, entry, opts, fun, retries - 1)
-    end)
+    with {:ok, instance} <- locate_instance(supervisor, registry, name, entry, opts),
+         :ok <-
+           safe_instance_call(name, fn ->
+             Instance.declare(instance, entry, registry, opts)
+           end) do
+      safe_instance_call(name, fn -> fun.(instance) end)
+    end
   end
 
   @spec call_existing_instance(
@@ -694,67 +656,9 @@ defmodule Minga.Extension.Supervisor do
         ) :: result | :absent | {:error, term()}
         when result: var
   defp call_existing_instance(supervisor, name, opts, fun) do
-    call_existing_instance(supervisor, name, opts, fun, @authority_retry_attempts)
-  end
-
-  @spec call_existing_instance(
-          GenServer.server(),
-          atom(),
-          start_opts(),
-          (GenServer.server() -> result),
-          non_neg_integer()
-        ) :: result | :absent | {:error, term()}
-        when result: var
-  defp call_existing_instance(supervisor, name, opts, fun, retries) do
-    result =
-      with {:ok, instance} <- existing_instance(supervisor, name, opts),
-           :ok <- run_test_hook(opts, :after_authority_located, [name, instance]) do
-        safe_instance_call(name, fn -> fun.(instance) end)
-      end
-
-    maybe_retry_authority(result, name, opts, retries, fn ->
-      call_existing_instance(supervisor, name, opts, fun, retries - 1)
-    end)
-  end
-
-  @spec maybe_retry_authority(result, atom(), start_opts(), non_neg_integer(), (-> result)) ::
-          result
-        when result: var
-  defp maybe_retry_authority(result, name, opts, retries, retry) do
-    if retries > 0 and retryable_authority_error?(result, name) do
-      :ok = run_test_hook(opts, :before_authority_retry, [name])
-      retry.()
-    else
-      result
+    with {:ok, instance} <- existing_instance(supervisor, name, opts) do
+      safe_instance_call(name, fn -> fun.(instance) end)
     end
-  end
-
-  @spec retryable_authority_error?(term(), atom()) :: boolean()
-  defp retryable_authority_error?(
-         {:error, {:authority_unavailable, name, reason}},
-         name
-       ),
-       do: restart_gap?(reason)
-
-  defp retryable_authority_error?(_result, _name), do: false
-
-  @spec restart_gap?(term()) :: boolean()
-  defp restart_gap?(:noproc), do: true
-  defp restart_gap?(:registration_timeout), do: true
-  defp restart_gap?({:noproc, _call}), do: true
-  defp restart_gap?({:authority_unavailable, _name, reason}), do: restart_gap?(reason)
-  defp restart_gap?(_reason), do: false
-
-  @spec run_test_hook(start_opts(), atom(), [term()]) :: :ok
-  defp run_test_hook(opts, hook, args) do
-    hooks = Keyword.get(opts, :test_hooks, %{})
-
-    case Map.get(hooks, hook) do
-      nil -> :ok
-      fun when is_function(fun) -> _result = apply(fun, args)
-    end
-
-    :ok
   end
 
   @spec safe_instance_call(atom(), (-> result)) :: result | {:error, term()} when result: var

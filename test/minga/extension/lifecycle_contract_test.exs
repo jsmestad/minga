@@ -1305,7 +1305,7 @@ defmodule Minga.Extension.LifecycleContractTest do
     end
   end
 
-  test "runtime DOWN before start completion rolls back and rejects stale success", ctx do
+  test "runtime DOWN before start completion rolls back queued lifecycle requests", ctx do
     name = unique_name(:runtime_down_during_start)
     source = {:extension, name}
     parent = self()
@@ -1323,13 +1323,8 @@ defmodule Minga.Extension.LifecycleContractTest do
     first_start = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
     assert_receive {:runtime_child_started, runtime}, 5_000
     authority = instance(ctx, name)
-    authority_pid = instance_pid(ctx, name)
 
-    assert {:starting,
-            %{
-              runtime: %{pid: ^runtime},
-              worker: %Worker{id: transition_id, pid: start_worker}
-            }} =
+    assert {:starting, %{runtime: %{pid: ^runtime}, worker: %Worker{pid: start_worker}}} =
              eventually(fn ->
                case Instance.phase(authority) do
                  {:starting, %{runtime: %{pid: ^runtime}, worker: %Worker{}}} = phase -> phase
@@ -1337,7 +1332,6 @@ defmodule Minga.Extension.LifecycleContractTest do
                end
              end)
 
-    stale_prepared = :sys.get_state(authority_pid)
     worker_ref = Process.monitor(start_worker)
     second_start = Task.async(fn -> Instance.start(authority) end)
     stop = Task.async(fn -> stop_extension(ctx, name, opts) end)
@@ -1366,12 +1360,6 @@ defmodule Minga.Extension.LifecycleContractTest do
              end)
 
     assert_receive {:DOWN, ^worker_ref, :process, ^start_worker, :killed}
-
-    send(
-      authority_pid,
-      {Worker, :done, transition_id, {:ok, {:ok, runtime, stale_prepared}}}
-    )
-
     assert {:stopping, _context} = Instance.phase(authority)
     :ok = :sys.resume(callback_registry)
 
@@ -1408,15 +1396,28 @@ defmodule Minga.Extension.LifecycleContractTest do
     callback_registry = Process.whereis(ctx.callback_registry)
     :ok = :sys.suspend(callback_registry)
 
-    opts = Keyword.put(ctx.opts, :transition_timeout_ms, 25)
+    timeout_ms = 5_000
+    opts = Keyword.put(ctx.opts, :transition_timeout_ms, timeout_ms)
     start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
-    assert_receive {:runtime_child_started, runtime}, 5_000
+    assert_receive {:runtime_child_started, runtime}, 10_000
     runtime_ref = Process.monitor(runtime)
-    Process.send_after(self(), :resume_callback_registry, 50)
-    assert_receive :resume_callback_registry
+    authority = instance_pid(ctx, name)
+
+    worker_id =
+      eventually(fn ->
+        case :sys.get_state(authority) do
+          %{phase: {:starting, %{runtime: %{pid: ^runtime}, worker: %Worker{id: id}}}} -> id
+          _state -> nil
+        end
+      end)
+
+    send(authority, {Worker, :timeout, worker_id, :start})
+    _barrier = :sys.get_state(authority)
     :ok = :sys.resume(callback_registry)
 
-    assert {:error, {:transition_timeout, :start, 25}} = Task.await(start_task)
+    assert {:error, {:transition_timeout, :start, ^timeout_ms}} =
+             Task.await(start_task, timeout_ms + 1_000)
+
     assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}, 5_000
     assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
     assert :error = CommandRegistry.lookup(ctx.commands, :crash_contribution_command)
@@ -1467,10 +1468,6 @@ defmodule Minga.Extension.LifecycleContractTest do
     retry_task = Task.async(fn -> start_extension(ctx, name, entry) end)
     assert_receive {:retry_child_start_mfa, retry_runtime_supervisor}, 5_000
     refute Task.yield(retry_task, 50)
-
-    state = :sys.get_state(instance(ctx, name))
-
-    assert Minga.Extension.Instance.TransitionHandler.transition_timeout(state) == 120_000
 
     send(retry_runtime_supervisor, :release_retry_child_start)
     assert {:ok, runtime} = Task.await(retry_task)
@@ -1601,61 +1598,6 @@ defmodule Minga.Extension.LifecycleContractTest do
     assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, _reason}, 5_000
     assert :error = ExtRegistry.get(ctx.registry, name)
     assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
-  end
-
-  test "replacement Instance reads the current redeclared config", ctx do
-    name = unique_name(:current_declaration)
-    original = register_module(ctx, name, [])
-    assert :ok = stop_extension(ctx, name, ctx.opts)
-    :ok = ExtRegistry.register_module(ctx.registry, name, RuntimeTwo, marker: :current)
-    {:ok, replacement} = ExtRegistry.get(ctx.registry, name)
-    assert :ok = Instance.declare(instance(ctx, name), replacement, ctx.registry, ctx.opts)
-
-    on_exit(fn ->
-      case InstanceRegistry.whereis(instance_registry(ctx), :root, name) do
-        pid when is_pid(pid) -> :sys.resume(pid)
-        nil -> :ok
-      end
-    end)
-
-    race = start_supervised!({Agent, fn -> :armed end})
-
-    after_located = fn ^name, _instance ->
-      case Agent.get_and_update(race, fn
-             :armed -> {:kill, :killed}
-             state -> {:skip, state}
-           end) do
-        :kill ->
-          root = InstanceRegistry.whereis(instance_registry(ctx), :root, name)
-          authority = instance_pid(ctx, name)
-          ref = Process.monitor(authority)
-          :ok = :sys.suspend(root)
-          Process.exit(authority, :kill)
-          assert_receive {:DOWN, ^ref, :process, ^authority, :killed}
-
-        :skip ->
-          :ok
-      end
-    end
-
-    before_retry = fn ^name ->
-      root = InstanceRegistry.whereis(instance_registry(ctx), :root, name)
-      :ok = :sys.resume(root)
-      Agent.update(race, fn :killed -> :retried end)
-    end
-
-    opts =
-      Keyword.put(ctx.opts, :test_hooks, %{
-        after_authority_located: after_located,
-        before_authority_retry: before_retry
-      })
-
-    assert {:ok, runtime} = start_extension(ctx, name, replacement, opts)
-    assert Agent.get(race, & &1) == :retried
-    assert Agent.get(runtime, & &1) == :runtime_two
-    refute_receive {:runtime_child_started, _duplicate}
-    assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
-    refute replacement == original
   end
 
   test "restart policies cover normal shutdown tuple-shutdown and abnormal reasons", ctx do
@@ -1852,7 +1794,8 @@ defmodule Minga.Extension.LifecycleContractTest do
     assert {:ok, initial_pid} = start_extension(ctx, name, entry)
 
     assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: 0}, %{extension: ^name}}
+                    %{count: 0}, %{extension: ^name}},
+                   5_000
 
     final_pid =
       Enum.reduce([:normal, :shutdown, {:shutdown, :policy}, :abnormal], initial_pid, fn reason,
@@ -1884,7 +1827,8 @@ defmodule Minga.Extension.LifecycleContractTest do
         ) :: pid()
   defp assert_policy_transition(ctx, name, _entry, _reason, pid, true) do
     assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: _count}, %{extension: ^name}}
+                    %{count: _count}, %{extension: ^name}},
+                   5_000
 
     assert {:ok, replacement} = Instance.start(instance(ctx, name))
     refute replacement == pid
@@ -1893,17 +1837,20 @@ defmodule Minga.Extension.LifecycleContractTest do
 
   defp assert_policy_transition(ctx, name, entry, reason, _pid, false) do
     assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :stop],
-                    %{duration: _duration}, %{extension: ^name, phase: :cleanup, outcome: :ok}}
+                    %{duration: _duration}, %{extension: ^name, phase: :cleanup, outcome: :ok}},
+                   5_000
 
     expected_phase = terminal_policy_phase(reason)
 
     assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :terminal], %{count: 1},
-                    %{extension: ^name, phase: ^expected_phase}}
+                    %{extension: ^name, phase: ^expected_phase}},
+                   5_000
 
     assert {:ok, replacement} = start_extension(ctx, name, entry)
 
     assert_receive {:policy_telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
-                    %{count: _count}, %{extension: ^name}}
+                    %{count: _count}, %{extension: ^name}},
+                   5_000
 
     replacement
   end

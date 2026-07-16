@@ -44,6 +44,27 @@ defmodule MingaEditor.ConfigReloadInstanceDeadlockTest do
     end
     """)
 
+    File.write!(Path.join(config_dir, "config.exs"), """
+    use Minga.Config
+    extension #{inspect(name)}, path: #{inspect(extension_dir)}
+    """)
+
+    previous_load_extensions = Application.get_env(:minga, :load_extensions)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+    Application.put_env(:minga, :load_extensions, false)
+
+    on_exit(fn ->
+      case previous_load_extensions do
+        nil ->
+          # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+          Application.delete_env(:minga, :load_extensions)
+
+        value ->
+          # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+          Application.put_env(:minga, :load_extensions, value)
+      end
+    end)
+
     owner = :"reload_ack_artifacts_#{suffix}"
     persistence_key = {__MODULE__, suffix}
 
@@ -76,7 +97,6 @@ defmodule MingaEditor.ConfigReloadInstanceDeadlockTest do
         id: {Loader, suffix}
       )
 
-    :ok = ExtRegistry.register(name, extension_dir, [])
     {:ok, declaration} = ExtRegistry.get(name)
 
     opts = [
@@ -96,11 +116,6 @@ defmodule MingaEditor.ConfigReloadInstanceDeadlockTest do
              )
 
     runtime_ref = Process.monitor(runtime)
-
-    File.write!(Path.join(config_dir, "config.exs"), """
-    use Minga.Config
-    extension #{inspect(name)}, path: #{inspect(extension_dir)}
-    """)
 
     :sys.replace_state(
       ctx.editor,
