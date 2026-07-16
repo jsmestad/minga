@@ -147,7 +147,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
 
     assert {:callback_failed,
             {:invalid_return, ^source, HandlerOne, :handle_editor_event,
-             {:handled, :invalid_state}}} =
+             %{kind: :tuple, size: 2, tag: :handled}}} =
              EventDispatcher.dispatch_editor_action(
                ctx.state,
                :invalid,

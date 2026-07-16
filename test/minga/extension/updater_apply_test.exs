@@ -47,6 +47,7 @@ defmodule Minga.Extension.UpdaterApplyTest do
     git!(work, ["config", "user.email", git_config("user.email", "minga-tests@example.invalid")])
     git!(work, ["config", "user.name", git_config("user.name", "Minga Tests")])
     git!(work, ["config", "commit.gpgsign", "false"])
+    git!(work, ["config", "core.hooksPath", "/dev/null"])
     File.write!(Path.join(work, "version.txt"), "v1")
     git!(work, ["add", "version.txt"])
     git!(work, ["commit", "-m", "v1"])

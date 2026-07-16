@@ -236,6 +236,28 @@ defmodule Minga.Extension.CallbackInvokerTest do
     assert CodeLease.active_leases(server: admission, source: source) == []
   end
 
+  test "unload completion requires the exact quiescing token and zero active leases", %{
+    admission: admission,
+    source: source
+  } do
+    assert {:ok, lease} =
+             CodeLease.admit_callback(source, Probe, :editor_event, server: admission)
+
+    assert {:ok, token} = CodeLease.quiesce_source(source, server: admission)
+
+    assert {:error, {:active_source_leases, ^source, 1}} =
+             CodeLease.complete_unload(token, server: admission)
+
+    assert {:error, {:source_quiescing, ^source, ^token}} =
+             CodeLease.activate_source(source, [Probe], server: admission)
+
+    assert :ok = CodeLease.release(lease)
+    assert :ok = CodeLease.complete_unload(token, server: admission)
+
+    assert {:error, {:invalid_unload_token, ^token}} =
+             CodeLease.abort_unload(token, server: admission)
+  end
+
   test "completed unload authority denies later invocation", %{
     admission: admission,
     source: source

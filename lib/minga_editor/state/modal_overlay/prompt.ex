@@ -29,7 +29,7 @@ defmodule MingaEditor.State.ModalOverlay.Prompt do
     %__MODULE__{
       prompt_ui: prompt_ui,
       owner: Keyword.get(opts, :owner, :global),
-      opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
+      opened_at: Keyword.get(opts, :opened_at, 0)
     }
   end
 

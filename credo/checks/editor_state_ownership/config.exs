@@ -316,7 +316,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.Workspace",
       owners: ["MingaEditor.State.Workspace"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State.Workspace transition API",
       workflow: "a focused workspace workflow"
     ],
@@ -339,7 +338,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.ModalOverlay.Picker",
       owners: ["MingaEditor.State.ModalOverlay.Picker"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State.ModalOverlay.Picker transition API",
       workflow: "MingaEditor.Shell.Traditional.ModalWorkflow"
     ],
@@ -347,7 +345,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.ModalOverlay.Prompt",
       owners: ["MingaEditor.State.ModalOverlay.Prompt"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State.ModalOverlay.Prompt transition API",
       workflow: "MingaEditor.Shell.Traditional.ModalWorkflow"
     ],
@@ -355,7 +352,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.ModalOverlay.Completion",
       owners: ["MingaEditor.State.ModalOverlay.Completion"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State.ModalOverlay.Completion transition API",
       workflow: "MingaEditor.Shell.Traditional.ModalWorkflow"
     ],
@@ -363,7 +359,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.ModalOverlay.CommandCompletion",
       owners: ["MingaEditor.State.ModalOverlay.CommandCompletion"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State.ModalOverlay.CommandCompletion transition API",
       workflow: "MingaEditor.Shell.Traditional.ModalWorkflow"
     ],
@@ -371,7 +366,6 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
       struct: "MingaEditor.State.ModalOverlay.Conflict",
       owners: ["MingaEditor.State.ModalOverlay.Conflict"],
       paths: [],
-      pure: false,
       boundary: "MingaEditor.State.ModalOverlay.Conflict transition API",
       workflow: "MingaEditor.Shell.Traditional.ModalWorkflow"
     ]

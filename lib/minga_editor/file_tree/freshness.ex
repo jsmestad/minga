@@ -18,6 +18,7 @@ defmodule MingaEditor.FileTree.Freshness do
   alias MingaEditor.FileTree.Refresh
   alias MingaEditor.FileTree.WatcherSync
   alias MingaEditor.FileTree.WatcherSync.Result, as: WatcherResult
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
@@ -25,6 +26,9 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @refresh_retry_base_ms 25
   @refresh_retry_max_ms 1_000
+  @watcher_retry_base_ms 25
+  @watcher_retry_max_ms 1_000
+  @watcher_retry_max_attempts 6
 
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()
@@ -122,10 +126,21 @@ defmodule MingaEditor.FileTree.Freshness do
 
   def apply_refresh_outcome(
         state,
+        %Outcome{
+          status: :failed,
+          request: %Request{effect: %Refresh{} = effect} = request,
+          reason: reason
+        } = outcome
+      ) do
+    {finish_failed_refresh(state, effect, request.id, reason), outcome}
+  end
+
+  def apply_refresh_outcome(
+        state,
         %Outcome{status: status, request: %Request{effect: %Refresh{} = effect} = request} =
           outcome
       )
-      when status in [:failed, :canceled, :stale] do
+      when status in [:canceled, :stale] do
     {finish_terminal_refresh(state, effect, request.id), outcome}
   end
 
@@ -233,11 +248,30 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_watcher_outcome(
         state,
         %Outcome{
+          status: :failed,
+          request: %Request{effect: %WatcherSync{} = effect} = request,
+          reason: reason
+        } = outcome
+      ) do
+    case FileTreeState.finish_watcher_request(file_tree_state(state), request.id) do
+      {:current, file_tree} ->
+        state = set_file_tree(state, file_tree)
+        opts = watcher_options(effect.backend, effect.backend_context)
+        {schedule_watcher_retry(state, opts, reason), outcome}
+
+      {:stale, file_tree} ->
+        {set_file_tree(state, file_tree), Outcome.stale(outcome, :stale)}
+    end
+  end
+
+  def apply_watcher_outcome(
+        state,
+        %Outcome{
           status: status,
           request: %Request{effect: %WatcherSync{}} = request
         } = outcome
       )
-      when status in [:failed, :canceled, :stale] do
+      when status in [:canceled, :stale] do
     case FileTreeState.finish_watcher_request(file_tree_state(state), request.id) do
       {:current, file_tree} -> {set_file_tree(state, file_tree), outcome}
       {:stale, file_tree} -> {set_file_tree(state, file_tree), Outcome.stale(outcome, :stale)}
@@ -547,6 +581,20 @@ defmodule MingaEditor.FileTree.Freshness do
     schedule_watcher_sync(state, intent, opts)
   end
 
+  @doc "Consumes a correlated watcher retry timer and resubmits the retained intent."
+  @spec retry_watcher_sync(state(), reference(), keyword()) :: state()
+  def retry_watcher_sync(state, token, opts) when is_reference(token) and is_list(opts) do
+    case FileTreeState.watcher_retry_elapsed(file_tree_state(state), token) do
+      {:current, file_tree} ->
+        state
+        |> set_file_tree(file_tree)
+        |> synchronize_watchers(opts)
+
+      {:stale, file_tree} ->
+        set_file_tree(state, file_tree)
+    end
+  end
+
   @spec maybe_synchronize_watchers(state(), Refresh.t() | FilterWalk.t()) :: state()
   defp maybe_synchronize_watchers(state, %Refresh{synchronize_watchers?: false}), do: state
   defp maybe_synchronize_watchers(state, %FilterWalk{synchronize_watchers?: false}), do: state
@@ -579,9 +627,55 @@ defmodule MingaEditor.FileTree.Freshness do
         set_file_tree(state, file_tree)
 
       {:error, reason} ->
-        Minga.Log.warning(:editor, "File tree watcher sync not scheduled: #{inspect(reason)}")
-        state
+        schedule_watcher_retry(state, opts, {:schedule_failed, reason})
     end
+  end
+
+  @spec schedule_watcher_retry(state(), keyword(), term()) :: state()
+  defp schedule_watcher_retry(state, opts, reason) do
+    token = make_ref()
+    {attempt, file_tree} = FileTreeState.schedule_watcher_retry(file_tree_state(state), token)
+    state = set_file_tree(state, file_tree)
+
+    if attempt < @watcher_retry_max_attempts do
+      if attempt == 1 do
+        Minga.Log.warning(
+          :editor,
+          "File tree watcher sync failed: #{inspect(reason, limit: 20)}; retrying"
+        )
+      end
+
+      Process.send_after(
+        self(),
+        {:file_tree_watcher_retry, token, opts},
+        watcher_retry_delay(attempt)
+      )
+
+      state
+    else
+      watcher_retry_exhausted(state, attempt, reason)
+    end
+  end
+
+  @spec watcher_retry_exhausted(state(), pos_integer(), term()) :: state()
+  defp watcher_retry_exhausted(state, attempt, reason) do
+    file_tree = FileTreeState.exhaust_watcher_retry(file_tree_state(state))
+    target = FileTreeState.watcher_intent(file_tree).target
+
+    Minga.Log.error(
+      :editor,
+      "File tree watcher sync stopped target=#{inspect(target)} attempts=#{attempt} reason=#{inspect(reason, limit: 20)}"
+    )
+
+    state
+    |> set_file_tree(file_tree)
+    |> NoticeWorkflow.publish("File tree watcher recovery stopped after #{attempt} attempts")
+  end
+
+  @spec watcher_retry_delay(pos_integer()) :: pos_integer()
+  defp watcher_retry_delay(attempt) do
+    exponent = min(attempt - 1, 6)
+    min(@watcher_retry_base_ms * Integer.pow(2, exponent), @watcher_retry_max_ms)
   end
 
   @spec watcher_options(module() | nil, term()) :: keyword()

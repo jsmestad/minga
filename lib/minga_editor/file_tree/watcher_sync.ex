@@ -68,6 +68,7 @@ defmodule MingaEditor.FileTree.WatcherSync do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
+  def render?(%Outcome{status: :failed}), do: true
   def render?(%Outcome{}), do: false
 
   @spec unwatch_obsolete_roots(t()) :: :ok | {:error, term()}

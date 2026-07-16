@@ -27,7 +27,7 @@ defmodule MingaEditor.Commands do
   alias Minga.Buffer
   alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.InvocationContext
-  alias MingaEditor.Extension.EventDispatcher, as: ExtensionEventDispatcher
+  alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
@@ -827,15 +827,10 @@ defmodule MingaEditor.Commands do
   @spec execute_git_porcelain_command(state(), atom() | tuple()) :: state()
   defp execute_git_porcelain_command(state, command) do
     if git_porcelain_running?() do
-      case ExtensionEventDispatcher.dispatch_editor_action(
-             state,
-             :execute_git_command,
-             command
-           ) do
-        {:handled, updated_state} -> updated_state
-        :not_matched -> state
-        {:callback_failed, _failure} -> state
-      end
+      ExtensionEventWorkflow.dispatch(
+        state,
+        {:editor_action, :execute_git_command, command}
+      )
     else
       state
     end

@@ -1,10 +1,12 @@
 defmodule MingaEditor.Extension.EventHandler do
   @moduledoc """
-  Contract for synchronous extension callbacks that transform editor state.
+  Contract for worker-executed extension callbacks that transform an editor snapshot.
 
   `:buffer_saved` callbacks fan out, `:editor_action` callbacks are first-match,
   and `:source_unload` callbacks run only for the source being finalized.
   Returning `:not_matched` means the callback ran successfully and declined.
+  The callback process identity is opaque, and a returned snapshot commits only
+  when it has not been superseded by newer Editor state.
   """
 
   alias Minga.Extension.CallbackInvoker
@@ -28,6 +30,6 @@ defmodule MingaEditor.Extension.EventHandler do
           | {:callback_failed, CallbackInvoker.failure()}
           | {:callback_failed, [CallbackInvoker.failure()], EditorState.t()}
 
-  @doc "Handles one runtime editor event synchronously in the Editor process."
+  @doc "Handles one runtime editor event in a bounded effect worker."
   @callback handle_editor_event(EditorState.t(), event()) :: callback_result()
 end

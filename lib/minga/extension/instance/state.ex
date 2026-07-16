@@ -51,7 +51,7 @@ defmodule Minga.Extension.Instance.State do
       declaration: declaration_only(declaration),
       registry: registry,
       instance_registry: instance_registry,
-      collaborators: collaborators
+      collaborators: stable_collaborators(collaborators)
     }
   end
 

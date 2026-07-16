@@ -35,7 +35,7 @@ defmodule MingaEditor.State.ModalOverlay.Conflict do
       buffer: buffer,
       message: message,
       owner: Keyword.get(opts, :owner, buffer),
-      opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
+      opened_at: Keyword.get(opts, :opened_at, 0)
     }
   end
 end

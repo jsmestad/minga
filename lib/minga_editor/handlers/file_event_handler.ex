@@ -11,7 +11,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   File-tree or LSP failures retain their existing domain reporting policy.
   """
 
-  alias MingaEditor.Extension.EventDispatcher
+  alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.LspActions
@@ -181,11 +181,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec dispatch_extension_buffer_saved(EditorState.t(), pid()) :: EditorState.t()
   defp dispatch_extension_buffer_saved(state, saved_buf) do
-    case EventDispatcher.dispatch(state, {:buffer_saved, saved_buf}) do
-      {:handled, updated_state} -> updated_state
-      :not_matched -> state
-      {:callback_failed, _failures, preserved_state} -> preserved_state
-    end
+    EventWorkflow.dispatch(state, {:buffer_saved, saved_buf})
   end
 
   @spec handle_buffer_changed(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}

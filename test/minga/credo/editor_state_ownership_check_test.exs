@@ -1211,6 +1211,30 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     end
   end
 
+  test "rejects explicit pure module subsets that omit declared owners" do
+    source =
+      """
+      defmodule MingaEditor.State.RenderCorrelation do
+        def violate(value), do: MingaEditor.RenderPipeline.render(value)
+      end
+      """
+
+    issues =
+      check(
+        source,
+        "lib/minga_editor/state/render_correlation.ex",
+        pure_modules: ["MingaEditor.State.RenderCorrelation"]
+      )
+
+    assert issues != []
+    assert Enum.all?(issues, &(&1.trigger == "ownership configuration"))
+
+    assert Enum.any?(issues, fn issue ->
+             issue.message =~ "declared ownership owner" and
+               issue.message =~ "is missing from pure_modules"
+           end)
+  end
+
   test "reports malformed policy and skips source scanning entirely" do
     source =
       """
@@ -1225,6 +1249,18 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     parameter_sets = [
       [ownerships: :invalid],
       [ownerships: [[struct: "Bad.*"]]],
+      [
+        ownerships: [
+          [
+            struct: "MingaEditor.State.Workspace",
+            owners: ["MingaEditor.State.Workspace"],
+            paths: [],
+            pure: false,
+            boundary: "workspace transitions",
+            workflow: "workspace workflow"
+          ]
+        ]
+      ],
       [pure_modules: :invalid],
       [pure_modules: ["Bad.*"]]
     ]

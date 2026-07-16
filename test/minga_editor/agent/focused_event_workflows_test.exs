@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.Agent.StreamEventWorkflow
   alias MingaEditor.Agent.ToolEventWorkflow
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
@@ -25,6 +26,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.Session
+  alias MingaEditor.Test.FakeShell
 
   test "status workflow synchronizes owner state before installing a render" do
     state = event_state()
@@ -37,6 +39,18 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
+  test "context usage remains shell-generic when the active shell is not Traditional" do
+    entry = Entry.builtin!(:fake, FakeShell, "Fake", "Fake shell", false)
+    shell_state = Map.put(FakeShell.init([]), :session, self())
+    state = %{event_state() | shell_runtime: Runtime.new(entry, shell_state)}
+
+    updated = StatusEventWorkflow.context_usage(state, 90, 100)
+
+    assert updated.workspace.agent_ui.view.context_estimate == 90
+    assert RenderCorrelation.scheduled?(updated.render.render_correlation)
+    assert Runtime.state(updated.shell_runtime) == shell_state
+  end
+
   test "stream workflow applies one bounded batch transition and one render" do
     state = event_state()
 
@@ -47,6 +61,18 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
         {:tool_update, "tc", "shell", "partial"}
       ])
 
+    assert state.workspace.agent_ui.panel.message_version == 1
+    assert RenderCorrelation.scheduled?(state.render.render_correlation)
+  end
+
+  test "live-session stream batches synchronize the transcript once" do
+    {:ok, session} = start_supervised({Session, provider_opts: []})
+    :ok = Session.seed_messages(session, [{:assistant, "Live streamed answer"}])
+    state = event_state(session)
+
+    state = StreamEventWorkflow.batch(state, [{:text_delta, "Live streamed answer"}])
+
+    assert state.workspace.agent_ui.panel.cached_display_messages != []
     assert state.workspace.agent_ui.panel.message_version == 1
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
@@ -137,6 +163,42 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
              EditTimeline.content_at(state.workspace.agent_ui.view.edit_timeline, "/tmp/a.ex", 1)
   end
 
+  test "spinner ticks advance only while the foreground agent is busy" do
+    busy = StatusEventWorkflow.status_changed(event_state(), :thinking)
+    frame = busy.workspace.agent_ui.panel.spinner_frame
+    busy = SessionEventWorkflow.spinner_tick(busy)
+
+    assert busy.workspace.agent_ui.panel.spinner_frame == frame + 1
+    assert RenderCorrelation.scheduled?(busy.render.render_correlation)
+
+    idle = StatusEventWorkflow.status_changed(busy, :idle)
+    idle_frame = idle.workspace.agent_ui.panel.spinner_frame
+    idle = SessionEventWorkflow.spinner_tick(idle)
+
+    assert idle.workspace.agent_ui.panel.spinner_frame == idle_frame
+    assert TraditionalState.agent(idle.shell_runtime.state).spinner_timer == nil
+  end
+
+  test "credentials status alone updates presentation and schedules a render" do
+    state = event_state()
+    panel = state.workspace.agent_ui.panel
+    state = SessionEventWorkflow.credentials_status(state, true)
+
+    assert state.workspace.agent_ui.panel.credentials_configured
+    assert state.workspace.agent_ui.panel.message_version == panel.message_version
+    assert state.workspace.agent_ui.panel.cached_display_messages == panel.cached_display_messages
+    assert RenderCorrelation.scheduled?(state.render.render_correlation)
+  end
+
+  test "error status logs the user-visible agent failure marker" do
+    :ok = Minga.Events.subscribe(:log_message)
+    on_exit(fn -> Minga.Events.unsubscribe(:log_message) end)
+
+    _state = StatusEventWorkflow.status_changed(event_state(), :error)
+
+    assert_agent_error_logged()
+  end
+
   test "session workflow installs approval state before render and transcript synchronization" do
     {:ok, session} = start_supervised({Session, provider_opts: []})
     state = event_state(session)
@@ -219,6 +281,22 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     assert TraditionalState.agent(state.shell_runtime.state).error == "provider failed"
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
+  end
+
+  @spec assert_agent_error_logged(integer()) :: :ok
+  defp assert_agent_error_logged(deadline \\ System.monotonic_time(:millisecond) + 500) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:minga_event, :log_message, %Minga.Events.LogMessageEvent{text: text}} ->
+        if String.contains?(text, "Agent: error") do
+          :ok
+        else
+          assert_agent_error_logged(deadline)
+        end
+    after
+      remaining -> flunk("Agent: error was not routed to the messages log")
+    end
   end
 
   @spec file_record(String.t(), String.t(), String.t()) :: EventRecord.t()

@@ -91,14 +91,14 @@ defmodule Minga.Credo.EditorStateOwnership.Validator do
          exact_module?(Keyword.get(ownership, :struct)) and
          valid_owner_list?(Keyword.get(ownership, :owners)) and
          valid_paths?(Keyword.get(ownership, :paths)) and
-         optional_boolean?(Keyword.get(ownership, :pure, true)) and
+         Keyword.get(ownership, :pure, true) == true and
          optional_boolean?(Keyword.get(ownership, :generic_api, true)) and
          documented?(Keyword.get(ownership, :boundary)) and
          documented?(Keyword.get(ownership, :workflow)) do
       []
     else
       [
-        "ownership entries require an exact struct, non-empty owners, bounded atom paths, boundary, and workflow"
+        "ownership entries require an exact struct, non-empty owners, bounded atom paths, boundary, and workflow; owner purity cannot be disabled"
       ]
     end
   end
@@ -139,15 +139,24 @@ defmodule Minga.Credo.EditorStateOwnership.Validator do
       |> Enum.flat_map(&Keyword.fetch!(&1, :owners))
       |> MapSet.new()
 
-    Enum.flat_map(modules, fn module ->
-      if MapSet.member?(declared_owners, module) do
-        []
-      else
-        [
-          "pure_modules entry #{module} is not a declared ownership owner; add it to an ownership :owners list or remove it from pure_modules"
-        ]
-      end
-    end)
+    configured_modules = MapSet.new(modules)
+
+    undeclared_errors =
+      modules
+      |> Enum.reject(&MapSet.member?(declared_owners, &1))
+      |> Enum.map(fn module ->
+        "pure_modules entry #{module} is not a declared ownership owner; add it to an ownership :owners list or remove it from pure_modules"
+      end)
+
+    omitted_errors =
+      declared_owners
+      |> MapSet.difference(configured_modules)
+      |> Enum.sort()
+      |> Enum.map(fn module ->
+        "declared ownership owner #{module} is missing from pure_modules; use :owners or include every declared owner"
+      end)
+
+    undeclared_errors ++ omitted_errors
   end
 
   @spec validate_allowlist(term()) :: [error()]

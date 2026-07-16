@@ -8,12 +8,15 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
   use ExUnit.Case, async: false
 
   alias Minga.Extension.CodeLease
+  alias Minga.Project.FileTree
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Shell.Registry, as: ShellRegistry
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Viewport
   alias MingaGitPorcelain.Commands
@@ -63,11 +66,11 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     assert request.source == @source
     refute contains_runtime_authority?(request.effect)
 
-    assert_receive {:dependency_called, :project_root, worker, nil}, @timeout
-    assert worker != self()
-    assert_receive {:dependency_called, :git_root, ^worker, "/tmp/project"}, @timeout
+    assert_receive {:dependency_called, :project_root, caller, nil}, @timeout
+    assert caller == self()
+    assert_receive {:dependency_called, :git_root, ^caller, "/tmp/project"}, @timeout
 
-    assert_receive {:dependency_called, :staged_diff, ^worker, {"/tmp/repo", [staged: true]}},
+    assert_receive {:dependency_called, :staged_diff, worker, {"/tmp/repo", [staged: true]}},
                    @timeout
 
     assert_receive {:dependency_called, :generator, ^worker, "diff --git"}, @timeout
@@ -153,7 +156,10 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
              "Commit message source unavailable:"
            )
 
-    refute_received {:dependency_called, :project_root, _worker, nil}
+    assert_receive {:dependency_called, :project_root, caller, nil}
+    assert caller == self()
+    assert_receive {:dependency_called, :git_root, ^caller, "/tmp/project"}
+    refute_received {:dependency_called, :staged_diff, _worker, _payload}
     assert CodeLease.active_leases(server: @admission) == []
   end
 
@@ -233,6 +239,46 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
 
     assert_receive {:effect_terminal, %Outcome{status: :canceled, request: %{id: ^completed_id}}},
                    @timeout
+  end
+
+  test "delayed success cannot open a prompt after an A to B to A repository switch" do
+    Dependencies.put(:generator, {:block, {:ok, "late subject"}})
+    {state, scheduler} = build_state()
+
+    initial_file_tree =
+      FileTreeState.begin_root_scan(
+        state.workspace.file_tree,
+        FileTree.new("/tmp/repo-a"),
+        :project
+      )
+
+    initial_workspace = SessionState.set_file_tree(state.workspace, initial_file_tree)
+    initial = %{state | workspace: initial_workspace}
+    returned = Commands.schedule_commit_generation(initial, dependency_opts())
+    _running = receive_running()
+    assert_receive {:dependency_called, :generator, worker, "diff --git"}, @timeout
+
+    b_file_tree =
+      FileTreeState.begin_root_scan(
+        returned.workspace.file_tree,
+        FileTree.new("/tmp/repo-b"),
+        :project
+      )
+
+    a_file_tree =
+      FileTreeState.begin_root_scan(b_file_tree, FileTree.new("/tmp/repo-a"), :project)
+
+    switched_workspace = SessionState.set_file_tree(returned.workspace, a_file_tree)
+    switched = %{returned | workspace: switched_workspace}
+    send(worker, {:release_dependency, :generator})
+
+    {result, outcome} = receive_and_apply(switched, scheduler, :completed)
+    assert outcome.status == :stale
+    assert outcome.reason == :repository_changed
+    assert result.shell_runtime.state.modal == :none
+
+    assert result.shell_runtime.state.notice.message ==
+             "Commit message result ignored after repository changed"
   end
 
   test "delayed success respects an existing modal and a foreign shell" do
