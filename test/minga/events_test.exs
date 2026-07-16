@@ -13,6 +13,7 @@ defmodule Minga.EventsTest do
     assert :ok = Events.subscribe(:buffer_opened, registry)
     payload = %Events.BufferEvent{buffer: self(), path: "/tmp/test.ex"}
 
+    assert payload.history_attribution == :active_workspace
     assert :ok = Events.broadcast(:buffer_opened, payload, registry)
     assert_receive {:minga_event, :buffer_opened, ^payload}
     assert self() in Events.subscribers(:buffer_opened, registry)

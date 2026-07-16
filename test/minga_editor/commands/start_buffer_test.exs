@@ -34,5 +34,23 @@ defmodule MingaEditor.Commands.StartBufferTest do
       assert {:ok, pid} = Commands.start_buffer(path, options_server)
       assert BufferProcess.get_option(pid, :autopair_block) == false
     end
+
+    test "attributes a newly opened buffer's history to its caller when requested", %{
+      tmp_dir: tmp_dir
+    } do
+      path = Path.join(tmp_dir, "caller-managed.txt")
+      File.write!(path, "hello")
+      Minga.Events.subscribe(:buffer_opened)
+
+      assert {:ok, pid} =
+               Commands.start_buffer(path, nil, history_attribution: :caller_managed)
+
+      assert_receive {:minga_event, :buffer_opened,
+                      %Minga.Events.BufferEvent{
+                        buffer: ^pid,
+                        path: ^path,
+                        history_attribution: :caller_managed
+                      }}
+    end
   end
 end

@@ -36,6 +36,20 @@ defmodule MingaEditor.UI.Picker.ProjectFileCandidate do
     Root.resolve_file(root, path)
   end
 
+  @doc """
+  Authorizes the candidate and returns its lexical workspace entry path.
+
+  This is for entry-level operations such as unlinking a symlink: authorization
+  follows the target through `Root`, while the returned path still names the
+  selected directory entry rather than its canonical referent.
+  """
+  @spec authorized_entry_path(t()) :: {:ok, String.t()} | {:error, error()}
+  def authorized_entry_path(%__MODULE__{root: %Root{} = root, path: path} = candidate) do
+    with {:ok, _canonical_path} <- resolve(candidate) do
+      {:ok, Path.join(root.path, path)}
+    end
+  end
+
   @spec safe_candidate(Root.t(), {:ok, String.t()} | :error) ::
           {:ok, t()} | {:error, :empty_path | :parent_traversal}
   defp safe_candidate(_root, {:ok, ""}), do: {:error, :empty_path}

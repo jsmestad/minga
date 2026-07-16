@@ -422,6 +422,34 @@ defmodule Minga.ProjectTest do
       assert "lib/app.ex" in recent
     end
 
+    test "root-scoped recording updates captured project history without switching workspaces", %{
+      tmp_dir: tmp
+    } do
+      project_a = Path.join(tmp, "captured_project")
+      project_b = Path.join(tmp, "active_project")
+      File.mkdir_p!(project_a)
+      File.mkdir_p!(project_b)
+      File.write!(Path.join(project_a, "captured.ex"), "")
+      {:ok, root_a} = Root.directory(project_a)
+
+      {_pid, name} = start_project!()
+      Project.switch(name, project_b)
+      flush(name)
+
+      Project.record_file_for_root(name, root_a, "captured.ex")
+      flush(name)
+
+      assert %WorkspaceSnapshot{root: %Root{path: ^project_b}} = Project.snapshot(name)
+      assert Project.recent_files(name) == []
+      assert Project.frecency_scores(name) == %{}
+
+      Project.switch(name, project_a)
+      flush(name)
+
+      assert Project.recent_files(name) == ["captured.ex"]
+      assert Project.frecency_scores(name)["captured.ex"] > 0
+    end
+
     test "most recently opened file appears first", %{tmp_dir: tmp} do
       project = Path.join(tmp, "recent_order")
       lib = Path.join(project, "lib")

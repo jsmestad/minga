@@ -64,22 +64,29 @@ defmodule Minga.Buffer do
     abs_path = Path.expand(path)
     options_server = Keyword.get(opts, :options_server, Minga.Config.Options.default_server())
 
+    history_attribution =
+      Keyword.get(opts, :history_attribution, :active_workspace)
+
     case pid_for_path(abs_path) do
       {:ok, pid} ->
         {:ok, pid}
 
       :not_found ->
         if File.exists?(abs_path) do
-          start_buffer_for_path(abs_path, events_registry, options_server)
+          start_buffer_for_path(abs_path, events_registry, options_server, history_attribution)
         else
           {:error, :enoent}
         end
     end
   end
 
-  @spec start_buffer_for_path(String.t(), Minga.Events.registry(), Minga.Config.Options.server()) ::
-          {:ok, pid()} | {:error, term()}
-  defp start_buffer_for_path(abs_path, events_registry, options_server) do
+  @spec start_buffer_for_path(
+          String.t(),
+          Minga.Events.registry(),
+          Minga.Config.Options.server(),
+          Minga.Events.BufferEvent.history_attribution()
+        ) :: {:ok, pid()} | {:error, term()}
+  defp start_buffer_for_path(abs_path, events_registry, options_server, history_attribution) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
            {__MODULE__,
@@ -90,7 +97,8 @@ defmodule Minga.Buffer do
           :buffer_opened,
           %Minga.Events.BufferEvent{
             buffer: pid,
-            path: abs_path
+            path: abs_path,
+            history_attribution: history_attribution
           },
           events_registry
         )

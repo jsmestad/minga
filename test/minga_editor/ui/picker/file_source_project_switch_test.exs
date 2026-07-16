@@ -52,6 +52,11 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
 
     activate_project!(root_a)
 
+    Enum.each(1..2, fn _ ->
+      Project.record_file_for_root(root_a, "marked/two.txt")
+      _ = :sys.get_state(Project)
+    end)
+
     production_state =
       TestHelpers.base_state(content: "initial")
       |> set_file_tree(%FileTree{project_root: project_a})
@@ -64,6 +69,7 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     items_by_path = Map.new(items, fn item -> {item.id.path, item} end)
 
     assert Enum.sort(Map.keys(items_by_path)) == Enum.sort(relative_paths)
+    assert hd(items).id.path == "marked/two.txt"
 
     assert Enum.all?(items, fn item ->
              match?(%ProjectFileCandidate{root: ^root_a}, item.id) and
@@ -92,6 +98,16 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
       |> PickerBuilder.build()
 
     assert %PickerModel{preview_lines: [[{"A:preview.txt", 0xCCCCCC, false}]]} = preview_model
+
+    for legacy_id <- ["preview.txt", Path.join(project_b, "preview.txt")] do
+      legacy_preview_model =
+        %Picker.Item{id: legacy_id, label: "preview.txt"}
+        |> picker_modal()
+        |> build_preview_context(rerooted_state)
+        |> PickerBuilder.build()
+
+      assert legacy_preview_model.preview_lines == nil
+    end
 
     FileSource.on_action(:delete, items_by_path["delete.txt"], rerooted_state)
     refute File.exists?(Path.join(project_a, "delete.txt"))
@@ -124,6 +140,8 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     assert Minga.Buffer.file_path(bulk_opened_state.workspace.buffers.active) ==
              Path.join(project_a, "bulk/two.txt")
 
+    assert Project.frecency_scores() == %{}
+
     assert %Minga.Project.WorkspaceSnapshot{
              root: ^root_b,
              files: project_b_files,
@@ -131,6 +149,50 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
            } = Project.snapshot()
 
     assert Enum.sort(project_b_files) == Enum.sort(relative_paths)
+
+    activate_project!(root_a)
+    assert "single.txt" in Project.recent_files()
+    assert Project.frecency_scores()["single.txt"] > 0
+  end
+
+  test "a stale nested-root candidate attributes a new buffer open only to its captured root", %{
+    tmp_dir: tmp_dir
+  } do
+    project_b = Path.join(tmp_dir, "live_project")
+    project_a = Path.join(project_b, "stale_nested_project")
+    relative_path = "nested.txt"
+    absolute_path = Path.join(project_a, relative_path)
+
+    File.mkdir_p!(project_a)
+    File.write!(absolute_path, "nested")
+    {:ok, root_a} = Root.directory(project_a)
+    {:ok, root_b} = Root.directory(project_b)
+    {:ok, stale_candidate} = ProjectFileCandidate.new(root_a, relative_path)
+
+    activate_project!(root_a)
+    existing_score = Map.get(Project.frecency_scores(), relative_path, 0)
+    activate_project!(root_b)
+
+    initial_state =
+      TestHelpers.base_state(content: "initial")
+      |> set_file_tree(%FileTree{project_root: project_b})
+
+    selected_state =
+      FileSource.on_select(
+        %Picker.Item{id: stale_candidate, label: relative_path},
+        initial_state
+      )
+
+    on_exit(fn -> stop_added_buffers(selected_state, initial_state) end)
+    _ = :sys.get_state(Project)
+
+    assert Minga.Buffer.file_path(selected_state.workspace.buffers.active) == absolute_path
+    assert Project.recent_files() == []
+    assert Project.frecency_scores() == %{}
+
+    activate_project!(root_a)
+    assert Project.recent_files() == [relative_path]
+    assert Project.frecency_scores()[relative_path] == existing_score + 100
   end
 
   @spec activate_project!(Root.t()) :: :ok

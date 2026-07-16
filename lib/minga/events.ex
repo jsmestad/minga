@@ -72,9 +72,15 @@ defmodule Minga.Events do
   defmodule BufferEvent do
     @moduledoc "Payload for `:buffer_saved` and `:buffer_opened` events."
     @enforce_keys [:buffer, :path]
-    defstruct [:buffer, :path]
+    defstruct [:buffer, :path, history_attribution: :active_workspace]
 
-    @type t :: %__MODULE__{buffer: pid(), path: String.t()}
+    @type history_attribution :: :active_workspace | :caller_managed
+
+    @type t :: %__MODULE__{
+            buffer: pid(),
+            path: String.t(),
+            history_attribution: history_attribution()
+          }
   end
 
   defmodule BufferClosedEvent do

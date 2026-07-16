@@ -8,6 +8,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.RenderModel.UI.Picker.ActionMenu
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.ProjectFileCandidate
 
   @max_items 100
@@ -155,17 +156,18 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
       %Picker.Item{} = item ->
         case Picker.Source.preview(source, item, ctx, callback_source) do
-          nil -> build_preview_for_item(ctx, item)
+          nil -> build_preview_for_item(ctx, source, item)
           lines -> lines
         end
     end
   end
 
   # Build preview lines for a file path item.
-  @spec build_preview_for_item(Context.t(), Picker.Item.t()) ::
+  @spec build_preview_for_item(Context.t(), module() | nil, Picker.Item.t()) ::
           [[PickerModel.preview_segment()]] | nil
   defp build_preview_for_item(
          ctx,
+         _source,
          %Picker.Item{id: %ProjectFileCandidate{} = candidate}
        ) do
     abs_path =
@@ -177,18 +179,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     build_file_preview(ctx, abs_path)
   end
 
-  defp build_preview_for_item(ctx, %Picker.Item{id: id}) when is_binary(id) do
+  defp build_preview_for_item(_ctx, FileSource, %Picker.Item{}), do: nil
+
+  defp build_preview_for_item(ctx, _source, %Picker.Item{id: id}) when is_binary(id) do
     build_file_preview(ctx, resolve_preview_path(id, Minga.Project.resolve_root()))
   end
 
-  defp build_preview_for_item(ctx, %Picker.Item{id: idx}) when is_integer(idx) do
+  defp build_preview_for_item(ctx, _source, %Picker.Item{id: idx}) when is_integer(idx) do
     case Enum.at(ctx.buffers.list, idx) do
       nil -> nil
       buf_pid -> preview_from_buffer(ctx, buf_pid)
     end
   end
 
-  defp build_preview_for_item(_ctx, _id), do: nil
+  defp build_preview_for_item(_ctx, _source, _item), do: nil
 
   @spec build_file_preview(Context.t(), String.t() | nil) ::
           [[PickerModel.preview_segment()]] | nil

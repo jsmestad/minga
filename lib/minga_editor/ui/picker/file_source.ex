@@ -131,6 +131,8 @@ defmodule MingaEditor.UI.Picker.FileSource do
     }
   end
 
+  defp enrich_item(%Item{} = item), do: item
+
   @spec log_error(String.t()) :: []
   defp log_error(msg) do
     Minga.Log.error(:editor, "find_file: #{msg}")
@@ -141,26 +143,29 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: %ProjectFileCandidate{} = candidate}, state) do
     Log.debug(:editor, "[file_picker] on_select path=#{candidate.path}")
-    open_selected_file(ProjectFileCandidate.resolve(candidate), state)
+    open_selected_file(ProjectFileCandidate.resolve(candidate), candidate, state)
   end
 
   @spec open_selected_file(
           {:ok, String.t()} | {:error, ProjectFileCandidate.error()},
+          ProjectFileCandidate.t(),
           term()
         ) :: term()
-  defp open_selected_file({:error, reason}, state) do
+  defp open_selected_file({:error, reason}, _candidate, state) do
     Log.error(:editor, "Failed to resolve project file candidate: #{inspect(reason)}")
     state
   end
 
-  defp open_selected_file({:ok, abs_path}, state) do
+  defp open_selected_file({:ok, abs_path}, candidate, state) do
     case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil ->
-        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
+        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server,
+               history_attribution: :caller_managed
+             ) do
           {:ok, pid} ->
             Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
             new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
-            record_selection(abs_path, state)
+            record_selection(candidate, state)
             new_state
 
           {:error, reason} ->
@@ -170,7 +175,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
       idx ->
         new_state = switch_existing_buffer(state, idx)
-        record_selection(abs_path, state)
+        record_selection(candidate, state)
         new_state
     end
   end
@@ -222,7 +227,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
         %Item{id: %ProjectFileCandidate{} = candidate},
         state
       ) do
-    delete_selected_file(ProjectFileCandidate.resolve(candidate), state)
+    delete_selected_file(ProjectFileCandidate.authorized_entry_path(candidate), state)
   end
 
   def on_action(_action, _item, state), do: state
@@ -268,12 +273,12 @@ defmodule MingaEditor.UI.Picker.FileSource do
     Enum.reduce(items, state, fn item, acc -> on_select(item, acc) end)
   end
 
-  @spec record_selection(String.t(), term()) :: :ok
-  defp record_selection(_abs_path, %{buffer_lifecycle: %{buffer_add_context: :preview}}),
+  @spec record_selection(ProjectFileCandidate.t(), term()) :: :ok
+  defp record_selection(_candidate, %{buffer_lifecycle: %{buffer_add_context: :preview}}),
     do: :ok
 
-  defp record_selection(abs_path, _state) do
-    Minga.Project.record_file(abs_path)
+  defp record_selection(%ProjectFileCandidate{root: root, path: path}, _state) do
+    Minga.Project.record_file_for_root(root, path)
   catch
     :exit, _ -> :ok
   end
