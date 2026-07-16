@@ -180,56 +180,6 @@ defmodule Minga.Extension.SupervisorTest do
                {:ok, pid}
     end
 
-    test "restarts when registry has stale running pid outside supervisor", ctx do
-      {path, cleanup} =
-        make_extension("StaleRunningExt", """
-        defmodule Minga.TestExtensions.StaleRunningExt do
-          use Minga.Extension
-
-          @impl true
-          def name, do: :stale_running_ext
-
-          @impl true
-          def description, do: "Stale running test extension"
-
-          @impl true
-          def version, do: "1.0.0"
-
-          @impl true
-          def init(_config), do: {:ok, %{}}
-        end
-        """)
-
-      on_exit(fn ->
-        cleanup.()
-        :code.purge(Minga.TestExtensions.StaleRunningExt)
-        :code.delete(Minga.TestExtensions.StaleRunningExt)
-      end)
-
-      :ok = ExtRegistry.register(ctx.registry, :stale_running_ext, path, [])
-      {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_running_ext)
-      stale_pid = self()
-
-      ExtRegistry.update(ctx.registry, :stale_running_ext,
-        status: :running,
-        pid: stale_pid,
-        module: Minga.TestExtensions.StaleRunningExt
-      )
-
-      assert {:ok, pid} =
-               ExtSupervisor.start_extension(
-                 ctx.supervisor,
-                 ctx.registry,
-                 :stale_running_ext,
-                 entry
-               )
-
-      assert pid != stale_pid
-      {:ok, updated} = ExtRegistry.get(ctx.registry, :stale_running_ext)
-      assert updated.status == :running
-      assert updated.pid == pid
-    end
-
     test "records load_error for nonexistent path", ctx do
       :ok =
         ExtRegistry.register(

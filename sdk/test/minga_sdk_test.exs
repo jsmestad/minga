@@ -40,6 +40,32 @@ defmodule MingaSdkTest do
     end
   end
 
+  describe "agent declaration contract" do
+    test "agent UI declarations compile into the SDK schema" do
+      defmodule TestAgentExtension do
+        use Minga.Extension.Agent
+
+        agent_ui(id: "status", surface: :panel, payload: %{text: "Ready"})
+
+        @impl true
+        def name, do: :test_agent_ext
+
+        @impl true
+        def description, do: "Test agent extension"
+
+        @impl true
+        def version, do: "0.1.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+
+      assert TestAgentExtension.__agent_ui_schema__() == [
+               [id: "status", surface: :panel, payload: %{text: "Ready"}]
+             ]
+    end
+  end
+
   describe "runtime callback family contract" do
     test "family type contains only retained events" do
       {:ok, types} = Code.Typespec.fetch_types(Minga.Extension)
@@ -54,6 +80,17 @@ defmodule MingaSdkTest do
              |> Code.Typespec.type_to_quoted()
              |> Macro.to_string() ==
                "editor_event_family() :: :buffer_saved | :editor_action | :source_unload"
+
+      assert {:type, {:extension_status, status_type, []}} =
+               Enum.find(types, fn
+                 {:type, {:extension_status, _type, []}} -> true
+                 _other -> false
+               end)
+
+      assert {:extension_status, status_type, []}
+             |> Code.Typespec.type_to_quoted()
+             |> Macro.to_string() ==
+               "extension_status() :: :running | :stopped | :crashed | :load_error | :stub"
     end
   end
 

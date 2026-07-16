@@ -172,18 +172,6 @@ defmodule Minga.Extension.Editor do
   end
 
   @doc """
-  Declares a synchronous runtime editor callback owned by this extension.
-
-  Supported families are `:buffer_saved`, `:editor_action`, and `:source_unload`.
-  Options support an integer `:priority` (default `100`).
-  """
-  defmacro editor_event_handler(callback, families, opts \\ []) do
-    quote do
-      @__extension_editor_event_handlers__ {unquote(callback), unquote(families), unquote(opts)}
-    end
-  end
-
-  @doc """
   Declares a keybinding this extension provides.
 
   Accumulated at compile time and exposed via `__keybind_schema__/0`.
@@ -210,6 +198,19 @@ defmodule Minga.Extension.Editor do
   end
 
   @doc """
+  Declares a synchronous runtime editor callback owned by this extension.
+
+  Supported families are `:buffer_saved`, `:editor_action`, and `:source_unload`.
+  The framework derives source ownership during lifecycle registration. Options
+  support an integer `:priority` (default `100`).
+  """
+  defmacro editor_event_handler(callback, families, opts \\ []) do
+    quote do
+      @__extension_editor_event_handlers__ {unquote(callback), unquote(families), unquote(opts)}
+    end
+  end
+
+  @doc """
   Sets the extension's load policy.
 
   See `Minga.Extension` for supported policies and examples.
@@ -226,28 +227,21 @@ defmodule Minga.Extension.Editor do
       read_editor_attributes(env.module)
 
     quote do
-      @doc false
       @spec __option_schema__() :: [Minga.Extension.option_spec()]
       def __option_schema__, do: unquote(Macro.escape(options))
 
-      @doc false
       @spec __command_schema__() :: [Minga.Extension.command_spec()]
       def __command_schema__, do: unquote(Macro.escape(commands))
 
-      @doc false
       @spec __keybind_schema__() :: [Minga.Extension.keybind_spec()]
       def __keybind_schema__, do: unquote(Macro.escape(keybinds))
 
-      @doc false
       @spec __modeline_segment_schema__() :: [Minga.Extension.modeline_segment_spec()]
       def __modeline_segment_schema__, do: unquote(Macro.escape(modeline_segments))
 
-      @doc false
       @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
       def __capability_schema__, do: unquote(Macro.escape(capabilities))
 
-      @doc false
-      @doc false
       @spec __editor_event_handler_schema__() :: [Minga.Extension.editor_event_handler_spec()]
       def __editor_event_handler_schema__, do: unquote(Macro.escape(event_handlers))
 

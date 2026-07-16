@@ -32,16 +32,30 @@ defmodule Minga.Application do
       │   │   ├── Minga.Command.Registry
       │   │   └── Minga.Diagnostics
       │   ├── Minga.Extension.Registry
+      │   ├── MingaEditor.Extension.Sidebar
+      │   ├── Minga.Extension.ArtifactGenerationState
+      │   ├── Minga.Extension.ArtifactAdmission
+      │   ├── Minga.Extension.CodeLease
+      │   ├── Minga.Extension.CallbackRegistry
+      │   ├── Minga.Extension.InstanceRegistry
+      │   ├── Minga.Extension.RootSupervisor
+      │   │   └── Minga.Extension.Root(name) (rest_for_one)
+      │   │       ├── Minga.Extension.RuntimeSupervisor(name)
+      │   │       └── Minga.Extension.Instance(name)
       │   ├── MingaAgent.ProviderRegistry
+      │   ├── MingaAgent.ProviderPacks.Native
       │   ├── MingaAgent.Hooks.Registry
       │   ├── MingaAgent.MCP.ServerRegistry
       │   ├── MingaAgent.Skills.Registry
       │   ├── MingaEditor.Agent.SlashCommand.Registry
-      │   ├── Minga.Extension.Supervisor
+      │   ├── MingaEditor.Agent.SemanticUI.Registry
       │   ├── Minga.Config.Loader
+      │   ├── Minga.Config.Writer
       │   ├── Minga.LSP.Supervisor
       │   ├── Minga.LSP.SyncServer
-      │   └── Minga.Project
+      │   ├── Minga.Project
+      │   ├── MingaAgent.SessionManager
+      │   └── MingaAgent.ReactiveDiagnostics
       ├── MingaAgent.Supervisor (DynamicSupervisor, one_for_one)
       ├── Minga.Runtime.Supervisor (one_for_one, conditional)
       │   ├── MingaEditor.Watchdog          (independent leaf)

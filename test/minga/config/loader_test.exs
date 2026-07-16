@@ -1076,7 +1076,7 @@ defmodule Minga.Config.LoaderTest do
 
       previous_load_extensions = Application.get_env(:minga, :load_extensions)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
-      Application.put_env(:minga, :load_extensions, true)
+      Application.put_env(:minga, :load_extensions, false)
 
       on_exit(fn ->
         restore_application_env(:load_extensions, previous_load_extensions)
@@ -1132,6 +1132,14 @@ defmodule Minga.Config.LoaderTest do
         end
       }
 
+      File.write!(
+        Path.join(minga_dir, "config.exs"),
+        """
+        use Minga.Config
+        extension :loader_start_all_failure, path: #{inspect(ext_dir)}
+        """
+      )
+
       name = :"loader_reload_start_all_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -1142,14 +1150,8 @@ defmodule Minga.Config.LoaderTest do
         )
 
       assert Loader.load_error(pid) == nil
-
-      File.write!(
-        Path.join(minga_dir, "config.exs"),
-        """
-        use Minga.Config
-        extension :loader_start_all_failure, path: #{inspect(ext_dir)}
-        """
-      )
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.put_env(:minga, :load_extensions, true)
 
       assert {:error, msg} = Loader.reload(pid)
       assert msg =~ "Extension start_all failed"
@@ -1158,6 +1160,141 @@ defmodule Minga.Config.LoaderTest do
       assert msg =~ "intentional_failure"
       assert msg =~ "cleanup failure"
       assert Loader.load_error(pid) =~ "Extension start_all failed"
+    end
+
+    test "reload detects one-argument module declaration changes" do
+      {minga_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        extension Minga.Extensions.MCP
+        """)
+
+      on_exit(fn ->
+        ExtRegistry.reset()
+        cleanup.()
+      end)
+
+      name = :"loader_module_declaration_reload_#{System.unique_integer([:positive])}"
+      {:ok, loader} = Loader.start_link(name: name, config_home: config_home)
+      assert Loader.load_error(loader) == nil
+      assert {:ok, %{module: Minga.Extensions.MCP}} = ExtRegistry.get(:minga_mcp)
+
+      File.write!(Path.join(minga_dir, "config.exs"), "use Minga.Config\n")
+
+      assert {:error, message} = Loader.reload(loader)
+      assert message == "Extension declarations changed; restart Minga before config reload"
+      assert {:ok, %{module: Minga.Extensions.MCP}} = ExtRegistry.get(:minga_mcp)
+    end
+
+    test "reload detects a newly created project extension declaration" do
+      {_minga_dir, config_home, cleanup_config} = make_config_dir("use Minga.Config\n")
+      previous_cwd = File.cwd!()
+
+      project_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "minga-loader-new-project-config-#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(project_dir)
+      File.cd!(project_dir)
+      extension_name = :loader_new_project_extension
+
+      on_exit(fn ->
+        File.cd!(previous_cwd)
+        File.rm_rf!(project_dir)
+        ExtRegistry.unregister(extension_name)
+        cleanup_config.()
+      end)
+
+      name = :"loader_new_project_config_#{System.unique_integer([:positive])}"
+      {:ok, loader} = Loader.start_link(name: name, config_home: config_home)
+      assert Loader.load_error(loader) == nil
+
+      File.write!(Path.join(project_dir, ".minga.exs"), """
+      use Minga.Config
+      extension #{inspect(extension_name)}, path: "/tmp/new-project-extension"
+      """)
+
+      assert {:error, message} = Loader.reload(loader)
+      assert message == "Extension declarations changed; restart Minga before config reload"
+      assert :error = ExtRegistry.get(extension_name)
+    end
+
+    @tag :heavy
+    test "reload rejects changed extension declarations before stopping the admitted runtime" do
+      ensure_extension_runtime()
+      suffix = System.unique_integer([:positive])
+      extension_name = String.to_atom("loader_declaration_pinned_#{suffix}")
+      extension_module = Module.concat(["LoaderDeclarationPinned#{suffix}"])
+      original_dir = Path.join(System.tmp_dir!(), "minga-loader-declaration-original-#{suffix}")
+
+      replacement_dir =
+        Path.join(System.tmp_dir!(), "minga-loader-declaration-replacement-#{suffix}")
+
+      File.mkdir_p!(original_dir)
+      File.mkdir_p!(replacement_dir)
+
+      source = """
+      defmodule #{inspect(extension_module)} do
+        use Minga.Extension
+        @impl true
+        def name, do: #{inspect(extension_name)}
+        @impl true
+        def description, do: "Config declaration generation fixture"
+        @impl true
+        def version, do: "1.0.0"
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+      """
+
+      File.write!(Path.join(original_dir, "extension.ex"), source)
+      File.write!(Path.join(replacement_dir, "extension.ex"), source)
+
+      {minga_dir, config_home, cleanup_config} =
+        make_config_dir("""
+        use Minga.Config
+        extension #{inspect(extension_name)}, path: #{inspect(original_dir)}
+        """)
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+        cleanup_config.()
+        File.rm_rf!(original_dir)
+        File.rm_rf!(replacement_dir)
+        :code.purge(extension_module)
+        :code.delete(extension_module)
+      end)
+
+      loader_name = String.to_atom("loader_declaration_reload_#{suffix}")
+      {:ok, loader} = Loader.start_link(name: loader_name, config_home: config_home)
+      assert Loader.load_error(loader) == nil
+      assert {:ok, declared} = ExtRegistry.get(extension_name)
+
+      assert {:ok, runtime_pid} =
+               ExtSupervisor.start_extension(
+                 Minga.Extension.Supervisor,
+                 ExtRegistry,
+                 extension_name,
+                 declared
+               )
+
+      File.write!(Path.join(minga_dir, "config.exs"), """
+      use Minga.Config
+      extension #{inspect(extension_name)}, path: #{inspect(replacement_dir)}
+      """)
+
+      assert {:error, message} = Loader.reload(loader)
+      assert message == "Extension declarations changed; restart Minga before config reload"
+
+      assert {:ok, unchanged} = ExtRegistry.get(extension_name)
+      assert unchanged.path == Path.expand(original_dir)
+      assert unchanged.pid == runtime_pid
+
+      runtime_supervisor = InstanceRegistry.via(InstanceRegistry, :runtime, extension_name)
+      assert RuntimeSupervisor.local_child(runtime_supervisor) == {:ok, runtime_pid}
     end
 
     @tag :heavy
@@ -1273,7 +1410,7 @@ defmodule Minga.Config.LoaderTest do
       assert Options.get(test_options_server(), :tab_width) == 7
     end
 
-    test "reload purges old user modules" do
+    test "reload rejects changed user modules and keeps admitted code resident" do
       {minga_dir, config_home, cleanup} = make_config_dir("")
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
@@ -1300,8 +1437,8 @@ defmodule Minga.Config.LoaderTest do
       end
       """)
 
-      assert :ok = Loader.reload(pid)
-      assert apply(Minga.UserModules.Reloadable, :version, []) == 2
+      assert {:error, "User module restart required before config reload"} = Loader.reload(pid)
+      assert apply(Minga.UserModules.Reloadable, :version, []) == 1
     end
 
     test "reload clears stale user commands" do

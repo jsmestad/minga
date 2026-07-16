@@ -22,9 +22,9 @@ These are the properties that make Emacs Emacs. Any replacement must match all s
 
 ## How Elixir on the BEAM matches each one
 
-### 1. Redefine any function at runtime ✅
+### 1. Replace behavior through declared extension boundaries ✅
 
-The BEAM was designed for hot code reloading. Erlang systems upgrade running code without dropping active connections. Elixir inherits this fully.
+The BEAM can hot-reload code, but Minga deliberately keeps compiled extension and user-module code fixed for one OS-process generation. Custom behavior is declared through commands, advice, hooks, keybindings, and extension callbacks, then a fresh Minga process admits changed modules as one validated artifact.
 
 **Elisp:**
 ```elisp
@@ -46,19 +46,11 @@ defmodule MyMotion do
   end
 end
 
-# Replace the motion in the running editor
+# Register the command or advice that uses MyMotion, then restart Minga after editing the module.
 Minga.Config.override(Minga.Motion.Word, :word_forward, &MyMotion.word_forward/2)
 ```
 
-Under the hood, the BEAM's code server manages two versions of a module simultaneously (the "current" and the "old"). When you load new code, existing function calls finish on the old version while new calls use the updated one. This is safer than Elisp's immediate replacement, where redefining a function mid-execution can cause subtle bugs.
-
-**Reloading a module you've edited:**
-```elixir
-# Recompile and reload (~50ms)
-r(MyMotion)
-
-# Or from the editor: SPC h r to reload all user modules
-```
+Minga does not expose the BEAM code server as an extension update mechanism. `SPC h r` re-evaluates configuration data, but it rejects changed extension or `~/.config/minga/modules` source. Restarting gives module ownership, callback admission, and cleanup one unambiguous generation boundary.
 
 ### 2. Advice system ✅
 

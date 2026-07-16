@@ -12,8 +12,6 @@ defmodule Minga.Extension.Lazy do
   @typedoc "Result from registering lazy stubs."
   @type stub_result :: :ok | {:error, term()}
 
-  @authority_retry_attempts 2
-
   @doc "Registers path/Git/Hex stubs through the extension Instance."
   @spec register_stubs(
           GenServer.server(),
@@ -177,7 +175,7 @@ defmodule Minga.Extension.Lazy do
           [DeferredBatchCompleteEvent.failure()]
         ) :: [DeferredBatchCompleteEvent.failure()]
   defp start_deferred_instance({instance, name, declaration}, failures) do
-    case safe_start_deferred(name, instance, declaration) do
+    case safe_start_deferred(instance, declaration) do
       {:ok, _pid} ->
         Log.info(:config, "Extension #{name} deferred load complete")
         failures
@@ -190,7 +188,7 @@ defmodule Minga.Extension.Lazy do
 
   @spec safe_start(atom(), GenServer.server()) :: {:ok, pid()} | {:error, term()}
   defp safe_start(name, instance) do
-    case retry_instance_call(name, instance, &Instance.start/1, @authority_retry_attempts) do
+    case call_instance(instance, &Instance.start/1) do
       {:authority_call_exit, reason} ->
         failure = {:authority_call_exit, name, reason}
         Log.warning(:config, "Extension #{name} lazy activation failed: #{inspect(failure)}")
@@ -201,73 +199,23 @@ defmodule Minga.Extension.Lazy do
     end
   end
 
-  @spec safe_start_deferred(atom(), GenServer.server(), ExtRegistry.entry()) ::
+  @spec safe_start_deferred(GenServer.server(), ExtRegistry.entry()) ::
           {:ok, pid()} | {:error, term()}
-  defp safe_start_deferred(name, instance, declaration) do
-    case retry_instance_call(
-           name,
-           instance,
-           fn current -> Instance.start_deferred(current, declaration) end,
-           @authority_retry_attempts
-         ) do
+  defp safe_start_deferred(instance, declaration) do
+    case call_instance(instance, fn current -> Instance.start_deferred(current, declaration) end) do
       {:authority_call_exit, reason} -> {:error, {:instance_call_exit, reason}}
       result -> result
     end
   end
 
-  @spec retry_instance_call(
-          atom(),
-          GenServer.server(),
-          (GenServer.server() -> result),
-          non_neg_integer()
-        ) :: result | {:authority_call_exit, term()}
+  @spec call_instance(GenServer.server(), (GenServer.server() -> result)) ::
+          result | {:authority_call_exit, term()}
         when result: var
-  defp retry_instance_call(name, instance, fun, retries) do
+  defp call_instance(instance, fun) do
     fun.(instance)
   catch
-    :exit, reason ->
-      retry_instance_call_after_exit(name, instance, fun, retries, reason)
+    :exit, reason -> {:authority_call_exit, reason}
   end
-
-  @spec retry_instance_call_after_exit(
-          atom(),
-          GenServer.server(),
-          (GenServer.server() -> result),
-          non_neg_integer(),
-          term()
-        ) :: result | {:authority_call_exit, term()}
-        when result: var
-  defp retry_instance_call_after_exit(name, instance, fun, retries, reason) do
-    if retries > 0 and restart_gap?(reason) do
-      case await_current_instance(instance, name) do
-        {:ok, current} -> retry_instance_call(name, current, fun, retries - 1)
-        {:error, _reason} -> {:authority_call_exit, reason}
-      end
-    else
-      {:authority_call_exit, reason}
-    end
-  end
-
-  @spec await_current_instance(GenServer.server(), atom()) ::
-          {:ok, GenServer.server()} | {:error, term()}
-  defp await_current_instance(
-         {:via, Registry, {registry, {:instance, name}}} = instance,
-         name
-       ) do
-    case InstanceRegistry.await(registry, :instance, name) do
-      {:ok, _pid} -> {:ok, instance}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp await_current_instance(_instance, name),
-    do: {:error, {:authority_unavailable, name, :unregistered_server}}
-
-  @spec restart_gap?(term()) :: boolean()
-  defp restart_gap?(:noproc), do: true
-  defp restart_gap?({:noproc, _call}), do: true
-  defp restart_gap?({:authority_unavailable, _name, reason}), do: restart_gap?(reason)
-  defp restart_gap?(_reason), do: false
 
   @spec root_supervisor(GenServer.server()) :: GenServer.server()
   defp root_supervisor(ExtSupervisor), do: Minga.Extension.RootSupervisor

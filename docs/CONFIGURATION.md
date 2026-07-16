@@ -1056,7 +1056,7 @@ set :tab_width, TodoTools.preferred_tab_width()
 
 Press `SPC h r` to reload ordinary configuration without restarting the editor. Before changing runtime state, Minga fingerprints every admitted path and Git extension from a private source snapshot. If any source differs from the artifact admitted for the current VM generation, reload reports that a restart is required and leaves the running extension module, process, manifest version, and contributions unchanged. It does not compile the changed source.
 
-When admitted extension sources are unchanged, reload stops their runtime processes without purging code, purges user modules from `modules/`, resets config-owned options, keybindings, hooks, advice, and commands, re-evaluates `config.exs`, `.minga.exs`, and `after.exs`, then starts extensions from their already admitted artifacts. Changed keybindings and options take effect immediately. The status bar shows "Config reloaded" on success or an error message if something went wrong.
+Reload also fingerprints `~/.config/minga/modules/*.ex`. If those files changed, it reports that a fresh Minga process is required and leaves resident code and runtime state alone. When all compiled sources are unchanged, reload stops extension runtimes through their lifecycle Instances, keeps user modules resident, resets config-owned options, keybindings, hooks, advice, and commands, re-evaluates `config.exs`, `.minga.exs`, and `after.exs`, then starts extensions from their admitted artifacts. Changed data declarations take effect immediately. The status bar shows "Config reloaded" on success or an error message if something went wrong.
 
 You can also reload from the command line with `:reload-config` (not yet wired as an ex command, use `SPC h r`).
 

@@ -8,7 +8,33 @@ All functions are safe to call with dead PIDs, stopped sessions, or when no sess
 
 Path and Git extensions compile only in a standalone disposable BEAM OS process. Its standard streams are bounded, discarded byte data rather than an ETF-capable host control channel. Source is bounded and copied into a private immutable snapshot before hashing or compilation. A second standalone process structurally validates bounded BEAM/ETF data and writes a descriptor-verified UTF-8 report before the host creates atoms or loads code. The complete validated BEAM artifact set establishes module ownership before host loading; direct, nested, atom-targeted, macro-generated, runtime-generated, and spawned-process-generated ordinary Elixir modules are supported when conflict-free. Cache hits enforce the same metadata, completeness, resource-limit, and ownership checks as fresh compilation. This protects host validation but does not sandbox trusted extension filesystem or network authority.
 
-Stopping or lazily starting an extension in the current session uses only the artifact admitted for that source when the VM generation began. Source edits and Git updates require a fresh Minga OS process and never purge, recompile, or replace active extension code.
+The validated artifact inventory, not an AST prediction or one entry module, owns the source's modules. A source can emit helper modules through ordinary Elixir compilation as long as every validated BEAM name matches its artifact and no module belongs to Minga, an OTP application, or another extension.
+
+Stopping, disabling, lazily starting, or restarting an extension in the current session uses only the artifact admitted for that source when the VM generation began. Source edits, user-module edits under `~/.config/minga/modules`, and Git updates require a fresh Minga OS process. Config reload reports a restart requirement instead of purging, recompiling, or replacing resident code. The updater stages accepted Git source for the next process and rolls the checkout back on a staging failure without disturbing the active runtime.
+
+## Lifecycle and child restart
+
+Every declaration has one stable `Minga.Extension.Instance` mailbox. Public start and stop APIs, lazy triggers, failed starts, runtime exits, and config reload all send lifecycle intent there. The PID in extension listings is only a projection of the current runtime child and is never an authority extension code should retain.
+
+The Instance validates options and runs `init/1` before it starts the child returned by `child_spec/1`. After the child is alive, it registers commands, keybindings, editor callbacks, and callback admission before publishing `:running`. If setup fails, it follows the same stop order as a normal disable and preserves the start diagnostic, wrapping it only when cleanup also fails.
+
+The top-level `restart` value returned by `child_spec/1` is interpreted by the Instance. Minga starts the actual runtime child as `:temporary` under the extension's local runtime supervisor, so OTP does not race the lifecycle authority. `:permanent` restarts after every terminal exit, `:transient` restarts after abnormal exits, and `:temporary` never restarts. If your child is itself a supervisor, that supervisor still owns its internal children normally.
+
+```elixir
+def child_spec(config) do
+  Supervisor.child_spec({MyExtension.Supervisor, config}, restart: :transient)
+end
+```
+
+A runtime disable leaves modules resident. The Instance first closes new callback admission, waits for source leases to drain, and asks the Editor to cancel source-owned effects. It then runs source-filtered `:source_unload` callbacks, terminates the runtime child, removes source-owned contributions once, publishes `:stopped`, and acknowledges the caller. Editor finalization is asynchronous, so an unload callback must not synchronously call back into extension lifecycle APIs.
+
+## Runtime callbacks and source-owned work
+
+Use `editor_event_handler/3` for the retained callback families: `:buffer_saved`, `:editor_action`, and `:source_unload`. Buffer-save handlers run as an ordered fan-out. Editor actions stop at the first `{:handled, state}` and continue only after `:not_matched`. Source-unload handlers run only for the extension being disabled.
+
+Dynamic extension callbacks cross `Minga.Extension.CallbackInvoker`. Exceptions, throws, exits, unavailable modules, and invalid return values become explicit callback failures and are reported without turning into a second callback protocol. Core callbacks execute directly and retain normal OTP crash behavior. Extension commands and editor handlers should return the documented state shape rather than rescuing framework failures themselves.
+
+Slow picker, Git, and similar work must be represented as a typed `MingaEditor.Effect` request. `MingaEditor.EffectScheduler` owns worker supervision, resource ordering, cancellation, and result application. Tag requests with the extension source so disable can cancel them before presentation and callback registrations are removed. Do not spawn an untracked task and send a custom result message to the Editor.
 
 ## Listing sessions
 

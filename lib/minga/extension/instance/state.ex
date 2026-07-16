@@ -89,7 +89,7 @@ defmodule Minga.Extension.Instance.State do
     %{state | collaborators: current_collaborators(state.collaborators, collaborators)}
   end
 
-  @doc "Removes request-scoped callbacks, hooks, and timeout overrides."
+  @doc "Removes request-scoped callbacks and timeout overrides."
   @spec stable_collaborators(keyword()) :: keyword()
   def stable_collaborators(collaborators) do
     Enum.reject(collaborators, fn {key, _value} -> request_override?(key) end)
@@ -206,7 +206,6 @@ defmodule Minga.Extension.Instance.State do
 
   @spec request_override?(atom()) :: boolean()
   defp request_override?(:callbacks), do: true
-  defp request_override?(:test_hooks), do: true
   defp request_override?(:slow_lifecycle_threshold_ms), do: true
 
   defp request_override?(key) when is_atom(key) do
