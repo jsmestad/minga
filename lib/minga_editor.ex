@@ -542,14 +542,13 @@ defmodule MingaEditor do
   end
 
   def handle_cast({:unload_extension_source_request, source, context, {caller, ref}}, state) do
-    case SourceFinalizer.finalize_unload(state, source, context) do
+    case SourceFinalizer.finalize_unload(state, source, context, {caller, ref}) do
       {:ok, new_state} ->
-        send(caller, {:extension_source_finalized, ref, :ok})
-        {:noreply, Renderer.render_or_async(new_state)}
+        {:noreply, new_state}
 
-      {{:error, failures}, new_state} ->
-        send(caller, {:extension_source_finalized, ref, {:error, failures}})
-        {:noreply, Renderer.render_or_async(new_state)}
+      {:error, reason, new_state} ->
+        send(caller, {:extension_source_finalized, ref, {:error, reason}})
+        {:noreply, new_state}
     end
   end
 
@@ -911,6 +910,12 @@ defmodule MingaEditor do
   # Correlated file-tree debounce timers enter the domain workflow directly.
   def handle_info({:file_tree_refresh_timer, token}, state) when is_reference(token) do
     {:noreply, MingaEditor.FileTree.Freshness.begin_refresh(state, token)}
+  end
+
+  def handle_info({:file_tree_watcher_retry, token, opts}, state)
+      when is_reference(token) and is_list(opts) do
+    state = MingaEditor.FileTree.Freshness.retry_watcher_sync(state, token, opts)
+    {:noreply, schedule_render(state, 16)}
   end
 
   # Renderer.Server writeback after each async frame completes.

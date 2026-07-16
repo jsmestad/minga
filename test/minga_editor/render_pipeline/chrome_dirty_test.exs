@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Test.FakeShell
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -199,6 +200,13 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       fp2 = Input.chrome_fingerprint(input2)
 
       assert fp1 != fp2
+    end
+
+    test "generic fingerprint treats non-Traditional shell state as opaque" do
+      input = base_state() |> Input.from_editor_state() |> Map.put(:shell, FakeShell)
+      input = %{input | shell_state: {:opaque, :shell_state}}
+
+      assert is_integer(Input.chrome_fingerprint(input))
     end
 
     test "unchanged input between frames produces stable fingerprint" do

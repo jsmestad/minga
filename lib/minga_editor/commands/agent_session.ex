@@ -982,7 +982,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp session_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     case TabBar.active_workspace(tb) do
       %Workspace{kind: :agent} = workspace ->
-        if Workspace.project_view_active?(workspace) do
+        if MingaEditor.WorkspaceWorkflow.project_view_active?(workspace) do
           {workspace.project_view, false}
         else
           project_view_from_root(state)

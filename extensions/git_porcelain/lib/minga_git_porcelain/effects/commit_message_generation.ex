@@ -19,29 +19,44 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   @generator MingaGitPorcelain.Git.CommitMessageGenerator
 
   @type source :: CallbackInvoker.source()
+  @type repository_context :: {
+          project_root :: String.t() | nil,
+          original_root :: String.t() | nil,
+          root_generation :: non_neg_integer()
+        }
+  @type repository_resolution :: {:ok, String.t()} | {:error, term()}
 
-  @enforce_keys [:source, :git, :generator, :project, :admission]
-  defstruct [:source, :git, :generator, :project, :admission]
+  @enforce_keys [:source, :git, :generator, :admission, :repository_context, :repository]
+  defstruct [:source, :git, :generator, :admission, :repository_context, :repository]
 
   @type t :: %__MODULE__{
           source: source(),
           git: module(),
           generator: module(),
-          project: module(),
-          admission: GenServer.server()
+          admission: GenServer.server(),
+          repository_context: repository_context(),
+          repository: repository_resolution()
         }
 
-  @doc "Builds a single-slot commit-generation request."
-  @spec request(keyword()) :: Request.t()
-  def request(opts \\ []) when is_list(opts) do
+  @doc "Builds a single-slot request correlated to an exact root lifecycle and repository."
+  @spec request(repository_context(), repository_resolution(), keyword()) :: Request.t()
+  def request(
+        {project_root, original_root, generation} = repository_context,
+        repository,
+        opts \\ []
+      )
+      when (is_binary(project_root) or is_nil(project_root)) and
+             (is_binary(original_root) or is_nil(original_root)) and
+             is_integer(generation) and generation >= 0 and is_list(opts) do
     {:extension, _name} = source = Keyword.get(opts, :source, @source)
 
     effect = %__MODULE__{
       source: source,
       git: Keyword.get(opts, :git, Git),
       generator: Keyword.get(opts, :generator, @generator),
-      project: Keyword.get(opts, :project, Minga.Project),
-      admission: Keyword.get(opts, :admission, CodeLease)
+      admission: Keyword.get(opts, :admission, CodeLease),
+      repository_context: repository_context,
+      repository: repository
     }
 
     Request.new(effect, {:git_porcelain_commit_generation, source}, Policy.fifo(0),
@@ -79,7 +94,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   @doc false
   @spec execute(t()) :: {:ok, {:generated, String.t()}} | {:error, term()}
   def execute(%__MODULE__{} = effect) do
-    with {:ok, root} <- resolve_root(effect),
+    with {:ok, root} <- effect.repository,
          {:ok, diff} <- staged_diff(effect.git, root),
          {:non_empty, true} <- {:non_empty, diff != ""},
          {:ok, message} <- generate(effect.generator, diff) do
@@ -94,17 +109,47 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   @spec coalesce(t(), t()) :: t()
   def coalesce(_older, newer), do: newer
 
-  @doc "Applies generation feedback and opens the existing commit prompt."
+  @doc "Returns the exact project roots that identify the active repository context."
+  @spec repository_context(EditorState.t()) :: repository_context()
+  def repository_context(%EditorState{workspace: %{file_tree: file_tree}}) do
+    {file_tree.project_root, file_tree.original_root,
+     MingaEditor.State.FileTree.root_generation(file_tree)}
+  end
+
+  @doc "Resolves the exact repository root captured before worker admission."
+  @spec resolve_repository(module(), module()) :: repository_resolution()
+  def resolve_repository(git, project) when is_atom(git) and is_atom(project) do
+    case git.root_for(project.resolve_root()) do
+      {:ok, root} -> {:ok, root}
+      :not_git -> {:error, :not_a_repository}
+      {:error, reason} -> {:error, {:root_resolution_failed, reason}}
+    end
+  end
+
+  @doc "Applies generation feedback only while the originating repository remains active."
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{status: :running} = outcome) do
+  def apply(
+        %EditorState{} = state,
+        %Outcome{
+          request: %Request{effect: %__MODULE__{repository_context: expected_context}}
+        } = outcome
+      ) do
+    case repository_context(state) do
+      ^expected_context -> apply_current(state, outcome)
+      _current_context -> stale_repository_result(state, outcome)
+    end
+  end
+
+  @spec apply_current(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  defp apply_current(state, %Outcome{status: :running} = outcome) do
     {publish_notice(state, "Generating commit message…"), outcome}
   end
 
-  def apply(
-        %{shell_runtime: %{state: %TraditionalState{modal: modal}}} = state,
-        %Outcome{status: :completed, result: {:generated, message}} = outcome
-      ) do
+  defp apply_current(
+         %{shell_runtime: %{state: %TraditionalState{modal: modal}}} = state,
+         %Outcome{status: :completed, result: {:generated, message}} = outcome
+       ) do
     state =
       if ModalOverlay.active?(modal) do
         NoticeWorkflow.publish(state, "Commit message ready (prompt already open)")
@@ -117,34 +162,35 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
     {state, outcome}
   end
 
-  def apply(state, %Outcome{status: :completed, result: {:generated, _message}} = outcome),
-    do: {state, outcome}
+  defp apply_current(
+         state,
+         %Outcome{status: :completed, result: {:generated, _message}} = outcome
+       ),
+       do: {state, outcome}
 
-  def apply(state, %Outcome{status: :failed, reason: reason} = outcome) do
+  defp apply_current(state, %Outcome{status: :failed, reason: reason} = outcome) do
     {publish_notice(state, failure_message(reason)), outcome}
   end
 
-  def apply(state, %Outcome{status: :canceled, reason: :source_canceled} = outcome),
+  defp apply_current(state, %Outcome{status: :canceled, reason: :source_canceled} = outcome),
     do: {state, outcome}
 
-  def apply(state, %Outcome{status: :canceled} = outcome) do
+  defp apply_current(state, %Outcome{status: :canceled} = outcome) do
     {publish_notice(state, "Commit message generation canceled"), outcome}
   end
 
-  def apply(state, %Outcome{status: :stale} = outcome), do: {state, outcome}
+  defp apply_current(state, %Outcome{status: :stale} = outcome), do: {state, outcome}
+
+  @spec stale_repository_result(EditorState.t(), Outcome.t()) ::
+          {EditorState.t(), Outcome.t()}
+  defp stale_repository_result(state, outcome) do
+    state = publish_notice(state, "Commit message result ignored after repository changed")
+    {state, Outcome.stale(outcome, :repository_changed)}
+  end
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
   def render?(%Outcome{}), do: true
-
-  @spec resolve_root(t()) :: {:ok, String.t()} | {:error, :not_a_repository | term()}
-  defp resolve_root(%__MODULE__{git: git, project: project}) do
-    case git.root_for(project.resolve_root()) do
-      {:ok, root} -> {:ok, root}
-      :not_git -> {:error, :not_a_repository}
-      {:error, reason} -> {:error, {:root_resolution_failed, reason}}
-    end
-  end
 
   @spec staged_diff(module(), String.t()) :: {:ok, String.t()} | {:error, term()}
   defp staged_diff(git, root) do

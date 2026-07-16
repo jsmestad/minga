@@ -30,7 +30,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.GitRepositoryResolver
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
-  alias MingaEditor.Extension.EventDispatcher, as: ExtensionEventDispatcher
+  alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
@@ -1282,22 +1282,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp open_git_diff_for_path(state, git_root, git_path, abs_path, current_content, opts) do
     arguments = {git_root, git_path, abs_path, current_content, opts}
 
-    case ExtensionEventDispatcher.dispatch_editor_action(
-           state,
-           :open_git_diff_for_path,
-           arguments
-         ) do
-      {:handled, updated_state} -> updated_state
-      :not_matched -> git_porcelain_unavailable(state)
-      {:callback_failed, _failure} -> git_porcelain_callback_failed(state)
-    end
-  end
-
-  @spec git_porcelain_callback_failed(state()) :: state()
-  defp git_porcelain_callback_failed(state) do
-    message = "Git porcelain extension callback failed"
-    Minga.Log.warning(:editor, message)
-    NoticeWorkflow.publish(state, message)
+    ExtensionEventWorkflow.dispatch(
+      state,
+      {:editor_action, :open_git_diff_for_path, arguments}
+    )
   end
 
   @spec git_porcelain_unavailable(state()) :: state()

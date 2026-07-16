@@ -38,6 +38,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.WindowTree
   alias MingaEditor.Shell.BufferMetadata
   alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.RenderPipeline.Input, as: RenderInput
   alias MingaEditor.Session.State, as: SessionState
 
   @impl true
@@ -183,6 +184,21 @@ defmodule MingaEditor.Shell.Traditional do
 
   @impl true
   @spec chrome_fingerprint(term()) :: term()
+  def chrome_fingerprint(%RenderInput{shell_state: %ShellState{} = shell_state}) do
+    {
+      shell_state.tab_bar,
+      shell_state.notice,
+      shell_state.flashes,
+      shell_state.hover_popup,
+      shell_state.signature_help,
+      shell_state.whichkey,
+      ShellState.modal(shell_state),
+      ShellState.agent(shell_state),
+      shell_state.bottom_panel,
+      ShellState.git_status_panel(shell_state)
+    }
+  end
+
   def chrome_fingerprint(editor_state),
     do: MingaEditor.Shell.Traditional.Chrome.chrome_fingerprint(editor_state)
 

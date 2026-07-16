@@ -61,7 +61,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Runtime
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
@@ -328,46 +327,21 @@ defmodule MingaEditor.RenderPipeline.Input do
       # Mode affects status bar label, minibuffer content, cursor shape
       input.workspace.editing.mode,
       input.workspace.editing.mode_state,
-      # Tab bar state
-      input.shell_state |> Map.get(:tab_bar),
-      # Ordinary notice and independent flash owners
-      input.shell_state |> Map.get(:notice),
-      input.shell_state |> Map.get(:flashes),
       # Sidebar registry state drives sidebar chrome/layout rebuilds.
       Sidebar.all(input.sidebar_registry),
       # File tree
       input.workspace.file_tree,
-      # Hover popup and signature help
-      input.shell_state |> Map.get(:hover_popup),
-      input.shell_state |> Map.get(:signature_help),
-      # Which-key popup
-      input.shell_state |> Map.get(:whichkey),
-      # Modal overlay (sum type covering picker, prompt, conflict,
-      # completion)
-      input.shell_state |> Map.get(:modal),
-      # Agent state (status, pending approval)
-      MingaEditor.Shell.Traditional.State.agent(input.shell_state),
       # Viewport dimensions (overlay positioning)
       input.terminal_viewport.rows,
       input.terminal_viewport.cols,
       # Window splits (separator rendering)
       input.workspace.windows.tree,
-      # Bottom panel
-      input.shell_state |> Map.get(:bottom_panel),
       # GUI notification center
       input.notifications,
-      # Git status panel
-      git_status_panel(input),
-      # Shell-owned chrome state that does not belong in the generic pipeline contract
+      # Shell-owned chrome state stays behind the shell contract.
       input.shell.chrome_fingerprint(input)
     })
   end
-
-  @spec git_status_panel(t()) :: MingaEditor.GitStatus.Panel.t() | nil
-  defp git_status_panel(%__MODULE__{shell_state: %TraditionalState{} = shell_state}),
-    do: TraditionalState.git_status_panel(shell_state)
-
-  defp git_status_panel(%__MODULE__{}), do: nil
 
   @spec status_bar_fingerprint(t()) :: integer()
   defp status_bar_fingerprint(%__MODULE__{} = input) do

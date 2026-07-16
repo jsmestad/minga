@@ -66,7 +66,7 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
       completion: Keyword.get(opts, :completion),
       trigger: Keyword.get(opts, :trigger, CompletionTrigger.new()),
       owner: owner,
-      opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
+      opened_at: Keyword.get(opts, :opened_at, 0)
     }
   end
 

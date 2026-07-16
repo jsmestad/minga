@@ -397,7 +397,11 @@ defmodule MingaGitPorcelain.Commands do
   @doc "Schedules staged-diff commit-message generation."
   @spec schedule_commit_generation(state(), keyword()) :: state()
   def schedule_commit_generation(state, opts \\ []) when is_list(opts) do
-    request = CommitMessageGeneration.request(opts)
+    repository_context = CommitMessageGeneration.repository_context(state)
+    git = Keyword.get(opts, :git, Git)
+    project = Keyword.get(opts, :project, Minga.Project)
+    repository = CommitMessageGeneration.resolve_repository(git, project)
+    request = CommitMessageGeneration.request(repository_context, repository, opts)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _request_id, _disposition} ->

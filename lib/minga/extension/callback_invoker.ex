@@ -86,7 +86,7 @@ defmodule Minga.Extension.CallbackInvoker do
   @spec invalid_return(source(), module(), atom(), term()) :: failure()
   def invalid_return({:extension, name} = source, module, function, returned)
       when is_atom(name) and is_atom(module) and is_atom(function) do
-    failure = {:invalid_return, source, module, function, returned}
+    failure = {:invalid_return, source, module, function, invalid_return_summary(returned)}
     report_failure(failure)
     failure
   end
@@ -175,6 +175,23 @@ defmodule Minga.Extension.CallbackInvoker do
     report_failure(failure, semantics: semantics, stacktrace: stacktrace)
     {:error, failure}
   end
+
+  @spec invalid_return_summary(term()) :: map()
+  defp invalid_return_summary(value) when is_tuple(value) do
+    tag = if tuple_size(value) > 0 and is_atom(elem(value, 0)), do: elem(value, 0), else: nil
+    %{kind: :tuple, size: tuple_size(value), tag: tag}
+  end
+
+  defp invalid_return_summary(%module{}), do: %{kind: :struct, module: module}
+  defp invalid_return_summary(value) when is_map(value), do: %{kind: :map, size: map_size(value)}
+  defp invalid_return_summary(value) when is_list(value), do: %{kind: :list, empty?: value == []}
+
+  defp invalid_return_summary(value) when is_binary(value),
+    do: %{kind: :binary, size: byte_size(value)}
+
+  defp invalid_return_summary(value) when is_atom(value), do: %{kind: :atom, value: value}
+  defp invalid_return_summary(value) when is_number(value), do: %{kind: :number}
+  defp invalid_return_summary(_value), do: %{kind: :other}
 
   @spec report_failure(failure(), keyword()) :: :ok
   defp report_failure(failure, diagnostic_opts \\ []) do

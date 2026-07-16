@@ -12,12 +12,13 @@ defmodule MingaEditor.Extension.SourceFinalizer do
   alias Minga.Extension.CodeLease
   alias Minga.Extension.ContributionCleanup
   alias MingaEditor.EffectScheduler
-  alias MingaEditor.Extension.EventDispatcher
+  alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
 
   @cleanup_family :editor_effects
   @unload_family :editor_extension_unload
+  @editor_request_timeout 2_000
 
   @type source :: ContributionCleanup.contribution_source()
   @type result :: :ok | {:error, term()}
@@ -70,18 +71,15 @@ defmodule MingaEditor.Extension.SourceFinalizer do
     end
   end
 
-  @doc "Runs source-filtered unload callbacks and preserves their last successful state."
-  @spec finalize_unload(EditorState.t(), CallbackInvoker.source(), unload_context()) ::
-          {:ok, EditorState.t()} | {{:error, term()}, EditorState.t()}
-  def finalize_unload(%EditorState{} = state, {:extension, _name} = source, context) do
-    token = Map.fetch!(context, :token)
-    registry = Map.get(context, :callback_registry, CallbackRegistry.default_table())
-    admission = Map.get(context, :callback_admission, CodeLease)
-
-    case EventDispatcher.dispatch_source_unload(state, source, token, registry, admission) do
-      {:ok, updated_state} -> {:ok, updated_state}
-      {:error, failures, updated_state} -> {{:error, failures}, updated_state}
-    end
+  @doc "Schedules source-filtered unload callbacks and defers the cleanup acknowledgement."
+  @spec finalize_unload(
+          EditorState.t(),
+          CallbackInvoker.source(),
+          unload_context(),
+          {pid(), reference()}
+        ) :: {:ok, EditorState.t()} | {:error, term(), EditorState.t()}
+  def finalize_unload(%EditorState{} = state, {:extension, _name} = source, context, reply_to) do
+    EventWorkflow.dispatch_unload(state, source, context, reply_to)
   end
 
   @doc "Cancels source work before removing its live picker presentation."
@@ -115,6 +113,10 @@ defmodule MingaEditor.Extension.SourceFinalizer do
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
         {:error, {:editor_unavailable, reason}}
+    after
+      @editor_request_timeout ->
+        Process.demonitor(ref, [:flush])
+        {:error, {:editor_request_timeout, @editor_request_timeout}}
     end
   end
 end

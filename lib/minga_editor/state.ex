@@ -134,6 +134,20 @@ defmodule MingaEditor.State do
     %{state | appearance: appearance, parser: parser}
   end
 
+  @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
+  @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
+  def accept_extension_event_result(
+        %__MODULE__{} = current,
+        %__MODULE__{} = base,
+        %__MODULE__{} = candidate
+      ) do
+    if current == %{base | render: current.render} do
+      {:ok, %{candidate | render: current.render}}
+    else
+      :stale
+    end
+  end
+
   @doc "Atomically integrates a synchronous focused renderer receipt."
   @spec integrate_synchronous_renderer_receipt(t(), RenderReceipt.t()) :: t()
   def integrate_synchronous_renderer_receipt(%__MODULE__{} = state, %RenderReceipt{} = receipt) do

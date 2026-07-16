@@ -10,10 +10,12 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
   alias Minga.Test.FileTreeRefreshScanner
+  alias Minga.Test.FileTreeWatcherBackend
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
+  alias MingaEditor.FileTree.WatcherSync
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Frontend
 
@@ -131,9 +133,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     Process.cancel_timer(accepted.render.render_correlation.timer)
   end
 
-  test "failed and canceled outcomes clear current correlation without requesting rendering", %{
-    tmp_dir: root
-  } do
+  test "current failures publish an error and request rendering", %{tmp_dir: root} do
     state = state_with_tree(root)
     %Frontend{} = frontend = state.frontend
     state = %{state | frontend: %Frontend{frontend | backend: :tui}}
@@ -143,14 +143,22 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {failed, %Outcome{status: :failed}} =
              Refresh.apply(tracked, Outcome.failed(request, :unreadable))
 
-    assert failed.render.render_correlation.timer == nil
+    assert {:error, reason} = FileTreeState.status(file_tree(failed))
+    assert reason =~ "unreadable"
     assert failed |> file_tree() |> then(& &1.refresh.current) == nil
+    assert is_reference(failed.render.render_correlation.timer)
+    Process.cancel_timer(failed.render.render_correlation.timer)
+  end
 
-    retry = Refresh.request(file_tree(failed).tree, failed.extension_surfaces.events_registry)
-    retracked = track(failed, retry)
+  test "canceled outcomes clear current correlation without requesting rendering", %{
+    tmp_dir: root
+  } do
+    state = state_with_tree(root)
+    request = Refresh.request(file_tree(state).tree, state.extension_surfaces.events_registry)
+    tracked = track(state, request)
 
     assert {canceled, %Outcome{status: :canceled}} =
-             Refresh.apply(retracked, Outcome.canceled(retry, :requested))
+             Refresh.apply(tracked, Outcome.canceled(request, :requested))
 
     assert canceled.render.render_correlation.timer == nil
     assert canceled |> file_tree() |> then(& &1.refresh.current) == nil
@@ -283,9 +291,10 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     Process.cancel_timer(loaded.render.render_correlation.timer)
   end
 
-  test "project-root scan failure installs the requested root error and a later scan recovers", %{
-    tmp_dir: root
-  } do
+  test "arbitrary project-root failure installs the requested root error and a later scan recovers",
+       %{
+         tmp_dir: root
+       } do
     old_root = Path.join(root, "old")
     failed_root = Path.join(root, "failed")
     recovered_root = Path.join(root, "recovered")
@@ -296,8 +305,9 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     failing =
       Freshness.update_project_root(state, failed_root,
         scanner: FileTreeRefreshScanner,
-        scanner_context: {self(), :failed_root, {:error, {:root_unavailable, :enoent}}},
-        synchronize_watchers?: false
+        scanner_context: {self(), :failed_root, {:error, {:invalid_refresh_result, :bad}}},
+        watcher_backend: FileTreeWatcherBackend,
+        watcher_context: {self(), :failed_cleanup, :immediate}
       )
 
     failed_id = file_tree(failing).refresh.current.token
@@ -313,6 +323,26 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
     Process.cancel_timer(failed.render.render_correlation.timer)
+
+    watcher_id = file_tree(failed).watchers.request.token
+
+    assert_receive {:file_tree_watcher_call, :failed_cleanup, :unwatch, first_root, worker},
+                   @timeout
+
+    assert_receive {:file_tree_watcher_call, :failed_cleanup, :unwatch, second_root, ^worker},
+                   @timeout
+
+    assert MapSet.new([first_root, second_root]) ==
+             MapSet.new([Path.expand(old_root), Path.expand(failed_root)])
+
+    cleanup_outcome = receive_outcome(scheduler, watcher_id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, cleanup_outcome)
+
+    assert {failed, %Outcome{status: :completed} = finalized_cleanup} =
+             WatcherSync.apply(failed, cleanup_outcome)
+
+    EffectScheduler.finalize(scheduler, finalized_cleanup)
+    assert file_tree(failed).watchers.candidates == MapSet.new()
 
     recovered_result = tree(recovered_root, [entry(recovered_root, "ok.ex")])
 

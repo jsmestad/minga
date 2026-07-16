@@ -29,14 +29,14 @@ defmodule MingaEditor.State.ModalOverlay.Picker do
   Builds a picker payload wrapping the given `picker_ui` state.
 
   The optional `:owner` keyword defaults to `:global`. The optional
-  `:opened_at` keyword defaults to `System.monotonic_time(:millisecond)`.
+  `:opened_at` defaults to `0`; workflows may pass an explicit monotonic timestamp when ordering metadata is required.
   """
   @spec new(PickerState.t(), keyword()) :: t()
   def new(%PickerState{} = picker_ui, opts \\ []) do
     %__MODULE__{
       picker_ui: picker_ui,
       owner: Keyword.get(opts, :owner, :global),
-      opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
+      opened_at: Keyword.get(opts, :opened_at, 0)
     }
   end
 

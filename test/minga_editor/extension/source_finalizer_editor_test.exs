@@ -304,7 +304,8 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     source = {:extension, :finalized_picker}
 
     callback_failure =
-      {:invalid_return, source, RootPickerExtension, :handle_editor_event, :invalid_unload_return}
+      {:invalid_return, source, RootPickerExtension, :handle_editor_event,
+       %{kind: :atom, value: :invalid_unload_return}}
 
     finalizer_failure = %{
       family: :editor_extension_unload,

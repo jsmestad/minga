@@ -187,12 +187,18 @@ defmodule Minga.Extension.CodeLease do
 
   @impl true
   def handle_call({:activate_source, source, modules}, _from, state) do
-    case validate_modules(modules) do
-      {:ok, module_set} ->
-        record = %{status: :active, modules: module_set}
-        {:reply, :ok, %{state | sources: Map.put(state.sources, source, record)}}
+    case {validate_modules(modules), Map.get(state.sources, source)} do
+      {{:ok, _module_set}, %{status: {:quiescing, token}}} ->
+        {:reply, {:error, {:source_quiescing, source, token}}, state}
 
-      {:error, _reason} = error ->
+      {{:ok, module_set}, _record} ->
+        record = %{status: :active, modules: module_set}
+        token_sources = drop_source_tokens(state.token_sources, source)
+
+        {:reply, :ok,
+         %{state | sources: Map.put(state.sources, source, record), token_sources: token_sources}}
+
+      {{:error, _reason} = error, _record} ->
         {:reply, error, state}
     end
   end
@@ -315,16 +321,60 @@ defmodule Minga.Extension.CodeLease do
   @spec transition_unload_token(state(), unload_token(), source_status()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp transition_unload_token(state, token, next_status) do
-    case Map.pop(state.token_sources, token) do
-      {nil, _tokens} ->
+    case Map.get(state.token_sources, token) do
+      nil ->
         {:reply, {:error, {:invalid_unload_token, token}}, state}
 
-      {source, tokens} ->
-        record = Map.fetch!(state.sources, source)
-        record = %{record | status: next_status}
-        sources = Map.put(state.sources, source, record)
-        {:reply, :ok, %{state | sources: sources, token_sources: tokens}}
+      source ->
+        transition_current_unload(state, source, token, next_status)
     end
+  end
+
+  @spec transition_current_unload(
+          state(),
+          ContributionCleanup.contribution_source(),
+          unload_token(),
+          source_status()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp transition_current_unload(state, source, token, :inactive) do
+    case {Map.fetch!(state.sources, source), matching_leases(state, source, :_)} do
+      {%{status: {:quiescing, ^token}}, []} ->
+        commit_unload_transition(state, source, token, :inactive)
+
+      {%{status: {:quiescing, ^token}}, leases} ->
+        {:reply, {:error, {:active_source_leases, source, length(leases)}}, state}
+
+      {%{status: status}, _leases} ->
+        {:reply, {:error, {:stale_unload_token, source, status}}, state}
+    end
+  end
+
+  defp transition_current_unload(state, source, token, :active) do
+    case Map.fetch!(state.sources, source) do
+      %{status: {:quiescing, ^token}} ->
+        commit_unload_transition(state, source, token, :active)
+
+      %{status: status} ->
+        {:reply, {:error, {:stale_unload_token, source, status}}, state}
+    end
+  end
+
+  @spec commit_unload_transition(
+          state(),
+          ContributionCleanup.contribution_source(),
+          unload_token(),
+          source_status()
+        ) :: {:reply, :ok, state()}
+  defp commit_unload_transition(state, source, token, next_status) do
+    record = Map.fetch!(state.sources, source)
+    sources = Map.put(state.sources, source, %{record | status: next_status})
+    token_sources = Map.delete(state.token_sources, token)
+    {:reply, :ok, %{state | sources: sources, token_sources: token_sources}}
+  end
+
+  @spec drop_source_tokens(%{unload_token() => term()}, term()) :: %{unload_token() => term()}
+  defp drop_source_tokens(token_sources, source) do
+    Map.reject(token_sources, fn {_token, token_source} -> token_source == source end)
   end
 
   @spec ordinary_source(state(), term(), module()) :: :ok | {:error, term()}

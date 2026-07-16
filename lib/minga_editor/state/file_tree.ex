@@ -250,6 +250,10 @@ defmodule MingaEditor.State.FileTree do
   @spec watcher_intent(t()) :: Watchers.t()
   def watcher_intent(%__MODULE__{} = ft), do: ft.watchers
 
+  @doc "Returns the monotonic generation of the current root and watcher lineage."
+  @spec root_generation(t()) :: non_neg_integer()
+  def root_generation(%__MODULE__{} = ft), do: ft.watchers.generation
+
   @doc "Correlates the latest admitted watcher synchronization request."
   @spec track_watcher_request(t(), reference()) :: t()
   def track_watcher_request(%__MODULE__{} = ft, token) when is_reference(token) do
@@ -270,6 +274,27 @@ defmodule MingaEditor.State.FileTree do
     case Watchers.request_finished(ft.watchers, token) do
       {status, watchers} -> {status, %{ft | watchers: watchers}}
     end
+  end
+
+  @doc "Correlates a bounded watcher synchronization retry."
+  @spec schedule_watcher_retry(t(), reference()) :: {pos_integer(), t()}
+  def schedule_watcher_retry(%__MODULE__{} = ft, token) when is_reference(token) do
+    {attempt, watchers} = Watchers.retry_scheduled(ft.watchers, token)
+    {attempt, %{ft | watchers: watchers}}
+  end
+
+  @doc "Consumes only the current watcher retry timer."
+  @spec watcher_retry_elapsed(t(), reference()) :: {:current | :stale, t()}
+  def watcher_retry_elapsed(%__MODULE__{} = ft, token) when is_reference(token) do
+    case Watchers.retry_elapsed(ft.watchers, token) do
+      {status, watchers} -> {status, %{ft | watchers: watchers}}
+    end
+  end
+
+  @doc "Terminalizes watcher retry correlation after the bounded attempt budget."
+  @spec exhaust_watcher_retry(t()) :: t()
+  def exhaust_watcher_retry(%__MODULE__{} = ft) do
+    %{ft | watchers: Watchers.retry_exhausted(ft.watchers)}
   end
 
   @doc "Changes the watcher target to cleanup-only while retaining all known roots."

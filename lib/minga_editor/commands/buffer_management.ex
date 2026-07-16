@@ -1391,7 +1391,7 @@ defmodule MingaEditor.Commands.BufferManagement do
        ) do
     case project_view_changed_files(workspace) do
       {:ok, []} ->
-        case WorkspaceModel.close_project_view(workspace) do
+        case MingaEditor.WorkspaceWorkflow.close_project_view(workspace) do
           :ok ->
             remove_clean_project_view_workspace_after_session_down(
               state,
@@ -1818,7 +1818,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_agent_tab_without_session(state, tb, workspace, _workspace_view) do
     case project_view_changed_files(workspace) do
       {:ok, []} ->
-        case WorkspaceModel.close_project_view(workspace) do
+        case MingaEditor.WorkspaceWorkflow.close_project_view(workspace) do
           :ok ->
             state =
               WorkspaceWorkflow.install_tab_bar(

@@ -134,6 +134,8 @@ defmodule MingaGitPorcelain.LifecycleTest do
 
     request =
       CommitMessageGeneration.request(
+        {nil, nil, 0},
+        {:ok, "/tmp/repo"},
         source: @source,
         git: Dependencies,
         project: Dependencies,

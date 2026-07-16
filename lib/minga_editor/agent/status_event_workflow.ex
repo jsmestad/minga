@@ -110,15 +110,19 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   defp maybe_auto_compact(state, _estimated_tokens, nil), do: {state, :none}
   defp maybe_auto_compact(state, _estimated_tokens, 0), do: {state, :none}
 
-  defp maybe_auto_compact(state, estimated_tokens, context_limit) do
+  defp maybe_auto_compact(
+         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state,
+         estimated_tokens,
+         context_limit
+       ) do
     fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
     view = state.workspace.agent_ui.view
-
-    agent_status =
-      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
-
+    agent_status = TraditionalState.agent(shell_state).runtime.status
     compact_when_ready(state, view, agent_status, fill_pct)
   end
+
+  defp maybe_auto_compact(%EditorState{} = state, _estimated_tokens, _context_limit),
+    do: {state, :none}
 
   @spec compact_when_ready(EditorState.t(), term(), AgentState.status(), non_neg_integer()) ::
           {EditorState.t(), compaction_action()}

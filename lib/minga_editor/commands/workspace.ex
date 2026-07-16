@@ -327,7 +327,7 @@ defmodule MingaEditor.Commands.Workspace do
     else
       case project_view_changed_files(workspace) do
         {:ok, []} ->
-          case WorkspaceModel.close_project_view(workspace) do
+          case MingaEditor.WorkspaceWorkflow.close_project_view(workspace) do
             :ok ->
               remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
 
@@ -399,7 +399,7 @@ defmodule MingaEditor.Commands.Workspace do
             "Stop the agent session before closing this workspace"
           )
         else
-          case WorkspaceModel.close_project_view(workspace) do
+          case MingaEditor.WorkspaceWorkflow.close_project_view(workspace) do
             :ok ->
               remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
 

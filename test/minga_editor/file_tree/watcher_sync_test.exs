@@ -16,6 +16,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
   alias MingaEditor.FileTree.WatcherSync
   alias MingaEditor.State.FileTree, as: FileTreeState
 
+  import ExUnit.CaptureLog
   import MingaEditor.RenderPipeline.TestHelpers
 
   @moduletag :tmp_dir
@@ -84,41 +85,77 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     assert c_outcome.request.effect.target == c
   end
 
-  test "failed watcher sync retains lineage and the next exact request recovers", %{
-    tmp_dir: root
-  } do
+  test "an old-root success cannot cancel the current reroot retry", %{tmp_dir: root} do
+    a = Path.join(root, "a")
+    b = Path.join(root, "b")
+    old_token = make_ref()
+    retry_token = make_ref()
+
+    file_tree =
+      %FileTreeState{}
+      |> FileTreeState.open(tree(a), nil)
+      |> FileTreeState.track_watcher_request(old_token)
+      |> FileTreeState.begin_root_scan(tree(b), :project)
+
+    {1, file_tree} = FileTreeState.schedule_watcher_retry(file_tree, retry_token)
+
+    assert {:stale, retained} = FileTreeState.accept_watcher_result(file_tree, old_token, a)
+    assert retained.watchers.target == Path.expand(b)
+    assert retained.watchers.candidates == MapSet.new([Path.expand(a), Path.expand(b)])
+    assert retained.watchers.retry_token == retry_token
+    assert retained.watchers.retry_attempt == 1
+  end
+
+  test "partial watcher failure retains lineage and automatically retries", %{tmp_dir: root} do
     a = Path.join(root, "a")
     b = Path.join(root, "b")
     scheduler = start_scheduler()
     state = state_with_tree(a, scheduler) |> establish_owned_root(a, scheduler)
     state = retarget_state(state, b)
+    context = {self(), :partial, :wait}
 
     state =
       Freshness.synchronize_watchers(state,
         watcher_backend: FileTreeWatcherBackend,
-        watcher_context: {self(), :failed, {:fail, :unwatch, a, :unavailable}}
+        watcher_context: context
       )
 
     failed_id = file_tree(state).watchers.request.token
-    assert_receive {:file_tree_watcher_call, :failed, :unwatch, ^a, _worker}, @timeout
+    assert_receive {:file_tree_watcher_call, :partial, :unwatch, ^a, failed_worker}, @timeout
+    send(failed_worker, {:release_file_tree_watcher_call, :partial, :unwatch, a, :ok})
+    assert_receive {:file_tree_watcher_call, :partial, :watch, ^b, ^failed_worker}, @timeout
+
+    send(
+      failed_worker,
+      {:release_file_tree_watcher_call, :partial, :watch, b, {:error, :unavailable}}
+    )
+
     failed = receive_outcome(scheduler, failed_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed)
-    assert {state, %Outcome{status: :failed} = applied_failure} = WatcherSync.apply(state, failed)
-    EffectScheduler.finalize(scheduler, applied_failure)
 
+    {{state, %Outcome{status: :failed} = applied_failure}, log} =
+      with_log(fn -> WatcherSync.apply(state, failed) end)
+
+    EffectScheduler.finalize(scheduler, applied_failure)
+    assert log =~ "File tree watcher sync failed"
     assert file_tree(state).watchers.candidates == MapSet.new([a, b])
     assert file_tree(state).watchers.target == b
     assert file_tree(state).watchers.request == nil
+    assert file_tree(state).watchers.retry_attempt == 1
+    retry_token = file_tree(state).watchers.retry_token
 
-    state =
-      Freshness.synchronize_watchers(state,
-        watcher_backend: FileTreeWatcherBackend,
-        watcher_context: {self(), :recovered, :immediate}
-      )
+    assert_receive {:file_tree_watcher_retry, ^retry_token, retry_opts}, @timeout
+
+    assert {:noreply, state} =
+             MingaEditor.handle_info({:file_tree_watcher_retry, retry_token, retry_opts}, state)
 
     recovered_id = file_tree(state).watchers.request.token
-    assert_receive {:file_tree_watcher_call, :recovered, :unwatch, ^a, worker}, @timeout
-    assert_receive {:file_tree_watcher_call, :recovered, :watch, ^b, ^worker}, @timeout
+
+    assert_receive {:file_tree_watcher_call, :partial, :unwatch, ^a, recovered_worker}, @timeout
+    send(recovered_worker, {:release_file_tree_watcher_call, :partial, :unwatch, a, :ok})
+    assert_receive {:file_tree_watcher_call, :partial, :watch, ^b, ^recovered_worker}, @timeout
+    send(recovered_worker, {:release_file_tree_watcher_call, :partial, :watch, b, :ok})
+
     recovered = receive_outcome(scheduler, recovered_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, recovered)
 
@@ -127,6 +164,65 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
 
     EffectScheduler.finalize(scheduler, applied_recovery)
     assert file_tree(state).watchers.candidates == MapSet.new([b])
+    assert file_tree(state).watchers.retry_token == nil
+    assert file_tree(state).watchers.retry_attempt == 0
+  end
+
+  test "watcher recovery stops visibly after the bounded retry budget", %{tmp_dir: root} do
+    a = Path.join(root, "a")
+    b = Path.join(root, "b")
+    scheduler = start_scheduler()
+
+    state =
+      state_with_tree(a, scheduler) |> establish_owned_root(a, scheduler) |> retarget_state(b)
+
+    context = {self(), :exhausted, :wait}
+
+    state =
+      Enum.reduce(1..6, state, fn attempt, current ->
+        current =
+          if attempt == 1 do
+            Freshness.synchronize_watchers(current,
+              watcher_backend: FileTreeWatcherBackend,
+              watcher_context: context
+            )
+          else
+            assert_receive {:file_tree_watcher_retry, retry_token, retry_opts}, @timeout
+
+            assert {:noreply, retried} =
+                     MingaEditor.handle_info(
+                       {:file_tree_watcher_retry, retry_token, retry_opts},
+                       current
+                     )
+
+            retried
+          end
+
+        request_id = file_tree(current).watchers.request.token
+        assert_receive {:file_tree_watcher_call, :exhausted, :unwatch, ^a, worker}, @timeout
+
+        send(
+          worker,
+          {:release_file_tree_watcher_call, :exhausted, :unwatch, a, {:error, :unavailable}}
+        )
+
+        failed = receive_outcome(scheduler, request_id, :failed)
+        assert :ok = EffectScheduler.claim(scheduler, failed)
+
+        assert {failed_state, %Outcome{status: :failed} = applied} =
+                 WatcherSync.apply(current, failed)
+
+        EffectScheduler.finalize(scheduler, applied)
+        assert file_tree(failed_state).watchers.retry_attempt == attempt
+        failed_state
+      end)
+
+    assert file_tree(state).watchers.retry_token == nil
+
+    assert state.shell_runtime.state.notice.message ==
+             "File tree watcher recovery stopped after 6 attempts"
+
+    refute_receive {:file_tree_watcher_retry, _token, _opts}, 100
   end
 
   test "A to B filter-winning reroot followed by C leaves only C owned", %{tmp_dir: root} do

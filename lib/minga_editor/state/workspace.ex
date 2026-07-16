@@ -124,13 +124,6 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | project_view: project_view}
   end
 
-  @doc "Releases the workspace's owned ProjectView resources, if any."
-  @spec close_project_view(t()) :: :ok | {:error, term()}
-  def close_project_view(%__MODULE__{project_view: %ProjectView{} = project_view}),
-    do: ProjectView.close(project_view)
-
-  def close_project_view(%__MODULE__{}), do: :ok
-
   @doc "Sets the session owned by the workspace."
   @spec set_session(t(), pid() | nil) :: t()
   def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
@@ -233,14 +226,6 @@ defmodule MingaEditor.State.Workspace do
   end
 
   def matches_remote_session?(%__MODULE__{}, _server_name, _session_id), do: false
-
-  @doc "Returns true when the workspace still has a live ProjectView."
-  @spec project_view_active?(t()) :: boolean()
-  def project_view_active?(%__MODULE__{project_view: %ProjectView{} = project_view}) do
-    ProjectView.active?(project_view)
-  end
-
-  def project_view_active?(%__MODULE__{}), do: false
 
   @doc "Returns a copy scoped to a project root for persistence."
   @spec with_project_root(t(), String.t() | nil) :: t()

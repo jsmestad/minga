@@ -1444,9 +1444,11 @@ defmodule Minga.Extension.LifecycleContractTest do
         BlockedThenStarts
       )
 
+    timeout_ms = 25
+
     opts =
       ctx.opts
-      |> Keyword.put(:transition_timeout_ms, 25)
+      |> Keyword.put(:transition_timeout_ms, timeout_ms)
       |> Keyword.put(:runtime_query_timeout_ms, 10)
 
     start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
@@ -1454,7 +1456,7 @@ defmodule Minga.Extension.LifecycleContractTest do
     old_instance = instance_pid(ctx, name)
     supervisor_ref = Process.monitor(old_runtime_supervisor)
 
-    assert {:error, {:transition_timeout, :start, 25}} = Task.await(start_task, 1_000)
+    assert {:error, {:transition_timeout, :start, ^timeout_ms}} = Task.await(start_task, 1_000)
     assert_receive {:DOWN, ^supervisor_ref, :process, ^old_runtime_supervisor, :killed}
     _new_instance = await_new_instance(ctx, name, old_instance)
 
