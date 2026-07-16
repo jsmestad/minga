@@ -9,20 +9,29 @@ defmodule Minga.Project.WorkspaceSnapshot do
 
   alias Minga.Project.Root
 
-  @enforce_keys [:root, :files, :rebuilding?]
-  defstruct [:root, :files, :rebuilding?]
+  @enforce_keys [:root, :activation_id, :files, :rebuilding?]
+  defstruct [:root, :activation_id, :files, :rebuilding?]
+
+  @typedoc "A monotonic identity assigned to one explicit workspace activation."
+  @type activation_id :: pos_integer()
 
   @typedoc "A coherent directory workspace and its cached inventory state."
   @type t :: %__MODULE__{
           root: Root.t(),
+          activation_id: activation_id(),
           files: [String.t()],
           rebuilding?: boolean()
         }
 
-  @doc "Installs a directory root with an empty, idle inventory."
+  @doc "Installs a directory root with a fresh activation identity and an empty inventory."
   @spec activate(Root.t()) :: t()
   def activate(%Root{kind: :directory} = root) do
-    %__MODULE__{root: root, files: [], rebuilding?: false}
+    %__MODULE__{
+      root: root,
+      activation_id: System.unique_integer([:monotonic, :positive]),
+      files: [],
+      rebuilding?: false
+    }
   end
 
   @doc "Clears cached inventory before discovery starts."

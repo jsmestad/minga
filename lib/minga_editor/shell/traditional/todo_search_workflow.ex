@@ -3,7 +3,7 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflow do
   Owns opening and scheduling the TODO-search picker workflow.
   """
 
-  alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.PickerUI
@@ -13,20 +13,21 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflow do
   @spec open(MingaEditor.State.t()) :: MingaEditor.State.t()
   def open(state) do
     {state, revision} = PickerUI.open_loading(state, TodoSearchSource)
-    schedule(state, active_workspace_root(), revision)
+    schedule(state, active_workspace_snapshot(), revision)
   end
 
-  @spec schedule(MingaEditor.State.t(), Root.t() | nil, reference()) :: MingaEditor.State.t()
+  @spec schedule(MingaEditor.State.t(), WorkspaceSnapshot.t() | nil, reference()) ::
+          MingaEditor.State.t()
   defp schedule(state, nil, revision) do
     apply_failure(state, revision, "No directory workspace active")
   end
 
-  defp schedule(%{effect_scheduler: nil} = state, _root, revision) do
+  defp schedule(%{effect_scheduler: nil} = state, _snapshot, revision) do
     apply_failure(state, revision, "TODO search scheduler unavailable")
   end
 
-  defp schedule(state, %Root{} = root, revision) do
-    case EffectScheduler.schedule(state.effect_scheduler, TodoSearch.request(root, revision)) do
+  defp schedule(state, %WorkspaceSnapshot{} = snapshot, revision) do
+    case EffectScheduler.schedule(state.effect_scheduler, TodoSearch.request(snapshot, revision)) do
       {:ok, _request_id, _disposition} ->
         state
 
@@ -38,9 +39,9 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflow do
       apply_failure(state, revision, "TODO search scheduler unavailable: #{inspect(reason)}")
   end
 
-  @spec active_workspace_root() :: Root.t() | nil
-  defp active_workspace_root do
-    Minga.Project.workspace_root()
+  @spec active_workspace_snapshot() :: WorkspaceSnapshot.t() | nil
+  defp active_workspace_snapshot do
+    Minga.Project.snapshot()
   catch
     :exit, _reason -> nil
   end

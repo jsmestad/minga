@@ -28,7 +28,7 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflowTest do
     active_path = temporary_root("active")
     stale_file_tree_path = temporary_root("stale-file-tree")
     {:ok, active_root} = Root.directory(active_path)
-    activate_project!(active_root)
+    active_snapshot = activate_project!(active_root)
     scheduler = start_scheduler()
 
     state =
@@ -44,9 +44,14 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflowTest do
                       status: :running,
                       request: %Request{
                         resource: {:todo_search, ^active_root},
-                        effect: %TodoSearch{root: ^active_root}
+                        effect: %TodoSearch{
+                          root: ^active_root,
+                          activation_id: activation_id
+                        }
                       }
                     }}
+
+    assert activation_id == active_snapshot.activation_id
   end
 
   test "does not reconstruct a Root from the file-tree path when no workspace is active" do
@@ -66,7 +71,7 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflowTest do
     refute_received {:effect_lifecycle, %Outcome{request: %Request{handler: TodoSearch}}}
   end
 
-  @spec activate_project!(Root.t()) :: :ok
+  @spec activate_project!(Root.t()) :: Minga.Project.WorkspaceSnapshot.t()
   defp activate_project!(%Root{path: path} = root) do
     Minga.Events.subscribe(:project_rebuilt)
     assert {:ok, snapshot} = Project.activate(root)
@@ -77,7 +82,7 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflowTest do
                      5_000
     end
 
-    :ok
+    snapshot
   end
 
   @spec start_scheduler() :: pid()

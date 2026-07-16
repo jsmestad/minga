@@ -4,12 +4,13 @@ defmodule MingaEditor.Effects.TodoSearch do
 
   Repository probing and grep execution run in the generation-owned effect
   scheduler. The editor only applies the correlated picker result when its
-  source, workspace root, and fetch revision are still live.
+  source, workspace activation, and fetch revision are still live.
   """
 
   @behaviour MingaEditor.Effect
 
   alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
@@ -21,18 +22,29 @@ defmodule MingaEditor.Effects.TodoSearch do
   alias MingaEditor.UI.Picker.TodoSearchSource
 
   @keyword_pattern "(^|[[:space:]])(#|//|/\\*|%|--)[[:space:]]*(TODO|FIXME|HACK|NOTE|REVIEW|DEPRECATED)([^[:alnum:]_]|$)"
+  @truncated_status "Results truncated to #{TodoSearchSource.max_results()}"
 
-  @enforce_keys [:root, :revision]
-  defstruct [:root, :revision, impl: TodoSearchPort]
+  @enforce_keys [:root, :activation_id, :revision]
+  defstruct [:root, :activation_id, :revision, impl: TodoSearchPort]
 
   @type impl :: module()
-  @type t :: %__MODULE__{root: Root.t(), revision: reference(), impl: impl()}
+  @type t :: %__MODULE__{
+          root: Root.t(),
+          activation_id: WorkspaceSnapshot.activation_id(),
+          revision: reference(),
+          impl: impl()
+        }
+  @type output_format :: TodoSearchSource.output_format()
 
-  @doc "Builds a latest-wins TODO search request for one project root."
-  @spec request(Root.t(), reference()) :: Request.t()
-  def request(%Root{} = root, revision) when is_reference(revision) do
+  @doc "Builds a latest-wins TODO search request for one captured workspace activation."
+  @spec request(WorkspaceSnapshot.t(), reference()) :: Request.t()
+  def request(
+        %WorkspaceSnapshot{root: %Root{} = root, activation_id: activation_id},
+        revision
+      )
+      when is_reference(revision) do
     Request.new(
-      %__MODULE__{root: root, revision: revision, impl: impl()},
+      %__MODULE__{root: root, activation_id: activation_id, revision: revision, impl: impl()},
       {:todo_search, root},
       Policy.latest_wins()
     )
@@ -73,7 +85,7 @@ defmodule MingaEditor.Effects.TodoSearch do
       effect,
       failure_message(reason),
       outcome,
-      active_workspace_root()
+      active_workspace_snapshot()
     )
   end
 
@@ -84,19 +96,17 @@ defmodule MingaEditor.Effects.TodoSearch do
   def render?(%Outcome{}), do: true
 
   @spec run_authorized(t(), String.t()) :: {:ok, Result.t()} | {:error, String.t()}
-  defp run_authorized(%__MODULE__{revision: revision, impl: impl}, canonical_root) do
-    with {:ok, output} <- search_output(canonical_root, impl) do
-      items =
-        output
-        |> TodoSearchSource.parse_output()
-        |> TodoSearchSource.build_candidates(canonical_root)
+  defp run_authorized(%__MODULE__{root: root, revision: revision, impl: impl}, canonical_root) do
+    with {:ok, output, format} <- search_output(canonical_root, impl) do
+      {markers, truncated?} = TodoSearchSource.parse_output(output, format)
+      items = TodoSearchSource.build_candidates(markers, root)
 
       {:ok,
        %Result{
          revision: revision,
          items: items,
          candidates: Candidate.from_items(items),
-         meta: %{}
+         meta: result_meta(truncated?)
        }}
     end
   end
@@ -104,7 +114,7 @@ defmodule MingaEditor.Effects.TodoSearch do
   @spec apply_matching_revision(EditorState.t(), t(), Result.t(), Outcome.t(), boolean()) ::
           {EditorState.t(), Outcome.t()}
   defp apply_matching_revision(state, effect, result, outcome, true) do
-    apply_completed_for_workspace(state, effect, result, outcome, active_workspace_root())
+    apply_completed_for_workspace(state, effect, result, outcome, active_workspace_snapshot())
   end
 
   defp apply_matching_revision(state, _effect, _result, outcome, false) do
@@ -116,19 +126,19 @@ defmodule MingaEditor.Effects.TodoSearch do
           t(),
           Result.t(),
           Outcome.t(),
-          Root.t() | nil
+          WorkspaceSnapshot.t() | nil
         ) :: {EditorState.t(), Outcome.t()}
   defp apply_completed_for_workspace(
          state,
-         %__MODULE__{root: root} = effect,
+         %__MODULE__{root: root, activation_id: activation_id} = effect,
          result,
          outcome,
-         root
+         %WorkspaceSnapshot{root: root, activation_id: activation_id}
        ) do
     apply_completed_result(state, effect, result, outcome)
   end
 
-  defp apply_completed_for_workspace(state, _effect, _result, outcome, _active_root) do
+  defp apply_completed_for_workspace(state, _effect, _result, outcome, _active_workspace) do
     {state, Outcome.stale(outcome, :workspace_rerooted)}
   end
 
@@ -137,13 +147,19 @@ defmodule MingaEditor.Effects.TodoSearch do
           t(),
           String.t(),
           Outcome.t(),
-          Root.t() | nil
+          WorkspaceSnapshot.t() | nil
         ) :: {EditorState.t(), Outcome.t()}
-  defp apply_failed_for_workspace(state, %__MODULE__{root: root} = effect, reason, outcome, root) do
+  defp apply_failed_for_workspace(
+         state,
+         %__MODULE__{root: root, activation_id: activation_id} = effect,
+         reason,
+         outcome,
+         %WorkspaceSnapshot{root: root, activation_id: activation_id}
+       ) do
     apply_failed_result(state, effect, reason, outcome)
   end
 
-  defp apply_failed_for_workspace(state, _effect, _reason, outcome, _active_root) do
+  defp apply_failed_for_workspace(state, _effect, _reason, outcome, _active_workspace) do
     {state, Outcome.stale(outcome, :workspace_rerooted)}
   end
 
@@ -170,9 +186,9 @@ defmodule MingaEditor.Effects.TodoSearch do
     end
   end
 
-  @spec active_workspace_root() :: Root.t() | nil
-  defp active_workspace_root do
-    Minga.Project.workspace_root()
+  @spec active_workspace_snapshot() :: WorkspaceSnapshot.t() | nil
+  defp active_workspace_snapshot do
+    Minga.Project.snapshot()
   catch
     :exit, _reason -> nil
   end
@@ -182,21 +198,27 @@ defmodule MingaEditor.Effects.TodoSearch do
     Application.get_env(:minga, :todo_search_port_module, TodoSearchPort)
   end
 
-  @spec search_output(String.t(), impl()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec result_meta(boolean()) :: MingaEditor.UI.Picker.Source.fetch_meta()
+  defp result_meta(true), do: %{status: @truncated_status}
+  defp result_meta(false), do: %{}
+
+  @spec search_output(String.t(), impl()) ::
+          {:ok, String.t(), output_format()} | {:error, String.t()}
   defp search_output(canonical_root, port_backend) do
     if git_repo?(canonical_root, port_backend) do
       run_search_command(
         port_backend,
         "git",
-        ["-C", canonical_root, "grep", "-n", "-I", "-E", @keyword_pattern, "--", "."]
+        ["-C", canonical_root, "grep", "-n", "-I", "-E", "-z", @keyword_pattern, "--", "."],
+        :git
       )
     else
-      run_search_command(port_backend, "grep", [
-        "-rnEI",
-        "--exclude-dir=.git",
-        @keyword_pattern,
-        canonical_root
-      ])
+      run_search_command(
+        port_backend,
+        "grep",
+        ["-rnEIZ", "--exclude-dir=.git", @keyword_pattern, canonical_root],
+        :grep
+      )
     end
   end
 
@@ -208,12 +230,12 @@ defmodule MingaEditor.Effects.TodoSearch do
     end
   end
 
-  @spec run_search_command(impl(), String.t(), [String.t()]) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp run_search_command(port_backend, command, args) do
+  @spec run_search_command(impl(), String.t(), [String.t()], output_format()) ::
+          {:ok, String.t(), output_format()} | {:error, String.t()}
+  defp run_search_command(port_backend, command, args, format) do
     case port_backend.run(command, args) do
-      {output, 0} -> {:ok, output}
-      {_output, 1} -> {:ok, ""}
+      {output, 0} -> {:ok, output, format}
+      {_output, 1} -> {:ok, "", format}
       {output, status} -> {:error, "#{command} exited with status #{status}: #{output}"}
     end
   end
