@@ -156,7 +156,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
       %Picker.Item{} = item ->
         case Picker.Source.preview(source, item, ctx, callback_source) do
-          nil -> build_preview_for_item(ctx, item)
+          nil -> build_preview_for_item(ctx, source, item)
           lines -> lines
         end
     end
