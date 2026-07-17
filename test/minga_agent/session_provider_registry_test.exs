@@ -95,12 +95,13 @@ defmodule MingaAgent.SessionProviderRegistryTest do
     :sys.get_state(session)
 
     send(session, :start_provider)
-    state = :sys.get_state(session)
+    :sys.get_state(session)
+    snapshot = Session.editor_snapshot(session)
 
-    assert state.provider == nil
-    assert state.status == :error
-    assert state.error_message =~ "provider_not_found"
-    assert state.error_message =~ provider_id
+    assert Session.get_provider(session) == nil
+    assert snapshot.status == :error
+    assert snapshot.error =~ "provider_not_found"
+    assert snapshot.error =~ provider_id
     assert [] = CodeLease.active_leases(source: source, module: RegistryProvider)
   end
 
