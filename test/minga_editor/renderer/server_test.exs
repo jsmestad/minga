@@ -19,6 +19,8 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
+  alias MingaEditor.State.Render
+  alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Viewport
   alias MingaEditor.Renderer.RenderWindow, as: Window
@@ -750,6 +752,32 @@ defmodule MingaEditor.Renderer.ServerTest do
                      @async_render_timeout
     end
 
+    test "keyframe handoff survives a superseding intent without forcing another keyframe" do
+      renderer = start_ack_renderer(self())
+      state = build_editor_state(:tui, renderer)
+      correlation = RenderCorrelation.request_keyframe(state.render.render_correlation)
+      state = %{state | render: Render.accept_correlation(state.render, correlation)}
+
+      recovered = MingaEditor.Renderer.render_or_async(state)
+      refute recovered.render.render_correlation.keyframe_pending?
+
+      assert_receive {:ack_pipeline, first_seq, 2, 0, true}, @async_render_timeout
+
+      superseding = MingaEditor.Renderer.render_or_async(recovered)
+      refute superseding.render.render_correlation.keyframe_pending?
+
+      RendererServer.frame_status(renderer, {:frame_applied, 2, first_seq})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^first_seq, keyframe?: true}},
+                     @async_render_timeout
+
+      assert_receive {:ack_pipeline, second_seq, 2, ^first_seq, false}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 2, second_seq})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^second_seq, keyframe?: false}},
+                     @async_render_timeout
+    end
+
     test "consecutive headless renders reuse renderer-process cache and consume targeted deltas" do
       state = build_editor_state(:headless, nil)
 
@@ -811,6 +839,33 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert confirmed.render.renderer == edited.render.renderer
       assert [row] = frontend_window.rows
       assert row.text == "Ztest"
+    end
+
+    test "non-headless synchronous shells retain acknowledgement ownership during keyframe reset" do
+      renderer = start_ack_renderer(self())
+      state = build_sync_shell_state(renderer)
+      correlation = RenderCorrelation.request_keyframe(state.render.render_correlation)
+      state = %{state | render: Render.accept_correlation(state.render, correlation)}
+
+      result = MingaEditor.Renderer.render_or_async(state)
+      refute result.render.render_correlation.keyframe_pending?
+
+      assert_receive {:ack_pipeline, frame_seq, 2, 0, true}, @async_render_timeout
+
+      superseding = MingaEditor.Renderer.render_or_async(result)
+      refute superseding.render.render_correlation.keyframe_pending?
+      refute_receive {:render_done, _receipt}, 50
+
+      RendererServer.frame_status(renderer, {:frame_applied, 2, frame_seq})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^frame_seq, keyframe?: true}},
+                     @async_render_timeout
+
+      assert_receive {:ack_pipeline, next_seq, 2, ^frame_seq, false}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 2, next_seq})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^next_seq, keyframe?: false}},
+                     @async_render_timeout
     end
 
     test "shells that opt out of async rendering render synchronously even when a renderer pid is present" do

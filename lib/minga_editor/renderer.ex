@@ -63,12 +63,19 @@ defmodule MingaEditor.Renderer do
         | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
       }
 
+      {keyframe?, state} = EditorState.take_keyframe_request(state)
       intent = Intent.from_editor_state(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
-      RendererServer.cast_snapshot(pid, intent, seq)
+
+      if keyframe? do
+        :ok = RendererServer.reset_connection(pid, intent, seq)
+      else
+        RendererServer.cast_snapshot(pid, intent, seq)
+      end
+
       state
     else
-      render(state)
+      render_synchronously_or_reset(state, pid)
     end
   end
 
@@ -95,6 +102,7 @@ defmodule MingaEditor.Renderer do
       | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
     }
 
+    {_keyframe?, state} = EditorState.take_keyframe_request(state)
     intent = Intent.from_editor_state(state, revision)
     seq = System.unique_integer([:positive, :monotonic])
 
@@ -116,6 +124,7 @@ defmodule MingaEditor.Renderer do
         | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
       }
 
+      {_keyframe?, state} = EditorState.take_keyframe_request(state)
       intent = Intent.from_editor_state(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
       :ok = RendererServer.reset_connection(pid, intent, seq)
@@ -126,6 +135,32 @@ defmodule MingaEditor.Renderer do
   end
 
   def reset_connection(state), do: render(state)
+
+  @spec render_synchronously_or_reset(state(), pid()) :: state()
+  defp render_synchronously_or_reset(state, renderer) do
+    case EditorState.take_keyframe_request(state) do
+      {false, state} ->
+        continue_synchronous_render(state, renderer, RendererServer.rendering?(renderer))
+
+      {true, state} ->
+        intent = Intent.from_editor_state(state)
+        seq = System.unique_integer([:positive, :monotonic])
+        :ok = RendererServer.reset_connection(renderer, intent, seq)
+        state
+    end
+  end
+
+  @spec continue_synchronous_render(state(), pid(), boolean()) :: state()
+  defp continue_synchronous_render(state, renderer, true) do
+    intent = Intent.from_editor_state(state)
+    seq = System.unique_integer([:positive, :monotonic])
+    RendererServer.cast_snapshot(renderer, intent, seq)
+    state
+  end
+
+  defp continue_synchronous_render(state, _renderer, false) do
+    render(state)
+  end
 
   @spec async_render?(state()) :: boolean()
   defp async_render?(state),
@@ -139,14 +174,51 @@ defmodule MingaEditor.Renderer do
   @spec render_buffer(state()) :: state()
   def render_buffer(state) do
     {state, renderer} = ensure_synchronous_renderer(state)
+    {keyframe?, state} = EditorState.take_keyframe_request(state)
     seq = System.unique_integer([:positive, :monotonic])
     intent = Intent.from_editor_state(state)
 
-    case RendererServer.render_sync(renderer, intent, seq) do
+    case dispatch_render_buffer(renderer, intent, seq, keyframe?, state.frontend.backend) do
+      :async -> state
       {:ok, receipt} -> EditorState.integrate_synchronous_renderer_receipt(state, receipt)
       {:error, error} -> log_synchronous_error(state, seq, error)
     end
   end
+
+  @spec dispatch_render_buffer(
+          pid(),
+          Intent.t(),
+          non_neg_integer(),
+          boolean(),
+          EditorState.backend()
+        ) ::
+          :async
+          | {:ok, MingaEditor.Renderer.RenderReceipt.t()}
+          | {:error, Exception.t()}
+  defp dispatch_render_buffer(renderer, intent, seq, true, :headless),
+    do: RendererServer.reset_sync(renderer, intent, seq)
+
+  defp dispatch_render_buffer(renderer, intent, seq, true, _backend) do
+    :ok = RendererServer.reset_connection(renderer, intent, seq)
+    :async
+  end
+
+  defp dispatch_render_buffer(renderer, intent, seq, false, :headless),
+    do: RendererServer.render_sync(renderer, intent, seq)
+
+  defp dispatch_render_buffer(renderer, intent, seq, false, _backend) do
+    dispatch_non_headless_render(renderer, intent, seq, RendererServer.rendering?(renderer))
+  end
+
+  @spec dispatch_non_headless_render(pid(), Intent.t(), non_neg_integer(), boolean()) ::
+          :async | {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()}
+  defp dispatch_non_headless_render(renderer, intent, seq, true) do
+    RendererServer.cast_snapshot(renderer, intent, seq)
+    :async
+  end
+
+  defp dispatch_non_headless_render(renderer, intent, seq, false),
+    do: RendererServer.render_sync(renderer, intent, seq)
 
   @spec ensure_synchronous_renderer(state()) :: {state(), pid()}
   defp ensure_synchronous_renderer(%EditorState{render: %{renderer: renderer}} = state)
