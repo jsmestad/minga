@@ -314,7 +314,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert integrate_receipt(switched, stale) == switched
     end
 
-    test "only an applied keyframe receipt clears a pending keyframe request", %{state: state} do
+    test "renderer receipts do not consume a keyframe request before handoff", %{state: state} do
       input = Input.from_editor_state(state)
 
       state = %{
@@ -329,10 +329,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       }
 
       state = integrate_receipt(state, receipt(input, 10, false))
-      assert state.render.render_correlation.keyframe_pending?
-
       state = integrate_receipt(state, receipt(input, 11, true))
-      refute state.render.render_correlation.keyframe_pending?
+      assert state.render.render_correlation.keyframe_pending?
     end
   end
 

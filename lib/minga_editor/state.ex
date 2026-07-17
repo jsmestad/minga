@@ -155,8 +155,7 @@ defmodule MingaEditor.State do
       RenderCorrelation.accept_synchronous_receipt(
         state.render.render_correlation,
         receipt.intent_revision,
-        receipt.frame_seq,
-        receipt.keyframe?
+        receipt.frame_seq
       )
 
     commit_renderer_receipt(state, receipt, correlation)
@@ -197,6 +196,16 @@ defmodule MingaEditor.State do
     workspace = SessionState.set_viewport(state.workspace, viewport)
     frontend = FrontendState.resize_terminal(state.frontend, viewport)
     %{state | workspace: workspace, frontend: frontend}
+  end
+
+  @doc "Transfers one queued keyframe request to the renderer boundary."
+  @spec take_keyframe_request(t()) :: {boolean(), t()}
+  def take_keyframe_request(%__MODULE__{} = state) do
+    {keyframe?, correlation} =
+      RenderCorrelation.take_keyframe_request(state.render.render_correlation)
+
+    render = RenderState.accept_correlation(state.render, correlation)
+    {keyframe?, %{state | render: render}}
   end
 
   @doc "Clears workspace and render observations after frontend state loss."
@@ -336,8 +345,7 @@ defmodule MingaEditor.State do
         RenderCorrelation.accept_receipt(
           state.render.render_correlation,
           receipt.intent_revision,
-          receipt.frame_seq,
-          receipt.keyframe?
+          receipt.frame_seq
         )
 
       {commit_renderer_receipt(state, receipt, correlation), :applied}

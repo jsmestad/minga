@@ -91,7 +91,7 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     refute RenderCorrelation.scheduled?(delivered.render.render_correlation)
   end
 
-  test "frontend readiness and reset require a keyframe without resetting ordering evidence" do
+  test "frontend readiness queues one renderer handoff without resetting ordering evidence" do
     correlation = %RenderCorrelation{
       latest_intent_revision: 8,
       last_receipt_revision: 7,
@@ -99,10 +99,11 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     }
 
     ready = RenderCorrelation.frontend_ready(correlation)
-    assert RenderCorrelation.force_keyframe?(ready)
-    assert RenderCorrelation.latest_intent_revision(ready) == 8
-    assert RenderCorrelation.last_receipt_revision(ready) == 7
-    assert RenderCorrelation.last_receipt_sequence(ready) == 41
+    assert {true, handed_off} = RenderCorrelation.take_keyframe_request(ready)
+    assert {false, ^handed_off} = RenderCorrelation.take_keyframe_request(handed_off)
+    assert RenderCorrelation.latest_intent_revision(handed_off) == 8
+    assert RenderCorrelation.last_receipt_revision(handed_off) == 7
+    assert RenderCorrelation.last_receipt_sequence(handed_off) == 41
 
     reset = RenderCorrelation.reset(correlation)
     assert reset == ready
@@ -131,7 +132,7 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     assert RenderCorrelation.classify_receipt(correlation, 3, 20) ==
              {:stale, :stale_sequence}
 
-    accepted = RenderCorrelation.accept_receipt(correlation, 3, 21, false)
+    accepted = RenderCorrelation.accept_receipt(correlation, 3, 21)
 
     assert RenderCorrelation.classify_receipt(accepted, 3, 22) ==
              {:stale, :stale_receipt_revision}
@@ -146,26 +147,23 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     correlation = RenderCorrelation.new()
     assert RenderCorrelation.classify_receipt(correlation, 0, 12) == {:fresh, 12}
 
-    correlation = RenderCorrelation.accept_receipt(correlation, 12, 12, false)
+    correlation = RenderCorrelation.accept_receipt(correlation, 12, 12)
 
     assert RenderCorrelation.classify_receipt(correlation, 0, 12) ==
              {:stale, :stale_receipt_revision}
   end
 
-  test "only an accepted keyframe fulfills a pending keyframe request" do
+  test "receipts do not consume a keyframe request before renderer handoff" do
     correlation = RenderCorrelation.request_keyframe(RenderCorrelation.new())
-    assert RenderCorrelation.force_keyframe?(correlation)
+    correlation = RenderCorrelation.accept_receipt(correlation, 1, 1)
 
-    delta = RenderCorrelation.accept_receipt(correlation, 1, 1, false)
-    assert RenderCorrelation.force_keyframe?(delta)
-
-    keyframe = RenderCorrelation.accept_receipt(delta, 2, 2, true)
-    refute RenderCorrelation.force_keyframe?(keyframe)
+    assert {true, handed_off} = RenderCorrelation.take_keyframe_request(correlation)
+    assert {false, ^handed_off} = RenderCorrelation.take_keyframe_request(handed_off)
   end
 
   test "synchronous receipts preserve monotonic revision and sequence evidence" do
     correlation = %RenderCorrelation{last_receipt_revision: 10, last_receipt_seq: 20}
-    correlation = RenderCorrelation.accept_synchronous_receipt(correlation, 8, 19, false)
+    correlation = RenderCorrelation.accept_synchronous_receipt(correlation, 8, 19)
 
     assert RenderCorrelation.last_receipt_revision(correlation) == 10
     assert RenderCorrelation.last_receipt_sequence(correlation) == 20

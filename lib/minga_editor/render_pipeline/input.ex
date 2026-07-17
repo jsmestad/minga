@@ -57,7 +57,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
-  alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Runtime
@@ -210,7 +209,6 @@ defmodule MingaEditor.RenderPipeline.Input do
       highlighting: state.parser.highlighting,
       terminal_viewport: state.frontend.terminal_viewport,
       last_input_seq: state.frontend.last_input_seq,
-      force_keyframe?: RenderCorrelation.force_keyframe?(state.render.render_correlation),
       line_spacing:
         Minga.Config.Options.get(state.interaction.options_server, :line_spacing) || 1.0,
       cursor_animate: Minga.Config.Options.get(state.interaction.options_server, :cursor_animate),

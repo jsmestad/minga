@@ -85,22 +85,25 @@ defmodule MingaEditor.State.RenderCorrelation do
       when is_integer(sequence) and sequence > 0,
       do: {:stale, correlation}
 
-  @doc "Marks the next completed render as requiring a keyframe."
+  @doc "Queues a keyframe request for one handoff to the renderer process."
   @spec request_keyframe(t()) :: t()
   def request_keyframe(%__MODULE__{} = correlation),
     do: %{correlation | keyframe_pending?: true}
+
+  @doc "Takes a queued keyframe request so the renderer becomes its sole durable owner."
+  @spec take_keyframe_request(t()) :: {boolean(), t()}
+  def take_keyframe_request(%__MODULE__{keyframe_pending?: true} = correlation),
+    do: {true, %{correlation | keyframe_pending?: false}}
+
+  def take_keyframe_request(%__MODULE__{} = correlation), do: {false, correlation}
 
   @doc "Resets frontend correlation without making an older receipt fresh again."
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = correlation), do: request_keyframe(correlation)
 
-  @doc "Marks a newly ready frontend as requiring a correlated keyframe."
+  @doc "Marks a newly ready frontend as requiring a renderer-owned keyframe reset."
   @spec frontend_ready(t()) :: t()
   def frontend_ready(%__MODULE__{} = correlation), do: reset(correlation)
-
-  @doc "Returns whether render intent construction must force a keyframe."
-  @spec force_keyframe?(t()) :: boolean()
-  def force_keyframe?(%__MODULE__{keyframe_pending?: pending?}), do: pending?
 
   @doc "Advances the Editor-owned semantic intent revision."
   @spec submit(t()) :: {t(), pos_integer()}
@@ -130,28 +133,24 @@ defmodule MingaEditor.State.RenderCorrelation do
     classify_normalized(correlation, revision, frame_seq)
   end
 
-  @doc "Records one accepted asynchronous receipt and clears a fulfilled keyframe request."
-  @spec accept_receipt(t(), non_neg_integer(), non_neg_integer(), boolean()) :: t()
-  def accept_receipt(%__MODULE__{} = correlation, revision, frame_seq, keyframe?)
-      when is_integer(revision) and revision >= 0 and is_integer(frame_seq) and frame_seq >= 0 and
-             is_boolean(keyframe?) do
+  @doc "Records one accepted asynchronous receipt."
+  @spec accept_receipt(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def accept_receipt(%__MODULE__{} = correlation, revision, frame_seq)
+      when is_integer(revision) and revision >= 0 and is_integer(frame_seq) and frame_seq >= 0 do
     %{
       correlation
-      | keyframe_pending?: pending_after_receipt?(correlation, keyframe?),
-        last_receipt_revision: revision,
+      | last_receipt_revision: revision,
         last_receipt_seq: frame_seq
     }
   end
 
   @doc "Records a synchronous receipt while preserving monotonic ordering evidence."
-  @spec accept_synchronous_receipt(t(), non_neg_integer(), non_neg_integer(), boolean()) :: t()
-  def accept_synchronous_receipt(%__MODULE__{} = correlation, revision, frame_seq, keyframe?)
-      when is_integer(revision) and revision >= 0 and is_integer(frame_seq) and frame_seq >= 0 and
-             is_boolean(keyframe?) do
+  @spec accept_synchronous_receipt(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def accept_synchronous_receipt(%__MODULE__{} = correlation, revision, frame_seq)
+      when is_integer(revision) and revision >= 0 and is_integer(frame_seq) and frame_seq >= 0 do
     %{
       correlation
-      | keyframe_pending?: pending_after_receipt?(correlation, keyframe?),
-        last_receipt_revision: max(correlation.last_receipt_revision, revision),
+      | last_receipt_revision: max(correlation.last_receipt_revision, revision),
         last_receipt_seq: max(correlation.last_receipt_seq, frame_seq)
     }
   end
@@ -174,8 +173,4 @@ defmodule MingaEditor.State.RenderCorrelation do
        do: {:stale, :stale_sequence}
 
   defp classify_normalized(_correlation, revision, _frame_seq), do: {:fresh, revision}
-
-  @spec pending_after_receipt?(t(), boolean()) :: boolean()
-  defp pending_after_receipt?(%__MODULE__{keyframe_pending?: false}, _keyframe?), do: false
-  defp pending_after_receipt?(%__MODULE__{keyframe_pending?: true}, keyframe?), do: not keyframe?
 end
