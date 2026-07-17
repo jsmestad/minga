@@ -1,5 +1,7 @@
 defmodule MingaAgent.SessionPersistenceTest do
   use Minga.Test.SessionCase, async: true
+  alias MingaAgent.Branch
+  alias MingaAgent.TranscriptEntry
 
   describe "session persistence" do
     test "session has a unique ID" do
@@ -84,6 +86,8 @@ defmodule MingaAgent.SessionPersistenceTest do
           model_name: "anthropic:claude-sonnet-4",
           provider_name: "native",
           messages: [{:user, "Restore me"}, {:assistant, "Restored reply"}],
+          message_ids: [7, 13],
+          pinned_ids: MapSet.new([13]),
           usage: %MingaAgent.TurnUsage{
             input: 20,
             output: 10,
@@ -92,7 +96,14 @@ defmodule MingaAgent.SessionPersistenceTest do
             cost: 0.02
           },
           branches: [
-            Branch.new("branch-1", [{:user, "branched prompt"}, {:assistant, "branched reply"}])
+            Branch.new(
+              "branch-1",
+              [
+                TranscriptEntry.new(1, {:user, "branched prompt"}),
+                TranscriptEntry.new(2, {:assistant, "branched reply"})
+              ],
+              ~U[2026-01-01 00:00:00Z]
+            )
           ],
           memory: "- [2026-01-01 00:00 UTC] Prefer direct answers\n"
         },
@@ -103,6 +114,13 @@ defmodule MingaAgent.SessionPersistenceTest do
       assert Session.session_id(session) == "resumable-session"
       assert Session.messages(session) == [{:user, "Restore me"}, {:assistant, "Restored reply"}]
 
+      assert Session.messages_with_ids(session) == [
+               {7, {:user, "Restore me"}},
+               {13, {:assistant, "Restored reply"}}
+             ]
+
+      assert Session.pinned_ids(session) == MapSet.new([13])
+
       meta = Session.metadata(session)
       assert meta.model_name == "anthropic:claude-sonnet-4"
       assert meta.provider_name == "native"
@@ -112,6 +130,13 @@ defmodule MingaAgent.SessionPersistenceTest do
 
       assert {:ok, branches} = Session.list_branches(session)
       assert branches =~ "branch-1"
+      assert :ok = Session.switch_branch(session, 0)
+
+      assert Session.messages(session) == [
+               {:user, "branched prompt"},
+               {:assistant, "branched reply"}
+             ]
+
       assert :ok = Session.switch_branch(session, 1)
 
       assert Session.messages(session) == [

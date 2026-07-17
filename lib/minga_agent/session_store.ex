@@ -13,6 +13,7 @@ defmodule MingaAgent.SessionStore do
   """
 
   alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.Session.Transcript
 
   @typedoc "Session metadata for the picker (without full message content)."
   @type session_meta :: %{
@@ -338,10 +339,34 @@ defmodule MingaAgent.SessionStore do
 
   @spec deserialize(map()) :: session_data()
   defp deserialize(data) do
-    messages = Enum.map(data["messages"] || [], &deserialize_message/1)
     timestamp = data["timestamp"] || ""
+    transcript = deserialize_transcript(data, timestamp)
+    session = deserialize_session(data, timestamp, transcript)
 
-    session = %{
+    if Map.has_key?(data, "memory"), do: Map.put(session, :memory, data["memory"]), else: session
+  end
+
+  @spec deserialize_transcript(map(), String.t()) :: Transcript.t()
+  defp deserialize_transcript(data, timestamp) do
+    messages = Enum.map(data["messages"] || [], &deserialize_message/1)
+    message_ids = data["message_ids"]
+    branches = Enum.map(data["branches"] || [], &deserialize_branch/1)
+
+    Transcript.restore(
+      messages,
+      message_ids,
+      branches,
+      deserialize_turn_usage(data["usage"] || %{}),
+      deserialize_pinned_ids(data["pinned_ids"]),
+      parse_datetime(timestamp)
+    )
+  end
+
+  @spec deserialize_session(map(), String.t(), Transcript.t()) :: session_data()
+  defp deserialize_session(data, timestamp, transcript) do
+    messages = Transcript.messages(transcript)
+
+    %{
       id: data["id"],
       timestamp: timestamp,
       last_message_at: data["last_message_at"] || timestamp,
@@ -349,18 +374,12 @@ defmodule MingaAgent.SessionStore do
       model_name: data["model_name"] || "unknown",
       provider_name: data["provider_name"] || "unknown",
       messages: messages,
-      message_ids: deserialize_message_ids(data["message_ids"], Enum.count(messages)),
-      pinned_ids: deserialize_pinned_ids(data["pinned_ids"]),
-      usage: deserialize_turn_usage(data["usage"] || %{}),
-      branches: Enum.map(data["branches"] || [], &deserialize_branch/1)
+      message_ids: Enum.map(Transcript.messages_with_ids(transcript), &elem(&1, 0)),
+      pinned_ids: Transcript.pinned_ids(transcript),
+      usage: Transcript.usage(transcript),
+      branches: Transcript.branches(transcript)
     }
-
-    if Map.has_key?(data, "memory"), do: Map.put(session, :memory, data["memory"]), else: session
   end
-
-  @spec deserialize_message_ids(term(), non_neg_integer()) :: [pos_integer()]
-  defp deserialize_message_ids(ids, _msg_count) when is_list(ids) and ids != [], do: ids
-  defp deserialize_message_ids(_, msg_count), do: Enum.to_list(1..max(msg_count, 1))
 
   @spec deserialize_pinned_ids(term()) :: MapSet.t()
   defp deserialize_pinned_ids(ids) when is_list(ids), do: MapSet.new(ids)
@@ -479,18 +498,18 @@ defmodule MingaAgent.SessionStore do
   defp serialize_branch(%MingaAgent.Branch{} = branch) do
     %{
       "name" => branch.name,
-      "messages" => Enum.map(branch.messages, &serialize_message/1),
+      "messages" => branch |> MingaAgent.Branch.messages() |> Enum.map(&serialize_message/1),
+      "message_ids" => MingaAgent.Branch.entry_ids(branch),
       "created_at" => DateTime.to_iso8601(branch.created_at)
     }
   end
 
-  @spec deserialize_branch(map()) :: MingaAgent.Branch.t()
+  @spec deserialize_branch(map()) :: Transcript.restore_branch()
   defp deserialize_branch(data) do
-    %MingaAgent.Branch{
-      name: data["name"] || "branch",
-      messages: Enum.map(data["messages"] || [], &deserialize_message/1),
-      created_at: parse_datetime(data["created_at"])
-    }
+    messages = Enum.map(data["messages"] || [], &deserialize_message/1)
+    ids = if is_list(data["message_ids"]), do: data["message_ids"], else: []
+
+    {data["name"] || "branch", messages, ids, parse_datetime(data["created_at"])}
   end
 
   @spec deserialize_turn_usage(map()) :: MingaAgent.TurnUsage.t()

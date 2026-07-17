@@ -3,6 +3,7 @@ defmodule MingaAgent.SessionStoreTest do
 
   alias MingaAgent.Branch
   alias MingaAgent.SessionStore
+  alias MingaAgent.TranscriptEntry
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
 
@@ -36,8 +37,16 @@ defmodule MingaAgent.SessionStoreTest do
         {:thinking, "Let me think about this...", true},
         {:usage, %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}}
       ],
+      message_ids: [10, 20, 30, 40, 50, 60],
+      pinned_ids: MapSet.new([20, 50]),
       usage: %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003},
-      branches: [Branch.new("branch-1", [{:user, "branch prompt"}])],
+      branches: [
+        Branch.new(
+          "branch-1",
+          [TranscriptEntry.new(8, {:user, "branch prompt"})],
+          ~U[2026-01-01 00:00:00Z]
+        )
+      ],
       memory: "- [2026-01-01 00:00 UTC] Use concise answers\n"
     }
   end
@@ -218,8 +227,85 @@ defmodule MingaAgent.SessionStoreTest do
       {:ok, loaded} = SessionStore.load(data.id, dir)
       assert loaded.title == "Hello, how are you?"
       assert loaded.provider_name == "native"
-      assert [%Branch{name: "branch-1", messages: [{:user, "branch prompt"}]}] = loaded.branches
+      assert [%Branch{name: "branch-1"} = branch] = loaded.branches
+      assert Branch.messages(branch) == [{:user, "branch prompt"}]
+      assert Branch.entry_ids(branch) == [8]
+      assert loaded.message_ids == [10, 20, 30, 40, 50, 60]
+      assert loaded.pinned_ids == MapSet.new([20, 50])
       assert loaded.memory =~ "Use concise answers"
+    end
+
+    test "loads legacy branch snapshots that predate structural message IDs", %{tmp_dir: dir} do
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      File.write!(
+        Path.join(sessions_dir, "legacy-branch.json"),
+        JSON.encode!(%{
+          "id" => "legacy-branch",
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "model_name" => "test-model",
+          "messages" => [
+            %{"type" => "user", "text" => "question"},
+            %{"type" => "assistant", "text" => "answer"}
+          ],
+          "message_ids" => [1, 2],
+          "pinned_ids" => [2],
+          "branches" => [
+            %{
+              "name" => "old-shape",
+              "messages" => [
+                %{"type" => "user", "text" => "question"},
+                %{"type" => "assistant", "text" => "answer"}
+              ],
+              "created_at" => "2026-01-01T00:00:00Z"
+            }
+          ],
+          "usage" => %{}
+        })
+      )
+
+      assert {:ok, %{branches: [branch], message_ids: [1, 2], pinned_ids: pinned_ids}} =
+               SessionStore.load("legacy-branch", dir)
+
+      assert Branch.messages(branch) == [{:user, "question"}, {:assistant, "answer"}]
+      assert Branch.entry_ids(branch) == [1, 2]
+      assert pinned_ids == MapSet.new([2])
+    end
+
+    test "normalizes invalid persisted branch identity candidates without raising", %{
+      tmp_dir: dir
+    } do
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      File.write!(
+        Path.join(sessions_dir, "invalid-branch-ids.json"),
+        JSON.encode!(%{
+          "id" => "invalid-branch-ids",
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "model_name" => "test-model",
+          "messages" => [%{"type" => "user", "text" => "active"}],
+          "message_ids" => [10],
+          "branches" => [
+            %{
+              "name" => "invalid-identities",
+              "messages" => [
+                %{"type" => "user", "text" => "one"},
+                %{"type" => "assistant", "text" => "two"},
+                %{"type" => "user", "text" => "three"}
+              ],
+              "message_ids" => [0, "bad", 2],
+              "created_at" => "2026-01-01T00:00:00Z"
+            }
+          ],
+          "usage" => %{}
+        })
+      )
+
+      assert {:ok, %{branches: [branch]}} = SessionStore.load("invalid-branch-ids", dir)
+      assert Branch.entry_ids(branch) == [11, 12, 2]
+      assert Branch.messages(branch) == [{:user, "one"}, {:assistant, "two"}, {:user, "three"}]
     end
 
     test "writes transcript and remote token files with private permissions", %{tmp_dir: dir} do

@@ -40,13 +40,14 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
   alias MingaAgent.Session.ProviderLifecycle
+  alias MingaAgent.Session.Persistence
+  alias MingaAgent.Session.Transcript
   require ProviderLifecycle
   alias MingaAgent.SessionStore
   alias MingaAgent.EditBoundary
   alias MingaAgent.SubagentContext
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
-  alias MingaAgent.TurnUsage
 
   @typedoc "Agent session status."
   @type status :: :idle | :plan | :thinking | :tool_executing | :error
@@ -92,9 +93,7 @@ defmodule MingaAgent.Session do
           provider: ProviderLifecycle.t(),
           credentials_configured_fn: credentials_configured_fn(),
           status: status(),
-          messages: [Message.t()],
-          message_ids: [pos_integer()],
-          next_message_id: pos_integer(),
+          transcript: Transcript.t(),
           subscribers: MapSet.t(pid()),
           subscriber_roles: %{pid() => attachment_role()},
           driver: pid() | nil,
@@ -102,7 +101,7 @@ defmodule MingaAgent.Session do
           idle_gc_timeout_ms: non_neg_integer(),
           idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
           idle_gc_token_fn: (-> reference()),
-          total_usage: Event.token_usage(),
+          persistence: Persistence.t(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
           pending_approval: pending_approval() | nil,
@@ -113,20 +112,14 @@ defmodule MingaAgent.Session do
           pending_auto_approvals: %{String.t() => trust_scope()},
           notifier: module() | {module(), term()},
           background_subagent: boolean(),
-          persist?: boolean(),
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
-          save_timer: reference() | nil,
-          save_retry_count: non_neg_integer(),
           session_store_dir: String.t() | nil,
           created_at: DateTime.t(),
-          last_message_at: DateTime.t(),
-          branches: [Branch.t()],
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           touched_files: %{String.t() => file_touch()},
           boundaries: %{String.t() => EditBoundary.t()},
-          pinned_ids: MapSet.t(pos_integer()),
           credentials_configured: boolean()
         }
 
@@ -728,11 +721,11 @@ defmodule MingaAgent.Session do
       provider: provider,
       credentials_configured_fn: credentials_configured_fn,
       status: :idle,
-      messages: [
-        Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))
-      ],
-      message_ids: [1],
-      next_message_id: 2,
+      transcript:
+        Transcript.new(
+          [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
+          now
+        ),
       subscribers: MapSet.new(),
       subscriber_roles: %{},
       driver: nil,
@@ -740,7 +733,7 @@ defmodule MingaAgent.Session do
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       idle_gc_timer: nil,
       idle_gc_token_fn: Keyword.get(opts, :idle_gc_token_fn, &make_ref/0),
-      total_usage: TurnUsage.new(),
+      persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
@@ -751,21 +744,15 @@ defmodule MingaAgent.Session do
       pending_auto_approvals: %{},
       notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
-      persist?: Keyword.get(opts, :persist?, true),
       hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
       session_start_hook_enabled?:
         Keyword.get(opts, :session_start_hook_enabled?, Keyword.get(opts, :hooks_enabled?, true)),
-      save_timer: nil,
-      save_retry_count: 0,
       session_store_dir: Keyword.get(opts, :session_store_dir),
       created_at: now,
-      last_message_at: now,
-      branches: [],
       steering_queue: [],
       follow_up_queue: [],
       touched_files: %{},
       boundaries: %{},
-      pinned_ids: MapSet.new(),
       credentials_configured: credentials_configured?
     }
 
@@ -929,14 +916,14 @@ defmodule MingaAgent.Session do
     state.provider.module.abort(ProviderLifecycle.pid(state.provider))
 
     # Mark any running tool calls as aborted
-    messages =
-      Enum.map(state.messages, fn
-        {:tool_call, %ToolCall{} = tc} -> {:tool_call, ToolCall.abort(tc)}
+    transcript =
+      Transcript.transform_messages(state.transcript, fn
+        {:tool_call, %ToolCall{} = tool_call} -> {:tool_call, ToolCall.abort(tool_call)}
         other -> other
       end)
 
     # Append "Aborted" system message, clear any pending approval
-    state = %{state | messages: messages, pending_approval: nil}
+    state = %{state | transcript: transcript, pending_approval: nil}
     state = append_system_message(state, "Aborted", :info)
     state = notify_messages_changed(state)
     state = set_idle_or_plan(state)
@@ -959,14 +946,12 @@ defmodule MingaAgent.Session do
       state
       | session_id: generate_session_id(),
         status: :idle,
-        total_usage: TurnUsage.new(),
         error_message: nil,
         pending_approval: nil,
         active_tool_calls: [],
         active_tool_name: nil,
         turn_active?: false,
         created_at: now,
-        last_message_at: now,
         steering_queue: [],
         follow_up_queue: [],
         touched_files: %{},
@@ -975,7 +960,12 @@ defmodule MingaAgent.Session do
         pending_auto_approvals: %{}
     }
 
-    state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
+    transcript =
+      state.transcript
+      |> Transcript.reset([Message.system("Session cleared · #{timestamp}")])
+      |> Transcript.touch(now)
+
+    state = %{state | transcript: transcript}
 
     record_critical_event(state, :session_started, %{
       model: state.provider.model_name,
@@ -1034,29 +1024,24 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:messages, _from, state) do
-    {:reply, state.messages, state}
+    {:reply, Transcript.messages(state.transcript), state}
   end
 
   def handle_call(:messages_with_ids, _from, state) do
-    paired = Enum.zip(state.message_ids, state.messages)
-    {:reply, paired, state}
+    {:reply, Transcript.messages_with_ids(state.transcript), state}
   end
 
   def handle_call(:usage, _from, state) do
-    {:reply, state.total_usage, state}
+    {:reply, Transcript.usage(state.transcript), state}
   end
 
   def handle_call(:pinned_ids, _from, state) do
-    {:reply, state.pinned_ids, state}
+    {:reply, Transcript.pinned_ids(state.transcript), state}
   end
 
   def handle_call({:toggle_pin, message_id}, _from, state) do
-    pinned =
-      if MapSet.member?(state.pinned_ids, message_id),
-        do: MapSet.delete(state.pinned_ids, message_id),
-        else: MapSet.put(state.pinned_ids, message_id)
-
-    state = %{state | pinned_ids: pinned}
+    transcript = Transcript.toggle_pin(state.transcript, message_id)
+    state = %{state | transcript: transcript}
     broadcast(state, :messages_changed)
     {:reply, :ok, schedule_save(state)}
   end
@@ -1066,7 +1051,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:persist?, _from, state) do
-    {:reply, state.persist?, state}
+    {:reply, Persistence.enabled?(state.persistence), state}
   end
 
   def handle_call(:hooks_enabled?, _from, state) do
@@ -1086,8 +1071,11 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:metadata, _from, state) do
-    first_prompt = first_user_prompt(state.messages)
-    title = readable_title(first_assistant_text(state.messages)) || readable_title(first_prompt)
+    first_prompt = first_user_prompt(Transcript.messages(state.transcript))
+
+    title =
+      readable_title(first_assistant_text(Transcript.messages(state.transcript))) ||
+        readable_title(first_prompt)
 
     meta = %SessionMetadata{
       id: state.session_id,
@@ -1095,11 +1083,11 @@ defmodule MingaAgent.Session do
       model_name: state.provider.model_name,
       provider_name: state.provider.provider_name,
       created_at: state.created_at,
-      last_message_at: state.last_message_at,
-      message_count: Enum.count(state.messages),
-      turn_count: count_user_turns(state.messages),
+      last_message_at: Transcript.last_changed_at(state.transcript),
+      message_count: Enum.count(Transcript.messages(state.transcript)),
+      turn_count: count_user_turns(Transcript.messages(state.transcript)),
       first_prompt: first_prompt,
-      cost: state.total_usage.cost,
+      cost: Transcript.usage(state.transcript).cost,
       status: state.status,
       workdir: state.workdir
     }
@@ -1360,14 +1348,19 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:toggle_tool_collapse, index}, _from, state) do
-    messages =
-      List.update_at(state.messages, index, fn
-        {:tool_call, %ToolCall{} = tc} -> {:tool_call, ToolCall.toggle_collapsed(tc)}
-        {:thinking, text, collapsed} -> {:thinking, text, !collapsed}
-        other -> other
+    transcript =
+      Transcript.update_at(state.transcript, index, fn
+        {:tool_call, %ToolCall{} = tool_call} ->
+          {:tool_call, ToolCall.toggle_collapsed(tool_call)}
+
+        {:thinking, text, collapsed} ->
+          {:thinking, text, !collapsed}
+
+        other ->
+          other
       end)
 
-    state = %{state | messages: messages}
+    state = %{state | transcript: transcript}
     state = notify_messages_changed(state)
     {:reply, :ok, state}
   end
@@ -1375,7 +1368,7 @@ defmodule MingaAgent.Session do
   def handle_call(:toggle_all_tool_collapses, _from, state) do
     # If any tool call is collapsed, expand all; otherwise collapse all.
     any_collapsed =
-      Enum.any?(state.messages, fn
+      Enum.any?(Transcript.messages(state.transcript), fn
         {:tool_call, %ToolCall{collapsed: true}} -> true
         {:thinking, _, true} -> true
         _ -> false
@@ -1383,28 +1376,30 @@ defmodule MingaAgent.Session do
 
     target = !any_collapsed
 
-    messages =
-      Enum.map(state.messages, fn
-        {:tool_call, %ToolCall{} = tc} -> {:tool_call, ToolCall.set_collapsed(tc, target)}
-        {:thinking, text, _} -> {:thinking, text, target}
-        other -> other
+    transcript =
+      Transcript.transform_messages(state.transcript, fn
+        {:tool_call, %ToolCall{} = tool_call} ->
+          {:tool_call, ToolCall.set_collapsed(tool_call, target)}
+
+        {:thinking, text, _collapsed} ->
+          {:thinking, text, target}
+
+        other ->
+          other
       end)
 
-    state = %{state | messages: messages}
+    state = %{state | transcript: transcript}
     state = notify_messages_changed(state)
     {:reply, :ok, state}
   end
 
   def handle_call({:branch_at, turn_index}, _from, state) do
-    branch_name = "branch-#{Enum.count(state.branches) + 1}"
-
-    case Branch.branch_at(state.messages, turn_index, branch_name, state.branches) do
-      {:ok, truncated, branches} ->
-        truncated_ids = Enum.take(state.message_ids, Enum.count(truncated))
-        state = %{state | messages: truncated, message_ids: truncated_ids, branches: branches}
+    case Transcript.branch_at(state.transcript, turn_index, DateTime.utc_now()) do
+      {:ok, transcript, branch} ->
+        state = %{state | transcript: transcript}
         state = notify_messages_changed(state)
 
-        {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
+        {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch.name}'."},
          state}
 
       {:error, reason} ->
@@ -1413,20 +1408,18 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:list_branches, _from, state) do
-    {:reply, {:ok, Branch.list(state.branches)}, state}
+    {:reply, {:ok, Branch.list(Transcript.branches(state.transcript))}, state}
   end
 
   def handle_call({:switch_branch, branch_index}, _from, state) do
-    idx = branch_index - 1
-
-    case Enum.at(state.branches, idx) do
-      nil ->
-        {:reply, {:error, "Branch #{branch_index} not found. Use /branches to list."}, state}
-
-      branch ->
-        state = reset_messages(state, branch.messages)
+    case Transcript.switch_branch(state.transcript, branch_index) do
+      {:ok, transcript} ->
+        state = %{state | transcript: transcript}
         state = notify_messages_changed(state)
         {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -1545,20 +1538,40 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
+  def handle_info(:save_session, %{persistence: %Persistence{timer: {token, _timer_ref}}} = state) do
+    handle_info({:save_session, token}, state)
+  end
+
   def handle_info(:save_session, state) do
-    state = %{state | save_timer: nil}
+    {persistence, timer_to_cancel} = Persistence.changed(state.persistence)
 
-    case save_to_disk(state) do
-      :ok ->
-        {:noreply, %{state | save_retry_count: 0}}
+    cancel_runtime_timer(timer_to_cancel)
 
-      {:error, reason} ->
-        Minga.Log.error(
-          :agent,
-          "[Agent.Session] failed to save session #{state.session_id} to disk: #{inspect(reason)}"
-        )
+    token = make_ref()
+    persistence = Persistence.scheduled(persistence, token, make_ref())
+    handle_info({:save_session, token}, %{state | persistence: persistence})
+  end
 
-        {:noreply, schedule_save_retry(state)}
+  def handle_info({:save_session, token}, state) do
+    case Persistence.save_due(state.persistence, token) do
+      :stale ->
+        {:noreply, state}
+
+      {:save, persistence} ->
+        state = %{state | persistence: persistence}
+
+        case save_to_disk(state) do
+          :ok ->
+            {:noreply, %{state | persistence: Persistence.saved(persistence)}}
+
+          {:error, reason} ->
+            Minga.Log.error(
+              :agent,
+              "[Agent.Session] failed to save session #{state.session_id} to disk: #{inspect(reason)}"
+            )
+
+            {:noreply, schedule_save_retry(state)}
+        end
     end
   end
 
@@ -1677,13 +1690,13 @@ defmodule MingaAgent.Session do
     notify(state, :complete, completion_notification(state))
 
     # Collapse thinking blocks now that the turn is complete.
-    state = %{state | messages: collapse_thinking_blocks(state.messages)}
+    state = %{state | transcript: Transcript.collapse_thinking(state.transcript)}
 
     state =
       if usage do
         log_turn_usage(usage, state)
 
-        state = %{state | total_usage: TurnUsage.add(state.total_usage, usage)}
+        state = %{state | transcript: Transcript.add_usage(state.transcript, usage)}
 
         state
         |> append_msg(Message.usage(usage))
@@ -1731,29 +1744,15 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
-    state =
-      case append_to_last_assistant(state.messages, delta) do
-        {:updated, updated_messages} ->
-          %{state | messages: updated_messages}
-
-        {:appended, new_msg} ->
-          append_msg(state, new_msg)
-      end
-
+    transcript = Transcript.append_stream_tail(state.transcript, :assistant, [delta])
+    state = %{state | transcript: transcript}
     broadcast(state, {:text_delta, delta})
     state
   end
 
   defp handle_provider_event(%Event.ThinkingDelta{delta: delta}, state) do
-    state =
-      case append_to_last_thinking(state.messages, delta) do
-        {:updated, updated_messages} ->
-          %{state | messages: updated_messages}
-
-        {:appended, new_msg} ->
-          append_msg(state, new_msg)
-      end
-
+    transcript = Transcript.append_stream_tail(state.transcript, :thinking, [delta])
+    state = %{state | transcript: transcript}
     broadcast(state, {:thinking_delta, delta})
     state
   end
@@ -1817,29 +1816,29 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolUpdate{} = event, state) do
-    messages =
-      update_tool_call(state.messages, event.tool_call_id, fn tc ->
-        ToolCall.update_partial(tc, event.partial_result)
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
+        ToolCall.update_partial(tool_call, event.partial_result)
       end)
 
-    state = %{state | messages: messages}
+    state = %{state | transcript: transcript}
     broadcast(state, {:tool_update, event.tool_call_id, event.name, event.partial_result})
     state
   end
 
   defp handle_provider_event(%Event.ToolEnd{} = event, state) do
-    messages =
-      update_tool_call(state.messages, event.tool_call_id, fn tc ->
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
         if event.is_error do
-          ToolCall.error(tc, event.result)
+          ToolCall.error(tool_call, event.result)
         else
-          ToolCall.complete(tc, event.result)
+          ToolCall.complete(tool_call, event.result)
         end
       end)
 
     state = %{
       state
-      | messages: messages,
+      | transcript: transcript,
         pending_auto_approvals: Map.delete(state.pending_auto_approvals, event.tool_call_id)
     }
 
@@ -1881,8 +1880,8 @@ defmodule MingaAgent.Session do
   end
 
   @spec append_error_message_once(state(), String.t()) :: state()
-  defp append_error_message_once(%{messages: messages} = state, message) do
-    case Enum.at(messages, -1) do
+  defp append_error_message_once(state, message) do
+    case Transcript.last_message(state.transcript) do
       {:system, ^message, :error} -> state
       _other -> append_system_message(state, message, :error)
     end
@@ -1922,12 +1921,17 @@ defmodule MingaAgent.Session do
 
     pending_auto_approvals = Map.put(state.pending_auto_approvals, event.tool_call_id, scope)
 
-    messages =
-      update_tool_call(state.messages, event.tool_call_id, fn tc ->
-        ToolCall.set_auto_approved_scope(tc, scope)
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
+        ToolCall.set_auto_approved_scope(tool_call, scope)
       end)
 
-    state = %{state | messages: messages, pending_auto_approvals: pending_auto_approvals}
+    state = %{
+      state
+      | transcript: transcript,
+        pending_auto_approvals: pending_auto_approvals
+    }
+
     broadcast(state, {:tool_auto_approved, event.tool_call_id, event.name, scope})
     notify_messages_changed(state)
   end
@@ -1954,64 +1958,14 @@ defmodule MingaAgent.Session do
 
   # Appends a message and assigns it a new stable ID.
   @spec append_msg(state(), Message.t()) :: state()
-  defp append_msg(state, msg) do
-    id = state.next_message_id
-
-    %{
-      state
-      | messages: Enum.concat(state.messages, [msg]),
-        message_ids: Enum.concat(state.message_ids, [id]),
-        next_message_id: id + 1
-    }
+  defp append_msg(state, message) do
+    %{state | transcript: Transcript.append(state.transcript, message)}
   end
 
   # Appends multiple messages, assigning each a new stable ID.
   @spec append_msgs(state(), [Message.t()]) :: state()
-  defp append_msgs(state, []), do: state
-
-  defp append_msgs(state, msgs) do
-    count = Enum.count(msgs)
-    base_id = state.next_message_id
-    new_ids = Enum.to_list(base_id..(base_id + count - 1))
-
-    %{
-      state
-      | messages: state.messages ++ msgs,
-        message_ids: state.message_ids ++ new_ids,
-        next_message_id: base_id + count
-    }
-  end
-
-  @spec restore_messages_with_ids(state(), SessionStore.session_data()) :: state()
-  defp restore_messages_with_ids(state, data) do
-    case Map.get(data, :message_ids) do
-      ids when is_list(ids) and ids != [] ->
-        count = Enum.count(data.messages)
-
-        %{
-          state
-          | messages: data.messages,
-            message_ids: Enum.take(ids, count),
-            next_message_id: Enum.max(ids, fn -> 0 end) + 1
-        }
-
-      _ ->
-        reset_messages(state, data.messages)
-    end
-  end
-
-  # Replaces all messages and resets IDs (used by new_session, load_session, switch_branch).
-  @spec reset_messages(state(), [Message.t()]) :: state()
-  defp reset_messages(state, msgs) do
-    count = Enum.count(msgs)
-    ids = Enum.to_list(1..max(count, 1))
-
-    %{
-      state
-      | messages: msgs,
-        message_ids: Enum.take(ids, count),
-        next_message_id: count + 1
-    }
+  defp append_msgs(state, messages) do
+    %{state | transcript: Transcript.append_many(state.transcript, messages)}
   end
 
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
@@ -2101,60 +2055,17 @@ defmodule MingaAgent.Session do
   defp public_pending_approval(%MingaAgent.ToolApproval{} = approval),
     do: MingaAgent.ToolApproval.public(approval)
 
-  @spec append_to_last_assistant([Message.t()], String.t()) ::
-          {:updated, [Message.t()]} | {:appended, Message.t()}
-  defp append_to_last_assistant(messages, delta) do
-    case Enum.at(messages, -1) do
-      {:assistant, text} ->
-        {:updated,
-         List.replace_at(messages, Enum.count(messages) - 1, {:assistant, text <> delta})}
-
-      _ ->
-        {:appended, Message.assistant(delta)}
-    end
-  end
-
-  @spec collapse_thinking_blocks([Message.t()]) :: [Message.t()]
-  defp collapse_thinking_blocks(messages) do
-    Enum.map(messages, fn
-      {:thinking, text, false} -> {:thinking, text, true}
-      other -> other
-    end)
-  end
-
-  @spec append_to_last_thinking([Message.t()], String.t()) ::
-          {:updated, [Message.t()]} | {:appended, Message.t()}
-  defp append_to_last_thinking(messages, delta) do
-    case Enum.at(messages, -1) do
-      {:thinking, text, _collapsed} ->
-        {:updated,
-         List.replace_at(messages, Enum.count(messages) - 1, {:thinking, text <> delta, false})}
-
-      _ ->
-        {:appended, Message.thinking(delta)}
-    end
-  end
-
-  @spec update_tool_call([Message.t()], String.t(), (ToolCall.t() -> ToolCall.t())) ::
-          [Message.t()]
-  defp update_tool_call(messages, tool_call_id, updater) do
-    Enum.map(messages, fn
-      {:tool_call, %ToolCall{id: ^tool_call_id} = tc} -> {:tool_call, updater.(tc)}
-      other -> other
-    end)
-  end
-
   @spec record_tool_file_preview(state(), Event.ToolFileChanged.t()) :: state()
   defp record_tool_file_preview(state, %Event.ToolFileChanged{} = event) do
     preview =
       ToolApproval.build_file_diff_preview(event.path, event.before_content, event.after_content)
 
-    messages =
-      update_tool_call(state.messages, event.tool_call_id, fn tc ->
-        ToolCall.set_preview(tc, preview)
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
+        ToolCall.set_preview(tool_call, preview)
       end)
 
-    %{state | messages: messages}
+    %{state | transcript: transcript}
   end
 
   # ── Status management ──────────────────────────────────────────────────────
@@ -2755,7 +2666,8 @@ defmodule MingaAgent.Session do
   @doc false
   @spec notify_messages_changed(state()) :: state()
   defp notify_messages_changed(state) do
-    state = %{state | last_message_at: DateTime.utc_now()}
+    transcript = Transcript.touch(state.transcript, DateTime.utc_now())
+    state = %{state | transcript: transcript}
     broadcast(state, :messages_changed)
     schedule_save(state)
   end
@@ -3205,7 +3117,7 @@ defmodule MingaAgent.Session do
     state = install_provider_transition(state, lifecycle, effects)
     state = clear_provider_start_error(state)
 
-    state = seed_provider_messages(state, state.messages)
+    state = seed_provider_messages(state, Transcript.messages(state.transcript))
     state = apply_pending_thinking_level(state)
     state = maybe_show_auth_onboarding(state)
     dispatch_session_start(state)
@@ -3602,66 +3514,76 @@ defmodule MingaAgent.Session do
   @save_debounce_ms 500
 
   @spec schedule_save(state()) :: state()
-  defp schedule_save(%{persist?: false} = state), do: state
-
   defp schedule_save(state) do
-    state = cancel_save_timer(state)
-    ref = Process.send_after(self(), :save_session, @save_debounce_ms)
-    %{state | save_timer: ref, save_retry_count: 0}
+    {persistence, timer_to_cancel} = Persistence.changed(state.persistence)
+
+    cancel_runtime_timer(timer_to_cancel)
+
+    persistence =
+      if Persistence.dirty?(persistence) do
+        token = make_ref()
+        timer_ref = Process.send_after(self(), {:save_session, token}, @save_debounce_ms)
+        Persistence.scheduled(persistence, token, timer_ref)
+      else
+        persistence
+      end
+
+    %{state | persistence: persistence}
   end
 
   @spec cancel_save_timer(state()) :: state()
-  defp cancel_save_timer(%{save_timer: nil} = state), do: state
-
-  defp cancel_save_timer(%{save_timer: ref} = state) do
-    Process.cancel_timer(ref)
-    %{state | save_timer: nil}
+  defp cancel_save_timer(state) do
+    {persistence, timer_to_cancel} = Persistence.cancel(state.persistence)
+    cancel_runtime_timer(timer_to_cancel)
+    %{state | persistence: persistence}
   end
 
-  @save_retry_base_ms 5_000
-  @save_retry_max_ms 60_000
+  @spec cancel_runtime_timer({reference(), reference()} | nil) :: :ok
+  defp cancel_runtime_timer(nil), do: :ok
+
+  defp cancel_runtime_timer({_token, timer_ref}) do
+    Process.cancel_timer(timer_ref)
+    :ok
+  end
 
   @spec save_to_disk(state()) :: :ok | {:error, term()}
-  defp save_to_disk(%{persist?: false}), do: :ok
-
   defp save_to_disk(state) do
-    now = DateTime.to_iso8601(DateTime.utc_now())
-    last_message_at = DateTime.to_iso8601(state.last_message_at)
+    if Persistence.enabled?(state.persistence) do
+      now = DateTime.to_iso8601(DateTime.utc_now())
+      last_message_at = DateTime.to_iso8601(Transcript.last_changed_at(state.transcript))
 
-    data = %{
-      id: state.session_id,
-      timestamp: now,
-      last_message_at: last_message_at,
-      title:
-        readable_title(first_assistant_text(state.messages)) ||
-          readable_title(first_user_prompt(state.messages)),
-      model_name: state.provider.model_name,
-      provider_name: state.provider.provider_name,
-      messages: state.messages,
-      message_ids: state.message_ids,
-      pinned_ids: state.pinned_ids,
-      usage: state.total_usage,
-      branches: state.branches,
-      memory: Memory.read(state.session_store_dir)
-    }
+      data = %{
+        id: state.session_id,
+        timestamp: now,
+        last_message_at: last_message_at,
+        title:
+          readable_title(first_assistant_text(Transcript.messages(state.transcript))) ||
+            readable_title(first_user_prompt(Transcript.messages(state.transcript))),
+        model_name: state.provider.model_name,
+        provider_name: state.provider.provider_name,
+        messages: Transcript.messages(state.transcript),
+        message_ids:
+          state.transcript
+          |> Transcript.messages_with_ids()
+          |> Enum.map(&elem(&1, 0)),
+        pinned_ids: Transcript.pinned_ids(state.transcript),
+        usage: Transcript.usage(state.transcript),
+        branches: Transcript.branches(state.transcript),
+        memory: Memory.read(state.session_store_dir)
+      }
 
-    SessionStore.save(data, state.session_store_dir)
+      SessionStore.save(data, state.session_store_dir)
+    else
+      :ok
+    end
   end
 
   @spec schedule_save_retry(state()) :: state()
   defp schedule_save_retry(state) do
-    retry_count = state.save_retry_count + 1
-    delay_ms = retry_delay_ms(retry_count)
-    ref = Process.send_after(self(), :save_session, delay_ms)
-    %{state | save_timer: ref, save_retry_count: retry_count}
-  end
-
-  @spec retry_delay_ms(non_neg_integer()) :: non_neg_integer()
-  defp retry_delay_ms(retry_count) when retry_count <= 1, do: @save_retry_base_ms
-
-  defp retry_delay_ms(retry_count) do
-    exponential = @save_retry_base_ms * round(:math.pow(2, retry_count - 1))
-    min(exponential, @save_retry_max_ms)
+    {persistence, delay_ms} = Persistence.failed(state.persistence)
+    token = make_ref()
+    timer_ref = Process.send_after(self(), {:save_session, token}, delay_ms)
+    %{state | persistence: Persistence.scheduled(persistence, token, timer_ref)}
   end
 
   @spec restore_loaded_session(state(), SessionStore.session_data()) ::
@@ -3685,10 +3607,25 @@ defmodule MingaAgent.Session do
             provider_opts
           )
 
+        transcript =
+          Transcript.restore(
+            data.messages,
+            data.message_ids,
+            Map.get(data, :branches, []),
+            data.usage,
+            Map.get(data, :pinned_ids, MapSet.new()),
+            loaded_at
+          )
+
+        {persistence, timer_to_cancel} = Persistence.restored(state.persistence)
+
+        cancel_runtime_timer(timer_to_cancel)
+
         state = %{
           state
           | session_id: data.id,
-            total_usage: data.usage,
+            transcript: transcript,
+            persistence: persistence,
             provider: lifecycle,
             status: :idle,
             error_message: nil,
@@ -3696,9 +3633,6 @@ defmodule MingaAgent.Session do
             active_tool_calls: [],
             active_tool_name: nil,
             created_at: loaded_at,
-            last_message_at: loaded_at,
-            branches: Map.get(data, :branches, []),
-            pinned_ids: Map.get(data, :pinned_ids, MapSet.new()),
             steering_queue: [],
             follow_up_queue: [],
             touched_files: %{},
@@ -3721,9 +3655,7 @@ defmodule MingaAgent.Session do
     case restore_memory_snapshot_if_recorded(state, data) do
       :ok ->
         state =
-          state
-          |> restore_messages_with_ids(data)
-          |> seed_provider_messages(data.messages)
+          seed_provider_messages(state, Transcript.messages(state.transcript))
 
         broadcast(state, {:status_changed, :idle})
         broadcast(state, :messages_changed)
@@ -3977,7 +3909,7 @@ defmodule MingaAgent.Session do
   defp dispatch_stop(%{hooks_enabled?: false}), do: :ok
 
   defp dispatch_stop(state) do
-    last_message = extract_last_assistant_text(state.messages)
+    last_message = extract_last_assistant_text(Transcript.messages(state.transcript))
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
     HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
   rescue
