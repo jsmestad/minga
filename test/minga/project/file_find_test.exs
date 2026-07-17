@@ -230,6 +230,10 @@ defmodule Minga.Project.FileFindTest do
                {:error, :absolute_path}
 
       assert Root.resolve_file(root, "../outside.txt") == {:error, :parent_traversal}
+      assert Root.resolve_file(root, "lib/../inside.txt") == {:error, :parent_traversal}
+
+      assert Root.resolve_file(root, "../#{Path.basename(tmp_dir)}/inside.txt") ==
+               {:error, :parent_traversal}
     end
 
     test "rejects a symlink whose canonical target escapes the workspace", %{

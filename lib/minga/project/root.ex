@@ -151,6 +151,14 @@ defmodule Minga.Project.Root do
   @spec safe_relative_path(String.t(), String.t()) ::
           {:ok, String.t()} | {:error, :parent_traversal}
   defp safe_relative_path(path, canonical_root) do
+    safe_relative_path(path, canonical_root, Enum.member?(Path.split(path), ".."))
+  end
+
+  @spec safe_relative_path(String.t(), String.t(), boolean()) ::
+          {:ok, String.t()} | {:error, :parent_traversal}
+  defp safe_relative_path(_path, _canonical_root, true), do: {:error, :parent_traversal}
+
+  defp safe_relative_path(path, canonical_root, false) do
     lexical_target = Path.expand(path, canonical_root)
     relative_target = Path.relative_to(lexical_target, canonical_root)
 
