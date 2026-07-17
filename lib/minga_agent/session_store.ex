@@ -5,6 +5,7 @@ defmodule MingaAgent.SessionStore do
   Each session is saved as `{session_id}.json` in the sessions directory
   (`~/.config/minga/agent/sessions/` by default). Files are written
   atomically via a temp file + rename to avoid corruption on crash.
+  Manager-owned remote identity is stored separately under `.remote_tokens/`.
 
   The store is stateless: all functions operate directly on the filesystem.
   The `Session` GenServer calls `save/2` on a debounced timer, and the
@@ -37,13 +38,14 @@ defmodule MingaAgent.SessionStore do
           required(:usage) => MingaAgent.TurnUsage.t(),
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
-          optional(:remote_token) => String.t() | nil,
           optional(:provider_name) => String.t(),
           optional(:branches) => [MingaAgent.Branch.t()],
           optional(:message_ids) => [pos_integer()],
           optional(:pinned_ids) => MapSet.t(pos_integer()),
           optional(:memory) => String.t() | nil
         }
+
+  @typep remote_token_result :: {:ok, String.t()} | :missing | {:error, term()}
 
   @doc "Returns the sessions directory path."
   @spec sessions_dir(String.t() | nil) :: String.t()
@@ -64,25 +66,87 @@ defmodule MingaAgent.SessionStore do
   """
   @spec save(session_data(), String.t() | nil) :: :ok | {:error, term()}
   def save(%{id: id} = data, config_dir \\ nil) when is_binary(id) do
-    dir = sessions_dir(config_dir)
-    path = Path.join(dir, "#{id}.json")
-    tmp_path = path <> ".tmp"
+    path = Path.join(sessions_dir(config_dir), "#{id}.json")
     json = JSON.encode!(serialize(data))
 
-    with :ok <- ensure_private_dir(dir),
-         :ok <- write_private_file(tmp_path, json),
-         :ok <- File.rename(tmp_path, path) do
-      :ok
-    else
+    case atomic_write_private(path, json) do
+      :ok ->
+        :ok
+
       {:error, reason} ->
-        File.rm(tmp_path)
         Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{reason}")
         {:error, reason}
     end
   end
 
   @doc """
-  Loads a session from disk.
+  Establishes manager-owned remote session identity.
+
+  Existing canonical identity wins over legacy transcript identity and the candidate. A new identity is persisted before it is returned.
+  """
+  @spec establish_remote_token(String.t(), String.t(), String.t() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  def establish_remote_token(session_id, candidate, config_dir \\ nil)
+      when is_binary(session_id) and is_binary(candidate) do
+    path = Path.join(remote_tokens_dir(config_dir), "#{session_id}.json")
+
+    case read_remote_token(path, {:error, :invalid_remote_token_record}) do
+      {:ok, token} -> {:ok, token}
+      :missing -> establish_missing_remote_token(path, session_id, candidate, config_dir)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec establish_missing_remote_token(String.t(), String.t(), String.t(), String.t() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  defp establish_missing_remote_token(path, session_id, candidate, config_dir) do
+    with {:ok, token} <- new_remote_token(session_id, candidate, config_dir),
+         :ok <- atomic_write_private(path, encode_remote_token(token)) do
+      {:ok, token}
+    end
+  end
+
+  @spec new_remote_token(String.t(), String.t(), String.t() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  defp new_remote_token(session_id, candidate, config_dir) do
+    case load_legacy_remote_token(session_id, config_dir) do
+      {:ok, token} -> {:ok, token}
+      :missing -> {:ok, candidate}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec remote_tokens_dir(String.t() | nil) :: String.t()
+  defp remote_tokens_dir(config_dir) do
+    Path.join(sessions_dir(config_dir), ".remote_tokens")
+  end
+
+  @spec load_legacy_remote_token(String.t(), String.t() | nil) :: remote_token_result()
+  defp load_legacy_remote_token(session_id, config_dir) do
+    path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
+    read_remote_token(path, :missing)
+  end
+
+  @spec read_remote_token(String.t(), :missing | {:error, term()}) :: remote_token_result()
+  defp read_remote_token(path, missing_record) do
+    with {:ok, json} <- File.read(path),
+         {:ok, data} when is_map(data) <- decode_json(json) do
+      case data["remote_token"] do
+        token when is_binary(token) -> {:ok, token}
+        _ -> missing_record
+      end
+    else
+      {:ok, _other} -> missing_record
+      {:error, :enoent} -> :missing
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec encode_remote_token(String.t()) :: String.t()
+  defp encode_remote_token(token), do: JSON.encode!(%{"remote_token" => token})
+
+  @doc """
+  Loads a persisted session transcript.
 
   Returns `{:ok, session_data}` or `{:error, reason}`.
   """
@@ -91,8 +155,11 @@ defmodule MingaAgent.SessionStore do
     path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
 
     with {:ok, json} <- File.read(path),
-         {:ok, data} <- decode_json(json) do
+         {:ok, data} when is_map(data) <- decode_json(json) do
       {:ok, deserialize(data)}
+    else
+      {:ok, _other} -> {:error, :invalid_session_record}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -139,14 +206,29 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @doc "Deletes a saved session."
+  @spec atomic_write_private(String.t(), String.t()) :: :ok | {:error, term()}
+  defp atomic_write_private(path, contents) do
+    tmp_path = path <> ".tmp"
+
+    with :ok <- ensure_private_dir(Path.dirname(path)),
+         :ok <- write_private_file(tmp_path, contents),
+         :ok <- File.rename(tmp_path, path) do
+      :ok
+    else
+      {:error, _reason} = error ->
+        File.rm(tmp_path)
+        error
+    end
+  end
+
+  @doc "Deletes a saved session transcript. Durable remote identity is retained."
   @spec delete(String.t(), String.t() | nil) :: :ok | {:error, term()}
   def delete(session_id, config_dir \\ nil) when is_binary(session_id) do
     path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
     File.rm(path)
   end
 
-  @doc "Deletes all saved sessions."
+  @doc "Deletes all saved session transcripts. Durable remote identities are retained."
   @spec clear_all(String.t() | nil) :: :ok
   def clear_all(config_dir \\ nil) do
     dir = sessions_dir(config_dir)
@@ -163,9 +245,9 @@ defmodule MingaAgent.SessionStore do
   end
 
   @doc """
-  Prunes sessions older than `days` days.
+  Prunes session transcripts older than `days` days.
 
-  Returns the number of sessions deleted.
+  Returns the number of transcripts deleted. Durable remote identities are retained.
   """
   @spec prune(non_neg_integer(), String.t() | nil) :: non_neg_integer()
   def prune(days, config_dir \\ nil) when is_integer(days) and days > 0 do
@@ -189,7 +271,6 @@ defmodule MingaAgent.SessionStore do
 
     %{
       "id" => data.id,
-      "remote_token" => Map.get(data, :remote_token),
       "timestamp" => timestamp,
       "last_message_at" => Map.get(data, :last_message_at, timestamp),
       "title" => Map.get(data, :title) || title_from_messages(messages),
@@ -262,7 +343,6 @@ defmodule MingaAgent.SessionStore do
 
     session = %{
       id: data["id"],
-      remote_token: data["remote_token"],
       timestamp: timestamp,
       last_message_at: data["last_message_at"] || timestamp,
       title: data["title"] || title_from_messages(messages),
@@ -439,7 +519,7 @@ defmodule MingaAgent.SessionStore do
   @spec load_meta(String.t()) :: session_meta() | nil
   defp load_meta(path) do
     with {:ok, json} <- File.read(path),
-         {:ok, data} <- decode_json(json) do
+         {:ok, data} when is_map(data) <- decode_json(json) do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
       timestamp = data["timestamp"] || ""
@@ -534,7 +614,7 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec decode_json(String.t()) :: {:ok, map()} | {:error, term()}
+  @spec decode_json(String.t()) :: {:ok, term()} | {:error, term()}
   defp decode_json(json) do
     {:ok, JSON.decode!(json)}
   rescue

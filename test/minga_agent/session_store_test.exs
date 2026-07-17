@@ -222,15 +222,22 @@ defmodule MingaAgent.SessionStoreTest do
       assert loaded.memory =~ "Use concise answers"
     end
 
-    test "writes session directory and files with private permissions", %{tmp_dir: dir} do
-      data = Map.put(sample_data("private-session"), :remote_token, "remote-token")
+    test "writes transcript and remote token files with private permissions", %{tmp_dir: dir} do
+      data = sample_data("private-session")
       assert :ok = SessionStore.save(data, dir)
+
+      assert {:ok, "remote-token"} =
+               SessionStore.establish_remote_token(data.id, "remote-token", dir)
 
       sessions_dir = SessionStore.sessions_dir(dir)
       session_path = Path.join(sessions_dir, "private-session.json")
+      token_dir = Path.join(sessions_dir, ".remote_tokens")
+      token_path = Path.join(token_dir, "private-session.json")
 
       assert private_mode?(File.stat!(sessions_dir).mode, 0o077)
       assert private_mode?(File.stat!(session_path).mode, 0o077)
+      assert private_mode?(File.stat!(token_dir).mode, 0o077)
+      assert private_mode?(File.stat!(token_path).mode, 0o077)
     end
 
     test "returns error for nonexistent session" do
@@ -242,6 +249,107 @@ defmodule MingaAgent.SessionStoreTest do
       File.write!(blocked_base, "file blocks mkdir")
 
       assert {:error, _reason} = SessionStore.save(sample_data("blocked"), blocked_base)
+    end
+  end
+
+  describe "remote token identity" do
+    test "persists manager identity outside the transcript", %{tmp_dir: dir} do
+      data = sample_data("separate-identity")
+
+      assert {:ok, "stable-token"} =
+               SessionStore.establish_remote_token(data.id, "stable-token", dir)
+
+      assert :ok = SessionStore.save(data, dir)
+
+      assert {:ok, "stable-token"} =
+               SessionStore.establish_remote_token(data.id, "replacement-token", dir)
+
+      assert {:ok, transcript} = SessionStore.load(data.id, dir)
+      refute Map.has_key?(transcript, :remote_token)
+
+      refute File.read!(Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")) =~
+               "remote_token"
+    end
+
+    test "existing canonical identity wins over a new candidate", %{tmp_dir: dir} do
+      session_id = "first-creator-wins"
+
+      assert {:ok, "first-token"} =
+               SessionStore.establish_remote_token(session_id, "first-token", dir)
+
+      assert {:ok, "first-token"} =
+               SessionStore.establish_remote_token(session_id, "second-token", dir)
+    end
+
+    test "migrates identity from a legacy transcript", %{tmp_dir: dir} do
+      data = sample_data("legacy-identity")
+      assert :ok = SessionStore.save(data, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      payload = path |> File.read!() |> JSON.decode!() |> Map.put("remote_token", "legacy-token")
+      File.write!(path, JSON.encode!(payload))
+
+      assert {:ok, "legacy-token"} =
+               SessionStore.establish_remote_token(data.id, "candidate-token", dir)
+
+      assert :ok = SessionStore.save(data, dir)
+      refute File.read!(path) =~ "remote_token"
+
+      assert {:ok, "legacy-token"} =
+               SessionStore.establish_remote_token(data.id, "replacement-token", dir)
+    end
+
+    test "concurrent transcript and identity writes preserve both owners", %{tmp_dir: dir} do
+      data = sample_data("concurrent-identity")
+      parent = self()
+
+      transcript_task =
+        Task.async(fn ->
+          send(parent, {:writer_ready, self()})
+          receive do: (:write -> SessionStore.save(data, dir))
+        end)
+
+      token_task =
+        Task.async(fn ->
+          send(parent, {:writer_ready, self()})
+
+          receive do
+            :write ->
+              SessionStore.establish_remote_token(data.id, "concurrent-token", dir)
+          end
+        end)
+
+      writer_pids =
+        for _ <- 1..2 do
+          assert_receive {:writer_ready, pid}
+          pid
+        end
+
+      Enum.each(writer_pids, &send(&1, :write))
+      assert :ok = Task.await(transcript_task)
+      assert {:ok, "concurrent-token"} = Task.await(token_task)
+
+      assert {:ok, transcript} = SessionStore.load(data.id, dir)
+      assert transcript.messages == data.messages
+      refute Map.has_key?(transcript, :remote_token)
+
+      assert {:ok, "concurrent-token"} =
+               SessionStore.establish_remote_token(data.id, "replacement-token", dir)
+    end
+
+    test "failed transcript writes leave durable identity unchanged", %{tmp_dir: dir} do
+      data = sample_data("failed-transcript")
+
+      assert {:ok, "surviving-token"} =
+               SessionStore.establish_remote_token(data.id, "surviving-token", dir)
+
+      transcript_path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      File.mkdir_p!(transcript_path)
+
+      assert {:error, _reason} = SessionStore.save(data, dir)
+
+      assert {:ok, "surviving-token"} =
+               SessionStore.establish_remote_token(data.id, "replacement-token", dir)
     end
   end
 
@@ -394,6 +502,23 @@ defmodule MingaAgent.SessionStoreTest do
       pruned = SessionStore.prune(30)
       assert pruned == 0
       assert {:ok, _} = SessionStore.load("recent-session")
+    end
+
+    test "pruning a transcript does not revoke its durable identity", %{tmp_dir: dir} do
+      session_id = "old-transcript-stable-token"
+      old_timestamp = DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -40, :day))
+      data = %{sample_data(session_id) | timestamp: old_timestamp}
+
+      assert :ok = SessionStore.save(data, dir)
+
+      assert {:ok, "stable-token"} =
+               SessionStore.establish_remote_token(session_id, "stable-token", dir)
+
+      assert SessionStore.prune(30, dir) == 1
+      assert {:error, _reason} = SessionStore.load(session_id, dir)
+
+      assert {:ok, "stable-token"} =
+               SessionStore.establish_remote_token(session_id, "replacement-token", dir)
     end
   end
 
