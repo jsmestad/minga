@@ -86,7 +86,6 @@ defmodule MingaAgent.Session do
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
-          remote_token: String.t() | nil,
           workdir: String.t() | nil,
           event_log_server: GenServer.server(),
           event_log_failure: event_log_failure() | nil,
@@ -723,7 +722,6 @@ defmodule MingaAgent.Session do
 
     state = %{
       session_id: session_id,
-      remote_token: Keyword.get(opts, :remote_token),
       workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       event_log_failure: nil,
@@ -3632,7 +3630,6 @@ defmodule MingaAgent.Session do
 
     data = %{
       id: state.session_id,
-      remote_token: state.remote_token,
       timestamp: now,
       last_message_at: last_message_at,
       title:
@@ -3691,7 +3688,6 @@ defmodule MingaAgent.Session do
         state = %{
           state
           | session_id: data.id,
-            remote_token: Map.get(data, :remote_token, state.remote_token),
             total_usage: data.usage,
             provider: lifecycle,
             status: :idle,

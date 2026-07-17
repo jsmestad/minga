@@ -499,30 +499,31 @@ defmodule MingaAgent.SessionManager do
   @spec do_start_managed_session(state(), keyword(), String.t()) ::
           {:ok, String.t(), pid(), state()} | {:error, term()}
   defp do_start_managed_session(state, opts, session_id) do
-    token = session_token_for_start(session_id, opts)
-    opts = Keyword.put(opts, :remote_token, token)
+    {supplied_token, session_opts} = Keyword.pop(opts, :remote_token)
 
-    case MingaAgent.Supervisor.start_session(opts) do
-      {:ok, pid} ->
-        ref = Process.monitor(pid)
+    with {:ok, token} <-
+           session_token_for_start(session_id, supplied_token, session_opts),
+         {:ok, pid} <- MingaAgent.Supervisor.start_session(session_opts) do
+      ref = Process.monitor(pid)
 
-        entry = %{
-          pid: pid,
-          monitor_ref: ref,
-          token: token,
-          restart_opts: opts,
-          restart_state: nil
-        }
+      entry = %{
+        pid: pid,
+        monitor_ref: ref,
+        token: token,
+        restart_opts: session_opts,
+        restart_state: nil
+      }
 
-        sessions = Map.put(state.sessions, session_id, entry)
-        next_id = next_id_after_start(state, session_id)
-        new_state = %{state | sessions: sessions, next_id: next_id}
+      sessions = Map.put(state.sessions, session_id, entry)
+      next_id = next_id_after_start(state, session_id)
+      new_state = %{state | sessions: sessions, next_id: next_id}
 
-        Minga.Log.info(:agent, "[SessionManager] Started session #{session_id} (#{inspect(pid)})")
-        {:ok, session_id, pid, new_state}
+      Minga.Log.info(
+        :agent,
+        "[SessionManager] Started session #{session_id} (#{inspect(pid)})"
+      )
 
-      {:error, reason} ->
-        {:error, reason}
+      {:ok, session_id, pid, new_state}
     end
   end
 
@@ -552,58 +553,31 @@ defmodule MingaAgent.SessionManager do
   defp next_id_after_start(state, "session-" <> _suffix), do: state.next_id + 1
   defp next_id_after_start(state, _session_id), do: state.next_id
 
-  @spec session_token_for_start(String.t(), keyword()) :: String.t()
-  defp session_token_for_start(session_id, opts) do
-    case Keyword.get(opts, :remote_token) do
-      token when is_binary(token) ->
-        token
+  @spec session_token_for_start(String.t(), term(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp session_token_for_start(session_id, supplied_token, opts) do
+    candidate =
+      case supplied_token do
+        token when is_binary(token) -> token
+        _ -> generate_token()
+      end
 
-      _ ->
-        case stored_session_token(session_id, opts) do
-          {:ok, token} ->
-            token
-
-          :missing ->
-            generate_token()
-
-          {:error, reason} ->
-            log_session_store_load_error(session_id, resolved_session_store_dir(opts), reason)
-            generate_token()
-        end
+    if Keyword.get(opts, :persist?, true) do
+      establish_persisted_token(session_id, candidate, opts)
+    else
+      {:ok, candidate}
     end
   end
 
-  @spec stored_session_token(String.t(), keyword()) ::
-          {:ok, String.t()} | :missing | {:error, term()}
-  defp stored_session_token(session_id, opts) do
+  @spec establish_persisted_token(String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp establish_persisted_token(session_id, candidate, opts) do
     session_store_dir = Keyword.get(opts, :session_store_dir)
 
-    case SessionStore.load(session_id, session_store_dir) do
-      {:ok, data} ->
-        case Map.get(data, :remote_token) do
-          token when is_binary(token) -> {:ok, token}
-          _ -> :missing
-        end
-
-      {:error, :enoent} ->
-        :missing
-
-      {:error, reason} ->
-        {:error, reason}
+    case SessionStore.establish_remote_token(session_id, candidate, session_store_dir) do
+      {:ok, token} -> {:ok, token}
+      {:error, reason} -> {:error, {:remote_token_persistence_failed, reason}}
     end
-  end
-
-  @spec log_session_store_load_error(String.t(), String.t() | nil, term()) :: :ok
-  defp log_session_store_load_error(session_id, session_store_dir, reason) do
-    message =
-      "[SessionManager] Failed to load persisted remote token for session #{session_id} from #{inspect(session_store_dir)}: #{inspect(reason)}"
-
-    case reason do
-      :enoent -> Minga.Log.warning(:agent, message)
-      _ -> Minga.Log.error(:agent, message)
-    end
-
-    :ok
   end
 
   @spec generate_token() :: String.t()

@@ -4,6 +4,7 @@ defmodule MingaAgent.SessionManagerTest do
   import ExUnit.CaptureLog
 
   alias MingaAgent.Providers.RecordingProvider
+  alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionManager.SessionRestartedEvent
   alias MingaAgent.SessionManager.SessionStoppedEvent
@@ -18,11 +19,13 @@ defmodule MingaAgent.SessionManagerTest do
     Process.unlink(manager)
 
     on_exit(fn ->
-      for {session_id, _pid, _metadata} <- SessionManager.list_sessions(manager) do
-        SessionManager.stop_session(manager, session_id)
-      end
+      if Process.alive?(manager) do
+        for {session_id, _pid, _metadata} <- SessionManager.list_sessions(manager) do
+          SessionManager.stop_session(manager, session_id)
+        end
 
-      GenServer.stop(manager)
+        GenServer.stop(manager)
+      end
     end)
 
     %{manager: manager}
@@ -75,73 +78,135 @@ defmodule MingaAgent.SessionManagerTest do
       assert String.starts_with?(id, "workdir-")
     end
 
-    test "mints a token for brokered remote control", %{manager: manager} do
-      {:ok, session_id, _pid} = SessionManager.start_session(manager, [])
+    @tag :tmp_dir
+    test "mints and persists a token before returning the session", %{
+      manager: manager,
+      tmp_dir: dir
+    } do
+      {:ok, session_id, pid} =
+        SessionManager.start_session(manager, session_store_dir: dir)
+
       assert {:ok, token} = SessionManager.session_token(manager, session_id)
       assert is_binary(token)
       assert byte_size(token) > 20
+
+      assert {:ok, ^token} =
+               SessionStore.establish_remote_token(session_id, "replacement-token", dir)
+
+      refute Map.has_key?(:sys.get_state(pid), :remote_token)
     end
 
-    test "reuses a persisted remote token for a stable session", %{manager: manager} do
-      dir =
-        Path.join(
-          System.tmp_dir!(),
-          "session-manager-token-#{System.unique_integer([:positive])}"
-        )
-
-      on_exit(fn -> File.rm_rf(dir) end)
-
-      :ok =
-        MingaAgent.SessionStore.save(
-          %{
-            id: "workdir-stable",
-            remote_token: "persisted-token",
-            timestamp: DateTime.to_iso8601(DateTime.utc_now()),
-            model_name: "test",
-            messages: [],
-            usage: MingaAgent.TurnUsage.new()
-          },
-          dir
-        )
-
-      {:ok, "workdir-stable", _pid} =
-        SessionManager.start_or_get_session(manager, "workdir-stable", session_store_dir: dir)
-
-      assert {:ok, "persisted-token"} = SessionManager.session_token(manager, "workdir-stable")
-    end
-
-    test "logs and mints a new token when persisted remote token file is corrupt", %{
-      manager: manager
+    @tag :tmp_dir
+    test "keeps the existing remote_token option at the manager boundary", %{
+      manager: manager,
+      tmp_dir: dir
     } do
-      dir =
-        Path.join(
-          System.tmp_dir!(),
-          "session-manager-token-corrupt-#{System.unique_integer([:positive])}"
-        )
+      session_id = "supplied-token"
 
-      session_id = "token-corrupt-#{System.unique_integer([:positive])}"
+      assert {:ok, ^session_id, pid} =
+               SessionManager.start_session(manager,
+                 session_id: session_id,
+                 remote_token: "caller-token",
+                 session_store_dir: dir
+               )
+
+      assert {:ok, "caller-token"} = SessionManager.session_token(manager, session_id)
+
+      assert {:ok, "caller-token"} =
+               SessionStore.establish_remote_token(session_id, "replacement-token", dir)
+
+      refute Map.has_key?(:sys.get_state(pid), :remote_token)
+    end
+
+    @tag :tmp_dir
+    test "does not publish a token when durable identity cannot be established", %{
+      manager: manager,
+      tmp_dir: dir
+    } do
+      session_id = "blocked-token-store"
       sessions_dir = SessionStore.sessions_dir(dir)
       File.mkdir_p!(sessions_dir)
-      File.write!(Path.join(sessions_dir, "#{session_id}.json"), "{not json")
+      File.write!(Path.join(sessions_dir, ".remote_tokens"), "blocks token directory")
 
-      on_exit(fn -> File.rm_rf(dir) end)
+      assert {:error, {:remote_token_persistence_failed, _reason}} =
+               SessionManager.start_session(manager,
+                 session_id: session_id,
+                 session_store_dir: dir
+               )
 
-      log =
-        capture_log(fn ->
-          assert {:ok, ^session_id, pid} =
-                   SessionManager.start_session(manager,
-                     session_id: session_id,
-                     session_store_dir: dir
-                   )
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+    end
 
-          assert {:ok, token} = SessionManager.session_token(manager, session_id)
-          assert is_binary(token)
-          assert Process.alive?(pid)
-        end)
+    @tag :tmp_dir
+    test "migrates a legacy token and preserves it across transcript saves and manager recovery",
+         %{
+           manager: manager,
+           tmp_dir: dir
+         } do
+      session_id = "workdir-stable"
+      write_legacy_session(session_id, "persisted-token", dir)
 
-      assert log =~ "Failed to load persisted remote token"
-      assert log =~ session_id
-      assert log =~ dir
+      {:ok, ^session_id, pid} =
+        SessionManager.start_or_get_session(manager, session_id, session_store_dir: dir)
+
+      assert {:ok, "persisted-token"} = SessionManager.session_token(manager, session_id)
+
+      assert {:ok, "persisted-token"} =
+               SessionStore.establish_remote_token(session_id, "replacement-token", dir)
+
+      :ok = Session.add_system_message(pid, "persist transcript without broker identity", :info)
+      send(pid, :save_session)
+      :sys.get_state(pid)
+
+      assert {:ok, transcript} = SessionStore.load(session_id, dir)
+      refute Map.has_key?(transcript, :remote_token)
+
+      assert {:system, "persist transcript without broker identity", :info} in transcript.messages
+      refute File.read!(session_path(session_id, dir)) =~ "remote_token"
+
+      :ok = SessionManager.stop_session(manager, session_id)
+      GenServer.stop(manager)
+
+      replacement_name = :"replacement_manager_#{System.unique_integer([:positive])}"
+      {:ok, replacement_manager} = SessionManager.start_link(name: replacement_name)
+      Process.unlink(replacement_manager)
+
+      on_exit(fn ->
+        if Process.alive?(replacement_manager) do
+          SessionManager.stop_session(replacement_manager, session_id)
+          GenServer.stop(replacement_manager)
+        end
+      end)
+
+      assert {:ok, ^session_id, replacement_pid} =
+               SessionManager.start_or_get_session(replacement_manager, session_id,
+                 session_store_dir: dir
+               )
+
+      assert replacement_pid != pid
+
+      assert {:ok, "persisted-token"} =
+               SessionManager.session_token(replacement_manager, session_id)
+    end
+
+    @tag :tmp_dir
+    test "fails closed when canonical remote identity is corrupt", %{
+      manager: manager,
+      tmp_dir: dir
+    } do
+      session_id = "token-corrupt-#{System.unique_integer([:positive])}"
+      token_path = remote_token_path(session_id, dir)
+      File.mkdir_p!(Path.dirname(token_path))
+      File.write!(token_path, "42")
+
+      assert {:error, {:remote_token_persistence_failed, _reason}} =
+               SessionManager.start_session(manager,
+                 session_id: session_id,
+                 session_store_dir: dir
+               )
+
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+      assert File.read!(token_path) == "42"
     end
   end
 
@@ -603,6 +668,32 @@ defmodule MingaAgent.SessionManagerTest do
       assert log =~ "after 101 attempts"
       assert log =~ "failed to accept prompt"
     end
+  end
+
+  @spec write_legacy_session(String.t(), String.t(), String.t()) :: :ok
+  defp write_legacy_session(session_id, token, dir) do
+    data = %{
+      id: session_id,
+      timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+      model_name: "test",
+      messages: [],
+      usage: MingaAgent.TurnUsage.new()
+    }
+
+    :ok = SessionStore.save(data, dir)
+    path = session_path(session_id, dir)
+    payload = path |> File.read!() |> JSON.decode!() |> Map.put("remote_token", token)
+    File.write!(path, JSON.encode!(payload))
+  end
+
+  @spec session_path(String.t(), String.t()) :: String.t()
+  defp session_path(session_id, dir) do
+    Path.join(SessionStore.sessions_dir(dir), "#{session_id}.json")
+  end
+
+  @spec remote_token_path(String.t(), String.t()) :: String.t()
+  defp remote_token_path(session_id, dir) do
+    Path.join([SessionStore.sessions_dir(dir), ".remote_tokens", "#{session_id}.json"])
   end
 
   @spec crash_and_wait_for_restart(GenServer.server(), String.t(), pid()) :: pid()
