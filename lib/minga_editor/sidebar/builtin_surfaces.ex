@@ -6,6 +6,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   """
 
   alias MingaEditor.Commands
+  alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Layout
@@ -68,14 +69,14 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   @doc "Handles native sidebar actions for the Git Status surface."
   @spec handle_git_status_action(EditorState.t(), String.t(), map()) :: EditorState.t()
   def handle_git_status_action(%EditorState{} = state, "toggle", _context) do
-    execute_git_porcelain_command(state, :git_status_toggle)
+    execute_registered_command(state, :git_status_toggle)
   end
 
   def handle_git_status_action(%EditorState{} = state, "activate", _context) do
     if SidebarWorkflow.git_status_panel(state) do
       focus_git_status(state)
     else
-      execute_git_porcelain_command(state, :git_status_toggle)
+      execute_registered_command(state, :git_status_toggle)
     end
   end
 
@@ -161,37 +162,8 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   defp normalize_command_result({state, _effect}), do: state
   defp normalize_command_result(state), do: state
 
-  @spec execute_git_porcelain_command(EditorState.t(), atom()) :: EditorState.t()
-  defp execute_git_porcelain_command(state, command) do
-    if git_porcelain_running?() do
-      Commands.execute(state, command)
-    else
-      git_porcelain_unavailable(state)
-    end
-  end
-
-  @spec git_porcelain_unavailable(EditorState.t()) :: EditorState.t()
-  defp git_porcelain_unavailable(state) do
-    message = "Git porcelain extension is disabled or failed to load"
-    Minga.Log.warning(:editor, message)
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil -> false
-      _pid -> git_porcelain_running_in_registry?()
-    end
-  catch
-    :exit, _reason -> false
-  end
-
-  @spec git_porcelain_running_in_registry?() :: boolean()
-  defp git_porcelain_running_in_registry? do
-    case Minga.Extension.Registry.get(:minga_git_porcelain) do
-      {:ok, %{status: :running}} -> true
-      _ -> false
-    end
+  @spec execute_registered_command(EditorState.t(), atom()) :: EditorState.t()
+  defp execute_registered_command(state, command) do
+    EventWorkflow.dispatch(state, {:editor_action, :execute_git_command, command})
   end
 end

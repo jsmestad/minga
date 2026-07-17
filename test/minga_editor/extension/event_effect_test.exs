@@ -165,6 +165,32 @@ defmodule MingaEditor.Extension.EventEffectTest do
     EffectScheduler.finalize(ctx.scheduler, applied)
   end
 
+  test "declined source-owned actions restore visible feedback", ctx do
+    actions = [
+      {{:editor_action, :execute_git_command, :status}, "Git command unavailable"},
+      {{:editor_action, :branch_delete_confirm, {"/repo", "feature", false}},
+       "Branch delete action unavailable"},
+      {{:editor_action, :branch_delete_cancel, nil}, "Branch delete action unavailable"}
+    ]
+
+    Enum.each(actions, fn {event, message} ->
+      state =
+        EventWorkflow.dispatch(ctx.state, event,
+          callback_registry: ctx.registry,
+          callback_admission: ctx.code_lease
+        )
+
+      assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},
+                     @timeout
+
+      outcome = receive_outcome(ctx.scheduler, request_id, :completed)
+      assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
+      assert {result, %Outcome{status: :completed} = applied} = EventEffect.apply(state, outcome)
+      assert result.shell_runtime.state.notice.message == message
+      EffectScheduler.finalize(ctx.scheduler, applied)
+    end)
+  end
+
   test "failing unload callbacks complete the deferred Editor reply with an error", ctx do
     {:ok, token} = CodeLease.quiesce_source(ctx.source, server: ctx.code_lease)
     reply_tag = make_ref()

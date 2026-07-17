@@ -257,7 +257,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert SidebarWorkflow.active_id(hidden) == nil
   end
 
-  test "git porcelain GUI actions report disabled extension instead of no-op", %{
+  test "optional GUI commands report scheduling failures instead of no-op", %{
     sidebar_registry: table
   } do
     state = base_state(table)
@@ -265,7 +265,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     toggled = GuiActionHandler.dispatch(state, {:toggle_panel, 2})
 
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(toggled) ==
-             "Git porcelain extension is disabled or failed to load"
+             "Git command not scheduled: :scheduler_unavailable"
 
     assert toggled.workspace.keymap_scope == state.workspace.keymap_scope
     assert SidebarWorkflow.active_id(toggled) == SidebarWorkflow.active_id(state)
@@ -274,7 +274,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       GuiActionHandler.dispatch(state, {:sidebar_action, "git_status", "git_status", "activate"})
 
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(activated) ==
-             "Git porcelain extension is disabled or failed to load"
+             "Git command not scheduled: :scheduler_unavailable"
 
     assert activated.workspace.keymap_scope == state.workspace.keymap_scope
     assert SidebarWorkflow.active_id(activated) == nil

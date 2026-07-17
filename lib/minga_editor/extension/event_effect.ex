@@ -272,6 +272,14 @@ defmodule MingaEditor.Extension.EventEffect do
        ),
        do: NoticeWorkflow.publish(state, "Git command #{status}: #{bounded_inspect(reason)}")
 
+  defp terminal_feedback(state, {:editor_action, action, _arguments}, status, reason)
+       when action in [:branch_delete_confirm, :branch_delete_cancel],
+       do:
+         NoticeWorkflow.publish(
+           state,
+           "Branch delete action #{status}: #{bounded_inspect(reason)}"
+         )
+
   defp terminal_feedback(state, _event, _status, _reason), do: state
 
   @spec interactive_failure(EditorState.t(), EventHandler.event()) :: EditorState.t()
@@ -281,6 +289,10 @@ defmodule MingaEditor.Extension.EventEffect do
   defp interactive_failure(state, {:editor_action, :execute_git_command, _command}),
     do: NoticeWorkflow.publish(state, "Git command callback failed")
 
+  defp interactive_failure(state, {:editor_action, action, _arguments})
+       when action in [:branch_delete_confirm, :branch_delete_cancel],
+       do: NoticeWorkflow.publish(state, "Branch delete action failed")
+
   defp interactive_failure(state, _event), do: state
 
   @spec interactive_unavailable(EditorState.t(), EventHandler.event()) :: EditorState.t()
@@ -289,6 +301,10 @@ defmodule MingaEditor.Extension.EventEffect do
 
   defp interactive_unavailable(state, {:editor_action, :execute_git_command, _command}),
     do: NoticeWorkflow.publish(state, "Git command unavailable")
+
+  defp interactive_unavailable(state, {:editor_action, action, _arguments})
+       when action in [:branch_delete_confirm, :branch_delete_cancel],
+       do: NoticeWorkflow.publish(state, "Branch delete action unavailable")
 
   defp interactive_unavailable(state, _event), do: state
 

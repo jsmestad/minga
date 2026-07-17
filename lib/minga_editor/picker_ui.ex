@@ -555,32 +555,28 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  # C-d → branch picker delete flow only. Keeps printable `d` available for
-  # normal picker filtering, including sources that define alternative delete
-  # actions for other purposes.
+  # C-d invokes a source-declared delete action. Sources that do not expose
+  # delete keep printable `d` available for normal picker filtering.
   def handle_key(
         %{
           shell_runtime: %{
             state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}
           }
-        } =
-          state,
+        } = state,
         ?d,
         mods
       )
-      when band(mods, @ctrl) != 0 and
-             source == :"Elixir.MingaGitPorcelain.UI.Picker.GitBranchSource" do
+      when band(mods, @ctrl) != 0 do
     case Picker.selected_item(picker) do
-      %Item{id: {:branch, _name, _current?, true}} ->
-        state
+      %Item{} = item ->
+        callback_source = current_callback_source(state)
 
-      %Item{id: {:branch, _name, true, false}} = item ->
-        run_source_action_and_close(state, source, :delete, item)
+        case Picker.Source.shortcut_action(source, item, {:ctrl, ?d}, callback_source) do
+          nil -> state
+          action -> run_source_action_and_close(state, source, action, item)
+        end
 
-      %Item{id: {:branch, _name, false, false}} = item ->
-        run_source_action_and_close(state, source, :delete, item)
-
-      _other ->
+      nil ->
         state
     end
   end

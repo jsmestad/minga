@@ -56,11 +56,31 @@ defmodule MingaGitPorcelain.Commands do
     {:handled, open_diff_for_path(state, git_root, rel_path, abs_path, current_content, opts)}
   end
 
+  def handle_editor_event(
+        state,
+        {:editor_action, :branch_delete_confirm, {git_root, name, force}}
+      )
+      when is_binary(git_root) and is_binary(name) and is_boolean(force) do
+    {:handled, execute(state, {:branch_delete_confirm, git_root, name, force})}
+  end
+
+  def handle_editor_event(state, {:editor_action, :branch_delete_cancel, nil}) do
+    {:handled, execute(state, :branch_delete_cancel)}
+  end
+
+  def handle_editor_event(state, {:editor_action, :git_accept_conflict, {choice, start_line}})
+      when choice in [:current, :incoming, :both] and is_integer(start_line) and start_line >= 0 do
+    {:handled, execute(state, {:git_accept_conflict, choice, start_line})}
+  end
+
   def handle_editor_event(state, {:editor_action, :execute_git_command, command}) do
     {:handled, execute(state, command)}
   end
 
-  def handle_editor_event(state, {:source_unload, @source}), do: {:handled, state}
+  def handle_editor_event(state, {:source_unload, @source}) do
+    {:handled, leave_branch_delete_mode(state)}
+  end
+
   def handle_editor_event(_state, _event), do: :not_matched
 
   @command_specs [
@@ -100,12 +120,37 @@ defmodule MingaGitPorcelain.Commands do
 
   @spec execute(
           state(),
-          atom() | {:git_accept_conflict, MergeConflict.choice(), non_neg_integer()}
+          atom()
+          | {:branch_delete_confirm, String.t(), String.t(), boolean()}
+          | {:git_accept_conflict, MergeConflict.choice(), non_neg_integer()}
         ) :: state()
 
   for {command_name, _description, _requires_buffer} <- @command_specs do
     @spec unquote(command_name)(state()) :: state()
     def unquote(command_name)(state), do: execute(state, unquote(command_name))
+  end
+
+  # ── Branch deletion ────────────────────────────────────────────────────────
+
+  def execute(state, {:branch_delete_confirm, git_root, name, force}) do
+    case Git.branch_delete(git_root, name, force) do
+      :ok ->
+        refresh_repo(git_root)
+        Minga.Log.info(:editor, "[git] Deleted branch: #{name}")
+
+        state
+        |> NoticeWorkflow.publish("Deleted branch #{name}")
+        |> reopen_git_branch_picker()
+
+      {:error, reason} ->
+        handle_branch_delete_error(state, git_root, name, force, reason)
+    end
+  end
+
+  def execute(state, :branch_delete_cancel) do
+    state
+    |> NoticeWorkflow.publish("Branch delete cancelled")
+    |> reopen_git_branch_picker()
   end
 
   # ── Status panel toggle ────────────────────────────────────────────────────
@@ -1688,6 +1733,51 @@ defmodule MingaGitPorcelain.Commands do
   defp get_base_lines(git_pid) do
     # Access the base_lines from the git buffer's state
     :sys.get_state(git_pid).base_lines
+  end
+
+  @spec leave_branch_delete_mode(state()) :: state()
+  defp leave_branch_delete_mode(%{workspace: %{editing: %{mode: :branch_delete_confirm}}} = state) do
+    %{state | workspace: SessionState.transition_mode(state.workspace, :normal)}
+  end
+
+  defp leave_branch_delete_mode(state), do: state
+
+  @spec reopen_git_branch_picker(state()) :: state()
+  defp reopen_git_branch_picker(state) do
+    PickerUI.open(state, MingaGitPorcelain.UI.Picker.GitBranchSource)
+  end
+
+  @spec handle_branch_delete_error(state(), String.t(), String.t(), boolean(), String.t()) ::
+          state()
+  defp handle_branch_delete_error(state, git_root, name, false, reason) do
+    if forceable_branch_delete_error?(reason) do
+      mode_state =
+        git_root
+        |> Minga.Mode.BranchDeleteConfirmState.new(name)
+        |> Minga.Mode.BranchDeleteConfirmState.to_force(reason)
+
+      state = NoticeWorkflow.publish(state, "Delete failed: #{reason}")
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :branch_delete_confirm, mode_state)
+
+      %{state | workspace: workspace}
+    else
+      NoticeWorkflow.publish(state, "Delete failed: #{reason}")
+    end
+  end
+
+  defp handle_branch_delete_error(state, _git_root, _name, true, reason) do
+    NoticeWorkflow.publish(state, "Force delete failed: #{reason}")
+  end
+
+  @spec forceable_branch_delete_error?(String.t()) :: boolean()
+  defp forceable_branch_delete_error?(reason) do
+    normalized = String.downcase(reason)
+
+    String.contains?(normalized, "not fully merged") or
+      String.contains?(normalized, "unmerged") or
+      String.contains?(normalized, "not merged")
   end
 
   @spec generate_commit_message(state()) :: state()

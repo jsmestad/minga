@@ -26,13 +26,11 @@ defmodule MingaEditor.Commands do
 
   alias Minga.Buffer
   alias Minga.Extension.CallbackInvoker
-  alias Minga.Extension.InvocationContext
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias Minga.Command
-  alias Minga.Git
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Commands.Editing, as: EditingCommands
@@ -295,27 +293,14 @@ defmodule MingaEditor.Commands do
     restore_file_tree_scope(state)
   end
 
-  # ── Branch delete confirmation commands ───────────────────────────────────
+  # ── Source-owned parameterized actions ─────────────────────────────────────
 
   def execute(state, {:branch_delete_confirm, git_root, name, force}) do
-    case Git.branch_delete(git_root, name, force) do
-      :ok ->
-        refresh_branch_delete_repo(git_root)
-        Minga.Log.info(:editor, "[git] Deleted branch: #{name}")
-
-        state
-        |> NoticeWorkflow.publish("Deleted branch #{name}")
-        |> reopen_git_branch_picker()
-
-      {:error, reason} ->
-        handle_branch_delete_error(state, git_root, name, force, reason)
-    end
+    dispatch_editor_action(state, :branch_delete_confirm, {git_root, name, force})
   end
 
   def execute(state, :branch_delete_cancel) do
-    state
-    |> NoticeWorkflow.publish("Branch delete cancelled")
-    |> reopen_git_branch_picker()
+    dispatch_editor_action(state, :branch_delete_cancel, nil)
   end
 
   # ── Agent tuple commands ──────────────────────────────────────────────────
@@ -332,8 +317,10 @@ defmodule MingaEditor.Commands do
 
   # ── Parameterized git commands ────────────────────────────────────────────
 
-  def execute(state, {:git_accept_conflict, _choice, _start_line} = cmd) do
-    guard_buffer(state, fn -> execute_git_porcelain_command(state, cmd) end)
+  def execute(state, {:git_accept_conflict, choice, start_line}) do
+    guard_buffer(state, fn ->
+      dispatch_editor_action(state, :git_accept_conflict, {choice, start_line})
+    end)
   end
 
   # ── Parameterized movement ────────────────────────────────────────────────
@@ -819,92 +806,9 @@ defmodule MingaEditor.Commands do
     end
   end
 
-  @spec reopen_git_branch_picker(state()) :: state()
-  defp reopen_git_branch_picker(state) do
-    source = :"Elixir.MingaGitPorcelain.UI.Picker.GitBranchSource"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(source) do
-      InvocationContext.with_source({:extension, :minga_git_porcelain}, fn ->
-        MingaEditor.PickerUI.open(state, source)
-      end)
-    else
-      state
-    end
-  end
-
-  @spec execute_git_porcelain_command(state(), atom() | tuple()) :: state()
-  defp execute_git_porcelain_command(state, command) do
-    if git_porcelain_running?() do
-      ExtensionEventWorkflow.dispatch(
-        state,
-        {:editor_action, :execute_git_command, command}
-      )
-    else
-      state
-    end
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil -> false
-      _pid -> git_porcelain_running_in_registry?()
-    end
-  catch
-    :exit, _reason -> false
-  end
-
-  @spec git_porcelain_running_in_registry?() :: boolean()
-  defp git_porcelain_running_in_registry? do
-    case Minga.Extension.Registry.get(:minga_git_porcelain) do
-      {:ok, %{status: :running}} -> true
-      _ -> false
-    end
-  end
-
-  @spec handle_branch_delete_error(state(), String.t(), String.t(), boolean(), String.t()) ::
-          state()
-  defp handle_branch_delete_error(state, git_root, name, false, reason) do
-    if forceable_branch_delete_error?(reason) do
-      mode_state =
-        git_root
-        |> Minga.Mode.BranchDeleteConfirmState.new(name)
-        |> Minga.Mode.BranchDeleteConfirmState.to_force(reason)
-
-      state = NoticeWorkflow.publish(state, "Delete failed: #{reason}")
-
-      workspace =
-        MingaEditor.Session.State.transition_mode(
-          state.workspace,
-          :branch_delete_confirm,
-          mode_state
-        )
-
-      %{state | workspace: workspace}
-    else
-      NoticeWorkflow.publish(state, "Delete failed: #{reason}")
-    end
-  end
-
-  defp handle_branch_delete_error(state, _git_root, _name, true, reason) do
-    NoticeWorkflow.publish(state, "Force delete failed: #{reason}")
-  end
-
-  @spec forceable_branch_delete_error?(String.t()) :: boolean()
-  defp forceable_branch_delete_error?(reason) do
-    normalized = String.downcase(reason)
-
-    String.contains?(normalized, "not fully merged") or
-      String.contains?(normalized, "unmerged") or
-      String.contains?(normalized, "not merged")
-  end
-
-  @spec refresh_branch_delete_repo(String.t()) :: :ok
-  defp refresh_branch_delete_repo(git_root) do
-    case Git.lookup_repo(git_root) do
-      nil -> :ok
-      pid -> Git.Repo.refresh(pid)
-    end
+  @spec dispatch_editor_action(state(), atom(), term()) :: state()
+  defp dispatch_editor_action(state, action, arguments) do
+    ExtensionEventWorkflow.dispatch(state, {:editor_action, action, arguments})
   end
 
   # Remove the current tool from the prompt queue after accept/decline.

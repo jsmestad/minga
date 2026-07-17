@@ -93,11 +93,17 @@ defmodule MingaEditor.UI.Picker.Source do
   @typedoc "An alternative action: display name and action identifier."
   @type action_entry :: {name :: String.t(), action_id :: term()}
 
+  @typedoc "A normalized picker keyboard shortcut."
+  @type shortcut :: {:ctrl, non_neg_integer()}
+
   @doc """
   Returns the list of alternative actions available for a picker item.
   The first entry is conventionally the default action.
   """
   @callback actions(Picker.item()) :: [action_entry()]
+
+  @doc "Returns the action identifier for a source-owned keyboard shortcut, or nil."
+  @callback shortcut_action(Picker.item(), shortcut()) :: term() | nil
 
   @doc """
   Executes an alternative action on a picker item.
@@ -181,6 +187,7 @@ defmodule MingaEditor.UI.Picker.Source do
     gui_preview?: 0,
     preview: 2,
     actions: 1,
+    shortcut_action: 2,
     on_action: 3,
     on_bulk_select: 2,
     bulk_actions: 1,
@@ -314,6 +321,36 @@ defmodule MingaEditor.UI.Picker.Source do
       []
     end
   end
+
+  @doc "Returns the source action for a keyboard shortcut, with a common delete fallback."
+  @spec shortcut_action(
+          module(),
+          Picker.item(),
+          shortcut(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: term() | nil
+  def shortcut_action(module, item, shortcut, source \\ nil) do
+    if exported?(module, :shortcut_action, 2) do
+      invoke_value(module, :shortcut_action, [item, shortcut], source, fn _value -> true end, nil)
+    else
+      default_shortcut_action(module, item, shortcut, source)
+    end
+  end
+
+  @spec default_shortcut_action(
+          module(),
+          Picker.item(),
+          shortcut(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: term() | nil
+  defp default_shortcut_action(module, item, {:ctrl, ?d}, source) do
+    case List.keyfind(actions(module, item, source), :delete, 1) do
+      {_label, :delete} -> :delete
+      nil -> nil
+    end
+  end
+
+  defp default_shortcut_action(_module, _item, _shortcut, _source), do: nil
 
   @doc "Runs a validated alternative action."
   @spec on_action(

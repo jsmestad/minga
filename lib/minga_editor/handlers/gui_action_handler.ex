@@ -451,7 +451,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:toggle_panel, 2}) do
-    execute_git_porcelain_command(state, :git_status_toggle)
+    execute_registered_command(state, :git_status_toggle)
   end
 
   defp dispatch_action(state, {:toggle_panel, 3}) do
@@ -695,15 +695,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, :git_push) do
-    execute_git_porcelain_command(state, :git_push)
+    execute_registered_command(state, :git_push)
   end
 
   defp dispatch_action(state, :git_pull) do
-    execute_git_porcelain_command(state, :git_pull)
+    execute_registered_command(state, :git_pull)
   end
 
   defp dispatch_action(state, :git_fetch) do
-    execute_git_porcelain_command(state, :git_fetch)
+    execute_registered_command(state, :git_fetch)
   end
 
   defp dispatch_action(state, {:git_commit_amend, message}) do
@@ -833,7 +833,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, :git_pull_and_retry) do
     state
     |> MingaEditor.Shell.Traditional.GitToastWorkflow.dismiss()
-    |> execute_git_porcelain_command(:git_pull_and_retry)
+    |> execute_registered_command(:git_pull_and_retry)
   end
 
   # ── GUI search toolbar actions ──────────────────────────────────────
@@ -1094,7 +1094,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     do: Commands.FileTree.toggle(state)
 
   defp dispatch_sidebar_toggle(state, "git_status", _kind),
-    do: execute_git_porcelain_command(state, :git_status_toggle)
+    do: execute_registered_command(state, :git_status_toggle)
 
   defp dispatch_sidebar_toggle(state, "observatory", _kind) do
     state
@@ -1268,13 +1268,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
-  @spec execute_git_porcelain_command(state(), atom()) :: state()
-  defp execute_git_porcelain_command(state, command) do
-    if git_porcelain_running?() do
-      Commands.execute(state, command)
-    else
-      git_porcelain_unavailable(state)
-    end
+  @spec execute_registered_command(state(), atom()) :: state()
+  defp execute_registered_command(state, command) do
+    ExtensionEventWorkflow.dispatch(state, {:editor_action, :execute_git_command, command})
   end
 
   @spec open_git_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
@@ -1286,31 +1282,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       state,
       {:editor_action, :open_git_diff_for_path, arguments}
     )
-  end
-
-  @spec git_porcelain_unavailable(state()) :: state()
-  defp git_porcelain_unavailable(state) do
-    message = "Git porcelain extension is disabled or failed to load"
-    Minga.Log.warning(:editor, message)
-    NoticeWorkflow.publish(state, message)
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil -> false
-      _pid -> git_porcelain_running_in_registry?()
-    end
-  catch
-    :exit, _reason -> false
-  end
-
-  @spec git_porcelain_running_in_registry?() :: boolean()
-  defp git_porcelain_running_in_registry? do
-    case Minga.Extension.Registry.get(:minga_git_porcelain) do
-      {:ok, %{status: :running}} -> true
-      _ -> false
-    end
   end
 
   @spec open_git_diff_for_entry(state(), String.t(), Git.StatusEntry.t()) :: state()

@@ -323,6 +323,32 @@ defmodule MingaEditor.PickerUITest do
       assert result.shell_runtime.state.notice.message == nil
       assert result.workspace.editing.mode == :normal
     end
+
+    test "C-d invokes a generic source-declared delete action" do
+      picker =
+        Picker.new([%Item{id: :delete_me, label: "Delete me"}], title: "Delete Action Test")
+
+      picker_state = %PickerState{
+        picker: picker,
+        source: Minga.Test.DeleteActionPickerSource,
+        restore: 0
+      }
+
+      state = %EditorState{
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
+        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %ShellState{modal: {:picker, PickerPayload.new(picker_state)}}
+          )
+      }
+
+      result = PickerUI.handle_key(state, ?d, MingaEditor.Input.mod_ctrl())
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.shell_runtime.state.notice.message == "Deleted via action"
+    end
   end
 
   describe "bulk action fallback for sources without bulk support" do
