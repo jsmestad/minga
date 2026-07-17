@@ -41,7 +41,12 @@ defmodule MingaAgent.SessionSourceLeaseTest do
 
     assert lease.reason == :provider
 
+    provider = Session.get_provider(session)
+    provider_ref = Process.monitor(provider)
+
     GenServer.stop(session)
+
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, _reason}
 
     assert [] =
              CodeLease.active_leases(source: source, module: Minga.Test.SessionSlowMockProvider)

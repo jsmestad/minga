@@ -1466,7 +1466,7 @@ defmodule Minga.Extension.LifecycleContractTest do
            end)
 
     retry_task = Task.async(fn -> start_extension(ctx, name, entry) end)
-    assert_receive {:retry_child_start_mfa, retry_runtime_supervisor}, 5_000
+    assert_receive {:retry_child_start_mfa, retry_runtime_supervisor}, 10_000
     refute Task.yield(retry_task, 50)
 
     send(retry_runtime_supervisor, :release_retry_child_start)

@@ -5,6 +5,7 @@ defmodule MingaAgent.SessionRecoveryTest do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
+  alias MingaAgent.Session.ProviderLifecycle
 
   # Provider startup runs synchronously inside the Session process
   # (`start_provider/1` -> `provider_module.start_link/1` -> `Native.init/1`).
@@ -258,6 +259,35 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert_receive {:flaky_provider_started, provider}, 1_000
     assert Session.get_provider(session) == provider
     assert Session.status(session) == :idle
+  end
+
+  test "starting early cancels the installed provider retry timer" do
+    {:ok, tracker} = Agent.start_link(fn -> %{attempts: 0, failures_remaining: :always} end)
+
+    {:ok, session} =
+      Session.start_link(
+        provider: FlakyStartProvider,
+        provider_opts: [test_pid: self(), tracker: tracker],
+        provider_restart_backoff_base_ms: 30_000,
+        provider_restart_backoff_max_ms: 30_000,
+        provider_restart_max_attempts: 3
+      )
+
+    on_exit(fn ->
+      Process.exit(session, :kill)
+      Process.exit(tracker, :kill)
+    end)
+
+    assert_receive {:flaky_start_attempt, 1}, 1_000
+    state = await_provider_startup(session)
+    assert {timer_ref, _token} = ProviderLifecycle.retry_timer(state.provider)
+    assert is_integer(Process.read_timer(timer_ref))
+
+    assert {:error, _reason} =
+             Session.set_model(session, "anthropic:test", @startup_timeout)
+
+    assert_receive {:flaky_start_attempt, 2}, 1_000
+    assert Process.read_timer(timer_ref) == false
   end
 
   test "repeated provider crashes back off and stop after the configured cap" do

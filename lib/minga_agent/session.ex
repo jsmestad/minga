@@ -2,10 +2,7 @@ defmodule MingaAgent.Session do
   @moduledoc """
   Manages the lifecycle of one AI agent conversation.
 
-  The session holds conversation history, tracks agent status, and
-  coordinates between the provider and the editor UI. It runs as a
-  supervised GenServer under `Agent.Supervisor`, so a crash here never
-  affects buffers or the editor.
+  The session holds conversation history, tracks agent status, and coordinates between the provider and the editor UI. Each session is supervised independently under `MingaAgent.Supervisor`.
 
   ## Status lifecycle
 
@@ -42,6 +39,8 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
+  alias MingaAgent.Session.ProviderLifecycle
+  require ProviderLifecycle
   alias MingaAgent.SessionStore
   alias MingaAgent.EditBoundary
   alias MingaAgent.SubagentContext
@@ -84,23 +83,6 @@ defmodule MingaAgent.Session do
   @type tool_approval_policy ::
           :interactive | {:auto_approve, trust_scope()} | {:reject, String.t()}
 
-  @typedoc "Provider restart backoff policy."
-  @type provider_restart_policy :: %{
-          base_delay_ms: pos_integer(),
-          max_attempts: pos_integer(),
-          max_delay_ms: pos_integer(),
-          window_ms: non_neg_integer()
-        }
-
-  @typedoc "Provider restart backoff runtime state."
-  @type provider_restart_state :: %{
-          attempts: non_neg_integer(),
-          window_started_at_ms: integer() | nil,
-          timer_ref: reference() | nil,
-          timer_token: reference() | nil,
-          last_reason: term()
-        }
-
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
@@ -108,14 +90,7 @@ defmodule MingaAgent.Session do
           workdir: String.t() | nil,
           event_log_server: GenServer.server(),
           event_log_failure: event_log_failure() | nil,
-          provider: pid() | nil,
-          provider_module: module(),
-          provider_id: String.t(),
-          provider_source: Minga.Extension.ContributionCleanup.contribution_source(),
-          provider_lease: CodeLease.t() | nil,
-          provider_opts: keyword(),
-          provider_restart_policy: provider_restart_policy(),
-          provider_restart: provider_restart_state(),
+          provider: ProviderLifecycle.t(),
           credentials_configured_fn: credentials_configured_fn(),
           status: status(),
           messages: [Message.t()],
@@ -137,8 +112,6 @@ defmodule MingaAgent.Session do
           turn_active?: boolean(),
           trust_levels: %{String.t() => trust_scope()},
           pending_auto_approvals: %{String.t() => trust_scope()},
-          model_name: String.t(),
-          provider_name: String.t(),
           notifier: module() | {module(), term()},
           background_subagent: boolean(),
           persist?: boolean(),
@@ -158,10 +131,13 @@ defmodule MingaAgent.Session do
           credentials_configured: boolean()
         }
 
-  @provider_restart_default_base_delay_ms 2_000
-  @provider_restart_default_max_delay_ms 30_000
-  @provider_restart_default_max_attempts 5
-  @provider_restart_default_window_ms 60_000
+  @provider_stop_timeout_ms 1_000
+  @provider_restart_options [
+    provider_restart_backoff_base_ms: :base_delay_ms,
+    provider_restart_backoff_max_ms: :max_delay_ms,
+    provider_restart_max_attempts: :max_attempts,
+    provider_restart_window_ms: :window_ms
+  ]
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -731,6 +707,18 @@ defmodule MingaAgent.Session do
         )
       end
 
+    provider =
+      ProviderLifecycle.new(
+        module: provider_module,
+        id: provider_resolution.id,
+        source: provider_resolution.source,
+        provider_opts: provider_opts,
+        model_name: model_name,
+        provider_name: provider_name,
+        lease: provider_lease,
+        restart: provider_restart_options(opts)
+      )
+
     now = DateTime.utc_now()
 
     state = %{
@@ -739,14 +727,7 @@ defmodule MingaAgent.Session do
       workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       event_log_failure: nil,
-      provider: nil,
-      provider_module: provider_module,
-      provider_id: provider_resolution.id,
-      provider_source: provider_resolution.source,
-      provider_lease: provider_lease,
-      provider_opts: provider_opts,
-      provider_restart_policy: provider_restart_policy(opts),
-      provider_restart: initial_provider_restart_state(),
+      provider: provider,
       credentials_configured_fn: credentials_configured_fn,
       status: :idle,
       messages: [
@@ -770,8 +751,6 @@ defmodule MingaAgent.Session do
       turn_active?: false,
       trust_levels: %{},
       pending_auto_approvals: %{},
-      model_name: model_name,
-      provider_name: provider_name,
       notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
       persist?: Keyword.get(opts, :persist?, true),
@@ -795,8 +774,8 @@ defmodule MingaAgent.Session do
     maybe_mark_interrupted_work(state, Keyword.get(opts, :recover_interrupted_work?, true))
 
     record_critical_event(state, :session_started, %{
-      model: state.model_name,
-      provider: state.provider_name,
+      model: state.provider.model_name,
+      provider: state.provider.provider_name,
       background_subagent: state.background_subagent
     })
 
@@ -833,7 +812,12 @@ defmodule MingaAgent.Session do
     handle_send_prompt(content, state)
   end
 
-  def handle_call({:send_follow_up, _content}, _from, %{provider: nil} = state) do
+  def handle_call(
+        {:send_follow_up, _content},
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
@@ -852,7 +836,7 @@ defmodule MingaAgent.Session do
     record_user_message(state, user_msg)
     state = notify_messages_changed(state)
 
-    case state.provider_module.send_prompt(state.provider, send_content) do
+    case state.provider.module.send_prompt(ProviderLifecycle.pid(state.provider), send_content) do
       :ok -> {:reply, :ok, state}
       {:error, _} = err -> {:reply, err, state}
     end
@@ -938,12 +922,13 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
-  def handle_call(:abort, _from, %{provider: nil} = state) do
+  def handle_call(:abort, _from, %{provider: provider} = state)
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, :ok, state}
   end
 
   def handle_call(:abort, _from, state) do
-    state.provider_module.abort(state.provider)
+    state.provider.module.abort(ProviderLifecycle.pid(state.provider))
 
     # Mark any running tool calls as aborted
     messages =
@@ -961,8 +946,8 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:new_session, _from, state) do
-    if state.provider do
-      state.provider_module.new_session(state.provider)
+    if ProviderLifecycle.pid(state.provider) do
+      state.provider.module.new_session(ProviderLifecycle.pid(state.provider))
     end
 
     record_critical_event(state, :session_stopped, %{reason: "new_session", status: state.status})
@@ -995,8 +980,8 @@ defmodule MingaAgent.Session do
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
 
     record_critical_event(state, :session_started, %{
-      model: state.model_name,
-      provider: state.provider_name,
+      model: state.provider.model_name,
+      provider: state.provider.provider_name,
       background_subagent: state.background_subagent
     })
 
@@ -1079,7 +1064,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:get_provider, _from, state) do
-    {:reply, state.provider, state}
+    {:reply, ProviderLifecycle.pid(state.provider), state}
   end
 
   def handle_call(:persist?, _from, state) do
@@ -1109,8 +1094,8 @@ defmodule MingaAgent.Session do
     meta = %SessionMetadata{
       id: state.session_id,
       title: title,
-      model_name: state.model_name,
-      provider_name: state.provider_name,
+      model_name: state.provider.model_name,
+      provider_name: state.provider.provider_name,
       created_at: state.created_at,
       last_message_at: state.last_message_at,
       message_count: Enum.count(state.messages),
@@ -1141,14 +1126,12 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:restart_provider, _from, state) do
-    state =
-      state
-      |> cancel_provider_restart_timer()
-      |> reset_provider_restart()
+    {lifecycle, effects} = ProviderLifecycle.reset_retry(state.provider)
+    state = install_provider_transition(state, lifecycle, effects)
 
     {state, result} = refresh_credentials_state_result(state)
 
-    case {state.provider, result} do
+    case {ProviderLifecycle.pid(state.provider), result} do
       {provider, :ok} when is_pid(provider) ->
         {:reply, :ok, state}
 
@@ -1204,103 +1187,156 @@ defmodule MingaAgent.Session do
     {:reply, :ok, remove_subscriber(state, pid, :detached)}
   end
 
-  def handle_call(:compact, _from, %{provider: nil} = state) do
+  def handle_call(:compact, _from, %{provider: provider} = state)
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}
   end
 
   def handle_call(:compact, _from, state) do
-    if function_exported?(state.provider_module, :compact, 1) do
-      result = state.provider_module.compact(state.provider)
+    if function_exported?(state.provider.module, :compact, 1) do
+      result = state.provider.module.compact(ProviderLifecycle.pid(state.provider))
       {:reply, result, state}
     else
       {:reply, {:error, "Provider does not support compaction"}, state}
     end
   end
 
-  def handle_call(:continue, _from, %{provider: nil} = state) do
+  def handle_call(:continue, _from, %{provider: provider} = state)
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}
   end
 
   def handle_call(:continue, _from, state) do
-    if function_exported?(state.provider_module, :continue, 1) do
-      result = state.provider_module.continue(state.provider)
+    if function_exported?(state.provider.module, :continue, 1) do
+      result = state.provider.module.continue(ProviderLifecycle.pid(state.provider))
       {:reply, result, state}
     else
       {:reply, {:error, "Provider does not support continue"}, state}
     end
   end
 
-  def handle_call({:activate_skill, _name}, _from, %{provider: nil} = state) do
+  def handle_call(
+        {:activate_skill, _name},
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}
   end
 
   def handle_call({:activate_skill, name}, _from, state) do
-    result = GenServer.call(state.provider, {:activate_skill, name})
+    result = GenServer.call(ProviderLifecycle.pid(state.provider), {:activate_skill, name})
     {:reply, result, state}
   end
 
-  def handle_call({:deactivate_skill, _name}, _from, %{provider: nil} = state) do
+  def handle_call(
+        {:deactivate_skill, _name},
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}
   end
 
   def handle_call({:deactivate_skill, name}, _from, state) do
-    result = GenServer.call(state.provider, {:deactivate_skill, name})
+    result = GenServer.call(ProviderLifecycle.pid(state.provider), {:deactivate_skill, name})
     {:reply, result, state}
   end
 
-  def handle_call(:list_skills, _from, %{provider: nil} = state) do
+  def handle_call(
+        :list_skills,
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}
   end
 
   def handle_call(:list_skills, _from, state) do
-    result = GenServer.call(state.provider, :list_skills)
+    result = GenServer.call(ProviderLifecycle.pid(state.provider), :list_skills)
     {:reply, result, state}
   end
 
-  def handle_call(:get_available_models, _from, %{provider: nil} = state) do
+  def handle_call(
+        :get_available_models,
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
   def handle_call(:get_available_models, _from, state) do
-    result = state.provider_module.get_available_models(state.provider)
+    result = state.provider.module.get_available_models(ProviderLifecycle.pid(state.provider))
     {:reply, result, state}
   end
 
-  def handle_call(:get_commands, _from, %{provider: nil} = state) do
+  def handle_call(
+        :get_commands,
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
   def handle_call(:get_commands, _from, state) do
-    result = state.provider_module.get_commands(state.provider)
+    result = state.provider.module.get_commands(ProviderLifecycle.pid(state.provider))
     {:reply, result, state}
   end
 
-  def handle_call({:set_thinking_level, _level}, _from, %{provider: nil} = state) do
+  def handle_call(
+        {:set_thinking_level, _level},
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
   def handle_call({:set_thinking_level, level}, _from, state) do
     result =
-      dispatch_optional(state.provider_module, :set_thinking_level, [state.provider, level])
+      dispatch_optional(state.provider.module, :set_thinking_level, [
+        ProviderLifecycle.pid(state.provider),
+        level
+      ])
 
     {:reply, result, state}
   end
 
-  def handle_call(:cycle_thinking_level, _from, %{provider: nil} = state) do
+  def handle_call(
+        :cycle_thinking_level,
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
   def handle_call(:cycle_thinking_level, _from, state) do
-    result = dispatch_optional(state.provider_module, :cycle_thinking_level, [state.provider])
+    result =
+      dispatch_optional(state.provider.module, :cycle_thinking_level, [
+        ProviderLifecycle.pid(state.provider)
+      ])
+
     {:reply, result, state}
   end
 
-  def handle_call(:cycle_model, _from, %{provider: nil} = state) do
+  def handle_call(
+        :cycle_model,
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
   def handle_call(:cycle_model, _from, state) do
-    result = dispatch_optional(state.provider_module, :cycle_model, [state.provider])
+    result =
+      dispatch_optional(state.provider.module, :cycle_model, [
+        ProviderLifecycle.pid(state.provider)
+      ])
+
     {:reply, result, state}
   end
 
@@ -1311,7 +1347,7 @@ defmodule MingaAgent.Session do
       |> refresh_credentials_state_result()
 
     result =
-      case {state.provider, refresh_result} do
+      case {ProviderLifecycle.pid(state.provider), refresh_result} do
         {nil, {:error, reason}} ->
           {:error, reason}
 
@@ -1319,7 +1355,7 @@ defmodule MingaAgent.Session do
           :ok
 
         {provider, _refresh_result} ->
-          dispatch_optional(state.provider_module, :set_model, [provider, model])
+          dispatch_optional(state.provider.module, :set_model, [provider, model])
       end
 
     {:reply, result, state}
@@ -1414,13 +1450,15 @@ defmodule MingaAgent.Session do
     {:noreply, refresh_credentials_state(state)}
   end
 
-  def handle_info({:start_provider, token}, %{provider_restart: %{timer_token: token}} = state) do
-    state = put_provider_restart_timer(state, nil, nil)
-    {:noreply, refresh_credentials_state(state)}
-  end
+  def handle_info({:start_provider, token}, state) do
+    case ProviderLifecycle.retry_due(state.provider, token) do
+      {:start, lifecycle} ->
+        state = install_provider_transition(state, lifecycle, [])
+        {:noreply, refresh_credentials_state(state)}
 
-  def handle_info({:start_provider, _token}, state) do
-    {:noreply, state}
+      {:stale, _lifecycle} ->
+        {:noreply, state}
+    end
   end
 
   def handle_info({:agent_provider_event, event}, state) do
@@ -1459,11 +1497,17 @@ defmodule MingaAgent.Session do
     {:noreply, %{state | event_log_failure: failure}}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
+  def handle_info(
+        {:DOWN, _ref, :process, pid, reason},
+        %{provider: %ProviderLifecycle{phase: {:running, pid, _lease, _retry}}} = state
+      ) do
     {:noreply, handle_provider_death(state, reason)}
   end
 
-  def handle_info({:EXIT, pid, reason}, %{provider: pid} = state) do
+  def handle_info(
+        {:EXIT, pid, reason},
+        %{provider: %ProviderLifecycle{phase: {:running, pid, _lease, _retry}}} = state
+      ) do
     {:noreply, handle_provider_death(state, reason)}
   end
 
@@ -1569,10 +1613,14 @@ defmodule MingaAgent.Session do
     {:reply, {:error, :credentials_not_configured}, state}
   end
 
-  defp handle_send_prompt(content, %{provider: nil} = state) do
+  defp handle_send_prompt(
+         content,
+         %{provider: provider} = state
+       )
+       when ProviderLifecycle.is_detached(provider) do
     state = refresh_credentials_state(state)
 
-    case state.provider do
+    case ProviderLifecycle.pid(state.provider) do
       nil -> {:reply, {:error, :provider_not_ready}, state}
       _ -> handle_send_prompt(content, state)
     end
@@ -1596,7 +1644,10 @@ defmodule MingaAgent.Session do
         state = notify_messages_changed(state)
         state = %{state | turn_active?: true}
 
-        case state.provider_module.send_prompt(state.provider, send_content) do
+        case state.provider.module.send_prompt(
+               ProviderLifecycle.pid(state.provider),
+               send_content
+             ) do
           :ok ->
             {:reply, :ok, state}
 
@@ -1667,7 +1718,10 @@ defmodule MingaAgent.Session do
         record_user_message(state, user_msg)
         state = notify_messages_changed(state)
 
-        case state.provider_module.send_prompt(state.provider, send_content) do
+        case state.provider.module.send_prompt(
+               ProviderLifecycle.pid(state.provider),
+               send_content
+             ) do
           :ok ->
             # AgentStart event from the provider will transition us to :thinking.
             state
@@ -2709,7 +2763,15 @@ defmodule MingaAgent.Session do
   end
 
   @spec seed_provider_messages(state(), [Message.t()]) :: state()
-  defp seed_provider_messages(%{provider: provider, provider_module: module} = state, messages)
+  defp seed_provider_messages(
+         %{
+           provider: %ProviderLifecycle{
+             module: module,
+             phase: {:running, provider, _lease, _retry}
+           }
+         } = state,
+         messages
+       )
        when is_pid(provider) do
     case module.seed_messages(provider, messages) do
       :ok ->
@@ -2777,40 +2839,36 @@ defmodule MingaAgent.Session do
     CodeLease.lease(source, module, :provider, owner: self())
   end
 
-  @spec start_provider(state()) :: {:ok, pid(), CodeLease.t() | nil} | {:error, term()}
-  defp start_provider(%{provider_source: {:bundle, _name}} = state) do
+  @spec start_provider(state()) :: {:ok, pid(), state()} | {:error, term(), state()}
+  defp start_provider(%{provider: %ProviderLifecycle{source: {:bundle, _name}}} = state) do
     start_source_owned_provider(state)
   end
 
-  defp start_provider(%{provider_source: {:extension, _name}} = state) do
+  defp start_provider(%{provider: %ProviderLifecycle{source: {:extension, _name}}} = state) do
     start_source_owned_provider(state)
   end
 
-  defp start_provider(state) do
-    case state.provider_module.start_link(state.provider_opts) do
-      {:ok, pid} -> {:ok, pid, nil}
-      {:error, _reason} = error -> error
-    end
-  end
+  defp start_provider(state), do: start_provider_process(state)
 
-  @spec start_source_owned_provider(state()) :: {:ok, pid(), CodeLease.t()} | {:error, term()}
+  @spec start_source_owned_provider(state()) :: {:ok, pid(), state()} | {:error, term(), state()}
   defp start_source_owned_provider(state) do
     with :ok <-
            validate_source_owned_provider(
-             state.provider_source,
-             state.provider_module,
-             state.provider_id
+             state.provider.source,
+             state.provider.module,
+             state.provider.id
            ),
          {:ok, lease} <-
            ensure_source_provider_lease(
-             state.provider_source,
-             state.provider_module,
-             state.provider_lease
+             state.provider.source,
+             state.provider.module,
+             ProviderLifecycle.lease(state.provider)
            ) do
-      start_provider_with_lease(state, lease)
+      {:ok, lifecycle} = ProviderLifecycle.install_lease(state.provider, lease)
+      start_provider_process(%{state | provider: lifecycle})
     else
-      {:error, {:provider_lease_unavailable, _reason}} = error -> error
-      {:error, reason} -> {:error, {:provider_unavailable, reason}}
+      {:error, {:provider_lease_unavailable, _reason} = reason} -> {:error, reason, state}
+      {:error, reason} -> {:error, {:provider_unavailable, reason}, state}
     end
   end
 
@@ -2829,7 +2887,7 @@ defmodule MingaAgent.Session do
   @spec validate_source_owned_provider(
           Minga.Extension.ContributionCleanup.contribution_source(),
           module(),
-          String.t() | nil
+          String.t()
         ) :: :ok | {:error, term()}
   defp validate_source_owned_provider(source, module, provider_id) do
     with {:ok, id} <- validate_provider_id(provider_id),
@@ -2840,7 +2898,7 @@ defmodule MingaAgent.Session do
     :exit, reason -> {:error, {:provider_registry_unavailable, provider_id, reason}}
   end
 
-  @spec validate_provider_id(String.t() | nil) :: {:ok, String.t()} | {:error, term()}
+  @spec validate_provider_id(String.t()) :: {:ok, String.t()} | {:error, term()}
   defp validate_provider_id(provider_id) when is_binary(provider_id) do
     if String.trim(provider_id) == "" do
       {:error, {:missing_provider_id, provider_id}}
@@ -2848,8 +2906,6 @@ defmodule MingaAgent.Session do
       {:ok, provider_id}
     end
   end
-
-  defp validate_provider_id(_provider_id), do: {:error, :missing_provider_id}
 
   @spec lookup_provider_registry_entry(String.t()) ::
           {:ok, MingaAgent.ProviderRegistry.Entry.t()} | {:error, term()}
@@ -2880,17 +2936,12 @@ defmodule MingaAgent.Session do
       }}}
   end
 
-  @spec start_provider_with_lease(state(), CodeLease.t()) ::
-          {:ok, pid(), CodeLease.t()} | {:error, term()}
-  defp start_provider_with_lease(state, lease) do
-    case state.provider_module.start_link(state.provider_opts) do
-      {:ok, pid} -> {:ok, pid, lease}
-      {:error, reason} -> release_provider_lease(lease, reason)
+  @spec start_provider_process(state()) :: {:ok, pid(), state()} | {:error, term(), state()}
+  defp start_provider_process(state) do
+    case state.provider.module.start_link(state.provider.opts) do
+      {:ok, pid} -> {:ok, pid, state}
+      {:error, reason} -> {:error, reason, state}
     end
-  catch
-    kind, reason ->
-      _ = release_provider_lease(lease, {kind, reason})
-      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   @spec release_provider_lease(CodeLease.t() | nil) :: :ok
@@ -2899,12 +2950,6 @@ defmodule MingaAgent.Session do
   defp release_provider_lease(lease) do
     CodeLease.release(lease)
     :ok
-  end
-
-  @spec release_provider_lease(CodeLease.t() | nil, term()) :: {:error, term()}
-  defp release_provider_lease(lease, reason) do
-    release_provider_lease(lease)
-    {:error, reason}
   end
 
   @spec initial_system_message(String.t(), String.t() | nil) :: String.t()
@@ -2916,10 +2961,10 @@ defmodule MingaAgent.Session do
     provider_state = provider_state(state)
 
     SubagentContext.new(
-      provider_module: state.provider_module,
+      provider_module: state.provider.module,
       provider_name: provider_name(provider_state, state),
-      provider_id: state.provider_id,
-      provider_source: state.provider_source,
+      provider_id: state.provider.id,
+      provider_source: state.provider.source,
       model: provider_model(provider_state, state),
       thinking_level: provider_thinking_level(provider_state),
       active_skill_names: provider_active_skill_names(provider_state),
@@ -2928,10 +2973,11 @@ defmodule MingaAgent.Session do
   end
 
   @spec provider_state(state()) :: map()
-  defp provider_state(%{provider: nil}), do: %{}
+  defp provider_state(%{provider: provider}) when ProviderLifecycle.is_detached(provider),
+    do: %{}
 
   defp provider_state(state) do
-    case state.provider_module.get_state(state.provider) do
+    case state.provider.module.get_state(ProviderLifecycle.pid(state.provider)) do
       {:ok, provider_state} when is_map(provider_state) -> provider_state
       _other -> %{}
     end
@@ -2946,10 +2992,15 @@ defmodule MingaAgent.Session do
   end
 
   @spec provider_name(map(), state()) :: String.t()
-  defp provider_name(_provider_state, %{
-         provider_module: MingaAgent.Providers.Native,
-         provider_name: provider_name
-       })
+  defp provider_name(
+         _provider_state,
+         %{
+           provider: %ProviderLifecycle{
+             module: MingaAgent.Providers.Native,
+             provider_name: provider_name
+           }
+         }
+       )
        when provider_name not in ["", "unknown"],
        do: provider_name
 
@@ -2957,13 +3008,19 @@ defmodule MingaAgent.Session do
     do: provider
 
   defp provider_name(%{provider: provider}, _state) when is_binary(provider), do: provider
-  defp provider_name(_provider_state, state), do: state.provider_name
+  defp provider_name(_provider_state, state), do: state.provider.provider_name
 
   @spec provider_model(map(), state()) :: String.t() | nil
   defp provider_model(%{model: %{id: id}}, _state) when is_binary(id), do: id
   defp provider_model(%{model: model}, _state) when is_binary(model), do: model
-  defp provider_model(_provider_state, %{model_name: "unknown"}), do: nil
-  defp provider_model(_provider_state, state), do: state.model_name
+
+  defp provider_model(
+         _provider_state,
+         %{provider: %ProviderLifecycle{model_name: "unknown"}}
+       ),
+       do: nil
+
+  defp provider_model(_provider_state, state), do: state.provider.model_name
 
   @spec provider_thinking_level(map()) :: String.t() | nil
   defp provider_thinking_level(%{thinking_level: level}) when is_binary(level), do: level
@@ -2983,7 +3040,7 @@ defmodule MingaAgent.Session do
   end
 
   defp provider_project_root(_provider_state, state) do
-    case Keyword.get(state.provider_opts, :project_root) do
+    case Keyword.get(state.provider.opts, :project_root) do
       project_root when is_binary(project_root) -> project_root
       _other -> nil
     end
@@ -3011,8 +3068,8 @@ defmodule MingaAgent.Session do
     # treat them as always ready.
     configured? =
       session_credentials_configured?(
-        state.provider_module,
-        state.provider_opts,
+        state.provider.module,
+        state.provider.opts,
         state.credentials_configured_fn
       )
 
@@ -3025,15 +3082,31 @@ defmodule MingaAgent.Session do
   @spec update_model_configuration(state(), String.t()) :: state()
   defp update_model_configuration(state, model) do
     {provider_name, provider_opts} =
-      session_provider_configuration(state.provider_module, model, state.provider_opts)
+      session_provider_configuration(
+        state.provider.module,
+        model,
+        state.provider.opts
+      )
 
-    %{
-      state
-      | model_name: model,
-        provider_name: provider_name,
-        provider_opts: provider_opts,
-        error_message: nil
-    }
+    lifecycle =
+      ProviderLifecycle.replace(
+        state.provider,
+        model,
+        provider_name,
+        provider_opts
+      )
+
+    %{state | provider: lifecycle, error_message: nil}
+  end
+
+  @spec provider_restart_options(keyword()) :: keyword()
+  defp provider_restart_options(opts) do
+    Enum.reduce(@provider_restart_options, [], fn {session_key, lifecycle_key}, restart_opts ->
+      case Keyword.fetch(opts, session_key) do
+        {:ok, value} -> Keyword.put(restart_opts, lifecycle_key, value)
+        :error -> restart_opts
+      end
+    end)
   end
 
   @spec session_provider_configuration(module(), String.t(), keyword()) :: {String.t(), keyword()}
@@ -3100,13 +3173,19 @@ defmodule MingaAgent.Session do
   end
 
   @spec maybe_start_provider_result(state()) :: {state(), :ok | {:error, term()}}
-  defp maybe_start_provider_result(%{provider: nil, credentials_configured: true} = state) do
-    if provider_startable?(state.provider_module, state.provider_opts, state.model_name) do
-      case start_provider(state) do
-        {:ok, pid, lease} ->
-          {attach_provider(state, pid, lease), :ok}
+  defp maybe_start_provider_result(%{provider: provider, credentials_configured: true} = state)
+       when ProviderLifecycle.is_detached(provider) do
+    lifecycle = state.provider
 
-        {:error, reason} ->
+    if provider_startable?(lifecycle.module, lifecycle.opts, lifecycle.model_name) do
+      {:start, lifecycle, effects} = ProviderLifecycle.start(lifecycle)
+      state = install_provider_transition(state, lifecycle, effects)
+
+      case start_provider(state) do
+        {:ok, pid, state} ->
+          {attach_provider(state, pid), :ok}
+
+        {:error, reason, state} ->
           state = report_provider_start_error(state, reason)
           state = maybe_schedule_provider_restart(state, reason)
           broadcast(state, {:error, state.error_message})
@@ -3119,16 +3198,14 @@ defmodule MingaAgent.Session do
 
   defp maybe_start_provider_result(state), do: {state, :ok}
 
-  @spec attach_provider(state(), pid(), CodeLease.t() | nil) :: state()
-  defp attach_provider(state, pid, lease) do
+  @spec attach_provider(state(), pid()) :: state()
+  defp attach_provider(state, pid) do
     Process.unlink(pid)
     Process.monitor(pid)
+    {lifecycle, effects} = ProviderLifecycle.attach(state.provider, pid)
 
-    state =
-      state
-      |> cancel_provider_restart_timer()
-      |> Map.merge(%{provider: pid, provider_lease: lease})
-      |> clear_provider_start_error()
+    state = install_provider_transition(state, lifecycle, effects)
+    state = clear_provider_start_error(state)
 
     state = seed_provider_messages(state, state.messages)
     state = apply_pending_thinking_level(state)
@@ -3146,63 +3223,21 @@ defmodule MingaAgent.Session do
   @spec report_provider_start_error(state(), term()) :: state()
   defp report_provider_start_error(state, reason) do
     Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
-    release_provider_lease(state.provider_lease)
-    state = %{state | provider_lease: nil, error_message: format_error(reason)}
-    state = set_error_status(state)
-    state
-  end
-
-  @spec provider_restart_policy(keyword()) :: provider_restart_policy()
-  defp provider_restart_policy(opts) do
-    %{
-      base_delay_ms:
-        Keyword.get(
-          opts,
-          :provider_restart_backoff_base_ms,
-          @provider_restart_default_base_delay_ms
-        ),
-      max_attempts:
-        Keyword.get(opts, :provider_restart_max_attempts, @provider_restart_default_max_attempts),
-      max_delay_ms:
-        Keyword.get(
-          opts,
-          :provider_restart_backoff_max_ms,
-          @provider_restart_default_max_delay_ms
-        ),
-      window_ms:
-        Keyword.get(opts, :provider_restart_window_ms, @provider_restart_default_window_ms)
-    }
-  end
-
-  @spec initial_provider_restart_state() :: provider_restart_state()
-  defp initial_provider_restart_state do
-    %{
-      attempts: 0,
-      window_started_at_ms: nil,
-      timer_ref: nil,
-      timer_token: nil,
-      last_reason: nil
-    }
-  end
-
-  @spec reset_provider_restart(state()) :: state()
-  defp reset_provider_restart(state) do
-    %{state | provider_restart: initial_provider_restart_state()}
+    {lifecycle, effects} = ProviderLifecycle.failure(state.provider, reason)
+    state = install_provider_transition(state, lifecycle, effects)
+    state = %{state | error_message: format_error(reason)}
+    set_error_status(state)
   end
 
   @spec handle_provider_death(state(), term()) :: state()
   defp handle_provider_death(state, reason) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    release_provider_lease(state.provider_lease)
+    {lifecycle, effects} = ProviderLifecycle.failure(state.provider, reason)
 
     state =
       state
-      |> Map.merge(%{
-        provider: nil,
-        provider_lease: nil,
-        error_message: "Agent provider crashed",
-        turn_active?: false
-      })
+      |> install_provider_transition(lifecycle, effects)
+      |> Map.merge(%{error_message: "Agent provider crashed", turn_active?: false})
       |> set_error_status()
       |> maybe_schedule_provider_restart(reason)
 
@@ -3212,88 +3247,73 @@ defmodule MingaAgent.Session do
 
   @spec maybe_schedule_provider_restart(state(), term()) :: state()
   defp maybe_schedule_provider_restart(state, reason) do
-    case next_provider_restart(state.provider_restart, state.provider_restart_policy, reason) do
-      {:ok, restart, delay_ms} ->
+    case ProviderLifecycle.retry(
+           state.provider,
+           reason,
+           System.monotonic_time(:millisecond)
+         ) do
+      {:retry, lifecycle, delay_ms, effects} ->
+        state = install_provider_transition(state, lifecycle, effects)
         token = make_ref()
         timer_ref = Process.send_after(self(), {:start_provider, token}, delay_ms)
+        {:ok, lifecycle} = ProviderLifecycle.install_retry_timer(state.provider, timer_ref, token)
 
-        state
-        |> cancel_provider_restart_timer()
-        |> put_provider_restart(%{restart | timer_ref: timer_ref, timer_token: token})
+        %{state | provider: lifecycle}
         |> put_provider_retrying_error(delay_ms)
 
-      :exhausted ->
+      {:terminal_failure, lifecycle, effects} ->
         state
-        |> cancel_provider_restart_timer()
-        |> put_provider_restart(%{state.provider_restart | last_reason: reason})
+        |> install_provider_transition(lifecycle, effects)
         |> put_provider_restart_exhausted_error()
     end
   end
 
-  @spec next_provider_restart(provider_restart_state(), provider_restart_policy(), term()) ::
-          {:ok, provider_restart_state(), pos_integer()} | :exhausted
-  defp next_provider_restart(restart, policy, reason) do
-    now_ms = System.monotonic_time(:millisecond)
+  @spec install_provider_transition(
+          state(),
+          ProviderLifecycle.t(),
+          ProviderLifecycle.effects()
+        ) :: state()
+  defp install_provider_transition(state, lifecycle, effects) do
+    Enum.each(effects, &perform_provider_effect/1)
+    %{state | provider: lifecycle}
+  end
 
-    {attempts, window_started_at_ms} =
-      case restart do
-        %{window_started_at_ms: window_started_at_ms, attempts: attempts}
-        when is_integer(window_started_at_ms) and
-               now_ms - window_started_at_ms <= policy.window_ms ->
-          {attempts + 1, window_started_at_ms}
+  @spec perform_provider_effect(ProviderLifecycle.effect()) :: :ok
+  defp perform_provider_effect({:stop_provider, pid}) do
+    monitor_ref = Process.monitor(pid)
+    Process.exit(pid, :shutdown)
 
-        _other ->
-          {1, now_ms}
-      end
+    receive do
+      {:DOWN, ^monitor_ref, :process, ^pid, _reason} ->
+        :ok
+    after
+      @provider_stop_timeout_ms ->
+        Process.exit(pid, :kill)
 
-    if attempts > policy.max_attempts do
-      :exhausted
-    else
-      next_restart = %{
-        restart
-        | attempts: attempts,
-          window_started_at_ms: window_started_at_ms,
-          timer_ref: nil,
-          timer_token: nil,
-          last_reason: reason
-      }
-
-      {:ok, next_restart, provider_restart_delay_ms(policy, attempts)}
+        receive do
+          {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
+        end
     end
   end
 
-  @spec provider_restart_delay_ms(provider_restart_policy(), pos_integer()) :: pos_integer()
-  defp provider_restart_delay_ms(
-         %{base_delay_ms: base_delay_ms, max_delay_ms: max_delay_ms},
-         attempts
-       ) do
-    exponential = base_delay_ms * round(:math.pow(2, attempts - 1))
-    min(exponential, max_delay_ms)
+  defp perform_provider_effect({:cancel_timer, timer_ref}) do
+    _cancelled? = Process.cancel_timer(timer_ref)
+    :ok
   end
 
-  @spec cancel_provider_restart_timer(state()) :: state()
-  defp cancel_provider_restart_timer(%{provider_restart: %{timer_ref: timer_ref}} = state)
-       when is_reference(timer_ref) do
-    Process.cancel_timer(timer_ref)
-    put_provider_restart_timer(state, nil, nil)
-  end
+  defp perform_provider_effect({:release_lease, lease}), do: release_provider_lease(lease)
 
-  defp cancel_provider_restart_timer(state), do: state
-
-  @spec put_provider_restart(state(), provider_restart_state()) :: state()
-  defp put_provider_restart(state, restart), do: %{state | provider_restart: restart}
-
-  @spec put_provider_restart_timer(state(), reference() | nil, reference() | nil) :: state()
-  defp put_provider_restart_timer(state, timer_ref, timer_token) do
-    restart = %{state.provider_restart | timer_ref: timer_ref, timer_token: timer_token}
-    put_provider_restart(state, restart)
+  @spec stop_provider_lifecycle(state()) :: state()
+  defp stop_provider_lifecycle(state) do
+    {lifecycle, effects} = ProviderLifecycle.stop(state.provider)
+    install_provider_transition(state, lifecycle, effects)
   end
 
   @spec put_provider_retrying_error(state(), pos_integer()) :: state()
   defp put_provider_retrying_error(state, delay_ms) do
     seconds = Float.round(delay_ms / 1000, 1)
-    attempts = state.provider_restart.attempts
-    max_attempts = state.provider_restart_policy.max_attempts
+    attempts = ProviderLifecycle.retry_attempts(state.provider)
+    max_attempts = state.provider.restart_policy.max_attempts
     cause = provider_restart_cause(state)
 
     message =
@@ -3325,7 +3345,8 @@ defmodule MingaAgent.Session do
   # `credentials_configured` flag set by `refresh_credentials_state/1`.
   @spec maybe_show_auth_onboarding(state()) :: state()
   defp maybe_show_auth_onboarding(state) do
-    if state.provider_module == MingaAgent.Providers.Native and not state.credentials_configured do
+    if state.provider.module == MingaAgent.Providers.Native and
+         not state.credentials_configured do
       msg = onboarding_message()
       state = append_system_message(state, msg, :info)
       broadcast(state, {:system_message, msg, :info})
@@ -3459,12 +3480,13 @@ defmodule MingaAgent.Session do
   defp humanize_legacy_error_kind(:passthrough, message, _provider), do: message
 
   @spec provider_slug(state()) :: String.t()
-  defp provider_slug(%{provider_name: provider_name})
+  defp provider_slug(%{provider: %ProviderLifecycle{provider_name: provider_name}})
        when is_binary(provider_name) and provider_name != "" do
     provider_name
   end
 
-  defp provider_slug(%{model_name: model_name}) when is_binary(model_name) do
+  defp provider_slug(%{provider: %ProviderLifecycle{model_name: model_name}})
+       when is_binary(model_name) do
     case String.split(model_name, ":", parts: 2) do
       [provider | _rest] when provider != "" -> provider
       _other -> "provider"
@@ -3507,7 +3529,10 @@ defmodule MingaAgent.Session do
 
   defp apply_pending_thinking_level(%{pending_thinking_level: level} = state) do
     try do
-      dispatch_optional(state.provider_module, :set_thinking_level, [state.provider, level])
+      dispatch_optional(state.provider.module, :set_thinking_level, [
+        ProviderLifecycle.pid(state.provider),
+        level
+      ])
     catch
       :exit, _ -> :ok
     end
@@ -3613,8 +3638,8 @@ defmodule MingaAgent.Session do
       title:
         readable_title(first_assistant_text(state.messages)) ||
           readable_title(first_user_prompt(state.messages)),
-      model_name: state.model_name,
-      provider_name: state.provider_name,
+      model_name: state.provider.model_name,
+      provider_name: state.provider.provider_name,
       messages: state.messages,
       message_ids: state.message_ids,
       pinned_ids: state.pinned_ids,
@@ -3650,13 +3675,25 @@ defmodule MingaAgent.Session do
         state = cancel_save_timer(state)
         loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
 
+        provider_name =
+          Map.get(data, :provider_name, state.provider.provider_name)
+
+        provider_opts = Keyword.put(state.provider.opts, :model, data.model_name)
+
+        lifecycle =
+          ProviderLifecycle.replace(
+            state.provider,
+            data.model_name,
+            provider_name,
+            provider_opts
+          )
+
         state = %{
           state
           | session_id: data.id,
             remote_token: Map.get(data, :remote_token, state.remote_token),
             total_usage: data.usage,
-            model_name: data.model_name,
-            provider_name: Map.get(data, :provider_name, state.provider_name),
+            provider: lifecycle,
             status: :idle,
             error_message: nil,
             pending_approval: nil,
@@ -3706,10 +3743,16 @@ defmodule MingaAgent.Session do
   defp persist_current_before_replacement(state, _target_id), do: save_to_disk(state)
 
   @spec apply_loaded_model_to_provider(state()) :: :ok
-  defp apply_loaded_model_to_provider(%{provider: nil}), do: :ok
+  defp apply_loaded_model_to_provider(%{provider: provider})
+       when ProviderLifecycle.is_detached(provider),
+       do: :ok
 
   defp apply_loaded_model_to_provider(state) do
-    dispatch_optional(state.provider_module, :set_model, [state.provider, state.model_name])
+    dispatch_optional(state.provider.module, :set_model, [
+      ProviderLifecycle.pid(state.provider),
+      state.provider.model_name
+    ])
+
     :ok
   catch
     :exit, _ -> :ok
@@ -3803,8 +3846,10 @@ defmodule MingaAgent.Session do
     cw = Map.get(usage, :cache_write, 0)
     cost = Map.get(usage, :cost, 0.0)
 
-    provider = titleize(state.provider_name)
-    model = state.model_name |> AgentConfig.strip_provider_prefix() |> titleize()
+    provider = titleize(state.provider.provider_name)
+
+    model =
+      state.provider.model_name |> AgentConfig.strip_provider_prefix() |> titleize()
 
     cache_part =
       if cr > 0 or cw > 0 do
@@ -3870,7 +3915,7 @@ defmodule MingaAgent.Session do
     })
 
     dispatch_session_end(state, reason)
-    release_provider_lease(state.provider_lease)
+    _stopped_state = stop_provider_lifecycle(state)
 
     case reason do
       :normal ->
@@ -3897,7 +3942,12 @@ defmodule MingaAgent.Session do
   defp dispatch_session_start(%{session_start_hook_enabled?: false}), do: :ok
 
   defp dispatch_session_start(state) do
-    payload = SessionStartPayload.new(state.session_id, state.model_name, state.provider_name)
+    payload =
+      SessionStartPayload.new(
+        state.session_id,
+        state.provider.model_name,
+        state.provider.provider_name
+      )
 
     HookDispatcher.session_start(
       AgentConfig.resolve().agent_hooks,
