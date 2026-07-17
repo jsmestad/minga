@@ -198,6 +198,14 @@ defmodule MingaEditor.State do
     %{state | workspace: workspace, frontend: frontend}
   end
 
+  @doc "Advances the semantic render revision and installs it through the Render owner."
+  @spec submit_render_intent(t()) :: {t(), pos_integer()}
+  def submit_render_intent(%__MODULE__{} = state) do
+    {correlation, revision} = RenderCorrelation.submit(state.render.render_correlation)
+    render = RenderState.accept_correlation(state.render, correlation)
+    {%{state | render: render}, revision}
+  end
+
   @doc "Transfers one queued keyframe request to the renderer boundary."
   @spec take_keyframe_request(t()) :: {boolean(), t()}
   def take_keyframe_request(%__MODULE__{} = state) do

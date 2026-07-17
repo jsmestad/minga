@@ -737,6 +737,17 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   describe "render_or_async dispatch" do
+    test "non-headless render without Renderer.Server fails closed" do
+      state = build_editor_state(:tui, nil)
+      assert Minga.Test.HeadlessPort.frame_count(state.frontend.port_manager) == 0
+
+      result = MingaEditor.Renderer.render_buffer(state)
+
+      assert result == state
+      assert result.render.renderer == nil
+      assert Minga.Test.HeadlessPort.frame_count(state.frontend.port_manager) == 0
+    end
+
     test "non-headless backend with renderer dispatches asynchronously" do
       renderer = start_renderer(self(), pipeline: & &1)
       state = build_editor_state(:tui, renderer)
@@ -750,6 +761,88 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       assert_receive {:render_done, %RenderReceipt{}},
                      @async_render_timeout
+    end
+
+    test "traditional launchpad render correlates before a normal async render" do
+      renderer = start_ack_renderer(self())
+      state = build_editor_state(:tui, renderer)
+      launchpad = MingaEditor.State.enter_empty_state(state)
+      assert launchpad.workspace.buffers.active == nil
+
+      rendered_launchpad = MingaEditor.Renderer.render_or_async(launchpad)
+      assert rendered_launchpad.render.render_correlation.latest_intent_revision == 1
+
+      assert_receive {:ack_pipeline, launchpad_seq, 1, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, launchpad_seq})
+
+      assert_receive {:render_done,
+                      %RenderReceipt{frame_seq: ^launchpad_seq, intent_revision: 1} = receipt},
+                     @async_render_timeout
+
+      assert {integrated_launchpad, :applied} =
+               MingaEditor.State.integrate_renderer_receipt(rendered_launchpad, receipt)
+
+      normal = %{state | render: integrated_launchpad.render}
+      rendered_normal = MingaEditor.Renderer.render_or_async(normal)
+      assert rendered_normal.render.render_correlation.latest_intent_revision == 2
+
+      assert_receive {:ack_pipeline, normal_seq, 1, ^launchpad_seq, false},
+                     @async_render_timeout
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, normal_seq})
+
+      assert_receive {:render_done,
+                      %RenderReceipt{frame_seq: ^normal_seq, intent_revision: 2} = normal_receipt},
+                     @async_render_timeout
+
+      assert {_integrated_normal, :applied} =
+               MingaEditor.State.integrate_renderer_receipt(rendered_normal, normal_receipt)
+    end
+
+    test "direct non-headless render keeps delta-base advancement behind frontend acknowledgement" do
+      renderer = start_ack_renderer(self())
+      state = build_editor_state(:tui, renderer)
+      intent = Intent.from_editor_state(state)
+
+      RendererServer.cast_snapshot(renderer, intent, 13)
+      assert_receive {:ack_pipeline, 13, 1, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 13})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 13, keyframe?: true}},
+                     @async_render_timeout
+
+      result = MingaEditor.Renderer.render_buffer(state)
+      assert result.render.render_correlation.latest_intent_revision == 1
+
+      assert_receive {:ack_pipeline, direct_seq, 1, 13, false}, @async_render_timeout
+      assert RendererServer.rendering?(renderer)
+      refute_receive {:render_done, %RenderReceipt{frame_seq: ^direct_seq}}, 50
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, direct_seq})
+
+      assert_receive {:render_done,
+                      %RenderReceipt{
+                        frame_seq: ^direct_seq,
+                        keyframe?: false,
+                        intent_revision: 1
+                      } = direct_receipt},
+                     @async_render_timeout
+
+      assert {integrated, :applied} =
+               MingaEditor.State.integrate_renderer_receipt(result, direct_receipt)
+
+      next = MingaEditor.Renderer.render_or_async(integrated)
+      assert_receive {:ack_pipeline, next_seq, 1, ^direct_seq, false}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, next_seq})
+
+      assert_receive {:render_done,
+                      %RenderReceipt{frame_seq: ^next_seq, intent_revision: 2} = next_receipt},
+                     @async_render_timeout
+
+      assert {_integrated, :applied} =
+               MingaEditor.State.integrate_renderer_receipt(next, next_receipt)
+
+      assert next.render.render_correlation.latest_intent_revision == 2
     end
 
     test "keyframe handoff survives a superseding intent without forcing another keyframe" do
