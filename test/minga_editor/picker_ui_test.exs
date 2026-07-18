@@ -180,6 +180,8 @@ defmodule MingaEditor.PickerUITest do
     def title, do: "No bulk actions"
 
     @impl true
+    def candidates(%{picker_ui: %{context: %{items: items}}}) when is_list(items), do: items
+
     def candidates(_ctx), do: []
 
     @impl true
@@ -390,6 +392,33 @@ defmodule MingaEditor.PickerUITest do
       assert new_state.shell_runtime.state.modal == :none
       assert Map.get(new_state, :action_item_id) == :first
       refute Map.has_key?(new_state, :bulk_selected)
+    end
+
+    test "rebuilds candidates, preserves query, and clamps selection" do
+      old_items =
+        for id <- [:old_one, :old_two, :old_three], do: %Item{id: id, label: "config #{id}"}
+
+      new_items = [%Item{id: :new, label: "config new"}]
+      picker = old_items |> Picker.new(title: "Test", max_visible: 10) |> Picker.filter("config")
+
+      picker_state = %PickerState{
+        picker: %{picker | selected: 2},
+        source: NoBulkActionsSource,
+        context: %{items: new_items}
+      }
+
+      refreshed =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+        |> PickerUI.refresh_items()
+
+      {:picker, %{picker_ui: %{picker: refreshed_picker}}} = refreshed.shell_runtime.state.modal
+
+      assert refreshed_picker.items == new_items
+      assert Enum.map(refreshed_picker.candidates, & &1.item.id) == [:new]
+      assert Enum.map(refreshed_picker.filtered, & &1.id) == [:new]
+      assert refreshed_picker.query == "config"
+      assert refreshed_picker.selected == 0
     end
   end
 
