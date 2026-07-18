@@ -1591,7 +1591,7 @@ Remove the unreachable Diagnostics-owned `:lsp_info` branch and its unused alias
 
 ### W011: Remove unreachable Tool Manager footer placement
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D36
 - **Roadmap unit:** W011, Remove unreachable Tool Manager footer placement
 - **Ponytail verdict:** `ACCEPT/delete`
@@ -1645,7 +1645,7 @@ Remove only the unreachable Tool Manager footer-overlay producer. Footer placeme
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2997
 - **Commit SHA:** `7dcd23c20ffd9368e341ce64fa435ea9391cea23`
-- **Merge SHA:** Pending
+- **Merge SHA:** `943382f155a13abebec53951a30e5b4c0d1ce9df`
 - **Focused tests:** `mix test.debug test/minga_editor/layout/footer_band_overlays_test.exs` passed, 18 tests.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,854 tests, 0 failures, 1 skipped, 578 excluded).
 - **Ponytail and Elixir verdict:** `LEAN` after one targeted correction; stale eight-surface wording was corrected to the same seven active producers implemented by `FooterOverlays`.
@@ -1656,6 +1656,73 @@ Remove only the unreachable Tool Manager footer-overlay producer. Footer placeme
 - **Concepts added/removed:** No concepts added; one permanently false placement branch removed.
 - **Findings resolved:** Tool Manager no longer appears as an unreachable footer-overlay producer.
 - **Discoveries affecting later work:** SurfaceRegistry identity is a protocol compatibility boundary independent from footer placement production.
+- **Completion date:** 2026-07-18
+
+### W012: Route picker prefix switching through async lifecycle
+
+- **Status:** ACTIVE
+- **Audit ID:** L11
+- **Roadmap unit:** W012, Route picker prefix switching through async lifecycle
+- **Ponytail verdict:** `ACCEPT/direct`
+- **Freshness profile:** direct just-in-time source check against current main
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `74f0bf29f1212b2036ceff3ad7a6323d81dcef6b`
+- **Freshness basis:** Current `HEAD` and `origin/main` include W011. Prefix switching still called source callbacks synchronously, while initial async picker opening already owned loading state, fetch revision, scheduler admission, latest-wins replacement, cancellation, errors, and stale-result rejection.
+- **Implementer questions:** None.
+
+#### Observable outcome
+
+Typing `#` at the start of File or Recent switches to Project Search without running search on the Editor input loop. The picker enters loading state with a fresh revision and scheduler-owned fetch. Backspacing through `#` cancels that resource, restores the original source and picker-open ownership fields, and rejects delayed Project Search results as stale. Synchronous `>` and `@` switching remains immediate.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.PickerUI` owns source switching and orchestrates the existing `PickerState`, `FetchEffect`, and `EffectScheduler` lifecycle. Async prefix targets must use `open_loading/3`, `FetchEffect.request/4`, and `schedule_fetch/4`; sync targets continue to rebuild candidates directly. Source switches preserve the picker-open `restore`, `restore_theme`, and `context` fields. Returning to a sync source clears the former async fetch revision and loading status.
+
+#### Exact files, symbols, producers, and consumers
+
+- `lib/minga_editor/picker_ui.ex`: `switch_to_source/3`, `switch_back_to_original/1`, local source-switch helpers, `open_loading/3`, `schedule_fetch/4`, `cancel_current_fetch/1`, and `apply_fetch_result/4`
+- `test/minga_editor/picker_ui_test.exs`: prefix switching, native full-query edits, loading/revision state, restoration, cancellation, and stale-result rejection
+- Existing collaborators remain unchanged: `MingaEditor.State.Picker`, `MingaEditor.UI.Picker.FetchEffect`, `MingaEditor.EffectScheduler`, `MingaEditor.UI.Picker.Source`, and `ProjectSearchSource`
+
+#### Locked implementation
+
+1. Derive the target callback source and select async or sync handling in one local switch path.
+2. For async targets, cancel the current resource through `open_loading/3`, retain picker-open ownership fields, mint a revision, build the existing `FetchEffect`, and submit it through `schedule_fetch/4`.
+3. For sync targets, cancel any current fetch, rebuild candidates immediately, update source/layout/prefix fields, and clear stale async loading/revision state.
+4. Preserve `original_source` while switched and clear it only when returning.
+5. Keep native full-query edit acknowledgement and post-prefix query installation unchanged.
+6. Add regressions for `#` loading, full `#needle` query handling, restore-index preservation, backspace cancellation, and delayed-result rejection. Preserve existing `>` coverage.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/picker_ui_test.exs test/minga_editor/ui/picker/fetch_effect_test.exs test/minga_editor/commands/search_async_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not remove prefix switching or change prefix mappings.
+- Do not add a process, scheduler, fetch abstraction, parallel picker state, compatibility path, retry policy, or new protocol.
+- Do not change project-search semantics, filtering, rendering, source callbacks, Editor scheduling, or extension behavior.
+- **Maximum production additions:** 80 lines.
+- **Maximum test additions:** 120 lines.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** 40 passed across `picker_ui_test.exs`, `fetch_effect_test.exs`, and `search_async_test.exs`.
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed on the final base (58 doctests, 98 properties, 9,891 tests, 0 failures, 1 skipped, 578 excluded).
+- **Ponytail and Elixir verdict:** `LEAN` after a targeted correction; source switching uses local helpers and existing lifecycle primitives, preserves picker-open ownership, clears stale sync-return fetch state, and stays within 76 production additions.
+- **Bug-hunt verdict:** Initial review found a lost live-preview restore index; the correction preserves `restore`, `restore_theme`, and `context`, with a targeted recheck confirming callback identity, query correlation, cancellation key, and stale-result guards.
+- **Final reviewer verdict:** `PASS`; the staged three-file diff routes `#` through existing async ownership, preserves synchronous prefixes and picker-open state, matches budgets, and carries behavior-level regressions plus final-base validation.
+- **Production lines added/removed:** 76 added / 56 removed, net +20
+- **Test lines added/removed:** 64 added / 1 removed, net +63
+- **Concepts added/removed:** No concepts added or removed; prefix switching now reuses the existing async lifecycle.
+- **Findings resolved:** Project Search prefix switching no longer executes synchronous search on the Editor input loop or bypasses async lifecycle ownership.
+- **Discoveries affecting later work:** Source switching must preserve picker-open restoration and context independently from per-source query and fetch state.
 - **Completion date:** 2026-07-18
 
 ## Follow-on simplifications
