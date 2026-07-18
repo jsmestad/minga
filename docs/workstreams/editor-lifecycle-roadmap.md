@@ -1132,7 +1132,7 @@ Consumers are the picker renderer and subsequent selection/action dispatch, both
 
 ### W006: Diagnostics picker uses current context
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L12
 - **Roadmap unit:** W006, Diagnostics picker uses current context
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1193,7 +1193,7 @@ The picker modal and `on_select/2` consume the returned items. The three command
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2989
 - **Commit SHA:** `8b10467ee49d335b4967ea9383bd2a38d7a34bf6`
-- **Merge SHA:** Pending
+- **Merge SHA:** `385d5b460f3b790bf2113e52f6c1974a5a234a4e`
 - **Focused tests:** `mix format lib/minga_editor/ui/picker/sources/diagnostics.ex test/minga_editor/commands/diagnostics_picker_test.exs` passed; `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs` passed, 2 tests, seed 316808
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,867 tests, 0 failures, 1 skipped, 578 excluded)
 - **Ponytail and Elixir verdict:** `LEAN`; no required findings. The direct `%Picker.Context{}` boundary is the smallest natural Elixir cutover, preserves full state for selection, and adds no adapter or parallel state shape.
@@ -1204,8 +1204,28 @@ The picker modal and `on_select/2` consume the returned items. The three command
 - **Concepts added/removed:** No concepts added; diagnostics source now consumes the existing `Picker.Context` projection directly
 - **Findings resolved:** Populated diagnostics picker commands now read the active buffer from `Picker.Context`; an empty diagnostics store retains the existing no-op command behavior.
 - **Discoveries affecting later work:** The worker correctly returned `NEEDS_REPLAN` because the initial empty-store assertion contradicted `PickerUI.open_sync/4`. The controller narrowed that edge to preserve the existing no-op instead of widening picker ownership or W006 scope.
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
 
 ## Goal completion
 
-The six-unit goal is complete only when W001 through W006 are VERIFIED after merge, every unit contains current evidence, no accepted review finding remains, cumulative production growth is recorded, and no unnecessary process, dependency, abstraction, wrapper, or parallel data shape was introduced.
+- **Status:** VERIFIED
+- **Completion date:** 2026-07-18
+- **Units verified:** W001 through W006
+- **Audit findings resolved:** L01, L02, L04, L05, L10, and L12
+- **Cumulative production delta:** 238 lines added / 172 removed, net +66
+- **Cumulative test delta:** 561 lines added / 9 removed, net +552
+- **Review closure:** Every unit received a final `PASS`; every required review finding was corrected before merge; no accepted review finding remains open.
+- **Closure reviewer verdict:** `PASS`, confidence 0.99; W006 merge evidence, cumulative arithmetic, review closure, simplicity closure, and the zero-trace Dired follow-on are truthful and internally consistent.
+- **Simplicity closure:** No unit added a process, dependency, protocol, behaviour, adapter, wrapper, cache, compatibility path, or parallel data shape. The only new semantic contracts are the private save outcome, explicit ordinary/force destruction intent, and exact-identity Dired retirement transition required by the accepted behavior. W001, W005, and W006 reused existing owners and removed or avoided duplicate transition logic.
+
+## Follow-on simplifications
+
+### Remove Dired completely
+
+- **Decision:** Approved for planning after the six-unit lifecycle goal
+- **Outcome:** Delete the directory-buffer feature without replacement. Minga does not use or need it, and retaining it adds command, state, keymap, input, persistence, buffer-lifecycle, filesystem-mutation, and test complexity.
+- **Deletion surface:** Remove `Minga.Dired`, `MingaEditor.Commands.Dired`, `MingaEditor.Input.Dired`, `MingaEditor.State.Dired`, the Dired keymap scope, command registry entries, `:dired` and `:oil` parser routes, leader bindings, Session/TabContext fields and transitions, BufferManagement special cases, tests, and user-facing documentation.
+- **Cutover rule:** No deprecation, compatibility alias, disabled code path, retained state field, placeholder module, migration shim, or replacement abstraction.
+- **Zero-trace acceptance:** The final deletion PR removes this follow-on entry too, then verifies the repository working tree has no `Dired`, `dired`, `dired_*`, `:dired`, or `:oil` feature references. Git history is the only retained record.
+- **Preserve:** Ordinary file opening, file finder, file tree, buffer save/close, and generic buffer retirement behavior must continue without Dired-specific branches.
+- **Planning requirement:** Inventory every producer and consumer against current main, lock deletion order and focused regression coverage, and fit the removal into reviewable dependency-ordered slices only if one PR cannot remain mechanically safe.
