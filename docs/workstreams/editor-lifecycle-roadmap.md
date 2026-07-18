@@ -1504,8 +1504,8 @@ Live renderer behavior is owned by the renderer pipeline, frontend capabilities,
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2995
+- **Commit SHA:** `ed77d50b5c5c6d2650b8d909b6903ab2c5f14fb2`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix compile --warnings-as-errors` passed; post-deletion source reference search found no live matches.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 578 excluded).
