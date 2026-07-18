@@ -742,10 +742,19 @@ defmodule MingaEditor do
   end
 
   def handle_info(
-        {:minga_input, {kind, _, _, _, _} = status},
+        {:minga_input, {:frame_rejected, _, _, _, _, _} = status},
         %{render: %{renderer: renderer}} = state
       )
-      when kind in [:frame_rejected, :window_ref_miss] and is_pid(renderer) do
+      when is_pid(renderer) do
+    MingaEditor.Renderer.Server.frame_status(renderer, status)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:minga_input, {:window_ref_miss, _, _, _, _} = status},
+        %{render: %{renderer: renderer}} = state
+      )
+      when is_pid(renderer) do
     MingaEditor.Renderer.Server.frame_status(renderer, status)
     {:noreply, state}
   end
