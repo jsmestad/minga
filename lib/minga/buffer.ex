@@ -481,6 +481,10 @@ defmodule Minga.Buffer do
   @spec decorations_version(t()) :: non_neg_integer()
   defdelegate decorations_version(server), to: BufferProcess
 
+  @doc "Removes every conceal range in a group atomically."
+  @spec remove_conceal_group(t(), atom()) :: :ok
+  defdelegate remove_conceal_group(server, group), to: BufferProcess
+
   @doc "Apply a batch of decoration changes atomically."
   @spec batch_decorations(t(), (Minga.Core.Decorations.t() -> Minga.Core.Decorations.t())) ::
           :ok
