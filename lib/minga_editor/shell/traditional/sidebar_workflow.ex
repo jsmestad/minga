@@ -210,7 +210,13 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   @spec sync_git_status_sidebar(state(), GitStatusPanel.t() | nil) :: :ok
   defp sync_git_status_sidebar(state, panel) do
-    case BuiltinSurfaces.sync_git_status_panel(panel, state.extension_surfaces.sidebar_registry) do
+    focused? = active_id(state) == "git_status"
+
+    case BuiltinSurfaces.sync_git_status_panel(
+           panel,
+           state.extension_surfaces.sidebar_registry,
+           focused?
+         ) do
       :ok ->
         :ok
 

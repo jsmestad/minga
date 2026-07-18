@@ -29,19 +29,20 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   end
 
   @doc "Synchronizes Git Status sidebar surface metadata from shell panel state."
-  @spec sync_git_status_panel(GitStatusPanel.t() | map() | nil, Sidebar.table()) ::
+  @spec sync_git_status_panel(GitStatusPanel.t() | map() | nil, Sidebar.table(), boolean()) ::
           :ok | {:error, term()}
-  def sync_git_status_panel(panel, sidebar_registry \\ Sidebar.default_table())
+  def sync_git_status_panel(panel, sidebar_registry \\ Sidebar.default_table(), focused? \\ false)
 
-  def sync_git_status_panel(nil, sidebar_registry),
-    do: register_git_status(false, 0, sidebar_registry)
+  def sync_git_status_panel(nil, sidebar_registry, focused?) when is_boolean(focused?),
+    do: register_git_status(false, false, 0, sidebar_registry)
 
-  def sync_git_status_panel(%GitStatusPanel{} = panel, sidebar_registry) do
-    register_git_status(true, Enum.count(panel.entries), sidebar_registry)
+  def sync_git_status_panel(%GitStatusPanel{} = panel, sidebar_registry, focused?)
+      when is_boolean(focused?) do
+    register_git_status(true, focused?, Enum.count(panel.entries), sidebar_registry)
   end
 
-  def sync_git_status_panel(%{} = panel, sidebar_registry) do
-    panel |> GitStatusPanel.new() |> sync_git_status_panel(sidebar_registry)
+  def sync_git_status_panel(%{} = panel, sidebar_registry, focused?) when is_boolean(focused?) do
+    panel |> GitStatusPanel.new() |> sync_git_status_panel(sidebar_registry, focused?)
   end
 
   @doc "Synchronizes BEAM Observatory sidebar surface metadata from shell visibility state."
@@ -102,9 +103,11 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
 
   def handle_observatory_action(%EditorState{} = state, _action, _context), do: state
 
-  @spec register_git_status(boolean(), non_neg_integer(), Sidebar.table()) ::
+  @spec register_git_status(boolean(), boolean(), non_neg_integer(), Sidebar.table()) ::
           :ok | {:error, term()}
-  defp register_git_status(visible?, badge_count, sidebar_registry) do
+  defp register_git_status(visible?, focused?, badge_count, sidebar_registry) do
+    focused? = visible? and focused?
+
     result =
       Sidebar.register(sidebar_registry, @builtin_source, %{
         id: @git_status_id,
@@ -114,14 +117,14 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
         priority: 20,
         preferred_width: 30,
         visible?: visible?,
-        focused?: visible?,
+        focused?: focused?,
         semantic_kind: "git_status",
         icon: "point.3.filled.connected.trianglepath.dotted",
         badge_count: badge_count,
         action_handler: {__MODULE__, :handle_git_status_action}
       })
 
-    focus_if_visible(result, visible?, @git_status_id, sidebar_registry)
+    focus_if_visible(result, focused?, @git_status_id, sidebar_registry)
   end
 
   @spec focus_if_visible(:ok | {:error, term()}, boolean(), String.t(), Sidebar.table()) ::

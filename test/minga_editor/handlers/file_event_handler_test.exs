@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -65,6 +66,38 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert panel.ahead == 1
       assert panel.last_commit_message == "feat: previous subject"
       assert panel.stash_count == 2
+      assert {:render, 16} in effects
+    end
+
+    test "background git refresh updates visible Git panel without stealing Observatory focus" do
+      state =
+        base_state()
+        |> SidebarWorkflow.open_observatory(nil)
+        |> SidebarWorkflow.select("observatory")
+        |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(%{entries: []}))
+
+      table = state.extension_surfaces.sidebar_registry
+      assert Sidebar.get(table, "observatory").focused?
+      refute Sidebar.get(table, "git_status").focused?
+
+      entry = %StatusEntry{path: "foo.ex", status: :modified, staged: false}
+
+      event =
+        {:minga_event, :git_status_changed,
+         %Minga.Events.GitStatusEvent{
+           git_root: "/tmp/repo",
+           entries: [entry],
+           branch: "develop",
+           ahead: 1,
+           behind: 0
+         }}
+
+      {new_state, effects} = FileEventHandler.handle(state, event)
+
+      assert SidebarWorkflow.active_id(new_state) == "observatory"
+      assert SidebarWorkflow.git_status_panel(new_state).entries == [entry]
+      assert %{visible?: true, focused?: false, badge_count: 1} = Sidebar.get(table, "git_status")
+      assert Sidebar.get(table, "observatory").focused?
       assert {:render, 16} in effects
     end
 

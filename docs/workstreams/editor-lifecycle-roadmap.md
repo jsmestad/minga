@@ -1814,6 +1814,76 @@ When prettify symbols are disabled, scheduling for a buffer first cancels work o
 - **Discoveries affecting later work:** Canceling a task cannot retract an already-sent Buffer call. Effect workers that race cleanup must return data and defer mutation until scheduler claim.
 - **Completion date:** 2026-07-18
 
+### W014: Preserve sidebar focus during Git refresh
+
+- **Status:** ACTIVE
+- **Audit ID:** L14
+- **Roadmap unit:** W014, Preserve sidebar focus during Git refresh
+- **Ponytail verdict:** `ACCEPT/direct`
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `cea126bc0d520698c6ddb79ca6ae2fd0dc85aa7e`
+- **Freshness basis:** Current `HEAD` and `origin/main` contain the verified W013 lifecycle fix. A visible Git panel registration still marked itself focused during every background panel replacement.
+
+#### Observable outcome
+
+Background Git status replacement updates the registered panel's visibility, badge count, and content without changing the focused left sidebar. Explicit Git activation still selects and focuses Git Status. Closing Git Status clears its selected shell state and registered visibility and focus.
+
+#### Owners and failure path
+
+- `MingaEditor.Shell.Traditional.Sidebars.active_id` owns the selected left-sidebar identity.
+- `MingaEditor.Shell.Traditional.SidebarWorkflow.select/2` owns explicit selection and registry focus synchronization.
+- `MingaEditor.Sidebar.BuiltinSurfaces` projects shell panel state into `MingaEditor.Extension.Sidebar`; it does not own focus selection.
+- Before this unit, `FileEventHandler.handle_git_status_changed/2` replaced the panel through `SidebarWorkflow.replace_git_status/2`. The projection registered every visible Git panel with `focused?: true` and called `Sidebar.focus_left/2`, so a background refresh could steal focus from Observatory.
+
+#### Locked implementation
+
+1. Pass an explicit boolean focus projection through `BuiltinSurfaces.sync_git_status_panel/3`.
+2. Register a missing Git panel as invisible and unfocused with badge count zero.
+3. Register a visible Git panel with the passed focus and current entry count.
+4. Call `Sidebar.focus_left/2` only when the projected Git panel is both visible and focused.
+5. Derive the projection in `SidebarWorkflow.sync_git_status_sidebar/2` from `active_id(state) == "git_status"`.
+6. Keep `replace_git_status/2` as a data replacement. Keep `select/2` as the explicit focus transition.
+7. Preserve Observatory synchronization without changes.
+
+#### Required tests
+
+- `test/minga_editor/handlers/file_event_handler_test.exs`: a background Git refresh updates panel data, visibility, and badge count while Observatory remains selected and focused.
+- `test/minga_editor/handlers/gui_action_handler_test.exs`: a visible Git panel begins unfocused, then explicit activation selects Git and installs the Git keymap scope.
+- `test/minga_editor/shell/traditional/sidebars_test.exs`: closing Git clears shell selection and registered visibility, focus, and badge count.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/handlers/file_event_handler_test.exs test/minga_editor/handlers/gui_action_handler_test.exs test/minga_editor/shell/traditional/sidebars_test.exs`
+- Broad: `git diff --check && make lint && mix test.llm --max-cases 4`
+
+#### Non-goals and budget
+
+- Do not add a process, registry, generic update API, wrapper, protocol, frontend change, or architecture migration.
+- Do not make `replace_git_status/2` select or focus a sidebar.
+- Do not change Observatory synchronization.
+- **Maximum production additions:** 40 lines.
+- **Maximum test additions:** 80 lines.
+
+#### Completion evidence
+
+- **PR URL:** https://github.com/jsmestad/minga/pull/3009
+- **Commit SHA:** `76ed51dde`
+- **Merge SHA:** Pending
+- **Focused tests:** 48 passed across the three locked test files.
+- **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed; full non-heavy result: 58 doctests, 98 properties, 9,914 tests, 0 failures, 1 skipped, 578 excluded.
+- **Planner verdict:** `READY`; the selected-sidebar owner, projection boundary, focus transitions, tests, constraints, and validation are locked with no unresolved implementer question.
+- **Ponytail verdict:** `LEAN`; targeted review returned `Lean already. Ship.`
+- **Elixir verdict:** `PASS`; explicit clauses, boolean guards, owner-derived projection, and state flow are idiomatic and narrow.
+- **Bug-hunt verdict:** `PASS`; refresh, activation, and close paths preserve the authoritative focus transition.
+- **Final reviewer verdict:** `PASS`.
+- **Production lines added/removed:** 22 added / 13 removed, net +9.
+- **Test lines added/removed:** 53 added / 0 removed, net +53.
+- **Concepts added/removed:** One explicit focus projection replaces visibility-derived focus. No process, registry, abstraction, protocol, or frontend path is added.
+- **Findings resolved:** Pending merge.
+- **Discoveries affecting later work:** Registry projections must derive focus from shell-owned selection instead of inferring focus from visibility.
+- **Completion date:** Pending
+
 ## Follow-on simplifications
 
 ### Remove Dired completely
