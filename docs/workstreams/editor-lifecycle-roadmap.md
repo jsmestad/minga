@@ -1867,8 +1867,8 @@ Background Git status replacement updates the registered panel's visibility, bad
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/3009
+- **Commit SHA:** `76ed51dde`
 - **Merge SHA:** Pending
 - **Focused tests:** 48 passed across the three locked test files.
 - **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed; full non-heavy result: 58 doctests, 98 properties, 9,914 tests, 0 failures, 1 skipped, 578 excluded.
