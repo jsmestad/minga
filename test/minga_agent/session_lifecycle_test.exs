@@ -13,6 +13,27 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert usage.output == 0
       assert usage.cost == 0.0
     end
+
+    test "stale provider starts cannot reactivate an idle session" do
+      session = start_subscribed_session()
+
+      send_provider_event(session, %Event.AgentStart{})
+      assert Session.status(session) == :idle
+
+      assert :ok = Session.continue(session)
+      send_provider_event(session, %Event.AgentStart{})
+      assert Session.status(session) == :thinking
+    end
+
+    test "failed continuation restores the prior terminal state" do
+      session = start_test_session(provider: Minga.Test.StubProvider, provider_opts: [])
+
+      send_provider_event(session, %Event.Error{message: "failed turn"})
+      assert Session.status(session) == :error
+
+      assert {:error, "Provider does not support continue"} = Session.continue(session)
+      assert Session.status(session) == :error
+    end
   end
 
   describe "remote attachment roles" do
@@ -178,6 +199,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       ref = Process.monitor(session)
 
       assert :ok = Session.enter_plan(session)
+      assert :ok = Session.send_prompt(session, "start plan turn")
       send_provider_event(session, %Event.AgentStart{})
 
       send(session, {:idle_gc_timeout, initial_token})
@@ -219,6 +241,7 @@ defmodule MingaAgent.SessionLifecycleTest do
         )
 
       assert :ok = Session.enter_plan(session)
+      assert :ok = Session.send_prompt(session, "start plan turn")
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       :sys.get_state(session)
 
@@ -353,6 +376,7 @@ defmodule MingaAgent.SessionLifecycleTest do
     test "plan mode survives provider events and abort" do
       session = start_subscribed_session()
       assert :ok = Session.enter_plan(session)
+      assert :ok = Session.continue(session)
 
       events = [
         %Event.AgentStart{},
@@ -448,7 +472,8 @@ defmodule MingaAgent.SessionLifecycleTest do
 
     test "marks running tool calls as aborted" do
       session = start_subscribed_session()
-      # Direct event injection: send + call is sufficient for sync
+      assert :ok = Session.continue(session)
+      # Admit a turn before injecting its provider event.
       send(
         session,
         {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
@@ -459,6 +484,14 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       :ok = Session.abort(session)
 
+      send_provider_event(session, %Event.ToolStart{
+        tool_call_id: "tc-stale",
+        name: "bash",
+        args: %{}
+      })
+
+      assert Session.status(session) == :idle
+
       messages = Session.messages(session)
 
       tool =
@@ -468,6 +501,7 @@ defmodule MingaAgent.SessionLifecycleTest do
         end)
 
       assert {:tool_call, tc} = tool
+      assert tc.id == "tc1"
       assert tc.status == :error
       assert tc.result == "aborted"
       assert tc.is_error
@@ -526,6 +560,7 @@ defmodule MingaAgent.SessionLifecycleTest do
   describe "editor_snapshot/1" do
     test "includes active tool name while a tool is running" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,
@@ -551,6 +586,7 @@ defmodule MingaAgent.SessionLifecycleTest do
 
     test "keeps the next tool name active until every tool ends" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,

@@ -22,6 +22,9 @@ defmodule Minga.Test.SessionMockProvider do
     :ok
   end
 
+  @spec continue(GenServer.server()) :: :ok
+  def continue(_pid), do: :ok
+
   @impl MingaAgent.Provider
   def new_session(pid) do
     GenServer.cast(pid, :new_session)

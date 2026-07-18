@@ -134,6 +134,46 @@ defmodule MingaAgent.SessionProviderErrorTest do
       end
     end
 
+    test "provider errors abort running tool transcript entries" do
+      session = start_subscribed_session()
+      assert :ok = Session.continue(session)
+      send_provider_event(session, %Event.AgentStart{})
+
+      send_provider_event(session, %Event.ToolStart{
+        tool_call_id: "tc-running",
+        name: "shell",
+        args: %{"command" => "sleep 10"}
+      })
+
+      send_provider_event(session, %Event.Error{
+        kind: :provider_error,
+        provider: "test",
+        message: "crashed"
+      })
+
+      assert {:tool_call, %{status: :error, result: "aborted", is_error: true}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+    end
+
+    test "provider errors reject approval requests that arrive after failure" do
+      session = start_subscribed_session()
+
+      send_provider_event(session, %Event.Error{
+        kind: :provider_error,
+        provider: "test",
+        message: "crashed"
+      })
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc-late",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      })
+
+      assert_receive {:tool_approval_response, "tc-late", :reject}
+    end
+
     test "repeated structured provider errors append one transcript row" do
       session = start_subscribed_session()
       event = %Event.Error{kind: :rate_limited, provider: "anthropic", message: "rate limited"}

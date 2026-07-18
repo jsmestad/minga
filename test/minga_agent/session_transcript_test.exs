@@ -4,6 +4,7 @@ defmodule MingaAgent.SessionTranscriptTest do
   describe "toggle_tool_collapse/2" do
     test "toggles collapsed state of tool call messages" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,
@@ -41,6 +42,7 @@ defmodule MingaAgent.SessionTranscriptTest do
   describe "tool execution timing" do
     test "tool auto-expands on first ToolUpdate" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,
@@ -67,6 +69,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
     test "tool re-collapses on ToolEnd with duration" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,
@@ -108,6 +111,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
     test "captures file diff preview on the matching tool call" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,
@@ -161,6 +165,7 @@ defmodule MingaAgent.SessionTranscriptTest do
   describe "thinking block collapse" do
     test "thinking blocks stay expanded during streaming and collapse on AgentEnd" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "Let me think..."}})
 
@@ -204,6 +209,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
     test "toggle_all_tool_collapses also toggles thinking blocks" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
       send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
@@ -313,6 +319,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
     test "thinking deltas get one stable ID, then assistant gets the next" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: " ok"}})
@@ -331,6 +338,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
     test "tool updates keep a stable tool message ID" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send(
         session,
@@ -362,6 +370,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
     test "message mutations preserve existing IDs" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "thinking..."}})
 
       send(

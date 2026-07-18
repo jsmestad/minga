@@ -85,6 +85,8 @@ defmodule Minga.Test.SessionCase do
 
   @spec send_approval(GenServer.server(), pid()) :: :ok
   def send_approval(session, reply_to \\ self()) do
+    :ok = MingaAgent.Session.continue(session)
+
     approval = %MingaAgent.Event.ToolApproval{
       tool_call_id: "tc1",
       name: "shell",

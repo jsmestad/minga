@@ -174,6 +174,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     test "tool_started and tool_ended keep active_tool_name synced with the session snapshot" do
       {:ok, session} = start_supervised({Session, provider_opts: []})
       :sys.get_state(session)
+      assert :ok = Session.send_prompt(session, "route tool events")
 
       {tab_bar, workspace} =
         TabBar.add_workspace(TabBar.new(Tab.new_agent(1, "Agent")), "Agent", session)
