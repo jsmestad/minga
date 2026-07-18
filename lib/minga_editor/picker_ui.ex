@@ -53,6 +53,9 @@ defmodule MingaEditor.PickerUI do
           {:ok, [Picker.item()], [MingaEditor.UI.Picker.Candidate.t()], Source.fetch_meta()}
           | {:error, String.t()}
 
+  @typep source_target :: PickerState.source_target()
+  @typep source_transition :: PickerState.source_transition()
+
   # Mode-switching prefix map: first character → source module.
   # When a prefix character is typed as the first query char in a switchable
   # source (file picker, recent files), the picker swaps to the mapped source
@@ -296,7 +299,7 @@ defmodule MingaEditor.PickerUI do
               modal:
                 {:picker,
                  %{
-                   picker_ui: %PickerState{picker: %Picker{} = picker} = picker_state
+                   picker_ui: %PickerState{picker: %Picker{}} = picker_state
                  }}
             }
           }
@@ -307,7 +310,7 @@ defmodule MingaEditor.PickerUI do
       )
       when is_binary(query) do
     if PickerState.current_query_edit?(picker_state, generation, edit_seq) do
-      replace_current_query(state, picker_state, picker, query, edit_seq)
+      replace_current_query(state, picker_state, query, edit_seq)
     else
       state
     end
@@ -315,29 +318,30 @@ defmodule MingaEditor.PickerUI do
 
   def replace_query(state, _generation, _edit_seq, _query), do: state
 
-  @spec replace_current_query(
-          state(),
-          PickerState.t(),
-          Picker.t(),
-          String.t(),
-          non_neg_integer()
-        ) :: state()
+  @spec replace_current_query(state(), PickerState.t(), String.t(), non_neg_integer()) ::
+          state()
   defp replace_current_query(
          state,
-         %PickerState{mode_prefix: mode_prefix},
-         picker,
+         %PickerState{
+           picker: %Picker{} = picker,
+           source_switch: {:switched, _original_source, mode_prefix}
+         },
          query,
          edit_seq
-       )
-       when mode_prefix != "" do
+       ) do
     normalized_query = String.replace_prefix(query, mode_prefix, "")
     install_query_edit(state, picker, normalized_query, edit_seq)
   end
 
-  defp replace_current_query(state, %PickerState{}, picker, query, edit_seq) do
+  defp replace_current_query(
+         state,
+         %PickerState{picker: %Picker{} = picker} = picker_state,
+         query,
+         edit_seq
+       ) do
     case String.next_grapheme(query) do
       {prefix, remaining_query} ->
-        case maybe_switch_mode(state, prefix, "") do
+        case maybe_switch_mode(state, picker_state, prefix) do
           {:switched, new_state} ->
             install_switched_query_edit(new_state, remaining_query, edit_seq)
 
@@ -676,14 +680,13 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  # Backspace (with mode-switch detection: if query becomes empty and we're in a switched mode, switch back)
+  # Backspace returns to the original source when it empties a switched picker.
   def handle_key(
         %{
           shell_runtime: %{
             state: %{
               modal:
-                {:picker,
-                 %{picker_ui: %{picker: picker, mode_prefix: prefix, original_source: orig}}}
+                {:picker, %{picker_ui: %PickerState{picker: %Picker{} = picker} = picker_state}}
             }
           }
         } = state,
@@ -691,20 +694,23 @@ defmodule MingaEditor.PickerUI do
         _mods
       )
       when cp in [8, 127] do
-    new_picker = Picker.backspace(picker)
+    case {Picker.backspace(picker), picker_state.source_switch} do
+      {%Picker{query: ""}, {:switched, _original_source, _prefix}} ->
+        switch_back_to_original(state)
 
-    # If query is now empty and we had mode-switched, switch back to original source
-    if new_picker.query == "" and prefix != "" and orig != nil do
-      switch_back_to_original(state)
-    else
-      state = update_picker(state, &%{&1 | picker: new_picker})
-      maybe_preview_selection(state)
+      {%Picker{} = new_picker, _source_switch} ->
+        state = update_picker(state, &PickerState.update_picker(&1, new_picker))
+        maybe_preview_selection(state)
     end
   end
 
   # Printable characters → filter (with mode-switch detection)
   def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
+        %{
+          shell_runtime: %{
+            state: %{modal: {:picker, %{picker_ui: %PickerState{} = picker_state}}}
+          }
+        } = state,
         codepoint,
         0
       )
@@ -721,7 +727,7 @@ defmodule MingaEditor.PickerUI do
         state
 
       c ->
-        type_printable_char(state, picker, c)
+        type_printable_char(state, picker_state, c)
     end
   end
 
@@ -736,15 +742,15 @@ defmodule MingaEditor.PickerUI do
     run_action(source, action_id, item, new_state, callback_source)
   end
 
-  @spec type_printable_char(EditorState.t(), Picker.t(), String.t()) :: EditorState.t()
-  defp type_printable_char(state, picker, char) do
-    case maybe_switch_mode(state, char, picker.query) do
+  @spec type_printable_char(EditorState.t(), PickerState.t(), String.t()) :: EditorState.t()
+  defp type_printable_char(state, %PickerState{picker: picker} = picker_state, char) do
+    case maybe_switch_mode(state, picker_state, char) do
       {:switched, new_state} ->
         new_state
 
       :no_switch ->
         new_picker = Picker.type_char(picker, char)
-        state = update_picker(state, &%{&1 | picker: new_picker})
+        state = update_picker(state, &PickerState.update_picker(&1, new_picker))
         maybe_preview_selection(state)
     end
   end
@@ -1015,119 +1021,88 @@ defmodule MingaEditor.PickerUI do
 
   # ── Mode switching ──────────────────────────────────────────────────────────
 
-  # Check if typing a character should trigger a mode switch.
-  # Only triggers on the first character in an empty query, for switchable sources.
-  @spec maybe_switch_mode(state(), String.t(), String.t()) ::
+  # Check whether the first character in an empty query retargets the picker.
+  @spec maybe_switch_mode(state(), PickerState.t(), String.t()) ::
           {:switched, state()} | :no_switch
   defp maybe_switch_mode(
-         %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{source: source}}}}}} = state,
-         char,
-         query
+         state,
+         %PickerState{picker: %Picker{query: ""}, source: source},
+         char
        ) do
-    source_prefixes = Map.get(@mode_prefixes, source, %{})
+    case @mode_prefixes do
+      %{^source => %{^char => target_source}} ->
+        {:switched, switch_to_source(state, target_source, char)}
 
-    if query == "" and Map.has_key?(source_prefixes, char) do
-      target_source = Map.fetch!(source_prefixes, char)
-      {:switched, switch_to_source(state, target_source, char)}
-    else
-      :no_switch
+      _prefixes ->
+        :no_switch
     end
   end
 
-  # Switch the picker to a new source module, preserving the original source for switch-back.
+  defp maybe_switch_mode(_state, %PickerState{}, _char), do: :no_switch
+
   @spec switch_to_source(state(), module(), String.t()) :: state()
   defp switch_to_source(state, new_source, prefix) do
     current = picker_state(state)
-    switch_source(state, new_source, current.original_source || current.source, prefix, current)
+    switch_source(state, current, new_source, {:switch, prefix})
   end
 
-  # Switch back to the original source after the prefix is deleted.
   @spec switch_back_to_original(state()) :: state()
   defp switch_back_to_original(state) do
-    current = picker_state(state)
-    switch_source(state, current.original_source, nil, "", current)
+    %PickerState{source_switch: {:switched, original_source, _prefix}} =
+      current =
+      picker_state(state)
+
+    switch_source(state, current, original_source, :restore)
   end
 
-  @spec switch_source(state(), module(), module() | nil, String.t(), PickerState.t()) :: state()
-  defp switch_source(state, source, original_source, mode_prefix, current) do
+  @spec switch_source(state(), PickerState.t(), module(), source_transition()) :: state()
+  defp switch_source(state, current, source, transition) do
     callback_source = Source.source_identity(source)
+    target = {source, callback_source, Source.layout(source, callback_source)}
 
     if Source.async?(source, callback_source) do
-      switch_async_source(state, source, callback_source, original_source, mode_prefix, current)
+      switch_async_source(state, current, target, transition)
     else
-      switch_sync_source(state, source, callback_source, original_source, mode_prefix)
+      switch_sync_source(state, current, target, transition)
     end
   end
 
-  @spec switch_async_source(
-          state(),
-          module(),
-          PickerState.callback_source(),
-          module() | nil,
-          String.t(),
-          PickerState.t()
-        ) :: state()
+  @spec switch_async_source(state(), PickerState.t(), source_target(), source_transition()) ::
+          state()
   defp switch_async_source(
          state,
-         source,
-         callback_source,
-         original_source,
-         mode_prefix,
-         current
+         current,
+         {source, callback_source, _layout} = target,
+         transition
        ) do
-    {loading_state, revision} = open_loading(state, source)
-
-    loading_state =
-      update_picker(loading_state, fn loading ->
-        %{
-          loading
-          | restore: current.restore,
-            restore_theme: current.restore_theme,
-            context: current.context,
-            original_source: original_source,
-            mode_prefix: mode_prefix
-        }
-      end)
+    state = cancel_current_fetch(state)
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
+    picker = Picker.new([], title: Source.title(source, callback_source), max_visible: max_vis)
+    switched = PickerState.retarget(current, picker, target, transition)
+    {loading, revision} = PickerState.begin_fetch(switched)
+    loading_state = update_picker(state, fn _current -> loading end)
 
     request =
       FetchEffect.request(
         source,
         callback_source,
-        Context.from_editor_state(loading_state, current.context),
+        Context.from_editor_state(loading_state),
         revision
       )
 
     schedule_fetch(loading_state, request, source, revision)
   end
 
-  @spec switch_sync_source(
-          state(),
-          module(),
-          PickerState.callback_source(),
-          module() | nil,
-          String.t()
-        ) :: state()
-  defp switch_sync_source(state, source, callback_source, original_source, mode_prefix) do
+  @spec switch_sync_source(state(), PickerState.t(), source_target(), source_transition()) ::
+          state()
+  defp switch_sync_source(state, current, {source, callback_source, _layout} = target, transition) do
     state = cancel_current_fetch(state)
     items = Source.candidates(source, Context.from_editor_state(state), callback_source)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     picker = Picker.new(items, title: Source.title(source, callback_source), max_visible: max_vis)
-    layout = MingaEditor.UI.Picker.Source.layout(source, callback_source)
+    switched = PickerState.retarget(current, picker, target, transition)
 
-    update_picker(
-      state,
-      &%{
-        &1
-        | picker: picker,
-          source: source,
-          callback_source: callback_source,
-          layout: layout,
-          original_source: original_source,
-          mode_prefix: mode_prefix,
-          load_status: :ready,
-          fetch_revision: nil
-      }
-    )
+    update_picker(state, fn _current -> switched end)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────

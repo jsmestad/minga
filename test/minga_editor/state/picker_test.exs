@@ -2,6 +2,8 @@ defmodule MingaEditor.State.PickerTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Theme
 
   describe "begin_fetch/1 and current_fetch?/2" do
     test "marks the picker loading and mints a fresh revision" do
@@ -55,6 +57,63 @@ defmodule MingaEditor.State.PickerTest do
       assert accepted.picker == picker
       assert accepted.acknowledged_query_edit_seq == 3
       assert PickerState.accept_query_edit(accepted, nil, 2) == accepted
+    end
+  end
+
+  describe "source switching" do
+    test "retarget and restore preserve picker-session state as one owned transition" do
+      original_picker = Picker.new([], title: "Files")
+      target_picker = Picker.new([], title: "Search")
+      theme = Theme.get!(Theme.default())
+      stale_revision = make_ref()
+
+      state = %PickerState{
+        picker: original_picker,
+        source: MingaEditor.UI.Picker.FileSource,
+        restore: 3,
+        restore_theme: theme,
+        context: %{query: "needle"},
+        query_generation: 7,
+        acknowledged_query_edit_seq: 2,
+        load_status: {:error, "old"},
+        fetch_revision: stale_revision
+      }
+
+      switched =
+        PickerState.retarget(
+          state,
+          target_picker,
+          {MingaEditor.UI.Picker.ProjectSearchSource, nil, :top},
+          {:switch, "#"}
+        )
+
+      assert switched.source == MingaEditor.UI.Picker.ProjectSearchSource
+      assert switched.source_switch == {:switched, MingaEditor.UI.Picker.FileSource, "#"}
+      assert PickerState.mode_prefix(switched) == "#"
+      assert switched.load_status == :ready
+      assert switched.fetch_revision == nil
+      assert switched.restore == 3
+      assert switched.restore_theme == theme
+      assert switched.context == %{query: "needle"}
+      assert switched.query_generation == 7
+      assert switched.acknowledged_query_edit_seq == 2
+
+      restored =
+        PickerState.retarget(
+          switched,
+          original_picker,
+          {MingaEditor.UI.Picker.FileSource, nil, :bottom},
+          :restore
+        )
+
+      assert restored.source == MingaEditor.UI.Picker.FileSource
+      assert restored.source_switch == :original
+      assert PickerState.mode_prefix(restored) == ""
+      assert restored.restore == 3
+      assert restored.restore_theme == theme
+      assert restored.context == %{query: "needle"}
+      assert restored.query_generation == 7
+      assert restored.acknowledged_query_edit_seq == 2
     end
   end
 

@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   alias Minga.RenderModel.UI.Picker
   alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Picker, as: PickerUIState
   alias MingaEditor.UI.Picker, as: PickerState
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectFileCandidate
@@ -164,18 +165,22 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   defp picker_modal(picker, source, action_menu, mode_prefix, load_status) do
     {:picker,
      %{
-       picker_ui: %{
+       picker_ui: %PickerUIState{
          picker: picker,
          source: source,
          callback_source: nil,
          action_menu: action_menu,
-         mode_prefix: mode_prefix,
+         source_switch: source_switch(mode_prefix, source),
          load_status: load_status,
          query_generation: 7,
          acknowledged_query_edit_seq: 11
        }
      }}
   end
+
+  @spec source_switch(String.t(), module()) :: PickerUIState.source_switch()
+  defp source_switch("", _source), do: :original
+  defp source_switch(prefix, source), do: {:switched, source, prefix}
 
   @spec build_context(term()) :: MingaEditor.Frontend.Emit.Context.t()
   defp build_context(modal) do

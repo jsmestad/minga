@@ -450,14 +450,14 @@ defmodule MingaEditor.PickerUITest do
       switched_state = PickerUI.handle_key(state, ?>, 0)
       {:picker, %{picker_ui: switched_pui}} = switched_state.shell_runtime.state.modal
       assert switched_pui.source == MingaEditor.UI.Picker.CommandSource
-      assert switched_pui.original_source == MingaEditor.UI.Picker.FileSource
-      assert switched_pui.mode_prefix == ">"
+
+      assert switched_pui.source_switch ==
+               {:switched, MingaEditor.UI.Picker.FileSource, ">"}
 
       reverted_state = PickerUI.handle_key(switched_state, 127, 0)
       {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal
       assert reverted_pui.source == MingaEditor.UI.Picker.FileSource
-      assert reverted_pui.original_source == nil
-      assert reverted_pui.mode_prefix == ""
+      assert reverted_pui.source_switch == :original
     end
 
     test "hash mode switches from file to project search through async loading" do
@@ -471,8 +471,10 @@ defmodule MingaEditor.PickerUITest do
       {:picker, %{picker_ui: switched_pui}} = switched_state.shell_runtime.state.modal
 
       assert switched_pui.source == MingaEditor.UI.Picker.ProjectSearchSource
-      assert switched_pui.original_source == MingaEditor.UI.Picker.FileSource
-      assert switched_pui.mode_prefix == "#"
+
+      assert switched_pui.source_switch ==
+               {:switched, MingaEditor.UI.Picker.FileSource, "#"}
+
       assert switched_pui.restore == 0
       assert switched_pui.load_status == :loading
       assert is_reference(switched_pui.fetch_revision)
@@ -494,8 +496,7 @@ defmodule MingaEditor.PickerUITest do
       reverted_state = PickerUI.handle_key(switched_state, 127, 0)
       {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal
       assert reverted_pui.source == MingaEditor.UI.Picker.FileSource
-      assert reverted_pui.original_source == nil
-      assert reverted_pui.mode_prefix == ""
+      assert reverted_pui.source_switch == :original
       assert reverted_pui.restore == 0
       refute PickerState.current_fetch?(reverted_pui, old_revision)
 
@@ -553,8 +554,10 @@ defmodule MingaEditor.PickerUITest do
       {:picker, %{picker_ui: picker_ui}} = switched.shell_runtime.state.modal
 
       assert picker_ui.source == MingaEditor.UI.Picker.CommandSource
-      assert picker_ui.original_source == MingaEditor.UI.Picker.FileSource
-      assert picker_ui.mode_prefix == ">"
+
+      assert picker_ui.source_switch ==
+               {:switched, MingaEditor.UI.Picker.FileSource, ">"}
+
       assert picker_ui.picker.query == ""
       assert picker_ui.acknowledged_query_edit_seq == 1
     end
@@ -569,8 +572,10 @@ defmodule MingaEditor.PickerUITest do
       {:picker, %{picker_ui: picker_ui}} = switched.shell_runtime.state.modal
 
       assert picker_ui.source == MingaEditor.UI.Picker.ProjectSearchSource
-      assert picker_ui.original_source == MingaEditor.UI.Picker.FileSource
-      assert picker_ui.mode_prefix == "#"
+
+      assert picker_ui.source_switch ==
+               {:switched, MingaEditor.UI.Picker.FileSource, "#"}
+
       assert picker_ui.picker.query == "needle"
       assert picker_ui.acknowledged_query_edit_seq == 1
       assert picker_ui.load_status == :loading
@@ -586,7 +591,10 @@ defmodule MingaEditor.PickerUITest do
       {:picker, %{picker_ui: picker_ui}} = switched.shell_runtime.state.modal
 
       assert picker_ui.source == MingaEditor.UI.Picker.CommandSource
-      assert picker_ui.mode_prefix == ">"
+
+      assert picker_ui.source_switch ==
+               {:switched, MingaEditor.UI.Picker.FileSource, ">"}
+
       assert picker_ui.picker.query == "open"
       assert picker_ui.acknowledged_query_edit_seq == 1
     end
@@ -728,8 +736,7 @@ defmodule MingaEditor.PickerUITest do
       {:picker, %{picker_ui: pui}} = switched.shell_runtime.state.modal
 
       assert pui.source == MingaEditor.UI.Picker.CommandSource
-      assert pui.original_source == MingaEditor.UI.Picker.FileSource
-      assert pui.mode_prefix == ">"
+      assert pui.source_switch == {:switched, MingaEditor.UI.Picker.FileSource, ">"}
     end
 
     defp large_file_picker_state(item_count) do

@@ -1660,7 +1660,7 @@ Remove only the unreachable Tool Manager footer-overlay producer. Footer placeme
 
 ### W012: Route picker prefix switching through async lifecycle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L11
 - **Roadmap unit:** W012, Route picker prefix switching through async lifecycle
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1712,7 +1712,7 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2998
 - **Commit SHA:** `b3d700b971ced9ed9d8b421984e415132235fe6c`
-- **Merge SHA:** Pending
+- **Merge SHA:** `422ed731c8d4ae984bf78181ec392ed9ca233320`
 - **Focused tests:** 40 passed across `picker_ui_test.exs`, `fetch_effect_test.exs`, and `search_async_test.exs`.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed on the final base (58 doctests, 98 properties, 9,891 tests, 0 failures, 1 skipped, 578 excluded).
 - **Ponytail and Elixir verdict:** `LEAN` after a targeted correction; source switching uses local helpers and existing lifecycle primitives, preserves picker-open ownership, clears stale sync-return fetch state, and stays within 76 production additions.
@@ -1722,8 +1722,27 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 - **Test lines added/removed:** 64 added / 1 removed, net +63
 - **Concepts added/removed:** No concepts added or removed; prefix switching now reuses the existing async lifecycle.
 - **Findings resolved:** Project Search prefix switching no longer executes synchronous search on the Editor input loop or bypasses async lifecycle ownership.
-- **Discoveries affecting later work:** Source switching must preserve picker-open restoration and context independently from per-source query and fetch state.
+- **Discoveries affecting later work:** Source switching must preserve picker-open restoration and context independently from per-source query and fetch state. Post-merge Elixir review found that rebuilding through `open_loading/3` and repairing five fields left the transition represented by positional arguments and two independent sentinel fields.
 - **Completion date:** 2026-07-18
+
+#### Post-merge ownership refinement
+
+- **Status:** ACTIVE
+- **Reason:** User review and a focused `elixir-architect` audit found that `switch_async_source/6` reopened a fresh picker and repaired session-owned fields instead of expressing one owner transition.
+- **Owned shape:** `MingaEditor.State.Picker` replaces `original_source` plus `mode_prefix` with `source_switch: :original | {:switched, original_source, prefix}` and owns retargeting through `retarget/4`. `PickerUI` retains callback, cancellation, scheduler, and candidate orchestration.
+- **Deletion outcome:** Async and sync switching update the existing picker state through the same transition. The async reopen-and-repair block, six-argument helper, duplicate picker/query arguments, foreign picker-state writes, and invalid sentinel combinations are removed without a new process, protocol, scheduler, or wrapper module.
+- **Preserve:** Prefix mappings, synchronous `>` and `@`, asynchronous `#`, query correlation, fetch revisions, scheduler cancellation, stale-result rejection, picker restoration, context, layout, and semantic mode-prefix rendering.
+- **Focused tests:** 55 passed across `state/picker_test.exs`, `picker_ui_test.exs`, `picker_builder_test.exs`, `fetch_effect_test.exs`, and `search_async_test.exs`.
+- **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed on current main; full non-heavy result: 58 doctests, 98 properties, 9,906 tests, 0 failures, 1 skipped, 578 excluded.
+- **Ponytail verdict:** `LEAN`; after rebasing removed an apparent unrelated diff and `Context.from_editor_state(loading_state)` made the retargeted state the single context owner, the targeted recheck returned `Lean already. Ship.`
+- **Production lines added/removed:** 147 added / 118 removed, net +29. Production additions remain below the 200-line slice ceiling.
+- **Test lines added/removed:** 88 added / 17 removed, net +71.
+- **Concepts added/removed:** One tagged `source_switch` field replaces two nullable/sentinel fields and removes invalid combinations; no new process, protocol, scheduler, or wrapper module.
+- **Final reviewer verdict:** `PASS`; the owner transition preserves restoration, context, layout, native correlation, fetch state, prefix behavior, latest-wins rejection, and semantic projection without new architecture or exceeding the production budget.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3005
+- **Commit SHA:** `a2f432d40`
+- **Merge SHA:** Pending
+- **Completion date:** Pending
 
 ## Follow-on simplifications
 

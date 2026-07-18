@@ -16,6 +16,14 @@ defmodule MingaEditor.State.Picker do
   @typedoc "Contribution source semantically authorized to provide picker candidates."
   @type callback_source :: Minga.Extension.ContributionCleanup.contribution_source() | nil
 
+  @typedoc "Source-switch state for the picker currently shown."
+  @type source_switch :: :original | {:switched, module(), String.t()}
+  @type source_transition :: {:switch, String.t()} | :restore
+
+  @typedoc "Source metadata installed by a picker source transition."
+  @type source_target ::
+          {module(), callback_source(), MingaEditor.UI.Picker.Source.layout()}
+
   @typedoc "Correlation generation for native full-query editing."
   @type query_generation :: non_neg_integer()
 
@@ -39,8 +47,7 @@ defmodule MingaEditor.State.Picker do
           action_menu: action_menu(),
           context: map() | nil,
           layout: MingaEditor.UI.Picker.Source.layout(),
-          original_source: module() | nil,
-          mode_prefix: String.t(),
+          source_switch: source_switch(),
           load_status: load_status(),
           fetch_revision: fetch_revision(),
           query_generation: query_generation(),
@@ -55,8 +62,7 @@ defmodule MingaEditor.State.Picker do
             action_menu: nil,
             context: nil,
             layout: :bottom,
-            original_source: nil,
-            mode_prefix: "",
+            source_switch: :original,
             load_status: :ready,
             fetch_revision: nil,
             query_generation: 0,
@@ -143,6 +149,53 @@ defmodule MingaEditor.State.Picker do
   @spec update_picker(t(), MingaEditor.UI.Picker.t()) :: t()
   def update_picker(%__MODULE__{} = ps, picker) do
     %{ps | picker: picker}
+  end
+
+  @doc "Returns the visible prefix for a switched source."
+  @spec mode_prefix(t()) :: String.t()
+  def mode_prefix(%__MODULE__{source_switch: {:switched, _original_source, prefix}}), do: prefix
+  def mode_prefix(%__MODULE__{}), do: ""
+
+  @doc "Retargets an open picker while retaining its session-owned fields."
+  @spec retarget(t(), MingaEditor.UI.Picker.t(), source_target(), source_transition()) :: t()
+  def retarget(
+        %__MODULE__{source: original_source, source_switch: :original} = ps,
+        picker,
+        target,
+        {:switch, prefix}
+      )
+      when is_atom(original_source) and is_binary(prefix),
+      do: put_source(ps, picker, target, {:switched, original_source, prefix})
+
+  def retarget(
+        %__MODULE__{source_switch: {:switched, original_source, _old_prefix}} = ps,
+        picker,
+        target,
+        {:switch, prefix}
+      )
+      when is_binary(prefix),
+      do: put_source(ps, picker, target, {:switched, original_source, prefix})
+
+  def retarget(
+        %__MODULE__{source_switch: {:switched, original_source, _prefix}} = ps,
+        picker,
+        {original_source, _callback_source, _layout} = target,
+        :restore
+      ),
+      do: put_source(ps, picker, target, :original)
+
+  @spec put_source(t(), MingaEditor.UI.Picker.t(), source_target(), source_switch()) :: t()
+  defp put_source(ps, picker, {source, callback_source, layout}, source_switch) do
+    %{
+      ps
+      | picker: picker,
+        source: source,
+        callback_source: callback_source,
+        layout: layout,
+        source_switch: source_switch,
+        load_status: :ready,
+        fetch_revision: nil
+    }
   end
 
   @doc """
