@@ -1574,8 +1574,8 @@ Remove the unreachable Diagnostics-owned `:lsp_info` branch and its unused alias
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2996
+- **Commit SHA:** `8a050efa3fabf0dfce0a02e1b8de19a54a7bceae`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs test/minga_editor/commands/lsp_test.exs` passed, 9 tests.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 578 excluded).
