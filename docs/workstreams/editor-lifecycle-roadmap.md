@@ -1362,8 +1362,8 @@ Ctrl-J and Ctrl-K cycle Signature Help overloads when frontends send the canonic
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2993
+- **Commit SHA:** `7bbd2730b6631cb2ce84be1da6903d9c0603fd66`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix test.debug test/minga_editor/input/signature_help_test.exs` passed, 7 tests
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,868 tests, 0 failures, 1 skipped, 578 excluded)
