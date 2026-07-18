@@ -707,7 +707,7 @@ None. The implementer must return `NEEDS_REPLAN` rather than choose a different 
 
 #### Status and provenance
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L04
 - **Roadmap unit:** W003, Dirty buffers require explicit destruction
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -920,7 +920,7 @@ All 13 conditions pass: accepted verdict; reproduction on current main; one lock
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2982
 - **Commit SHA:** `316dfe39fe1e3dc6cea3a21fbacfb62134443222`
-- **Merge SHA:** Pending
+- **Merge SHA:** `2a4e20884f4049cd647b5f86a8e99d030963e77a`
 - **Focused tests:** `mix test.debug test/minga_editor/commands/buffer_management_kill_test.exs test/minga_editor/launchpad_integration_test.exs` passed (6); `mix test.debug test/minga_editor/commands/agent_split_toggle_test.exs` passed (21); `mix test.debug test/minga/command/registry_test.exs test/minga/keymap/defaults_test.exs` passed
 - **Broad validation:** `make lint` exited 0 (format, changed-file Credo, compile, incremental Dialyzer; Credo reported two non-blocking boolean-case refactoring suggestions, including the locked direct-pattern-match decision); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,851 tests, 0 failures, 1 skipped, 574 excluded). The planned `+S 8:8` run and an intermediate `+S 4:4` run each exposed one unrelated 5-second MingaAgent subscription timeout in different modules; both failed cases passed immediately in isolation before the contention-safe full run.
 - **Ponytail verdict:** LEAN, no findings after the targeted shrink recheck
@@ -932,7 +932,7 @@ All 13 conditions pass: accepted verdict; reproduction on current main; one lock
 - **Concepts added/removed:** Added the private `kill_intent` (`:ordinary | :force`) and registered `:force_kill_buffer`; removed unguarded ordinary dirty destruction and foreign `:sys.replace_state/2` Buffer mutation
 - **Findings resolved:** L04, ordinary dirty-buffer destruction now refuses before destructive effects and explicit force destruction reuses the existing lifecycle
 - **Discoveries affecting later work:** W004-W006 remain untouched. Headless focused workflow tests required a module-scoped real `WaitRequests` tracker because the runtime supervisor is not started; request IDs remained unique. Review fixes reduced the kill decision to one catch-scoped query, switched the focused tests to the public `Minga.Buffer` API, restored `:new_buffer` registry coverage, and consolidated ordinary and force keymap coverage. No new discovery affecting later work
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
 
 ### W004: Dired targets its backing buffer
 
