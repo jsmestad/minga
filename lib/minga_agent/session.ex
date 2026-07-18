@@ -740,55 +740,18 @@ defmodule MingaAgent.Session do
 
   def handle_call({:send_prompt_as, client_pid, content}, _from, state) do
     if driver_allowed?(state, client_pid) do
-      handle_send_prompt(content, state)
+      handle_prompt(content, :steering, state)
     else
       {:reply, {:error, :not_driver}, state}
     end
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
-    handle_send_prompt(content, state)
-  end
-
-  def handle_call(
-        {:send_follow_up, _content},
-        _from,
-        %{provider: provider} = state
-      )
-      when ProviderLifecycle.is_detached(provider) do
-    {:reply, {:error, :provider_not_ready}, state}
+    handle_prompt(content, :steering, state)
   end
 
   def handle_call({:send_follow_up, content}, _from, state) do
-    case TurnExecution.follow_up(state.turn_execution, content) do
-      {:ok, execution, effects} ->
-        state = install_turn_execution(state, execution, effects)
-        {:reply, {:queued, :follow_up}, state}
-
-      {:error, :invalid_phase, _execution} ->
-        {user_message, send_content} = build_user_message(content)
-        state = append_msg(state, user_message)
-        record_user_message(state, user_message)
-        state = notify_messages_changed(state)
-        state = install_turn_transition(state, TurnExecution.begin_turn(state.turn_execution))
-
-        case state.provider.module.send_prompt(
-               ProviderLifecycle.pid(state.provider),
-               send_content
-             ) do
-          :ok ->
-            {:reply, :ok, state}
-
-          {:error, _reason} = error ->
-            state =
-              install_turn_transition(
-                state,
-                TurnExecution.queued_send_failed(state.turn_execution)
-              )
-
-            {:reply, error, state}
-        end
-    end
+    handle_prompt(content, :follow_up, state)
   end
 
   def handle_call(:dequeue_steering, _from, state) do
@@ -1777,15 +1740,19 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec handle_send_prompt(String.t() | [ReqLLM.Message.ContentPart.t()], state()) ::
-          {:reply, :ok | {:queued, :steering} | {:error, term()}, state()}
-  defp handle_send_prompt(_content, %{credentials_configured: false} = state) do
+  @spec handle_prompt(
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          TurnExecution.prompt_kind(),
+          state()
+        ) :: {:reply, :ok | {:queued, TurnExecution.prompt_kind()} | {:error, term()}, state()}
+  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state) do
     # No usable provider yet. Refuse locally so callers can preserve the draft instead of clearing it.
     {:reply, {:error, :credentials_not_configured}, state}
   end
 
-  defp handle_send_prompt(
+  defp handle_prompt(
          content,
+         kind,
          %{provider: provider} = state
        )
        when ProviderLifecycle.is_detached(provider) do
@@ -1793,31 +1760,35 @@ defmodule MingaAgent.Session do
 
     case ProviderLifecycle.pid(state.provider) do
       nil -> {:reply, {:error, :provider_not_ready}, state}
-      _ -> handle_send_prompt(content, state)
+      _ -> handle_prompt(content, kind, state)
     end
   end
 
-  defp handle_send_prompt(content, state) do
-    case TurnExecution.steer(state.turn_execution, content) do
-      {:ok, execution, effects} ->
+  defp handle_prompt(content, kind, state) do
+    case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
+      {:queued, ^kind, execution, effects} ->
         state = install_turn_execution(state, execution, effects)
-        {:reply, {:queued, :steering}, state}
+        {:reply, {:queued, kind}, state}
 
-      {:error, :invalid_phase, _execution} ->
-        send_new_turn(content, state)
+      {:send_now, execution, effects} ->
+        send_new_turn(content, state, execution, effects)
     end
   end
 
-  @spec send_new_turn(String.t() | [ReqLLM.Message.ContentPart.t()], state()) ::
-          {:reply, :ok | {:error, term()}, state()}
-  defp send_new_turn(content, state) do
+  @spec send_new_turn(
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          state(),
+          TurnExecution.t(),
+          TurnExecution.effects()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp send_new_turn(content, state, execution, effects) do
     case dispatch_user_prompt_submit(state, content) do
       :ok ->
         {user_message, send_content} = build_user_message(content)
         state = append_msg(state, user_message)
         record_user_message(state, user_message)
         state = notify_messages_changed(state)
-        state = install_turn_transition(state, TurnExecution.begin_turn(state.turn_execution))
+        state = install_turn_execution(state, execution, effects)
 
         case state.provider.module.send_prompt(
                ProviderLifecycle.pid(state.provider),

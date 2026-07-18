@@ -18,6 +18,13 @@ defmodule MingaAgent.Session.TurnExecution do
   @typedoc "Prompt content admitted to steering and follow-up queues."
   @type content :: String.t() | [ReqLLM.Message.ContentPart.t()]
 
+  @typedoc "How an active turn should admit an additional prompt."
+  @type prompt_kind :: :steering | :follow_up
+
+  @typedoc "Whether a prompt starts a turn now or joins one of the active turn's queues."
+  @type prompt_admission ::
+          {:send_now, t(), effects()} | {:queued, prompt_kind(), t(), effects()}
+
   @typedoc "An active provider tool identified by its stable call ID."
   @type active_tool :: {tool_call_id :: String.t(), name :: String.t()}
 
@@ -324,16 +331,11 @@ defmodule MingaAgent.Session.TurnExecution do
     end
   end
 
-  @doc "Queues a steering prompt while a turn is active."
-  @spec steer(t(), content()) :: {:ok, t(), effects()} | {:error, :invalid_phase, t()}
-  def steer(%__MODULE__{} = execution, content) do
-    queue_active(execution, content, :steering, active?(execution))
-  end
-
-  @doc "Queues a follow-up prompt while a turn is active."
-  @spec follow_up(t(), content()) :: {:ok, t(), effects()} | {:error, :invalid_phase, t()}
-  def follow_up(%__MODULE__{} = execution, content) do
-    queue_active(execution, content, :follow_up, active?(execution))
+  @doc "Admits a prompt by starting an inactive turn or queueing behind an active turn."
+  @spec admit_prompt(t(), prompt_kind(), content()) :: prompt_admission()
+  def admit_prompt(%__MODULE__{} = execution, kind, content)
+      when kind in [:steering, :follow_up] do
+    admit_prompt(execution, kind, content, active?(execution))
   end
 
   @doc "Dequeues steering prompts without changing follow-up admission."
@@ -660,19 +662,20 @@ defmodule MingaAgent.Session.TurnExecution do
 
   defp rejection_message_effects(_approval, _decision), do: []
 
-  @spec queue_active(t(), content(), :steering | :follow_up, boolean()) ::
-          {:ok, t(), effects()} | {:error, :invalid_phase, t()}
-  defp queue_active(execution, _content, _kind, false),
-    do: {:error, :invalid_phase, execution}
-
-  defp queue_active(execution, content, :steering, true) do
-    next = %{execution | steering_queue: execution.steering_queue ++ [content]}
-    {:ok, next, [{:broadcast, {:prompt_queued, content, :steering}}]}
+  @spec admit_prompt(t(), prompt_kind(), content(), boolean()) :: prompt_admission()
+  defp admit_prompt(execution, _kind, _content, false) do
+    {:ok, next, effects} = begin_turn(execution)
+    {:send_now, next, effects}
   end
 
-  defp queue_active(execution, content, :follow_up, true) do
+  defp admit_prompt(execution, :steering, content, true) do
+    next = %{execution | steering_queue: execution.steering_queue ++ [content]}
+    {:queued, :steering, next, [{:broadcast, {:prompt_queued, content, :steering}}]}
+  end
+
+  defp admit_prompt(execution, :follow_up, content, true) do
     next = %{execution | follow_up_queue: execution.follow_up_queue ++ [content]}
-    {:ok, next, [{:broadcast, {:prompt_queued, content, :follow_up}}]}
+    {:queued, :follow_up, next, [{:broadcast, {:prompt_queued, content, :follow_up}}]}
   end
 
   @spec leave_approval_wait(t()) :: {t(), effects()}

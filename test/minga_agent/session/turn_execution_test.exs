@@ -238,31 +238,40 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     assert TurnExecution.status(resumed) == :tool_executing
   end
 
-  test "steering and follow-up admission is exhaustive across runtime phases" do
+  test "prompt admission is exhaustive across runtime phases" do
     for mode <- @modes, phase <- active_phases() do
       source = state(mode, phase)
 
-      assert {:ok, steered, [{:broadcast, {:prompt_queued, "steer", :steering}}]} =
-               TurnExecution.steer(source, "steer")
+      assert {:queued, :steering, steered, [{:broadcast, {:prompt_queued, "steer", :steering}}]} =
+               TurnExecution.admit_prompt(source, :steering, "steer")
 
-      assert {:ok, followed, [{:broadcast, {:prompt_queued, "follow", :follow_up}}]} =
-               TurnExecution.follow_up(steered, "follow")
+      assert {:queued, :follow_up, followed,
+              [{:broadcast, {:prompt_queued, "follow", :follow_up}}]} =
+               TurnExecution.admit_prompt(steered, :follow_up, "follow")
 
       assert TurnExecution.queues(followed) == {["steer"], ["follow"]}
     end
 
-    for mode <- @modes, phase <- [:idle, :failure] do
+    for mode <- @modes, phase <- [:idle, :failure], kind <- [:steering, :follow_up] do
       source = state(mode, phase)
-      assert {:error, :invalid_phase, ^source} = TurnExecution.steer(source, "steer")
-      assert {:error, :invalid_phase, ^source} = TurnExecution.follow_up(source, "follow")
+      assert {:send_now, starting, []} = TurnExecution.admit_prompt(source, kind, "now")
+      assert TurnExecution.mode(starting) == mode
+      assert TurnExecution.phase(starting) == :starting
+      assert TurnExecution.queues(starting) == {[], []}
     end
   end
 
   test "queue dequeue, recall, and clear preserve FIFO and declare transcript effects" do
     source = state(:exec, :thinking)
-    {:ok, first, _effects} = TurnExecution.steer(source, "one")
-    {:ok, second, _effects} = TurnExecution.steer(first, "two")
-    {:ok, queued, _effects} = TurnExecution.follow_up(second, "later")
+
+    {:queued, :steering, first, _effects} =
+      TurnExecution.admit_prompt(source, :steering, "one")
+
+    {:queued, :steering, second, _effects} =
+      TurnExecution.admit_prompt(first, :steering, "two")
+
+    {:queued, :follow_up, queued, _effects} =
+      TurnExecution.admit_prompt(second, :follow_up, "later")
 
     assert {["one", "two"], dequeued, [{:append_steering_messages, ["one", "two"]}]} =
              TurnExecution.dequeue_steering(queued)
@@ -339,7 +348,10 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   test "completion effects precede turn cleanup and queued work starts after trust clears" do
     waiting = state(:exec, :approval_waiting)
     waiting = TurnExecution.put_trust(waiting, "read_file", :turn)
-    {:ok, queued, _effects} = TurnExecution.follow_up(waiting, "next")
+
+    {:queued, :follow_up, queued, _effects} =
+      TurnExecution.admit_prompt(waiting, :follow_up, "next")
+
     approval = TurnExecution.pending_approval(queued)
 
     assert {:ok, completing, effects} = TurnExecution.begin_completion(queued, nil)
@@ -443,7 +455,9 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       refute TurnExecution.reclaimable?(state(:exec, phase))
     end
 
-    {:ok, queued, _effects} = TurnExecution.steer(state(:exec, :thinking), "queued")
+    {:queued, :steering, queued, _effects} =
+      TurnExecution.admit_prompt(state(:exec, :thinking), :steering, "queued")
+
     {aborted, _effects} = TurnExecution.abort(queued)
     refute TurnExecution.reclaimable?(aborted)
   end
@@ -501,8 +515,13 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
   test "reset after failure closes boundaries, queues, and turn trust" do
     source = state(:exec, :thinking)
-    {:ok, source, _effects} = TurnExecution.steer(source, "steer")
-    {:ok, source, _effects} = TurnExecution.follow_up(source, "follow")
+
+    {:queued, :steering, source, _effects} =
+      TurnExecution.admit_prompt(source, :steering, "steer")
+
+    {:queued, :follow_up, source, _effects} =
+      TurnExecution.admit_prompt(source, :follow_up, "follow")
+
     {failed, _effects} = TurnExecution.provider_failed(source, "boom")
     failed = TurnExecution.put_trust(failed, "shell", :turn)
     {:ok, failed} = TurnExecution.set_boundary(failed, "lib/a.ex", 1, 2)

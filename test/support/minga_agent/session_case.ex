@@ -1,6 +1,8 @@
 defmodule Minga.Test.SessionCase do
   use ExUnit.CaseTemplate
 
+  @provider_startup_timeout 30_000
+
   using do
     quote do
       import Minga.Test.SessionCase
@@ -52,7 +54,9 @@ defmodule Minga.Test.SessionCase do
   def start_test_session(opts) do
     opts = Keyword.put_new(opts, :persist?, false)
     child_id = {:session, System.unique_integer([:positive, :monotonic])}
-    start_supervised!({MingaAgent.Session, opts}, id: child_id)
+    session = start_supervised!({MingaAgent.Session, opts}, id: child_id)
+    :sys.get_state(session, @provider_startup_timeout)
+    session
   end
 
   @spec start_subscribed_session(module(), keyword()) :: pid()
