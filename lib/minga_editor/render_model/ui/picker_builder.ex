@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.ProjectFileCandidate
@@ -21,20 +22,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       {:picker,
        %{
          picker_ui:
-           picker_ui = %{
-             picker: picker,
-             source: source,
-             callback_source: callback_source,
-             action_menu: action_menu
-           }
+           picker_ui =
+               %PickerState{
+                 picker: picker,
+                 source: source,
+                 callback_source: callback_source,
+                 action_menu: action_menu,
+                 load_status: load_status,
+                 query_generation: query_generation,
+                 acknowledged_query_edit_seq: acknowledged_query_edit_seq
+               }
        }}
       when picker != nil ->
-        mode_prefix = Map.get(picker_ui, :mode_prefix, "")
-        load_status = Map.get(picker_ui, :load_status, :ready)
-
-        query_correlation =
-          {Map.get(picker_ui, :query_generation, 0),
-           Map.get(picker_ui, :acknowledged_query_edit_seq, 0)}
+        mode_prefix = PickerState.mode_prefix(picker_ui)
+        query_correlation = {query_generation, acknowledged_query_edit_seq}
 
         build_open(
           ctx,
