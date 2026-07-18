@@ -1643,8 +1643,8 @@ Remove only the unreachable Tool Manager footer-overlay producer. Footer placeme
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2997
+- **Commit SHA:** `7dcd23c20ffd9368e341ce64fa435ea9391cea23`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix test.debug test/minga_editor/layout/footer_band_overlays_test.exs` passed, 18 tests.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,854 tests, 0 failures, 1 skipped, 578 excluded).
