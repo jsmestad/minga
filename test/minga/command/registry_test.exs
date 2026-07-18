@@ -33,6 +33,7 @@ defmodule Minga.Command.RegistryTest do
           :buffer_prev,
           :kill_buffer,
           :new_buffer,
+          :force_kill_buffer,
           :view_messages,
           :view_warnings,
           :open_config,

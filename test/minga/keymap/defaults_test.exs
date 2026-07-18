@@ -79,10 +79,17 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :buffer_list} = Bindings.lookup(b_node, {?b, 0})
     end
 
-    test "SPC b d → :kill_buffer" do
+    test "SPC b d and SPC b X bind ordinary and force buffer kills" do
       trie = Defaults.leader_trie()
       {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
       assert {:command, :kill_buffer} = Bindings.lookup(b_node, {?d, 0})
+      assert {:command, :force_kill_buffer} = Bindings.lookup(b_node, {?X, 0})
+    end
+
+    test "SPC TAB d → :kill_buffer" do
+      trie = Defaults.leader_trie()
+      {:prefix, tab_node} = Bindings.lookup(trie, {9, 0})
+      assert {:command, :kill_buffer} = Bindings.lookup(tab_node, {?d, 0})
     end
 
     test "SPC b tab management bindings route to tab commands" do
