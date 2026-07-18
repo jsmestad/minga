@@ -1710,8 +1710,8 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2998
+- **Commit SHA:** `b3d700b971ced9ed9d8b421984e415132235fe6c`
 - **Merge SHA:** Pending
 - **Focused tests:** 40 passed across `picker_ui_test.exs`, `fetch_effect_test.exs`, and `search_async_test.exs`.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed on the final base (58 doctests, 98 properties, 9,891 tests, 0 failures, 1 skipped, 578 excluded).
