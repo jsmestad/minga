@@ -41,6 +41,8 @@ defmodule MingaAgent.Session do
   alias MingaAgent.SessionMetadata
   alias MingaAgent.Session.ProviderLifecycle
   alias MingaAgent.Session.Persistence
+  alias MingaAgent.Session.SubscriberAttachment
+  alias MingaAgent.Session.SubscriberLifecycle
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.TurnExecution
   require ProviderLifecycle
@@ -65,7 +67,7 @@ defmodule MingaAgent.Session do
   @type credentials_configured_fn :: (-> boolean())
 
   @typedoc "Remote attachment role."
-  @type attachment_role :: :driver | :viewer
+  @type attachment_role :: SubscriberLifecycle.role()
 
   @typedoc "Latest EventLog admission or persistence failure retained for reconnecting subscribers."
   @type event_log_failure :: Failure.t()
@@ -84,13 +86,9 @@ defmodule MingaAgent.Session do
           credentials_configured_fn: credentials_configured_fn(),
           turn_execution: TurnExecution.t(),
           transcript: Transcript.t(),
-          subscribers: MapSet.t(pid()),
-          subscriber_roles: %{pid() => attachment_role()},
-          driver: pid() | nil,
+          subscriber_lifecycle: SubscriberLifecycle.t(),
           tool_approval_policy: tool_approval_policy(),
           idle_gc_timeout_ms: non_neg_integer(),
-          idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
-          idle_gc_token_fn: (-> reference()),
           persistence: Persistence.t(),
           pending_thinking_level: String.t() | nil,
           notifier: module() | {module(), term()},
@@ -691,13 +689,9 @@ defmodule MingaAgent.Session do
           [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
           now
         ),
-      subscribers: MapSet.new(),
-      subscriber_roles: %{},
-      driver: nil,
+      subscriber_lifecycle: SubscriberLifecycle.new(),
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
-      idle_gc_timer: nil,
-      idle_gc_token_fn: Keyword.get(opts, :idle_gc_token_fn, &make_ref/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
       pending_thinking_level: initial_thinking_level,
       notifier: Keyword.get(opts, :notifier, Notifier),
@@ -724,7 +718,7 @@ defmodule MingaAgent.Session do
       send(self(), :start_provider)
     end
 
-    {:ok, schedule_idle_gc(state, state.idle_gc_timeout_ms > 0, nil, state.idle_gc_timeout_ms)}
+    {:ok, maybe_schedule_idle_gc(state)}
   end
 
   @impl GenServer
@@ -1014,32 +1008,20 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:subscribe, pid, opts}, _from, state) do
-    role = Keyword.get(opts, :role, default_subscriber_role(state))
-
-    if valid_subscriber_role?(role) do
-      Process.monitor(pid)
-      state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
-      send(pid, {:agent_event, self(), {:credentials_status, state.credentials_configured}})
-      notify_retained_event_log_failure(pid, state.event_log_failure)
-      {:reply, :ok, state}
-    else
-      {:reply, {:error, :invalid_role}, state}
-    end
+    role = Keyword.get(opts, :role, SubscriberLifecycle.default_role(state.subscriber_lifecycle))
+    reply_to_subscribe(state, pid, role)
   end
 
   def handle_call({:subscriber_role, pid}, _from, state) do
-    {:reply, Map.get(state.subscriber_roles, pid), state}
+    {:reply, SubscriberLifecycle.role(state.subscriber_lifecycle, pid), state}
   end
 
   def handle_call({:claim_driver, pid}, _from, state) do
-    case claim_driver_role(state, pid) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
+    reply_to_claim_driver(state, pid)
   end
 
   def handle_call({:unsubscribe, pid}, _from, state) do
-    {:reply, :ok, remove_subscriber(state, pid, :detached)}
+    {:reply, :ok, detach_subscriber(state, pid, :detached)}
   end
 
   def handle_call(:compact, _from, %{provider: provider} = state)
@@ -1378,36 +1360,12 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    {:noreply, remove_subscriber(state, pid, reason)}
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    {:noreply, handle_subscriber_down(state, pid, ref, reason)}
   end
 
-  def handle_info({:idle_gc_timeout, token}, %{idle_gc_timer: {_timer_ref, token}} = state) do
-    if idle_gc_reclaimable?(state) do
-      Minga.Log.info(
-        :agent,
-        "[Agent.Session] reclaiming idle detached session #{state.session_id}"
-      )
-
-      case save_to_disk(state) do
-        :ok ->
-          {:stop, :normal, %{state | idle_gc_timer: nil}}
-
-        {:error, reason} ->
-          Minga.Log.error(
-            :agent,
-            "[Agent.Session] failed to reclaim idle detached session #{state.session_id}: #{inspect(reason)}"
-          )
-
-          {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
-      end
-    else
-      {:noreply, maybe_schedule_idle_gc(%{state | idle_gc_timer: nil})}
-    end
-  end
-
-  def handle_info({:idle_gc_timeout, _token}, state) do
-    {:noreply, state}
+  def handle_info({:timeout, timer_ref, :idle_gc}, state) do
+    handle_reclaim_timeout(state, timer_ref)
   end
 
   def handle_info(:save_session, %{persistence: %Persistence{timer: {token, _timer_ref}}} = state) do
@@ -1611,11 +1569,7 @@ defmodule MingaAgent.Session do
         |> maybe_schedule_idle_gc(execution)
 
       :plan ->
-        if TurnExecution.reclaimable?(execution) do
-          maybe_schedule_idle_gc(state, execution)
-        else
-          state
-        end
+        maybe_schedule_idle_gc(state, execution)
     end
   end
 
@@ -2153,93 +2107,117 @@ defmodule MingaAgent.Session do
     "Execution mode enabled. Destructive tools can run again after normal approval checks. Use /plan to return to planning."
   end
 
-  # ── Remote attachment roles ────────────────────────────────────────────────
+  # ── Subscriber lifecycle ──────────────────────────────────────────────────
 
-  @spec default_subscriber_role(state()) :: attachment_role()
-  defp default_subscriber_role(%{driver: nil}), do: :driver
-  defp default_subscriber_role(_state), do: :viewer
+  @spec reply_to_subscribe(state(), pid(), term()) ::
+          {:reply, :ok | {:error, :invalid_role}, state()}
+  defp reply_to_subscribe(state, pid, role) do
+    case SubscriberLifecycle.prepare_subscribe(state.subscriber_lifecycle, pid, role) do
+      {:monitor, preparation} ->
+        monitor_subscriber(state, pid, preparation)
 
-  @spec valid_subscriber_role?(term()) :: boolean()
-  defp valid_subscriber_role?(role), do: role in [:driver, :viewer]
+      {:already_attached, lifecycle} ->
+        notify_subscriber_connected(pid, state)
+        {:reply, :ok, %{state | subscriber_lifecycle: lifecycle}}
 
-  @spec put_subscriber(state(), pid(), attachment_role()) :: state()
-  defp put_subscriber(state, pid, :driver) do
-    state = %{state | subscribers: MapSet.put(state.subscribers, pid)}
-
-    case state.driver do
-      nil -> set_driver(state, pid)
-      ^pid -> set_driver(state, pid)
-      _other -> put_subscriber(state, pid, :viewer)
+      {:error, :invalid_role} ->
+        {:reply, {:error, :invalid_role}, state}
     end
   end
 
-  defp put_subscriber(state, pid, :viewer) do
-    %{
-      state
-      | subscribers: MapSet.put(state.subscribers, pid),
-        subscriber_roles: Map.put(state.subscriber_roles, pid, :viewer)
-    }
-  end
+  @spec monitor_subscriber(state(), pid(), SubscriberLifecycle.subscription_preparation()) ::
+          {:reply, :ok, state()}
+  defp monitor_subscriber(state, pid, preparation) do
+    monitor_ref = Process.monitor(pid)
 
-  @spec claim_driver_role(state(), pid()) ::
-          {:ok, state()} | {:error, :driver_taken | :not_subscribed}
-  defp claim_driver_role(state, pid) do
-    claim_driver_role(state, pid, MapSet.member?(state.subscribers, pid), state.driver)
-  end
+    case SubscriberLifecycle.complete_subscribe(
+           state.subscriber_lifecycle,
+           preparation,
+           monitor_ref
+         ) do
+      {:ok, lifecycle, subscription_change, timer_ref} ->
+        cancel_reclaim_timer(timer_ref)
 
-  @spec claim_driver_role(state(), pid(), boolean(), pid() | nil) ::
-          {:ok, state()} | {:error, :driver_taken | :not_subscribed}
-  defp claim_driver_role(_state, _pid, false, _driver), do: {:error, :not_subscribed}
-  defp claim_driver_role(state, pid, true, nil), do: {:ok, set_driver(state, pid)}
-  defp claim_driver_role(state, pid, true, pid), do: {:ok, set_driver(state, pid)}
-  defp claim_driver_role(_state, _pid, true, _driver), do: {:error, :driver_taken}
+        state =
+          state
+          |> Map.put(:subscriber_lifecycle, lifecycle)
+          |> announce_subscription_change(pid, subscription_change)
 
-  @spec set_driver(state(), pid()) :: state()
-  defp set_driver(%{driver: nil, subscriber_roles: roles} = state, pid)
-       when map_size(roles) == 0 do
-    %{
-      state
-      | driver: pid,
-        subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)
-    }
-  end
+        notify_subscriber_connected(pid, state)
+        {:reply, :ok, state}
 
-  defp set_driver(%{driver: pid} = state, pid) do
-    %{state | subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)}
-  end
-
-  defp set_driver(state, pid) do
-    state = %{
-      state
-      | driver: pid,
-        subscriber_roles: Map.put(state.subscriber_roles, pid, :driver)
-    }
-
-    broadcast(state, {:driver_changed, pid})
-    state
-  end
-
-  @spec remove_subscriber(state(), pid(), term()) :: state()
-  defp remove_subscriber(state, pid, reason) do
-    was_subscribed? = MapSet.member?(state.subscribers, pid)
-    role = Map.get(state.subscriber_roles, pid)
-    driver = if state.driver == pid, do: nil, else: state.driver
-
-    state = %{
-      state
-      | subscribers: MapSet.delete(state.subscribers, pid),
-        subscriber_roles: Map.delete(state.subscriber_roles, pid),
-        driver: driver
-    }
-
-    if was_subscribed? do
-      record_user_disconnected(state, pid, role, reason)
+      {:error, reason} ->
+        Process.demonitor(monitor_ref, [:flush])
+        raise "subscriber monitor installation failed: #{inspect(reason)}"
     end
-
-    maybe_schedule_idle_gc(state)
   end
 
-  @spec record_user_disconnected(state(), pid(), attachment_role() | nil, term()) ::
+  @spec announce_subscription_change(
+          state(),
+          pid(),
+          SubscriberLifecycle.subscription_change()
+        ) :: state()
+  defp announce_subscription_change(state, pid, :driver_changed),
+    do: broadcast(state, {:driver_changed, pid})
+
+  defp announce_subscription_change(state, _pid, :driver_initialized), do: state
+
+  defp announce_subscription_change(state, _pid, :viewer_attached), do: state
+
+  @spec notify_subscriber_connected(pid(), state()) :: :ok
+  defp notify_subscriber_connected(pid, state) do
+    send(pid, {:agent_event, self(), {:credentials_status, state.credentials_configured}})
+    notify_retained_event_log_failure(pid, state.event_log_failure)
+  end
+
+  @spec reply_to_claim_driver(state(), pid()) ::
+          {:reply, :ok | {:error, :driver_taken | :not_subscribed}, state()}
+  defp reply_to_claim_driver(state, pid) do
+    case SubscriberLifecycle.claim_driver(state.subscriber_lifecycle, pid) do
+      {:changed, lifecycle} ->
+        state = %{state | subscriber_lifecycle: lifecycle}
+        {:reply, :ok, broadcast(state, {:driver_changed, pid})}
+
+      :unchanged ->
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec detach_subscriber(state(), pid(), term()) :: state()
+  defp detach_subscriber(state, pid, reason) do
+    case SubscriberLifecycle.detach(state.subscriber_lifecycle, pid) do
+      {:removed, lifecycle, %SubscriberAttachment{} = attachment} ->
+        Process.demonitor(attachment.monitor_ref, [:flush])
+        state = %{state | subscriber_lifecycle: lifecycle}
+        record_user_disconnected(state, pid, attachment.role, reason)
+        maybe_schedule_idle_gc(state)
+
+      :unchanged ->
+        state
+    end
+  end
+
+  @spec handle_subscriber_down(state(), pid(), reference(), term()) :: state()
+  defp handle_subscriber_down(state, pid, monitor_ref, reason) do
+    case SubscriberLifecycle.subscriber_down(
+           state.subscriber_lifecycle,
+           pid,
+           monitor_ref
+         ) do
+      {:removed, lifecycle, %SubscriberAttachment{} = attachment} ->
+        state = %{state | subscriber_lifecycle: lifecycle}
+        record_user_disconnected(state, pid, attachment.role, reason)
+        maybe_schedule_idle_gc(state)
+
+      {:error, :stale_monitor} ->
+        state
+    end
+  end
+
+  @spec record_user_disconnected(state(), pid(), attachment_role(), term()) ::
           EventLog.admission_result()
   defp record_user_disconnected(state, pid, role, reason) do
     record_critical_event(state, :user_disconnected, %{
@@ -2255,45 +2233,93 @@ defmodule MingaAgent.Session do
 
   @spec maybe_schedule_idle_gc(state(), TurnExecution.t()) :: state()
   defp maybe_schedule_idle_gc(state, execution) do
-    schedule_idle_gc(
-      state,
-      idle_gc_reclaimable?(state, execution),
-      state.idle_gc_timer,
-      state.idle_gc_timeout_ms
+    enabled? = state.idle_gc_timeout_ms > 0
+    turn_reclaimable? = TurnExecution.reclaimable?(execution)
+
+    case SubscriberLifecycle.reconcile_reclaim(
+           state.subscriber_lifecycle,
+           enabled?,
+           turn_reclaimable?
+         ) do
+      {:start_timer, preparation} ->
+        start_reclaim_timer(state, preparation)
+
+      {:cancel_timer, timer_ref, lifecycle} ->
+        cancel_reclaim_timer(timer_ref)
+        %{state | subscriber_lifecycle: lifecycle}
+
+      :unchanged ->
+        state
+    end
+  end
+
+  @spec start_reclaim_timer(state(), SubscriberLifecycle.reclaim_preparation()) :: state()
+  defp start_reclaim_timer(state, preparation) do
+    timer_ref = :erlang.start_timer(state.idle_gc_timeout_ms, self(), :idle_gc)
+
+    case SubscriberLifecycle.complete_reclaim_schedule(
+           state.subscriber_lifecycle,
+           preparation,
+           timer_ref
+         ) do
+      {:ok, lifecycle} ->
+        %{state | subscriber_lifecycle: lifecycle}
+
+      {:error, reason} ->
+        Process.cancel_timer(timer_ref)
+        raise "subscriber reclaim timer installation failed: #{inspect(reason)}"
+    end
+  end
+
+  @spec handle_reclaim_timeout(state(), reference()) ::
+          {:noreply, state()} | {:stop, :normal, state()}
+  defp handle_reclaim_timeout(state, timer_ref) do
+    turn_reclaimable? = TurnExecution.reclaimable?(state.turn_execution)
+
+    case SubscriberLifecycle.reclaim_timeout(
+           state.subscriber_lifecycle,
+           timer_ref,
+           turn_reclaimable?
+         ) do
+      {:reclaim, lifecycle} ->
+        reclaim_idle_session(%{state | subscriber_lifecycle: lifecycle})
+
+      {:keep, lifecycle} ->
+        state = %{state | subscriber_lifecycle: lifecycle}
+        {:noreply, maybe_schedule_idle_gc(state)}
+
+      {:error, :stale_timer} ->
+        {:noreply, state}
+    end
+  end
+
+  @spec reclaim_idle_session(state()) :: {:noreply, state()} | {:stop, :normal, state()}
+  defp reclaim_idle_session(state) do
+    Minga.Log.info(
+      :agent,
+      "[Agent.Session] reclaiming idle detached session #{state.session_id}"
     )
+
+    case save_to_disk(state) do
+      :ok ->
+        {:stop, :normal, state}
+
+      {:error, reason} ->
+        Minga.Log.error(
+          :agent,
+          "[Agent.Session] failed to reclaim idle detached session #{state.session_id}: #{inspect(reason)}"
+        )
+
+        {:noreply, maybe_schedule_idle_gc(state)}
+    end
   end
 
-  @spec schedule_idle_gc(
-          map(),
-          boolean(),
-          {timer_ref :: reference(), token :: reference()} | nil,
-          non_neg_integer()
-        ) :: map()
-  defp schedule_idle_gc(state, true, nil, timeout_ms) when timeout_ms > 0 do
-    token = state.idle_gc_token_fn.()
-    timer_ref = Process.send_after(self(), {:idle_gc_timeout, token}, timeout_ms)
-    %{state | idle_gc_timer: {timer_ref, token}}
-  end
+  @spec cancel_reclaim_timer(reference() | nil) :: :ok
+  defp cancel_reclaim_timer(nil), do: :ok
 
-  defp schedule_idle_gc(state, true, _timer, _timeout_ms), do: state
-  defp schedule_idle_gc(state, false, _timer, _timeout_ms), do: cancel_idle_gc_timer(state)
-
-  @spec cancel_idle_gc_timer(map()) :: map()
-  defp cancel_idle_gc_timer(%{idle_gc_timer: nil} = state), do: state
-
-  defp cancel_idle_gc_timer(state) do
-    {timer_ref, _token} = state.idle_gc_timer
+  defp cancel_reclaim_timer(timer_ref) when is_reference(timer_ref) do
     Process.cancel_timer(timer_ref)
-    %{state | idle_gc_timer: nil}
-  end
-
-  @spec idle_gc_reclaimable?(state()) :: boolean()
-  defp idle_gc_reclaimable?(state),
-    do: idle_gc_reclaimable?(state, state.turn_execution)
-
-  @spec idle_gc_reclaimable?(state(), TurnExecution.t()) :: boolean()
-  defp idle_gc_reclaimable?(state, execution) do
-    MapSet.size(state.subscribers) == 0 and TurnExecution.reclaimable?(execution)
+    :ok
   end
 
   @spec idle_gc_timeout_ms() :: non_neg_integer()
@@ -2302,8 +2328,8 @@ defmodule MingaAgent.Session do
   end
 
   @spec driver_allowed?(state(), pid()) :: boolean()
-  defp driver_allowed?(%{driver: pid}, pid) when is_pid(pid), do: true
-  defp driver_allowed?(_state, _pid), do: false
+  defp driver_allowed?(state, pid),
+    do: SubscriberLifecycle.driver?(state.subscriber_lifecycle, pid)
 
   # ── Broadcasting ────────────────────────────────────────────────────────────
 
@@ -2312,7 +2338,7 @@ defmodule MingaAgent.Session do
     record_broadcast_event(state, event)
     session_pid = self()
 
-    Enum.each(state.subscribers, fn pid ->
+    Enum.each(SubscriberLifecycle.subscribers(state.subscriber_lifecycle), fn pid ->
       send(pid, {:agent_event, session_pid, event})
     end)
 
@@ -2323,7 +2349,7 @@ defmodule MingaAgent.Session do
   defp notify_event_log_failure(state, failure) do
     session_pid = self()
 
-    Enum.each(state.subscribers, fn pid ->
+    Enum.each(SubscriberLifecycle.subscribers(state.subscriber_lifecycle), fn pid ->
       send(pid, {:agent_event, session_pid, failure})
     end)
   end
@@ -3796,6 +3822,7 @@ defmodule MingaAgent.Session do
     })
 
     dispatch_session_end(state, reason)
+    state = release_subscriber_lifecycle(state)
     _stopped_state = stop_provider_lifecycle(state)
 
     case reason do
@@ -3814,6 +3841,14 @@ defmodule MingaAgent.Session do
           "[Agent.Session] crashed: #{inspect(reason, pretty: true, limit: 1000)}"
         )
     end
+  end
+
+  @spec release_subscriber_lifecycle(state()) :: state()
+  defp release_subscriber_lifecycle(state) do
+    {lifecycle, timer_ref, monitor_refs} = SubscriberLifecycle.stop(state.subscriber_lifecycle)
+    cancel_reclaim_timer(timer_ref)
+    Enum.each(monitor_refs, &Process.demonitor(&1, [:flush]))
+    %{state | subscriber_lifecycle: lifecycle}
   end
 
   # ── Hook dispatching ──────────────────────────────────────────────────────

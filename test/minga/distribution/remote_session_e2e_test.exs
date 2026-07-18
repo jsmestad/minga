@@ -106,17 +106,10 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
     Session.add_system_message(remote_pid, "work done while you were away")
 
     # Simulate a GUI that subscribes, then dies (laptop closed / wifi lost).
-    test_pid = self()
-
-    subscriber =
-      spawn(fn ->
-        Session.subscribe(remote_pid, self())
-        send(test_pid, :subscribed)
-        Process.sleep(:infinity)
-      end)
-
-    assert_receive :subscribed, 1_000
+    subscriber = spawn(fn -> receive do: (:stop -> :ok) end)
     ref = Process.monitor(subscriber)
+
+    assert :ok = Session.subscribe(remote_pid, subscriber)
     Process.exit(subscriber, :kill)
     assert_receive {:DOWN, ^ref, :process, ^subscriber, _}, 1_000
 
@@ -139,16 +132,25 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
 
     viewer =
       spawn(fn ->
-        :erpc.call(server, RemoteAPI, :attach, [session_id, token, self(), [role: :driver]])
-        send(test_pid, :viewer_attached)
+        attach_result =
+          :erpc.call(server, RemoteAPI, :attach, [
+            session_id,
+            token,
+            self(),
+            [role: :driver]
+          ])
+
+        receive do
+          {:agent_event, ^remote_pid, {:credentials_status, _configured?}} ->
+            send(test_pid, {:viewer_attached, attach_result})
+        end
 
         receive do
           {:agent_event, ^remote_pid, event} -> send(test_pid, {:viewer_event, event})
-          :stop -> :ok
         end
       end)
 
-    assert_receive :viewer_attached, 1_000
+    assert_receive {:viewer_attached, {:ok, %{role: :viewer}}}, 1_000
 
     assert {:error, :not_driver} =
              :erpc.call(server, RemoteAPI, :send_prompt, [

@@ -1,6 +1,8 @@
 defmodule MingaAgent.SessionLifecycleTest do
   use Minga.Test.SessionCase, async: true
 
+  alias MingaAgent.Session.SubscriberLifecycle
+
   describe "initial state" do
     test "starts idle with a system message and zero usage" do
       session = start_subscribed_session()
@@ -92,6 +94,26 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert :ok = Session.claim_driver(session, viewer)
       assert Session.subscriber_role(session, viewer) == :driver
     end
+
+    test "a driver attaching to a viewer-only session broadcasts the role change" do
+      session = start_test_session(provider: Minga.Test.SessionMockProvider, provider_opts: [])
+      old_driver = idle_process()
+      new_driver = idle_process()
+
+      on_exit(fn -> Process.exit(new_driver, :kill) end)
+
+      assert :ok = Session.subscribe(session, old_driver, role: :driver)
+      assert :ok = Session.subscribe(session, self(), role: :viewer)
+
+      ref = Process.monitor(old_driver)
+      Process.exit(old_driver, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^old_driver, :killed}, @event_timeout
+      wait_until_subscriber_role(session, old_driver, nil)
+
+      assert :ok = Session.subscribe(session, new_driver, role: :driver)
+      assert_receive {:agent_event, ^session, {:driver_changed, ^new_driver}}, @event_timeout
+      assert Session.subscriber_role(session, new_driver) == :driver
+    end
   end
 
   describe "detached session lifecycle" do
@@ -102,14 +124,11 @@ defmodule MingaAgent.SessionLifecycleTest do
     end
 
     test "idle detached sessions are reclaimed after the configured timeout" do
-      idle_gc_token = make_ref()
-
       session =
         start_test_session(
           provider: Minga.Test.SessionMockProvider,
           provider_opts: [],
-          idle_gc_timeout_ms: 60_000,
-          idle_gc_token_fn: fn -> idle_gc_token end
+          idle_gc_timeout_ms: 60_000
         )
 
       client = idle_process()
@@ -120,7 +139,8 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       ref = Process.monitor(session)
       assert :ok = Session.unsubscribe(session, client)
-      send(session, {:idle_gc_timeout, idle_gc_token})
+      timer_ref = reclaim_timer(session)
+      send(session, {:timeout, timer_ref, :idle_gc})
       assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
     end
 
@@ -130,7 +150,6 @@ defmodule MingaAgent.SessionLifecycleTest do
     } do
       bad_store_dir = Path.join(dir, "blocked-store")
       File.write!(bad_store_dir, "not a directory")
-      idle_gc_token = make_ref()
 
       session =
         start_test_session(
@@ -138,8 +157,7 @@ defmodule MingaAgent.SessionLifecycleTest do
           provider_opts: [],
           persist?: false,
           session_store_dir: bad_store_dir,
-          idle_gc_timeout_ms: 60_000,
-          idle_gc_token_fn: fn -> idle_gc_token end
+          idle_gc_timeout_ms: 60_000
         )
 
       client = idle_process()
@@ -150,7 +168,8 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       ref = Process.monitor(session)
       assert :ok = Session.unsubscribe(session, client)
-      send(session, {:idle_gc_timeout, idle_gc_token})
+      timer_ref = reclaim_timer(session)
+      send(session, {:timeout, timer_ref, :idle_gc})
       assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
       assert File.read!(bad_store_dir) == "not a directory"
     end
@@ -161,15 +180,12 @@ defmodule MingaAgent.SessionLifecycleTest do
     } do
       session_store_dir = Path.join(dir, "idle-race")
 
-      idle_gc_token = make_ref()
-
       session =
         start_test_session(
           provider: Minga.Test.SessionDeferredMockProvider,
           provider_opts: [test_pid: self()],
           session_store_dir: session_store_dir,
-          idle_gc_timeout_ms: 60_000,
-          idle_gc_token_fn: fn -> idle_gc_token end
+          idle_gc_timeout_ms: 60_000
         )
 
       client = idle_process()
@@ -178,6 +194,7 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       assert :ok = Session.subscribe(session, client)
       assert :ok = Session.unsubscribe(session, client)
+      timer_ref = reclaim_timer(session)
       ref = Process.monitor(session)
 
       assert :ok = Session.send_prompt(session, "keep working")
@@ -186,7 +203,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert_receive {:deferred_provider_prompt_received, ^provider, "keep working"},
                      @event_timeout
 
-      send(session, {:idle_gc_timeout, idle_gc_token})
+      send(session, {:timeout, timer_ref, :idle_gc})
       assert Session.status(session) == :idle
       refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
 
@@ -199,17 +216,15 @@ defmodule MingaAgent.SessionLifecycleTest do
     end
 
     test "active plan-mode turns reschedule idle GC after finishing" do
-      initial_token = make_ref()
-      finished_token = make_ref()
-
       session =
         start_test_session(
           provider: Minga.Test.StubProvider,
           provider_opts: [],
           persist?: false,
-          idle_gc_timeout_ms: 60_000,
-          idle_gc_token_fn: idle_gc_token_fn([initial_token, finished_token])
+          idle_gc_timeout_ms: 60_000
         )
+
+      initial_timer = reclaim_timer(session)
 
       ref = Process.monitor(session)
 
@@ -217,14 +232,15 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert :ok = Session.send_prompt(session, "start plan turn")
       send_provider_event(session, %Event.AgentStart{})
 
-      send(session, {:idle_gc_timeout, initial_token})
+      send(session, {:timeout, initial_timer, :idle_gc})
       assert Session.status(session) == :plan
       refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
 
       send_provider_event(session, %Event.AgentEnd{usage: nil})
 
       assert Session.status(session) == :plan
-      send(session, {:idle_gc_timeout, finished_token})
+      finished_timer = reclaim_timer(session)
+      send(session, {:timeout, finished_timer, :idle_gc})
       assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
     end
 
@@ -236,14 +252,14 @@ defmodule MingaAgent.SessionLifecycleTest do
           idle_gc_timeout_ms: 60_000
         )
 
-      {_timer_ref, stale_token} = :sys.get_state(session).idle_gc_timer
+      stale_timer = reclaim_timer(session)
 
       assert :ok = Session.subscribe(session)
       assert :ok = Session.send_prompt(session, "keep working")
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
       assert :ok = Session.unsubscribe(session)
 
-      send(session, {:idle_gc_timeout, stale_token})
+      send(session, {:timeout, stale_timer, :idle_gc})
       assert Session.status(session) == :thinking
     end
 
@@ -255,15 +271,17 @@ defmodule MingaAgent.SessionLifecycleTest do
           idle_gc_timeout_ms: 60_000
         )
 
+      stale_timer = reclaim_timer(session)
+
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.send_prompt(session, "start plan turn")
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       :sys.get_state(session)
 
-      {_timer_ref, token} = :sys.get_state(session).idle_gc_timer
+      assert reclaim_timer(session) == nil
       ref = Process.monitor(session)
 
-      send(session, {:idle_gc_timeout, token})
+      send(session, {:timeout, stale_timer, :idle_gc})
       assert Session.status(session) == :plan
       refute_receive {:DOWN, ^ref, :process, ^session, :normal}, 50
     end
@@ -278,10 +296,10 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       assert :ok = Session.subscribe(session)
       assert :ok = Session.unsubscribe(session)
-      {_timer_ref, stale_token} = :sys.get_state(session).idle_gc_timer
+      stale_timer = reclaim_timer(session)
       assert :ok = Session.subscribe(session)
 
-      send(session, {:idle_gc_timeout, stale_token})
+      send(session, {:timeout, stale_timer, :idle_gc})
       assert Session.status(session) == :idle
     end
 
@@ -323,13 +341,11 @@ defmodule MingaAgent.SessionLifecycleTest do
           idle_gc_timeout_ms: 60_000
         )
 
-      {_timer_ref, token} = :sys.get_state(session).idle_gc_timer
+      timer_ref = reclaim_timer(session)
       ref = Process.monitor(session)
 
-      send(session, {:idle_gc_timeout, token})
-      state = :sys.get_state(session)
-
-      assert state.idle_gc_timer != nil
+      send(session, {:timeout, timer_ref, :idle_gc})
+      assert is_reference(reclaim_timer(session))
       assert Session.status(session) == :idle
       assert is_pid(Session.get_provider(session))
       refute_receive {:DOWN, ^ref, :process, ^session, _}, 50
@@ -660,4 +676,10 @@ defmodule MingaAgent.SessionLifecycleTest do
   end
 
   # ── Queue API ──────────────────────────────────────────────────────────────
+  defp reclaim_timer(session) do
+    session
+    |> :sys.get_state()
+    |> Map.fetch!(:subscriber_lifecycle)
+    |> SubscriberLifecycle.reclaim_timer()
+  end
 end

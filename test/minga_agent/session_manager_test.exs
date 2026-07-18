@@ -5,6 +5,7 @@ defmodule MingaAgent.SessionManagerTest do
 
   alias MingaAgent.Providers.RecordingProvider
   alias MingaAgent.Session
+  alias MingaAgent.Session.SubscriberLifecycle
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionManager.SessionRestartedEvent
   alias MingaAgent.SessionManager.SessionStoppedEvent
@@ -387,18 +388,17 @@ defmodule MingaAgent.SessionManagerTest do
 
   test "idle GC shutdown stops a managed session without restart", %{manager: manager} do
     Minga.Events.subscribe(:agent_session_stopped)
-    idle_gc_token = make_ref()
 
     {:ok, session_id, pid} =
       SessionManager.start_session(manager,
         persist?: false,
-        idle_gc_timeout_ms: 60_000,
-        idle_gc_token_fn: fn -> idle_gc_token end
+        idle_gc_timeout_ms: 60_000
       )
 
     assert :ok = MingaAgent.Session.subscribe(pid)
     assert :ok = MingaAgent.Session.unsubscribe(pid)
-    send(pid, {:idle_gc_timeout, idle_gc_token})
+    timer_ref = :sys.get_state(pid).subscriber_lifecycle |> SubscriberLifecycle.reclaim_timer()
+    send(pid, {:timeout, timer_ref, :idle_gc})
 
     assert_receive {
                      :minga_event,

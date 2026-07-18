@@ -38,18 +38,6 @@ defmodule Minga.Test.SessionCase do
     :ok
   end
 
-  @spec idle_gc_token_fn([reference()]) :: (-> reference())
-  def idle_gc_token_fn(tokens) do
-    token_source = start_supervised!({Agent, fn -> tokens end})
-
-    fn ->
-      Agent.get_and_update(token_source, fn
-        [token | rest] -> {token, rest}
-        [] -> raise "idle_gc_token_fn called more times than expected"
-      end)
-    end
-  end
-
   @spec start_test_session(keyword()) :: pid()
   def start_test_session(opts) do
     opts = Keyword.put_new(opts, :persist?, false)
