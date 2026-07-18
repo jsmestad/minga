@@ -60,6 +60,43 @@ Decision inventory:
 - **ROUTE, craftsmanship:** E01
 - **ROUTE, data shape:** ES01, ES02, ES06, ES19, ES20
 
+### Architecture decision wave at `6e175b87764145577999a1c04a532960cb89222f`
+
+Ten independent read-only `archie` reviews at `xhigh` resolved all 28 routed findings against the same production source. The later roadmap-only merge at `c375b8dcebcc0b6bc7cb0edecb3d2af8f802ef5e` did not change the inspected code. Twenty-three findings may proceed to high-planner scoping, four are preserved, and one is dropped because focused decisions fully subsume it. These are architecture dispositions, not READY promotions.
+
+| ID | Disposition | Locked owner and boundary |
+| --- | --- | --- |
+| L03 | `APPROVE_DIRECT` | Derive one ordered live-plus-tab buffer inventory in the existing buffer lifecycle workflow. Keep actual retirement atomic in `MingaEditor.State.remove_buffer/2`. |
+| L06 | `APPROVE_DIRECT` | `MingaEditor.State.LSP.PendingRequests` owns captured request identity; `LspEventHandler` takes each response once and delegates accepted results. |
+| L07 | `APPROVE_DIRECT` | Completion request authority uses the same typed pending-request owner and must validate captured buffer, version, client, and completion generation. |
+| L08 | `APPROVE_DIRECT` | Code-lens and inlay-hint requests use the same captured identity contract; result stores remain with their existing presentation owners. |
+| L09 | `APPROVE_DIRECT` | Parser highlighting owns syntax, `State.LSP` owns semantic spans and correlation, and the pure content boundary composes them for rendering. |
+| L17 | `APPROVE_DIRECT` | Workspace remains agent lifecycle authority; `TabBar` atomically projects Workspace values onto associated agent tabs. |
+| L18 | `APPROVE_DIRECT` | Persist remote server, session, and committed replay cursor in `Workspace.RemoteSession`; never persist live connection status or runtime values. |
+| L21 | `APPROVE_DIRECT` | `Input.Interrupt` coordinates existing focus owners, cancels pending input, preserves durable panel visibility, and derives the surviving scope from the active window. |
+| D01 | `PRESERVE` | Keep `FeatureState` as documented, tab-scoped extension state with source cleanup. Absence of a bundled writer is not evidence against an out-of-tree contract. |
+| D02 | `APPROVE_DIRECT` | Retire the orphaned Change Summary semantic and protocol surface in one synchronized protocol change. Do not redirect it to live review state. |
+| D03 | `APPROVE_DIRECT` | Retire the unused native Tool Manager panel and keep the existing semantic picker as the sole presentation. Preserve Tool Manager services. |
+| D07 | `PRESERVE` | Keep `Frontend.Adapter` as the transport-process contract implemented by Manager and test frontends. Remove only independently proven dead leaves. |
+| D17 | `PRESERVE` | Keep `MingaEditor.UI` and `MingaEditor.Frontend` as documented public facades and retain every live export. |
+| S01 | `APPROVE_DIRECT` | `Commands.Formatting` owns one asynchronous formatting lifecycle; BufferManagement owns save intent and the post-format write or close continuation. |
+| S08 | `APPROVE_DIRECT` | Split Router only at a complete key-local routing seam. The outer event envelope still performs universal housekeeping exactly once. |
+| S10 | `PRESERVE` | Keep separate prompt and file-tree temporary-target workflows over the shared `Buffers.set_active_override/2` leaf because their restore and failure invariants differ. |
+| S13 | `APPROVE_DIRECT` | `TabBar` represents no active tab as `active_id: nil`; do not use a valid-looking sentinel or invent a launchpad pseudo-tab. |
+| S16 | `APPROVE_DIRECT` | Consolidate only authorized-path open-or-activate mechanics in `Handlers.BufferRegistry`; sources retain authorization, cursor, preview, and failure policy. |
+| S17 | `APPROVE_DIRECT` | `PromptUI` owns successor-safe callback sequencing through `ModalWorkflow`; context-aware handlers may open a successor modal without it being dismissed. |
+| S27 | `APPROVE_DIRECT` | Enforce the one generated frontend protocol version at Manager admission and remove packet layouts that the admitted version cannot send. |
+| S30 | `APPROVE_DIRECT` | `RenderPipeline.Intent` is the sole cache-free Editor-to-Renderer contract; renderer-local working values remain nested, frame-local, and renderer-owned. |
+| S31 | `DROP` | L17, L18, ES02, ES19, and ES20 fully decompose the aggregate duplication concern. No umbrella owner or standalone cleanup is allowed. |
+| E01 | `APPROVE_DIRECT` | Extract pure lane-value transitions under `EffectScheduler`; keep one scheduler mailbox and all timers, monitors, tasks, leases, and terminal outcomes in the existing engine. |
+| ES01 | `APPROVE_DIRECT` | Keep `WindowIntent` as the explicit transfer DTO and pare renderer working windows to semantic input plus renderer-mutated state. Do not share live structs. |
+| ES02 | `APPROVE_DIRECT` | Preserve nested Intent identity through renderer materialization and emit; stop reconstructing Editor-shaped broad maps. |
+| ES06 | `APPROVE_DIRECT` | One typed, Editor-global `State.LSP.PendingRequests` collection owns semantic request authority. Transport correlation and sync ordering stay in Layer 1. |
+| ES19 | `APPROVE_DIRECT` | `Session.State` owns active agent UI and the agent Workspace payload owns inactive agent UI; transfer authority on activation instead of mirroring. |
+| ES20 | `APPROVE_DIRECT` | Add kind-specific payloads inside existing Tab and Workspace owners. Do not share one payload type or create a generalized tagged-state abstraction. |
+
+Dependency order from the decisions is mandatory: ES06 before L06, L06 before L07 and L08, and L06 before L09; ES20 before L18 and ES19; L17 before L18; ES19 before ES02, ES02 before S30, and S30 before ES01. Same-owner work remains serialized even where no hard dependency exists.
+
 Retained constraints:
 
 - **PRESERVE:** D04, D12, D16, D33, D38, S02, S24, E04, E06, E07, ES13
@@ -78,8 +115,8 @@ The program is complete only when every `ACCEPT` ID is VERIFIED or DROPPED with 
 
 Queue rules:
 
-- Only Ponytail `ACCEPT` findings may become implementation work.
-- `ROUTE` findings require a recorded architecture decision before implementation.
+- Ponytail `ACCEPT` findings and routed findings with an `APPROVE_DIRECT` architecture disposition may become implementation work.
+- Other `ROUTE` findings require a recorded architecture decision before implementation.
 - `PRESERVE` and `REJECT` findings cannot enter the implementation queue.
 - A lower-cost implementation model executes only READY work.
 - The controller or a human promotes direct work to READY from current-source evidence.
@@ -93,7 +130,7 @@ Queue rules:
 
 A candidate becomes READY only when every condition passes:
 
-1. The Ponytail verdict is `ACCEPT`.
+1. The Ponytail verdict is `ACCEPT`, or the routed finding has an `APPROVE_DIRECT` architecture disposition.
 2. The finding remains reproducible on current main.
 3. One independently verifiable outcome is locked.
 4. The authoritative state, process, protocol, or persistence owner is known.
