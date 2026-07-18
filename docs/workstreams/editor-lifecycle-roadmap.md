@@ -1057,14 +1057,78 @@ Tests use exact PID identities, `start_supervised!/1`, `Process.monitor/1`, and 
 
 ### W005: Picker refresh rebuilds candidates
 
-- **Status:** CANDIDATE
+- **Status:** ACTIVE
 - **Audit ID:** L10
+- **Roadmap unit:** W005, Picker refresh rebuilds candidates
 - **Ponytail verdict:** `ACCEPT/direct`
-- **Candidate outcome:** Keep-open picker refresh replaces displayed items and normalized scoring candidates atomically while preserving query and valid selection.
-- **Existing direction:** Reuse `Picker.replace_items/2`, then clamp selection through the existing picker owner. Do not add a refresh protocol, cache owner, or candidate abstraction.
-- **Readiness gap:** A fresh planner must verify every `refresh_items/1` producer, lock the owner call sequence and selection edge cases, and name the cheapest pure picker tests plus any necessary Tool Manager wiring test.
-- **Allowed concepts before planning:** None.
-- **Completion evidence:** Pending.
+- **Planning profile:** Controller promotion from current source with GPT-5.5 `medium`; no delegated planner
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `470e232435b172e3437baf72acbcf96c4f3d9aae`
+- **Freshness basis:** `HEAD`, `main`, and `origin/main` resolved to the freshness SHA. L10 remains reproducible: `PickerUI.refresh_items/1` replaces only `items`, so `Picker.filter/2` scores the previous normalized candidates.
+
+#### Observable outcome
+
+Keep-open picker refresh atomically replaces source items and normalized scoring candidates, reapplies the current query to the new set, and clamps selection to the refreshed filtered count.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.UI.Picker` owns `items`, `candidates`, `query`, `filtered`, and `selected`. `Picker.replace_items/2` already rebuilds candidates, refilters with the current query, and clamps selection through `refilter/1`. `PickerUI.refresh_items/1` must call that owner transition once and remove its duplicate manual filtering and clamping.
+
+#### Exact files, symbols, producers, and consumers
+
+Production:
+
+- `lib/minga_editor/picker_ui.ex`: `refresh_items/1`
+
+Tests:
+
+- `test/minga_editor/picker_ui_test.exs`: refresh orchestration regression
+
+Producers:
+
+- keep-open `select_single_item/4` after `Source.on_select/4`
+- `MingaEditor.maybe_refresh_tool_picker/1`
+- `MingaEditor.Handlers.FileEventHandler.maybe_refresh_file_picker/2`
+
+Consumers are the picker renderer and subsequent selection/action dispatch, both of which must see items and scoring candidates from the same source refresh.
+
+#### Locked implementation
+
+1. Fetch fresh items through the existing source and context path.
+2. Replace the item-only update, explicit `Picker.filter/2`, and duplicate selection clamp with `Picker.replace_items(picker, items)`.
+3. Keep the existing `update_picker/2` modal transition.
+4. Add one orchestration test whose old candidates all match the preserved query at selection index two while the refreshed source returns one new matching item. Assert the refreshed item and filtered IDs are new, the query is unchanged, and selection clamps to zero.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/picker_ui_test.exs test/minga_editor/ui/picker_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not change async picker fetch, source callbacks, keep-open policy, file events, Tool Manager behavior, fuzzy scoring, query editing, modal ownership, or renderer contracts.
+- Do not add a refresh protocol, cache owner, candidate abstraction, helper, process, dependency, or compatibility path.
+- **Maximum production delta:** 0 net lines in the one production file.
+- **Maximum test delta:** +30 net lines in the one test file.
+- **Implementer questions:** None.
+
+#### Completion evidence
+
+- **PR URL:** https://github.com/jsmestad/minga/pull/2987
+- **Commit SHA:** `206a5cb8608f0c9f233bb34814f066d30aaf4a6e`
+- **Merge SHA:** Pending
+- **Focused tests:** `mix format lib/minga_editor/picker_ui.ex test/minga_editor/picker_ui_test.exs` passed; `mix test.debug test/minga_editor/picker_ui_test.exs test/minga_editor/ui/picker_test.exs` passed, 76 tests, seed 161951
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,865 tests, 0 failures, 1 skipped, 578 excluded)
+- **Ponytail and Elixir verdict:** `LEAN`; no required findings. The one-call `Picker.replace_items/2` owner transition is the smallest natural Elixir shape, and the reused context-fed test source adds no new concept.
+- **Bug-hunt verdict:** `PASS`, confidence 0.97; no correctness findings. The test fails on the old stale-candidate path and covers all three unchanged producers through the shared refresh entry point.
+- **Final reviewer verdict:** `PASS`, confidence 0.99; staged W005 patch is merge-safe, within line budgets, limited to L10, and keeps all three producers on the unchanged refresh boundary
+- **Production lines added/removed:** 1 added / 7 removed, net -6
+- **Test lines added/removed:** 29 added / 0 removed, net +29
+- **Concepts added/removed:** No concepts added; removed duplicate refresh-side manual filtering and selection clamp
+- **Findings resolved:** L10 keep-open picker refresh now uses `Picker.replace_items/2` so items, candidates, filtered results, query preservation, and selection clamp stay in the picker owner transition
+- **Discoveries affecting later work:** None
+- **Completion date:** 2026-07-18
 
 ### W006: Diagnostics picker uses current context
 

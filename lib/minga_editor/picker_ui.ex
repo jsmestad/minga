@@ -989,13 +989,7 @@ defmodule MingaEditor.PickerUI do
         } = state
       ) do
     ctx = Context.from_editor_state(state)
-    items = Source.candidates(source, ctx, callback_source)
-    refreshed = %{picker | items: items}
-    refreshed = Picker.filter(refreshed, picker.query)
-
-    # Clamp selection to new item count
-    max_sel = max(Enum.count(refreshed.filtered) - 1, 0)
-    refreshed = %{refreshed | selected: min(picker.selected, max_sel)}
+    refreshed = Picker.replace_items(picker, Source.candidates(source, ctx, callback_source))
 
     update_picker(state, &%{&1 | picker: refreshed})
   end
