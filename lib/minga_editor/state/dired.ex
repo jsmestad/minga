@@ -40,6 +40,11 @@ defmodule MingaEditor.State.Dired do
     %__MODULE__{}
   end
 
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{buffer: pid} = dired, pid), do: deactivate(dired)
+
+  def retire_buffer(%__MODULE__{} = dired, _other_pid), do: dired
+
   @spec update_dired(t(), Dired.t()) :: t()
   def update_dired(%__MODULE__{} = state, %Dired{} = dired) do
     %{state | dired: dired, original_entries: dired.entries}

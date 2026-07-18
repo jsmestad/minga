@@ -274,6 +274,7 @@ defmodule MingaEditor.State do
     workspace =
       state.workspace
       |> SessionState.set_buffers(buffers)
+      |> SessionState.retire_dired_buffer(pid)
       |> SessionState.retire_agent_prompt_buffer(pid)
       |> SessionState.activate_buffer(buffers)
 

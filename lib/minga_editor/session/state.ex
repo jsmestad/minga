@@ -460,6 +460,23 @@ defmodule MingaEditor.Session.State do
     end
   end
 
+  @doc "Retires the exact Dired backing buffer and normalizes only a stale Dired scope."
+  @spec retire_dired_buffer(t(), pid()) :: t()
+  def retire_dired_buffer(
+        %__MODULE__{dired: %DiredState{buffer: pid} = dired, keymap_scope: scope} = workspace,
+        pid
+      )
+      when is_pid(pid) do
+    workspace = set_dired(workspace, DiredState.retire_buffer(dired, pid))
+
+    case scope do
+      :dired -> set_keymap_scope(workspace, :editor)
+      _other_scope -> workspace
+    end
+  end
+
+  def retire_dired_buffer(%__MODULE__{} = workspace, _pid), do: workspace
+
   # ── Field mutation functions (Rule 2 enforcement) ──────────────────────
 
   @doc "Replaces the editing (VimState) sub-struct."
