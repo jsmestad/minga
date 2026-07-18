@@ -1727,7 +1727,7 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 
 #### Post-merge ownership refinement
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Reason:** User review and a focused `elixir-architect` audit found that `switch_async_source/6` reopened a fresh picker and repaired session-owned fields instead of expressing one owner transition.
 - **Owned shape:** `MingaEditor.State.Picker` replaces `original_source` plus `mode_prefix` with `source_switch: :original | {:switched, original_source, prefix}` and owns retargeting through `retarget/4`. `PickerUI` retains callback, cancellation, scheduler, and candidate orchestration.
 - **Deletion outcome:** Async and sync switching update the existing picker state through the same transition. The async reopen-and-repair block, six-argument helper, duplicate picker/query arguments, foreign picker-state writes, and invalid sentinel combinations are removed without a new process, protocol, scheduler, or wrapper module.
@@ -1741,8 +1741,8 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 - **Final reviewer verdict:** `PASS`; the owner transition preserves restoration, context, layout, native correlation, fetch state, prefix behavior, latest-wins rejection, and semantic projection without new architecture or exceeding the production budget.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3005
 - **Commit SHA:** `a2f432d40`
-- **Merge SHA:** Pending
-- **Completion date:** Pending
+- **Merge SHA:** `5c965962f31aa89f48b56f477c6d3373f2bb15a9`
+- **Completion date:** 2026-07-18
 
 ## Follow-on simplifications
 
