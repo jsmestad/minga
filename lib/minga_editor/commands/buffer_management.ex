@@ -48,6 +48,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.WorkspaceWorkflow
 
   @type state :: EditorState.t()
+  @typep save_result :: {:ok, state()} | {:error, state()}
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -61,30 +62,9 @@ defmodule MingaEditor.Commands.BufferManagement do
     MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save) do
-    state = apply_pre_save_transforms(state, buf)
-
-    case Buffer.save(buf) do
-      :ok ->
-        name = Helpers.buffer_display_name(buf)
-
-        NoticeWorkflow.publish(state, "Wrote #{name}")
-
-      {:error, :file_changed} ->
-        handle_file_changed_on_save(state, buf)
-
-      {:error, :no_file_path} ->
-        NoticeWorkflow.publish(
-          state,
-          "No file name — use :w <filename>"
-        )
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Save failed: #{inspect(reason)}"
-        )
-    end
+  def execute(%{workspace: %{buffers: %{active: _}}} = state, :save) do
+    {_status, state} = save_active_buffer(state)
+    state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
@@ -306,11 +286,17 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:save_quit, []}}) do
-    state |> execute(:save) |> close_tab_or_quit()
+    case save_active_buffer(state) do
+      {:ok, state} -> close_tab_or_quit(state)
+      {:error, state} -> state
+    end
   end
 
   def execute(state, {:execute_ex_command, {:save_quit_all, []}}) do
-    state |> save_all_buffers() |> shutdown_editor()
+    case save_all_buffers(state) do
+      {:ok, state} -> shutdown_editor(state)
+      {:error, state} -> state
+    end
   end
 
   def execute(state, {:execute_ex_command, {:dired, nil}}) do
@@ -2093,19 +2079,56 @@ defmodule MingaEditor.Commands.BufferManagement do
     end)
   end
 
-  # Saves all dirty buffers in the buffer list. Called by :wqa before
-  # shutting down. Returns state unchanged (side-effectual only).
-  @spec save_all_buffers(state()) :: state()
-  defp save_all_buffers(state) do
-    Enum.each(state.workspace.buffers.list, fn buf ->
-      try do
-        if Buffer.dirty?(buf), do: Buffer.save(buf)
-      catch
-        :exit, _ -> :ok
-      end
-    end)
+  @spec save_active_buffer(state()) :: save_result()
+  defp save_active_buffer(%{workspace: %{dired: %{active?: true}}} = state) do
+    {:ok, MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)}
+  end
 
-    state
+  defp save_active_buffer(%{workspace: %{buffers: %{active: buf}}} = state) do
+    try do
+      state = apply_pre_save_transforms(state, buf)
+
+      case Buffer.save(buf) do
+        :ok ->
+          name = Helpers.buffer_display_name(buf)
+          {:ok, NoticeWorkflow.publish(state, "Wrote #{name}")}
+
+        {:error, :file_changed} ->
+          {:error, handle_file_changed_on_save(state, buf)}
+
+        {:error, :no_file_path} ->
+          {:error, NoticeWorkflow.publish(state, "No file name — use :w <filename>")}
+
+        {:error, reason} ->
+          {:error, NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")}
+      end
+    catch
+      :exit, reason ->
+        {:error, NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")}
+    end
+  end
+
+  @spec save_all_buffers(state()) :: save_result()
+  defp save_all_buffers(state), do: save_all_buffers(state, state.workspace.buffers.list)
+
+  @spec save_all_buffers(state(), [pid()]) :: save_result()
+  defp save_all_buffers(state, []), do: {:ok, state}
+
+  defp save_all_buffers(state, [buf | rest]) do
+    try do
+      case Buffer.dirty?(buf) do
+        true ->
+          case Buffer.save(buf) do
+            :ok -> save_all_buffers(state, rest)
+            {:error, _reason} -> {:error, state}
+          end
+
+        false ->
+          save_all_buffers(state, rest)
+      end
+    catch
+      :exit, _reason -> {:error, state}
+    end
   end
 
   @spec complete_wait_requests_for_tabs([Tab.t()]) :: :ok
