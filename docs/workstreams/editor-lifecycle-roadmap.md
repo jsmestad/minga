@@ -1433,8 +1433,8 @@ Delete the unused Session History and Tab picker source implementations, plus th
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2994
+- **Commit SHA:** `a82bf2ccc4d829ffcfe422373c56e7084c22d038`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix compile --warnings-as-errors` passed; post-deletion source reference search found only roadmap evidence.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,862 tests, 0 failures, 1 skipped, 578 excluded).
