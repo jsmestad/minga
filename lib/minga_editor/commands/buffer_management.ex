@@ -16,7 +16,6 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaAgent.ProjectView
   alias Minga.Buffer
   alias Minga.Project.FileRef, as: ProjectFileRef
-  alias Minga.Buffer.Document
   alias Minga.Config
 
   alias MingaEditor.BottomPanel
@@ -49,6 +48,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @type state :: EditorState.t()
   @typep save_result :: {:ok, state()} | {:error, state()}
+  @typep kill_intent :: :ordinary | :force
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -174,14 +174,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :move_tab_left), do: move_active_tab(state, :left)
   def execute(state, :move_tab_right), do: move_active_tab(state, :right)
 
-  def execute(state, :kill_buffer) do
-    {state, kind} = Workflow.resolve_active_tab_kind(state)
+  def execute(state, :kill_buffer), do: kill_active_tab(state, :ordinary)
 
-    case kind do
-      :agent -> close_agent_tab(state)
-      _ -> remove_current_buffer(state)
-    end
-  end
+  def execute(state, :force_kill_buffer), do: kill_active_tab(state, :force)
 
   def execute(state, :new_buffer) do
     n = next_new_buffer_number(state.workspace.buffers.list)
@@ -1044,95 +1039,116 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec remove_current_buffer(state()) :: state()
+  @spec kill_active_tab(state(), kill_intent()) :: state()
+  defp kill_active_tab(state, intent) do
+    {state, kind} = Workflow.resolve_active_tab_kind(state)
 
-  defp remove_current_buffer(
-         %{workspace: %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs}} = state
-       ) do
-    buf = Enum.at(buffers, idx)
-
-    # Check if persistent — if so, recreate instead of removing
-    persistent? =
-      if buf do
-        try do
-          Buffer.persistent?(buf)
-        catch
-          :exit, _ -> false
-        end
-      else
-        false
-      end
-
-    if persistent? do
-      # Clear buffer content instead of killing it
-      :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new("")}
-      end)
-
-      NoticeWorkflow.publish(
-        state,
-        "Buffer is persistent — content cleared"
-      )
-    else
-      buf_name =
-        if buf do
-          try do
-            Helpers.buffer_display_name(buf)
-          catch
-            :exit, _ -> "[unknown]"
-          end
-        else
-          "[unknown]"
-        end
-
-      :ok = complete_active_wait_on_close(state)
-
-      if buf do
-        try do
-          path = Buffer.file_path(buf) || :scratch
-
-          Minga.Events.broadcast(
-            :buffer_closed,
-            %Minga.Events.BufferClosedEvent{buffer: buf, path: path},
-            state.extension_surfaces.events_registry
-          )
-
-          GenServer.stop(buf, :normal)
-        catch
-          :exit, _ -> :ok
-        end
-      end
-
-      # Free the buffer's tree-sitter parse tree in the Zig parser process.
-      state = HighlightSync.close_buffer(state, buf)
-
-      Minga.Log.info(:editor, "Closed: #{buf_name}")
-
-      new_buffers = List.delete_at(buffers, idx)
-      had_neighbor_tab? = has_neighbor_tab?(state)
-
-      # TabBar.remove handles neighbor selection.
-      state = remove_current_tab(state)
-
-      case new_buffers do
-        [] ->
-          restore_neighbor_tab_or_create_fallback(state, bs, had_neighbor_tab?)
-
-        _ ->
-          new_idx = min(idx, Enum.count(new_buffers) - 1)
-          new_bs = Buffers.replace_list(bs, new_buffers, new_idx)
-
-          MingaEditor.BufferActivation.activate(state, new_bs, notify_shell?: false)
-      end
+    case kind do
+      :agent -> close_agent_tab(state)
+      _ -> remove_current_buffer(state, intent)
     end
   end
 
-  defp remove_current_buffer(state), do: state
+  defp remove_current_buffer(
+         %{workspace: %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs}} = state,
+         intent
+       ) do
+    buf = Enum.at(buffers, idx)
 
-  # Pure cleanup: stops and unsubscribes from the live agent session.
-  # Workspace and tab removal are handled by the caller so ProjectView-aware
-  # close paths can decide whether to release or preserve the workspace first.
-  @spec cleanup_agent_session(state()) :: state()
+    case kill_decision(buf, intent) do
+      :persistent ->
+        clear_persistent_buffer(state, buffers, idx, bs, buf)
+
+      :refuse ->
+        NoticeWorkflow.publish(state, "Buffer has unsaved changes. Use SPC b X to force kill.")
+
+      :destroy ->
+        destroy_current_buffer(state, buffers, idx, bs, buf)
+    end
+  end
+
+  defp remove_current_buffer(state, _intent), do: state
+
+  defp kill_decision(buf, intent) when is_pid(buf) do
+    try do
+      case {Buffer.persistent?(buf), intent} do
+        {true, _} ->
+          :persistent
+
+        {false, :force} ->
+          :destroy
+
+        {false, :ordinary} ->
+          case Buffer.dirty?(buf) do
+            true -> :refuse
+            false -> :destroy
+          end
+      end
+    catch
+      :exit, _ -> :destroy
+    end
+  end
+
+  defp kill_decision(_buf, _intent), do: :destroy
+
+  defp clear_persistent_buffer(state, buffers, idx, bs, buf) do
+    try do
+      :ok = Buffer.replace_generated_content(buf, "")
+      NoticeWorkflow.publish(state, "Buffer is persistent — content cleared")
+    catch
+      :exit, _ -> destroy_current_buffer(state, buffers, idx, bs, buf)
+    end
+  end
+
+  defp destroy_current_buffer(state, buffers, idx, bs, buf) do
+    buf_name =
+      if buf do
+        try do
+          Helpers.buffer_display_name(buf)
+        catch
+          :exit, _ -> "[unknown]"
+        end
+      else
+        "[unknown]"
+      end
+
+    :ok = complete_active_wait_on_close(state)
+
+    if buf do
+      try do
+        Minga.Events.broadcast(
+          :buffer_closed,
+          %Minga.Events.BufferClosedEvent{buffer: buf, path: Buffer.file_path(buf) || :scratch},
+          state.extension_surfaces.events_registry
+        )
+
+        GenServer.stop(buf, :normal)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
+    state = HighlightSync.close_buffer(state, buf)
+
+    Minga.Log.info(:editor, "Closed: #{buf_name}")
+
+    new_buffers = List.delete_at(buffers, idx)
+    had_neighbor_tab? = has_neighbor_tab?(state)
+
+    state = remove_current_tab(state)
+
+    case new_buffers do
+      [] ->
+        restore_neighbor_tab_or_create_fallback(state, bs, had_neighbor_tab?)
+
+      _ ->
+        new_idx = min(idx, Enum.count(new_buffers) - 1)
+        new_bs = Buffers.replace_list(bs, new_buffers, new_idx)
+
+        MingaEditor.BufferActivation.activate(state, new_bs, notify_shell?: false)
+    end
+  end
+
   defp cleanup_agent_session(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state) do
     session = Runtime.active_session(state.shell_runtime)
 
@@ -1972,7 +1988,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec quit_last_file_tab(state()) :: state()
   defp quit_last_file_tab(state) do
     case quit_last_tab_option(state) do
-      :empty_state -> remove_current_buffer(state)
+      :empty_state -> remove_current_buffer(state, :force)
       _ -> shutdown_editor(state)
     end
   end
@@ -2751,6 +2767,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   command(:buffer_next, "Next buffer", requires_buffer: true)
   command(:buffer_prev, "Previous buffer", requires_buffer: true)
   command(:kill_buffer, "Kill current buffer", requires_buffer: true)
+  command(:force_kill_buffer, "Force kill current buffer", requires_buffer: true)
   command(:view_messages, "Show messages in bottom panel", requires_buffer: false)
   command(:view_warnings, "Show warnings in bottom panel", requires_buffer: false)
   command(:open_config, "Open config file", requires_buffer: true)

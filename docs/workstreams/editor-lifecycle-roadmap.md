@@ -705,14 +705,234 @@ None. The implementer must return `NEEDS_REPLAN` rather than choose a different 
 
 ### W003: Dirty buffers require explicit destruction
 
-- **Status:** CANDIDATE
+#### Status and provenance
+
+- **Status:** ACTIVE
 - **Audit ID:** L04
+- **Roadmap unit:** W003, Dirty buffers require explicit destruction
 - **Ponytail verdict:** `ACCEPT/direct`
-- **Candidate outcome:** Ordinary buffer destruction refuses a dirty buffer with visible feedback; one explicit force path performs intentional destruction.
-- **Existing direction:** Put the decision at the existing buffer-retirement command boundary. Do not add a confirmation framework, policy object, or parallel retirement API family.
-- **Readiness gap:** A fresh planner must enumerate every command, keymap, mouse, GUI, and palette producer; lock the force command and feedback contract; and keep root buffer retirement ownership intact.
-- **Allowed concepts before planning:** None.
-- **Completion evidence:** Pending.
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.6-sol`, `xhigh`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.6-luna`, `high`
+- **Freshness SHA:** `ba7c7893db582a7ea99ba2ffe366c3e8d8a2c3c5`
+- **Freshness basis:** `HEAD`, `main`, and `origin/main` resolved to the freshness SHA when Sol/xhigh planned this unit. The worktree was clean and L04 was reproduced from current source. Planning ran no build or tests.
+
+#### Observable outcome
+
+Ordinary `:kill_buffer` refuses to destroy the selected live, non-persistent Buffer process when `Buffer.dirty?/1` returns `true`. It leaves the Buffer process, buffer pool, tab, highlighting state, and wait request intact, then publishes this exact notice:
+
+```text
+Buffer has unsaved changes. Use SPC b X to force kill.
+```
+
+The new `:force_kill_buffer` command explicitly bypasses only the dirty-buffer refusal and runs the existing destruction sequence. It is registered as `command(:force_kill_buffer, "Force kill current buffer", requires_buffer: true)` and bound to `SPC b X`. No Ex command, GUI action, mouse gesture, confirmation prompt, configuration option, or alternate retirement API is added.
+
+#### Current producer-to-consumer failure path
+
+1. `MingaEditor.Commands.BufferManagement.execute/2` receives `:kill_buffer`.
+2. `MingaEditor.Shell.Workflow.resolve_active_tab_kind/1` routes agent tabs to `close_agent_tab/1` and every other result to `remove_current_buffer/1`.
+3. `remove_current_buffer/1` selects the target with `Enum.at(buffers, active_index)`.
+4. Persistent buffers are cleared instead of stopped.
+5. Non-persistent buffers proceed without calling `Buffer.dirty?/1`.
+6. The workflow completes the active wait request, broadcasts `:buffer_closed`, stops the Buffer process, closes parser/highlight state, logs the close, removes the tab and buffer, and restores a neighbor or enters the launchpad.
+
+L04 therefore remains reproducible at the freshness SHA.
+
+#### Producer inventory
+
+Every current static producer is covered by the command boundary:
+
+1. `Minga.Keymap.Defaults.@leader_bindings`: `SPC b d` emits `:kill_buffer`.
+2. `Minga.Keymap.Defaults.@leader_bindings`: `SPC TAB d` emits `:kill_buffer`.
+3. `MingaEditor.Mouse.close_tab_by_command/2` switches to the middle-clicked tab and dispatches `:kill_buffer`.
+4. `MingaEditor.Handlers.GuiActionHandler.dispatch_action/2` dispatches `:kill_buffer` only for GUI close of the selected last file tab.
+5. `MingaEditor.Commands.Dired.close_dired/1` deactivates Dired, restores editor scope, and dispatches ordinary `:kill_buffer`.
+6. `MingaEditor.Commands.BufferManagement.close_all_file_tabs/1` removes other file tabs and calls ordinary `:kill_buffer` for the remaining active target.
+7. `command(:kill_buffer, ...)` exposes the atom through `Minga.Command.Registry`, generic command execution, and `MingaEditor.UI.Picker.CommandSource`.
+8. User and extension keymaps may bind the registered command through existing APIs.
+
+No current producer migrates to force. Tab-only closes remain distinct because `close_file_tab/1`, `close_other_tabs/1`, and `close_tabs_to_right/1` remove views without stopping Buffer processes. GUI close of a non-last file tab continues through `:force_quit`, which closes the tab while retaining the Buffer in the pool.
+
+#### Authoritative owners
+
+- Dirty, persistent, and content state: the selected `Minga.Buffer` process.
+- Ordinary versus intentional destruction sequencing: `MingaEditor.Commands.BufferManagement`.
+- Refusal feedback: `MingaEditor.Shell.Traditional.NoticeWorkflow`.
+- Wait request completion: existing `Minga.Frontend.WaitRequests`.
+- Buffer-close events: existing `Minga.Events`.
+- Parser/highlight cleanup: existing `MingaEditor.HighlightSync`.
+- Tab and buffer-pool transitions: existing `MingaEditor.State.Buffers`, `MingaEditor.State.TabBar`, `MingaEditor.BufferActivation`, and current root lifecycle functions.
+- Dead-process cleanup: existing `MingaEditor.Handlers.BufferRegistry.retire_dead_buffer/2` through `MingaEditor.handle_info/2`.
+- Command registration, palette discovery, and default binding: existing Registry, CommandSource, and Keymap.Defaults owners.
+
+No owner moves and no new owner is introduced.
+
+#### Locked transition contract
+
+Add one private intent type:
+
+```elixir
+@typep kill_intent :: :ordinary | :force
+```
+
+Public command execution continues to return `state()`.
+
+| Active target | Intent | Required transition |
+| --- | --- | --- |
+| Agent tab | Either | Call existing `close_agent_tab/1`; do not query or destroy the file Buffer process. |
+| Persistent Buffer | Either | Clear content through `Buffer.replace_generated_content(buffer, "")`, retain PID and tab, and publish the existing persistent notice. |
+| Live non-persistent clean Buffer | Ordinary | Run the existing destruction sequence unchanged. |
+| Live non-persistent dirty Buffer | Ordinary | Return with only the exact refusal notice; do not complete wait requests, broadcast close, stop the process, close highlighting, remove tabs, alter the pool, or activate a replacement. |
+| Live non-persistent Buffer | Force | Do not call `Buffer.dirty?/1`; run the existing destruction sequence unchanged. |
+| Buffer exits during persistence or dirty query | Either | Continue stale-process cleanup; do not refuse or crash. |
+| Missing or invalid active target | Either | Preserve the existing unchanged-state fallback. |
+
+The persistence and dirty decisions must apply to the exact PID selected by `Enum.at(buffers, active_index)`, which is the PID the workflow would stop.
+
+#### Locked implementation shape
+
+1. In `MingaEditor.Commands.BufferManagement`, make `execute(state, :kill_buffer)` call private `kill_active_tab(state, :ordinary)` and add `execute(state, :force_kill_buffer)` calling `kill_active_tab(state, :force)`.
+2. Add `kill_active_tab/2` with an explicit spec. Reuse `Workflow.resolve_active_tab_kind/1`; route `:agent` to `close_agent_tab/1` and file/default results to `remove_current_buffer/2`.
+3. Change `remove_current_buffer/1` to `remove_current_buffer/2` with `kill_intent()`.
+4. Update the existing `quit_last_file_tab/1` caller to pass `:force`, preserving its existing upstream quit confirmation and configuration behavior without adding another quit-policy owner.
+5. Retain the current `buffers` and `active_index` pattern and derive the same target PID.
+6. Preserve persistence precedence. Query `Buffer.persistent?/1` with the current exit fallback; persistent targets never run dirty refusal; force never calls `Buffer.dirty?/1`; ordinary live non-persistent targets call it; an exit from either query continues cleanup.
+7. Express the decision with direct pattern matching. No `cond`, callback option, policy map, confirmation state, or generic wrapper.
+8. Replace the current foreign `:sys.replace_state/2` persistent-buffer mutation with `:ok = Buffer.replace_generated_content(buf, "")`; remove the now-unused `Minga.Buffer.Document` alias.
+9. For ordinary dirty refusal, return `NoticeWorkflow.publish(state, "Buffer has unsaved changes. Use SPC b X to force kill.")` before every destructive side effect.
+10. For allowed destruction, preserve the exact existing order: display name, active wait completion, path and close event, normal process stop, highlight cleanup, close log, buffer-list removal, tab removal, then neighbor activation or launchpad.
+11. Register `:force_kill_buffer` beside `:kill_buffer` with description `"Force kill current buffer"` and `requires_buffer: true`.
+12. Add `{~k(b X), :force_kill_buffer, "Force kill buffer"}` beside the existing buffer kill binding.
+13. Leave every existing mouse, GUI, Dired, close-all, palette, and keymap producer on ordinary `:kill_buffer`.
+14. Do not add an Ex alias such as `:bd!`.
+
+#### Exact files and symbols
+
+Production:
+
+- `lib/minga_editor/commands/buffer_management.ex`: `execute/2`, new `kill_active_tab/2`, `remove_current_buffer/2`, persistence/dirty decision helpers only if needed, `quit_last_file_tab/1`, `command(:force_kill_buffer, ...)`, and removal of `Minga.Buffer.Document` alias.
+- `lib/minga/keymap/defaults.ex`: `@leader_bindings` only.
+
+Tests:
+
+- New `test/minga_editor/commands/buffer_management_kill_test.exs` for focused real-Buffer workflow contracts.
+- `test/minga/command/registry_test.exs`: required built-in command set.
+- `test/minga/keymap/defaults_test.exs`: ordinary, force, and tab kill bindings.
+
+Roadmap:
+
+- `docs/workstreams/editor-lifecycle-roadmap.md`: replace W003 candidate with this locked specification, mark ACTIVE during implementation, and reserve completion evidence.
+
+Verified unchanged producers and consumers include `lib/minga_editor/mouse.ex`, `lib/minga_editor/handlers/gui_action_handler.ex`, `lib/minga_editor/commands/dired.ex`, `lib/minga_editor/commands.ex`, `lib/minga_editor/ui/picker/command_source.ex`, `lib/minga/command/registry.ex`, `lib/minga/frontend/wait_requests.ex`, `lib/minga_editor/highlight_sync.ex`, `lib/minga_editor/handlers/buffer_registry.ex`, and `lib/minga_editor.ex`.
+
+#### Required test layer
+
+Use direct command-workflow tests with real supervised Buffer GenServers and state created through `MingaEditor.Startup.build_initial_state/1`.
+
+- `ExUnit.Case, async: true`.
+- No Editor GenServer or HeadlessPort.
+- `start_supervised!/1` for Buffer and options processes.
+- `Process.monitor/1` plus pinned `assert_receive` or `refute_received` for lifecycle.
+- Direct `Minga.Buffer` queries for content and dirty state.
+- `NoticeWorkflow.message/1` for feedback.
+- Unique real WaitRequests registrations for wait behavior.
+- No sleeps, polling, `Process.alive?/1`, `:sys.get_state/1` state assertions, or foreign struct writes.
+
+#### Required tests
+
+Add `test/minga_editor/commands/buffer_management_kill_test.exs` with exactly these five contracts:
+
+1. **`"ordinary kill refuses a dirty buffer without completing its wait request"`**: start a file-backed non-persistent Buffer; build initial Editor state; capture PID, list, and tab ID; modify through `Minga.Buffer`; register a matching wait request; monitor; execute ordinary kill; assert the exact refusal notice; assert active PID, list, tab ID, content, and dirty state are unchanged; refute Buffer `:DOWN`; refute wait completion.
+2. **`"ordinary kill destroys a clean buffer and accepts its wait request"`**: start a clean file-backed non-persistent Buffer; register and monitor; execute ordinary kill; assert `%WaitRequestCompletion{outcome: :accepted}`; assert Buffer exits `:normal`; assert active is nil, list empty, and `MingaEditor.State.Launchpad` active.
+3. **`"force kill destroys a dirty buffer and cancels its wait request"`**: start and modify a file-backed non-persistent Buffer; register and monitor; execute force kill; assert `%WaitRequestCompletion{outcome: {:cancelled, "closed with unsaved changes"}}`; assert normal Buffer exit; assert empty buffer list and active launchpad.
+4. **`"ordinary and force kills clear persistent buffers without stopping them"`**: exercise both commands against separate dirty persistent Buffers; monitor; assert each PID remains active and listed; content becomes `""`; dirty remains true; exact existing notice is `"Buffer is persistent — content cleared"`; refute corresponding `:DOWN`.
+5. **`"ordinary kill retires an already-exited buffer"`**: build state around non-persistent Buffer; monitor and stop, consume matching `:DOWN`; execute ordinary kill on captured state; assert no raise; assert stale PID removed and launchpad active; assert dirty-refusal notice absent.
+
+Update registry test to require `:force_kill_buffer`.
+
+Update keymap tests to retain `SPC b d -> :kill_buffer`, assert `SPC b X -> :force_kill_buffer`, and assert `SPC TAB d -> :kill_buffer`.
+
+Existing agent-tab tests remain the proof that ordinary `:kill_buffer` uses the separate agent lifecycle. No new mouse, GUI, Dired, or palette integration test is needed because those producers remain unchanged and converge on the command boundary; registry and keymap tests prove force discovery and its only default producer.
+
+#### Dired retained-behavior constraint
+
+`MingaEditor.Commands.Dired.close_dired/1` remains unchanged. It deactivates Dired and dispatches ordinary `:kill_buffer`; it never calls force. A dirty active Buffer reached through that path is refused. The deactivate-before-dispatch ordering remains. W003 must not inspect or retire `state.workspace.dired.buffer` or repair stale active-buffer versus backing-buffer identity. W004 exclusively owns that targeting and process-death cleanup.
+
+#### Validation
+
+Focused:
+
+```bash
+mix test.debug test/minga_editor/commands/buffer_management_kill_test.exs test/minga_editor/launchpad_integration_test.exs
+mix test.debug test/minga_editor/commands/agent_split_toggle_test.exs
+mix test.debug test/minga/command/registry_test.exs test/minga/keymap/defaults_test.exs
+```
+
+Broad:
+
+```bash
+make lint
+ERL_FLAGS='+S 8:8' mix test.llm
+```
+
+No Swift, Go, Zig, protocol generation, snapshot, browser, or frontend build is required.
+
+#### Non-goals and retained constraints
+
+- No confirmation prompt, yes/no state, policy object, new module, process, dependency, behaviour, protocol, registry, adapter, manager, configuration, persistence shape, compatibility shim, or parallel retirement API.
+- No L03 root inventory or inactive-context change; no W004 Dired PID ownership change.
+- No quit-all, save-all, forced middle-click, forced GUI action, `:force_kill_all_buffers`, or Ex kill aliases.
+- No retry, telemetry, delayed cleanup, polling, or async confirmation.
+- No event-shape, wait-text, parser, highlighting, tab, window, launchpad, or BufferRegistry ownership change.
+- Clean ordinary kills retain current event, wait, stop, parser cleanup, tab removal, activation, and launchpad behavior.
+- Forced dirty kills reuse that exact sequence.
+- Ordinary refusal occurs before every destructive or close-reporting effect.
+- Persistent buffers remain persistent and never stop; agent tabs retain their separate close path; dead PIDs reach cleanup.
+- Tab-only closes remain tab-only and may close views of dirty buffers because the Buffer process survives.
+- Mouse and GUI routing remains unchanged.
+- `BufferManagement` remains workflow owner and `Minga.Buffer` remains the only writer of Buffer state.
+
+#### Dependencies and budget
+
+- W001 and W002 are VERIFIED.
+- L03 is not a dependency because W003 checks only the exact existing destruction target.
+- W004-W006 remain CANDIDATE and no overlapping owner unit is READY or ACTIVE.
+- **Maximum production files:** 2
+- **Maximum net production-line increase:** `+30`
+- **Expected production delta:** approximately `+15` to `+25`, offset by removing the `Document` alias and direct `:sys.replace_state/2` block.
+- **Maximum test files changed:** 3
+- **Maximum net test-line increase:** `+150`
+- **Maximum documentation files changed:** 1
+- **Maximum net documentation-line increase:** `+220`
+- **New concepts allowed:** exactly one registered `:force_kill_buffer` command and one private two-value `kill_intent`.
+- **Removed concepts:** unguarded ordinary dirty destruction and foreign mutation of Buffer process state.
+- **Forbidden additions:** confirmation framework, policy object, new owner, public Elixir API, alternate result struct, protocol action, configuration flag, lifecycle wrapper, force alias, compatibility path, or root inventory.
+
+Exceeding a budget or requiring a new owner or contract returns W003 to BLOCKED for a named decision.
+
+#### Definition of Ready
+
+All 13 conditions pass: accepted verdict; reproduction on current main; one locked outcome; known owners; exact intent and transition table; named files, symbols, producers, and consumers; exact tests and edge cases; explicit non-goals; merged dependencies with no overlap; exact validation; fixed production/test/documentation and concept budgets; no unresolved question; one reviewable PR.
+
+- **Definition of Ready status:** PASS
+- **Implementer-question status:** None. The implementer must return `NEEDS_REPLAN` rather than change the command, keybinding, notice, owner, producer behavior, test layer, persistent-buffer semantics, Dired constraint, or any budget.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** `mix test.debug test/minga_editor/commands/buffer_management_kill_test.exs test/minga_editor/launchpad_integration_test.exs` passed (6); `mix test.debug test/minga_editor/commands/agent_split_toggle_test.exs` passed (21); `mix test.debug test/minga/command/registry_test.exs test/minga/keymap/defaults_test.exs` passed
+- **Broad validation:** `make lint` exited 0 (format, changed-file Credo, compile, incremental Dialyzer; Credo reported two non-blocking boolean-case refactoring suggestions, including the locked direct-pattern-match decision); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,851 tests, 0 failures, 1 skipped, 574 excluded). The planned `+S 8:8` run and an intermediate `+S 4:4` run each exposed one unrelated 5-second MingaAgent subscription timeout in different modules; both failed cases passed immediately in isolation before the contention-safe full run.
+- **Ponytail verdict:** LEAN, no findings after the targeted shrink recheck
+- **Bug-hunt verdict:** PASS after the registry-coverage fix; silent-failure review PASS
+- **Elixir craftsmanship verdict:** IDIOMATIC
+- **Final reviewer verdict:** PASS, 1.00 confidence after the targeted staged-patch recheck; no findings
+- **Production lines added/removed:** 2 production files, +91/-73, net +18
+- **Test lines added/removed:** 3 test files, +144/-1, net +143
+- **Concepts added/removed:** Added the private `kill_intent` (`:ordinary | :force`) and registered `:force_kill_buffer`; removed unguarded ordinary dirty destruction and foreign `:sys.replace_state/2` Buffer mutation
+- **Findings resolved:** L04, ordinary dirty-buffer destruction now refuses before destructive effects and explicit force destruction reuses the existing lifecycle
+- **Discoveries affecting later work:** W004-W006 remain untouched. Headless focused workflow tests required a module-scoped real `WaitRequests` tracker because the runtime supervisor is not started; request IDs remained unique. Review fixes reduced the kill decision to one catch-scoped query, switched the focused tests to the public `Minga.Buffer` API, restored `:new_buffer` registry coverage, and consolidated ordinary and force keymap coverage. No new discovery affecting later work
+- **Completion date:** Pending
 
 ### W004: Dired targets its backing buffer
 

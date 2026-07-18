@@ -60,6 +60,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(b n), :buffer_next, "Next buffer"},
     {~k(b p), :buffer_prev, "Previous buffer"},
     {~k(b d), :kill_buffer, "Kill buffer"},
+    {~k(b X), :force_kill_buffer, "Force kill buffer"},
     {~k(b D), :kill_other_buffers, "Close other tabs"},
     {~k(b K), :kill_all_buffers, "Close all tabs"},
     {~k(b m), :view_messages, "View messages"},
