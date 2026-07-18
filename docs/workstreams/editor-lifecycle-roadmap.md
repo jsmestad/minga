@@ -1521,7 +1521,7 @@ Live renderer behavior is owned by the renderer pipeline, frontend capabilities,
 
 ### W010: Remove duplicate Diagnostics LSP Info branch
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D29
 - **Roadmap unit:** W010, Remove duplicate Diagnostics LSP Info branch
 - **Ponytail verdict:** `ACCEPT/delete`
@@ -1576,7 +1576,7 @@ Remove the unreachable Diagnostics-owned `:lsp_info` branch and its unused alias
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2996
 - **Commit SHA:** `8a050efa3fabf0dfce0a02e1b8de19a54a7bceae`
-- **Merge SHA:** Pending
+- **Merge SHA:** `38451d7cf696987d86a5d100ad20c0e308693f7e`
 - **Focused tests:** `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs test/minga_editor/commands/lsp_test.exs` passed, 9 tests.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 578 excluded).
 - **Ponytail and Elixir verdict:** `LEAN`; the one-file cut removes a duplicate unreachable branch while leaving the explicit registered owner intact.
@@ -1587,6 +1587,75 @@ Remove the unreachable Diagnostics-owned `:lsp_info` branch and its unused alias
 - **Concepts added/removed:** No concepts added; one duplicate command implementation removed.
 - **Findings resolved:** Diagnostics no longer carries an unreachable alternate LSP Info implementation.
 - **Discoveries affecting later work:** None.
+- **Completion date:** 2026-07-18
+
+### W011: Remove unreachable Tool Manager footer placement
+
+- **Status:** ACTIVE
+- **Audit ID:** D36
+- **Roadmap unit:** W011, Remove unreachable Tool Manager footer placement
+- **Ponytail verdict:** `ACCEPT/delete`
+- **Freshness profile:** `editor-lifecycle-freshness`, `openai-codex/gpt-5.5`, `medium`, read-only
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `38451d7cf696987d86a5d100ad20c0e308693f7e`
+- **Freshness basis:** Freshly rebased `HEAD` and `origin/main` include W010. The footer placement list still contains Tool Manager behind a private predicate that always returns false. SurfaceRegistry identity, numeric ID 21, GUI action handling, frontend decoder state, service ownership, and picker behavior remain live and must be preserved.
+- **Implementer questions:** None.
+
+#### Observable outcome
+
+Remove only the unreachable Tool Manager footer-overlay producer. Footer placement APIs report the seven active producers and never return a Tool Manager rect, while Tool Manager protocol identity and live frontend/service/picker behavior remain unchanged.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.Layout.FooterOverlays` owns footer placement production. `MingaEditor.Layout.SurfaceRegistry` separately owns stable surface identity, numeric protocol ID, z order, and hit kind. Delete the dormant producer from the former without changing the latter.
+
+#### Exact files, symbols, producers, and consumers
+
+- `lib/minga_editor/layout/footer_overlays.ex`: remove the `:tool_manager` visibility entry and private `tool_manager_visible?/1`; document seven active producers
+- `lib/minga_editor/focus_tree.ex`: update exact active footer-overlay count wording
+- `lib/minga_editor/layout/overlay_band.ex`: remove Tool Manager from the active footer-band surface list and retain the seven real surfaces
+- `test/minga_editor/layout/footer_band_overlays_test.exs`: assert Tool Manager retains registry identity and ID 21 but has no placement or rect
+- Preserve `MingaEditor.Layout.SurfaceRegistry.surface_id/1`, `surface_id_u16/1`, z/hit mappings, protocol encoders/decoders, Tool Manager service, commands, picker sources, and native frontend state
+
+#### Locked implementation
+
+1. Delete `{:tool_manager, tool_manager_visible?(state), :max}` from `FooterOverlays.visible/1`.
+2. Delete the private hardcoded-false predicate.
+3. Update active-producer documentation from eight to seven and remove Tool Manager from the list.
+4. Add a focused regression asserting `surface_id(:tool_manager) == :tool_manager`, `surface_id_u16(:tool_manager) == 21`, no placement ID equals `:tool_manager`, and `rect_for(state, :tool_manager) == nil`.
+5. Change no registry, protocol, frontend, service, command, picker, or Tool Manager state code.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/layout/footer_band_overlays_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not delete or redesign Tool Manager, reclaim ID 21, alter SurfaceRegistry, change footer geometry, or modify any live producer.
+- Do not add a process, module, dependency, abstraction, behaviour, protocol, cache, compatibility path, or replacement.
+- **Expected production delta:** net non-positive.
+- **Expected test delta:** at most +12 net lines.
+- **Maximum production-line increase:** 0 net.
+- **Maximum test-line increase:** +12 net.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** `mix test.debug test/minga_editor/layout/footer_band_overlays_test.exs` passed, 18 tests.
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,854 tests, 0 failures, 1 skipped, 578 excluded).
+- **Ponytail and Elixir verdict:** `LEAN` after one targeted correction; stale eight-surface wording was corrected to the same seven active producers implemented by `FooterOverlays`.
+- **Bug-hunt verdict:** `PASS`; Tool Manager registry ID 21, z/hit mapping, GUI actions, frontend decoder state, service, and picker behavior remain live and untouched.
+- **Final reviewer verdict:** `PASS`; the staged diff removes only the false placement producer, preserves Tool Manager compatibility boundaries and all live overlays, matches budgets, and carries final-base validation.
+- **Production lines added/removed:** 26 added / 36 removed, net -10
+- **Test lines added/removed:** 12 added / 2 removed, net +10
+- **Concepts added/removed:** No concepts added; one permanently false placement branch removed.
+- **Findings resolved:** Tool Manager no longer appears as an unreachable footer-overlay producer.
+- **Discoveries affecting later work:** SurfaceRegistry identity is a protocol compatibility boundary independent from footer placement production.
 - **Completion date:** 2026-07-18
 
 ## Follow-on simplifications

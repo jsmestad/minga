@@ -1,7 +1,7 @@
 defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   @moduledoc """
-  Promotion of the eight footer-band secondary overlays to registry-placed
-  FocusTree nodes (#2281), plus the click-containment safety floor (AC-2).
+  Promotion of active footer-band secondary overlays to registry-placed FocusTree
+  nodes (#2281), plus the click-containment safety floor (AC-2).
 
   Covers four things:
 
@@ -228,6 +228,16 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       refute :notifications in ids
       refute :float_popup in ids
       refute :observatory in ids
+    end
+
+    test "tool manager registry identity remains without a footer placement" do
+      state = base_state()
+      ids = state |> SurfaceRegistry.placements() |> Enum.map(& &1.surface_id)
+
+      assert SurfaceRegistry.surface_id(:tool_manager) == :tool_manager
+      assert SurfaceRegistry.surface_id_u16(:tool_manager) == 21
+      refute :tool_manager in ids
+      assert SurfaceRegistry.rect_for(state, :tool_manager) == nil
     end
 
     test "the notifications focus node routes to the swallow-by-default sink" do

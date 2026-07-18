@@ -352,9 +352,9 @@ defmodule MingaEditor.FocusTree do
 
   # ── Footer-band overlay builders ──────────────────────────────────────────
   #
-  # The eight secondary overlays (float popup, agent context, tool manager,
-  # extension panel, observatory, edit timeline, notifications, extension
-  # overlay) the owner ruled mouse-driven (#2330). `FooterOverlays.visible/1`
+  # The seven active secondary overlay producers (float popup, agent context,
+  # extension panel, observatory, edit timeline, notifications, extension overlay)
+  # the owner ruled mouse-driven (#2330). `FooterOverlays.visible/1`
   # decides which are live this frame (single-active model still holds, but the
   # tree expresses each visible one so the registry/emitter carry their rect/z;
   # Go composites the single highest-z winner). Each gets a bottom-anchored band
