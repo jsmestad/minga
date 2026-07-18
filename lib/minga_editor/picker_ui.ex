@@ -1036,76 +1036,96 @@ defmodule MingaEditor.PickerUI do
 
   # Switch the picker to a new source module, preserving the original source for switch-back.
   @spec switch_to_source(state(), module(), String.t()) :: state()
-  defp switch_to_source(
-         %{
-           shell_runtime: %{
-             state: %{
-               modal:
-                 {:picker,
-                  %{
-                    picker_ui: %{
-                      source: current_source,
-                      original_source: orig_src,
-                      callback_source: callback_source
-                    }
-                  }}
-             }
-           }
-         } = state,
-         new_source,
-         prefix
-       ) do
-    ctx = Context.from_editor_state(state)
-    items = Source.candidates(new_source, ctx, callback_source)
-    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
-
-    picker =
-      Picker.new(items, title: Source.title(new_source, callback_source), max_visible: max_vis)
-
-    layout = MingaEditor.UI.Picker.Source.layout(new_source, callback_source)
-    original = orig_src || current_source
-
-    update_picker(
-      state,
-      &%{
-        &1
-        | picker: picker,
-          source: new_source,
-          layout: layout,
-          original_source: original,
-          mode_prefix: prefix
-      }
-    )
+  defp switch_to_source(state, new_source, prefix) do
+    current = picker_state(state)
+    switch_source(state, new_source, current.original_source || current.source, prefix, current)
   end
 
   # Switch back to the original source after the prefix is deleted.
   @spec switch_back_to_original(state()) :: state()
-  defp switch_back_to_original(
-         %{
-           shell_runtime: %{
-             state: %{
-               modal:
-                 {:picker,
-                  %{picker_ui: %{original_source: orig, callback_source: callback_source}}}
-             }
-           }
-         } = state
+  defp switch_back_to_original(state) do
+    current = picker_state(state)
+    switch_source(state, current.original_source, nil, "", current)
+  end
+
+  @spec switch_source(state(), module(), module() | nil, String.t(), PickerState.t()) :: state()
+  defp switch_source(state, source, original_source, mode_prefix, current) do
+    callback_source = Source.source_identity(source)
+
+    if Source.async?(source, callback_source) do
+      switch_async_source(state, source, callback_source, original_source, mode_prefix, current)
+    else
+      switch_sync_source(state, source, callback_source, original_source, mode_prefix)
+    end
+  end
+
+  @spec switch_async_source(
+          state(),
+          module(),
+          PickerState.callback_source(),
+          module() | nil,
+          String.t(),
+          PickerState.t()
+        ) :: state()
+  defp switch_async_source(
+         state,
+         source,
+         callback_source,
+         original_source,
+         mode_prefix,
+         current
        ) do
-    ctx = Context.from_editor_state(state)
-    items = Source.candidates(orig, ctx, callback_source)
+    {loading_state, revision} = open_loading(state, source)
+
+    loading_state =
+      update_picker(loading_state, fn loading ->
+        %{
+          loading
+          | restore: current.restore,
+            restore_theme: current.restore_theme,
+            context: current.context,
+            original_source: original_source,
+            mode_prefix: mode_prefix
+        }
+      end)
+
+    request =
+      FetchEffect.request(
+        source,
+        callback_source,
+        Context.from_editor_state(loading_state, current.context),
+        revision
+      )
+
+    schedule_fetch(loading_state, request, source, revision)
+  end
+
+  @spec switch_sync_source(
+          state(),
+          module(),
+          PickerState.callback_source(),
+          module() | nil,
+          String.t()
+        ) :: state()
+  defp switch_sync_source(state, source, callback_source, original_source, mode_prefix) do
+    state = cancel_current_fetch(state)
+    items = Source.candidates(source, Context.from_editor_state(state), callback_source)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
-    picker = Picker.new(items, title: Source.title(orig, callback_source), max_visible: max_vis)
-    layout = MingaEditor.UI.Picker.Source.layout(orig, callback_source)
+    picker = Picker.new(items, title: Source.title(source, callback_source), max_visible: max_vis)
+    layout = MingaEditor.UI.Picker.Source.layout(source, callback_source)
 
     update_picker(
       state,
       &%{
         &1
         | picker: picker,
-          source: orig,
+          source: source,
+          callback_source: callback_source,
           layout: layout,
-          original_source: nil,
-          mode_prefix: ""
+          original_source: original_source,
+          mode_prefix: mode_prefix,
+          load_status: :ready,
+          fetch_revision: nil
       }
     )
   end

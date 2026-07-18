@@ -9,6 +9,9 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.UI.Picker.Candidate
+  alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -216,6 +219,11 @@ defmodule MingaEditor.PickerUITest do
 
     :ok = EffectScheduler.attach(scheduler, self())
     %{TestHelpers.base_state(rendering: :disabled) | effect_scheduler: scheduler}
+  end
+
+  defp with_project_query(state, query) do
+    search = MingaEditor.State.Search.set_project_query(state.workspace.search, query)
+    %{state | workspace: SessionState.set_search(state.workspace, search)}
   end
 
   defp picker_state_for_source(state, source, items) do
@@ -452,20 +460,57 @@ defmodule MingaEditor.PickerUITest do
       assert reverted_pui.mode_prefix == ""
     end
 
-    test "hash mode switches to project search and backspaces to the original source" do
+    test "hash mode switches from file to project search through async loading" do
       {state, _original_buf, _preview_buf} = preview_promotion_state()
+      scheduled = state_with_scheduler()
+
+      state =
+        %{state | effect_scheduler: scheduled.effect_scheduler} |> with_project_query("needle")
 
       switched_state = PickerUI.handle_key(state, ?#, 0)
       {:picker, %{picker_ui: switched_pui}} = switched_state.shell_runtime.state.modal
+
       assert switched_pui.source == MingaEditor.UI.Picker.ProjectSearchSource
       assert switched_pui.original_source == MingaEditor.UI.Picker.FileSource
       assert switched_pui.mode_prefix == "#"
+      assert switched_pui.restore == 0
+      assert switched_pui.load_status == :loading
+      assert is_reference(switched_pui.fetch_revision)
+      assert switched_pui.picker.items == []
+      assert EffectScheduler.active?(switched_state.effect_scheduler, FetchEffect)
+    end
+
+    test "backspace from hash mode restores file and makes old project search results stale" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+      scheduled = state_with_scheduler()
+
+      state =
+        %{state | effect_scheduler: scheduled.effect_scheduler} |> with_project_query("needle")
+
+      switched_state = PickerUI.handle_key(state, ?#, 0)
+      {:picker, %{picker_ui: switched_pui}} = switched_state.shell_runtime.state.modal
+      old_revision = switched_pui.fetch_revision
 
       reverted_state = PickerUI.handle_key(switched_state, 127, 0)
       {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal
       assert reverted_pui.source == MingaEditor.UI.Picker.FileSource
       assert reverted_pui.original_source == nil
       assert reverted_pui.mode_prefix == ""
+      assert reverted_pui.restore == 0
+      refute PickerState.current_fetch?(reverted_pui, old_revision)
+
+      sentinel_items = [%Item{id: :sentinel, label: "sentinel"}]
+
+      stale_outcome =
+        MingaEditor.UI.Picker.ProjectSearchSource
+        |> FetchEffect.request(nil, Context.from_editor_state(switched_state), old_revision)
+        |> Outcome.completed({:ok, sentinel_items, Candidate.from_items(sentinel_items), %{}})
+
+      assert {^reverted_state, %Outcome{status: :stale}} =
+               FetchEffect.apply(reverted_state, stale_outcome)
+
+      {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal
+      refute Enum.any?(reverted_pui.picker.items, &(&1.id == :sentinel))
     end
 
     test "typing fix in git log stays in the fuzzy query" do
@@ -512,6 +557,24 @@ defmodule MingaEditor.PickerUITest do
       assert picker_ui.mode_prefix == ">"
       assert picker_ui.picker.query == ""
       assert picker_ui.acknowledged_query_edit_seq == 1
+    end
+
+    test "native hash query switches to project search and keeps the pasted query loading" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+      scheduled = state_with_scheduler()
+      state = %{state | effect_scheduler: scheduled.effect_scheduler}
+      {:picker, %{picker_ui: initial_pui}} = state.shell_runtime.state.modal
+
+      switched = PickerUI.replace_query(state, initial_pui.query_generation, 1, "#needle")
+      {:picker, %{picker_ui: picker_ui}} = switched.shell_runtime.state.modal
+
+      assert picker_ui.source == MingaEditor.UI.Picker.ProjectSearchSource
+      assert picker_ui.original_source == MingaEditor.UI.Picker.FileSource
+      assert picker_ui.mode_prefix == "#"
+      assert picker_ui.picker.query == "needle"
+      assert picker_ui.acknowledged_query_edit_seq == 1
+      assert picker_ui.load_status == :loading
+      assert is_reference(picker_ui.fetch_revision)
     end
 
     test "applies text pasted after a source prefix to the switched picker" do
