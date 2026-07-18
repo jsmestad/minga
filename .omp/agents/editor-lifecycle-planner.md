@@ -4,7 +4,7 @@ description: "Read-only planner for promoting one accepted editor lifecycle audi
 tools: read, bash, grep, glob, lsp
 autoloadSkills: false
 model: openai-codex/gpt-5.5
-thinkingLevel: xhigh
+thinkingLevel: high
 blocking: true
 ---
 

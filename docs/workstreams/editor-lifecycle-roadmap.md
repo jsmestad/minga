@@ -1,6 +1,6 @@
 # Editor Lifecycle Execution Roadmap
 
-This ledger turns six independently accepted findings from `FINDINGS.md` into small, current-main implementation slices. `FINDINGS.md` remains the immutable audit record. This file owns execution status, locked specifications, validation evidence, and discoveries made after the audit.
+This ledger drives every actionable finding from `FINDINGS.md` through freshness triage, decision, implementation, and merge evidence. `FINDINGS.md` remains the immutable audit record. This file owns execution status, locked specifications, validation evidence, and discoveries made after the audit.
 
 The audit merged in [PR #2974](https://github.com/jsmestad/minga/pull/2974) at `c0bb98042b9ffaf75392727e7934c8af60f85cb9`. Do not repeat the 537-file audit. Reproduce only the selected finding against current main before promoting it.
 
@@ -17,7 +17,55 @@ Production line count is a guardrail rather than a code-golf target:
 - Delete obsolete branches and compatibility code made unnecessary by the correction.
 - Never compress clear code into opaque expressions to meet a line budget.
 
-The cumulative target across W001 through W006 is net-neutral or net-negative production code.
+The cumulative target across the full accepted program is net-negative production code.
+
+## Program scope
+
+The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, and 9 `REJECT` verdicts. W001 through W006 resolved only the first six accepted findings. They are a verified initial tranche, not completion of the audit program.
+
+Current accepted inventory:
+
+- **VERIFIED:** L01, L02, L04, L05, L10, L12
+- **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
+- **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
+- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35
+- **CANDIDATE, craftsmanship:** E02, E03, E05, E08
+- **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
+
+### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
+
+Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `ACCEPT` IDs against the same current-main source commit. Seventy-nine remain reproducible with the accepted direction intact. Six remain concerns but have drifted enough to require a high planner before promotion. None was already resolved, and none introduced a new architecture decision.
+
+- **STILL_REPRODUCIBLE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
+- **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
+- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35
+- **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E05, E08
+- **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
+- **DRIFTED:** D13, D36, D40, S14, ES08, ES21
+
+Drift evidence:
+
+- **D13:** No-op compatibility paths remain, but the live `MingaEditor.State.BufferLifecycle` owner now shares the old module name and the highlight call path changed. Rescope without touching the live owner.
+- **D36:** Dormant Tool Manager placement remains, but the shared footer surface registry is now an explicit numbered placement and focus contract. Rescope the removable local branch.
+- **D40:** Agent-chat prefetch and `WindowCache.boundary_snapshot/1` remain dead, while `DisplayMap` queries and row-rasterization telemetry named by the old aggregate are now live. Split only current dead surfaces.
+- **S14:** Several picker preview callbacks are already optional, while cancel, prompt, effect, and input callbacks remain mandatory. Re-evaluate each remaining callback separately.
+- **ES08:** Parser and semantic-token producers now construct `Minga.Language.Highlight.Span`; only mixed map acceptance in editor highlight storage remains. Relock the remaining conversion boundary.
+- **ES21:** Typed semantic status-bar structs now exist beside the legacy snapshot maps. Relock which projection remains redundant instead of introducing a second typed model.
+
+Decision inventory:
+
+- **ROUTE, lifecycle:** L03, L06, L07, L08, L09, L17, L18, L21
+- **ROUTE, deletion:** D01, D02, D03, D07, D17
+- **ROUTE, shrink:** S01, S08, S10, S13, S16, S17, S27, S30, S31
+- **ROUTE, craftsmanship:** E01
+- **ROUTE, data shape:** ES01, ES02, ES06, ES19, ES20
+
+Retained constraints:
+
+- **PRESERVE:** D04, D12, D16, D33, D38, S02, S24, E04, E06, E07, ES13
+- **REJECT:** D37, S19, E09, E10, ES04, ES11, ES15, ES22, ES23
+
+The program is complete only when every `ACCEPT` ID is VERIFIED or DROPPED with current-main evidence, every `ROUTE` ID has a recorded decision and any accepted follow-on is terminal, every retained constraint has survived the resulting diffs, and the final ledger is merged. A completed tranche never closes the program.
 
 ## Status model
 
@@ -63,20 +111,20 @@ If any condition fails, keep the unit CANDIDATE or mark it BLOCKED.
 
 ## OMP orchestration contract
 
-Direct `ACCEPT` candidates are promoted inline by the controller or a human, with GPT-5.5 at `medium` available for a fast read-only contract check. The optional planner is an escalation path for an unresolved contract or `NEEDS_REPLAN`, not a mandatory phase. Repository-local profiles pin routine implementation and specialist review to GPT-5.5 at `medium`.
+Freshness triage uses the read-only `editor-lifecycle-freshness` profile on GPT-5.5 at `medium`. It classifies only whether the current finding still fits current main. The `editor-lifecycle-planner` profile uses GPT-5.5 at `high` when a reproducible finding needs a locked specification. Escalate that planner invocation to `xhigh` only after a `DRIFTED` high plan remains unresolved, a worker returns `NEEDS_REPLAN`, or a recorded architecture decision requires it. `ROUTE` findings require an xhigh architecture decision before planning. Repository-local profiles pin routine implementation and specialist review to GPT-5.5 at `medium`.
 
 | Responsibility | Agent | Model | Thinking | Access |
 | --- | --- | --- | --- | --- |
-| Promote a direct candidate | Controller or human | Active session | Session-owned | Current source and ledger |
-| Resolve an implementation contract | `editor-lifecycle-planner` | `openai-codex/gpt-5.5` | `xhigh` | Read-only |
+| Classify current-main freshness | `editor-lifecycle-freshness` | `openai-codex/gpt-5.5` | `medium` | Read-only |
+| Lock a direct implementation contract | `editor-lifecycle-planner` | `openai-codex/gpt-5.5` | `high` | Read-only |
+| Resolve architecture ownership | `archie` | Project profile | `xhigh` | Read-only |
 | Implement one READY unit | `editor-lifecycle-worker` | `openai-codex/gpt-5.5` | `medium` | One worktree, no delegation |
-| Ponytail and Elixir review | `editor-lifecycle-reviewer` | `openai-codex/gpt-5.5` | `medium` | Read-only |
-| Correctness bug hunt | `editor-lifecycle-reviewer` | `openai-codex/gpt-5.5` | `medium` | Read-only |
+| Ponytail, Elixir, and bug-hunt review | `editor-lifecycle-reviewer` | `openai-codex/gpt-5.5` | `medium` | Read-only |
 | Final acceptance | `reviewer` | Project profile | Project profile | Read-only |
 
 ### Promotion and replanning
 
-The controller promotes a direct candidate only after reproducing it on current main and locking every Definition of Ready field. Invoke `editor-lifecycle-planner` on GPT-5.5 at `xhigh` only when source evidence leaves an implementation contract unresolved or a worker returns `NEEDS_REPLAN`. `ROUTE` findings still require their named architecture decision and cannot use inline promotion to bypass it.
+Run `editor-lifecycle-freshness` first. `ALREADY_RESOLVED` becomes DROPPED only with exact current-main evidence. `STILL_REPRODUCIBLE` may proceed to a high planner. `DRIFTED` requires the high planner to relock the specification and escalates to xhigh only if the contract remains ambiguous. `NEEDS_DECISION` and every `ROUTE` finding require an xhigh architecture decision. No classification alone promotes work to READY.
 
 ### Implementer
 
@@ -97,16 +145,23 @@ Do not use TaskExecute for planner or implementer work.
 
 ## Per-unit lifecycle
 
-1. Synchronize with current `origin/main` and create a dedicated feature worktree.
-2. Reproduce the direct candidate, lock its READY specification inline, and record the freshness SHA. Escalate only unresolved contracts.
-3. Mark the unit ACTIVE and run one worker.
-4. Run focused tests and measure production and test line deltas.
-5. Run the combined Ponytail and Elixir review plus the correctness bug hunt in parallel.
-6. Return accepted in-scope fixes to the existing worker.
-7. Run required focused and broad validation.
-8. Run the normal project reviewer.
-9. Update evidence, commit, push, and open the implementation PR.
-10. Merge after required checks, mark VERIFIED, synchronize main, then promote the next candidate.
+1. Synchronize with current `origin/main`.
+2. Run medium freshness triage and record its SHA and evidence.
+3. For a reproducible candidate, create a dedicated feature worktree and run the high planner to lock every Definition of Ready field. Escalate only unresolved contracts.
+4. Mark the unit ACTIVE and run one worker.
+5. Run focused tests and measure production and test line deltas.
+6. Run the combined Ponytail and Elixir review plus the correctness bug hunt in parallel.
+7. Return accepted in-scope fixes to the existing worker.
+8. Run required focused and broad validation.
+9. Run the normal project reviewer.
+10. Update evidence, commit, push, and open the implementation PR.
+11. Merge after required checks, mark VERIFIED, synchronize main, then freshen the next candidate in that owner area.
+
+### CI pipelining
+
+CI is a background merge gate, not an idle barrier. After opening a PR, start one background check watcher and immediately continue read-only freshness, architecture decisions, or planning for disjoint owner areas. A separate implementation may proceed only when it has no owner, file, contract, protocol, persistence, or dependency overlap with the PR in CI.
+
+Do not start a same-owner or dependency-successor implementation from an unmerged branch. Do not stack speculative branches merely to avoid waiting. A CI failure interrupts the affected slice for diagnosis, while independent work may continue. Merge only after required checks pass, synchronize main, and re-run freshness for any downstream candidate whose evidence may have changed.
 
 Pause only for a named architecture or product decision, an unavailable dependency or credential, a plan requiring more than 50 net new production lines, three failed focused attempts on the same failure, or explicit user instruction.
 
@@ -1206,7 +1261,7 @@ The picker modal and `on_select/2` consume the returned items. The three command
 - **Discoveries affecting later work:** The worker correctly returned `NEEDS_REPLAN` because the initial empty-store assertion contradicted `PickerUI.open_sync/4`. The controller narrowed that edge to preserve the existing no-op instead of widening picker ownership or W006 scope.
 - **Completion date:** 2026-07-18
 
-## Goal completion
+## Initial tranche completion
 
 - **Status:** VERIFIED
 - **Completion date:** 2026-07-18
@@ -1216,6 +1271,7 @@ The picker modal and `on_select/2` consume the returned items. The three command
 - **Cumulative test delta:** 561 lines added / 9 removed, net +552
 - **Review closure:** Every unit received a final `PASS`; every required review finding was corrected before merge; no accepted review finding remains open.
 - **Closure reviewer verdict:** `PASS`, confidence 0.99; W006 merge evidence, cumulative arithmetic, review closure, simplicity closure, and the zero-trace Dired follow-on are truthful and internally consistent.
+- **Program status:** ACTIVE; this evidence closes only W001 through W006. Eighty-five accepted findings and twenty-eight routed decisions remained when this correction was recorded.
 - **Simplicity closure:** No unit added a process, dependency, protocol, behaviour, adapter, wrapper, cache, compatibility path, or parallel data shape. The only new semantic contracts are the private save outcome, explicit ordinary/force destruction intent, and exact-identity Dired retirement transition required by the accepted behavior. W001, W005, and W006 reused existing owners and removed or avoided duplicate transition logic.
 
 ## Follow-on simplifications
