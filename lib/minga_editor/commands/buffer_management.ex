@@ -54,11 +54,12 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Save / quit ───────────────────────────────────────────────────────────
 
-  def execute(%{workspace: %{dired: %{active?: true}}} = state, :save) do
-    MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
-  end
-
-  def execute(%{workspace: %{dired: %{active?: true}}} = state, :force_save) do
+  def execute(
+        %{workspace: %{dired: %{active?: true, buffer: buffer}, buffers: %{active: buffer}}} =
+          state,
+        :force_save
+      )
+      when is_pid(buffer) do
     MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
   end
 
@@ -2096,7 +2097,11 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec save_active_buffer(state()) :: save_result()
-  defp save_active_buffer(%{workspace: %{dired: %{active?: true}}} = state) do
+  defp save_active_buffer(
+         %{workspace: %{dired: %{active?: true, buffer: buffer}, buffers: %{active: buffer}}} =
+           state
+       )
+       when is_pid(buffer) do
     {:ok, MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)}
   end
 

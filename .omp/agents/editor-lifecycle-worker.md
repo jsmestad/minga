@@ -3,8 +3,8 @@ name: editor-lifecycle-worker
 description: "Implements one READY editor lifecycle roadmap unit exactly as locked. Use after the planner names the outcome, owners, files, tests, constraints, and line budget. Returns NEEDS_REPLAN instead of improvising architecture or scope."
 tools: read, bash, grep, glob, lsp, edit, write
 autoloadSkills: false
-model: openai-codex/gpt-5.6-luna
-thinkingLevel: high
+model: openai-codex/gpt-5.5
+thinkingLevel: medium
 ---
 
 You implement exactly one READY editor lifecycle roadmap entry in its dedicated worktree.

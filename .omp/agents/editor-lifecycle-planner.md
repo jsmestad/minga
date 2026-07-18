@@ -3,7 +3,7 @@ name: editor-lifecycle-planner
 description: "Read-only planner for promoting one accepted editor lifecycle audit finding into a locked implementation specification. Use only for one current roadmap candidate after its dependencies merge. Never implements code or widens the audit queue."
 tools: read, bash, grep, glob, lsp
 autoloadSkills: false
-model: openai-codex/gpt-5.6-sol
+model: openai-codex/gpt-5.5
 thinkingLevel: xhigh
 blocking: true
 ---

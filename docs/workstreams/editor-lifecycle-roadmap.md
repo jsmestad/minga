@@ -34,7 +34,7 @@ Queue rules:
 - `ROUTE` findings require a recorded architecture decision before implementation.
 - `PRESERVE` and `REJECT` findings cannot enter the implementation queue.
 - A lower-cost implementation model executes only READY work.
-- A planner or human promotes work to READY.
+- The controller or a human promotes direct work to READY from current-source evidence.
 - One owner area may have only one READY or ACTIVE implementation at a time.
 - Every implementation PR updates this ledger.
 - A completed PR does not automatically promote the next candidate.
@@ -63,34 +63,20 @@ If any condition fails, keep the unit CANDIDATE or mark it BLOCKED.
 
 ## OMP orchestration contract
 
-OMP task calls do not accept per-call model or thinking overrides. The repository-local profiles under `.omp/agents/` pin those choices so the controller cannot silently spend Sol on routine implementation.
+Direct `ACCEPT` candidates are promoted inline by the controller or a human, with GPT-5.5 at `medium` available for a fast read-only contract check. The optional planner is an escalation path for an unresolved contract or `NEEDS_REPLAN`, not a mandatory phase. Repository-local profiles pin routine implementation and specialist review to GPT-5.5 at `medium`.
 
 | Responsibility | Agent | Model | Thinking | Access |
 | --- | --- | --- | --- | --- |
-| Lock one READY specification | `editor-lifecycle-planner` | `openai-codex/gpt-5.6-sol` | `xhigh` | Read-only |
-| Implement one READY unit | `editor-lifecycle-worker` | `openai-codex/gpt-5.6-luna` | `high` | One worktree, no delegation |
-| Ponytail or bug-hunt review | `editor-lifecycle-reviewer` | `openai-codex/gpt-5.6-luna` | `high` | Read-only |
-| Elixir craftsmanship review | `elixir-architect` | Profile-owned Sol | `xhigh` | Read-only |
+| Promote a direct candidate | Controller or human | Active session | Session-owned | Current source and ledger |
+| Resolve an implementation contract | `editor-lifecycle-planner` | `openai-codex/gpt-5.5` | `xhigh` | Read-only |
+| Implement one READY unit | `editor-lifecycle-worker` | `openai-codex/gpt-5.5` | `medium` | One worktree, no delegation |
+| Ponytail and Elixir review | `editor-lifecycle-reviewer` | `openai-codex/gpt-5.5` | `medium` | Read-only |
+| Correctness bug hunt | `editor-lifecycle-reviewer` | `openai-codex/gpt-5.5` | `medium` | Read-only |
 | Final acceptance | `reviewer` | Project profile | Project profile | Read-only |
 
-### Planner
+### Promotion and replanning
 
-The planner promotes one candidate by returning a locked implementation specification. It verifies current source, callers, tests, ownership, and constraints. It may not edit or implement.
-
-Use one task item:
-
-```text
-task(
-  context: "Current roadmap unit, project rules, and freshness SHA",
-  tasks: [
-    {
-      name: "W001Planner",
-      agent: "editor-lifecycle-planner",
-      task: "Verify one finding and return the locked READY specification"
-    }
-  ]
-)
-```
+The controller promotes a direct candidate only after reproducing it on current main and locking every Definition of Ready field. Invoke `editor-lifecycle-planner` on GPT-5.5 at `xhigh` only when source evidence leaves an implementation contract unresolved or a worker returns `NEEDS_REPLAN`. `ROUTE` findings still require their named architecture decision and cannot use inline promotion to bypass it.
 
 ### Implementer
 
@@ -98,16 +84,12 @@ The worker executes one READY unit exactly as written, adds the locked tests, va
 
 ### Adversarial review
 
-After the first working diff and focused tests pass, launch independent read-only reviews in one task batch:
+After the first working diff and focused tests pass, launch two independent read-only reviews in one task batch:
 
-1. **Ponytail:** Falsify the smallest-correct-slice claim, count production and test deltas separately, and identify deletion, reuse, fake simplicity, or architecture questions.
-2. **Bug hunt:** Inspect logic, state flow, process identity, races, stale messages, failure handling, silent fallthroughs, owner boundaries, and acceptance drift.
-3. **Elixir craftsmanship:** Inspect changed Elixir source for canonical data shapes, pattern-matched control flow, owner APIs, fitting OTP primitives, types, and removable ceremony.
-4. **Silent failure review:** Add `silent-failure-hunter` only when the diff changes error handling, recovery, fallback, catch, shutdown, persistence, or ignored-result behavior.
+1. **Ponytail and Elixir:** Falsify the smallest-correct-slice claim, count production and test deltas separately, identify deletion or reuse opportunities, and inspect changed Elixir for canonical data shapes, pattern-matched control flow, owner APIs, fitting OTP primitives, types, and removable ceremony.
+2. **Correctness bug hunt:** Inspect logic, state flow, process identity, races, stale messages, failure handling, silent fallthroughs, owner boundaries, and acceptance drift.
 
-Send accepted fixes to the existing worker through `hub`; do not spawn a replacement worker. Reuse the same reviewers through `hub` for targeted rechecks. If a bug hunt finds a real correctness, data-loss, concurrency, rendering, security, or acceptance bug, run one additional broad bug hunt after the fix.
-
-A unit cannot advance while Ponytail says `SHRINK`, the Elixir review reports a material non-idiomatic shape, or the bug hunt has an unresolved correctness finding. Architecture or contract changes return `NEEDS_REPLAN`.
+Add `silent-failure-hunter` only when a diff materially changes error handling, recovery, fallback, catch, shutdown, persistence, or ignored-result behavior beyond the locked direct behavior. Send accepted fixes to the existing worker through `hub`; do not spawn a replacement worker. A unit cannot advance while either review has an unresolved finding. Architecture or contract changes return `NEEDS_REPLAN`.
 
 Use the normal project reviewer once after all review fixes and required validation. A BLOCKED verdict permits one targeted re-review of the named blockers.
 
@@ -116,15 +98,15 @@ Do not use TaskExecute for planner or implementer work.
 ## Per-unit lifecycle
 
 1. Synchronize with current `origin/main` and create a dedicated feature worktree.
-2. Run one planner and record the freshness SHA.
+2. Reproduce the direct candidate, lock its READY specification inline, and record the freshness SHA. Escalate only unresolved contracts.
 3. Mark the unit ACTIVE and run one worker.
 4. Run focused tests and measure production and test line deltas.
-5. Run Ponytail, bug-hunt, and Elixir reviews in parallel.
+5. Run the combined Ponytail and Elixir review plus the correctness bug hunt in parallel.
 6. Return accepted in-scope fixes to the existing worker.
 7. Run required focused and broad validation.
 8. Run the normal project reviewer.
 9. Update evidence, commit, push, and open the implementation PR.
-10. Merge after required checks, mark VERIFIED, synchronize main, then plan the next candidate.
+10. Merge after required checks, mark VERIFIED, synchronize main, then promote the next candidate.
 
 Pause only for a named architecture or product decision, an unavailable dependency or credential, a plan requiring more than 50 net new production lines, three failed focused attempts on the same failure, or explicit user instruction.
 
@@ -936,14 +918,142 @@ All 13 conditions pass: accepted verdict; reproduction on current main; one lock
 
 ### W004: Dired targets its backing buffer
 
-- **Status:** CANDIDATE
+- **Status:** ACTIVE
 - **Audit ID:** L05
+- **Roadmap unit:** W004, Dired targets its backing buffer
 - **Ponytail verdict:** `ACCEPT/direct`
-- **Candidate outcome:** Dired save and close operate only on the PID stored in Dired state, and Dired clears when that backing process dies.
-- **Existing direction:** Require backing-buffer identity for save, retire that PID directly, and use the existing lifecycle cleanup path. Do not add a Dired process, buffer wrapper, or generic target resolver.
-- **Readiness gap:** A fresh planner must reproduce stale scope or tab-switch behavior, name the Dired owner transition, trace buffer `:DOWN` cleanup, and lock tests for save, close, and process death.
-- **Allowed concepts before planning:** None.
-- **Completion evidence:** Pending.
+- **Planning profile:** Controller promotion with a GPT-5.5 `medium` read-only contract check
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `7bb5e981fc957f662b0e653eefc6fbedd3091b56`
+- **Freshness basis:** `HEAD`, `main`, and `origin/main` resolved to the freshness SHA in a clean worktree. L05 remained reproducible in all three paths below.
+
+#### Observable outcome
+
+Dired save and force-save enter Dired mutation handling only when the workspace active buffer is the exact PID stored in Dired state. Closing Dired stops and retires that stored PID even when another buffer is active. Any deliberate or independent death of the stored PID clears Dired state and restores `:editor` only when the stale scope is `:dired`; unrelated buffer deaths and unrelated scopes remain unchanged.
+
+#### Current producer-to-consumer failure paths
+
+1. `MingaEditor.Commands.BufferManagement.execute/2` and its W002 `save_active_buffer/1` path check only `dired.active?` before routing save to `:dired_apply_changes`; `:force_save` has the same broad public dispatch. A tab or active-buffer switch therefore applies edits from the stored Dired PID instead of saving the current buffer unless every Dired-specific save clause requires exact active identity.
+2. `MingaEditor.Commands.Dired.close_dired/1` reads the stored PID, deactivates Dired, then dispatches generic `:kill_buffer`. `MingaEditor.Commands.BufferManagement` resolves that command from the active tab and can retire a different PID.
+3. Buffer monitor `:DOWN` reaches `MingaEditor.Handlers.BufferRegistry.retire_dead_buffer/2`, then `MingaEditor.State.remove_buffer/2`. The root transition retires buffer, parser, shell, monitor, Git, and agent-prompt references but never asks the Dired owner to forget an exact backing PID, leaving stale Dired state and scope.
+
+#### Authoritative owners and locked shape
+
+`MingaEditor.State.Dired` owns exact backing identity. Add `retire_buffer/2` with this contract:
+
+```elixir
+retire_buffer(%DiredState{buffer: pid} = dired, pid) :: DiredState.deactivate(dired)
+retire_buffer(%DiredState{} = dired, other_pid) :: dired
+```
+
+`MingaEditor.Session.State` owns the aggregate Dired and keymap-scope invariant. Add `retire_dired_buffer/2`. When the PID matches, it installs the leaf transition and changes `:dired` to `:editor`; every other scope is preserved. A non-matching PID returns the workspace unchanged.
+
+`MingaEditor.State.remove_buffer/2` remains the root exact-identity retirement transition and must call the session aggregate before activating the surviving buffer.
+`MingaEditor.State.Buffers` owns active-buffer identity during membership changes. `remove/2` must preserve the exact surviving active PID and recompute its index when a different PID is removed; existing neighbor selection remains unchanged when the active PID itself is removed.
+
+`MingaEditor.Commands.BufferManagement` owns save command dispatch. Its public Dired `:force_save` clause and private Dired `save_active_buffer/1` clause require one PID to match both `workspace.dired.buffer` and `workspace.buffers.active`; public `:save` reuses the generic `save_active_buffer/1` path. All mismatches fall through to the existing normal save or force-save clauses.
+
+`MingaEditor.Commands.Dired` owns deliberate Dired close effects. For an exact stored PID it must synchronously stop that PID, tolerate an already-dead PID, then call the existing `MingaEditor.Handlers.BufferRegistry.retire_dead_buffer/2` workflow before returning. This removes the dead PID and its monitor before the immediate render, reuses parser, highlight, shell, persistence, and root cleanup, and prevents a later duplicate `:DOWN` through the existing `Process.demonitor(ref, [:flush])`.
+
+#### Exact files and symbols
+
+Production:
+
+- `lib/minga_editor/commands/buffer_management.ex`: public Dired `:force_save` clause plus private Dired `save_active_buffer/1`; public `:save` reuses the generic private helper
+- `lib/minga_editor/commands/dired.ex`: `close_dired/1` and one private exact-PID stop helper
+- `lib/minga_editor/state/dired.ex`: `retire_buffer/2`
+- `lib/minga_editor/session/state.ex`: `retire_dired_buffer/2`
+- `lib/minga_editor/state.ex`: `remove_buffer/2`
+- `lib/minga_editor/state/buffers.ex`: `remove/2` exact surviving-active preservation
+
+Tests:
+
+- `test/minga_editor/commands/dired_mutation_test.exs`
+- `test/minga_editor/state/dired_test.exs`
+- `test/minga_editor/state/buffers_test.exs`
+
+Producers and consumers:
+
+- Save producers: command registry, Dired keymap scope, ex `:write`, GUI action dispatch
+- Close producers: Dired `q` and Escape bindings, command registry, `open_file/2`
+- Death producer: Editor-owned buffer monitor in `MingaEditor`
+- Consumers: Dired mutation confirmation, ordinary buffer save, Dired state, session keymap scope, buffer registry retirement workflow, immediate renderer state
+
+#### Locked implementation steps
+
+1. Add exact-identity `DiredState.retire_buffer/2`.
+2. Add `SessionState.retire_dired_buffer/2` with exact-match scope normalization and no unrelated-scope write.
+3. Insert that aggregate transition into `EditorState.remove_buffer/2` before surviving-buffer activation.
+4. Update `Buffers.remove/2` to preserve the exact active PID when removing a different member and use existing neighbor selection when removing the active member.
+5. Tighten the public Dired force-save clause and private Dired `save_active_buffer/1` clause with one repeated PID pattern and an `is_pid` guard. Let public `:save` fall through to the existing generic `save_active_buffer/1` call rather than retaining a redundant public Dired clause. Do not add a query helper.
+6. Replace generic `:kill_buffer` dispatch in `close_dired/1` with exact stored-PID stop followed synchronously by `BufferRegistry.retire_dead_buffer/2`. Treat only `:noproc` as already dead; an unexpected stop exit must retain ownership and publish the failure.
+7. Add the locked regression tests and run the focused command.
+
+#### Required tests
+
+`test/minga_editor/commands/dired_mutation_test.exs`:
+
+- Matching active and stored Dired PID: `BufferManagement.execute(state, :save)` enters confirmation for the edited Dired listing.
+- Mismatched active PID: `:save` writes the active file buffer and does not enter Dired confirmation or mutate the Dired backing file operations.
+- Mismatched active PID: `:force_save` uses the existing active-buffer force-save path rather than Dired mutation handling.
+- `:dired_close` with the stored Dired PID before the unrelated active PID in a four-buffer list sends `:DOWN` only for Dired, preserves the exact unrelated active PID and its corrected index in returned state, removes the stored PID, clears Dired, and restores `:editor`.
+- `:dired_close` with an already-dead stored PID still returns cleaned state without raising.
+- `:dired_close` preserves Dired and buffer ownership when the stop exits unexpectedly instead of retiring a potentially live process.
+
+`test/minga_editor/state/dired_test.exs`:
+
+- Exact backing retirement resets the Dired leaf.
+- Unrelated PID retirement returns the Dired leaf unchanged.
+- Session exact backing retirement changes stale `:dired` scope to `:editor`.
+- Session exact backing retirement preserves a non-Dired scope.
+- Root `remove_buffer/2` clears exact Dired ownership while preserving Dired for an unrelated retired PID.
+
+`test/minga_editor/state/buffers_test.exs`:
+
+- Removing a non-active PID before the active PID preserves the exact active PID and recomputes its shifted index.
+
+Tests use exact PID identities, `start_supervised!/1`, `Process.monitor/1`, and `assert_receive {:DOWN, ...}` at the cheapest useful layer. They do not use sleeps, `Process.alive?/1` assertions, or `:sys.replace_state/2`.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/commands/dired_mutation_test.exs test/minga_editor/state/dired_test.exs test/minga_editor/state/buffers_test.exs`
+- Related state boundary: `mix test.debug test/minga_editor/state/root_purity_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and retained constraints
+
+- Do not change Dired operation diffing, confirmation, refresh, navigation, listing format, keybindings, or filesystem semantics.
+- Do not add a Dired process, monitor, buffer wrapper, generic target resolver, generic retirement facade, protocol, dependency, configuration, compatibility path, or architecture exception.
+- Do not change ordinary buffer kill behavior, W003 force-kill behavior, wait-request policy, root buffer inventory, tab ownership, or L03.
+- Preserve one Editor mailbox, Editor-owned monitor correlation, synchronous safe returned state, surviving active-buffer identity, shell cleanup, parser and highlight cleanup, persistence, and exact-identity state ownership.
+- `MingaEditor.State.Dired` remains the only writer of its struct. `MingaEditor.State.Buffers` owns membership and active identity. `MingaEditor.Session.State` coordinates Dired with keymap scope. `MingaEditor.State` coordinates root retirement. External stop and persistence work remain in the Dired and BufferRegistry workflows.
+
+#### Dependencies and budget
+
+- **Dependencies:** W001-W003 are VERIFIED. No overlapping Dired owner work is active.
+- **Allowed concept:** One exact-identity Dired retirement transition across its existing leaf, session aggregate, and root lifecycle.
+- **Maximum production delta:** +40 net lines across the six named production files.
+- **Maximum test delta:** +150 net lines across the three named test files.
+- **Forbidden concepts:** New process, monitor, generic abstraction, wrapper, protocol, registry, adapter, compatibility path, configuration, dependency, or broader buffer inventory.
+- **Implementer questions:** None. Return `NEEDS_REPLAN` rather than alter the stop-and-retire sequence, owner boundaries, tests, scope policy, or budgets.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** `mix test.debug test/minga_editor/commands/dired_mutation_test.exs test/minga_editor/state/dired_test.exs test/minga_editor/state/buffers_test.exs` passed (13); `mix test.debug test/minga_editor/state/root_purity_test.exs` passed (2)
+- **Broad validation:** `make lint` passed (format, changed-file Credo, compile, incremental Dialyzer; two non-blocking boolean-case suggestions); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 574 excluded)
+- **Ponytail and Elixir verdict:** `LEAN`; no required findings after the formatting-driven shrink
+- **Bug-hunt verdict:** `PASS` after targeted unexpected-stop recheck
+- **Final reviewer verdict:** `PASS`, confidence 0.98, no findings
+- **Production lines added/removed:** 72 added / 43 removed, net +29
+- **Test lines added/removed:** 149 added / 0 removed, net +149
+- **Concepts added/removed:** Added one exact-identity Dired retirement transition across existing Dired leaf, session aggregate, and root lifecycle; removed generic Dired close through active-buffer `:kill_buffer`; consolidated repeated notice-owner qualification through one alias
+- **Findings resolved:** Focused validation covers L05 exact backing PID targeting for Dired save, force-save, live close, already-dead close, unexpected stop failure, buffer-death retirement, and exact surviving active PID preservation when a different earlier buffer is removed
+- **Discoveries affecting later work:** Reviews found the private Dired save path, shifted-index active-buffer drift, and unexpected stop-exit retirement; all were corrected within W004 and do not change later work-unit contracts
+- **Completion date:** Pending
 
 ### W005: Picker refresh rebuilds candidates
 

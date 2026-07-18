@@ -91,9 +91,12 @@ defmodule MingaEditor.State.Buffers do
     help = if bs.help == pid, do: nil, else: bs.help
 
     {new_active, new_index} =
-      case new_list do
-        [] ->
+      case {new_list, bs.active == pid, Enum.find_index(new_list, &(&1 == bs.active))} do
+        {[], _, _} ->
           {nil, 0}
+
+        {_, false, idx} when is_integer(idx) ->
+          {bs.active, idx}
 
         _ ->
           idx = min(bs.active_index, Enum.count(new_list) - 1)

@@ -39,6 +39,11 @@ defmodule MingaEditor.State.BuffersTest do
       assert result.list == [:a, :c]
       assert result.active == :c
       assert result.active_index == 1
+
+      shifted = Buffers.remove(%Buffers{list: [:a, :b, :c], active: :b, active_index: 1}, :a)
+      assert shifted.list == [:b, :c]
+      assert shifted.active == :b
+      assert shifted.active_index == 0
     end
 
     test "removes only buffer leaving empty state" do
