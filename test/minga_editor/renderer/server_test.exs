@@ -200,8 +200,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
     :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
     RendererServer.cast_snapshot(renderer, snapshot, 81)
-    RendererServer.frame_status(renderer, {:frame_rejected, 1, 80, 0, :base_sequence_mismatch})
-
+    reject_base_sequence_mismatch(renderer, 1, 80, 0)
     assert_receive {:lineage_probe, 81, nil, 0, [0, 1, 2], 1}, @async_render_timeout
     RendererServer.frame_status(renderer, {:frame_applied, 2, 81})
   end
@@ -291,7 +290,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       RendererServer.frame_status(renderer, {:frame_applied, 2, 10})
       RendererServer.frame_status(renderer, {:frame_applied, 1, 9})
-      RendererServer.frame_status(renderer, {:frame_rejected, 1, 10, 99, :base_sequence_mismatch})
+      reject_base_sequence_mismatch(renderer, 1, 10, 99)
       assert RendererServer.acknowledgement_state(renderer) == {1, 0}
       refute_receive {:ack_pipeline, _, _, _, _}, 50
 
@@ -304,7 +303,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert RendererServer.acknowledgement_state(renderer) == {1, 10}
 
       RendererServer.frame_status(renderer, {:frame_applied, 1, 10})
-      RendererServer.frame_status(renderer, {:frame_rejected, 0, 12, 10, :base_sequence_mismatch})
+      reject_base_sequence_mismatch(renderer, 0, 12, 10)
       assert RendererServer.acknowledgement_state(renderer) == {1, 10}
       refute_receive {:render_done, %RenderReceipt{frame_seq: 12}}, 50
     end
@@ -373,6 +372,26 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
       assert RendererServer.acknowledgement_state(renderer) == {2, 0}
       refute_receive {:ack_pipeline, _, 3, _, _}, 50
+      refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
+    end
+
+    test "decoded retryable frame rejection reaches renderer recovery" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
+      assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
+
+      assert {:ok, decoded} =
+               MingaEditor.Frontend.Protocol.decode_event(<<0x0B, 1::32, 20::32, 0::32, 4, 1>>)
+
+      assert decoded ==
+               {:frame_rejected, 1, 20, 0, :base_sequence_mismatch, :retryable_recovery}
+
+      state = build_editor_state(:tui, renderer)
+      assert {:noreply, ^state} = MingaEditor.handle_info({:minga_input, decoded}, state)
+
+      assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
       refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
     end
 
@@ -710,10 +729,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert_receive {:resident_probe, 20, 1, false, 0, [], ^epoch}, @async_render_timeout
       assert_receive {:line_fetch, %{lines_fetched: 24}, %{full_residence?: true}}
 
-      RendererServer.frame_status(
-        renderer,
-        {:frame_rejected, 1, 20, 3, :base_sequence_mismatch}
-      )
+      reject_base_sequence_mismatch(renderer, 1, 20, 3)
 
       assert_receive {:resident_probe, retry_seq, 2, true, 130, nil, fresh_epoch},
                      @async_render_timeout
@@ -1291,6 +1307,14 @@ defmodule MingaEditor.Renderer.ServerTest do
     else
       false
     end
+  end
+
+  defp reject_base_sequence_mismatch(renderer, generation, frame_seq, last_applied) do
+    RendererServer.frame_status(
+      renderer,
+      {:frame_rejected, generation, frame_seq, last_applied, :base_sequence_mismatch,
+       :retryable_recovery}
+    )
   end
 
   defp stub_snapshot do

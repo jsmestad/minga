@@ -156,7 +156,7 @@ Every unit reserves these fields:
 
 ### W001: Frame rejection reaches renderer recovery
 
-- **Status:** READY
+- **Status:** ACTIVE
 - **Audit ID:** L01
 - **Ponytail verdict:** `ACCEPT/direct`
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.6-sol`, `xhigh`, read-only
@@ -292,17 +292,17 @@ No Swift, Go, Zig, protocol generation, or snapshot validation is required becau
 - **PR URL:** Pending
 - **Commit SHA:** Pending
 - **Merge SHA:** Pending
-- **Focused tests:** Pending
-- **Broad validation:** Pending
-- **Ponytail verdict:** Pending
-- **Bug-hunt verdict:** Pending
-- **Elixir craftsmanship verdict:** Pending
-- **Final reviewer verdict:** Pending
-- **Production lines added/removed:** Pending
-- **Test lines added/removed:** Pending
-- **Concepts added/removed:** Pending
-- **Findings resolved:** Pending
-- **Discoveries affecting later work:** Pending
+- **Focused tests:** `mix test.debug test/minga_editor/frontend/protocol_test.exs test/minga_editor/renderer/server_test.exs` — 179 passed
+- **Broad validation:** `make lint` passed (Credo: 3 changed source files, no issues; compile and incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 8:8' mix test.llm` passed (58 doctests, 98 properties, 9,839 tests, 0 failures, 1 skipped, 574 excluded; max_cases 16)
+- **Ponytail verdict:** LEAN, including targeted helper recheck
+- **Bug-hunt verdict:** PASS, correctness including targeted helper recheck
+- **Elixir craftsmanship verdict:** IDIOMATIC, including targeted helper recheck
+- **Final reviewer verdict:** PASS
+- **Production lines added/removed:** 11 added / 10 removed, net +1
+- **Test lines added/removed:** 32 added / 8 removed, net +24
+- **Concepts added/removed:** None added; removed five-element runtime `:frame_rejected` compatibility
+- **Findings resolved:** L01 routed canonical correlated frame rejection from `MingaEditor` to renderer recovery without Editor state mutation
+- **Discoveries affecting later work:** Silent-failure review: PASS. Default-concurrency broad runs exposed pre-existing unrelated suite races; seed 30291 reproduced the extension timeout on untouched `origin/main` with 9,838 tests passing, and another run got `:noproc` where an unrelated lifecycle test expected `:killed`; reduced scheduler count produced a clean full pass. No later-work contract discovery
 - **Completion date:** Pending
 
 ### W002: Failed saves prevent shutdown

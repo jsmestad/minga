@@ -57,14 +57,6 @@ defmodule MingaEditor.Renderer.AckHandler do
     terminal(state, last_applied, reason, disposition)
   end
 
-  # Keep direct callers from the protocol-version-11 contract retryable.
-  def handle(state, {:frame_rejected, generation, seq, last_applied, reason}) do
-    handle(
-      state,
-      {:frame_rejected, generation, seq, last_applied, reason, :retryable_recovery}
-    )
-  end
-
   def handle(
         %State{
           awaiting_ack: %{generation: generation, seq: seq, intent: intent, pushed_at: pushed_at}
