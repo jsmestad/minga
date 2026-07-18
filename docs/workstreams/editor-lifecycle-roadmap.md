@@ -1040,8 +1040,8 @@ Tests use exact PID identities, `start_supervised!/1`, `Process.monitor/1`, and 
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2984
+- **Commit SHA:** `d391c76e7512ab033b5088803b8072cd84f9f5c9`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix test.debug test/minga_editor/commands/dired_mutation_test.exs test/minga_editor/state/dired_test.exs test/minga_editor/state/buffers_test.exs` passed (13); `mix test.debug test/minga_editor/state/root_purity_test.exs` passed (2)
 - **Broad validation:** `make lint` passed (format, changed-file Credo, compile, incremental Dialyzer; two non-blocking boolean-case suggestions); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 574 excluded)
