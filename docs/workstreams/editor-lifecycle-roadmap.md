@@ -1315,7 +1315,7 @@ The picker modal and `on_select/2` consume the returned items. The three command
 
 ### W007: Signature Help recognizes Control modifiers
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L20
 - **Roadmap unit:** W007, Signature Help recognizes Control modifiers
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1364,7 +1364,7 @@ Ctrl-J and Ctrl-K cycle Signature Help overloads when frontends send the canonic
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2993
 - **Commit SHA:** `7bbd2730b6631cb2ce84be1da6903d9c0603fd66`
-- **Merge SHA:** Pending
+- **Merge SHA:** `fb7aa9d0572bab31047cca77d444acc01782d6c0`
 - **Focused tests:** `mix test.debug test/minga_editor/input/signature_help_test.exs` passed, 7 tests
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,868 tests, 0 failures, 1 skipped, 578 excluded)
 - **Ponytail and Elixir verdict:** `LEAN`; the canonical modifier helper is the smallest natural Elixir cutover, removes one duplicate constant, and introduces no concept.
@@ -1375,7 +1375,78 @@ Ctrl-J and Ctrl-K cycle Signature Help overloads when frontends send the canonic
 - **Concepts added/removed:** No concepts added; one incorrect private modifier constant was replaced by the existing input owner.
 - **Findings resolved:** Signature Help now recognizes frontend Control modifiers without treating Alt as Control.
 - **Discoveries affecting later work:** None.
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
+
+### W008: Remove unused picker sources
+
+- **Status:** ACTIVE
+- **Audit ID:** D19
+- **Roadmap unit:** W008, Remove unused picker sources
+- **Ponytail verdict:** `ACCEPT/delete`
+- **Freshness profile:** `editor-lifecycle-freshness`, `openai-codex/gpt-5.5`, `medium`, read-only
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `fb7aa9d0572bab31047cca77d444acc01782d6c0`
+- **Freshness basis:** Freshly rebased `HEAD`, `main`, and `origin/main` include W007. Current source has no production, test, extension, or documentation reference to either unused picker source outside the two modules and the obsolete Tab Source test.
+- **Implementer questions:** None.
+
+#### Observable outcome
+
+Delete the unused Session History and Tab picker source implementations, plus the obsolete test that instantiates Tab Source directly. Registered picker sources, picker orchestration, extension source support, and all user-visible picker behavior remain unchanged.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.UI.PickerUI` owns picker orchestration and opens explicitly selected source modules. `MingaEditor.UI.Picker.Source` owns the source behaviour and extension contract. Neither owner registers, references, or selects `SessionHistorySource` or `TabSource`. This work removes only those two orphan implementations and their direct unit test; it adds no replacement.
+
+#### Exact files, symbols, producers, and consumers
+
+- Delete `lib/minga_editor/ui/picker/session_history_source.ex`, module `MingaEditor.UI.Picker.SessionHistorySource`
+- Delete `lib/minga_editor/ui/picker/tab_source.ex`, module `MingaEditor.UI.Picker.TabSource`
+- Delete `test/minga_editor/ui/picker/tab_source_test.exs`, module `MingaEditor.UI.Picker.TabSourceTest`
+- Preserve `lib/minga_editor/ui/picker/source.ex`, including the source behaviour and extension contract
+- Preserve `lib/minga_editor/ui/picker_ui.ex`, including explicit source selection and picker lifecycle
+- Preserve live registered sources under `lib/minga_editor/ui/picker/sources/`
+
+#### Locked implementation
+
+1. Reconfirm no repository caller, registry entry, extension reference, or documentation reference exists for either obsolete module.
+2. Delete `session_history_source.ex`.
+3. Delete `tab_source.ex`.
+4. Delete `tab_source_test.exs`, which tests only the removed module.
+5. Add no fallback, alias, compatibility module, registry entry, migration, or replacement test.
+
+#### Validation
+
+- Source reference check: no `SessionHistorySource`, `session_history_source`, `TabSource`, or `tab_source` reference remains outside immutable audit and roadmap history.
+- Focused: `mix compile --warnings-as-errors`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not change `PickerUI`, `Picker.Source`, registered source modules, picker state, keymaps, commands, extensions, session history, tabs, or tab switching behavior.
+- Do not add a process, module, dependency, abstraction, behaviour, protocol, cache, compatibility path, or replacement.
+- **Expected production delta:** 146 lines removed and 0 added.
+- **Expected test delta:** 103 lines removed and 0 added.
+- **Maximum added production lines:** 0.
+- **Maximum added test lines:** 0.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** `mix compile --warnings-as-errors` passed; post-deletion source reference search found only roadmap evidence.
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,862 tests, 0 failures, 1 skipped, 578 excluded).
+- **Ponytail and Elixir verdict:** `LEAN`; deleting both orphan implementations and the direct test removes concepts without changing the live source behaviour or picker orchestration.
+- **Bug-hunt verdict:** `PASS`; no production, test, extension, registry, command, documentation, dynamic lookup, or compatibility consumer remains.
+- **Final reviewer verdict:** `PASS`; the staged diff deletes only the two orphan picker sources and their direct test, preserves live picker contracts, matches line budgets, and carries complete validation evidence.
+- **Production lines added/removed:** 0 added / 146 removed, net -146
+- **Test lines added/removed:** 0 added / 103 removed, net -103
+- **Concepts added/removed:** No concepts added; two unused picker source implementations removed.
+- **Findings resolved:** Session History Source and Tab Source no longer remain as unreachable picker implementations.
+- **Discoveries affecting later work:** None.
+- **Completion date:** 2026-07-18
 
 ## Follow-on simplifications
 
