@@ -1191,7 +1191,7 @@ The picker modal and `on_select/2` consume the returned items. The three command
 
 #### Completion evidence
 
-- **PR URL:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2989
 - **Commit SHA:** `8b10467ee49d335b4967ea9383bd2a38d7a34bf6`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix format lib/minga_editor/ui/picker/sources/diagnostics.ex test/minga_editor/commands/diagnostics_picker_test.exs` passed; `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs` passed, 2 tests, seed 316808
