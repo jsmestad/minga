@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Context
 
   alias Minga.Buffer
   alias Minga.Diagnostics
@@ -25,8 +26,8 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   def preview?, do: false
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{buffers: %{active: buf}}) when is_pid(buf) do
     buf
     |> Buffer.file_path()
     |> candidates_for_path(buf)
