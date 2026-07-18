@@ -41,8 +41,8 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
 
   @event_timeout 5_000
 
-  # Minimal provider: the session needs a provider pid to boot, but these tests
-  # drive approval events in directly rather than through a real turn.
+  # Minimal provider: the session needs a provider pid and admitted turn, while
+  # the tests inject the approval event instead of running a real tool.
   defmodule QuietProvider do
     @moduledoc false
     @behaviour MingaAgent.Provider
@@ -80,10 +80,12 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     %{session: session, ingest: ingest}
   end
 
-  # Inject a pending tool approval whose blocked task is `reply_to`. The session
-  # broadcasts {:approval_pending, ...} to subscribers (Ingest forwards it on),
-  # and the decision later flows back to `reply_to`.
+  # Start a provider-owned turn, then inject a pending tool approval whose blocked
+  # task is `reply_to`. The decision later flows back to `reply_to`.
   defp inject_pending_approval(session, reply_to) do
+    assert :ok = Session.send_prompt(session, "approval turn")
+    send(session, {:agent_provider_event, %Event.AgentStart{}})
+
     send(
       session,
       {:agent_provider_event,

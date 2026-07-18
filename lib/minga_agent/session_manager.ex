@@ -853,6 +853,7 @@ defmodule MingaAgent.SessionManager do
 
   @background_prompt_retry_ms 10
   @background_prompt_max_attempts 100
+  @background_prompt_call_timeout_ms 30_000
 
   @spec send_background_prompt(state(), String.t(), pid(), String.t(), non_neg_integer()) ::
           state()
@@ -861,8 +862,18 @@ defmodule MingaAgent.SessionManager do
       :ok ->
         state
 
+      {:queued, :steering} ->
+        # Another admitted turn won the startup race. The queued task remains
+        # owned by the session and will run when that turn completes.
+        state
+
       {:error, :provider_not_ready} when attempt < @background_prompt_max_attempts ->
         schedule_background_prompt_retry(session_id, task, attempt)
+        state
+
+      {:exit, {:timeout, _call} = reason} ->
+        # Retrying a timed-out GenServer.call duplicates the still-queued request.
+        log_background_prompt_failure(session_id, pid, attempt, reason)
         state
 
       {:exit, _reason} when attempt < @background_prompt_max_attempts ->
@@ -895,9 +906,10 @@ defmodule MingaAgent.SessionManager do
     :ok
   end
 
-  @spec safe_send_prompt(pid(), String.t()) :: :ok | {:error, term()} | {:exit, term()}
+  @spec safe_send_prompt(pid(), String.t()) ::
+          :ok | {:queued, :steering} | {:error, term()} | {:exit, term()}
   defp safe_send_prompt(pid, task) do
-    Session.send_prompt(pid, task)
+    GenServer.call(pid, {:send_prompt, task}, @background_prompt_call_timeout_ms)
   catch
     :exit, reason -> {:exit, reason}
   end

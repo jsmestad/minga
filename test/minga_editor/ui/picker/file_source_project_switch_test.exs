@@ -159,7 +159,13 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     tmp_dir: tmp_dir
   } do
     project_b = Path.join(tmp_dir, "live_project")
-    project_a = Path.join(project_b, "stale_nested_project")
+
+    project_a =
+      Path.join(
+        project_b,
+        "stale_nested_project_#{System.unique_integer([:positive, :monotonic])}"
+      )
+
     relative_path = "nested.txt"
     absolute_path = Path.join(project_a, relative_path)
 

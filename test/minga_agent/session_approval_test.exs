@@ -4,6 +4,7 @@ defmodule MingaAgent.SessionApprovalTest do
   describe "tool approval" do
     test "ToolApproval event stores pending approval and broadcasts" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       approval = %Event.ToolApproval{
         tool_call_id: "tc1",
@@ -21,6 +22,32 @@ defmodule MingaAgent.SessionApprovalTest do
       assert data.preview.kind == :command
       assert data.preview.summary == "rm -rf /"
       refute Map.has_key?(data, :reply_to)
+    end
+
+    test "stale approval requests cannot reactivate an idle session" do
+      session = start_subscribed_session()
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc-stale",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      })
+
+      assert_receive {:tool_approval_response, "tc-stale", :reject}, @event_timeout
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc-trusted-stale",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      })
+
+      assert_receive {:tool_approval_response, "tc-trusted-stale", :reject}, @event_timeout
+      refute_received {:agent_event, _, {:tool_auto_approved, "tc-trusted-stale", _, _}}
+      assert Session.status(session) == :idle
+      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
     end
 
     test "respond_to_approval resolves each supported decision" do
@@ -105,6 +132,7 @@ defmodule MingaAgent.SessionApprovalTest do
 
     test "approval session trust for MCP tools is scoped to the approved arguments" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       send_provider_event(session, %Event.ToolApproval{
         tool_call_id: "tc_mcp",
@@ -159,6 +187,7 @@ defmodule MingaAgent.SessionApprovalTest do
 
     test "trusted tool approvals are auto-approved without pending approval" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       assert :ok = Session.set_tool_trust(session, "shell", :session)
 
       approval = %Event.ToolApproval{
@@ -175,12 +204,46 @@ defmodule MingaAgent.SessionApprovalTest do
       assert_receive {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}},
                      @event_timeout
 
+      refute_received {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}}
+
       refute_received {:agent_event, _, {:approval_pending, _}}
       assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
     end
 
-    test "auto-approved scope is applied when the tool starts and survives updates" do
+    test "trusted approval remains safe while another approval is pending" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_pending",
+        name: "read_file",
+        args: %{"path" => "README.md"},
+        reply_to: self()
+      })
+
+      assert_receive {:agent_event, _, {:approval_pending, %{tool_call_id: "tc_pending"}}},
+                     @event_timeout
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      })
+
+      assert_receive {:tool_approval_response, "tc_auto", :approve}, @event_timeout
+
+      assert_receive {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}},
+                     @event_timeout
+
+      assert :ok = Session.respond_to_approval(session, :reject)
+      assert_receive {:tool_approval_response, "tc_pending", :reject}, @event_timeout
+    end
+
+    test "auto-approved scope survives active updates and completion" do
+      session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       assert :ok = Session.set_tool_trust(session, "shell", :turn)
 
       approval = %Event.ToolApproval{
@@ -210,10 +273,21 @@ defmodule MingaAgent.SessionApprovalTest do
 
       assert {:tool_call, %{auto_approved_scope: :turn, result: "out"}} =
                Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      send_provider_event(session, %Event.ToolEnd{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        result: "done",
+        is_error: false
+      })
+
+      assert {:tool_call, %{auto_approved_scope: :turn, result: "done"}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
     end
 
     test "turn trust clears when the session returns to idle while session trust persists" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
       assert :ok = Session.set_tool_trust(session, "shell", :turn)
       assert :ok = Session.set_tool_trust(session, "read_file", :session)
 

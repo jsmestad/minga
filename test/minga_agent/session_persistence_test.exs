@@ -212,5 +212,44 @@ defmodule MingaAgent.SessionPersistenceTest do
       assert {:system, "unsaved local note", :info} in saved_current.messages
       assert Session.session_id(session) == "target-session"
     end
+
+    @tag :tmp_dir
+    test "load_session aborts active provider work before installing restored state", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionSlowMockProvider,
+          provider_opts: [test_pid: self()],
+          session_store_dir: dir
+        )
+
+      assert :ok = Session.subscribe(session)
+
+      restored_tool = MingaAgent.ToolCall.new("restored-tool", "shell", %{"command" => "pwd"})
+
+      SessionStore.save(
+        %{
+          id: "target-session",
+          timestamp: "2026-01-01T00:00:00Z",
+          model_name: "test-model",
+          provider_name: "test",
+          messages: [{:user, "restored prompt"}, {:tool_call, restored_tool}],
+          usage: %MingaAgent.TurnUsage{}
+        },
+        dir
+      )
+
+      assert :ok = Session.send_prompt(session, "still running")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+
+      assert :ok = Session.load_session(session, "target-session")
+      assert_receive :provider_abort_called, @event_timeout
+      assert Session.session_id(session) == "target-session"
+      assert Session.status(session) == :idle
+
+      assert [{:user, "restored prompt"}, {:tool_call, %{status: :running}}] =
+               Session.messages(session)
+    end
   end
 end

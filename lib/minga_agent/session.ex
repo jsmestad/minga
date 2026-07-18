@@ -42,30 +42,27 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.ProviderLifecycle
   alias MingaAgent.Session.Persistence
   alias MingaAgent.Session.Transcript
+  alias MingaAgent.Session.TurnExecution
   require ProviderLifecycle
   alias MingaAgent.SessionStore
-  alias MingaAgent.EditBoundary
   alias MingaAgent.SubagentContext
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
 
   @typedoc "Agent session status."
-  @type status :: :idle | :plan | :thinking | :tool_executing | :error
+  @type status :: TurnExecution.status()
 
   @typedoc "Pending tool approval data."
   @type pending_approval :: MingaAgent.ToolApproval.t()
 
   @typedoc "Tool trust lifetime."
-  @type trust_scope :: :session | :turn
+  @type trust_scope :: TurnExecution.trust_scope()
 
   @typedoc "Context inherited by child subagent sessions."
   @type subagent_context :: SubagentContext.t()
 
   @typedoc "Callback that reports whether credentials are currently configured."
   @type credentials_configured_fn :: (-> boolean())
-
-  @typedoc "Active tool call tracked while the provider is executing tools."
-  @type active_tool_call :: {tool_call_id :: String.t(), name :: String.t()}
 
   @typedoc "Remote attachment role."
   @type attachment_role :: :driver | :viewer
@@ -85,7 +82,7 @@ defmodule MingaAgent.Session do
           event_log_failure: event_log_failure() | nil,
           provider: ProviderLifecycle.t(),
           credentials_configured_fn: credentials_configured_fn(),
-          status: status(),
+          turn_execution: TurnExecution.t(),
           transcript: Transcript.t(),
           subscribers: MapSet.t(pid()),
           subscriber_roles: %{pid() => attachment_role()},
@@ -95,23 +92,13 @@ defmodule MingaAgent.Session do
           idle_gc_timer: {timer_ref :: reference(), token :: reference()} | nil,
           idle_gc_token_fn: (-> reference()),
           persistence: Persistence.t(),
-          error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
-          pending_approval: pending_approval() | nil,
-          active_tool_calls: [active_tool_call()],
-          active_tool_name: String.t() | nil,
-          turn_active?: boolean(),
-          trust_levels: %{String.t() => trust_scope()},
-          pending_auto_approvals: %{String.t() => trust_scope()},
           notifier: module() | {module(), term()},
           background_subagent: boolean(),
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
           session_store_dir: String.t() | nil,
           created_at: DateTime.t(),
-          steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
-          follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
-          boundaries: %{String.t() => EditBoundary.t()},
           credentials_configured: boolean()
         }
 
@@ -259,6 +246,7 @@ defmodule MingaAgent.Session do
   the resolution to subscribers.
   """
   @type approval_decision :: :approve | :approve_session | :approve_turn | :reject
+  @typep approval_resolution :: {state(), ToolApproval.t(), approval_decision()}
 
   @spec respond_to_approval(GenServer.server(), approval_decision()) ::
           :ok | {:error, :no_pending_approval}
@@ -697,7 +685,7 @@ defmodule MingaAgent.Session do
       event_log_failure: nil,
       provider: provider,
       credentials_configured_fn: credentials_configured_fn,
-      status: :idle,
+      turn_execution: TurnExecution.new(),
       transcript:
         Transcript.new(
           [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
@@ -711,14 +699,7 @@ defmodule MingaAgent.Session do
       idle_gc_timer: nil,
       idle_gc_token_fn: Keyword.get(opts, :idle_gc_token_fn, &make_ref/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
-      error_message: nil,
       pending_thinking_level: initial_thinking_level,
-      pending_approval: nil,
-      active_tool_calls: [],
-      active_tool_name: nil,
-      turn_active?: false,
-      trust_levels: %{},
-      pending_auto_approvals: %{},
       notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
       hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
@@ -726,9 +707,6 @@ defmodule MingaAgent.Session do
         Keyword.get(opts, :session_start_hook_enabled?, Keyword.get(opts, :hooks_enabled?, true)),
       session_store_dir: Keyword.get(opts, :session_store_dir),
       created_at: now,
-      steering_queue: [],
-      follow_up_queue: [],
-      boundaries: %{},
       credentials_configured: credentials_configured?
     }
 
@@ -763,115 +741,61 @@ defmodule MingaAgent.Session do
 
   def handle_call({:send_prompt_as, client_pid, content}, _from, state) do
     if driver_allowed?(state, client_pid) do
-      handle_send_prompt(content, state)
+      handle_prompt(content, :steering, state)
     else
       {:reply, {:error, :not_driver}, state}
     end
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
-    handle_send_prompt(content, state)
-  end
-
-  def handle_call(
-        {:send_follow_up, _content},
-        _from,
-        %{provider: provider} = state
-      )
-      when ProviderLifecycle.is_detached(provider) do
-    {:reply, {:error, :provider_not_ready}, state}
-  end
-
-  def handle_call({:send_follow_up, content}, _from, %{status: status} = state)
-      when status in [:thinking, :tool_executing] do
-    # Agent is busy: queue as a follow-up that sends automatically once the current run finishes.
-    state = %{state | follow_up_queue: Enum.concat(state.follow_up_queue, [content])}
-    broadcast(state, {:prompt_queued, content, :follow_up})
-    {:reply, {:queued, :follow_up}, state}
+    handle_prompt(content, :steering, state)
   end
 
   def handle_call({:send_follow_up, content}, _from, state) do
-    # Agent is idle: treat follow-up as a regular prompt.
-    {user_msg, send_content} = build_user_message(content)
-    state = append_msg(state, user_msg)
-    record_user_message(state, user_msg)
-    state = notify_messages_changed(state)
-
-    case state.provider.module.send_prompt(ProviderLifecycle.pid(state.provider), send_content) do
-      :ok -> {:reply, :ok, state}
-      {:error, _} = err -> {:reply, err, state}
-    end
+    handle_prompt(content, :follow_up, state)
   end
 
   def handle_call(:dequeue_steering, _from, state) do
-    steering = state.steering_queue
-
-    if steering == [] do
-      {:reply, [], state}
-    else
-      # Add each steering message to conversation history so it appears in chat.
-      new_msgs =
-        Enum.map(steering, fn content ->
-          {user_msg, _} = build_user_message(content)
-          user_msg
-        end)
-
-      state = %{state | steering_queue: []}
-      Enum.each(new_msgs, &record_user_message(state, &1))
-      state = append_msgs(state, new_msgs)
-      state = notify_messages_changed(state)
-      {:reply, steering, state}
-    end
+    {steering, execution} = TurnExecution.dequeue_steering(state.turn_execution)
+    state = append_steering_messages(state, steering)
+    {:reply, steering, %{state | turn_execution: execution}}
   end
 
   def handle_call(:recall_queues, _from, state) do
-    result = {state.steering_queue, state.follow_up_queue}
-    state = %{state | steering_queue: [], follow_up_queue: []}
-    broadcast(state, :queues_recalled)
-    {:reply, result, state}
+    {queues, execution} = TurnExecution.recall_queues(state.turn_execution)
+    state = broadcast(state, :queues_recalled)
+    {:reply, queues, %{state | turn_execution: execution}}
   end
 
   def handle_call(:clear_queues, _from, state) do
-    state = %{state | steering_queue: [], follow_up_queue: []}
-    broadcast(state, :queues_recalled)
-    {:reply, :ok, state}
+    execution = TurnExecution.clear_queues(state.turn_execution)
+    state = broadcast(state, :queues_recalled)
+    {:reply, :ok, %{state | turn_execution: execution}}
   end
 
   def handle_call(:get_queued_messages, _from, state) do
-    {:reply, {state.steering_queue, state.follow_up_queue}, state}
+    {:reply, TurnExecution.queues(state.turn_execution), state}
   end
 
   def handle_call({:set_boundary, path, start_line, end_line}, _from, state) do
-    abs_path = Path.expand(path)
-
-    case EditBoundary.new(start_line, end_line) do
-      {:ok, boundary} ->
-        {:reply, :ok, %{state | boundaries: Map.put(state.boundaries, abs_path, boundary)}}
-
-      {:error, _} = err ->
-        {:reply, err, state}
+    case TurnExecution.set_boundary(state.turn_execution, path, start_line, end_line) do
+      {:ok, execution} -> {:reply, :ok, %{state | turn_execution: execution}}
+      {:error, _message} = error -> {:reply, error, state}
     end
   end
 
   def handle_call({:clear_boundary, path}, _from, state) do
-    abs_path = Path.expand(path)
-    {:reply, :ok, %{state | boundaries: Map.delete(state.boundaries, abs_path)}}
+    execution = TurnExecution.clear_boundary(state.turn_execution, path)
+    {:reply, :ok, %{state | turn_execution: execution}}
   end
 
   def handle_call(:clear_all_boundaries, _from, state) do
-    {:reply, :ok, %{state | boundaries: %{}}}
+    execution = TurnExecution.clear_boundaries(state.turn_execution)
+    {:reply, :ok, %{state | turn_execution: execution}}
   end
 
   def handle_call({:boundary_for, path}, _from, state) do
-    abs_path = Path.expand(path)
-
-    result =
-      case Map.get(state.boundaries, abs_path) do
-        nil -> nil
-        %EditBoundary{start_line: s, end_line: e} -> {s, e}
-      end
-
-    {:reply, result, state}
+    {:reply, TurnExecution.boundary(state.turn_execution, path), state}
   end
 
   def handle_call(:abort, _from, %{provider: provider} = state)
@@ -880,21 +804,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:abort, _from, state) do
-    state.provider.module.abort(ProviderLifecycle.pid(state.provider))
-
-    # Mark any running tool calls as aborted
-    transcript =
-      Transcript.transform_messages(state.transcript, fn
-        {:tool_call, %ToolCall{} = tool_call} -> {:tool_call, ToolCall.abort(tool_call)}
-        other -> other
-      end)
-
-    # Append "Aborted" system message, clear any pending approval
-    state = %{state | transcript: transcript, pending_approval: nil}
-    state = append_system_message(state, "Aborted", :info)
-    state = notify_messages_changed(state)
-    state = set_idle_or_plan(state)
-    {:reply, :ok, state}
+    {:reply, :ok, abort_turn(state)}
   end
 
   def handle_call(:new_session, _from, state) do
@@ -902,28 +812,22 @@ defmodule MingaAgent.Session do
       state.provider.module.new_session(ProviderLifecycle.pid(state.provider))
     end
 
-    record_critical_event(state, :session_stopped, %{reason: "new_session", status: state.status})
+    record_critical_event(state, :session_stopped, %{
+      reason: "new_session",
+      status: TurnExecution.status(state.turn_execution)
+    })
 
     now = DateTime.utc_now()
     timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
 
     state = cancel_save_timer(state)
+    source_execution = state.turn_execution
+    execution = TurnExecution.reset(source_execution)
 
     state = %{
       state
       | session_id: generate_session_id(),
-        status: :idle,
-        error_message: nil,
-        pending_approval: nil,
-        active_tool_calls: [],
-        active_tool_name: nil,
-        turn_active?: false,
-        created_at: now,
-        steering_queue: [],
-        follow_up_queue: [],
-        boundaries: %{},
-        trust_levels: %{},
-        pending_auto_approvals: %{}
+        created_at: now
     }
 
     transcript =
@@ -939,9 +843,13 @@ defmodule MingaAgent.Session do
       background_subagent: state.background_subagent
     })
 
-    broadcast(state, {:status_changed, :idle})
-    state = notify_messages_changed(state)
-    {:reply, :ok, state}
+    state =
+      state
+      |> reject_execution_approval(source_execution)
+      |> announce_turn_status(execution)
+
+    state = %{state | turn_execution: execution}
+    {:reply, :ok, notify_messages_changed(state)}
   end
 
   def handle_call(:session_id, _from, state) do
@@ -949,23 +857,14 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:enter_plan, _from, state) do
-    reject_pending_approval(state.pending_approval)
-    state = %{state | pending_approval: nil}
-    state = append_system_message(state, plan_mode_message(), :info)
-    state = notify_messages_changed(state)
-    state = set_status(state, :plan)
-    {:reply, :ok, state}
-  end
-
-  def handle_call(:enter_exec, _from, %{status: :plan} = state) do
-    state = append_system_message(state, exec_mode_message(), :info)
-    state = notify_messages_changed(state)
-    state = set_status(state, :idle)
-    {:reply, :ok, state}
+    {:reply, :ok, enter_plan_mode(state)}
   end
 
   def handle_call(:enter_exec, _from, state) do
-    {:reply, :ok, state}
+    case TurnExecution.enter_exec(state.turn_execution) do
+      {:changed, execution} -> {:reply, :ok, enter_exec_mode(state, execution)}
+      :unchanged -> {:reply, :ok, state}
+    end
   end
 
   def handle_call({:load_session, session_id}, _from, state) do
@@ -982,7 +881,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:status, _from, state) do
-    {:reply, state.status, state}
+    {:reply, TurnExecution.status(state.turn_execution), state}
   end
 
   def handle_call(:subagent_context, _from, state) do
@@ -1026,10 +925,11 @@ defmodule MingaAgent.Session do
 
   def handle_call(:editor_snapshot, _from, state) do
     snapshot = %{
-      status: state.status,
-      pending_approval: public_pending_approval(state.pending_approval),
-      error: state.error_message,
-      active_tool_name: state.active_tool_name,
+      status: TurnExecution.status(state.turn_execution),
+      pending_approval:
+        public_pending_approval(TurnExecution.pending_approval(state.turn_execution)),
+      error: TurnExecution.error(state.turn_execution),
+      active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
       credentials_configured: state.credentials_configured
     }
 
@@ -1054,7 +954,7 @@ defmodule MingaAgent.Session do
       turn_count: count_user_turns(Transcript.messages(state.transcript)),
       first_prompt: first_prompt,
       cost: Transcript.usage(state.transcript).cost,
-      status: state.status,
+      status: TurnExecution.status(state.turn_execution),
       workdir: state.workdir
     }
 
@@ -1074,7 +974,8 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:set_tool_trust, name, scope}, _from, state) do
-    {:reply, :ok, put_tool_trust(state, name, scope)}
+    execution = TurnExecution.put_trust(state.turn_execution, name, scope)
+    {:reply, :ok, %{state | turn_execution: execution}}
   end
 
   def handle_call(:restart_provider, _from, state) do
@@ -1099,15 +1000,17 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:revoke_tool_trust, :all}, _from, state) do
-    {:reply, :ok, %{state | trust_levels: %{}}}
+    execution = TurnExecution.revoke_trust(state.turn_execution, :all)
+    {:reply, :ok, %{state | turn_execution: execution}}
   end
 
   def handle_call({:revoke_tool_trust, name}, _from, state) do
-    {:reply, :ok, %{state | trust_levels: Map.delete(state.trust_levels, name)}}
+    execution = TurnExecution.revoke_trust(state.turn_execution, name)
+    {:reply, :ok, %{state | turn_execution: execution}}
   end
 
   def handle_call(:list_tool_trust, _from, state) do
-    {:reply, state.trust_levels, state}
+    {:reply, TurnExecution.trust_levels(state.turn_execution), state}
   end
 
   def handle_call({:subscribe, pid, opts}, _from, state) do
@@ -1159,11 +1062,14 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:continue, _from, state) do
-    if function_exported?(state.provider.module, :continue, 1) do
-      result = state.provider.module.continue(ProviderLifecycle.pid(state.provider))
-      {:reply, result, state}
-    else
-      {:reply, {:error, "Provider does not support continue"}, state}
+    source_execution = state.turn_execution
+
+    case TurnExecution.begin_turn(source_execution) do
+      {:ok, execution} ->
+        reply_to_continue(state, execution)
+
+      {:error, :turn_active} ->
+        reply_to_continue(state, nil)
     end
   end
 
@@ -1545,6 +1451,351 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
+  @spec reply_to_continue(state(), TurnExecution.t() | nil) :: {:reply, term(), state()}
+  defp reply_to_continue(state, proposed_execution) do
+    result =
+      if function_exported?(state.provider.module, :continue, 1) do
+        state.provider.module.continue(ProviderLifecycle.pid(state.provider))
+      else
+        {:error, "Provider does not support continue"}
+      end
+
+    {:reply, result, finish_continue(state, proposed_execution, result)}
+  end
+
+  @spec finish_continue(state(), TurnExecution.t() | nil, term()) :: state()
+  defp finish_continue(state, %TurnExecution{} = execution, :ok),
+    do: %{state | turn_execution: execution}
+
+  defp finish_continue(state, _proposed_execution, _result), do: state
+
+  @spec abort_turn(state()) :: state()
+  defp abort_turn(state) do
+    source_execution = state.turn_execution
+    execution = TurnExecution.abort(source_execution)
+
+    state =
+      state
+      |> reject_execution_approval(source_execution)
+      |> abort_provider()
+      |> abort_active_tools(source_execution, false)
+      |> append_system_message("Aborted", :info)
+      |> notify_messages_changed()
+      |> announce_turn_status(execution)
+
+    %{state | turn_execution: execution}
+  end
+
+  @spec enter_plan_mode(state()) :: state()
+  defp enter_plan_mode(state) do
+    source_execution = state.turn_execution
+    execution = TurnExecution.enter_plan(source_execution)
+
+    state =
+      state
+      |> reject_execution_approval(source_execution)
+      |> append_system_message(plan_mode_message(), :info)
+      |> notify_messages_changed()
+      |> broadcast({:status_changed, :plan})
+      |> maybe_schedule_idle_gc(execution)
+
+    %{state | turn_execution: execution}
+  end
+
+  @spec enter_exec_mode(state(), TurnExecution.t()) :: state()
+  defp enter_exec_mode(state, execution) do
+    state =
+      state
+      |> append_system_message(exec_mode_message(), :info)
+      |> notify_messages_changed()
+      |> announce_turn_status(execution)
+
+    %{state | turn_execution: execution}
+  end
+
+  @spec queued_send_failed(state(), TurnExecution.t()) :: state()
+  defp queued_send_failed(state, proposed_execution) do
+    {:ok, execution} = TurnExecution.queued_send_failed(proposed_execution)
+    state = announce_turn_status(state, execution)
+    %{state | turn_execution: execution}
+  end
+
+  @spec complete_provider_turn(state(), Event.token_usage() | nil) :: state()
+  defp complete_provider_turn(state, usage) do
+    source_execution = state.turn_execution
+
+    case TurnExecution.begin_completion(source_execution) do
+      {:ok, completing} ->
+        state
+        |> reject_execution_approval(source_execution)
+        |> notify(:complete, completion_notification(state))
+        |> collapse_transcript_thinking()
+        |> apply_turn_usage(usage)
+        |> dispatch_stop()
+        |> finish_provider_turn(completing)
+
+      {:error, :invalid_phase} ->
+        state
+    end
+  end
+
+  @spec collapse_transcript_thinking(state()) :: state()
+  defp collapse_transcript_thinking(state) do
+    %{state | transcript: Transcript.collapse_thinking(state.transcript)}
+  end
+
+  @spec finish_provider_turn(state(), TurnExecution.t()) :: state()
+  defp finish_provider_turn(state, completing) do
+    case TurnExecution.finish_completion(completing) do
+      {:idle, execution} ->
+        state = announce_turn_status(state, execution)
+        %{state | turn_execution: execution}
+
+      {:send_next, contents, execution} ->
+        send_queued_turn(state, contents, execution)
+    end
+  end
+
+  @spec report_turn_error(state(), String.t()) :: state()
+  defp report_turn_error(state, message) do
+    execution = TurnExecution.report_error(state.turn_execution, message)
+
+    state =
+      state
+      |> notify(:error, message)
+      |> announce_turn_status(execution)
+      |> append_error_message_once(message)
+      |> notify_messages_changed()
+      |> broadcast({:error, message})
+
+    %{state | turn_execution: execution}
+  end
+
+  @spec mark_provider_failed(state(), String.t()) :: state()
+  defp mark_provider_failed(state, message) do
+    source_execution = state.turn_execution
+    execution = TurnExecution.fail(source_execution, message)
+
+    state =
+      state
+      |> reject_execution_approval(source_execution)
+      |> abort_active_tools(source_execution, true)
+      |> announce_turn_status(execution)
+
+    %{state | turn_execution: execution}
+  end
+
+  @spec restore_turn_execution(state(), TurnExecution.t()) :: state()
+  defp restore_turn_execution(state, execution) do
+    source_execution = state.turn_execution
+
+    state =
+      if TurnExecution.active?(source_execution) do
+        state
+        |> reject_execution_approval(source_execution)
+        |> abort_provider()
+        |> abort_active_tools(source_execution, true)
+      else
+        state
+      end
+
+    %{state | turn_execution: execution}
+  end
+
+  @spec announce_turn_status(state(), TurnExecution.t()) :: state()
+  defp announce_turn_status(state, execution) do
+    case TurnExecution.mode(execution) do
+      :exec ->
+        state
+        |> broadcast({:status_changed, TurnExecution.status(execution)})
+        |> maybe_schedule_idle_gc(execution)
+
+      :plan ->
+        if TurnExecution.reclaimable?(execution) do
+          maybe_schedule_idle_gc(state, execution)
+        else
+          state
+        end
+    end
+  end
+
+  @spec reject_execution_approval(state(), TurnExecution.t()) :: state()
+  defp reject_execution_approval(state, execution) do
+    reject_pending_approval(TurnExecution.pending_approval(execution))
+    state
+  end
+
+  @spec send_approval_response(approval_resolution()) :: approval_resolution()
+  defp send_approval_response({_state, approval, decision} = resolution) do
+    send_approval_response(approval, decision)
+    resolution
+  end
+
+  @spec send_approval_response(ToolApproval.t(), approval_decision()) :: :ok
+  defp send_approval_response(approval, decision) do
+    send(
+      approval.reply_to,
+      {:tool_approval_response, approval.tool_call_id, execution_decision(decision)}
+    )
+
+    :ok
+  end
+
+  @spec record_approval_resolution(approval_resolution()) :: approval_resolution()
+  defp record_approval_resolution({state, approval, decision} = resolution) do
+    record_critical_event(state, :approval_resolved, %{
+      approval_id: approval.tool_call_id,
+      tool_call_id: approval.tool_call_id,
+      name: approval.name,
+      decision: decision
+    })
+
+    resolution
+  end
+
+  @spec maybe_append_approval_rejection(approval_resolution()) :: state()
+  defp maybe_append_approval_rejection({state, approval, :reject}) do
+    append_system_message(
+      state,
+      "Denied #{approval.name}: the tool was refused and the agent was notified.",
+      :info
+    )
+  end
+
+  defp maybe_append_approval_rejection({state, _approval, _decision}), do: state
+
+  @spec mark_tool_auto_approved(state(), Event.ToolApproval.t(), trust_scope()) :: state()
+  defp mark_tool_auto_approved(state, event, scope) do
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
+        ToolCall.set_auto_approved_scope(tool_call, scope)
+      end)
+
+    %{state | transcript: transcript}
+    |> broadcast({:tool_auto_approved, event.tool_call_id, event.name, scope})
+    |> notify_messages_changed()
+  end
+
+  @spec append_tool_start(state(), Event.ToolStart.t(), trust_scope() | nil) :: state()
+  defp append_tool_start(state, event, scope) do
+    tool_call =
+      event.tool_call_id
+      |> ToolCall.new(event.name, event.args)
+      |> ToolCall.set_auto_approved_scope(scope)
+
+    state = append_msg(state, {:tool_call, tool_call})
+
+    record_critical_event(state, :tool_call_started, %{
+      tool_call_id: event.tool_call_id,
+      name: event.name,
+      args: event.args
+    })
+
+    state
+    |> broadcast({:tool_started, event.name, event.args})
+    |> notify_messages_changed()
+  end
+
+  @spec finish_tool(state(), Event.ToolEnd.t()) :: state()
+  defp finish_tool(state, event) do
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
+        if event.is_error do
+          ToolCall.error(tool_call, event.result)
+        else
+          ToolCall.complete(tool_call, event.result)
+        end
+      end)
+
+    state = %{state | transcript: transcript}
+    status = if event.is_error, do: :error, else: :done
+
+    record_critical_event(state, :tool_call_finished, %{
+      tool_call_id: event.tool_call_id,
+      name: event.name,
+      result: event.result,
+      status: status
+    })
+
+    state
+    |> broadcast({:tool_ended, event.name, event.result, status})
+    |> notify_messages_changed()
+  end
+
+  @spec append_steering_messages(state(), [TurnExecution.content()]) :: state()
+  defp append_steering_messages(state, []), do: state
+
+  defp append_steering_messages(state, contents) do
+    messages =
+      Enum.map(contents, fn content ->
+        {user_message, _send_content} = build_user_message(content)
+        user_message
+      end)
+
+    Enum.each(messages, &record_user_message_event(state, &1))
+
+    state
+    |> append_msgs(messages)
+    |> notify_messages_changed()
+  end
+
+  @spec abort_provider(state()) :: state()
+  defp abort_provider(state) do
+    case ProviderLifecycle.pid(state.provider) do
+      pid when is_pid(pid) -> state.provider.module.abort(pid)
+      nil -> :ok
+    end
+
+    state
+  end
+
+  @spec abort_active_tools(state(), TurnExecution.t(), boolean()) :: state()
+  defp abort_active_tools(state, execution, notify?) do
+    case TurnExecution.active_tools(execution) do
+      [] ->
+        state
+
+      [_tool | _rest] ->
+        transcript =
+          Transcript.transform_messages(state.transcript, fn
+            {:tool_call, %ToolCall{} = tool_call} -> {:tool_call, ToolCall.abort(tool_call)}
+            other -> other
+          end)
+
+        state = %{state | transcript: transcript}
+        if notify?, do: notify_messages_changed(state), else: state
+    end
+  end
+
+  @spec apply_turn_usage(state(), Event.token_usage() | nil) :: state()
+  defp apply_turn_usage(state, nil), do: notify_messages_changed(state)
+
+  defp apply_turn_usage(state, usage) do
+    log_turn_usage(usage, state)
+
+    state
+    |> Map.update!(:transcript, &Transcript.add_usage(&1, usage))
+    |> append_msg(Message.usage(usage))
+    |> notify_messages_changed()
+  end
+
+  @spec send_queued_turn(state(), [TurnExecution.content(), ...], TurnExecution.t()) :: state()
+  defp send_queued_turn(state, contents, execution) do
+    combined = combine_queue_entries_to_text(contents)
+    {user_message, send_content} = build_user_message(combined)
+
+    state =
+      state
+      |> append_msg(user_message)
+      |> record_user_message_event(user_message)
+      |> notify_messages_changed()
+
+    case state.provider.module.send_prompt(ProviderLifecycle.pid(state.provider), send_content) do
+      :ok -> %{state | turn_execution: execution}
+      {:error, _reason} -> queued_send_failed(state, execution)
+    end
+  end
+
   @spec handle_approval_response(approval_decision(), state()) ::
           {:reply, :ok | {:error, :no_pending_approval}, state()}
   defp handle_approval_response(decision, state),
@@ -1552,46 +1803,41 @@ defmodule MingaAgent.Session do
 
   @spec handle_approval_response(String.t() | nil, approval_decision(), state()) ::
           {:reply, :ok | {:error, :approval_not_found | :no_pending_approval}, state()}
-  defp handle_approval_response(_approval_id, _decision, %{pending_approval: nil} = state) do
-    Minga.Log.warning(:agent, "[Session] respond_to_approval called with no pending approval")
-    {:reply, {:error, :no_pending_approval}, state}
+  defp handle_approval_response(approval_id, decision, state) do
+    case TurnExecution.resolve_approval(state.turn_execution, approval_id, decision) do
+      {:ok, approval, execution} ->
+        state =
+          {state, approval, decision}
+          |> send_approval_response()
+          |> record_approval_resolution()
+          |> maybe_append_approval_rejection()
+          |> notify_messages_changed()
+          |> broadcast({:approval_resolved, decision})
+
+        {:reply, :ok, %{state | turn_execution: execution}}
+
+      {:error, :approval_not_found} ->
+        {:reply, {:error, :approval_not_found}, state}
+
+      {:error, :no_pending_approval} ->
+        Minga.Log.warning(:agent, "[Session] respond_to_approval called with no pending approval")
+        {:reply, {:error, :no_pending_approval}, state}
+    end
   end
 
-  defp handle_approval_response(approval_id, _decision, %{pending_approval: approval} = state)
-       when is_binary(approval_id) and approval.tool_call_id != approval_id do
-    {:reply, {:error, :approval_not_found}, state}
-  end
-
-  defp handle_approval_response(_approval_id, decision, state) do
-    %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
-    state = maybe_set_trust_for_decision(state, approval, decision)
-
-    # Send the execution decision directly to the blocked Task process.
-    send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
-
-    record_critical_event(state, :approval_resolved, %{
-      approval_id: tool_call_id,
-      tool_call_id: tool_call_id,
-      name: approval.name,
-      decision: decision
-    })
-
-    state = maybe_record_rejection(state, approval, decision)
-    state = %{state | pending_approval: nil}
-    state = notify_messages_changed(state)
-    broadcast(state, {:approval_resolved, decision})
-    {:reply, :ok, state}
-  end
-
-  @spec handle_send_prompt(String.t() | [ReqLLM.Message.ContentPart.t()], state()) ::
-          {:reply, :ok | {:queued, :steering} | {:error, term()}, state()}
-  defp handle_send_prompt(_content, %{credentials_configured: false} = state) do
+  @spec handle_prompt(
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          TurnExecution.prompt_kind(),
+          state()
+        ) :: {:reply, :ok | {:queued, TurnExecution.prompt_kind()} | {:error, term()}, state()}
+  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state) do
     # No usable provider yet. Refuse locally so callers can preserve the draft instead of clearing it.
     {:reply, {:error, :credentials_not_configured}, state}
   end
 
-  defp handle_send_prompt(
+  defp handle_prompt(
          content,
+         kind,
          %{provider: provider} = state
        )
        when ProviderLifecycle.is_detached(provider) do
@@ -1599,43 +1845,46 @@ defmodule MingaAgent.Session do
 
     case ProviderLifecycle.pid(state.provider) do
       nil -> {:reply, {:error, :provider_not_ready}, state}
-      _ -> handle_send_prompt(content, state)
+      _ -> handle_prompt(content, kind, state)
     end
   end
 
-  defp handle_send_prompt(content, %{status: status} = state)
-       when status in [:thinking, :tool_executing] do
-    # Agent is busy: queue the message as a steering prompt. It will be injected
-    # into the agent's context between tool calls.
-    state = %{state | steering_queue: Enum.concat(state.steering_queue, [content])}
-    broadcast(state, {:prompt_queued, content, :steering})
-    {:reply, {:queued, :steering}, state}
+  defp handle_prompt(content, kind, state) do
+    case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
+      {:queued, execution} ->
+        state = broadcast(state, {:prompt_queued, content, kind})
+        {:reply, {:queued, kind}, %{state | turn_execution: execution}}
+
+      {:send_now, execution} ->
+        send_new_turn(content, state, execution)
+    end
   end
 
-  defp handle_send_prompt(content, state) do
+  @spec send_new_turn(
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          state(),
+          TurnExecution.t()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp send_new_turn(content, state, execution) do
     case dispatch_user_prompt_submit(state, content) do
       :ok ->
-        {user_msg, send_content} = build_user_message(content)
-        state = append_msg(state, user_msg)
-        record_user_message(state, user_msg)
-        state = notify_messages_changed(state)
-        state = %{state | turn_active?: true}
+        {user_message, send_content} = build_user_message(content)
+
+        state =
+          state
+          |> append_msg(user_message)
+          |> record_user_message_event(user_message)
+          |> notify_messages_changed()
 
         case state.provider.module.send_prompt(
                ProviderLifecycle.pid(state.provider),
                send_content
              ) do
           :ok ->
-            {:reply, :ok, state}
+            {:reply, :ok, %{state | turn_execution: execution}}
 
-          {:error, _} = err ->
-            state =
-              state
-              |> cancel_idle_gc_timer()
-              |> Map.put(:turn_active?, false)
-              |> maybe_schedule_idle_gc()
-
-            {:reply, err, state}
+          {:error, _reason} = error ->
+            {:reply, error, announce_turn_status(state, state.turn_execution)}
         end
 
       {:error, %HookResult{} = result} ->
@@ -1647,201 +1896,120 @@ defmodule MingaAgent.Session do
 
   @spec handle_provider_event(Event.t(), state()) :: state()
   defp handle_provider_event(%Event.AgentStart{}, state) do
-    state = %{state | pending_approval: nil, turn_active?: true}
-    set_working_status(state, :thinking)
-  end
+    case TurnExecution.provider_started(state.turn_execution) do
+      {:ok, execution} ->
+        state = announce_turn_status(state, execution)
+        %{state | turn_execution: execution}
 
-  defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
-    state = %{state | turn_active?: false}
-    notify(state, :complete, completion_notification(state))
-
-    # Collapse thinking blocks now that the turn is complete.
-    state = %{state | transcript: Transcript.collapse_thinking(state.transcript)}
-
-    state =
-      if usage do
-        log_turn_usage(usage, state)
-
-        state = %{state | transcript: Transcript.add_usage(state.transcript, usage)}
-
+      {:error, :invalid_phase} ->
         state
-        |> append_msg(Message.usage(usage))
-        |> notify_messages_changed()
-      else
-        notify_messages_changed(state)
-      end
-
-    dispatch_stop(state)
-    state = clear_turn_trust(state)
-
-    # Collect pending messages from both queues. Steering messages that arrived
-    # after the last tool call (or just before AgentEnd) would otherwise be
-    # orphaned because dequeue_steering is only called between tool calls during
-    # an active agent loop. Merge them with follow-ups so nothing gets lost.
-    all_pending = state.steering_queue ++ state.follow_up_queue
-
-    case all_pending do
-      [] ->
-        set_idle_or_plan(state)
-
-      pending ->
-        # Auto-send queued messages as a new turn. Combine all pending
-        # messages into a single prompt so they arrive as one user message.
-        combined = combine_queue_entries_to_text(pending)
-        {user_msg, send_content} = build_user_message(combined)
-
-        state = %{state | steering_queue: [], follow_up_queue: []}
-        state = append_msg(state, user_msg)
-        record_user_message(state, user_msg)
-        state = notify_messages_changed(state)
-
-        case state.provider.module.send_prompt(
-               ProviderLifecycle.pid(state.provider),
-               send_content
-             ) do
-          :ok ->
-            # AgentStart event from the provider will transition us to :thinking.
-            state
-
-          {:error, _reason} ->
-            set_idle_or_plan(state)
-        end
     end
   end
 
+  defp handle_provider_event(%Event.AgentEnd{usage: usage}, state),
+    do: complete_provider_turn(state, usage)
+
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
-    transcript = Transcript.append_stream_tail(state.transcript, :assistant, [delta])
-    state = %{state | transcript: transcript}
-    broadcast(state, {:text_delta, delta})
     state
+    |> Map.update!(:transcript, &Transcript.append_stream_tail(&1, :assistant, [delta]))
+    |> broadcast({:text_delta, delta})
   end
 
   defp handle_provider_event(%Event.ThinkingDelta{delta: delta}, state) do
-    transcript = Transcript.append_stream_tail(state.transcript, :thinking, [delta])
-    state = %{state | transcript: transcript}
-    broadcast(state, {:thinking_delta, delta})
     state
+    |> Map.update!(:transcript, &Transcript.append_stream_tail(&1, :thinking, [delta]))
+    |> broadcast({:thinking_delta, delta})
   end
 
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
-    {scope, pending_auto_approvals} = Map.pop(state.pending_auto_approvals, event.tool_call_id)
+    case TurnExecution.tool_started(state.turn_execution, event) do
+      {:ok, scope, execution} ->
+        state =
+          state
+          |> announce_turn_status(execution)
+          |> append_tool_start(event, scope)
 
-    msg =
-      event.tool_call_id
-      |> ToolCall.new(event.name, event.args)
-      |> ToolCall.set_auto_approved_scope(scope)
-      |> then(&{:tool_call, &1})
+        %{state | turn_execution: execution}
 
-    state = %{state | pending_auto_approvals: pending_auto_approvals}
-    state = append_msg(state, msg)
-    state = track_active_tool_start(state, event.tool_call_id, event.name)
-    state = set_working_status(state, :tool_executing)
-
-    record_critical_event(state, :tool_call_started, %{
-      tool_call_id: event.tool_call_id,
-      name: event.name,
-      args: event.args
-    })
-
-    broadcast(state, {:tool_started, event.name, event.args})
-    notify_messages_changed(state)
+      {:error, _reason} ->
+        state
+    end
   end
 
   defp handle_provider_event(%Event.ToolFileChanged{} = event, state) do
-    tool_name = tool_name_for_call(state.active_tool_calls, event.tool_call_id)
+    tool_name =
+      case TurnExecution.tool_name(state.turn_execution, event.tool_call_id) do
+        {:ok, name} -> name
+        {:error, :tool_not_active} -> "unknown"
+      end
 
-    broadcast(
-      state,
-      {:file_changed, event.path, event.before_content, event.after_content, event.tool_call_id,
-       tool_name}
-    )
-
-    state = record_tool_file_preview(state, event)
-    notify_messages_changed(state)
+    handle_tool_file_changed(event, tool_name, state)
   end
 
   defp handle_provider_event(%Event.SystemMessage{} = event, state) do
-    state = append_system_message(state, event.message, event.level)
-    notify_messages_changed(state)
+    state
+    |> append_system_message(event.message, event.level)
+    |> notify_messages_changed()
   end
 
   defp handle_provider_event(%Event.TodoPlan{todos: todos}, state) do
     broadcast(state, {:todo_plan_updated, todos})
-    state
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
-    case trusted_scope_for_approval(state.trust_levels, event) do
-      nil ->
-        request_tool_approval(event, state)
-
-      scope ->
-        auto_approve_tool(event, state, scope)
+    case TurnExecution.trusted_scope(state.turn_execution, event) do
+      nil -> request_tool_approval(event, state)
+      scope -> auto_approve_tool(event, state, scope)
     end
   end
 
   defp handle_provider_event(%Event.ToolUpdate{} = event, state) do
-    transcript =
-      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
-        ToolCall.update_partial(tool_call, event.partial_result)
-      end)
-
-    state = %{state | transcript: transcript}
-    broadcast(state, {:tool_update, event.tool_call_id, event.name, event.partial_result})
-    state
+    handle_tool_update(event, state)
   end
 
   defp handle_provider_event(%Event.ToolEnd{} = event, state) do
-    transcript =
-      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
-        if event.is_error do
-          ToolCall.error(tool_call, event.result)
-        else
-          ToolCall.complete(tool_call, event.result)
-        end
-      end)
+    case TurnExecution.tool_completed(state.turn_execution, event) do
+      {:ok, execution} ->
+        state = finish_tool(state, event)
+        %{state | turn_execution: execution}
 
-    state = %{
-      state
-      | transcript: transcript,
-        pending_auto_approvals: Map.delete(state.pending_auto_approvals, event.tool_call_id)
-    }
-
-    state = track_active_tool_end(state, event.tool_call_id)
-    status = if event.is_error, do: :error, else: :done
-
-    record_critical_event(state, :tool_call_finished, %{
-      tool_call_id: event.tool_call_id,
-      name: event.name,
-      result: event.result,
-      status: status
-    })
-
-    broadcast(state, {:tool_ended, event.name, event.result, status})
-    notify_messages_changed(state)
+      {:error, :tool_not_active} ->
+        state
+    end
   end
 
   defp handle_provider_event(%Event.ContextUsage{} = event, state) do
     broadcast(state, {:context_usage, event.estimated_tokens, event.context_limit})
-    state
   end
 
   defp handle_provider_event(%Event.TurnLimitReached{current: current, limit: limit}, state) do
     broadcast(state, {:turn_limit_reached, current, limit})
-    state
   end
 
   defp handle_provider_event(%Event.Error{} = event, state) do
-    # Show one human-readable line in the transcript. The raw error is already
-    # logged to the Messages panel by the provider, so we don't repeat it here.
-    friendly = humanize_error(event, state)
-    notify(state, :error, friendly)
-    state = set_error_status(state)
-    state = %{state | error_message: friendly}
-    state = append_error_message_once(state, friendly)
-    state = notify_messages_changed(state)
-    broadcast(state, {:error, friendly})
+    report_turn_error(state, humanize_error(event, state))
+  end
+
+  @spec handle_tool_file_changed(Event.ToolFileChanged.t(), String.t(), state()) :: state()
+  defp handle_tool_file_changed(event, tool_name, state) do
     state
+    |> broadcast(
+      {:file_changed, event.path, event.before_content, event.after_content, event.tool_call_id,
+       tool_name}
+    )
+    |> record_tool_file_preview(event)
+    |> notify_messages_changed()
+  end
+
+  @spec handle_tool_update(Event.ToolUpdate.t(), state()) :: state()
+  defp handle_tool_update(event, state) do
+    state
+    |> Map.update!(:transcript, fn transcript ->
+      Transcript.update_tool_call(transcript, event.tool_call_id, fn tool_call ->
+        ToolCall.update_partial(tool_call, event.partial_result)
+      end)
+    end)
+    |> broadcast({:tool_update, event.tool_call_id, event.name, event.partial_result})
   end
 
   @spec append_error_message_once(state(), String.t()) :: state()
@@ -1859,46 +2027,45 @@ defmodule MingaAgent.Session do
 
   defp request_tool_approval(event, %{tool_approval_policy: {:reject, message}} = state) do
     send(event.reply_to, {:tool_approval_response, event.tool_call_id, {:reject, message}})
-
     broadcast(state, {:approval_rejected, event.tool_call_id, event.name, message})
-    state
   end
 
   defp request_tool_approval(event, state) do
-    notify(state, :approval, "Approval needed: #{event.name}")
-
     approval =
-      MingaAgent.ToolApproval.new(
+      ToolApproval.new(
         tool_call_id: event.tool_call_id,
         name: event.name,
         args: event.args,
         reply_to: event.reply_to
       )
 
-    state = %{state | pending_approval: approval}
-    broadcast(state, {:approval_pending, MingaAgent.ToolApproval.public(approval)})
-    state
+    case TurnExecution.request_approval(state.turn_execution, approval) do
+      {:accepted, execution} ->
+        state =
+          state
+          |> notify(:approval, "Approval needed: #{approval.name}")
+          |> broadcast({:approval_pending, ToolApproval.public(approval)})
+
+        %{state | turn_execution: execution}
+
+      :rejected ->
+        reject_pending_approval(approval)
+        state
+    end
   end
 
   @spec auto_approve_tool(Event.ToolApproval.t(), state(), trust_scope()) :: state()
   defp auto_approve_tool(event, state, scope) do
-    send(event.reply_to, {:tool_approval_response, event.tool_call_id, :approve})
+    case TurnExecution.auto_approve(state.turn_execution, event, scope) do
+      {:approved, approval, execution} ->
+        send_approval_response(approval, :approve)
+        state = mark_tool_auto_approved(state, event, scope)
+        %{state | turn_execution: execution}
 
-    pending_auto_approvals = Map.put(state.pending_auto_approvals, event.tool_call_id, scope)
-
-    transcript =
-      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
-        ToolCall.set_auto_approved_scope(tool_call, scope)
-      end)
-
-    state = %{
-      state
-      | transcript: transcript,
-        pending_auto_approvals: pending_auto_approvals
-    }
-
-    broadcast(state, {:tool_auto_approved, event.tool_call_id, event.name, scope})
-    notify_messages_changed(state)
+      {:rejected, approval} ->
+        reject_pending_approval(approval)
+        state
+    end
   end
 
   @spec completion_notification(state()) :: String.t()
@@ -1908,15 +2075,17 @@ defmodule MingaAgent.Session do
 
   defp completion_notification(_state), do: "Agent finished"
 
-  @spec notify(state(), atom(), String.t()) :: :ok
+  @spec notify(state(), atom(), String.t()) :: state()
   defp notify(%{notifier: {module, arg}} = state, trigger, message) when is_atom(module) do
     dispatch_notification(state, trigger, message)
     module.notify(trigger, message, arg)
+    state
   end
 
   defp notify(%{notifier: module} = state, trigger, message) when is_atom(module) do
     dispatch_notification(state, trigger, message)
     module.notify(trigger, message)
+    state
   end
 
   # ── Message list helpers ────────────────────────────────────────────────────
@@ -1941,78 +2110,9 @@ defmodule MingaAgent.Session do
     append_msg(state, msg)
   end
 
-  @spec maybe_set_trust_for_decision(state(), MingaAgent.ToolApproval.t(), approval_decision()) ::
-          state()
-  defp maybe_set_trust_for_decision(state, approval, :approve_session),
-    do: put_tool_trust(state, approval_trust_key(approval), :session)
-
-  defp maybe_set_trust_for_decision(state, approval, :approve_turn),
-    do: put_tool_trust(state, approval_trust_key(approval), :turn)
-
-  defp maybe_set_trust_for_decision(state, _approval, _decision), do: state
-
-  @spec put_tool_trust(state(), String.t(), trust_scope()) :: state()
-  defp put_tool_trust(state, name, scope) when is_binary(name) and scope in [:session, :turn] do
-    %{state | trust_levels: Map.put(state.trust_levels, name, scope)}
-  end
-
-  @spec trusted_scope_for_approval(%{String.t() => trust_scope()}, Event.ToolApproval.t()) ::
-          trust_scope() | nil
-  defp trusted_scope_for_approval(trust_levels, %Event.ToolApproval{} = event) do
-    Map.get(trust_levels, trust_key(event.name, event.args)) || Map.get(trust_levels, event.name)
-  end
-
-  @spec approval_trust_key(MingaAgent.ToolApproval.t()) :: String.t()
-  defp approval_trust_key(%MingaAgent.ToolApproval{name: name, args: args}) do
-    trust_key(name, args)
-  end
-
-  @spec trust_key(String.t(), map()) :: String.t()
-  defp trust_key("shell", args) when is_map(args), do: shell_trust_key(args)
-
-  defp trust_key("call_mcp_tool", args) when is_map(args),
-    do: hashed_trust_key("call_mcp_tool", args)
-
-  defp trust_key("list_mcp_tools", args) when is_map(args),
-    do: hashed_trust_key("list_mcp_tools", args)
-
-  defp trust_key("mcp_" <> _rest = name, args) when is_map(args), do: hashed_trust_key(name, args)
-  defp trust_key(name, _args), do: name
-
-  @spec shell_trust_key(map()) :: String.t()
-  defp shell_trust_key(args) do
-    string_args = Map.new(args, fn {key, value} -> {to_string(key), value} end)
-
-    case Map.get(string_args, "command") do
-      command when is_binary(command) -> "shell:#{command}"
-      _other -> hashed_trust_key("shell", args)
-    end
-  end
-
-  @spec hashed_trust_key(String.t(), map()) :: String.t()
-  defp hashed_trust_key(name, args) do
-    hash =
-      :sha256
-      |> :crypto.hash(:erlang.term_to_binary(args))
-      |> Base.encode16(case: :lower)
-
-    "#{name}:#{hash}"
-  end
-
   @spec execution_decision(approval_decision()) :: :approve | :reject
   defp execution_decision(:reject), do: :reject
   defp execution_decision(_decision), do: :approve
-
-  @spec maybe_record_rejection(state(), MingaAgent.ToolApproval.t(), atom()) :: state()
-  defp maybe_record_rejection(state, approval, :reject) do
-    append_system_message(
-      state,
-      "Denied #{approval.name}: the tool was refused and the agent was notified.",
-      :info
-    )
-  end
-
-  defp maybe_record_rejection(state, _approval, _decision), do: state
 
   @spec public_pending_approval(MingaAgent.ToolApproval.t() | nil) :: map() | nil
   defp public_pending_approval(nil), do: nil
@@ -2041,99 +2141,6 @@ defmodule MingaAgent.Session do
   defp reject_pending_approval(%{tool_call_id: tool_call_id, reply_to: reply_to}) do
     send(reply_to, {:tool_approval_response, tool_call_id, :reject})
     :ok
-  end
-
-  @spec set_status(state(), status()) :: state()
-  defp set_status(state, new_status) do
-    state = %{state | status: new_status}
-
-    state =
-      if new_status == :tool_executing do
-        state
-      else
-        clear_active_tool_tracking(state)
-      end
-
-    state = clear_turn_trust_for_status(state, new_status)
-    broadcast(state, {:status_changed, new_status})
-    maybe_schedule_idle_gc(state)
-  end
-
-  @spec clear_turn_trust_for_status(state(), status()) :: state()
-  defp clear_turn_trust_for_status(state, status) when status in [:idle, :error] do
-    clear_turn_trust(state)
-  end
-
-  defp clear_turn_trust_for_status(state, _status), do: state
-
-  @spec clear_turn_trust(state()) :: state()
-  defp clear_turn_trust(state) do
-    %{state | trust_levels: drop_turn_trust(state.trust_levels), pending_auto_approvals: %{}}
-  end
-
-  @spec drop_turn_trust(%{String.t() => trust_scope()}) :: %{String.t() => trust_scope()}
-  defp drop_turn_trust(trust_levels) do
-    Map.reject(trust_levels, fn {_name, scope} -> scope == :turn end)
-  end
-
-  @spec set_working_status(state(), :thinking | :tool_executing) :: state()
-  defp set_working_status(%{status: :plan} = state, _new_status), do: state
-  defp set_working_status(state, new_status), do: set_status(state, new_status)
-
-  @spec set_idle_or_plan(state()) :: state()
-  defp set_idle_or_plan(%{status: :plan} = state),
-    do: maybe_schedule_idle_gc(%{state | turn_active?: false})
-
-  defp set_idle_or_plan(state), do: set_status(%{state | turn_active?: false}, :idle)
-
-  @spec set_error_status(state()) :: state()
-  defp set_error_status(%{status: :plan} = state),
-    do: maybe_schedule_idle_gc(%{state | turn_active?: false})
-
-  defp set_error_status(state), do: set_status(%{state | turn_active?: false}, :error)
-
-  @spec track_active_tool_start(state(), String.t(), String.t()) :: state()
-  defp track_active_tool_start(state, tool_call_id, name) do
-    active_tool_calls = Enum.concat(state.active_tool_calls, [{tool_call_id, name}])
-
-    %{
-      state
-      | active_tool_calls: active_tool_calls,
-        active_tool_name: current_active_tool_name(active_tool_calls)
-    }
-  end
-
-  @spec track_active_tool_end(state(), String.t()) :: state()
-  defp track_active_tool_end(state, tool_call_id) do
-    active_tool_calls =
-      Enum.reject(state.active_tool_calls, fn {id, _name} -> id == tool_call_id end)
-
-    %{
-      state
-      | active_tool_calls: active_tool_calls,
-        active_tool_name: current_active_tool_name(active_tool_calls)
-    }
-  end
-
-  @spec clear_active_tool_tracking(state()) :: state()
-  defp clear_active_tool_tracking(state) do
-    %{state | active_tool_calls: [], active_tool_name: nil}
-  end
-
-  @spec current_active_tool_name([active_tool_call()]) :: String.t() | nil
-  defp current_active_tool_name([]), do: nil
-
-  defp current_active_tool_name(active_tool_calls) do
-    {_tool_call_id, name} = Enum.at(active_tool_calls, -1)
-    name
-  end
-
-  @spec tool_name_for_call([active_tool_call()], String.t()) :: String.t()
-  defp tool_name_for_call(active_tool_calls, tool_call_id) do
-    case Enum.find(active_tool_calls, fn {id, _name} -> id == tool_call_id end) do
-      {_id, name} -> name
-      nil -> "unknown"
-    end
   end
 
   @spec plan_mode_message() :: String.t()
@@ -2242,11 +2249,15 @@ defmodule MingaAgent.Session do
     })
   end
 
-  @spec maybe_schedule_idle_gc(map()) :: map()
-  defp maybe_schedule_idle_gc(state) do
+  @spec maybe_schedule_idle_gc(state()) :: state()
+  defp maybe_schedule_idle_gc(state),
+    do: maybe_schedule_idle_gc(state, state.turn_execution)
+
+  @spec maybe_schedule_idle_gc(state(), TurnExecution.t()) :: state()
+  defp maybe_schedule_idle_gc(state, execution) do
     schedule_idle_gc(
       state,
-      idle_gc_reclaimable?(state),
+      idle_gc_reclaimable?(state, execution),
       state.idle_gc_timer,
       state.idle_gc_timeout_ms
     )
@@ -2276,11 +2287,13 @@ defmodule MingaAgent.Session do
     %{state | idle_gc_timer: nil}
   end
 
-  @spec idle_gc_reclaimable?(map()) :: boolean()
-  defp idle_gc_reclaimable?(state) do
-    MapSet.size(state.subscribers) == 0 and state.status in [:idle, :plan, :error] and
-      state.pending_approval == nil and state.active_tool_calls == [] and not state.turn_active? and
-      state.steering_queue == [] and state.follow_up_queue == []
+  @spec idle_gc_reclaimable?(state()) :: boolean()
+  defp idle_gc_reclaimable?(state),
+    do: idle_gc_reclaimable?(state, state.turn_execution)
+
+  @spec idle_gc_reclaimable?(state(), TurnExecution.t()) :: boolean()
+  defp idle_gc_reclaimable?(state, execution) do
+    MapSet.size(state.subscribers) == 0 and TurnExecution.reclaimable?(execution)
   end
 
   @spec idle_gc_timeout_ms() :: non_neg_integer()
@@ -2294,7 +2307,7 @@ defmodule MingaAgent.Session do
 
   # ── Broadcasting ────────────────────────────────────────────────────────────
 
-  @spec broadcast(state(), term()) :: :ok
+  @spec broadcast(state(), term()) :: state()
   defp broadcast(state, event) do
     record_broadcast_event(state, event)
     session_pid = self()
@@ -2302,6 +2315,8 @@ defmodule MingaAgent.Session do
     Enum.each(state.subscribers, fn pid ->
       send(pid, {:agent_event, session_pid, event})
     end)
+
+    state
   end
 
   @spec notify_event_log_failure(state(), Failure.t()) :: :ok
@@ -2611,13 +2626,15 @@ defmodule MingaAgent.Session do
     {Message.user(text, attachments), parts}
   end
 
-  @spec record_user_message(state(), Message.t()) :: EventLog.admission_result()
-  defp record_user_message(state, {:user, text}) do
+  @spec record_user_message_event(state(), Message.t()) :: state()
+  defp record_user_message_event(state, {:user, text}) do
     record_critical_event(state, :user_message, %{text: text, attachments: []})
+    state
   end
 
-  defp record_user_message(state, {:user, text, attachments}) do
+  defp record_user_message_event(state, {:user, text, attachments}) do
     record_critical_event(state, :user_message, %{text: text, attachments: attachments})
+    state
   end
 
   @spec parse_size_kb(String.t()) :: non_neg_integer()
@@ -2631,10 +2648,10 @@ defmodule MingaAgent.Session do
   @doc false
   @spec notify_messages_changed(state()) :: state()
   defp notify_messages_changed(state) do
-    transcript = Transcript.touch(state.transcript, DateTime.utc_now())
-    state = %{state | transcript: transcript}
-    broadcast(state, :messages_changed)
-    schedule_save(state)
+    state
+    |> Map.update!(:transcript, &Transcript.touch(&1, DateTime.utc_now()))
+    |> broadcast(:messages_changed)
+    |> schedule_save()
   end
 
   @spec seed_provider_messages(state(), [Message.t()]) :: state()
@@ -2971,7 +2988,12 @@ defmodule MingaAgent.Session do
         provider_opts
       )
 
-    %{state | provider: lifecycle, error_message: nil}
+    state = %{state | provider: lifecycle}
+
+    case TurnExecution.recover(state.turn_execution) do
+      {:changed, execution} -> %{state | turn_execution: execution}
+      :unchanged -> state
+    end
   end
 
   @spec provider_restart_options(keyword()) :: keyword()
@@ -3063,8 +3085,8 @@ defmodule MingaAgent.Session do
         {:error, reason, state} ->
           state = report_provider_start_error(state, reason)
           state = maybe_schedule_provider_restart(state, reason)
-          broadcast(state, {:error, state.error_message})
-          {state, {:error, state.error_message}}
+          broadcast(state, {:error, TurnExecution.error(state.turn_execution)})
+          {state, {:error, TurnExecution.error(state.turn_execution)}}
       end
     else
       {state, :ok}
@@ -3090,33 +3112,31 @@ defmodule MingaAgent.Session do
   end
 
   @spec clear_provider_start_error(state()) :: state()
-  defp clear_provider_start_error(%{status: :error} = state),
-    do: %{state | status: :idle, error_message: nil}
-
-  defp clear_provider_start_error(state), do: %{state | error_message: nil}
+  defp clear_provider_start_error(state) do
+    case TurnExecution.recover(state.turn_execution) do
+      {:changed, execution} -> %{state | turn_execution: execution}
+      :unchanged -> state
+    end
+  end
 
   @spec report_provider_start_error(state(), term()) :: state()
   defp report_provider_start_error(state, reason) do
     Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
     {lifecycle, effects} = ProviderLifecycle.failure(state.provider, reason)
     state = install_provider_transition(state, lifecycle, effects)
-    state = %{state | error_message: format_error(reason)}
-    set_error_status(state)
+
+    mark_provider_failed(state, format_error(reason))
   end
 
   @spec handle_provider_death(state(), term()) :: state()
   defp handle_provider_death(state, reason) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
     {lifecycle, effects} = ProviderLifecycle.failure(state.provider, reason)
+    state = install_provider_transition(state, lifecycle, effects)
 
-    state =
-      state
-      |> install_provider_transition(lifecycle, effects)
-      |> Map.merge(%{error_message: "Agent provider crashed", turn_active?: false})
-      |> set_error_status()
-      |> maybe_schedule_provider_restart(reason)
-
-    broadcast(state, {:error, state.error_message})
+    state = mark_provider_failed(state, "Agent provider crashed")
+    state = maybe_schedule_provider_restart(state, reason)
+    broadcast(state, {:error, TurnExecution.error(state.turn_execution)})
     state
   end
 
@@ -3194,7 +3214,8 @@ defmodule MingaAgent.Session do
     message =
       "#{cause}. Retrying in #{seconds}s (attempt #{attempts}/#{max_attempts}). Press Ctrl-C to retry now, or run /clear to reset."
 
-    %{state | error_message: message}
+    {:ok, execution} = TurnExecution.update_failure(state.turn_execution, message)
+    %{state | turn_execution: execution}
   end
 
   @spec put_provider_restart_exhausted_error(state()) :: state()
@@ -3204,16 +3225,17 @@ defmodule MingaAgent.Session do
     message =
       "#{cause}. Automatic restart stopped. Press Ctrl-C to retry now, or run /clear to reset."
 
-    %{state | error_message: message}
+    {:ok, execution} = TurnExecution.update_failure(state.turn_execution, message)
+    %{state | turn_execution: execution}
   end
 
   @spec provider_restart_cause(state()) :: String.t()
-  defp provider_restart_cause(%{error_message: message})
-       when is_binary(message) and message != "" do
-    String.trim_trailing(message, ".")
+  defp provider_restart_cause(state) do
+    case TurnExecution.error(state.turn_execution) do
+      message when is_binary(message) and message != "" -> String.trim_trailing(message, ".")
+      nil -> "Agent provider unavailable"
+    end
   end
-
-  defp provider_restart_cause(_state), do: "Agent provider unavailable"
 
   # Shows an onboarding message when no credentials are configured and the
   # native provider is active. Only fires once per session. Relies on the
@@ -3582,6 +3604,9 @@ defmodule MingaAgent.Session do
             loaded_at
           )
 
+        execution = TurnExecution.restore(state.turn_execution)
+        state = restore_turn_execution(state, execution)
+
         {persistence, timer_to_cancel} = Persistence.restored(state.persistence)
 
         cancel_runtime_timer(timer_to_cancel)
@@ -3592,17 +3617,8 @@ defmodule MingaAgent.Session do
             transcript: transcript,
             persistence: persistence,
             provider: lifecycle,
-            status: :idle,
-            error_message: nil,
-            pending_approval: nil,
-            active_tool_calls: [],
-            active_tool_name: nil,
-            created_at: loaded_at,
-            steering_queue: [],
-            follow_up_queue: [],
-            boundaries: %{},
-            trust_levels: %{},
-            pending_auto_approvals: %{}
+            turn_execution: execution,
+            created_at: loaded_at
         }
 
         apply_loaded_model_to_provider(state)
@@ -3776,7 +3792,7 @@ defmodule MingaAgent.Session do
   def terminate(reason, state) do
     record_critical_event(state, :session_stopped, %{
       reason: inspect(reason),
-      status: state.status
+      status: TurnExecution.status(state.turn_execution)
     })
 
     dispatch_session_end(state, reason)
@@ -3829,7 +3845,8 @@ defmodule MingaAgent.Session do
   defp dispatch_session_end(%{hooks_enabled?: false}, _reason), do: :ok
 
   defp dispatch_session_end(state, reason) do
-    payload = SessionEndPayload.new(state.session_id, reason, state.status)
+    payload =
+      SessionEndPayload.new(state.session_id, reason, TurnExecution.status(state.turn_execution))
 
     HookDispatcher.session_end(
       AgentConfig.resolve().agent_hooks,
@@ -3842,17 +3859,22 @@ defmodule MingaAgent.Session do
       Minga.Log.warning(:agent, "SessionEnd hook dispatch failed: #{inspect(caught)}")
   end
 
-  @spec dispatch_stop(state()) :: :ok
-  defp dispatch_stop(%{hooks_enabled?: false}), do: :ok
+  @spec dispatch_stop(state()) :: state()
+  defp dispatch_stop(%{hooks_enabled?: false} = state), do: state
 
   defp dispatch_stop(state) do
     last_message = extract_last_assistant_text(Transcript.messages(state.transcript))
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
     HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
+    state
   rescue
-    e -> Minga.Log.warning(:agent, "Stop hook dispatch failed: #{Exception.message(e)}")
+    e ->
+      Minga.Log.warning(:agent, "Stop hook dispatch failed: #{Exception.message(e)}")
+      state
   catch
-    _, reason -> Minga.Log.warning(:agent, "Stop hook dispatch failed: #{inspect(reason)}")
+    _, reason ->
+      Minga.Log.warning(:agent, "Stop hook dispatch failed: #{inspect(reason)}")
+      state
   end
 
   @spec dispatch_notification(state(), atom(), String.t()) :: :ok

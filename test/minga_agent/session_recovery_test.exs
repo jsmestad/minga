@@ -257,6 +257,7 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert_receive {:flaky_start_attempt, 1}, 1_000
     assert_receive {:flaky_start_attempt, 2}, 1_000
     assert_receive {:flaky_provider_started, provider}, 1_000
+    await_provider_startup(session)
     assert Session.get_provider(session) == provider
     assert Session.status(session) == :idle
   end

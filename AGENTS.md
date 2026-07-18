@@ -328,6 +328,47 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
   5. **Never build a "safe client" wrapper module** that mirrors another module's API with nil-handling and exit-catching added. That's just indirection. The monitor is the real fix; the wrapper hides the problem behind a layer that every caller must remember to use.
 - `mix compile --warnings-as-errors` must pass clean
 
+### Tagged state and transition APIs
+
+Use tagged values to make valid lifecycle states and transitions explicit:
+
+- **Dispatch on tagged values directly.** Public transition functions should pattern-match valid source tags in their own clauses. Do not derive `active?`, `empty?`, or another boolean only to forward into a same-named private function with one extra argument. Projection predicates are for callers, not internal transition dispatch.
+- **Repeated unwrap-update-rewrap code is a representation smell.** Mutually exclusive facts belong in sum types; orthogonal facts belong together in one product. If several transitions extract nested tagged data and reconstruct it afterward, revise the tagged shape before adding helpers.
+- **Use keyed collection primitives for keyed data.** For lists of fixed tuples, prefer `List.keyfind/3`, `List.keymember?/3`, and `List.keytake/3` over a query followed by another `Enum` traversal.
+- **Keep lifecycle effects in operation-named workflows.** Pure transitions return the next owned value or a named domain outcome. The owning process performs external work in the corresponding workflow and installs the returned value afterward. Do not introduce generic effect lists or universal effect interpreters, and do not let effect helpers invoke transitions or choose the next owned value. Return fallible work as an explicit orchestration outcome so the caller can apply the appropriate success or failure transition.
+- **Pipe the complete workflow context.** When adjacent steps consume the same owned state plus the same operation data, make one fixed tuple or struct the pipe subject. Each step returns that context, with any owned-state update applied, until the last step that needs the extra data returns the plain owned state. For example, an approval workflow should thread `{state, approval, decision}` through response delivery and event recording, then return `state` after the final approval-specific transcript update so ordinary state transforms can continue.
+- **Fix pipeline contracts instead of escaping the pipeline.** Do not use `Kernel.tap/2` or `Kernel.then/2` to force side effects or arbitrary expressions into a state workflow. Change the participating helpers to accept and return the workflow context they actually share. Do not replace the pipe with a one-off `apply_*`, `handle_*`, or `process_*` wrapper that merely hides the same procedural sequence.
+
+The intended workflow-context shape is:
+
+```elixir
+@typep approval_resolution :: {state(), ToolApproval.t(), approval_decision()}
+
+state =
+  {state, approval, decision}
+  |> send_approval_response()
+  |> record_approval_resolution()
+  |> maybe_append_approval_rejection()
+  |> notify_messages_changed()
+  |> broadcast({:approval_resolved, decision})
+
+{:reply, :ok, %{state | turn_execution: execution}}
+
+defp send_approval_response({_state, approval, decision} = resolution) do
+  send(approval.reply_to, {:tool_approval_response, approval.tool_call_id, decision})
+  resolution
+end
+
+defp maybe_append_approval_rejection({state, approval, :reject}) do
+  append_system_message(state, "Denied #{approval.name}", :info)
+end
+
+defp maybe_append_approval_rejection({state, _approval, _decision}), do: state
+```
+
+`send_approval_response/1` and `record_approval_resolution/1` return the complete tuple because later steps still need all three values. `maybe_append_approval_rejection/1` is the last approval-specific step, so it returns only `state`; the rest of the pipeline is an ordinary state workflow. Once that workflow has collapsed to plain state, install a separately calculated owned value explicitly at the orchestration boundary. Do not add a wrapper whose only purpose is to keep the update inside the pipe.
+- **Table-test transitions across every tag.** Every public transition should cover each valid source tag, including rejected states. A newly added tag must fail visibly in focused tests instead of inheriting a boolean fallback.
+
 ### Module-Level Type Aliases
 
 Define `@type` aliases at the top of any module where a type appears in 3+ specs. This turns noisy specs into readable ones:
