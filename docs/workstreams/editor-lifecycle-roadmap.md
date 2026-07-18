@@ -1132,14 +1132,79 @@ Consumers are the picker renderer and subsequent selection/action dispatch, both
 
 ### W006: Diagnostics picker uses current context
 
-- **Status:** CANDIDATE
+- **Status:** ACTIVE
 - **Audit ID:** L12
+- **Roadmap unit:** W006, Diagnostics picker uses current context
 - **Ponytail verdict:** `ACCEPT/direct`
-- **Candidate outcome:** Both registered diagnostics picker commands return diagnostics from the current `Picker.Context` instead of falling through to an empty result.
-- **Existing direction:** Match the existing context shape and leave selection callbacks on full Editor state. Do not add another context adapter, source behaviour, or diagnostics projection.
-- **Readiness gap:** A fresh planner must verify the current context fields, both command producers, exact diagnostic item shape, empty-state behavior, and the cheapest command-level regression test.
-- **Allowed concepts before planning:** None.
-- **Completion evidence:** Pending.
+- **Planning profile:** Controller promotion from current source with GPT-5.5 `medium`; no delegated planner
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `a8b2db8b93162810801f20055126a6e666edbe30`
+- **Freshness basis:** `HEAD`, `main`, and `origin/main` resolved to the freshness SHA. L12 remains reproducible: the diagnostics source matches full Editor state while `PickerUI.open/3` passes `MingaEditor.UI.Picker.Context`, so the fallback returns no items.
+
+#### Observable outcome
+
+Every registered diagnostics picker name opens the current buffer's diagnostics from `Picker.Context`; populated diagnostics retain severity, byte position, message, and source in the existing item shape, while a current buffer with no diagnostics preserves the existing no-op command behavior.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.UI.Picker.Context` owns the source-facing projection and exposes `%Context{buffers: %Buffers{active: pid}}`. `MingaEditor.UI.Picker.Sources.Diagnostics` owns conversion to `%Picker.Item{id: {line, byte_col}, label: "SEVERITY line:col  message (source)"}`. Only `candidates/1` changes to consume `Context`; `on_select/2` must continue to receive full Editor state and move the active buffer.
+
+#### Exact files, symbols, producers, and consumers
+
+Production:
+
+- `lib/minga_editor/ui/picker/sources/diagnostics.ex`: `candidates/1`
+
+Tests:
+
+- `test/minga_editor/commands/diagnostics_picker_test.exs`: registered-command regression
+
+Command producers:
+
+- `MingaEditor.Commands.Diagnostics`: `:diagnostic_list`
+- `MingaEditor.Commands.Diagnostics`: `:diagnostic_picker`
+- `MingaEditor.Commands.UI`: `:diagnostics_list`
+
+The picker modal and `on_select/2` consume the returned items. The three command names are preserved; alias consolidation remains separate Ponytail finding S02.
+
+#### Locked implementation
+
+1. Alias `MingaEditor.UI.Picker.Context`.
+2. Change `candidates/1` to accept `%Context{buffers: %{active: buf}}` with the existing PID guard and retain the fallback.
+3. Keep path lookup, URI conversion, diagnostics lookup, position encoding, item formatting, selection, and cancellation unchanged.
+4. Add an async command-level test that executes all three registered command functions against one current file buffer and published diagnostic. Assert each picker contains exactly `%Item{id: {1, 2}, label: "W 2:3  unused variable (expert)"}`.
+5. Add the empty-store edge case through one registered command and assert the command leaves state unchanged.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not consolidate command aliases, alter command registration, add notices, change diagnostics storage, change position encoding, add context adapters, change selection callbacks, or modify picker rendering.
+- Do not add a process, protocol, behaviour, dependency, wrapper, projection, cache, or compatibility path.
+- **Maximum production delta:** +2 net lines in the one production file.
+- **Maximum test delta:** +80 net lines in the one new test file.
+- **Implementer questions:** None.
+
+#### Completion evidence
+
+- **PR URL:** https://github.com/jsmestad/minga/pull/2989
+- **Commit SHA:** `8b10467ee49d335b4967ea9383bd2a38d7a34bf6`
+- **Merge SHA:** Pending
+- **Focused tests:** `mix format lib/minga_editor/ui/picker/sources/diagnostics.ex test/minga_editor/commands/diagnostics_picker_test.exs` passed; `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs` passed, 2 tests, seed 316808
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,867 tests, 0 failures, 1 skipped, 578 excluded)
+- **Ponytail and Elixir verdict:** `LEAN`; no required findings. The direct `%Picker.Context{}` boundary is the smallest natural Elixir cutover, preserves full state for selection, and adds no adapter or parallel state shape.
+- **Bug-hunt verdict:** `PASS`; no correctness findings. All three registered names exercise the real context producer, the populated regression fails on `origin/main`, URI cleanup is isolated, and empty no-op behavior is preserved.
+- **Final reviewer verdict:** `PASS`, confidence 0.99 after targeted recheck; the only blocker was stale `BLOCKED` ledger status left by the resolved inline replan, corrected to `ACTIVE`
+- **Production lines added/removed:** 3 added / 2 removed, net +1
+- **Test lines added/removed:** 67 added / 0 removed, net +67
+- **Concepts added/removed:** No concepts added; diagnostics source now consumes the existing `Picker.Context` projection directly
+- **Findings resolved:** Populated diagnostics picker commands now read the active buffer from `Picker.Context`; an empty diagnostics store retains the existing no-op command behavior.
+- **Discoveries affecting later work:** The worker correctly returned `NEEDS_REPLAN` because the initial empty-store assertion contradicted `PickerUI.open_sync/4`. The controller narrowed that edge to preserve the existing no-op instead of widening picker ownership or W006 scope.
+- **Completion date:** Pending
 
 ## Goal completion
 
