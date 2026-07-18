@@ -2,70 +2,44 @@ defmodule MingaAgent.BranchTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Branch
+  alias MingaAgent.TranscriptEntry
 
-  defp make_messages(count) do
-    for i <- 1..count do
-      {:user, "message #{i}"}
-    end
+  @created_at ~U[2026-07-17 12:00:00Z]
+
+  test "stores an immutable snapshot of identified entries" do
+    entries = [
+      TranscriptEntry.new(7, {:user, "question"}),
+      TranscriptEntry.new(11, {:assistant, "answer"})
+    ]
+
+    branch = Branch.new("experiment", entries, @created_at)
+
+    assert branch.name == "experiment"
+    assert Branch.messages(branch) == [{:user, "question"}, {:assistant, "answer"}]
+    assert Branch.entry_ids(branch) == [7, 11]
+    assert branch.created_at == @created_at
   end
 
-  describe "new/2" do
-    test "creates a branch with name and messages" do
-      msgs = make_messages(3)
-      branch = Branch.new("test-branch", msgs)
+  test "lists branch names and message counts" do
+    branches = [
+      branch("first", [{1, {:user, "one"}}]),
+      branch("second", [{2, {:user, "two"}}, {3, {:assistant, "three"}}])
+    ]
 
-      assert branch.name == "test-branch"
-      assert Enum.count(branch.messages) == 3
-      assert %DateTime{} = branch.created_at
-    end
+    result = Branch.list(branches)
+
+    assert result =~ "first"
+    assert result =~ "1 messages"
+    assert result =~ "second"
+    assert result =~ "2 messages"
   end
 
-  describe "branch_at/4" do
-    test "saves current messages and truncates" do
-      msgs = make_messages(5)
-
-      {:ok, truncated, branches} = Branch.branch_at(msgs, 2, "b1", [])
-
-      assert Enum.count(truncated) == 3
-      assert Enum.count(branches) == 1
-      assert hd(branches).name == "b1"
-      assert Enum.count(hd(branches).messages) == 5
-    end
-
-    test "returns error for out-of-bounds index" do
-      msgs = make_messages(3)
-      {:error, reason} = Branch.branch_at(msgs, 10, "b1", [])
-      assert reason =~ "beyond"
-    end
-
-    test "appends to existing branches" do
-      msgs = make_messages(5)
-      existing = [Branch.new("b0", make_messages(2))]
-
-      {:ok, _truncated, branches} = Branch.branch_at(msgs, 1, "b1", existing)
-
-      assert Enum.count(branches) == 2
-      assert Enum.at(branches, 0).name == "b0"
-      assert Enum.at(branches, 1).name == "b1"
-    end
+  test "lists help when no branches exist" do
+    assert Branch.list([]) =~ "No branches"
   end
 
-  describe "list/1" do
-    test "shows help when empty" do
-      assert Branch.list([]) =~ "No branches"
-    end
-
-    test "shows branches with counts" do
-      branches = [
-        Branch.new("b1", make_messages(3)),
-        Branch.new("b2", make_messages(5))
-      ]
-
-      result = Branch.list(branches)
-      assert result =~ "b1"
-      assert result =~ "3 messages"
-      assert result =~ "b2"
-      assert result =~ "5 messages"
-    end
+  defp branch(name, pairs) do
+    entries = Enum.map(pairs, fn {id, message} -> TranscriptEntry.new(id, message) end)
+    Branch.new(name, entries, @created_at)
   end
 end

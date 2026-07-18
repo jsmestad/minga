@@ -266,8 +266,8 @@ defmodule MingaAgent.SessionLifecycleTest do
       send(session, :save_session)
       state = :sys.get_state(session)
 
-      assert state.save_timer != nil
-      assert state.save_retry_count == 1
+      assert state.persistence.timer != nil
+      assert state.persistence.retry_count == 1
       refute_receive {:DOWN, ^ref, :process, ^session, _}, 50
     end
 
