@@ -309,7 +309,7 @@ No Swift, Go, Zig, protocol generation, or snapshot validation is required becau
 
 #### Status and provenance
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L02
 - **Roadmap unit:** W002, Failed saves prevent shutdown
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -689,7 +689,7 @@ None. The implementer must return `NEEDS_REPLAN` rather than choose a different 
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2980
 - **Commit SHA:** `e3a981b04`
-- **Merge SHA:** Pending
+- **Merge SHA:** `ad4f7dc07`
 - **Focused tests:** `mix test.debug test/minga_editor/commands/buffer_management_save_quit_test.exs test/minga_editor/input/handler_test.exs test/minga_editor/input/router_test.exs test/minga/buffer/mtime_test.exs` — 47 passed
 - **Broad validation:** `make lint` passed; `ERL_FLAGS='+S 8:8' mix test.llm` passed — 58 doctests, 98 properties, 9,845 tests, 0 failures, 1 skipped, 574 excluded
 - **Ponytail verdict:** LEAN
@@ -701,7 +701,7 @@ None. The implementer must return `NEEDS_REPLAN` rather than choose a different 
 - **Concepts added/removed:** One private `save_result` contract added; removed implicit state-only save success, unconditional save-and-quit close/shutdown, ignored save errors, and catch-and-continue save-all exits
 - **Findings resolved:** L02, failed saves no longer close the active tab or shut down the editor
 - **Discoveries affecting later work:** Silent-failure review: PASS. Default-concurrency `mix test.llm` hit five unrelated MingaAgent timeout failures after 8,155 tests; untouched current `main` reproduced the known suite-instability class with an unrelated extension timeout and `erl_child_setup` EPIPE after 9,839 tests. The already-established reduced scheduler count produced a clean full pass. No later-work contract discovery; L03 remains out of scope and W003-W006 were not changed
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
 
 ### W003: Dirty buffers require explicit destruction
 
