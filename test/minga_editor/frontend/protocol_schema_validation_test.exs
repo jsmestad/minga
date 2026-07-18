@@ -553,11 +553,20 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       assert header == <<1::8, 2::16, 10::16, 100::16, 1::8, 5::16, "Files", 3::16>>
     end
 
-    test "query section encodes only the text string" do
-      <<_opcode, section_count::8, sections_binary::binary>> =
-        PickerEncoder.encode_command(%Picker{visible?: true, query: "hi", items: []})
+    test "query section encodes text and native edit correlation" do
+      model = %Picker{
+        visible?: true,
+        query: "hi",
+        query_generation: 7,
+        acknowledged_query_edit_seq: 11,
+        items: []
+      }
 
-      assert extract_section_payload(sections_binary, section_count, 0x02) == <<2::16, "hi">>
+      <<_opcode, section_count::8, sections_binary::binary>> =
+        PickerEncoder.encode_command(model)
+
+      assert extract_section_payload(sections_binary, section_count, 0x02) ==
+               <<2::16, "hi", 7::32, 11::32>>
     end
 
     test "action_menu section encodes the visible conditional tail" do

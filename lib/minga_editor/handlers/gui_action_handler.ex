@@ -836,6 +836,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> execute_registered_command(:git_pull_and_retry)
   end
 
+  defp dispatch_action(state, {:picker_query_changed, generation, edit_seq, query}) do
+    PickerUI.replace_query(state, generation, edit_seq, query)
+  end
+
   # ── GUI search toolbar actions ──────────────────────────────────────
 
   defp dispatch_action(

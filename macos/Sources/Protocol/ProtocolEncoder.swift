@@ -361,6 +361,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: picker_query_changed with native edit correlation and complete UTF-8 text.
+    func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_QUERY_CHANGED])
+        appendU32(&buf, generation)
+        appendU32(&buf, editSeq)
+        appendString16(&buf, text)
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: file_tree_click. Layout: opcode(1) + action_type(1) + index(2).
     func sendFileTreeClick(index: UInt16) {
         var buf = Data(count: 4)

@@ -330,7 +330,7 @@ defmodule MingaAgent.Providers.Native do
     subscriber = Keyword.fetch!(opts, :subscriber)
     model = Keyword.get(opts, :model, config.model)
     thinking_level = Keyword.get(opts, :thinking_level, "off")
-    project_root = Keyword.get(opts, :project_root) || detect_project_root()
+    project_root = Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
     project_view = Keyword.get(opts, :project_view)
 
     max_tokens = Keyword.get(opts, :max_tokens, config.max_tokens)

@@ -1182,6 +1182,14 @@ value = 0x5D
 # 0x5E is retired. The former open_file_wait action was replaced by the
 # authenticated macOS native IPC endpoint and must not be reused.
 
+# Native text fields send their complete picker query after each local edit.
+# The picker generation rejects edits from a closed/replaced picker, while the
+# edit sequence lets the BEAM acknowledge accepted text without stale frames
+# overwriting a newer native draft or its selection.
+[[gui_actions]]
+name = "picker_query_changed"
+value = 0x5F
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -2021,7 +2029,11 @@ fields = [
 opcode = "gui_picker"
 id = 0x02
 name = "query"
-fields = [{ name = "text", type = "string16" }]
+fields = [
+  { name = "text", type = "string16" },
+  { name = "generation", type = "u32", optional = true },
+  { name = "acknowledged_edit_seq", type = "u32", optional = true },
+]
 
 [[sections]]
 opcode = "gui_picker"

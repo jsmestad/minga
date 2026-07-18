@@ -96,7 +96,7 @@ public struct PreviewSegment: Identifiable {
 @MainActor
 @Observable
 public final class PickerState {
-    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil) {
+    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0) {
         self.visible = visible
         self.selectedIndex = selectedIndex
         self.previewSelectedIndex = previewSelectedIndex
@@ -105,6 +105,8 @@ public final class PickerState {
         self.markedCount = markedCount
         self.title = title
         self.query = query
+        self.queryGeneration = queryGeneration
+        self.acknowledgedQueryEditSeq = acknowledgedQueryEditSeq
         self.modePrefix = modePrefix
         self.hasPreview = hasPreview
         self.loadStatus = loadStatus
@@ -127,6 +129,8 @@ public final class PickerState {
     public var markedCount: Int = 0
     public var title: String = ""
     public var query: String = ""
+    public var queryGeneration: UInt32 = 0
+    public var acknowledgedQueryEditSeq: UInt32 = 0
     public var modePrefix: String = ""
     public var hasPreview: Bool = false
     public var loadStatus: Wire.PickerLoadStatus = .ready
@@ -134,7 +138,7 @@ public final class PickerState {
     public var previewLines: [PreviewLine] = []
     public var actionMenu: PickerActionMenu? = nil
 
-    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0) {
         self.visible = visible
         self.selectedIndex = Int(selectedIndex)
         self.previewSelectedIndex = nil
@@ -143,6 +147,8 @@ public final class PickerState {
         self.markedCount = Int(markedCount)
         self.title = title
         self.query = query
+        self.queryGeneration = queryGeneration
+        self.acknowledgedQueryEditSeq = acknowledgedQueryEditSeq
         self.modePrefix = modePrefix
         self.hasPreview = hasPreview
         self.loadStatus = loadStatus
@@ -203,6 +209,8 @@ public final class PickerState {
         items = []
         previewLines = []
         previewSelectedIndex = nil
+        queryGeneration = 0
+        acknowledgedQueryEditSeq = 0
         modePrefix = ""
         hasPreview = false
         loadStatus = .ready

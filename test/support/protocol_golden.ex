@@ -346,14 +346,23 @@ defmodule Minga.Test.ProtocolGolden do
       %{
         name: "picker_query_unicode",
         decoder: "GuiPickerQuery",
-        payload: section_body(picker_command(%{picker_model([]) | query: "λ-query"}), 0x02),
-        expected: %{text: "λ-query"}
+        payload:
+          section_body(
+            picker_command(%{
+              picker_model([])
+              | query: "λ-query",
+                query_generation: 7,
+                acknowledged_query_edit_seq: 11
+            }),
+            0x02
+          ),
+        expected: %{text: "λ-query", generation: 7, acknowledged_edit_seq: 11}
       },
       %{
         name: "picker_query_empty",
         decoder: "GuiPickerQuery",
         payload: section_body(picker_command(%{picker_model([]) | query: ""}), 0x02),
-        expected: %{text: ""}
+        expected: %{text: "", generation: 0, acknowledged_edit_seq: 0}
       }
     ]
   end

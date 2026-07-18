@@ -372,7 +372,7 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 | Section ID | Name | Content |
 |-----------|------|--------|
 | 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count |
-| 0x02 | Query | query string |
+| 0x02 | Query | query string, native editing generation, acknowledged native edit sequence |
 | 0x03 | Items | item_count + items (positional per item) |
 | 0x04 | ActionMenu | visible flag + selected + actions |
 | 0x05 | ModePrefix | mode prefix string |
@@ -389,7 +389,7 @@ Header section 0x01 payload:
   + has_preview(1) + title_len(2) + title(title_len) + marked_count(2)
 
 Query section 0x02 payload:
-  query_len(2) + query(query_len)
+  query_len(2) + query(query_len) + generation(4) + acknowledged_edit_seq(4)
 
 Items section 0x03 payload:
   item_count(2) + items...
@@ -419,6 +419,8 @@ filtered_count and total_count enable "X/Y" display in the search field.
 marked_count is authoritative across the full picker item set, including marked items hidden by the current filter or item limit.
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
 mode prefix badges show switched picker sources like command, buffer, or project search.
+
+Native frontends may optimistically edit the query with a platform text control so caret movement, selection, paste, cut, copy, undo, and IME composition remain local and immediate. Query semantics remain BEAM-owned. The frontend sends each complete field value with the current `generation` and a monotonically increasing edit sequence. The BEAM echoes the accepted sequence as `acknowledged_edit_seq`; the frontend must not replace a newer unacknowledged local value with an older echo. A new generation replaces all pending local edits.
 
 When hidden:
   opcode(1) + 0(1)
@@ -1232,6 +1234,7 @@ opcode(1) + action_type(1) + payload...
 | 0x5A | system_will_unmount | path_len(2) + path | A volume is about to unmount; BEAM protects buffers under the mount path |
 | 0x5C | chat_scrolled_away_from_bottom | (empty) | Reader left the transcript bottom; pauses BEAM-side auto-follow (pin flag only, no offset move) |
 | 0x5D | chat_returned_to_bottom | (empty) | Reader returned to the transcript bottom; re-pins auto-follow (pin flag only, no offset move) |
+| 0x5F | picker_query_changed | generation(4) + edit_seq(4) + query_len(2) + query | Replace the native picker's complete query when the edit belongs to the active generation and is newer than the last acknowledged edit |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

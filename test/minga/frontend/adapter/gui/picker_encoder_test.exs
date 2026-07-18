@@ -31,6 +31,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
         visible?: true,
         title: "Pick",
         query: "o",
+        query_generation: 7,
+        acknowledged_query_edit_seq: 11,
         selected_index: 0,
         filtered_count: 1,
         total_count: 2,
@@ -71,8 +73,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert title == "Pick"
       assert marked == 1
 
-      # Query (0x02): length-prefixed "o"
-      assert <<1::16, "o">> = sections[0x02]
+      # Query (0x02): text plus native-edit generation and acknowledgement.
+      assert <<1::16, "o", 7::32, 11::32>> = sections[0x02]
 
       # Items (0x03): one item, flags 3, icon color, match positions [0, 2]
       <<1::16, icon_color::24, flags::8, label_len::16, label::binary-size(label_len),

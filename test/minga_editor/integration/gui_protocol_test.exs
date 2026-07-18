@@ -644,6 +644,8 @@ defmodule Minga.Integration.GUIProtocolTest do
         visible?: true,
         title: "Find File",
         query: "edi",
+        query_generation: 7,
+        acknowledged_query_edit_seq: 11,
         selected_index: 0,
         filtered_count: 1,
         total_count: 2,
@@ -671,6 +673,8 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["visible"] == true
       assert decoded["title"] == "Find File"
       assert decoded["query"] == "edi"
+      assert decoded["query_generation"] == 7
+      assert decoded["acknowledged_query_edit_seq"] == 11
       assert decoded["mode_prefix"] == ">"
       assert decoded["filtered_count"] == 1
       assert decoded["total_count"] == 2

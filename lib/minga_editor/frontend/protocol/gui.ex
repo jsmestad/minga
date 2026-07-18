@@ -113,6 +113,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x5A       | system_will_unmount     |
   | 0x5C       | chat_scrolled_away_from_bottom |
   | 0x5D       | chat_returned_to_bottom |
+  | 0x5F       | picker_query_changed    |
 
   """
 
@@ -250,6 +251,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_float_popup_dismiss Opcodes.gui_action_float_popup_dismiss()
   @gui_action_chat_scrolled_away_from_bottom Opcodes.gui_action_chat_scrolled_away_from_bottom()
   @gui_action_chat_returned_to_bottom Opcodes.gui_action_chat_returned_to_bottom()
+  @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
   @gui_action_search_prev Opcodes.gui_action_search_prev()
@@ -400,6 +402,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:notification_action, notification_id :: String.t(), action_id :: String.t()}
           | {:observatory_inspect, pid_string :: String.t()}
           | {:font_size_adjust, direction :: :decrease | :increase | :reset}
+          | {:picker_query_changed, generation :: non_neg_integer(),
+             edit_seq :: non_neg_integer(), query :: String.t()}
           | {:search_query, query :: String.t(), flags :: non_neg_integer()}
           | :search_next
           | :search_prev
@@ -2574,6 +2578,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ) do
     context = decode_panel_action_context(context_rest)
     {:ok, {:extension_panel_action, ext_name, action_name, context}}
+  end
+
+  def decode_gui_action(
+        @gui_action_picker_query_changed,
+        <<generation::32, edit_seq::32, query_len::16, query::binary-size(query_len)>>
+      ) do
+    {:ok, {:picker_query_changed, generation, edit_seq, query}}
   end
 
   def decode_gui_action(

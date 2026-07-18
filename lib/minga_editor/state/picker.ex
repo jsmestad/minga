@@ -16,6 +16,12 @@ defmodule MingaEditor.State.Picker do
   @typedoc "Contribution source semantically authorized to provide picker candidates."
   @type callback_source :: Minga.Extension.ContributionCleanup.contribution_source() | nil
 
+  @typedoc "Correlation generation for native full-query editing."
+  @type query_generation :: non_neg_integer()
+
+  @typedoc "Latest native query edit accepted by the BEAM."
+  @type query_edit_seq :: non_neg_integer()
+
   @typedoc """
   Latest-wins guard for async candidate fetches. Each `open_async` mints a fresh
   reference; a result whose revision doesn't match the live picker's is stale and
@@ -36,7 +42,9 @@ defmodule MingaEditor.State.Picker do
           original_source: module() | nil,
           mode_prefix: String.t(),
           load_status: load_status(),
-          fetch_revision: fetch_revision()
+          fetch_revision: fetch_revision(),
+          query_generation: query_generation(),
+          acknowledged_query_edit_seq: query_edit_seq()
         }
 
   defstruct picker: nil,
@@ -50,7 +58,9 @@ defmodule MingaEditor.State.Picker do
             original_source: nil,
             mode_prefix: "",
             load_status: :ready,
-            fetch_revision: nil
+            fetch_revision: nil,
+            query_generation: 0,
+            acknowledged_query_edit_seq: 0
 
   @doc "Builds the semantic state for an asynchronous picker before fetching starts."
   @spec loading(
@@ -74,7 +84,43 @@ defmodule MingaEditor.State.Picker do
       layout: layout,
       load_status: :loading
     }
+    |> begin_query_session()
   end
+
+  @doc "Starts a fresh native query-editing generation."
+  @spec begin_query_session(t()) :: t()
+  def begin_query_session(%__MODULE__{} = ps) do
+    generation = Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1
+    %{ps | query_generation: generation, acknowledged_query_edit_seq: 0}
+  end
+
+  @doc "Returns whether a native query edit belongs to this picker and is newer than its acknowledgement."
+  @spec current_query_edit?(t(), query_generation(), query_edit_seq()) :: boolean()
+  def current_query_edit?(
+        %__MODULE__{
+          query_generation: generation,
+          acknowledged_query_edit_seq: acknowledged_edit_seq
+        },
+        generation,
+        edit_seq
+      )
+      when edit_seq > acknowledged_edit_seq,
+      do: true
+
+  def current_query_edit?(%__MODULE__{}, _generation, _edit_seq), do: false
+
+  @doc "Installs an accepted native query and advances its acknowledgement."
+  @spec accept_query_edit(t(), MingaEditor.UI.Picker.t(), query_edit_seq()) :: t()
+  def accept_query_edit(
+        %__MODULE__{acknowledged_query_edit_seq: acknowledged_edit_seq} = ps,
+        picker,
+        edit_seq
+      )
+      when edit_seq > acknowledged_edit_seq do
+    %{ps | picker: picker, acknowledged_query_edit_seq: edit_seq}
+  end
+
+  def accept_query_edit(%__MODULE__{} = ps, _picker, _edit_seq), do: ps
 
   @doc "Returns true if a picker is currently open."
   @spec open?(t()) :: boolean()

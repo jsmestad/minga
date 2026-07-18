@@ -75,29 +75,25 @@ public struct PickerOverlay: View {
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg.opacity(0.4))
 
-            if state.query.isEmpty {
-                HStack(spacing: 6) {
-                    if !state.modePrefix.isEmpty {
-                        modePrefixBadge
-                    }
-
-                    Text(state.title.isEmpty ? "Search..." : state.title)
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.popupFg.opacity(0.35))
-                }
-            } else {
-                HStack(spacing: 6) {
-                    if !state.modePrefix.isEmpty {
-                        modePrefixBadge
-                    }
-
-                    Text(state.query)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(theme.popupFg)
-                }
+            if !state.modePrefix.isEmpty {
+                modePrefixBadge
             }
 
-            Spacer()
+            PickerQueryField(
+                authoritativeText: state.query,
+                generation: state.queryGeneration,
+                acknowledgedEditSequence: state.acknowledgedQueryEditSeq,
+                placeholder: state.title.isEmpty ? "Search..." : state.title,
+                isEditable: state.actionMenu == nil,
+                style: InlineEditFieldStyle(
+                    textColor: theme.popupFg,
+                    selectionBackgroundColor: theme.accent.opacity(0.35),
+                    selectionForegroundColor: theme.popupFg,
+                    insertionPointColor: theme.accent
+                ),
+                encoder: encoder
+            )
+            .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
 
             if state.markedCount > 0 {
                 Text("\(state.markedCount) marked")

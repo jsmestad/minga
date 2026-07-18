@@ -265,15 +265,17 @@ defmodule MingaEditor.PickerUI do
     new_state = clear_whichkey(state)
     layout = MingaEditor.UI.Picker.Source.layout(source_module, callback_source)
 
-    picker_state = %PickerState{
-      picker: picker,
-      source: source_module,
-      callback_source: callback_source,
-      restore: state.workspace.buffers.active_index,
-      restore_theme: state.appearance.theme,
-      context: context,
-      layout: layout
-    }
+    picker_state =
+      %PickerState{
+        picker: picker,
+        source: source_module,
+        callback_source: callback_source,
+        restore: state.workspace.buffers.active_index,
+        restore_theme: state.appearance.theme,
+        context: context,
+        layout: layout
+      }
+      |> PickerState.begin_query_session()
 
     MingaEditor.Shell.Traditional.ModalWorkflow.open(
       new_state,
@@ -284,6 +286,99 @@ defmodule MingaEditor.PickerUI do
   @spec clear_whichkey(state()) :: state()
   defp clear_whichkey(state),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
+
+  @doc "Replaces the native picker's complete query when the correlated edit is current."
+  @spec replace_query(state(), non_neg_integer(), non_neg_integer(), String.t()) :: state()
+  def replace_query(
+        %{
+          shell_runtime: %{
+            state: %{
+              modal:
+                {:picker,
+                 %{
+                   picker_ui: %PickerState{picker: %Picker{} = picker} = picker_state
+                 }}
+            }
+          }
+        } = state,
+        generation,
+        edit_seq,
+        query
+      )
+      when is_binary(query) do
+    if PickerState.current_query_edit?(picker_state, generation, edit_seq) do
+      replace_current_query(state, picker_state, picker, query, edit_seq)
+    else
+      state
+    end
+  end
+
+  def replace_query(state, _generation, _edit_seq, _query), do: state
+
+  @spec replace_current_query(
+          state(),
+          PickerState.t(),
+          Picker.t(),
+          String.t(),
+          non_neg_integer()
+        ) :: state()
+  defp replace_current_query(
+         state,
+         %PickerState{mode_prefix: mode_prefix},
+         picker,
+         query,
+         edit_seq
+       )
+       when mode_prefix != "" do
+    normalized_query = String.replace_prefix(query, mode_prefix, "")
+    install_query_edit(state, picker, normalized_query, edit_seq)
+  end
+
+  defp replace_current_query(state, %PickerState{}, picker, query, edit_seq) do
+    case String.next_grapheme(query) do
+      {prefix, remaining_query} ->
+        case maybe_switch_mode(state, prefix, "") do
+          {:switched, new_state} ->
+            install_switched_query_edit(new_state, remaining_query, edit_seq)
+
+          :no_switch ->
+            install_query_edit(state, picker, query, edit_seq)
+        end
+
+      nil ->
+        install_query_edit(state, picker, query, edit_seq)
+    end
+  end
+
+  @spec install_switched_query_edit(state(), String.t(), non_neg_integer()) :: state()
+  defp install_switched_query_edit(state, "", edit_seq),
+    do: acknowledge_query_edit(state, edit_seq)
+
+  defp install_switched_query_edit(
+         %{
+           shell_runtime: %{
+             state: %{modal: {:picker, %{picker_ui: %PickerState{picker: %Picker{} = picker}}}}
+           }
+         } = state,
+         query,
+         edit_seq
+       ) do
+    install_query_edit(state, picker, query, edit_seq)
+  end
+
+  @spec install_query_edit(state(), Picker.t(), String.t(), non_neg_integer()) :: state()
+  defp install_query_edit(state, picker, query, edit_seq) do
+    filtered = Picker.filter(picker, query)
+    state = update_picker(state, &PickerState.accept_query_edit(&1, filtered, edit_seq))
+    maybe_preview_selection(state)
+  end
+
+  @spec acknowledge_query_edit(state(), non_neg_integer()) :: state()
+  defp acknowledge_query_edit(state, edit_seq) do
+    update_picker(state, fn picker_state ->
+      PickerState.accept_query_edit(picker_state, picker_state.picker, edit_seq)
+    end)
+  end
 
   @doc """
   Handles a key event while the picker is open.

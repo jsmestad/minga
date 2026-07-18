@@ -33,6 +33,31 @@ defmodule MingaEditor.State.PickerTest do
     end
   end
 
+  describe "native query edit correlation" do
+    test "a fresh query session mints a generation and clears its acknowledgement" do
+      state =
+        %PickerState{acknowledged_query_edit_seq: 9}
+        |> PickerState.begin_query_session()
+
+      assert state.query_generation > 0
+      assert state.acknowledged_query_edit_seq == 0
+    end
+
+    test "only newer edits from the current generation are accepted" do
+      picker = MingaEditor.UI.Picker.new([], title: "Native")
+      state = %PickerState{query_generation: 7, acknowledged_query_edit_seq: 2}
+
+      refute PickerState.current_query_edit?(state, 6, 3)
+      refute PickerState.current_query_edit?(state, 7, 2)
+      assert PickerState.current_query_edit?(state, 7, 3)
+
+      accepted = PickerState.accept_query_edit(state, picker, 3)
+      assert accepted.picker == picker
+      assert accepted.acknowledged_query_edit_seq == 3
+      assert PickerState.accept_query_edit(accepted, nil, 2) == accepted
+    end
+  end
+
   describe "source ownership and fetch completion" do
     test "loading state retains only semantic source and revision correlation" do
       source = {:extension, :picker_owner}

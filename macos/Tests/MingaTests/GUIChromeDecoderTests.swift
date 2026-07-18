@@ -1816,6 +1816,8 @@ struct GUIPickerDecoderTests {
         // Section 0x02: Query
         var query = Data()
         appendString16(&query, "edi")
+        appendU32(&query, 7)
+        appendU32(&query, 11)
 
         // Section 0x03: Items
         var items = Data()
@@ -1859,7 +1861,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -1870,6 +1872,8 @@ struct GUIPickerDecoderTests {
         #expect(markedCount == 3)
         #expect(title == "Find File")
         #expect(q == "edi")
+        #expect(queryGeneration == 7)
+        #expect(acknowledgedQueryEditSeq == 11)
         #expect(modePrefix == ">")
         #expect(hasPreview == true)
         #expect(decodedItems.count == 2)
@@ -1890,7 +1894,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
@@ -1933,7 +1937,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
