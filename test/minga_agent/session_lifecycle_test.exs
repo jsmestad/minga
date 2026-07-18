@@ -34,6 +34,21 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert {:error, "Provider does not support continue"} = Session.continue(session)
       assert Session.status(session) == :error
     end
+
+    test "failed prompt submission restores the exact terminal turn state" do
+      session =
+        start_test_session(
+          provider: Minga.Test.StubProvider,
+          provider_opts: [send_prompt_result: {:error, :prompt_failed}]
+        )
+
+      send_provider_event(session, %Event.Error{message: "failed turn"})
+      source_execution = :sys.get_state(session).turn_execution
+
+      assert {:error, :prompt_failed} = Session.send_prompt(session, "retry")
+      assert :sys.get_state(session).turn_execution == source_execution
+      assert Session.status(session) == :error
+    end
   end
 
   describe "remote attachment roles" do

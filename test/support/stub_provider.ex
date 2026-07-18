@@ -22,7 +22,7 @@ defmodule Minga.Test.StubProvider do
   end
 
   @impl MingaAgent.Provider
-  def send_prompt(_pid, _text), do: :ok
+  def send_prompt(pid, text), do: GenServer.call(pid, {:send_prompt, text})
 
   @impl MingaAgent.Provider
   def abort(_pid), do: :ok
@@ -49,8 +49,17 @@ defmodule Minga.Test.StubProvider do
   def init(opts) do
     subscriber = Keyword.get(opts, :subscriber)
     if subscriber, do: Process.monitor(subscriber)
-    {:ok, %{subscriber: subscriber}}
+
+    {:ok,
+     %{
+       subscriber: subscriber,
+       send_prompt_result: Keyword.get(opts, :send_prompt_result, :ok)
+     }}
   end
+
+  @impl GenServer
+  def handle_call({:send_prompt, _text}, _from, state),
+    do: {:reply, state.send_prompt_result, state}
 
   @impl GenServer
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}

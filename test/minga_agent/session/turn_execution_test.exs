@@ -40,27 +40,26 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   test "begin turn accepts inactive phases and rejects every active phase" do
     for mode <- @modes, phase <- [:idle, :failure] do
       source = state(mode, phase)
-      assert {:ok, next, []} = TurnExecution.begin_turn(source)
+      assert {:ok, next} = TurnExecution.begin_turn(source)
       assert TurnExecution.phase(next) == :starting
     end
 
     for mode <- @modes, phase <- active_phases() do
       source = state(mode, phase)
-      assert {:error, :turn_active, ^source} = TurnExecution.begin_turn(source)
+      assert {:error, :turn_active} = TurnExecution.begin_turn(source)
     end
   end
 
   test "provider start accepts starting and rejects every other phase" do
-    for mode <- @modes, phase <- [:starting] do
-      source = state(mode, phase)
-      assert {:ok, next, effects} = TurnExecution.provider_started(source)
+    for mode <- @modes do
+      source = state(mode, :starting)
+      assert {:ok, next} = TurnExecution.provider_started(source)
       assert TurnExecution.phase(next) == :thinking
-      assert effects == status_effect(mode, :thinking)
     end
 
     for mode <- @modes, phase <- @phases -- [:starting] do
       source = state(mode, phase)
-      assert {:error, :invalid_phase, ^source} = TurnExecution.provider_started(source)
+      assert {:error, :invalid_phase} = TurnExecution.provider_started(source)
     end
   end
 
@@ -69,54 +68,38 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     for mode <- @modes, phase <- @phases -- [:idle, :approval_waiting, :failure] do
       source = state(mode, phase)
-      assert {:ok, waiting, effects} = TurnExecution.request_approval(source, approval)
+      assert {:accepted, waiting} = TurnExecution.request_approval(source, approval)
       assert TurnExecution.phase(waiting) == :approval_waiting
       assert TurnExecution.pending_approval(waiting) == approval
-
-      assert effects == [
-               {:notify, :approval, "Approval needed: shell"},
-               {:broadcast, {:approval_pending, ToolApproval.public(approval)}}
-             ]
     end
 
     for mode <- @modes, phase <- [:idle, :failure] do
       source = state(mode, phase)
-
-      assert {:ok, ^source, [{:reject_approval, ^approval}]} =
-               TurnExecution.request_approval(source, approval)
+      assert :rejected = TurnExecution.request_approval(source, approval)
     end
 
     for mode <- @modes do
       waiting = state(mode, :approval_waiting)
-
-      assert {:ok, ^waiting, [{:reject_approval, ^approval}]} =
-               TurnExecution.request_approval(waiting, approval)
+      assert :rejected = TurnExecution.request_approval(waiting, approval)
     end
   end
 
-  test "approval resolution rejects stale identity and declares ordered effects" do
+  test "approval resolution rejects stale identity and returns the approved transition" do
     waiting = state(:exec, :approval_waiting)
 
-    assert {:error, :approval_not_found, ^waiting} =
+    assert {:error, :approval_not_found} =
              TurnExecution.resolve_approval(waiting, "stale", :approve)
 
-    assert {:ok, approval, next, effects} =
+    assert {:ok, approval, next} =
              TurnExecution.resolve_approval(waiting, "approval-1", :reject)
 
+    assert approval.tool_call_id == "approval-1"
     assert TurnExecution.phase(next) == :thinking
-
-    assert effects == [
-             {:send_approval_response, approval, :reject},
-             {:record_approval_resolution, approval, :reject},
-             {:append_approval_rejection, approval},
-             :notify_messages_changed,
-             {:broadcast, {:approval_resolved, :reject}}
-           ]
 
     for mode <- @modes, phase <- @phases -- [:approval_waiting] do
       source = state(mode, phase)
 
-      assert {:error, :no_pending_approval, ^source} =
+      assert {:error, :no_pending_approval} =
                TurnExecution.resolve_approval(source, nil, :approve)
     end
   end
@@ -126,9 +109,9 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     for mode <- @modes, phase <- [:starting, :thinking, :tool_execution, :completion] do
       source = state(mode, phase)
-      {:ok, waiting, _effects} = TurnExecution.request_approval(source, approval)
+      {:accepted, waiting} = TurnExecution.request_approval(source, approval)
 
-      assert {:ok, ^approval, resumed, _effects} =
+      assert {:ok, ^approval, resumed} =
                TurnExecution.resolve_approval(waiting, approval.tool_call_id, :approve)
 
       assert TurnExecution.phase(resumed) == phase
@@ -140,7 +123,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     for {decision, scope} <- [approve_session: :session, approve_turn: :turn] do
       waiting = state(:exec, :approval_waiting)
 
-      assert {:ok, _approval, next, _effects} =
+      assert {:ok, _approval, next} =
                TurnExecution.resolve_approval(waiting, nil, decision)
 
       assert TurnExecution.trust_levels(next) == %{"shell:rm -rf /" => scope}
@@ -151,16 +134,14 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     execution = state(:exec, :thinking)
     approval_event = approval_event("tool-1")
 
-    assert {:ok, approved, effects} =
+    assert {:approved, approval, approved} =
              TurnExecution.auto_approve(execution, approval_event, :turn)
 
-    assert length(effects) == 2
-    assert hd(effects) |> elem(0) == :send_approval_response
-    assert Enum.at(effects, 1) == {:mark_tool_auto_approved, approval_event, :turn}
+    assert approval.tool_call_id == "tool-1"
 
     waiting = state(:exec, :approval_waiting)
 
-    assert {:ok, still_waiting, _effects} =
+    assert {:approved, _approval, still_waiting} =
              TurnExecution.auto_approve(waiting, approval_event("tool-2"), :session)
 
     assert TurnExecution.phase(still_waiting) == :approval_waiting
@@ -168,22 +149,22 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     idle = state(:exec, :idle)
 
-    assert {:ok, ^idle, [{:reject_approval, idle_rejected}]} =
+    assert {:rejected, idle_rejected} =
              TurnExecution.auto_approve(idle, approval_event("tool-idle"), :session)
 
     assert idle_rejected.tool_call_id == "tool-idle"
 
     failed = state(:exec, :failure)
 
-    assert {:ok, ^failed, [{:reject_approval, rejected}]} =
+    assert {:rejected, rejected} =
              TurnExecution.auto_approve(failed, approval_event("tool-3"), :session)
 
     assert rejected.tool_call_id == "tool-3"
 
-    event = tool_start("tool-1", "shell")
-    assert {:ok, :turn, running, tool_effects} = TurnExecution.tool_started(approved, event)
+    assert {:ok, :turn, running} =
+             TurnExecution.tool_started(approved, tool_start("tool-1", "shell"))
+
     assert TurnExecution.active_tool_name(running) == "shell"
-    assert {:append_tool_start, event, :turn} in tool_effects
   end
 
   test "tool starts support parallel identities and reject duplicate IDs or inactive phases" do
@@ -191,40 +172,38 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     first = tool_start("tool-1", "read_file")
     second = tool_start("tool-2", "shell")
 
-    assert {:ok, nil, running, effects} = TurnExecution.tool_started(source, first)
-    assert hd(effects) == {:status_changed, :tool_executing}
-    assert {:ok, nil, parallel, _effects} = TurnExecution.tool_started(running, second)
+    assert {:ok, nil, running} = TurnExecution.tool_started(source, first)
+    assert {:ok, nil, parallel} = TurnExecution.tool_started(running, second)
     assert TurnExecution.active_tools(parallel) == [{"tool-1", "read_file"}, {"tool-2", "shell"}]
     assert TurnExecution.active_tool_name(parallel) == "shell"
 
-    assert {:error, :tool_already_active, ^parallel} =
+    assert {:error, :tool_already_active} =
              TurnExecution.tool_started(parallel, second)
 
     idle = state(:exec, :idle)
-    assert {:error, :invalid_phase, ^idle} = TurnExecution.tool_started(idle, first)
+    assert {:error, :invalid_phase} = TurnExecution.tool_started(idle, first)
 
     failed = state(:exec, :failure)
-    assert {:error, :invalid_phase, ^failed} = TurnExecution.tool_started(failed, first)
+    assert {:error, :invalid_phase} = TurnExecution.tool_started(failed, first)
   end
 
   test "tool completion removes only matching identity and rejects stale duplicates" do
     source = state(:exec, :thinking)
 
-    {:ok, nil, one, _effects} =
+    {:ok, nil, one} =
       TurnExecution.tool_started(source, tool_start("tool-1", "read_file"))
 
-    {:ok, nil, two, _effects} = TurnExecution.tool_started(one, tool_start("tool-2", "shell"))
+    {:ok, nil, two} = TurnExecution.tool_started(one, tool_start("tool-2", "shell"))
 
     first_end = tool_end("tool-1", "read_file")
-    assert {:ok, remaining, effects} = TurnExecution.tool_completed(two, first_end)
+    assert {:ok, remaining} = TurnExecution.tool_completed(two, first_end)
     assert TurnExecution.active_tools(remaining) == [{"tool-2", "shell"}]
-    assert {:finish_tool, first_end} in effects
 
-    assert {:error, :tool_not_active, ^remaining} =
+    assert {:error, :tool_not_active} =
              TurnExecution.tool_completed(remaining, first_end)
 
     second_end = tool_end("tool-2", "shell")
-    assert {:ok, completed, _effects} = TurnExecution.tool_completed(remaining, second_end)
+    assert {:ok, completed} = TurnExecution.tool_completed(remaining, second_end)
     assert TurnExecution.phase(completed) == :completion
     assert TurnExecution.active_tools(completed) == []
     assert TurnExecution.status(completed) == :tool_executing
@@ -233,12 +212,12 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   test "tool completion preserves a concurrent approval wait" do
     source = state(:exec, :thinking)
 
-    {:ok, nil, running, _effects} =
+    {:ok, nil, running} =
       TurnExecution.tool_started(source, tool_start("tool-1", "read_file"))
 
-    {:ok, waiting, _effects} = TurnExecution.request_approval(running, approval("approval-1"))
+    {:accepted, waiting} = TurnExecution.request_approval(running, approval("approval-1"))
 
-    assert {:ok, next, _effects} =
+    assert {:ok, next} =
              TurnExecution.tool_completed(waiting, tool_end("tool-1", "read_file"))
 
     assert TurnExecution.phase(next) == :approval_waiting
@@ -246,7 +225,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     assert TurnExecution.pending_approval(next).tool_call_id == "approval-1"
     assert TurnExecution.status(next) == :tool_executing
 
-    assert {:ok, _approval, resumed, _effects} =
+    assert {:ok, _approval, resumed} =
              TurnExecution.resolve_approval(next, "approval-1", :approve)
 
     assert TurnExecution.phase(resumed) == :completion
@@ -257,11 +236,10 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     for mode <- @modes, phase <- active_phases() do
       source = state(mode, phase)
 
-      assert {:queued, :steering, steered, [{:broadcast, {:prompt_queued, "steer", :steering}}]} =
+      assert {:queued, steered} =
                TurnExecution.admit_prompt(source, :steering, "steer")
 
-      assert {:queued, :follow_up, followed,
-              [{:broadcast, {:prompt_queued, "follow", :follow_up}}]} =
+      assert {:queued, followed} =
                TurnExecution.admit_prompt(steered, :follow_up, "follow")
 
       assert TurnExecution.queues(followed) == {["steer"], ["follow"]}
@@ -269,135 +247,126 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     for mode <- @modes, phase <- [:idle, :failure], kind <- [:steering, :follow_up] do
       source = state(mode, phase)
-      assert {:send_now, starting, []} = TurnExecution.admit_prompt(source, kind, "now")
+      assert {:send_now, starting} = TurnExecution.admit_prompt(source, kind, "now")
       assert TurnExecution.mode(starting) == mode
       assert TurnExecution.phase(starting) == :starting
       assert TurnExecution.queues(starting) == {[], []}
     end
   end
 
-  test "queue dequeue, recall, and clear preserve FIFO and declare transcript effects" do
+  test "queue dequeue, recall, and clear preserve FIFO" do
     source = state(:exec, :thinking)
 
-    {:queued, :steering, first, _effects} =
+    {:queued, first} =
       TurnExecution.admit_prompt(source, :steering, "one")
 
-    {:queued, :steering, second, _effects} =
+    {:queued, second} =
       TurnExecution.admit_prompt(first, :steering, "two")
 
-    {:queued, :follow_up, queued, _effects} =
+    {:queued, queued} =
       TurnExecution.admit_prompt(second, :follow_up, "later")
 
-    assert {["one", "two"], dequeued, [{:append_steering_messages, ["one", "two"]}]} =
-             TurnExecution.dequeue_steering(queued)
-
+    assert {["one", "two"], dequeued} = TurnExecution.dequeue_steering(queued)
     assert TurnExecution.queues(dequeued) == {[], ["later"]}
 
-    assert {{[], ["later"]}, recalled, [{:broadcast, :queues_recalled}]} =
-             TurnExecution.recall_queues(dequeued)
-
+    assert {{[], ["later"]}, recalled} = TurnExecution.recall_queues(dequeued)
     assert TurnExecution.queues(recalled) == {[], []}
-    assert {cleared, [{:broadcast, :queues_recalled}]} = TurnExecution.clear_queues(queued)
+
+    cleared = TurnExecution.clear_queues(queued)
     assert TurnExecution.queues(cleared) == {[], []}
   end
 
   test "plan mode remains independent from every active runtime phase" do
     for phase <- @phases do
       exec = state(:exec, phase)
-      {plan, effects} = TurnExecution.enter_plan(exec)
+      plan = TurnExecution.enter_plan(exec)
       assert TurnExecution.mode(plan) == :plan
       assert TurnExecution.phase(plan) == approval_resume_phase(phase)
-      assert List.last(effects) == {:status_changed, :plan}
 
-      assert {:changed, resumed, [:announce_exec_mode, {:status_changed, status}]} =
-               TurnExecution.enter_exec(plan)
-
+      assert {:changed, resumed} = TurnExecution.enter_exec(plan)
       assert TurnExecution.mode(resumed) == :exec
-      assert status == TurnExecution.status(resumed)
-      assert {:unchanged, ^resumed, []} = TurnExecution.enter_exec(resumed)
+      assert :unchanged = TurnExecution.enter_exec(resumed)
     end
   end
 
-  test "abort rejects approval before provider work and clears only turn-scoped resources" do
+  test "abort clears only turn-scoped resources" do
     waiting = state(:exec, :approval_waiting)
     waiting = TurnExecution.put_trust(waiting, "turn-tool", :turn)
     waiting = TurnExecution.put_trust(waiting, "session-tool", :session)
-    approval = TurnExecution.pending_approval(waiting)
 
-    assert {aborted, effects} = TurnExecution.abort(waiting)
+    aborted = TurnExecution.abort(waiting)
     assert TurnExecution.phase(aborted) == :idle
     assert TurnExecution.trust_levels(aborted) == %{"session-tool" => :session}
-
-    assert effects == [
-             {:reject_approval, approval},
-             :abort_provider,
-             :abort_active_tools,
-             {:append_system_message, "Aborted", :info},
-             :notify_messages_changed,
-             {:status_changed, :idle}
-           ]
+    assert TurnExecution.pending_approval(aborted) == nil
   end
 
-  test "failure rejects approval and aborts active tools before error publication" do
-    running = state(:exec, :tool_execution)
-    {:ok, waiting, _effects} = TurnExecution.request_approval(running, approval("approval-1"))
-    approval = TurnExecution.pending_approval(waiting)
+  test "reported errors preserve active work and fail inactive phases" do
+    for mode <- @modes, phase <- active_phases() do
+      source = state(mode, phase)
+      errored = TurnExecution.report_error(source, "provider warning")
 
-    assert {failed, effects} = TurnExecution.fail(waiting, "boom")
+      assert TurnExecution.phase(errored) == phase
+      assert TurnExecution.active?(errored)
+      assert TurnExecution.error(errored) == "provider warning"
+      assert TurnExecution.active_tools(errored) == TurnExecution.active_tools(source)
+      assert TurnExecution.pending_approval(errored) == TurnExecution.pending_approval(source)
+      assert TurnExecution.status(errored) == if(mode == :plan, do: :plan, else: :error)
+    end
+
+    for mode <- @modes, phase <- [:idle, :failure] do
+      failed = mode |> state(phase) |> TurnExecution.report_error("provider failure")
+
+      assert TurnExecution.phase(failed) == :failure
+      refute TurnExecution.active?(failed)
+      assert TurnExecution.error(failed) == "provider failure"
+    end
+
+    running = state(:exec, :tool_execution)
+    errored = TurnExecution.report_error(running, "hook rejected")
+
+    assert {:ok, completing} =
+             TurnExecution.tool_completed(errored, tool_end("tool-1", "shell"))
+
+    assert TurnExecution.phase(completing) == :completion
+    assert TurnExecution.error(completing) == "hook rejected"
+  end
+
+  test "failure clears pending approval and active tools" do
+    running = state(:exec, :tool_execution)
+    {:accepted, waiting} = TurnExecution.request_approval(running, approval("approval-1"))
+
+    failed = TurnExecution.fail(waiting, "boom")
     assert TurnExecution.phase(failed) == :failure
     assert TurnExecution.error(failed) == "boom"
     assert TurnExecution.pending_approval(failed) == nil
     assert TurnExecution.active_tools(failed) == []
-
-    assert effects == [
-             {:reject_approval, approval},
-             :abort_active_tools,
-             {:notify, :error, "boom"},
-             {:status_changed, :error},
-             {:append_error_once, "boom"},
-             :notify_messages_changed,
-             {:broadcast, {:error, "boom"}}
-           ]
   end
 
-  test "completion effects precede turn cleanup and queued work starts after trust clears" do
+  test "completion clears turn trust and admits queued work" do
     waiting = state(:exec, :approval_waiting)
     waiting = TurnExecution.put_trust(waiting, "read_file", :turn)
 
-    {:queued, :follow_up, queued, _effects} =
+    {:queued, queued} =
       TurnExecution.admit_prompt(waiting, :follow_up, "next")
 
-    approval = TurnExecution.pending_approval(queued)
-
-    assert {:ok, completing, effects} = TurnExecution.begin_completion(queued, nil)
-
-    assert effects == [
-             {:reject_approval, approval},
-             :notify_completion,
-             :collapse_thinking,
-             {:apply_usage, nil},
-             :dispatch_stop
-           ]
-
-    assert {:send_next, ["next"], starting, []} =
-             TurnExecution.finish_completion(completing)
-
+    assert {:ok, completing} = TurnExecution.begin_completion(queued)
+    assert {:send_next, ["next"], starting} = TurnExecution.finish_completion(completing)
     assert TurnExecution.phase(starting) == :starting
     assert TurnExecution.trust_levels(starting) == %{}
     assert TurnExecution.queues(starting) == {[], []}
-    assert {:ok, idle, [{:status_changed, :idle}]} = TurnExecution.queued_send_failed(starting)
+    assert {:ok, idle} = TurnExecution.queued_send_failed(starting)
     assert TurnExecution.phase(idle) == :idle
   end
 
   test "completion rejects idle and finish rejects every non-completion phase" do
     for mode <- @modes do
       idle = state(mode, :idle)
-      assert {:error, :invalid_phase, ^idle} = TurnExecution.begin_completion(idle, nil)
+      assert {:error, :invalid_phase} = TurnExecution.begin_completion(idle)
     end
 
     for mode <- @modes, phase <- @phases -- [:completion] do
       source = state(mode, phase)
-      assert {:error, :invalid_phase, ^source} = TurnExecution.finish_completion(source)
+      assert {:error, :invalid_phase} = TurnExecution.finish_completion(source)
     end
   end
 
@@ -412,26 +381,18 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     for mode <- @modes, phase <- @phases -- [:failure] do
       source = state(mode, phase)
-      assert {:error, :invalid_phase, ^source} = TurnExecution.update_failure(source, "nope")
-      assert {:unchanged, ^source} = TurnExecution.recover(source)
+      assert {:error, :invalid_phase} = TurnExecution.update_failure(source, "nope")
+      assert :unchanged = TurnExecution.recover(source)
     end
   end
 
-  test "reset and restore reject live approval before clearing all resources" do
+  test "reset and restore clear all resources" do
     waiting = state(:plan, :approval_waiting)
     waiting = TurnExecution.put_trust(waiting, "shell", :session)
     {:ok, waiting} = TurnExecution.set_boundary(waiting, "lib/a.ex", 1, 2)
-    approval = TurnExecution.pending_approval(waiting)
 
-    assert {reset, [{:reject_approval, ^approval}, {:status_changed, :idle}]} =
-             TurnExecution.reset(waiting)
-
-    assert reset == TurnExecution.new()
-
-    assert {restored, [{:reject_approval, ^approval}, :abort_provider]} =
-             TurnExecution.restore(waiting)
-
-    assert restored == TurnExecution.new()
+    assert TurnExecution.reset(waiting) == TurnExecution.new()
+    assert TurnExecution.restore(waiting) == TurnExecution.new()
   end
 
   test "trust and boundaries are owned without exposing mutation" do
@@ -470,27 +431,22 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       refute TurnExecution.reclaimable?(state(:exec, phase))
     end
 
-    {:queued, :steering, queued, _effects} =
+    {:queued, queued} =
       TurnExecution.admit_prompt(state(:exec, :thinking), :steering, "queued")
 
-    {aborted, _effects} = TurnExecution.abort(queued)
+    aborted = TurnExecution.abort(queued)
     refute TurnExecution.reclaimable?(aborted)
   end
 
-  test "provider failure is exhaustive across every active phase" do
+  test "failure is exhaustive across every active phase" do
     for mode <- @modes, phase <- active_phases() do
       source = state(mode, phase)
-      {failed, effects} = TurnExecution.provider_failed(source, "provider crashed")
+      failed = TurnExecution.fail(source, "provider crashed")
 
       assert TurnExecution.phase(failed) == :failure
       assert TurnExecution.error(failed) == "provider crashed"
       assert TurnExecution.pending_approval(failed) == nil
       assert TurnExecution.active_tools(failed) == []
-      assert List.last(effects) == hd(status_effect(mode, :error))
-
-      if phase == :approval_waiting do
-        assert match?({:reject_approval, %ToolApproval{}}, hd(effects))
-      end
     end
   end
 
@@ -504,25 +460,22 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       is_error: true
     }
 
-    assert {:ok, completing, [{:finish_tool, ^failed_event}]} =
-             TurnExecution.tool_completed(running, failed_event)
+    assert {:ok, completing} = TurnExecution.tool_completed(running, failed_event)
 
     assert TurnExecution.phase(completing) == :completion
 
-    assert {:error, :tool_not_active, ^completing} =
+    assert {:error, :tool_not_active} =
              TurnExecution.tool_completed(completing, failed_event)
   end
 
   test "abort during tool execution and interrupted completion clear active resources" do
     running = state(:exec, :tool_execution)
-    {aborted, abort_effects} = TurnExecution.abort(running)
+    aborted = TurnExecution.abort(running)
     assert TurnExecution.phase(aborted) == :idle
     assert TurnExecution.active_tools(aborted) == []
-    assert :abort_provider in abort_effects
-    assert :abort_active_tools in abort_effects
 
-    {:ok, completing, _effects} = TurnExecution.begin_completion(running, nil)
-    {interrupted, _effects} = TurnExecution.abort(completing)
+    {:ok, completing} = TurnExecution.begin_completion(running)
+    interrupted = TurnExecution.abort(completing)
     assert TurnExecution.phase(interrupted) == :idle
     assert TurnExecution.pending_approval(interrupted) == nil
     assert TurnExecution.active_tools(interrupted) == []
@@ -531,55 +484,52 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   test "reset after failure closes boundaries, queues, and turn trust" do
     source = state(:exec, :thinking)
 
-    {:queued, :steering, source, _effects} =
+    {:queued, source} =
       TurnExecution.admit_prompt(source, :steering, "steer")
 
-    {:queued, :follow_up, source, _effects} =
+    {:queued, source} =
       TurnExecution.admit_prompt(source, :follow_up, "follow")
 
-    {failed, _effects} = TurnExecution.provider_failed(source, "boom")
+    failed = TurnExecution.fail(source, "boom")
     failed = TurnExecution.put_trust(failed, "shell", :turn)
     {:ok, failed} = TurnExecution.set_boundary(failed, "lib/a.ex", 1, 2)
 
-    {reset, effects} = TurnExecution.reset(failed)
-    assert reset == TurnExecution.new()
-    assert effects == [{:status_changed, :idle}]
+    assert TurnExecution.reset(failed) == TurnExecution.new()
   end
 
   defp state(mode, :idle), do: TurnExecution.new(mode)
 
   defp state(mode, :starting) do
-    {:ok, starting, _effects} = mode |> TurnExecution.new() |> TurnExecution.begin_turn()
+    {:ok, starting} = mode |> TurnExecution.new() |> TurnExecution.begin_turn()
     starting
   end
 
   defp state(mode, :thinking) do
-    {:ok, thinking, _effects} = mode |> state(:starting) |> TurnExecution.provider_started()
+    {:ok, thinking} = mode |> state(:starting) |> TurnExecution.provider_started()
     thinking
   end
 
   defp state(mode, :approval_waiting) do
-    {:ok, waiting, _effects} =
+    {:accepted, waiting} =
       mode |> state(:thinking) |> TurnExecution.request_approval(approval("approval-1"))
 
     waiting
   end
 
   defp state(mode, :tool_execution) do
-    {:ok, nil, running, _effects} =
+    {:ok, nil, running} =
       mode |> state(:thinking) |> TurnExecution.tool_started(tool_start("tool-1", "shell"))
 
     running
   end
 
   defp state(mode, :completion) do
-    {:ok, completing, _effects} = mode |> state(:thinking) |> TurnExecution.begin_completion(nil)
+    {:ok, completing} = mode |> state(:thinking) |> TurnExecution.begin_completion()
     completing
   end
 
   defp state(mode, :failure) do
-    {failed, _effects} = mode |> state(:thinking) |> TurnExecution.fail("boom")
-    failed
+    mode |> state(:thinking) |> TurnExecution.fail("boom")
   end
 
   defp approval(id) do
@@ -610,13 +560,6 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
   defp active_phases,
     do: [:starting, :thinking, :approval_waiting, :tool_execution, :completion]
-
-  defp status_effect(:exec, status), do: [{:status_changed, status}]
-
-  defp status_effect(:plan, status) when status in [:idle, :error],
-    do: [:reconsider_idle_gc]
-
-  defp status_effect(:plan, _status), do: []
 
   defp approval_resume_phase(:approval_waiting), do: :thinking
   defp approval_resume_phase(phase), do: phase

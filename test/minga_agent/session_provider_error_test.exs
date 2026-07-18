@@ -134,7 +134,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
       end
     end
 
-    test "provider errors abort running tool transcript entries" do
+    test "provider errors preserve running tools until matching completion" do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
       send_provider_event(session, %Event.AgentStart{})
@@ -148,11 +148,25 @@ defmodule MingaAgent.SessionProviderErrorTest do
       send_provider_event(session, %Event.Error{
         kind: :provider_error,
         provider: "test",
-        message: "crashed"
+        message: "hook rejected"
       })
 
-      assert {:tool_call, %{status: :error, result: "aborted", is_error: true}} =
+      assert Session.status(session) == :error
+      assert Session.editor_snapshot(session).active_tool_name == "shell"
+
+      send_provider_event(session, %Event.ToolEnd{
+        tool_call_id: "tc-running",
+        name: "shell",
+        result: "blocked by hook",
+        is_error: true
+      })
+
+      assert_receive {:agent_event, ^session, {:tool_ended, "shell", "blocked by hook", :error}}
+
+      assert {:tool_call, %{status: :error, result: "blocked by hook", is_error: true}} =
                Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      assert Session.editor_snapshot(session).active_tool_name == nil
     end
 
     test "provider errors reject approval requests that arrive after failure" do
