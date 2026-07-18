@@ -1746,7 +1746,7 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 
 ### W013: Clear disabled prettify symbols safely
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L13
 - **Roadmap unit:** W013, Clear disabled prettify symbols safely
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1799,7 +1799,7 @@ When prettify symbols are disabled, scheduling for a buffer first cancels work o
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/3007
 - **Commit SHA:** `d55840281`
-- **Merge SHA:** Pending
+- **Merge SHA:** `fda6e81df20f0f8ab0667287adfe9386aa98d14e`
 - **Focused tests:** 35 passed: 8 effect tests, 6 rule tests, and 21 conceal-range tests including 8 properties.
 - **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed on current main; full non-heavy result: 58 doctests, 98 properties, 9,912 tests, 0 failures, 1 skipped, 578 excluded.
 - **Planner verdict:** `READY`; exact owners, transition order, worker/apply boundary, tests, constraints, and validation are locked with no unresolved implementer question.
@@ -1810,9 +1810,9 @@ When prettify symbols are disabled, scheduling for a buffer first cancels work o
 - **Production lines added/removed:** 99 added / 58 removed, net +41.
 - **Test lines added/removed:** 160 added / 2 removed, net +158.
 - **Concepts added/removed:** Preparation and application are explicit phases of the existing effect; the obsolete combined `apply/3` entry point is removed. No process, scheduler, protocol, or wrapper is added.
-- **Findings resolved:** Pending merge.
-- **Discoveries affecting later work:** Pending
-- **Completion date:** Pending
+- **Findings resolved:** L13. Disabling prettify symbols now cancels admitted work and removes installed prettify conceals without permitting stale worker mutation.
+- **Discoveries affecting later work:** Canceling a task cannot retract an already-sent Buffer call. Effect workers that race cleanup must return data and defer mutation until scheduler claim.
+- **Completion date:** 2026-07-18
 
 ## Follow-on simplifications
 
