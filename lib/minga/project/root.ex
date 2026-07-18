@@ -107,7 +107,7 @@ defmodule Minga.Project.Root do
   def canonical_path(path) when is_binary(path) do
     path
     |> Path.expand()
-    |> canonical_path([], 0)
+    |> canonical_path(0)
   end
 
   @doc "Returns true when a path names a root whose recursive traversal needs explicit confirmation."
@@ -200,45 +200,41 @@ defmodule Minga.Project.Root do
   defp unchanged_root(path, path), do: :ok
   defp unchanged_root(_authorized_path, _current_path), do: {:error, :root_changed}
 
-  @spec canonical_path(String.t(), [String.t()], non_neg_integer()) ::
+  @spec canonical_path(String.t(), non_neg_integer()) ::
           {:ok, String.t()} | {:error, canonical_error()}
-  defp canonical_path(_path, _seen, depth) when depth >= @max_symlink_depth,
+  defp canonical_path(_path, depth) when depth >= @max_symlink_depth,
     do: {:error, :too_many_symlinks}
 
-  defp canonical_path(path, seen, depth) do
+  defp canonical_path(path, depth) do
     {anchor, parts} = split_anchor(path)
-    resolve_components(parts, anchor, seen, depth)
+    resolve_components(parts, anchor, depth)
   end
 
-  @spec resolve_components([String.t()], String.t(), [String.t()], non_neg_integer()) ::
+  @spec resolve_components([String.t()], String.t(), non_neg_integer()) ::
           {:ok, String.t()} | {:error, canonical_error()}
-  defp resolve_components([], current, _seen, _depth), do: {:ok, current}
+  defp resolve_components([], current, _depth), do: {:ok, current}
 
-  defp resolve_components([part | rest], current, seen, depth) do
+  defp resolve_components([part | rest], current, depth) do
     candidate = Path.join(current, part)
 
     case File.lstat(candidate) do
-      {:ok, %File.Stat{type: :symlink}} -> resolve_symlink(candidate, rest, seen, depth)
-      {:ok, _stat} -> resolve_components(rest, candidate, seen, depth)
+      {:ok, %File.Stat{type: :symlink}} -> resolve_symlink(candidate, rest, depth)
+      {:ok, _stat} -> resolve_components(rest, candidate, depth)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  @spec resolve_symlink(String.t(), [String.t()], [String.t()], non_neg_integer()) ::
+  @spec resolve_symlink(String.t(), [String.t()], non_neg_integer()) ::
           {:ok, String.t()} | {:error, canonical_error()}
-  defp resolve_symlink(candidate, rest, seen, depth) do
-    if candidate in seen do
-      {:error, :too_many_symlinks}
-    else
-      case File.read_link(candidate) do
-        {:ok, target} ->
-          resolved_target = Path.expand(target, Path.dirname(candidate))
-          combined = Enum.reduce(rest, resolved_target, &Path.join(&2, &1))
-          canonical_path(combined, [candidate | seen], depth + 1)
+  defp resolve_symlink(candidate, rest, depth) do
+    case File.read_link(candidate) do
+      {:ok, target} ->
+        resolved_target = Path.expand(target, Path.dirname(candidate))
+        combined = Enum.reduce(rest, resolved_target, &Path.join(&2, &1))
+        canonical_path(combined, depth + 1)
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

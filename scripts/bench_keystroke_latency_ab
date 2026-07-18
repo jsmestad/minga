@@ -127,6 +127,11 @@ run_check() {
   done
 
   git checkout -f --quiet "$head_sha"
+
+  if ! mix deps.get || ! mix deps.compile; then
+    return 1
+  fi
+
   MIX_ENV=test mix run bench/check_latency_budgets.exs "${args[@]}"
 }
 

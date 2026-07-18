@@ -543,12 +543,13 @@ defmodule Minga.Project do
   defp do_record_file(%{workspace: nil} = state, _file_path), do: state
 
   defp do_record_file(state, file_path) do
-    expanded = Path.expand(file_path)
     root = workspace_path(state.workspace)
 
-    case make_relative(expanded, root) do
-      nil -> state
-      rel_path -> update_file_history(state, root, rel_path)
+    with {:ok, canonical_path} <- Root.canonical_path(file_path),
+         rel_path when is_binary(rel_path) <- make_relative(canonical_path, root) do
+      update_file_history(state, root, rel_path)
+    else
+      _invalid_or_outside_path -> state
     end
   end
 

@@ -5,6 +5,7 @@ defmodule MingaEditor.Commands.ProjectTest do
   use ExUnit.Case, async: false
 
   alias Minga.Project
+  alias Minga.Project.Root
   alias MingaEditor.Commands.Project, as: ProjectCommands
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectSource
@@ -22,6 +23,7 @@ defmodule MingaEditor.Commands.ProjectTest do
     file = Path.join(root, "inside.txt")
     File.mkdir_p!(root)
     File.write!(file, "content")
+    {:ok, canonical_root} = Root.canonical_path(root)
     {_output, 0} = System.cmd("git", ["init"], cd: root, stderr_to_stdout: true)
     {_output, 0} = System.cmd("git", ["add", "inside.txt"], cd: root, stderr_to_stdout: true)
 
@@ -40,17 +42,17 @@ defmodule MingaEditor.Commands.ProjectTest do
 
     state = ProjectSource.on_select(%Item{id: root, label: Path.basename(root)}, state)
 
-    assert Project.root() == root
-    assert %Minga.Project.Root{kind: :directory, path: ^root} = Project.workspace_root()
-    assert state.workspace.file_tree.project_root == root
-    assert root in Project.known_projects()
+    assert Project.root() == canonical_root
+    assert %Root{kind: :directory, path: ^canonical_root} = Project.workspace_root()
+    assert state.workspace.file_tree.project_root == canonical_root
+    assert canonical_root in Project.known_projects()
 
     assert_receive {:minga_event, :project_rebuilt,
-                    %Minga.Events.ProjectRebuiltEvent{root: ^root}},
+                    %Minga.Events.ProjectRebuiltEvent{root: ^canonical_root}},
                    5_000
 
     refute_receive {:minga_event, :project_rebuilt,
-                    %Minga.Events.ProjectRebuiltEvent{root: ^root}},
+                    %Minga.Events.ProjectRebuiltEvent{root: ^canonical_root}},
                    100
 
     Minga.Events.broadcast(

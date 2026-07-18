@@ -120,7 +120,7 @@ defmodule Minga.Extension.DisposableBeam do
   defp run_port(executable, mode, request_path, timeout, attempts) do
     with {:ok, port} <- open_port(executable, mode, request_path) do
       case await_exit(port, timeout, 0) do
-        {:error, {:exit_status, 1}} when attempts > 1 ->
+        {:error, {:exit_status, _status}} when attempts > 1 ->
           safe_close(port)
           flush_port(port)
           run_port(executable, mode, request_path, timeout, attempts - 1)
