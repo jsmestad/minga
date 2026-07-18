@@ -1453,7 +1453,7 @@ defmodule Minga.Extension.LifecycleContractTest do
       |> Keyword.put(:runtime_query_timeout_ms, 10)
 
     start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
-    assert_receive {:blocked_child_start_mfa, old_runtime_supervisor}
+    assert_receive {:blocked_child_start_mfa, old_runtime_supervisor}, 1_000
     old_instance = instance_pid(ctx, name)
     supervisor_ref = Process.monitor(old_runtime_supervisor)
 
