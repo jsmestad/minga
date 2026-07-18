@@ -1116,7 +1116,7 @@ Consumers are the picker renderer and subsequent selection/action dispatch, both
 #### Completion evidence
 
 - **PR URL:** Pending
-- **Commit SHA:** Pending
+- **Commit SHA:** `206a5cb8608f0c9f233bb34814f066d30aaf4a6e`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix format lib/minga_editor/picker_ui.ex test/minga_editor/picker_ui_test.exs` passed; `mix test.debug test/minga_editor/picker_ui_test.exs test/minga_editor/ui/picker_test.exs` passed, 76 tests, seed 161951
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,865 tests, 0 failures, 1 skipped, 578 excluded)
