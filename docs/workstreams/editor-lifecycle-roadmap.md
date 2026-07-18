@@ -1816,7 +1816,7 @@ When prettify symbols are disabled, scheduling for a buffer first cancels work o
 
 ### W014: Preserve sidebar focus during Git refresh
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L14
 - **Roadmap unit:** W014, Preserve sidebar focus during Git refresh
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1869,7 +1869,7 @@ Background Git status replacement updates the registered panel's visibility, bad
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/3009
 - **Commit SHA:** `76ed51dde`
-- **Merge SHA:** Pending
+- **Merge SHA:** `098436f3fe321ed33ba1d4e5ec6e3994298d1731`
 - **Focused tests:** 48 passed across the three locked test files.
 - **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed; full non-heavy result: 58 doctests, 98 properties, 9,914 tests, 0 failures, 1 skipped, 578 excluded.
 - **Planner verdict:** `READY`; the selected-sidebar owner, projection boundary, focus transitions, tests, constraints, and validation are locked with no unresolved implementer question.
@@ -1880,9 +1880,9 @@ Background Git status replacement updates the registered panel's visibility, bad
 - **Production lines added/removed:** 22 added / 13 removed, net +9.
 - **Test lines added/removed:** 53 added / 0 removed, net +53.
 - **Concepts added/removed:** One explicit focus projection replaces visibility-derived focus. No process, registry, abstraction, protocol, or frontend path is added.
-- **Findings resolved:** Pending merge.
+- **Findings resolved:** L14. Background Git status replacement now preserves shell-owned sidebar focus while explicit activation and close retain their focus transitions.
 - **Discoveries affecting later work:** Registry projections must derive focus from shell-owned selection instead of inferring focus from visibility.
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
 
 ## Follow-on simplifications
 
