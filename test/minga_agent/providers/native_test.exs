@@ -4,6 +4,7 @@ defmodule MingaAgent.Providers.NativeTest do
   import ExUnit.CaptureLog
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Git.Stub, as: GitStub
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ProjectView
   alias MingaAgent.Event
@@ -11,6 +12,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
   alias MingaAgent.Tool.Spec
+  alias MingaAgent.Test.RecordingProcessBackend
   alias MingaAgent.ToolCall
   alias MingaAgent.Tools
   alias ReqLLM.Context
@@ -197,6 +199,141 @@ defmodule MingaAgent.Providers.NativeTest do
       assert session_state.project_root == dir
       assert session_state.system_prompt =~ "PLAN SKILL 1419"
       assert session_state.system_prompt =~ "PROJECT RULE 1419"
+    end
+
+    test "falls back to the process working directory when no project is active" do
+      {:ok, pid} = start_provider(project_root: nil)
+
+      assert {:ok, session_state} = Native.get_state(pid)
+      assert session_state.project_root == File.cwd!()
+      assert session_state.system_prompt =~ "Project root: #{File.cwd!()}"
+    end
+
+    test "default Git tools are advertised only inside a repository", %{tmp_dir: dir} do
+      on_exit(fn -> GitStub.clear(dir) end)
+      parent = self()
+
+      tool_names_for = fn tools ->
+        ref = make_ref()
+
+        client = fn _model, _messages, opts ->
+          send(parent, {ref, Enum.map(opts[:tools], & &1.name)})
+
+          build_stream_response([
+            ReqLLM.StreamChunk.text("done"),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+
+        {:ok, pid} =
+          start_provider(project_root: dir, tools: tools, llm_client: client)
+
+        assert :ok = Native.send_prompt(pid, "Inspect the project")
+        assert_receive {^ref, names}, 5_000
+        _events = collect_run_events()
+        names
+      end
+
+      refute "git_status" in tool_names_for.(nil)
+
+      GitStub.set_root(dir, dir)
+      assert "git_status" in tool_names_for.(nil)
+
+      git_status = Enum.find(Tools.specs(), &(&1.name == "git_status"))
+      GitStub.clear(dir)
+      assert "git_status" in tool_names_for.([git_status])
+    end
+
+    test "find executes from the fallback working directory when no project is active" do
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("find", %{"pattern" => "*.ex", "path" => "."}, %{
+                id: "tc_find_without_project",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          project_root: nil,
+          llm_client: client,
+          tools: nil,
+          process_backend: RecordingProcessBackend
+        )
+
+      assert :ok = Native.send_prompt(pid, "Find Elixir files")
+      events = collect_run_events()
+
+      assert %Event.ToolEnd{is_error: false, result: result} =
+               Enum.find(events, &match?(%Event.ToolEnd{name: "find"}, &1))
+
+      assert result =~ "find pattern=*.ex"
+      assert result =~ "path=#{File.cwd!()}"
+    end
+
+    test "an approved shell command completes from the working directory without an active project" do
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("shell", %{"command" => "pwd"}, %{
+                id: "tc_shell_without_project",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          project_root: nil,
+          llm_client: client,
+          tools: nil,
+          process_backend: RecordingProcessBackend,
+          config: agent_config(tool_approval: :destructive, destructive_tools: ["shell"])
+        )
+
+      assert :ok = Native.send_prompt(pid, "Print the working directory")
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{
+                        tool_call_id: "tc_shell_without_project",
+                        reply_to: reply_to
+                      }},
+                     5_000
+
+      send(reply_to, {:tool_approval_response, "tc_shell_without_project", :approve})
+      events = collect_run_events()
+
+      assert %Event.ToolEnd{is_error: false, result: result} =
+               Enum.find(events, &match?(%Event.ToolEnd{name: "shell"}, &1))
+
+      assert result =~ "shell command=pwd"
+      assert result =~ "cwd=#{File.cwd!()}"
     end
 
     test "system prompt keeps cacheable environment prefix stable within a session", %{

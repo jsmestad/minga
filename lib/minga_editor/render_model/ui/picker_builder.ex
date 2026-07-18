@@ -31,7 +31,21 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       when picker != nil ->
         mode_prefix = Map.get(picker_ui, :mode_prefix, "")
         load_status = Map.get(picker_ui, :load_status, :ready)
-        build_open(ctx, picker, source, callback_source, action_menu, mode_prefix, load_status)
+
+        query_correlation =
+          {Map.get(picker_ui, :query_generation, 0),
+           Map.get(picker_ui, :acknowledged_query_edit_seq, 0)}
+
+        build_open(
+          ctx,
+          picker,
+          source,
+          callback_source,
+          action_menu,
+          mode_prefix,
+          load_status,
+          query_correlation
+        )
 
       _ ->
         %PickerModel{}
@@ -49,10 +63,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
           MingaEditor.State.Picker.callback_source(),
           term(),
           String.t(),
-          PickerModel.load_status()
+          PickerModel.load_status(),
+          {non_neg_integer(), non_neg_integer()}
         ) ::
           PickerModel.t()
-  defp build_open(ctx, picker, source, callback_source, action_menu, mode_prefix, load_status) do
+  defp build_open(
+         ctx,
+         picker,
+         source,
+         callback_source,
+         action_menu,
+         mode_prefix,
+         load_status,
+         {query_generation, acknowledged_query_edit_seq}
+       ) do
     has_preview = source != nil and Picker.Source.gui_preview?(source, callback_source)
 
     items =
@@ -67,6 +91,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       visible?: true,
       title: picker.title,
       query: picker.query,
+      query_generation: query_generation,
+      acknowledged_query_edit_seq: acknowledged_query_edit_seq,
       selected_index: picker.selected,
       filtered_count: Enum.count(picker.filtered),
       total_count: Enum.count(picker.items),

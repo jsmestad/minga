@@ -802,26 +802,28 @@ defmodule MingaAgent.Tools do
         process_backend = Map.get(context.metadata, :process_backend, SystemProcessBackend)
 
         fn args ->
-          timeout_secs = min(args["timeout"] || 30, 300)
+          timeout_secs = normalize_shell_timeout(args["timeout"])
 
-          with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
-               {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
-            shell_root = cwd || root
+          run_shell_with_timeout(timeout_secs, fn ->
+            with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
+                 {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
+              shell_root = cwd || root
 
-            if is_nil(cwd) do
-              flush_before_shell()
-            end
+              if is_nil(cwd) do
+                flush_before_shell()
+              end
 
-            routed_result(
-              router_ctx,
-              process_backend.shell(args["command"], shell_root, timeout_secs,
-                env: env,
-                on_output: shell_output_callback
+              routed_result(
+                router_ctx,
+                process_backend.shell(args["command"], shell_root, timeout_secs,
+                  env: env,
+                  on_output: shell_output_callback
+                )
               )
-            )
-          else
-            {:error, reason} -> {:error, inspect(reason)}
-          end
+            else
+              {:error, reason} -> {:error, inspect(reason)}
+            end
+          end)
         end
       end
     )
@@ -1489,6 +1491,75 @@ defmodule MingaAgent.Tools do
         &MingaAgent.Tools.Introspection.describe_tools/1
       end
     )
+  end
+
+  # ── Shell execution guard ─────────────────────────────────────────────────
+
+  @spec normalize_shell_timeout(term()) :: pos_integer()
+  defp normalize_shell_timeout(value) when is_integer(value), do: value |> max(1) |> min(300)
+  defp normalize_shell_timeout(_value), do: 30
+
+  @spec run_shell_with_timeout(
+          pos_integer(),
+          (-> {:ok, String.t()} | {:error, String.t()})
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp run_shell_with_timeout(timeout_secs, callback) do
+    parent = self()
+    result_ref = make_ref()
+
+    {pid, monitor_ref} =
+      spawn_monitor(fn -> coordinate_shell_worker(parent, result_ref, callback) end)
+
+    receive do
+      {^result_ref, result} ->
+        Process.demonitor(monitor_ref, [:flush])
+        result
+
+      {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
+        receive_shell_result_after_down(result_ref, reason)
+    after
+      timeout_secs * 1_000 ->
+        Process.exit(pid, :kill)
+        await_shell_worker_down(monitor_ref, pid)
+        {:error, "command timed out"}
+    end
+  end
+
+  @spec coordinate_shell_worker(pid(), reference(), (-> term())) :: term()
+  defp coordinate_shell_worker(parent, result_ref, callback) do
+    parent_monitor = Process.monitor(parent)
+    coordinator = self()
+    callback_pid = spawn_link(fn -> send(coordinator, {:shell_callback_result, callback.()}) end)
+
+    receive do
+      {:shell_callback_result, result} ->
+        Process.demonitor(parent_monitor, [:flush])
+        send(parent, {result_ref, result})
+
+      {:DOWN, ^parent_monitor, :process, ^parent, _reason} ->
+        Process.exit(callback_pid, :kill)
+    end
+  end
+
+  @spec receive_shell_result_after_down(reference(), term()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp receive_shell_result_after_down(result_ref, reason) do
+    receive do
+      {^result_ref, result} -> result
+    after
+      0 -> {:error, "command failed: #{inspect(reason)}"}
+    end
+  end
+
+  @spec await_shell_worker_down(reference(), pid()) :: :ok
+  defp await_shell_worker_down(monitor_ref, pid) do
+    receive do
+      {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
+    after
+      1_000 ->
+        Process.demonitor(monitor_ref, [:flush])
+        :ok
+    end
   end
 
   # ── Pre-shell buffer flush ─────────────────────────────────────────────────

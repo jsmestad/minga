@@ -55,7 +55,7 @@ enum RenderCommand: Sendable {
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus)
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
@@ -1244,7 +1244,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let pickerSectionCount = Int(data[rest])
         if pickerSectionCount == 0 {
-            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, markedCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready), 2)
+            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, markedCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready, queryGeneration: 0, acknowledgedQueryEditSeq: 0), 2)
         }
         var pickerPos = rest + 1
         var pkVisible = false
@@ -1259,6 +1259,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pkActionMenu: Wire.PickerActionMenu? = nil
         var pkModePrefix = ""
         var pkLoadStatus: Wire.PickerLoadStatus = .ready
+        var pkQueryGeneration: UInt32 = 0
+        var pkAcknowledgedQueryEditSeq: UInt32 = 0
 
         // The section-dispatch loop stays hand-written (it owns the outer framing);
         // each section body is decoded by the schema-generated, window-aware
@@ -1290,6 +1292,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 case 0x02: // Query
                     let (q, _) = try GeneratedProtocol.decodeGuiPickerQuery(data, psStart, psEnd)
                     pkQuery = q.text
+                    pkQueryGeneration = q.generation
+                    pkAcknowledgedQueryEditSeq = q.acknowledgedEditSeq
 
                 case 0x05: // Mode prefix
                     let (m, _) = try GeneratedProtocol.decodeGuiPickerModePrefix(data, psStart, psEnd)
@@ -1335,7 +1339,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pickerPos = psEnd
         }
 
-        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus), pickerPos - offset)
+        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq), pickerPos - offset)
 
     case OP_GUI_PICKER_PREVIEW:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

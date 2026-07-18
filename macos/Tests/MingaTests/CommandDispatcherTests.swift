@@ -743,11 +743,14 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready,
+                                        queryGeneration: 7, acknowledgedQueryEditSeq: 11))
 
         #expect(gui.pickerState.visible == true)
         #expect(gui.pickerState.title == "Find File")
         #expect(gui.pickerState.query == "edi")
+        #expect(gui.pickerState.queryGeneration == 7)
+        #expect(gui.pickerState.acknowledgedQueryEditSeq == 11)
         #expect(gui.pickerState.modePrefix == ">")
         #expect(gui.pickerState.markedCount == 2)
     }
@@ -757,10 +760,12 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready,
+                                        queryGeneration: 7, acknowledgedQueryEditSeq: 11))
         dispatcher.applyForTesting(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, markedCount: 0, title: "", query: "",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready,
+                                        queryGeneration: 0, acknowledgedQueryEditSeq: 0))
 
         #expect(gui.pickerState.visible == false)
         #expect(gui.pickerState.items.isEmpty)

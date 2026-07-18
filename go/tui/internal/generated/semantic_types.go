@@ -501,7 +501,9 @@ type GuiPickerHeader struct {
 }
 
 type GuiPickerQuery struct {
-	Text string
+	Text                string
+	Generation          uint32
+	AcknowledgedEditSeq uint32
 }
 
 type GuiPickerActionMenu struct {

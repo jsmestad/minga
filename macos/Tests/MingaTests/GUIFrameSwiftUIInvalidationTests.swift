@@ -1408,7 +1408,9 @@ struct GUIFrameSwiftUIInvalidationTests {
             items: [pickerItem(label: label)],
             actionMenu: nil,
             modePrefix: "",
-            loadStatus: .ready
+            loadStatus: .ready,
+            queryGeneration: 0,
+            acknowledgedQueryEditSeq: 0
         )
     }
 

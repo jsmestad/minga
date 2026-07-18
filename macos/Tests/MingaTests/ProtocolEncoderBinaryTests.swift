@@ -329,6 +329,21 @@ struct EncoderGUIActionTests {
         #expect(returnedPayload[1] == GUI_ACTION_CHAT_RETURNED_TO_BOTTOM)
     }
 
+    @Test("picker_query_changed encodes correlation and complete UTF-8 text")
+    func pickerQueryChangedLayout() {
+        let payload = captureFrame {
+            $0.sendPickerQueryChanged(generation: 7, editSeq: 11, text: "café")
+        }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_PICKER_QUERY_CHANGED)
+        #expect(readU32(payload, 2) == 7)
+        #expect(readU32(payload, 6) == 11)
+        let (query, end) = readString16(payload, 10)
+        #expect(query == "café")
+        #expect(end == payload.count)
+    }
+
     @Test("tab_reorder encodes action type, tab ID, and visible index")
     func tabReorderLayout() {
         let payload = captureFrame { $0.sendTabReorder(id: 42, newIndex: 3) }

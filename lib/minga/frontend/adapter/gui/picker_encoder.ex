@@ -44,6 +44,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     :erlang.phash2({
       model.title,
       model.query,
+      model.query_generation,
+      model.acknowledged_query_edit_seq,
       model.mode_prefix,
       model.selected_index,
       model.filtered_count,
@@ -77,7 +79,11 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     |> Writer.section16(
       :picker_query,
       @section_picker_query,
-      Encode.encode_gui_picker_query(%{text: model.query})
+      Encode.encode_gui_picker_query(%{
+        text: model.query,
+        generation: model.query_generation,
+        acknowledged_edit_seq: model.acknowledged_query_edit_seq
+      })
     )
     |> Writer.section16(
       :picker_items,

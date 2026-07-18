@@ -50,6 +50,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert %Picker{visible?: true} = model
       assert model.title == "Find"
       assert model.query == "o"
+      assert model.query_generation == 7
+      assert model.acknowledged_query_edit_seq == 11
       assert model.selected_index == 0
       assert model.filtered_count == 1
       assert model.total_count == 2
@@ -168,7 +170,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
          callback_source: nil,
          action_menu: action_menu,
          mode_prefix: mode_prefix,
-         load_status: load_status
+         load_status: load_status,
+         query_generation: 7,
+         acknowledged_query_edit_seq: 11
        }
      }}
   end

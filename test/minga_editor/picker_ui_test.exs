@@ -6,6 +6,7 @@ defmodule MingaEditor.PickerUITest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Runtime
@@ -451,6 +452,63 @@ defmodule MingaEditor.PickerUITest do
 
       assert pui.source == source
       assert pui.picker.query == "fix"
+    end
+  end
+
+  describe "native full-query edits" do
+    test "accepts the complete query and ignores stale generations and sequences" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+
+      accepted = PickerUI.replace_query(state, 0, 1, "missing")
+      {:picker, %{picker_ui: accepted_picker}} = accepted.shell_runtime.state.modal
+
+      assert accepted_picker.picker.query == "missing"
+      assert accepted_picker.acknowledged_query_edit_seq == 1
+
+      stale_sequence = PickerUI.replace_query(accepted, 0, 1, "newer")
+      stale_generation = PickerUI.replace_query(accepted, 1, 2, "newer")
+
+      assert stale_sequence == accepted
+      assert stale_generation == accepted
+    end
+
+    test "preserves source-prefix switching and acknowledges the native edit" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+
+      switched = PickerUI.replace_query(state, 0, 1, ">")
+      {:picker, %{picker_ui: picker_ui}} = switched.shell_runtime.state.modal
+
+      assert picker_ui.source == MingaEditor.UI.Picker.CommandSource
+      assert picker_ui.original_source == MingaEditor.UI.Picker.FileSource
+      assert picker_ui.mode_prefix == ">"
+      assert picker_ui.picker.query == ""
+      assert picker_ui.acknowledged_query_edit_seq == 1
+    end
+
+    test "applies text pasted after a source prefix to the switched picker" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+
+      switched =
+        GuiActionHandler.dispatch(state, {:picker_query_changed, 0, 1, ">open"})
+
+      {:picker, %{picker_ui: picker_ui}} = switched.shell_runtime.state.modal
+
+      assert picker_ui.source == MingaEditor.UI.Picker.CommandSource
+      assert picker_ui.mode_prefix == ">"
+      assert picker_ui.picker.query == "open"
+      assert picker_ui.acknowledged_query_edit_seq == 1
+    end
+
+    test "normalizes queued native edits that still include the acknowledged source prefix" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+
+      switched = PickerUI.replace_query(state, 0, 1, ">")
+      queued = PickerUI.replace_query(switched, 0, 2, ">save")
+      {:picker, %{picker_ui: picker_ui}} = queued.shell_runtime.state.modal
+
+      assert picker_ui.source == MingaEditor.UI.Picker.CommandSource
+      assert picker_ui.picker.query == "save"
+      assert picker_ui.acknowledged_query_edit_seq == 2
     end
   end
 

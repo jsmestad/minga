@@ -81,27 +81,39 @@ struct MingaMenuCommands: Commands {
         // Replace the default text editing commands (Cmd+C/V/X/Z/A) with
         // our own versions that route through the BEAM.
         CommandGroup(replacing: .textEditing) {
-            Button("Undo") { encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) } // 'u' = vim undo
-                .keyboardShortcut("z", modifiers: .command)
-                .disabled(!connected)
-            Button("Redo") { encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) } // Ctrl+R = vim redo
-                .keyboardShortcut("z", modifiers: [.command, .shift])
-                .disabled(!connected)
+            Button("Undo") {
+                routeTextEditingCommand(.undo) {
+                    encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) // 'u' = vim undo
+                }
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .disabled(!connected)
+            Button("Redo") {
+                routeTextEditingCommand(.redo) {
+                    encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) // Ctrl+R = vim redo
+                }
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!connected)
 
             Divider()
 
-            Button("Cut") { encoder?.sendCmdCut() }
+            Button("Cut") { routeTextEditingCommand(.cut) { encoder?.sendCmdCut() } }
                 .keyboardShortcut("x", modifiers: .command)
                 .disabled(!connected)
-            Button("Copy") { encoder?.sendCmdCopy() }
+            Button("Copy") { routeTextEditingCommand(.copy) { encoder?.sendCmdCopy() } }
                 .keyboardShortcut("c", modifiers: .command)
                 .disabled(!connected)
-            Button("Paste") { pasteFromClipboard() }
+            Button("Paste") { routeTextEditingCommand(.paste, fallback: pasteFromClipboard) }
                 .keyboardShortcut("v", modifiers: .command)
                 .disabled(!connected)
-            Button("Select All") { encoder?.sendExecuteCommand(name: "select_all") }
-                .keyboardShortcut("a", modifiers: .command)
-                .disabled(!connected)
+            Button("Select All") {
+                routeTextEditingCommand(.selectAll) {
+                    encoder?.sendExecuteCommand(name: "select_all")
+                }
+            }
+            .keyboardShortcut("a", modifiers: .command)
+            .disabled(!connected)
 
             Divider()
 
@@ -169,6 +181,12 @@ struct MingaMenuCommands: Commands {
                 latencyHUDState.toggle()
             }
             .keyboardShortcut("l", modifiers: [.command, .control])
+        }
+    }
+
+    private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: () -> Void) {
+        if !NativeTextCommandRouter.perform(command) {
+            fallback()
         }
     }
 

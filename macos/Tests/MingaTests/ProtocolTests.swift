@@ -951,6 +951,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     struct Log: Sendable { let level: UInt8; let message: String }
     struct Paste: Sendable { let text: String }
     struct KeyPress: Sendable { let codepoint: UInt32; let modifiers: UInt8 }
+    struct PickerQuery: Sendable, Equatable { let generation: UInt32; let editSeq: UInt32; let text: String }
     struct MouseEvent: Sendable { let row: Int16; let col: Int16; let button: UInt8; let modifiers: UInt8; let eventType: UInt8; let clickCount: UInt8 }
 
     /// Recorded GUI action events. Each sendFoo() call appends one entry.
@@ -1028,6 +1029,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         var logCalls: [Log] = []
         var pasteCalls: [Paste] = []
         var keyPressCalls: [KeyPress] = []
+        var pickerQueryCalls: [PickerQuery] = []
         var mouseEventCalls: [MouseEvent] = []
         var guiActions: [GUIAction] = []
     }
@@ -1037,6 +1039,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     var logCalls: [Log] { state.withLock { $0.logCalls } }
     var pasteCalls: [Paste] { state.withLock { $0.pasteCalls } }
     var keyPressCalls: [KeyPress] { state.withLock { $0.keyPressCalls } }
+    var pickerQueryCalls: [PickerQuery] { state.withLock { $0.pickerQueryCalls } }
     var mouseEventCalls: [MouseEvent] { state.withLock { $0.mouseEventCalls } }
     var guiActions: [GUIAction] { state.withLock { $0.guiActions } }
 
@@ -1045,6 +1048,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     }
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
         state.withLock { $0.keyPressCalls.append(KeyPress(codepoint: codepoint, modifiers: modifiers)) }
+    }
+    func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {
+        state.withLock { $0.pickerQueryCalls.append(PickerQuery(generation: generation, editSeq: editSeq, text: text)) }
     }
     func sendResize(cols: UInt16, rows: UInt16) {
         state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }

@@ -8,7 +8,8 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   @type ref :: %{
           parent: pid(),
           working_dir: String.t(),
-          env: [{String.t(), String.t()}]
+          env: [{String.t(), String.t()}],
+          block_prepare?: boolean()
         }
 
   @spec create(String.t(), keyword()) :: {:ok, ProjectView.t()}
@@ -20,7 +21,8 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
       parent: Keyword.fetch!(opts, :parent),
       working_dir: working_dir,
       env: Keyword.get(opts, :env, []),
-      diff: Keyword.get(opts, :diff, [])
+      diff: Keyword.get(opts, :diff, []),
+      block_prepare?: Keyword.get(opts, :block_prepare?, false)
     }
 
     {:ok, ProjectView.new(__MODULE__, project_root, ref, opts)}
@@ -82,6 +84,14 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
 
   @impl true
   @spec prepare_working_dir(ProjectView.t()) :: {:ok, String.t()}
+  def prepare_working_dir(%ProjectView{ref: %{block_prepare?: true}} = view) do
+    record(view, :prepare_working_dir)
+
+    receive do
+      :continue -> {:ok, view.ref.working_dir}
+    end
+  end
+
   def prepare_working_dir(%ProjectView{} = view) do
     record(view, :prepare_working_dir)
     {:ok, view.ref.working_dir}

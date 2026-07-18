@@ -34,6 +34,7 @@ defmodule MingaAgent.Providers.Native do
   use GenServer
 
   alias Minga.Buffer
+  alias Minga.Git
   alias MingaAgent.Compaction
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.CostCalculator
@@ -330,7 +331,7 @@ defmodule MingaAgent.Providers.Native do
     subscriber = Keyword.fetch!(opts, :subscriber)
     model = Keyword.get(opts, :model, config.model)
     thinking_level = Keyword.get(opts, :thinking_level, "off")
-    project_root = Keyword.get(opts, :project_root) || detect_project_root()
+    project_root = Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
     project_view = Keyword.get(opts, :project_view)
 
     max_tokens = Keyword.get(opts, :max_tokens, config.max_tokens)
@@ -356,10 +357,10 @@ defmodule MingaAgent.Providers.Native do
     tool_context =
       native_tool_context(project_root, project_view, fork_store, changeset, tool_metadata)
 
-    custom_tools? = Keyword.has_key?(opts, :tools)
+    custom_tools? = explicit_tool_declarations?(opts)
 
     custom_tool_declarations =
-      if custom_tools?, do: Keyword.get(opts, :tools) || ToolRegistry.all(), else: []
+      if custom_tools?, do: Keyword.fetch!(opts, :tools), else: []
 
     base_tools =
       if custom_tools? do
@@ -472,10 +473,32 @@ defmodule MingaAgent.Providers.Native do
     )
   end
 
+  @spec explicit_tool_declarations?(keyword()) :: boolean()
+  defp explicit_tool_declarations?(opts) do
+    case Keyword.fetch(opts, :tools) do
+      {:ok, tools} when is_list(tools) -> true
+      _missing_or_default -> false
+    end
+  end
+
   @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [Tool.t()]
   defp registry_tools(%ToolContext{} = tool_context, %AgentConfig{} = config, hook_runner) do
-    provider_tools(ToolRegistry.all(), tool_context, config, hook_runner)
+    ToolRegistry.all()
+    |> filter_git_tools(tool_context.project_root)
+    |> provider_tools(tool_context, config, hook_runner)
   end
+
+  @spec filter_git_tools([Tool.t() | ToolSpec.t()], String.t()) :: [Tool.t() | ToolSpec.t()]
+  defp filter_git_tools(specs, project_root) do
+    case Git.root_for(project_root) do
+      {:ok, _git_root} -> specs
+      :not_git -> Enum.reject(specs, &git_tool_spec?/1)
+    end
+  end
+
+  @spec git_tool_spec?(Tool.t() | ToolSpec.t()) :: boolean()
+  defp git_tool_spec?(%ToolSpec{category: :git}), do: true
+  defp git_tool_spec?(_tool), do: false
 
   @spec provider_tools([Tool.t() | ToolSpec.t()], ToolContext.t(), AgentConfig.t(), hook_runner()) ::
           [Tool.t()]

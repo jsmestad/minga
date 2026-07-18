@@ -974,8 +974,20 @@ func DecodeGuiPickerQuery(data []byte, offset int, windowEnd int) (GuiPickerQuer
 	if err != nil {
 		return GuiPickerQuery{}, offset, err
 	}
+	var generation uint32
+	var acknowledgedEditSeq uint32
+	if pos+4 <= windowEnd {
+		generation = decodeU32(data, pos)
+		pos += 4
+		if pos+4 <= windowEnd {
+			acknowledgedEditSeq = decodeU32(data, pos)
+			pos += 4
+		}
+	}
 	return GuiPickerQuery{
-		Text: text,
+		Text:                text,
+		Generation:          generation,
+		AcknowledgedEditSeq: acknowledgedEditSeq,
 	}, pos, nil
 }
 
