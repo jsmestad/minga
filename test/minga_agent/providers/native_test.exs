@@ -4,6 +4,7 @@ defmodule MingaAgent.Providers.NativeTest do
   import ExUnit.CaptureLog
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Git.Stub, as: GitStub
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ProjectView
   alias MingaAgent.Event
@@ -206,6 +207,41 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, session_state} = Native.get_state(pid)
       assert session_state.project_root == File.cwd!()
       assert session_state.system_prompt =~ "Project root: #{File.cwd!()}"
+    end
+
+    test "default Git tools are advertised only inside a repository", %{tmp_dir: dir} do
+      on_exit(fn -> GitStub.clear(dir) end)
+      parent = self()
+
+      tool_names_for = fn tools ->
+        ref = make_ref()
+
+        client = fn _model, _messages, opts ->
+          send(parent, {ref, Enum.map(opts[:tools], & &1.name)})
+
+          build_stream_response([
+            ReqLLM.StreamChunk.text("done"),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+
+        {:ok, pid} =
+          start_provider(project_root: dir, tools: tools, llm_client: client)
+
+        assert :ok = Native.send_prompt(pid, "Inspect the project")
+        assert_receive {^ref, names}, 5_000
+        _events = collect_run_events()
+        names
+      end
+
+      refute "git_status" in tool_names_for.(nil)
+
+      GitStub.set_root(dir, dir)
+      assert "git_status" in tool_names_for.(nil)
+
+      git_status = Enum.find(Tools.specs(), &(&1.name == "git_status"))
+      GitStub.clear(dir)
+      assert "git_status" in tool_names_for.([git_status])
     end
 
     test "find executes from the fallback working directory when no project is active" do
