@@ -1797,8 +1797,8 @@ When prettify symbols are disabled, scheduling for a buffer first cancels work o
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/3007
+- **Commit SHA:** `d55840281`
 - **Merge SHA:** Pending
 - **Focused tests:** 35 passed: 8 effect tests, 6 rule tests, and 21 conceal-range tests including 8 properties.
 - **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed on current main; full non-heavy result: 58 doctests, 98 properties, 9,912 tests, 0 failures, 1 skipped, 578 excluded.
