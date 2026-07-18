@@ -135,8 +135,10 @@ defmodule Minga.Project.FileFindTest do
       File.ln_s!("/", broad_alias)
       File.ln_s!(safe_target, safe_alias)
 
+      {:ok, canonical_safe_target} = Root.canonical_path(safe_target)
+
       assert {:error, :broad_root_confirmation_required} = Root.directory(broad_alias)
-      assert {:ok, %Root{path: ^safe_target}} = Root.directory(safe_alias)
+      assert {:ok, %Root{path: ^canonical_safe_target}} = Root.directory(safe_alias)
     end
 
     test "excludes directories listed in file_find_excludes", %{
@@ -186,28 +188,42 @@ defmodule Minga.Project.FileFindTest do
   describe "Root.resolve_file/2" do
     setup do
       tmp_dir = make_tmp_dir("minga_root_resolve_file")
-      File.write!(Path.join(tmp_dir, "inside.txt"), "inside")
+      inside_path = Path.join(tmp_dir, "inside.txt")
+      File.write!(inside_path, "inside")
+      {:ok, canonical_inside_path} = Root.canonical_path(inside_path)
       on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-      %{tmp_dir: tmp_dir, root: directory_root!(tmp_dir)}
+      %{
+        tmp_dir: tmp_dir,
+        root: directory_root!(tmp_dir),
+        canonical_inside_path: canonical_inside_path
+      }
     end
 
     test "returns the canonical target for an authorized workspace-relative file", %{
-      tmp_dir: tmp_dir,
-      root: root
+      root: root,
+      canonical_inside_path: canonical_inside_path
     } do
-      assert Root.resolve_file(root, "inside.txt") ==
-               {:ok, Path.join(tmp_dir, "inside.txt")}
+      assert Root.resolve_file(root, "inside.txt") == {:ok, canonical_inside_path}
     end
 
     test "returns the canonical target of an in-workspace symlink", %{
       tmp_dir: tmp_dir,
-      root: root
+      root: root,
+      canonical_inside_path: canonical_inside_path
     } do
       File.ln_s!("inside.txt", Path.join(tmp_dir, "inside-link.txt"))
 
-      assert Root.resolve_file(root, "inside-link.txt") ==
-               {:ok, Path.join(tmp_dir, "inside.txt")}
+      assert Root.resolve_file(root, "inside-link.txt") == {:ok, canonical_inside_path}
+    end
+
+    test "rejects a symlink loop", %{tmp_dir: tmp_dir} do
+      first = Path.join(tmp_dir, "first-link")
+      second = Path.join(tmp_dir, "second-link")
+      File.ln_s!(second, first)
+      File.ln_s!(first, second)
+
+      assert Root.canonical_path(first) == {:error, :too_many_symlinks}
     end
 
     test "returns the filesystem error when the target is missing", %{root: root} do

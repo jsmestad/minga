@@ -1445,7 +1445,7 @@ defmodule Minga.Extension.LifecycleContractTest do
         BlockedThenStarts
       )
 
-    timeout_ms = 25
+    timeout_ms = 5_000
 
     opts =
       ctx.opts
@@ -1457,22 +1457,43 @@ defmodule Minga.Extension.LifecycleContractTest do
     old_instance = instance_pid(ctx, name)
     supervisor_ref = Process.monitor(old_runtime_supervisor)
 
+    worker_id =
+      eventually(fn ->
+        case :sys.get_state(old_instance) do
+          %{phase: {:starting, %{worker: %Worker{id: id}}}} -> id
+          _state -> nil
+        end
+      end)
+
+    send(old_instance, {Worker, :timeout, worker_id, :start})
+    _barrier = :sys.get_state(old_instance)
+
     assert {:error, {:transition_timeout, :start, ^timeout_ms}} = Task.await(start_task, 1_000)
     assert_receive {:DOWN, ^supervisor_ref, :process, ^old_runtime_supervisor, :killed}
-    _new_instance = await_new_instance(ctx, name, old_instance)
+    new_instance = await_new_instance(ctx, name, old_instance)
 
     assert eventually(fn ->
              RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == :empty
            end)
 
-    retry_task = Task.async(fn -> start_extension(ctx, name, entry) end)
+    assert eventually(fn ->
+             case Instance.phase(new_instance) do
+               {:load_error, %{reason: {:transition_timeout, :start, ^timeout_ms}}} -> :ready
+               _phase -> nil
+             end
+           end)
+
+    assert {:ok, retry_entry} = ExtRegistry.get(ctx.registry, name)
+    retry_task = Task.async(fn -> start_extension(ctx, name, retry_entry) end)
     assert_receive {:retry_child_start_mfa, retry_runtime_supervisor}, 10_000
+    assert Agent.get(attempts, & &1) == 2
     refute Task.yield(retry_task, 50)
 
     send(retry_runtime_supervisor, :release_retry_child_start)
     assert {:ok, runtime} = Task.await(retry_task)
     assert_receive {:runtime_child_started, ^runtime}
-    refute_receive {:runtime_child_started, _duplicate}
+    refute_receive {:retry_child_start_mfa, _duplicate_retry}
+    refute_receive {:runtime_child_started, _duplicate_runtime}
     assert RuntimeSupervisor.local_child(runtime_supervisor(ctx, name)) == {:ok, runtime}
     assert :ok = stop_extension(ctx, name, ctx.opts)
   end

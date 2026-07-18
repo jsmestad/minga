@@ -9,7 +9,8 @@ defmodule Minga.Frontend.NativeIPCTest do
 
   setup do
     suffix = System.unique_integer([:positive])
-    runtime_parent = Path.join(System.tmp_dir!(), "minga-native-ipc-#{suffix}")
+    # AF_UNIX socket paths are capped near 100 bytes, so keep the test runtime parent short.
+    runtime_parent = Path.join("/tmp", "minga-ipc-#{suffix}")
     runtime_dir = Path.join(runtime_parent, "com.minga.editor")
     rejected_target = runtime_parent <> "-target"
     registry = Module.concat(__MODULE__, "Events#{suffix}")

@@ -456,6 +456,8 @@ defmodule MingaAgent.EventLog.Store do
       {:ok, %File.Stat{type: :regular}} ->
         case File.chmod(path, mode) do
           :ok -> {:cont, :ok}
+          # SQLite can remove WAL sidecars between the lstat and chmod calls.
+          {:error, :enoent} -> {:cont, :ok}
           {:error, reason} -> {:halt, {:error, reason}}
         end
 

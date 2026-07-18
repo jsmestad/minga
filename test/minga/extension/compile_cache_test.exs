@@ -67,6 +67,32 @@ defmodule Minga.Extension.CompileCacheTest do
     assert names.spawned.marker() == :spawned_generated
   end
 
+  test "disposable compiler retries a non-zero runtime exit once", context do
+    module = unique_module("RuntimeRetry")
+    retry_marker = Path.join(context.root, "runtime-retry-marker")
+    file = Path.join(context.root, "runtime_retry.ex")
+
+    File.write!(
+      file,
+      """
+      unless File.exists?(#{inspect(retry_marker)}) do
+        File.write!(#{inspect(retry_marker)}, "retry")
+        System.halt(2)
+      end
+
+      defmodule #{inspect(module)} do
+        def marker, do: :retried
+      end
+      """
+    )
+
+    assert {:ok, %{source: :compiled, modules: [^module]}} =
+             load(context, [file], :runtime_retry)
+
+    assert File.read!(retry_marker) == "retry"
+    assert module.marker() == :retried
+  end
+
   test "cache hits repeat complete validation and preserve the admitted generation", context do
     module = unique_module("CacheHit")
     file = write_module(context.root, module, ":v1")

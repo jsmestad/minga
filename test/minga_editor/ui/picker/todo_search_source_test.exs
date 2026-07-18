@@ -65,7 +65,8 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       assert item.label =~ "lib/example.ex:1"
       assert item.description == "# NOTE explain"
       assert item.icon_color != nil
-      assert item.id == %{path: file, line: 1, index: 0}
+      assert {:ok, canonical_file} = Root.canonical_path(file)
+      assert item.id == %{path: canonical_file, line: 1, index: 0}
     end
 
     test "empty results produce no items" do
@@ -102,7 +103,8 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       File.write!(forged_path, "# TODO real match\n")
 
       assert {:ok, %TodoSearch.Result{items: [item]}} = TodoSearch.run(effect(root_path))
-      assert item.id.path == forged_path
+      assert {:ok, canonical_forged_path} = Root.canonical_path(forged_path)
+      assert item.id.path == canonical_forged_path
       refute item.id.path == "/etc/passwd"
     end
 
@@ -192,21 +194,23 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
   describe "root authorization boundary" do
     test "passes only the canonical path into Port arguments and candidate authorization" do
       container = temporary_root()
-      canonical = Path.join(container, "canonical")
+      target_path = Path.join(container, "canonical")
       alias_path = Path.join(container, "alias")
-      file = Path.join(canonical, "lib/example.ex")
+      file = Path.join(target_path, "lib/example.ex")
       File.mkdir_p!(Path.dirname(file))
       File.write!(file, "# TODO probe\n")
-      File.ln_s!(canonical, alias_path)
+      File.ln_s!(target_path, alias_path)
       root = directory_root!(alias_path)
+      {:ok, canonical_root} = Root.canonical_path(target_path)
+      {:ok, canonical_file} = Root.canonical_path(file)
 
       assert {:ok, %TodoSearch.Result{items: [item]}} =
                TodoSearch.run(todo_effect(root, TodoSearchPortProbe))
 
       assert_received {:todo_search_port_opened, "git",
-                       ["-C", ^canonical, "rev-parse", "--is-inside-work-tree"]}
+                       ["-C", ^canonical_root, "rev-parse", "--is-inside-work-tree"]}
 
-      assert item.id.path == file
+      assert item.id.path == canonical_file
     end
 
     test "accepts a confirmed broad root before opening the probe Port" do

@@ -216,7 +216,7 @@ defmodule MingaEditor.Effects.TodoSearch do
       run_search_command(
         port_backend,
         "grep",
-        ["-rnEIZ", "--exclude-dir=.git", @keyword_pattern, canonical_root],
+        ["-rnEI", "--null", "--exclude-dir=.git", @keyword_pattern, canonical_root],
         :grep
       )
     end
