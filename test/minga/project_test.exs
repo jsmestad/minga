@@ -1,12 +1,19 @@
 defmodule Minga.ProjectTest do
-  use ExUnit.Case, async: true
+  # Serializes because git-backed fixtures spawn real OS processes.
+  use ExUnit.Case, async: false
   use ExUnitProperties
 
+  alias Minga.Config.Options
   alias Minga.Project
   alias Minga.Project.Root
   alias Minga.Project.WorkspaceSnapshot
 
   @moduletag :tmp_dir
+  setup_all do
+    Options.set(:persist_known_projects, false)
+    Options.set(:persist_recent_files, false)
+    :ok
+  end
 
   # Start a private Project GenServer for each test to avoid global state.
   defp start_project!(opts \\ []) do

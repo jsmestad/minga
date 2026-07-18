@@ -1,5 +1,6 @@
 defmodule MingaAgent.Tools.PathIgnoreTest do
-  use ExUnit.Case, async: true
+  # Serializes because git-backed filter tests spawn real OS processes.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.Tools.PathIgnore
 
