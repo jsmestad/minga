@@ -5,10 +5,10 @@ defmodule MingaEditor.Layout.OverlayBand do
   The Go compositor historically footer-appended one secondary overlay at the
   bottom of the screen, sizing its height with `maxOverlayHeight()`
   (`go/tui/internal/ui/model.go`: `min(max(height/3, 4), 12)`) and spanning the
-  full terminal width. These eight surfaces (float popup, agent context, tool
-  manager, extension panel, observatory, edit timeline, notifications, extension
-  overlay) are identical footer-band shapes, so the BEAM owns one rect helper for
-  all of them instead of eight copies.
+  full terminal width. These seven surfaces (float popup, agent context, extension
+  panel, observatory, edit timeline, notifications, and extension overlay) are
+  identical footer-band shapes, so the BEAM owns one rect helper for all of them
+  instead of seven copies.
 
   `rect/2` ports that exact clamp. `content_height` is the surface's content line
   count (BEAM-derivable from the chrome/UI models) or `:max` for a surface whose
@@ -20,9 +20,9 @@ defmodule MingaEditor.Layout.OverlayBand do
   Only one overlay shows at a time in that band (single-active model, #2268 AC-4).
   For the count-derivable surfaces (notifications, observatory, edit_timeline,
   extension_overlay) the caller passes a real `content_height` so the band shrinks
-  to the content and the overlay hugs the screen bottom. For the wrap-dependent
-  surfaces (float_popup, extension_panel, and the dormant agent_context/tool_manager)
-  the caller passes `:max` (the clamp ceiling); the frontend bottom-aligns the
+  to the content and the overlay hugs the screen bottom. For wrap-dependent
+  active surfaces (float_popup, extension_panel, and agent_context) the caller
+  passes `:max` (the clamp ceiling); the frontend bottom-aligns the
   rendered content inside that band, so a short overlay still hugs the bottom and
   the residual phantom rows sit ABOVE it (see `MingaEditor.Layout.FooterOverlays`).
   Either way the rect only needs to CONTAIN the overlay so clicks over it are

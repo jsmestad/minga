@@ -1,17 +1,17 @@
 defmodule MingaEditor.Layout.FooterOverlays do
   @moduledoc """
-  BEAM visibility source for the eight footer-band secondary overlays (#2281).
+  BEAM visibility source for the seven active footer-band secondary overlay producers (#2281).
 
-  These surfaces (float popup, agent context, tool manager, extension panel,
-  observatory, edit timeline, notifications, extension overlay) historically had
-  no BEAM rect: the Go compositor footer-appended one of them, sizing it
-  frontend-side. The owner ruled them mouse-driven (#2330), so the BEAM now owns
-  their semantic footer-band z and conservative cell containment. Native GUI
-  frontends still own final rich-content measurement inside those bands. This
-  module is the single place that decides which of the eight is visible this
-  frame and how tall its conservative band is, reading the SAME underlying state
-  the render-model builders read (so visibility never drifts from what the
-  frontend actually renders).
+  These surfaces (float popup, agent context, extension panel, observatory, edit
+  timeline, notifications, extension overlay) historically had no BEAM rect: the
+  Go compositor footer-appended one of them, sizing it frontend-side. The owner
+  ruled them mouse-driven (#2330), so the BEAM now owns their semantic footer-band
+  z and conservative cell containment. Native GUI frontends still own final
+  rich-content measurement inside those bands. This module is the single place
+  that decides which active producer is visible this frame and how tall its
+  conservative band is, reading the SAME underlying state the render-model
+  builders read (so visibility never drifts from what the frontend actually
+  renders).
 
   `visible/1` returns the visible footer overlays as `{surface_id, content_height}`
   pairs. `MingaEditor.FocusTree` turns each into an overlay node via
@@ -51,17 +51,13 @@ defmodule MingaEditor.Layout.FooterOverlays do
       renders a title plus up to two blocks per visible panel until it fills the
       band, so its phantom zone shrinks as panels are added.
 
-  ## Live vs dormant sources (honesty, #2281)
+  ## Live sources (honesty, #2281)
 
   Seven surfaces have a live BEAM content source in the render-model path and so
   can actually become visible here: float popup, extension panel, observatory,
-  edit timeline, notifications, extension overlay, and agent context. One is
-  dormant on that path: the tool manager is not in the render-model UI at all (it
-  ships only via the legacy `protocol/gui.ex` path). Their predicates here are
-  wired to the same future sources, so they are placement-ready and will light up
-  automatically when an epic child gives them a BEAM render-model source. Today
-  the tool manager predicate never fires, which is correct: an overlay the BEAM
-  never renders must not claim a footer band.
+  edit timeline, notifications, extension overlay, and agent context. The Tool
+  Manager registry identity is preserved elsewhere for compatibility, but it has
+  no footer-overlay producer here because it is not in the render-model UI.
   """
 
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
@@ -98,7 +94,6 @@ defmodule MingaEditor.Layout.FooterOverlays do
       {:edit_timeline, edit_timeline_visible?(state), content_height_edit_timeline(state)},
       {:observatory, observatory_visible?(state), content_height_observatory(state)},
       {:extension_panel, extension_panel_visible?(), :max},
-      {:tool_manager, tool_manager_visible?(state), :max},
       {:agent_context, agent_context_visible?(state), :max},
       {:float_popup, float_popup_visible?(state), :max}
     ]
@@ -218,11 +213,6 @@ defmodule MingaEditor.Layout.FooterOverlays do
   defp agent_context_visible?(state) do
     AgentContextBuilder.visible?(state)
   end
-
-  # Tool manager: not in the render-model UI; no BEAM content source on this path.
-  # Dormant until an epic child adds a render-model builder for it.
-  @spec tool_manager_visible?(map()) :: boolean()
-  defp tool_manager_visible?(_state), do: false
 
   # Extension panel: any visible extension or semantic panel.
   # Mirrors MingaEditor.RenderModel.UI.ExtensionPanelBuilder.
