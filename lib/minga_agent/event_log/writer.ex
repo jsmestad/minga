@@ -9,6 +9,7 @@ defmodule MingaAgent.EventLog.Writer do
 
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.WriterState
+  alias MingaAgent.EventLog.WriterWorkflow
 
   @doc "Starts an unlinked writer monitored by its EventLog owner."
   @spec start(pid(), keyword()) :: GenServer.on_start()
@@ -35,67 +36,24 @@ defmodule MingaAgent.EventLog.Writer do
   @impl GenServer
   @spec handle_continue(:open, WriterState.t()) ::
           {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
-  def handle_continue(:open, state) do
-    case state.backend.open_writer(state.path, state.backend_opts) do
-      {:ok, db} -> finish_open(state, db, state.backend.file_edit_events(db))
-      {:error, reason} -> report_unavailable(state, reason)
-    end
-  end
-
-  @spec finish_open(WriterState.t(), term(), {:ok, [EventRecord.t()]} | {:error, term()}) ::
-          {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
-  defp finish_open(state, db, {:ok, events}) do
-    send(state.owner, {:event_log_writer_ready, self(), events})
-    {:noreply, WriterState.opened(state, db)}
-  end
-
-  defp finish_open(state, db, {:error, reason}) do
-    _ = state.backend.close(db)
-    report_unavailable(state, {:reconstruction_failed, reason})
-  end
-
-  @spec report_unavailable(WriterState.t(), term()) :: {:stop, term(), WriterState.t()}
-  defp report_unavailable(state, reason) do
-    send(state.owner, {:event_log_writer_unavailable, self(), reason})
-    {:stop, {:shutdown, {:open_failed, reason}}, state}
-  end
+  def handle_continue(:open, state), do: WriterWorkflow.open(state)
 
   @impl GenServer
   @spec handle_info(term(), WriterState.t()) ::
           {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
   def handle_info({:write_event, token, %EventRecord{} = record}, state) do
-    result = state.backend.insert(state.db, record)
-    send(state.owner, {:event_log_writer_result, self(), token, record.event_type, result})
-    {:noreply, state}
+    WriterWorkflow.write_event(state, token, record)
   end
 
   def handle_info({:delete_before, token, %DateTime{} = cutoff}, state) do
-    result =
-      case state.backend.delete_before(state.db, cutoff) do
-        {:ok, deleted_count} ->
-          case state.backend.file_edit_events(state.db) do
-            {:ok, events} -> {:ok, deleted_count, events}
-            {:error, reason} -> {:error, {:reload_failed, reason}}
-          end
-
-        {:error, reason} ->
-          {:error, {:delete_failed, reason}}
-      end
-
-    send(state.owner, {:event_log_retention_result, self(), token, result})
-    {:noreply, state}
+    WriterWorkflow.delete_before(state, token, cutoff)
   end
 
   def handle_info({:DOWN, ref, :process, owner, reason}, %{owner_ref: ref, owner: owner} = state) do
-    {:stop, {:owner_terminated, reason}, state}
+    WriterWorkflow.owner_down(state, reason)
   end
 
   @impl GenServer
   @spec terminate(term(), WriterState.t()) :: :ok
-  def terminate(_reason, %{db: nil}), do: :ok
-
-  def terminate(_reason, state) do
-    _ = state.backend.close(state.db)
-    :ok
-  end
+  def terminate(_reason, state), do: WriterWorkflow.terminate(state)
 end

@@ -291,7 +291,7 @@ defmodule MingaAgent.EventLogTest do
     second_ref = Process.monitor(second_writer)
     send(second_writer, {:event_log_store_open_result, {:error, :permission_denied}})
     assert_receive {:DOWN, ^second_ref, :process, ^second_writer, _reason}
-    assert %{status: :unavailable, pending_retention: true} = :sys.get_state(log)
+    assert %{writer: :unavailable, pending_retention: true} = :sys.get_state(log)
 
     assert :ok = EventLog.restart_writer(name)
     third_writer = open_controlled_writer()
@@ -508,7 +508,7 @@ defmodule MingaAgent.EventLogTest do
     assert_receive {:event_log_store_file_edit_events, ^writer}
     send(writer, {:event_log_store_file_edit_events_result, {:ok, []}})
     :sys.get_state(writer)
-    assert %{status: :ready} = :sys.get_state(name)
+    assert %{writer: {:ready, ^writer, _ref}} = :sys.get_state(name)
 
     send(name, :retention_sweep)
     assert_receive {:event_log_store_delete_before, ^writer, _cutoff}
@@ -519,7 +519,7 @@ defmodule MingaAgent.EventLogTest do
     send(writer, {:event_log_store_file_edit_events_result, {:error, :disk_read_failed}})
 
     assert_receive {:DOWN, ^writer_ref, :process, ^writer, _reason}, @event_timeout
-    assert %{status: :unavailable} = :sys.get_state(name)
+    assert %{writer: :unavailable} = :sys.get_state(name)
     assert EventLog.touched_files("session", name) == {:error, :unavailable}
   end
 

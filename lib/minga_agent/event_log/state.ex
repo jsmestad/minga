@@ -1,20 +1,18 @@
 defmodule MingaAgent.EventLog.State do
   @moduledoc "Owned runtime state and transitions for `MingaAgent.EventLog`."
 
+  alias MingaAgent.EventLog.Entry
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Limits
   alias MingaAgent.EventLog.TouchedFiles
 
-  @type receipt :: reference()
-  @type critical_entry ::
-          {:critical, receipt(), pid(), EventRecord.event_type(), non_neg_integer(),
-           EventRecord.t()}
-  @type best_effort_entry ::
-          {:best_effort, EventRecord.event_type(), non_neg_integer(), EventRecord.t()}
-  @type entry :: critical_entry() | best_effort_entry()
-  @type in_flight ::
-          {:event, reference(), entry()}
-          | {:retention, reference(), DateTime.t()}
+  @type entry :: Entry.t()
+  @type writer_lifecycle ::
+          :starting
+          | :unavailable
+          | {:opening, pid(), reference()}
+          | {:ready, pid(), reference()}
+  @type in_flight :: {:event, reference(), entry()} | {:retention, reference()}
 
   @enforce_keys [
     :path,
@@ -31,9 +29,7 @@ defmodule MingaAgent.EventLog.State do
             writer_opts: [],
             restart_delay_ms: nil,
             queue: :queue.new(),
-            writer: nil,
-            writer_ref: nil,
-            status: :starting,
+            writer: :starting,
             in_flight: nil,
             pending_retention: false,
             sweep_ref: nil,
@@ -48,9 +44,7 @@ defmodule MingaAgent.EventLog.State do
           writer_opts: keyword(),
           restart_delay_ms: non_neg_integer(),
           queue: term(),
-          writer: pid() | nil,
-          writer_ref: reference() | nil,
-          status: :starting | :ready | :unavailable,
+          writer: writer_lifecycle(),
           in_flight: in_flight() | nil,
           pending_retention: boolean(),
           sweep_ref: reference() | nil,
@@ -113,25 +107,39 @@ defmodule MingaAgent.EventLog.State do
   @spec touched_files(t(), String.t()) :: [TouchedFiles.touch()]
   def touched_files(state, session_id), do: TouchedFiles.list(state.touched_files, session_id)
 
-  @doc "Marks a writer process as starting."
+  @doc "Stores an opening writer and its monitor as one lifecycle value."
   @spec writer_started(t(), pid(), reference()) :: t()
   def writer_started(state, writer, writer_ref) do
-    %{state | writer: writer, writer_ref: writer_ref, status: :starting}
+    %{state | writer: {:opening, writer, writer_ref}}
   end
 
-  @doc "Marks the current writer as ready."
+  @doc "Marks the opening writer as ready."
   @spec writer_ready(t()) :: t()
-  def writer_ready(state), do: %{state | status: :ready}
-
-  @doc "Clears writer identity and sets its availability state."
-  @spec clear_writer(t(), :starting | :unavailable) :: t()
-  def clear_writer(state, status) do
-    %{state | writer: nil, writer_ref: nil, status: status}
+  def writer_ready(%__MODULE__{writer: {:opening, writer, writer_ref}} = state) do
+    %{state | writer: {:ready, writer, writer_ref}}
   end
 
-  @doc "Returns whether one event of the given serialized size fits the outstanding-work bounds."
-  @spec admission_available?(t(), non_neg_integer()) :: boolean()
-  def admission_available?(state, bytes), do: Limits.available?(state.limits, bytes)
+  @doc "Transitions writer lifecycle into a fresh start attempt."
+  @spec writer_restarting(t()) :: t()
+  def writer_restarting(state), do: %{state | writer: :starting}
+
+  @doc "Transitions writer lifecycle into explicit unavailability."
+  @spec writer_unavailable(t()) :: t()
+  def writer_unavailable(state), do: %{state | writer: :unavailable}
+
+  @doc "Returns the writer process when opening or ready."
+  @spec writer_pid(t()) :: pid() | nil
+  def writer_pid(%__MODULE__{writer: {phase, writer, _ref}})
+      when phase in [:opening, :ready],
+      do: writer
+
+  def writer_pid(%__MODULE__{}), do: nil
+
+  @doc "Reports whether one serialized event fits the outstanding-work bounds."
+  @spec ensure_capacity(t(), non_neg_integer()) :: :ok | {:error, :overloaded}
+  def ensure_capacity(state, bytes) do
+    if Limits.available?(state.limits, bytes), do: :ok, else: {:error, :overloaded}
+  end
 
   @doc "Enqueues an admitted event at the back of the ordered queue."
   @spec enqueue(t(), entry()) :: t()
@@ -159,9 +167,9 @@ defmodule MingaAgent.EventLog.State do
   end
 
   @doc "Marks a retention sweep as the writer's single in-flight operation."
-  @spec start_retention(t(), reference(), DateTime.t()) :: t()
-  def start_retention(state, token, cutoff) do
-    %{state | pending_retention: false, in_flight: {:retention, token, cutoff}}
+  @spec start_retention(t(), reference()) :: t()
+  def start_retention(state, token) do
+    %{state | pending_retention: false, in_flight: {:retention, token}}
   end
 
   @doc "Clears the completed in-flight operation and releases completed event bytes."
@@ -178,7 +186,7 @@ defmodule MingaAgent.EventLog.State do
     %{state | queue: :queue.in_r(entry, state.queue), in_flight: nil}
   end
 
-  def requeue_in_flight(%__MODULE__{in_flight: {:retention, _token, _cutoff}} = state) do
+  def requeue_in_flight(%__MODULE__{in_flight: {:retention, _token}} = state) do
     %{state | in_flight: nil, pending_retention: true}
   end
 
@@ -188,7 +196,7 @@ defmodule MingaAgent.EventLog.State do
   @spec clear_event_work(t()) :: t()
   def clear_event_work(state) do
     pending_retention =
-      state.pending_retention or match?({:retention, _token, _cutoff}, state.in_flight)
+      state.pending_retention or match?({:retention, _token}, state.in_flight)
 
     %{
       state
@@ -216,6 +224,5 @@ defmodule MingaAgent.EventLog.State do
   def clear_idle_waiters(state), do: %{state | idle_waiters: []}
 
   @spec entry_bytes(entry()) :: non_neg_integer()
-  defp entry_bytes({:critical, _receipt, _caller, _event_type, bytes, _record}), do: bytes
-  defp entry_bytes({:best_effort, _event_type, bytes, _record}), do: bytes
+  defp entry_bytes(%Entry{payload_bytes: bytes}), do: bytes
 end
