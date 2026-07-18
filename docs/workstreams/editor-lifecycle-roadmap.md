@@ -1450,7 +1450,7 @@ Delete the unused Session History and Tab picker source implementations, plus th
 
 ### W009: Remove unused renderer capability helpers
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D10
 - **Roadmap unit:** W009, Remove unused renderer capability helpers
 - **Ponytail verdict:** `ACCEPT/delete`
@@ -1506,7 +1506,7 @@ Live renderer behavior is owned by the renderer pipeline, frontend capabilities,
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2995
 - **Commit SHA:** `ed77d50b5c5c6d2650b8d909b6903ab2c5f14fb2`
-- **Merge SHA:** Pending
+- **Merge SHA:** `db7468ca6cac6da438e05326430070bba155a673`
 - **Focused tests:** `mix compile --warnings-as-errors` passed; post-deletion source reference search found no live matches.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 578 excluded).
 - **Ponytail and Elixir verdict:** `LEAN`; the exact three-file deletion removes an orphan module and its isolated tests without introducing or relocating a concept.
@@ -1516,6 +1516,76 @@ Live renderer behavior is owned by the renderer pipeline, frontend capabilities,
 - **Test lines added/removed:** 0 added / 52 removed, net -52
 - **Concepts added/removed:** No concepts added; one unused renderer capability helper module removed.
 - **Findings resolved:** The orphan renderer capability helper API and its isolated test surface are removed.
+- **Discoveries affecting later work:** None.
+- **Completion date:** 2026-07-18
+
+### W010: Remove duplicate Diagnostics LSP Info branch
+
+- **Status:** ACTIVE
+- **Audit ID:** D29
+- **Roadmap unit:** W010, Remove duplicate Diagnostics LSP Info branch
+- **Ponytail verdict:** `ACCEPT/delete`
+- **Freshness profile:** Targeted controller check against current main; no repeated broad freshness pass
+- **Planning profile:** Direct controller promotion; no high-planner escalation because command registration and the surviving owner are explicit
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `db7468ca6cac6da438e05326430070bba155a673`
+- **Freshness basis:** Freshly rebased `HEAD` and `origin/main` include W009. `MingaEditor.Commands.Diagnostics` registers only diagnostic commands, has no live `:lsp_info` caller, and still carries an unreachable branch. `MingaEditor.Commands.Lsp` remains registered and owns the live `:lsp_info` command and Ex-command path.
+- **Implementer questions:** None.
+
+#### Observable outcome
+
+Remove the unreachable Diagnostics-owned `:lsp_info` branch and its unused aliases. The registered LSP Info command continues to work through `MingaEditor.Commands.Lsp`; diagnostic picker and navigation behavior remain unchanged.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.Commands.Lsp` owns `:lsp_info`, including registration and execution. `MingaEditor.Commands.Diagnostics` owns only diagnostic navigation and picker commands. Narrow the Diagnostics `execute/2` contract to its registered atoms and remove the duplicate implementation rather than sharing or moving code.
+
+#### Exact files, symbols, producers, and consumers
+
+- Production: `lib/minga_editor/commands/diagnostics.ex`
+- Remove `execute(state, :lsp_info)`
+- Remove unused aliases `Minga.LSP.Client` and `Minga.LSP.Supervisor`
+- Narrow the public `execute/2` spec to `:diagnostic_list | :diagnostic_picker | :next_diagnostic | :prev_diagnostic`
+- Preserve `MingaEditor.Commands.Lsp.__commands__/0` and `execute/2`
+- Preserve Registry membership, Ex-command routing, keybindings, diagnostic picker, and next/previous navigation
+
+#### Locked implementation
+
+1. Confirm Diagnostics does not register or receive `:lsp_info`.
+2. Confirm `MingaEditor.Commands.Lsp` remains the registered live owner.
+3. Delete the duplicate Diagnostics branch and now-unused aliases.
+4. Narrow the Diagnostics `execute/2` spec to registered diagnostics commands.
+5. Change no command names, registration, dispatch, picker behavior, navigation, or LSP status output.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs test/minga_editor/commands/lsp_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not consolidate command modules, alter aliases exposed to users, change status formatting, modify LSP clients or supervision, or change diagnostics storage and navigation.
+- Do not add a process, module, dependency, abstraction, behaviour, protocol, cache, compatibility path, or replacement.
+- **Expected production delta:** 2 added / 28 removed, net -26.
+- **Expected test delta:** 0.
+- **Maximum added production lines:** 2.
+- **Maximum added test lines:** 0.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs test/minga_editor/commands/lsp_test.exs` passed, 9 tests.
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 578 excluded).
+- **Ponytail and Elixir verdict:** `LEAN`; the one-file cut removes a duplicate unreachable branch while leaving the explicit registered owner intact.
+- **Bug-hunt verdict:** `PASS`; no live Diagnostics caller reaches `:lsp_info`, and all registered LSP Info paths continue through `MingaEditor.Commands.Lsp`.
+- **Final reviewer verdict:** `PASS`; the staged one-file production cut preserves registered diagnostics and LSP command ownership, matches the locked budget, and carries final-base validation evidence.
+- **Production lines added/removed:** 2 added / 28 removed, net -26
+- **Test lines added/removed:** 0 added / 0 removed, net 0
+- **Concepts added/removed:** No concepts added; one duplicate command implementation removed.
+- **Findings resolved:** Diagnostics no longer carries an unreachable alternate LSP Info implementation.
 - **Discoveries affecting later work:** None.
 - **Completion date:** 2026-07-18
 
