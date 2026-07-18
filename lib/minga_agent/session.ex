@@ -1480,48 +1480,28 @@ defmodule MingaAgent.Session do
 
   @spec install_turn_execution(state(), TurnExecution.t(), TurnExecution.effects()) :: state()
   defp install_turn_execution(state, execution, effects) do
-    {state, execution} =
-      Enum.reduce(effects, {state, execution}, &apply_turn_effect/2)
+    state =
+      Enum.reduce(effects, state, fn effect, state ->
+        interpret_transition_effect(effect, state, execution)
+      end)
 
     %{state | turn_execution: execution}
   end
 
-  @spec apply_turn_effect(
-          TurnExecution.effect(),
-          {state(), TurnExecution.t()}
-        ) :: {state(), TurnExecution.t()}
-  defp apply_turn_effect({:status_changed, _status} = effect, {state, execution}),
-    do: interpret_effect_against_execution(effect, state, execution)
-
-  defp apply_turn_effect(:reconsider_idle_gc = effect, {state, execution}),
-    do: interpret_effect_against_execution(effect, state, execution)
-
-  defp apply_turn_effect({:send_queued_turn, _contents} = effect, {state, execution}),
-    do: interpret_effect_against_execution(effect, state, execution)
-
-  defp apply_turn_effect(effect, {state, execution}),
-    do: {interpret_turn_effect(effect, state), execution}
-
-  @spec interpret_effect_against_execution(
-          TurnExecution.effect(),
-          state(),
-          TurnExecution.t()
-        ) :: {state(), TurnExecution.t()}
-  defp interpret_effect_against_execution(effect, state, execution) do
-    source_execution = state.turn_execution
-    state = interpret_turn_effect(effect, %{state | turn_execution: execution})
-    next_execution = state.turn_execution
-    {%{state | turn_execution: source_execution}, next_execution}
+  @spec interpret_transition_effect(TurnExecution.effect(), state(), TurnExecution.t()) ::
+          state()
+  defp interpret_transition_effect({:status_changed, status}, state, execution) do
+    broadcast(state, {:status_changed, status})
+    maybe_schedule_idle_gc(state, execution)
   end
+
+  defp interpret_transition_effect(:reconsider_idle_gc, state, execution),
+    do: maybe_schedule_idle_gc(state, execution)
+
+  defp interpret_transition_effect(effect, state, _execution),
+    do: interpret_turn_effect(effect, state)
 
   @spec interpret_turn_effect(TurnExecution.effect(), state()) :: state()
-  defp interpret_turn_effect({:status_changed, status}, state) do
-    broadcast(state, {:status_changed, status})
-    maybe_schedule_idle_gc(state)
-  end
-
-  defp interpret_turn_effect(:reconsider_idle_gc, state),
-    do: maybe_schedule_idle_gc(state)
 
   defp interpret_turn_effect({:notify, trigger, message}, state) do
     notify(state, trigger, message)
@@ -1699,7 +1679,8 @@ defmodule MingaAgent.Session do
     state
   end
 
-  defp interpret_turn_effect({:send_queued_turn, contents}, state) do
+  @spec send_queued_turn(state(), [TurnExecution.content(), ...]) :: state()
+  defp send_queued_turn(state, contents) do
     combined = combine_queue_entries_to_text(contents)
     {user_message, send_content} = build_user_message(combined)
 
@@ -1834,8 +1815,10 @@ defmodule MingaAgent.Session do
           {:idle, execution, effects} ->
             install_turn_execution(state, execution, effects)
 
-          {:queued, _contents, execution, effects} ->
-            install_turn_execution(state, execution, effects)
+          {:send_next, contents, execution, effects} ->
+            state
+            |> install_turn_execution(execution, effects)
+            |> send_queued_turn(contents)
         end
 
       {:error, :invalid_phase, _execution} ->
@@ -2167,11 +2150,15 @@ defmodule MingaAgent.Session do
     })
   end
 
-  @spec maybe_schedule_idle_gc(map()) :: map()
-  defp maybe_schedule_idle_gc(state) do
+  @spec maybe_schedule_idle_gc(state()) :: state()
+  defp maybe_schedule_idle_gc(state),
+    do: maybe_schedule_idle_gc(state, state.turn_execution)
+
+  @spec maybe_schedule_idle_gc(state(), TurnExecution.t()) :: state()
+  defp maybe_schedule_idle_gc(state, execution) do
     schedule_idle_gc(
       state,
-      idle_gc_reclaimable?(state),
+      idle_gc_reclaimable?(state, execution),
       state.idle_gc_timer,
       state.idle_gc_timeout_ms
     )
@@ -2201,10 +2188,13 @@ defmodule MingaAgent.Session do
     %{state | idle_gc_timer: nil}
   end
 
-  @spec idle_gc_reclaimable?(map()) :: boolean()
-  defp idle_gc_reclaimable?(state) do
-    MapSet.size(state.subscribers) == 0 and
-      TurnExecution.reclaimable?(state.turn_execution)
+  @spec idle_gc_reclaimable?(state()) :: boolean()
+  defp idle_gc_reclaimable?(state),
+    do: idle_gc_reclaimable?(state, state.turn_execution)
+
+  @spec idle_gc_reclaimable?(state(), TurnExecution.t()) :: boolean()
+  defp idle_gc_reclaimable?(state, execution) do
+    MapSet.size(state.subscribers) == 0 and TurnExecution.reclaimable?(execution)
   end
 
   @spec idle_gc_timeout_ms() :: non_neg_integer()

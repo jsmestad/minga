@@ -64,7 +64,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     end
   end
 
-  test "approval request owns resumable phase and rejects idle, failure, or concurrent requests" do
+  test "approval is orthogonal to active activity and rejects idle, failure, or concurrent requests" do
     approval = approval("approval-1")
 
     for mode <- @modes, phase <- @phases -- [:idle, :approval_waiting, :failure] do
@@ -118,6 +118,21 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
       assert {:error, :no_pending_approval, ^source} =
                TurnExecution.resolve_approval(source, nil, :approve)
+    end
+  end
+
+  test "approval resolution preserves every active activity" do
+    approval = approval("approval-activity")
+
+    for mode <- @modes, phase <- [:starting, :thinking, :tool_execution, :completion] do
+      source = state(mode, phase)
+      {:ok, waiting, _effects} = TurnExecution.request_approval(source, approval)
+
+      assert {:ok, ^approval, resumed, _effects} =
+               TurnExecution.resolve_approval(waiting, approval.tool_call_id, :approve)
+
+      assert TurnExecution.phase(resumed) == phase
+      assert TurnExecution.active_tools(resumed) == TurnExecution.active_tools(source)
     end
   end
 
@@ -364,7 +379,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
              :dispatch_stop
            ]
 
-    assert {:queued, ["next"], starting, [{:send_queued_turn, ["next"]}]} =
+    assert {:send_next, ["next"], starting, []} =
              TurnExecution.finish_completion(completing)
 
     assert TurnExecution.phase(starting) == :starting

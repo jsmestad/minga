@@ -328,6 +328,16 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
   5. **Never build a "safe client" wrapper module** that mirrors another module's API with nil-handling and exit-catching added. That's just indirection. The monitor is the real fix; the wrapper hides the problem behind a layer that every caller must remember to use.
 - `mix compile --warnings-as-errors` must pass clean
 
+### Tagged state and transition APIs
+
+Use tagged values to make valid lifecycle states and transitions explicit:
+
+- **Dispatch on tagged values directly.** Public transition functions should pattern-match valid source tags in their own clauses. Do not derive `active?`, `empty?`, or another boolean only to forward into a same-named private function with one extra argument. Projection predicates are for callers, not internal transition dispatch.
+- **Repeated unwrap-update-rewrap code is a representation smell.** Mutually exclusive facts belong in sum types; orthogonal facts belong together in one product. If several transitions extract nested tagged data and reconstruct it afterward, revise the tagged shape before adding helpers.
+- **Use keyed collection primitives for keyed data.** For lists of fixed tuples, prefer `List.keyfind/3`, `List.keymember?/3`, and `List.keytake/3` over a query followed by another `Enum` traversal.
+- **Keep effect interpreters out of lifecycle decisions.** Session-style orchestrators should interpret declared effects before installing the returned owned value. If an effect needs a projection from the proposed value, pass that value explicitly instead of temporarily installing it. An effect handler must not invoke another transition or choose the next owned value. Return fallible work as an explicit orchestration outcome so the caller performs it and applies the appropriate success or failure transition.
+- **Table-test transitions across every tag.** Every public transition should cover each valid source tag, including rejected states. A newly added tag must fail visibly in focused tests instead of inheriting a boolean fallback.
+
 ### Module-Level Type Aliases
 
 Define `@type` aliases at the top of any module where a type appears in 3+ specs. This turns noisy specs into readable ones:

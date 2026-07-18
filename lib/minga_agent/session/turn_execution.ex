@@ -28,18 +28,14 @@ defmodule MingaAgent.Session.TurnExecution do
   @typedoc "An active provider tool identified by its stable call ID."
   @type active_tool :: {tool_call_id :: String.t(), name :: String.t()}
 
-  @typedoc "Provider phase restored after a pending approval is resolved."
-  @type resumable_phase ::
-          :idle | :starting | :thinking | :completion | {:tool_execution, [active_tool(), ...]}
+  @typedoc "Provider activity within one active turn."
+  @type activity ::
+          :starting | :thinking | :completion | {:tool_execution, [active_tool(), ...]}
 
-  @typedoc "Runtime phase with phase-specific approval and tool data."
+  @typedoc "Runtime phase. Approval is orthogonal to provider activity within an active turn."
   @type phase ::
           :idle
-          | :starting
-          | :thinking
-          | {:approval_waiting, ToolApproval.t(), resumable_phase()}
-          | {:tool_execution, [active_tool(), ...]}
-          | :completion
+          | {:active, activity(), ToolApproval.t() | nil}
           | {:failure, String.t()}
 
   @typedoc "Public status retained at the Session API boundary."
@@ -82,7 +78,6 @@ defmodule MingaAgent.Session.TurnExecution do
           | {:apply_usage, Event.token_usage() | nil}
           | :dispatch_stop
           | {:append_steering_messages, [content()]}
-          | {:send_queued_turn, [content()]}
 
   @typedoc "Ordered effects returned by a transition."
   @type effects :: [effect()]
@@ -123,39 +118,28 @@ defmodule MingaAgent.Session.TurnExecution do
           | :tool_execution
           | :completion
           | :failure
-  def phase(%__MODULE__{phase: {phase, _message}}), do: phase
-  def phase(%__MODULE__{phase: {phase, _approval, _resume_phase}}), do: phase
-  def phase(%__MODULE__{phase: phase}), do: phase
+  def phase(%__MODULE__{phase: {:active, _activity, %ToolApproval{}}}),
+    do: :approval_waiting
+
+  def phase(%__MODULE__{phase: {:active, activity, nil}}), do: activity_phase(activity)
+  def phase(%__MODULE__{phase: {:failure, _message}}), do: :failure
+  def phase(%__MODULE__{phase: :idle}), do: :idle
 
   @doc "Derives the stable public Session status."
   @spec status(t()) :: status()
   def status(%__MODULE__{mode: :plan}), do: :plan
   def status(%__MODULE__{phase: :idle}), do: :idle
-  def status(%__MODULE__{phase: :starting}), do: :idle
-  def status(%__MODULE__{phase: :thinking}), do: :thinking
-
-  def status(%__MODULE__{phase: {:approval_waiting, _approval, resume_phase}}),
-    do: resumable_status(resume_phase)
-
-  def status(%__MODULE__{phase: {:tool_execution, [_tool | _rest]}}), do: :tool_executing
-  def status(%__MODULE__{phase: :completion}), do: :tool_executing
+  def status(%__MODULE__{phase: {:active, activity, _approval}}), do: activity_status(activity)
   def status(%__MODULE__{phase: {:failure, _message}}), do: :error
 
   @doc "Returns true while provider work belongs to the current turn."
   @spec active?(t()) :: boolean()
-  def active?(%__MODULE__{phase: phase}) when phase in [:starting, :thinking, :completion],
-    do: true
-
-  def active?(%__MODULE__{phase: {:approval_waiting, _approval, _resume_phase}}), do: true
-
-  def active?(%__MODULE__{phase: {:tool_execution, [_tool | _rest]}}), do: true
+  def active?(%__MODULE__{phase: {:active, _activity, _approval}}), do: true
   def active?(%__MODULE__{}), do: false
 
   @doc "Returns the current pending approval, if any."
   @spec pending_approval(t()) :: ToolApproval.t() | nil
-  def pending_approval(%__MODULE__{phase: {:approval_waiting, approval, _resume_phase}}),
-    do: approval
-
+  def pending_approval(%__MODULE__{phase: {:active, _activity, approval}}), do: approval
   def pending_approval(%__MODULE__{}), do: nil
 
   @doc "Returns the current failure message, if any."
@@ -165,10 +149,9 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Returns active tools in provider start order."
   @spec active_tools(t()) :: [active_tool()]
-  def active_tools(%__MODULE__{phase: {:approval_waiting, _approval, resume_phase}}),
-    do: resumable_active_tools(resume_phase)
+  def active_tools(%__MODULE__{phase: {:active, {:tool_execution, tools}, _approval}}),
+    do: tools
 
-  def active_tools(%__MODULE__{phase: {:tool_execution, tools}}), do: tools
   def active_tools(%__MODULE__{}), do: []
 
   @doc "Returns the most recently started active tool name."
@@ -183,7 +166,7 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc "Returns the name for one active tool call."
   @spec tool_name(t(), String.t()) :: {:ok, String.t()} | {:error, :tool_not_active}
   def tool_name(%__MODULE__{} = execution, tool_call_id) when is_binary(tool_call_id) do
-    case Enum.find(active_tools(execution), fn {id, _name} -> id == tool_call_id end) do
+    case List.keyfind(active_tools(execution), tool_call_id, 0) do
       {_id, name} -> {:ok, name}
       nil -> {:error, :tool_not_active}
     end
@@ -191,14 +174,19 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Begins a provider turn from an inactive state."
   @spec begin_turn(t()) :: {:ok, t(), effects()} | {:error, :turn_active, t()}
-  def begin_turn(%__MODULE__{} = execution) do
-    begin_turn(execution, active?(execution))
-  end
+  def begin_turn(%__MODULE__{phase: :idle} = execution),
+    do: {:ok, activate(execution, :starting), []}
+
+  def begin_turn(%__MODULE__{phase: {:failure, _message}} = execution),
+    do: {:ok, activate(execution, :starting), []}
+
+  def begin_turn(%__MODULE__{phase: {:active, _activity, _approval}} = execution),
+    do: {:error, :turn_active, execution}
 
   @doc "Accepts the provider's turn-start event."
   @spec provider_started(t()) :: {:ok, t(), effects()} | {:error, :invalid_phase, t()}
-  def provider_started(%__MODULE__{phase: :starting} = execution) do
-    next = %{execution | phase: :thinking}
+  def provider_started(%__MODULE__{phase: {:active, :starting, nil}} = execution) do
+    next = activate(execution, :thinking)
     {:ok, next, status_effect(next, :thinking)}
   end
 
@@ -208,21 +196,23 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc "Moves an active turn into approval waiting."
   @spec request_approval(t(), ToolApproval.t()) :: {:ok, t(), effects()}
   def request_approval(
-        %__MODULE__{phase: {:approval_waiting, _pending, _resume_phase}} = execution,
+        %__MODULE__{phase: {:active, _activity, %ToolApproval{}}} = execution,
         %ToolApproval{} = approval
       ),
       do: {:ok, execution, [{:reject_approval, approval}]}
 
-  def request_approval(%__MODULE__{phase: phase} = execution, %ToolApproval{} = approval)
-      when phase in [:starting, :thinking, :completion] do
-    put_approval_wait(execution, approval)
-  end
-
   def request_approval(
-        %__MODULE__{phase: {:tool_execution, [_tool | _rest]}} = execution,
+        %__MODULE__{phase: {:active, activity, nil}} = execution,
         %ToolApproval{} = approval
       ) do
-    put_approval_wait(execution, approval)
+    next = %{execution | phase: {:active, activity, approval}}
+
+    effects = [
+      {:notify, :approval, "Approval needed: #{approval.name}"},
+      {:broadcast, {:approval_pending, ToolApproval.public(approval)}}
+    ]
+
+    {:ok, next, effects}
   end
 
   def request_approval(%__MODULE__{} = execution, %ToolApproval{} = approval),
@@ -233,12 +223,12 @@ defmodule MingaAgent.Session.TurnExecution do
           {:ok, ToolApproval.t(), t(), effects()}
           | {:error, :approval_not_found | :no_pending_approval, t()}
   def resolve_approval(
-        %__MODULE__{phase: {:approval_waiting, approval, resume_phase}} = execution,
+        %__MODULE__{phase: {:active, activity, %ToolApproval{} = approval}} = execution,
         approval_id,
         decision
       )
       when decision in [:approve, :approve_session, :approve_turn, :reject] do
-    resolve_matching_approval(execution, approval, resume_phase, approval_id, decision)
+    resolve_matching_approval(execution, activity, approval, approval_id, decision)
   end
 
   def resolve_approval(%__MODULE__{} = execution, _approval_id, _decision),
@@ -280,62 +270,60 @@ defmodule MingaAgent.Session.TurnExecution do
   @spec tool_started(t(), Event.ToolStart.t()) ::
           {:ok, trust_scope() | nil, t(), effects()}
           | {:error, :invalid_phase | :tool_already_active, t()}
-  def tool_started(%__MODULE__{phase: :idle} = execution, %Event.ToolStart{}),
-    do: {:error, :invalid_phase, execution}
+  def tool_started(
+        %__MODULE__{phase: {:active, _activity, _approval}} = execution,
+        %Event.ToolStart{} = event
+      ) do
+    tools = active_tools(execution)
 
-  def tool_started(%__MODULE__{phase: {:failure, _message}} = execution, %Event.ToolStart{}),
-    do: {:error, :invalid_phase, execution}
+    if List.keymember?(tools, event.tool_call_id, 0) do
+      {:error, :tool_already_active, execution}
+    else
+      {scope, pending_auto_approvals} =
+        Map.pop(execution.pending_auto_approvals, event.tool_call_id)
 
-  def tool_started(%__MODULE__{} = execution, %Event.ToolStart{} = event) do
-    case tool_name(execution, event.tool_call_id) do
-      {:ok, _name} ->
-        {:error, :tool_already_active, execution}
+      next =
+        execution
+        |> put_activity({:tool_execution, tools ++ [{event.tool_call_id, event.name}]})
+        |> Map.put(:pending_auto_approvals, pending_auto_approvals)
 
-      {:error, :tool_not_active} ->
-        {scope, pending_auto_approvals} =
-          Map.pop(execution.pending_auto_approvals, event.tool_call_id)
-
-        tools = active_tools(execution) ++ [{event.tool_call_id, event.name}]
-        next = put_active_tools(execution, tools)
-        next = %{next | pending_auto_approvals: pending_auto_approvals}
-
-        effects =
-          status_effect(next, :tool_executing) ++ [{:append_tool_start, event, scope}]
-
-        {:ok, scope, next, effects}
+      effects = status_effect(next, :tool_executing) ++ [{:append_tool_start, event, scope}]
+      {:ok, scope, next, effects}
     end
   end
+
+  def tool_started(%__MODULE__{} = execution, %Event.ToolStart{}),
+    do: {:error, :invalid_phase, execution}
 
   @doc "Completes one matching active tool and rejects stale or duplicate completions."
   @spec tool_completed(t(), Event.ToolEnd.t()) ::
           {:ok, t(), effects()} | {:error, :tool_not_active, t()}
   def tool_completed(%__MODULE__{} = execution, %Event.ToolEnd{} = event) do
-    case tool_name(execution, event.tool_call_id) do
-      {:ok, _name} ->
-        tools =
-          Enum.reject(active_tools(execution), fn {id, _name} -> id == event.tool_call_id end)
+    case List.keytake(active_tools(execution), event.tool_call_id, 0) do
+      {{_id, _name}, remaining} ->
+        next =
+          execution
+          |> put_activity(completed_tool_activity(remaining))
+          |> Map.update!(:pending_auto_approvals, &Map.delete(&1, event.tool_call_id))
 
-        next = complete_active_tool(execution, tools)
+        {:ok, next, [{:finish_tool, event}]}
 
-        next = %{
-          next
-          | pending_auto_approvals: Map.delete(next.pending_auto_approvals, event.tool_call_id)
-        }
-
-        effects = [{:finish_tool, event}]
-
-        {:ok, next, effects}
-
-      {:error, :tool_not_active} ->
+      nil ->
         {:error, :tool_not_active, execution}
     end
   end
 
   @doc "Admits a prompt by starting an inactive turn or queueing behind an active turn."
   @spec admit_prompt(t(), prompt_kind(), content()) :: prompt_admission()
-  def admit_prompt(%__MODULE__{} = execution, kind, content)
+  def admit_prompt(%__MODULE__{phase: {:active, _activity, _approval}} = execution, kind, content)
       when kind in [:steering, :follow_up] do
-    admit_prompt(execution, kind, content, active?(execution))
+    queue_prompt(execution, kind, content)
+  end
+
+  def admit_prompt(%__MODULE__{} = execution, kind, _content)
+      when kind in [:steering, :follow_up] do
+    {:ok, next, effects} = begin_turn(execution)
+    {:send_now, next, effects}
   end
 
   @doc "Dequeues steering prompts without changing follow-up admission."
@@ -368,7 +356,7 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc "Switches to plan mode while preserving the runtime phase."
   @spec enter_plan(t()) :: {t(), effects()}
   def enter_plan(%__MODULE__{} = execution) do
-    {next, approval_effects} = leave_approval_wait(execution)
+    {next, approval_effects} = clear_approval(execution)
     next = transition_mode(next, :plan)
     {next, approval_effects ++ [:announce_plan_mode, {:status_changed, :plan}]}
   end
@@ -472,7 +460,7 @@ defmodule MingaAgent.Session.TurnExecution do
     do: {:error, :invalid_phase, execution}
 
   def begin_completion(%__MODULE__{} = execution, usage) do
-    next = %{execution | phase: :completion}
+    next = activate(execution, :completion)
 
     effects =
       reject_approval_effects(execution) ++
@@ -484,15 +472,14 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc "Finishes completion, clearing turn trust before admitting queued work."
   @spec finish_completion(t()) ::
           {:idle, t(), effects()}
-          | {:queued, [content()], t(), effects()}
+          | {:send_next, [content(), ...], t(), effects()}
           | {:error, :invalid_phase, t()}
-  def finish_completion(%__MODULE__{phase: :completion} = execution) do
+  def finish_completion(%__MODULE__{phase: {:active, :completion, nil}} = execution) do
     pending = execution.steering_queue ++ execution.follow_up_queue
 
     next = %{
       execution
-      | phase: completion_phase(pending),
-        trust_levels: drop_turn_trust(execution.trust_levels),
+      | trust_levels: drop_turn_trust(execution.trust_levels),
         pending_auto_approvals: %{},
         steering_queue: [],
         follow_up_queue: []
@@ -506,7 +493,7 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Returns a failed queued-send transition to idle without restoring consumed entries."
   @spec queued_send_failed(t()) :: {:ok, t(), effects()} | {:error, :invalid_phase, t()}
-  def queued_send_failed(%__MODULE__{phase: :starting} = execution) do
+  def queued_send_failed(%__MODULE__{phase: {:active, :starting, nil}} = execution) do
     next = %{execution | phase: :idle}
     {:ok, next, status_effect(next, :idle)}
   end
@@ -523,8 +510,15 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Restores an idle execution value after declaring cleanup for live work."
   @spec restore(t()) :: {t(), effects()}
-  def restore(%__MODULE__{} = execution),
-    do: {new(), restore_effects(execution, active?(execution))}
+  def restore(%__MODULE__{phase: {:active, _activity, _approval}} = execution) do
+    effects =
+      reject_approval_effects(execution) ++
+        [:abort_provider] ++ abort_active_tool_effects(execution, true)
+
+    {new(), effects}
+  end
+
+  def restore(%__MODULE__{}), do: {new(), []}
 
   @doc "Adds or replaces one tool trust decision."
   @spec put_trust(t(), String.t(), trust_scope()) :: t()
@@ -587,44 +581,27 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc "Returns true when turn state does not prevent detached-session reclamation."
   @spec reclaimable?(t()) :: boolean()
   def reclaimable?(%__MODULE__{} = execution) do
-    not active?(execution) and pending_approval(execution) == nil and
-      execution.pending_auto_approvals == %{} and execution.steering_queue == [] and
-      execution.follow_up_queue == []
-  end
-
-  @spec begin_turn(t(), boolean()) :: {:ok, t(), effects()} | {:error, :turn_active, t()}
-  defp begin_turn(execution, true), do: {:error, :turn_active, execution}
-  defp begin_turn(execution, false), do: {:ok, %{execution | phase: :starting}, []}
-
-  @spec put_approval_wait(t(), ToolApproval.t()) :: {:ok, t(), effects()}
-  defp put_approval_wait(%__MODULE__{} = execution, approval) do
-    next = %{execution | phase: {:approval_waiting, approval, execution.phase}}
-
-    effects = [
-      {:notify, :approval, "Approval needed: #{approval.name}"},
-      {:broadcast, {:approval_pending, ToolApproval.public(approval)}}
-    ]
-
-    {:ok, next, effects}
+    not active?(execution) and execution.pending_auto_approvals == %{} and
+      execution.steering_queue == [] and execution.follow_up_queue == []
   end
 
   @spec resolve_matching_approval(
           t(),
+          activity(),
           ToolApproval.t(),
-          resumable_phase(),
           String.t() | nil,
           approval_decision()
         ) ::
           {:ok, ToolApproval.t(), t(), effects()} | {:error, :approval_not_found, t()}
-  defp resolve_matching_approval(execution, approval, _resume_phase, approval_id, _decision)
+  defp resolve_matching_approval(execution, _activity, approval, approval_id, _decision)
        when is_binary(approval_id) and approval.tool_call_id != approval_id,
        do: {:error, :approval_not_found, execution}
 
-  defp resolve_matching_approval(execution, approval, resume_phase, _approval_id, decision) do
+  defp resolve_matching_approval(execution, activity, approval, _approval_id, decision) do
     next =
       execution
       |> maybe_put_decision_trust(approval, decision)
-      |> resume_after_approval(resume_phase)
+      |> then(&%{&1 | phase: {:active, activity, nil}})
 
     effects =
       [
@@ -662,42 +639,33 @@ defmodule MingaAgent.Session.TurnExecution do
 
   defp rejection_message_effects(_approval, _decision), do: []
 
-  @spec admit_prompt(t(), prompt_kind(), content(), boolean()) :: prompt_admission()
-  defp admit_prompt(execution, _kind, _content, false) do
-    {:ok, next, effects} = begin_turn(execution)
-    {:send_now, next, effects}
-  end
-
-  defp admit_prompt(execution, :steering, content, true) do
+  @spec queue_prompt(t(), prompt_kind(), content()) :: prompt_admission()
+  defp queue_prompt(%__MODULE__{} = execution, :steering, content) do
     next = %{execution | steering_queue: execution.steering_queue ++ [content]}
     {:queued, :steering, next, [{:broadcast, {:prompt_queued, content, :steering}}]}
   end
 
-  defp admit_prompt(execution, :follow_up, content, true) do
+  defp queue_prompt(%__MODULE__{} = execution, :follow_up, content) do
     next = %{execution | follow_up_queue: execution.follow_up_queue ++ [content]}
     {:queued, :follow_up, next, [{:broadcast, {:prompt_queued, content, :follow_up}}]}
   end
 
-  @spec leave_approval_wait(t()) :: {t(), effects()}
-  defp leave_approval_wait(
-         %__MODULE__{phase: {:approval_waiting, approval, resume_phase}} = execution
+  @spec clear_approval(t()) :: {t(), effects()}
+  defp clear_approval(
+         %__MODULE__{phase: {:active, activity, %ToolApproval{} = approval}} = execution
        ) do
-    {resume_after_approval(execution, resume_phase), [{:reject_approval, approval}]}
+    {%{execution | phase: {:active, activity, nil}}, [{:reject_approval, approval}]}
   end
 
-  defp leave_approval_wait(%__MODULE__{} = execution), do: {execution, []}
-
-  @spec resume_after_approval(t(), resumable_phase()) :: t()
-  defp resume_after_approval(%__MODULE__{} = execution, resume_phase),
-    do: %{execution | phase: resume_phase}
+  defp clear_approval(%__MODULE__{} = execution), do: {execution, []}
 
   @spec reject_approval_effects(t()) :: effects()
-  defp reject_approval_effects(%__MODULE__{} = execution) do
-    case pending_approval(execution) do
-      %ToolApproval{} = approval -> [{:reject_approval, approval}]
-      nil -> []
-    end
-  end
+  defp reject_approval_effects(%__MODULE__{
+         phase: {:active, _activity, %ToolApproval{} = approval}
+       }),
+       do: [{:reject_approval, approval}]
+
+  defp reject_approval_effects(%__MODULE__{}), do: []
 
   @spec abort_active_tool_effects(t(), boolean()) :: effects()
   defp abort_active_tool_effects(%__MODULE__{} = execution, notify?) do
@@ -711,51 +679,33 @@ defmodule MingaAgent.Session.TurnExecution do
   defp active_tool_effects([_tool | _rest], true),
     do: [:abort_active_tools, :notify_messages_changed]
 
-  @spec restore_effects(t(), boolean()) :: effects()
-  defp restore_effects(%__MODULE__{} = execution, false),
-    do: reject_approval_effects(execution)
+  @spec activate(t(), activity()) :: t()
+  defp activate(%__MODULE__{} = execution, activity),
+    do: %{execution | phase: {:active, activity, nil}}
 
-  defp restore_effects(%__MODULE__{} = execution, true) do
-    reject_approval_effects(execution) ++
-      [:abort_provider] ++ abort_active_tool_effects(execution, true)
-  end
-
-  @spec put_active_tools(t(), nonempty_list(active_tool())) :: t()
-  defp put_active_tools(
-         %__MODULE__{phase: {:approval_waiting, approval, _old_resume}} = execution,
-         tools
+  @spec put_activity(t(), activity()) :: t()
+  defp put_activity(
+         %__MODULE__{phase: {:active, _old_activity, approval}} = execution,
+         activity
        ),
-       do: %{execution | phase: {:approval_waiting, approval, {:tool_execution, tools}}}
+       do: %{execution | phase: {:active, activity, approval}}
 
-  defp put_active_tools(%__MODULE__{} = execution, [_tool | _rest] = tools),
-    do: %{execution | phase: {:tool_execution, tools}}
+  @spec completed_tool_activity([active_tool()]) ::
+          :completion | {:tool_execution, [active_tool(), ...]}
+  defp completed_tool_activity([]), do: :completion
+  defp completed_tool_activity([_tool | _rest] = tools), do: {:tool_execution, tools}
 
-  @spec complete_active_tool(t(), [active_tool()]) :: t()
-  defp complete_active_tool(
-         %__MODULE__{phase: {:approval_waiting, approval, _old_resume}} = execution,
-         tools
-       ),
-       do: %{execution | phase: {:approval_waiting, approval, resumable_phase(tools)}}
+  @spec activity_phase(activity()) :: :starting | :thinking | :tool_execution | :completion
+  defp activity_phase(:starting), do: :starting
+  defp activity_phase(:thinking), do: :thinking
+  defp activity_phase(:completion), do: :completion
+  defp activity_phase({:tool_execution, [_tool | _rest]}), do: :tool_execution
 
-  defp complete_active_tool(%__MODULE__{} = execution, []),
-    do: %{execution | phase: :completion}
-
-  defp complete_active_tool(%__MODULE__{} = execution, [_tool | _rest] = tools),
-    do: %{execution | phase: {:tool_execution, tools}}
-
-  @spec resumable_phase([active_tool()]) :: :completion | {:tool_execution, [active_tool(), ...]}
-  defp resumable_phase([]), do: :completion
-  defp resumable_phase([_tool | _rest] = tools), do: {:tool_execution, tools}
-
-  @spec resumable_status(resumable_phase()) :: :idle | :thinking | :tool_executing
-  defp resumable_status(phase) when phase in [:idle, :starting], do: :idle
-  defp resumable_status(:thinking), do: :thinking
-  defp resumable_status(:completion), do: :tool_executing
-  defp resumable_status({:tool_execution, [_tool | _rest]}), do: :tool_executing
-
-  @spec resumable_active_tools(resumable_phase()) :: [active_tool()]
-  defp resumable_active_tools({:tool_execution, tools}), do: tools
-  defp resumable_active_tools(_phase), do: []
+  @spec activity_status(activity()) :: :idle | :thinking | :tool_executing
+  defp activity_status(:starting), do: :idle
+  defp activity_status(:thinking), do: :thinking
+  defp activity_status(:completion), do: :tool_executing
+  defp activity_status({:tool_execution, [_tool | _rest]}), do: :tool_executing
 
   @spec transition_mode(t(), mode()) :: t()
   defp transition_mode(%__MODULE__{} = execution, mode), do: struct!(execution, mode: mode)
@@ -770,16 +720,17 @@ defmodule MingaAgent.Session.TurnExecution do
   defp plan_idle_effect(true), do: [:reconsider_idle_gc]
   defp plan_idle_effect(false), do: []
 
-  @spec completion_phase([content()]) :: :idle | :starting
-  defp completion_phase([]), do: :idle
-  defp completion_phase([_entry | _rest]), do: :starting
-
   @spec finish_completion_result(t(), [content()]) ::
-          {:idle, t(), effects()} | {:queued, [content()], t(), effects()}
-  defp finish_completion_result(next, []), do: {:idle, next, status_effect(next, :idle)}
+          {:idle, t(), effects()} | {:send_next, [content(), ...], t(), effects()}
+  defp finish_completion_result(next, []) do
+    idle = %{next | phase: :idle}
+    {:idle, idle, status_effect(idle, :idle)}
+  end
 
-  defp finish_completion_result(next, pending),
-    do: {:queued, pending, next, [{:send_queued_turn, pending}]}
+  defp finish_completion_result(next, [_entry | _rest] = pending) do
+    starting = activate(next, :starting)
+    {:send_next, pending, starting, []}
+  end
 
   @spec clear_queue_values(t()) :: t()
   defp clear_queue_values(execution),
