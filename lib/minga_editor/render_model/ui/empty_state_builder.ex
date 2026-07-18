@@ -17,6 +17,8 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   alias Minga.RenderModel.UI.EmptyState.Section
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.Launchpad
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Window.Content
 
   # {item id, label, leader-bound command} for the start section, in order.
   @actions [
@@ -26,14 +28,19 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   ]
 
   @spec build(Context.t()) :: EmptyState.t()
-  def build(%Context{launchpad: %Launchpad{} = lp}) do
-    %EmptyState{
-      visible?: true,
-      crashed?: lp.crashed?,
-      focused_id: lp.focused_id,
-      version: version(),
-      sections: sections(lp)
-    }
+  def build(%Context{launchpad: %Launchpad{} = lp, windows: %Windows{} = windows}) do
+    with %{content: content} <- Windows.active_struct(windows),
+         true <- Content.empty?(content) do
+      %EmptyState{
+        visible?: true,
+        crashed?: lp.crashed?,
+        focused_id: lp.focused_id,
+        version: version(),
+        sections: sections(lp)
+      }
+    else
+      _other -> %EmptyState{visible?: false}
+    end
   end
 
   def build(%Context{}), do: %EmptyState{visible?: false}

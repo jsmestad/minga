@@ -3,17 +3,17 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
 
   alias Minga.RenderModel.UI.EmptyState
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
+  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.State.Launchpad
+  alias MingaEditor.State.Windows
 
-  defp ctx(launchpad) do
-    # The builder only reads ctx.launchpad; a bare struct-shaped map keeps
-    # the test at the cheapest layer.
+  defp ctx(launchpad, window \\ RenderWindow.new_empty_state(1, 24, 80)) do
     %MingaEditor.Frontend.Emit.Context{
       port_manager: nil,
       capabilities: nil,
       theme: nil,
       font_registry: nil,
-      windows: nil,
+      windows: %Windows{tree: {:leaf, 1}, map: %{1 => window}, active: 1, next_id: 2},
       layout: nil,
       shell: nil,
       launchpad: launchpad
@@ -29,6 +29,13 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
 
   test "hidden when the workspace has no launchpad" do
     assert %EmptyState{visible?: false} = EmptyStateBuilder.build(ctx(nil))
+  end
+
+  test "hidden when the active render window is agent chat" do
+    agent_window = RenderWindow.new_agent_chat(1, 24, 80)
+
+    assert %EmptyState{visible?: false} =
+             EmptyStateBuilder.build(ctx(launchpad([]), agent_window))
   end
 
   test "returning user gets a resume card, recents, actions, and footer" do
