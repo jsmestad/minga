@@ -1379,7 +1379,7 @@ Ctrl-J and Ctrl-K cycle Signature Help overloads when frontends send the canonic
 
 ### W008: Remove unused picker sources
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D19
 - **Roadmap unit:** W008, Remove unused picker sources
 - **Ponytail verdict:** `ACCEPT/delete`
@@ -1435,7 +1435,7 @@ Delete the unused Session History and Tab picker source implementations, plus th
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2994
 - **Commit SHA:** `a82bf2ccc4d829ffcfe422373c56e7084c22d038`
-- **Merge SHA:** Pending
+- **Merge SHA:** `9d5f97315e7b37e409961c27274b1fcb447d88c0`
 - **Focused tests:** `mix compile --warnings-as-errors` passed; post-deletion source reference search found only roadmap evidence.
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,862 tests, 0 failures, 1 skipped, 578 excluded).
 - **Ponytail and Elixir verdict:** `LEAN`; deleting both orphan implementations and the direct test removes concepts without changing the live source behaviour or picker orchestration.
@@ -1445,6 +1445,77 @@ Delete the unused Session History and Tab picker source implementations, plus th
 - **Test lines added/removed:** 0 added / 103 removed, net -103
 - **Concepts added/removed:** No concepts added; two unused picker source implementations removed.
 - **Findings resolved:** Session History Source and Tab Source no longer remain as unreachable picker implementations.
+- **Discoveries affecting later work:** None.
+- **Completion date:** 2026-07-18
+
+### W009: Remove unused renderer capability helpers
+
+- **Status:** ACTIVE
+- **Audit ID:** D10
+- **Roadmap unit:** W009, Remove unused renderer capability helpers
+- **Ponytail verdict:** `ACCEPT/delete`
+- **Freshness profile:** Targeted controller check against current main; no repeated broad freshness pass
+- **Planning profile:** Direct controller promotion; no high-planner escalation because the deletion boundary is fully reproducible and has no unresolved owner, caller, test, or compatibility question
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `9d5f97315e7b37e409961c27274b1fcb447d88c0`
+- **Freshness basis:** Freshly rebased `HEAD` and `origin/main` include W008. Current source has no live caller, dynamic lookup, extension reference, configuration reference, or public compatibility consumer for `MingaEditor.Renderer.Caps` or any of its functions.
+- **Implementer questions:** None.
+
+#### Observable outcome
+
+Delete the unused renderer capability helper module and its isolated direct test. Remove the stale renderer moduledoc entry. Live renderer capability handling and output remain unchanged.
+
+#### Authoritative owner and locked shape
+
+Live renderer behavior is owned by the renderer pipeline, frontend capabilities, and frontend adapters. `MingaEditor.Renderer.Caps` is not consumed by those owners. Remove the orphan module without moving its functions or adding a replacement API.
+
+#### Exact files, symbols, producers, and consumers
+
+- Delete `lib/minga_editor/renderer/caps.ex`, module `MingaEditor.Renderer.Caps`
+- Delete `test/minga_editor/renderer/caps_test.exs`, module `MingaEditor.Renderer.CapsTest`
+- Remove the stale `Renderer.Caps` bullet from `lib/minga_editor/renderer.ex`
+- Removed public functions: `render_overlays?/1`, `adapt_color/2`, and `send_images?/1`
+- Removed private helper: `rgb_to_256/1`
+- Preserve all live renderer modules, frontend capability structures, adapters, protocols, and tests
+
+#### Locked implementation
+
+1. Confirm no current repository reference selects or calls the module or any removed function.
+2. Delete `renderer/caps.ex`.
+3. Delete `renderer/caps_test.exs`, which tests only the removed module.
+4. Remove the stale moduledoc bullet.
+5. Add no replacement, alias, delegation, fallback, compatibility module, or migration.
+
+#### Validation
+
+- Source reference check: no `MingaEditor.Renderer.Caps`, `Renderer.Caps`, `render_overlays?`, `adapt_color`, `send_images?`, or `rgb_to_256` reference remains outside immutable audit and roadmap history.
+- Focused: `mix compile --warnings-as-errors`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not change renderer behavior, frontend capabilities, color conversion, image rendering, overlays, adapters, protocols, or registered render paths.
+- Do not add a process, module, dependency, abstraction, behaviour, protocol, cache, compatibility path, or replacement.
+- **Expected production delta:** 0 added / 78 removed.
+- **Expected test delta:** 0 added / 52 removed.
+- **Maximum added production lines:** 0.
+- **Maximum added test lines:** 0.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** `mix compile --warnings-as-errors` passed; post-deletion source reference search found no live matches.
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 578 excluded).
+- **Ponytail and Elixir verdict:** `LEAN`; the exact three-file deletion removes an orphan module and its isolated tests without introducing or relocating a concept.
+- **Bug-hunt verdict:** `PASS`; no production, configuration, documentation, extension, dynamic lookup, or compatibility consumer remains.
+- **Final reviewer verdict:** `PASS`; the staged diff matches the locked three-file deletion, line budgets, validation evidence, and live-renderer preservation boundary.
+- **Production lines added/removed:** 0 added / 78 removed, net -78
+- **Test lines added/removed:** 0 added / 52 removed, net -52
+- **Concepts added/removed:** No concepts added; one unused renderer capability helper module removed.
+- **Findings resolved:** The orphan renderer capability helper API and its isolated test surface are removed.
 - **Discoveries affecting later work:** None.
 - **Completion date:** 2026-07-18
 
