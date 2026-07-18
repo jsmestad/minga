@@ -1311,6 +1311,72 @@ The picker modal and `on_select/2` consume the returned items. The three command
 - **Program status:** ACTIVE; this evidence closes only W001 through W006. Eighty-five accepted findings and twenty-eight routed decisions remained when this correction was recorded.
 - **Simplicity closure:** No unit added a process, dependency, protocol, behaviour, adapter, wrapper, cache, compatibility path, or parallel data shape. The only new semantic contracts are the private save outcome, explicit ordinary/force destruction intent, and exact-identity Dired retirement transition required by the accepted behavior. W001, W005, and W006 reused existing owners and removed or avoided duplicate transition logic.
 
+## Extended execution
+
+### W007: Signature Help recognizes Control modifiers
+
+- **Status:** ACTIVE
+- **Audit ID:** L20
+- **Roadmap unit:** W007, Signature Help recognizes Control modifiers
+- **Ponytail verdict:** `ACCEPT/direct`
+- **Freshness profile:** `editor-lifecycle-freshness`, `openai-codex/gpt-5.5`, `medium`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `b4c7f30b3b9cc5d3c473c378a8e26c67ac016914`
+- **Freshness basis:** `HEAD`, `main`, and `origin/main` changed only roadmap, profile, and route-decision documentation after the medium freshness review at `6e175b87764145577999a1c04a532960cb89222f`. Current source still hardcodes the Alt modifier bit in Signature Help.
+- **Implementer questions:** None.
+
+#### Observable outcome
+
+Ctrl-J and Ctrl-K cycle Signature Help overloads when frontends send the canonical Control bit `0x02`. Alt-J remains ordinary input and passes through unchanged.
+
+#### Authoritative owner and locked shape
+
+`MingaEditor.Input` owns modifier constants through `mod_ctrl/0` and `mod_alt/0`. `MingaEditor.Input.SignatureHelp.handle_key/3` consumes those constants. Replace only the private hardcoded `@ctrl 4` value with `MingaEditor.Input.mod_ctrl/0`; no input or protocol contract changes.
+
+#### Exact files, symbols, producers, and consumers
+
+- Production: `lib/minga_editor/input/signature_help.ex`, private `@ctrl` used by `handle_key/3`
+- Tests: `test/minga_editor/input/signature_help_test.exs`, Ctrl-J/Ctrl-K cycling and Alt-J collision regression
+- Producers: macOS and Go frontends encode Control as `0x02`; `MingaEditor.Frontend.Protocol` decodes the shared modifier mask
+- Consumer: `MingaEditor.Input.SignatureHelp`
+
+#### Locked implementation
+
+1. Bind the Signature Help `@ctrl` attribute to `MingaEditor.Input.mod_ctrl/0`.
+2. Bind the test modifier to the same canonical helper.
+3. Preserve the existing Ctrl-J and Ctrl-K cycling assertions.
+4. Add a negative Alt-J assertion that returns `{:passthrough, state}` unchanged.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/input/signature_help_test.exs`
+- Broad: `make lint`
+- Full non-heavy: `ERL_FLAGS='+S 2:2' mix test.llm`
+
+#### Non-goals and budget
+
+- Do not change modifier encoding, frontend protocol values, Signature Help state, cycling behavior, Escape dismissal, or ordinary passthrough.
+- Do not add a process, module, dependency, abstraction, compatibility path, or fallback.
+- **Maximum production delta:** 0 net lines.
+- **Maximum test delta:** +10 net lines.
+
+#### Completion evidence
+
+- **PR URL:** https://github.com/jsmestad/minga/pull/2993
+- **Commit SHA:** `7bbd2730b6631cb2ce84be1da6903d9c0603fd66`
+- **Merge SHA:** Pending
+- **Focused tests:** `mix test.debug test/minga_editor/input/signature_help_test.exs` passed, 7 tests
+- **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,868 tests, 0 failures, 1 skipped, 578 excluded)
+- **Ponytail and Elixir verdict:** `LEAN`; the canonical modifier helper is the smallest natural Elixir cutover, removes one duplicate constant, and introduces no concept.
+- **Bug-hunt verdict:** `PASS`; Ctrl-J and Ctrl-K use the canonical Control bit, Alt-J proves the former collision passes through, and Escape plus ordinary passthrough remain covered.
+- **Final reviewer verdict:** `PASS`, confidence 0.99; canonical modifier ownership, Ctrl-J/Ctrl-K cycling, Alt-J passthrough, tests, evidence, and budgets are merge-safe.
+- **Production lines added/removed:** 1 added / 1 removed, net 0
+- **Test lines added/removed:** 8 added / 1 removed, net +7
+- **Concepts added/removed:** No concepts added; one incorrect private modifier constant was replaced by the existing input owner.
+- **Findings resolved:** Signature Help now recognizes frontend Control modifiers without treating Alt as Control.
+- **Discoveries affecting later work:** None.
+- **Completion date:** Pending
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

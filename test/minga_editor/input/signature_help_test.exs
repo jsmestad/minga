@@ -9,7 +9,7 @@ defmodule MingaEditor.Input.SignatureHelpTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
-  @ctrl 4
+  @ctrl MingaEditor.Input.mod_ctrl()
   @escape 27
 
   @sample_response %{
@@ -59,6 +59,13 @@ defmodule MingaEditor.Input.SignatureHelpTest do
       {:handled, state} = SigHelpInput.handle_key(state, ?j, @ctrl)
       assert {:handled, new_state} = SigHelpInput.handle_key(state, ?k, @ctrl)
       assert new_state.shell_runtime.state.signature_help.active_signature == 0
+    end
+
+    test "Alt-j passes through without cycling signatures" do
+      state = state_with_sig_help()
+
+      assert {:passthrough, ^state} =
+               SigHelpInput.handle_key(state, ?j, MingaEditor.Input.mod_alt())
     end
 
     test "Escape dismisses" do

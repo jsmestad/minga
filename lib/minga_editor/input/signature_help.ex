@@ -16,7 +16,7 @@ defmodule MingaEditor.Input.SignatureHelp do
 
   import Bitwise
 
-  @ctrl 4
+  @ctrl MingaEditor.Input.mod_ctrl()
   @key_escape 27
 
   @impl true
