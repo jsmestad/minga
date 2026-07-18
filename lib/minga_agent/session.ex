@@ -58,13 +58,6 @@ defmodule MingaAgent.Session do
   @typedoc "Tool trust lifetime."
   @type trust_scope :: :session | :turn
 
-  @typedoc "File touch record."
-  @type file_touch :: %{
-          path: String.t(),
-          action: :created | :modified | :deleted,
-          timestamp: integer()
-        }
-
   @typedoc "Context inherited by child subagent sessions."
   @type subagent_context :: SubagentContext.t()
 
@@ -118,7 +111,6 @@ defmodule MingaAgent.Session do
           created_at: DateTime.t(),
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
-          touched_files: %{String.t() => file_touch()},
           boundaries: %{String.t() => EditBoundary.t()},
           credentials_configured: boolean()
         }
@@ -530,21 +522,6 @@ defmodule MingaAgent.Session do
   end
 
   @doc """
-  Returns files touched by this agent session, ordered by most recent first.
-
-  Each entry contains:
-  - `path`: relative file path
-  - `action`: `:created`, `:modified`, or `:deleted`
-  - `timestamp`: monotonic timestamp of the last touch
-
-  Derived from tool call history (file_write, file_edit, multi_edit_file, apply_diff).
-  """
-  @spec touched_files(GenServer.server()) :: [file_touch()]
-  def touched_files(session) do
-    GenServer.call(session, :touched_files)
-  end
-
-  @doc """
   Sets an edit boundary for the agent on the given file path.
 
   The agent will be restricted to editing within the specified line range
@@ -751,7 +728,6 @@ defmodule MingaAgent.Session do
       created_at: now,
       steering_queue: [],
       follow_up_queue: [],
-      touched_files: %{},
       boundaries: %{},
       credentials_configured: credentials_configured?
     }
@@ -865,15 +841,6 @@ defmodule MingaAgent.Session do
     {:reply, {state.steering_queue, state.follow_up_queue}, state}
   end
 
-  def handle_call(:touched_files, _from, state) do
-    files =
-      state.touched_files
-      |> Map.values()
-      |> Enum.sort_by(& &1.timestamp, :desc)
-
-    {:reply, files, state}
-  end
-
   def handle_call({:set_boundary, path, start_line, end_line}, _from, state) do
     abs_path = Path.expand(path)
 
@@ -954,7 +921,6 @@ defmodule MingaAgent.Session do
         created_at: now,
         steering_queue: [],
         follow_up_queue: [],
-        touched_files: %{},
         boundaries: %{},
         trust_levels: %{},
         pending_auto_approvals: %{}
@@ -1790,7 +1756,6 @@ defmodule MingaAgent.Session do
        tool_name}
     )
 
-    state = record_file_touch(state, event.path, event.before_content, event.after_content)
     state = record_tool_file_preview(state, event)
     notify_messages_changed(state)
   end
@@ -3635,7 +3600,6 @@ defmodule MingaAgent.Session do
             created_at: loaded_at,
             steering_queue: [],
             follow_up_queue: [],
-            touched_files: %{},
             boundaries: %{},
             trust_levels: %{},
             pending_auto_approvals: %{}
@@ -3805,33 +3769,6 @@ defmodule MingaAgent.Session do
       {first, rest} = String.split_at(word, 1)
       String.upcase(first) <> rest
     end)
-  end
-
-  # Records a file touch from a ToolFileChanged event.
-  @spec record_file_touch(state(), String.t(), String.t(), String.t()) :: state()
-  defp record_file_touch(state, path, "", after_content) when byte_size(after_content) > 0 do
-    record_file_touch_with_action(state, path, :created)
-  end
-
-  defp record_file_touch(state, path, before_content, "") when byte_size(before_content) > 0 do
-    record_file_touch_with_action(state, path, :deleted)
-  end
-
-  defp record_file_touch(state, path, _before, _after) do
-    record_file_touch_with_action(state, path, :modified)
-  end
-
-  @spec record_file_touch_with_action(state(), String.t(), :created | :modified | :deleted) ::
-          state()
-  defp record_file_touch_with_action(state, path, action) do
-    touch = %{
-      path: path,
-      action: action,
-      timestamp: System.monotonic_time()
-    }
-
-    touched_files = Map.put(state.touched_files, path, touch)
-    %{state | touched_files: touched_files}
   end
 
   @impl GenServer

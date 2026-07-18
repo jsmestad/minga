@@ -13,9 +13,22 @@ defmodule MingaAgent.EventLog.ControllableStore do
     send(controller, {:event_log_store_open, self(), path})
 
     receive do
-      {:event_log_store_open_result, result} -> normalize_open_result(result, controller)
+      {:event_log_store_open_result, result} -> normalize_open_result(result, controller, opts)
     end
   end
+
+  @doc "Returns the configured reconstruction result without another synchronization exchange."
+  @impl MingaAgent.EventLog.StoreBackend
+  @spec file_edit_events(map()) :: {:ok, [EventRecord.t()]} | {:error, term()}
+  def file_edit_events(%{controller: controller, reconstruction_result: :controlled}) do
+    send(controller, {:event_log_store_file_edit_events, self()})
+
+    receive do
+      {:event_log_store_file_edit_events_result, result} -> result
+    end
+  end
+
+  def file_edit_events(%{reconstruction_result: result}), do: result
 
   @doc "Reports that the controlled connection closed."
   @impl MingaAgent.EventLog.StoreBackend
@@ -61,8 +74,15 @@ defmodule MingaAgent.EventLog.ControllableStore do
     end
   end
 
-  @spec normalize_open_result(:ok | {:error, term()}, pid()) ::
+  @spec normalize_open_result(:ok | {:error, term()}, pid(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  defp normalize_open_result(:ok, controller), do: {:ok, %{controller: controller}}
-  defp normalize_open_result({:error, _reason} = error, _controller), do: error
+  defp normalize_open_result(:ok, controller, opts) do
+    {:ok,
+     %{
+       controller: controller,
+       reconstruction_result: Keyword.get(opts, :reconstruction_result, {:ok, []})
+     }}
+  end
+
+  defp normalize_open_result({:error, _reason} = error, _controller, _opts), do: error
 end

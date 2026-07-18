@@ -34,7 +34,7 @@ defmodule Minga.Extension.AgentAPI do
   @spec list_sessions() :: [session_summary()]
   def list_sessions, do: raise("minga_sdk is compile-time only")
 
-  @spec session_info(pid()) :: {:ok, session_info()} | {:error, :not_found}
+  @spec session_info(pid()) :: {:ok, session_info()} | {:error, :not_found | :unavailable}
   def session_info(_pid), do: raise("minga_sdk is compile-time only")
 
   @spec subscribe() :: :ok

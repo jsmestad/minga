@@ -76,6 +76,20 @@ defmodule MingaAgent.EventLog.Store do
     query_events(db, sql, [session_id, last_id, limit])
   end
 
+  @doc "Returns every persisted file-edit event in durable order."
+  @impl MingaAgent.EventLog.StoreBackend
+  @spec file_edit_events(db()) :: {:ok, [EventRecord.t()]} | {:error, term()}
+  def file_edit_events(db) do
+    sql = """
+    SELECT id, event_key, session_id, event_type, payload, wall_clock, monotonic_ts
+    FROM events
+    WHERE event_type = 'file_edit_proposed'
+    ORDER BY id ASC
+    """
+
+    query_events(db, sql, [])
+  end
+
   @doc "Returns the latest event id for a session, or 0 when it has no events."
   @spec latest_id(db(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
   def latest_id(db, session_id) when is_binary(session_id) do

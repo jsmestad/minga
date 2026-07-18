@@ -20,9 +20,11 @@ defmodule Minga.Extension.AgentAPI do
       Minga.Extension.AgentAPI.subscribe()
       # subscribes calling process to agent lifecycle events
   """
+  alias MingaAgent.EventLog
   alias MingaAgent.Session
 
   @default_manager MingaAgent.SessionManager
+  @default_event_log EventLog
 
   @typedoc "Agent session status."
   @type session_status :: :idle | :plan | :thinking | :tool_executing | :error
@@ -85,40 +87,43 @@ defmodule Minga.Extension.AgentAPI do
   @doc """
   Returns detailed info for a specific session by PID.
 
-  Includes cost, token usage, and turn count in addition to the
-  summary fields. Returns `{:error, :not_found}` if the PID is dead
-  or not a known session.
+  Includes cost, token usage, and turn count in addition to the summary fields.
+  Returns `{:error, :not_found}` if the PID is dead or not a known session, and
+  `{:error, :unavailable}` when the touched-file projection cannot be queried.
   """
-  @spec session_info(pid(), keyword()) :: {:ok, session_info()} | {:error, :not_found}
+  @spec session_info(pid(), keyword()) ::
+          {:ok, session_info()} | {:error, :not_found | :unavailable}
   def session_info(pid, opts \\ []) when is_pid(pid) do
     manager = Keyword.get(opts, :session_manager, @default_manager)
+    event_log = Keyword.get(opts, :event_log, @default_event_log)
 
     case MingaAgent.SessionManager.session_id_for_pid(manager, pid) do
       {:ok, id} ->
-        snapshot = Session.editor_snapshot(pid)
-        usage = Session.usage(pid)
-        metadata = Session.metadata(pid)
+        case EventLog.touched_files(id, event_log) do
+          {:ok, touched_files} ->
+            snapshot = Session.editor_snapshot(pid)
+            usage = Session.usage(pid)
+            metadata = Session.metadata(pid)
 
-        touched =
-          pid
-          |> Session.touched_files()
-          |> Enum.map(& &1.path)
+            {:ok,
+             %{
+               id: id,
+               pid: pid,
+               status: snapshot.status,
+               label: metadata.title || metadata.first_prompt || "agent",
+               model: metadata.model_name,
+               active_tool: snapshot.active_tool_name,
+               created_at: metadata.created_at,
+               cost: usage.cost,
+               input_tokens: usage.input,
+               output_tokens: usage.output,
+               turn_count: metadata.turn_count,
+               files_touched: Enum.map(touched_files, & &1.path)
+             }}
 
-        {:ok,
-         %{
-           id: id,
-           pid: pid,
-           status: snapshot.status,
-           label: metadata.title || metadata.first_prompt || "agent",
-           model: metadata.model_name,
-           active_tool: snapshot.active_tool_name,
-           created_at: metadata.created_at,
-           cost: usage.cost,
-           input_tokens: usage.input,
-           output_tokens: usage.output,
-           turn_count: metadata.turn_count,
-           files_touched: touched
-         }}
+          {:error, :unavailable} ->
+            {:error, :unavailable}
+        end
 
       {:error, :not_found} ->
         {:error, :not_found}

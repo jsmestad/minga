@@ -9,6 +9,7 @@ defmodule MingaAgent.EventLog.Writer do
 
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.WriterState
+  alias MingaAgent.EventLog.WriterWorkflow
 
   @doc "Starts an unlinked writer monitored by its EventLog owner."
   @spec start(pid(), keyword()) :: GenServer.on_start()
@@ -35,43 +36,24 @@ defmodule MingaAgent.EventLog.Writer do
   @impl GenServer
   @spec handle_continue(:open, WriterState.t()) ::
           {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
-  def handle_continue(:open, state) do
-    case state.backend.open_writer(state.path, state.backend_opts) do
-      {:ok, db} ->
-        send(state.owner, {:event_log_writer_ready, self()})
-        {:noreply, WriterState.opened(state, db)}
-
-      {:error, reason} ->
-        send(state.owner, {:event_log_writer_unavailable, self(), reason})
-        {:stop, {:shutdown, {:open_failed, reason}}, state}
-    end
-  end
+  def handle_continue(:open, state), do: WriterWorkflow.open(state)
 
   @impl GenServer
   @spec handle_info(term(), WriterState.t()) ::
           {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
   def handle_info({:write_event, token, %EventRecord{} = record}, state) do
-    result = state.backend.insert(state.db, record)
-    send(state.owner, {:event_log_writer_result, self(), token, record.event_type, result})
-    {:noreply, state}
+    WriterWorkflow.write_event(state, token, record)
   end
 
   def handle_info({:delete_before, token, %DateTime{} = cutoff}, state) do
-    result = state.backend.delete_before(state.db, cutoff)
-    send(state.owner, {:event_log_retention_result, self(), token, result})
-    {:noreply, state}
+    WriterWorkflow.delete_before(state, token, cutoff)
   end
 
   def handle_info({:DOWN, ref, :process, owner, reason}, %{owner_ref: ref, owner: owner} = state) do
-    {:stop, {:owner_terminated, reason}, state}
+    WriterWorkflow.owner_down(state, reason)
   end
 
   @impl GenServer
   @spec terminate(term(), WriterState.t()) :: :ok
-  def terminate(_reason, %{db: nil}), do: :ok
-
-  def terminate(_reason, state) do
-    _ = state.backend.close(state.db)
-    :ok
-  end
+  def terminate(_reason, state), do: WriterWorkflow.terminate(state)
 end

@@ -15,6 +15,9 @@ defmodule MingaAgent.EventLog.StoreBackend do
   @doc "Closes the writer-owned database connection."
   @callback close(db()) :: :ok | {:error, term()}
 
+  @doc "Loads persisted file-edit events in durable order for projection reconstruction."
+  @callback file_edit_events(db()) :: {:ok, [EventRecord.t()]} | {:error, term()}
+
   @doc "Inserts one event and returns its committed id."
   @callback insert(db(), EventRecord.t()) :: {:ok, pos_integer()} | {:error, term()}
 
