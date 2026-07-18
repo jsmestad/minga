@@ -2,6 +2,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.GitStatus.Panel
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Observatory.Data
   alias MingaEditor.Observatory.Inspection
@@ -22,6 +23,22 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
     assert Sidebars.active_id(closed) == nil
     assert Sidebars.git_status_panel(closed) == nil
     assert Sidebars.git_status_tui_state(closed) == nil
+  end
+
+  test "Git status workflow close clears shell state and registered visibility" do
+    state =
+      MingaEditor.RenderPipeline.TestHelpers.base_state()
+      |> SidebarWorkflow.replace_git_status(Panel.new(%{entries: []}))
+      |> SidebarWorkflow.select("git_status")
+
+    table = state.extension_surfaces.sidebar_registry
+    assert %{visible?: true, focused?: true} = Sidebar.get(table, "git_status")
+
+    closed = SidebarWorkflow.close_git_status(state)
+
+    assert SidebarWorkflow.git_status_panel(closed) == nil
+    assert SidebarWorkflow.active_id(closed) == nil
+    assert %{visible?: false, focused?: false, badge_count: 0} = Sidebar.get(table, "git_status")
   end
 
   test "Git status replacement rejects legacy map-shaped panel and TUI state" do

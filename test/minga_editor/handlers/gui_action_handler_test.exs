@@ -183,6 +183,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     git_state = SidebarWorkflow.replace_git_status(state, GitStatusPanel.new(%{entries: []}))
 
+    assert %{visible?: true, focused?: false} = Sidebar.get(table, "git_status")
+
     git_active =
       GuiActionHandler.dispatch(
         git_state,
@@ -191,6 +193,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert git_active.workspace.keymap_scope == :git_status
     assert SidebarWorkflow.active_id(git_active) == "git_status"
+    assert Sidebar.get(table, "git_status").focused?
 
     observatory_state =
       state
