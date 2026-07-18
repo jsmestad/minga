@@ -7,9 +7,9 @@ defmodule MingaEditor.UI.PrettifySymbolsEffect do
   that buffer cancels the older worker/candidate instead of building a queue.
   The generation-owned scheduler starts workers under its `Task.Supervisor`.
 
-  Scheduler supersession provides request correlation and cancellation. Since
-  prettification writes only the addressed Buffer's decoration store and does
-  not mutate EditorState, canceled/stale outcomes require no state rollback.
+  Scheduler supersession provides request correlation and cancellation. Workers
+  return prepared decoration data without mutating the Buffer. The Editor applies
+  only a scheduler-claimed outcome, so canceled and stale work cannot write.
   Worker or admission failures are logged and remain non-rendering; successful
   Buffer decoration notifications retain the existing render behavior.
   """
@@ -47,27 +47,34 @@ defmodule MingaEditor.UI.PrettifySymbolsEffect do
     )
   end
 
-  @doc "Snapshots and schedules prettification for a highlighted Buffer."
+  @doc "Snapshots and schedules prettification, or synchronously clears disabled prettify conceals."
   @spec schedule(EditorState.t(), pid()) :: EditorState.t()
   def schedule(%EditorState{} = state, buffer) when is_pid(buffer) do
-    highlight = HighlightSync.get_highlight(state, buffer)
+    if PrettifySymbols.enabled?() do
+      highlight = HighlightSync.get_highlight(state, buffer)
 
-    if PrettifySymbols.enabled?() and highlight.capture_names != {} and
-         tuple_size(highlight.spans) > 0 do
-      filetype = buffer |> Buffer.file_path() |> Language.detect_filetype()
-      schedule_request(state, request(buffer, highlight, filetype))
+      if highlight.capture_names != {} and tuple_size(highlight.spans) > 0 do
+        filetype = buffer |> Buffer.file_path() |> Language.detect_filetype()
+        schedule_request(state, request(buffer, highlight, filetype))
+      else
+        state
+      end
     else
-      state
+      clear_disabled(state, buffer)
     end
   end
 
   @impl true
-  @spec run(t()) :: {:ok, :applied} | {:error, term()}
+  @spec run(t()) :: {:ok, PrettifySymbols.update()} | {:error, term()}
   def run(%__MODULE__{buffer: buffer, highlight: highlight, filetype: filetype}) do
-    :ok = PrettifySymbols.apply(buffer, highlight, filetype)
-    {:ok, :applied}
+    {:ok, PrettifySymbols.prepare(buffer, highlight, filetype)}
   catch
-    :exit, reason -> {:error, {:buffer_exit, reason}}
+    :exit, {reason, {GenServer, :call, [^buffer | _args]}}
+    when reason in [:noproc, :normal, :shutdown, :killed] ->
+      {:error, {:buffer_exit, reason}}
+
+    :exit, {{:shutdown, reason}, {GenServer, :call, [^buffer | _args]}} ->
+      {:error, {:buffer_exit, {:shutdown, reason}}}
   end
 
   @impl true
@@ -76,6 +83,25 @@ defmodule MingaEditor.UI.PrettifySymbolsEffect do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  def apply(
+        %EditorState{} = state,
+        %Outcome{
+          request: %Request{effect: %__MODULE__{buffer: buffer}},
+          status: :completed,
+          result: update
+        } = outcome
+      ) do
+    :ok = PrettifySymbols.apply_update(buffer, update)
+    {state, outcome}
+  catch
+    :exit, {reason, {GenServer, :call, [^buffer | _args]}}
+    when reason in [:noproc, :normal, :shutdown, :killed] ->
+      {state, Outcome.failed(outcome.request, {:buffer_exit, reason})}
+
+    :exit, {{:shutdown, reason}, {GenServer, :call, [^buffer | _args]}} ->
+      {state, Outcome.failed(outcome.request, {:buffer_exit, {:shutdown, reason}})}
+  end
+
   def apply(%EditorState{} = state, %Outcome{status: :failed, reason: reason} = outcome) do
     Minga.Log.warning(:editor, "Prettify symbols failed: #{inspect(reason)}")
     {state, outcome}
@@ -86,6 +112,22 @@ defmodule MingaEditor.UI.PrettifySymbolsEffect do
   @impl true
   @spec render?(Outcome.t()) :: boolean()
   def render?(%Outcome{}), do: false
+
+  @spec clear_disabled(EditorState.t(), pid()) :: EditorState.t()
+  defp clear_disabled(%EditorState{} = state, buffer) when is_pid(buffer) do
+    _cancel_result =
+      EffectScheduler.cancel_resource(state.effect_scheduler, {:prettify_symbols, buffer})
+
+    :ok = PrettifySymbols.clear(buffer)
+    state
+  catch
+    :exit, {reason, {GenServer, :call, [^buffer | _args]}}
+    when reason in [:noproc, :normal, :shutdown, :killed] ->
+      state
+
+    :exit, {{:shutdown, _reason}, {GenServer, :call, [^buffer | _args]}} ->
+      state
+  end
 
   @spec schedule_request(EditorState.t(), Request.t()) :: EditorState.t()
   defp schedule_request(%EditorState{effect_scheduler: nil} = state, _request) do

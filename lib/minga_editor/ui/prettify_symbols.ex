@@ -38,6 +38,10 @@ defmodule MingaEditor.UI.PrettifySymbols do
           captures: [String.t()]
         }
 
+  @type position :: {non_neg_integer(), non_neg_integer()}
+  @type conceal :: {position(), position(), String.t()}
+  @type update :: :clear | {:replace, [conceal()]}
+
   @doc """
   Returns the substitution rules for a filetype.
 
@@ -116,56 +120,38 @@ defmodule MingaEditor.UI.PrettifySymbols do
     ]
   end
 
-  @doc """
-  Applies prettify-symbol conceals to a buffer based on its highlight spans.
-
-  Clears any previous `:prettify_symbols` conceal group, then scans
-  highlight spans against the substitution rules for the buffer's filetype.
-  Only applies when the `prettify_symbols` config option is enabled.
-
-  Returns `:ok`. Decorations are applied directly to the buffer via
-  `Buffer.batch_decorations/2`.
-  """
-  @spec apply(pid(), Highlight.t(), atom()) :: :ok
-  def apply(buf, %Highlight{} = hl, filetype) do
-    if enabled?() do
-      apply_conceals(buf, hl, filetype)
-    else
-      clear_conceals(buf)
-    end
+  @doc "Builds the decoration update for the current buffer content and highlights."
+  @spec prepare(pid(), Highlight.t(), atom()) :: update()
+  def prepare(buf, %Highlight{} = hl, filetype) when is_pid(buf) and is_atom(filetype) do
+    build_update(buf, hl, rules_for(filetype))
   end
 
-  @spec clear_conceals(pid()) :: :ok
-  defp clear_conceals(buf) do
+  @doc "Applies a prepared prettify-symbol update atomically."
+  @spec apply_update(pid(), update()) :: :ok
+  def apply_update(buf, :clear) when is_pid(buf), do: clear(buf)
+
+  def apply_update(buf, {:replace, conceals}) when is_pid(buf) and is_list(conceals) do
     Buffer.batch_decorations(buf, fn decs ->
-      Decorations.remove_conceal_group(decs, :prettify_symbols)
+      decs
+      |> Decorations.remove_conceal_group(:prettify_symbols)
+      |> add_all_conceals(conceals)
     end)
-
-    :ok
   end
 
-  @spec apply_conceals(pid(), Highlight.t(), atom()) :: :ok
-  defp apply_conceals(buf, hl, filetype) do
-    rules = rules_for(filetype)
+  @doc "Clears the `:prettify_symbols` conceal group from a buffer."
+  @spec clear(pid()) :: :ok
+  def clear(buf), do: Buffer.remove_conceal_group(buf, :prettify_symbols)
 
-    if rules == [] do
-      clear_conceals(buf)
-    else
-      content = Buffer.content(buf)
-      lines = String.split(content, "\n")
-      capture_names = Tuple.to_list(hl.capture_names)
-      spans = Tuple.to_list(hl.spans)
+  @spec build_update(pid(), Highlight.t(), [rule()]) :: update()
+  defp build_update(_buf, %Highlight{}, []), do: :clear
 
-      conceals = find_conceals(spans, rules, capture_names, content, lines)
+  defp build_update(buf, %Highlight{} = hl, rules) do
+    content = Buffer.content(buf)
+    lines = String.split(content, "\n")
+    capture_names = Tuple.to_list(hl.capture_names)
+    spans = Tuple.to_list(hl.spans)
 
-      Buffer.batch_decorations(buf, fn decs ->
-        decs
-        |> Decorations.remove_conceal_group(:prettify_symbols)
-        |> add_all_conceals(conceals)
-      end)
-
-      :ok
-    end
+    {:replace, find_conceals(spans, rules, capture_names, content, lines)}
   end
 
   @doc "Returns true if prettify-symbols is enabled in config."
@@ -173,8 +159,6 @@ defmodule MingaEditor.UI.PrettifySymbols do
   def enabled? do
     Config.get(:prettify_symbols)
   end
-
-  @typep position :: {non_neg_integer(), non_neg_integer()}
 
   @spec add_all_conceals(Decorations.t(), [{position(), position(), String.t()}]) ::
           Decorations.t()

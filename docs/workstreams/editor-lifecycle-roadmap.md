@@ -1744,6 +1744,76 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 - **Merge SHA:** `5c965962f31aa89f48b56f477c6d3373f2bb15a9`
 - **Completion date:** 2026-07-18
 
+### W013: Clear disabled prettify symbols safely
+
+- **Status:** ACTIVE
+- **Audit ID:** L13
+- **Roadmap unit:** W013, Clear disabled prettify symbols safely
+- **Ponytail verdict:** `ACCEPT/direct`
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `57a37139155812ca0f3e002916b948f17803ee47`
+- **Freshness basis:** Current `HEAD` and `origin/main` contain the verified W012 refinement. Disabled scheduling still skipped cleanup, and the effect worker still mutated the Buffer before scheduler claim.
+
+#### Observable outcome
+
+When prettify symbols are disabled, scheduling for a buffer first cancels work owned by `{:prettify_symbols, buffer}`, then synchronously removes only that buffer's `:prettify_symbols` conceal group. Repeated cleanup is idempotent, preserves other conceal groups, and does not increment the decoration version when the target group is already absent. Workers return prepared data; only the Editor's scheduler-claimed completed outcome may mutate the Buffer.
+
+#### Owners and failure path
+
+- `MingaEditor.UI.PrettifySymbolsEffect` owns domain scheduling, disabled cleanup, and domain outcome application.
+- `MingaEditor.EffectScheduler` owns admission, cancellation, candidate claim, and worker lifecycle.
+- `MingaEditor.UI.PrettifySymbols` owns conceal preparation and atomic update application.
+- `Minga.Buffer.Process` owns Buffer decoration mutation; `Minga.Core.Decorations.remove_conceal_group/2` owns idempotent group removal.
+- Before this unit, `PrettifySymbolsEffect.schedule/2` returned unchanged state when disabled, leaving installed conceals behind. `run/1` called the mutating `PrettifySymbols.apply/3`, so canceled or stale work could race cleanup.
+
+#### Locked implementation
+
+1. Keep scheduler resource identity `{:prettify_symbols, buffer}` and the existing latest-wins policy.
+2. Preserve the enabled path: snapshot highlight and filetype, require usable spans, and schedule through `EffectScheduler`.
+3. On the disabled path, call `EffectScheduler.cancel_resource/2` before `PrettifySymbols.clear/1`; treat scheduler unavailability as non-fatal.
+4. Split preparation from mutation: `prepare/3` returns `:clear | {:replace, conceals}`, while `apply_update/2` applies that update atomically.
+5. Make `run/1` return prepared data. Apply completed data only after the Editor claims the scheduler outcome.
+6. Route atomic group removal through `Minga.Buffer.remove_conceal_group/2` and `Minga.Buffer.Process`.
+7. Catch only expected stale/dead Buffer exits around cleanup and completed application.
+
+#### Required tests
+
+- `test/minga_editor/ui/prettify_symbols_effect_test.exs`: request identity and latest-wins policy; worker non-mutation; claimed outcome mutation; disabled cancellation before cleanup; group isolation; version idempotence; stale Buffer exit; failed, stale, and canceled outcome non-mutation.
+- Preserve rule and decoration contracts through `test/minga_editor/ui/prettify_symbols_test.exs` and `test/minga/buffer/conceal_range_test.exs`.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/ui/prettify_symbols_effect_test.exs test/minga_editor/ui/prettify_symbols_test.exs test/minga/buffer/conceal_range_test.exs`
+- Broad: `git diff --check && make lint && mix test.llm --max-cases 4`
+
+#### Non-goals and budget
+
+- Do not add a config observer, process, registry, scheduler, protocol, frontend command, option-change event, wrapper, or dead-buffer abstraction.
+- Do not change capture rules, enabled scheduling, render scheduling, or unrelated empty-highlight behavior.
+- Do not remove or mutate conceal groups other than `:prettify_symbols`.
+- **Maximum production additions:** 200 lines.
+- **Maximum test additions:** 160 lines.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** 35 passed: 8 effect tests, 6 rule tests, and 21 conceal-range tests including 8 properties.
+- **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed on current main; full non-heavy result: 58 doctests, 98 properties, 9,912 tests, 0 failures, 1 skipped, 578 excluded.
+- **Planner verdict:** `READY`; exact owners, transition order, worker/apply boundary, tests, constraints, and validation are locked with no unresolved implementer question.
+- **Ponytail verdict:** `LEAN` after deleting the obsolete test-only `PrettifySymbols.apply/3`; targeted recheck returned `Lean already. Ship.`
+- **Elixir verdict:** `PASS` after narrowing expected Buffer exits and making cleanup cancel admitted work before mutation.
+- **Bug-hunt verdict:** `PASS` after moving all Buffer mutation out of workers; canceled and stale candidates cannot re-add conceals.
+- **Final reviewer verdict:** `PASS` after a targeted correction narrowed worker and completed-apply catches to expected dead Buffer exits; behavior coverage proves unexpected exits propagate.
+- **Production lines added/removed:** 99 added / 58 removed, net +41.
+- **Test lines added/removed:** 160 added / 2 removed, net +158.
+- **Concepts added/removed:** Preparation and application are explicit phases of the existing effect; the obsolete combined `apply/3` entry point is removed. No process, scheduler, protocol, or wrapper is added.
+- **Findings resolved:** Pending merge.
+- **Discoveries affecting later work:** Pending
+- **Completion date:** Pending
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

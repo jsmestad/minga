@@ -792,6 +792,12 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:remove_highlight_group, group})
   end
 
+  @doc "Removes every conceal range in a group atomically."
+  @spec remove_conceal_group(GenServer.server(), atom()) :: :ok
+  def remove_conceal_group(server, group) when is_atom(group) do
+    GenServer.call(server, {:remove_conceal_group, group})
+  end
+
   @doc """
   Executes a batch of decoration operations. The function receives and
   returns a `Decorations` struct. All operations are applied with a
@@ -1776,6 +1782,11 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:remove_highlight_group, group}, _from, state) do
     decs = Decorations.remove_group(state.decorations, group)
+    {:reply, :ok, %{state | decorations: decs}}
+  end
+
+  def handle_call({:remove_conceal_group, group}, _from, state) do
+    decs = Decorations.remove_conceal_group(state.decorations, group)
     {:reply, :ok, %{state | decorations: decs}}
   end
 
