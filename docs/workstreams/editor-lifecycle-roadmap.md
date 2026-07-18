@@ -687,8 +687,8 @@ None. The implementer must return `NEEDS_REPLAN` rather than choose a different 
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/2980
+- **Commit SHA:** `e3a981b04`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix test.debug test/minga_editor/commands/buffer_management_save_quit_test.exs test/minga_editor/input/handler_test.exs test/minga_editor/input/router_test.exs test/minga/buffer/mtime_test.exs` — 47 passed
 - **Broad validation:** `make lint` passed; `ERL_FLAGS='+S 8:8' mix test.llm` passed — 58 doctests, 98 properties, 9,845 tests, 0 failures, 1 skipped, 574 excluded
