@@ -1679,7 +1679,15 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     Process.exit(old_runtime_supervisor, :kill)
     new_instance = await_new_instance(ctx, name, old_instance)
-    assert {:ok, replacement} = eventually(fn -> Instance.start(new_instance) end)
+
+    assert {:ok, replacement} =
+             eventually(fn ->
+               case Instance.start(new_instance) do
+                 {:ok, _pid} = started -> started
+                 {:error, _reason} -> nil
+               end
+             end)
+
     refute replacement == runtime
     refute runtime_supervisor_pid(ctx, name) == old_runtime_supervisor
   end
