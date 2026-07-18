@@ -15,8 +15,6 @@ defmodule MingaEditor.Commands.Diagnostics do
   alias MingaEditor.UI.Picker.Sources.Diagnostics, as: DiagPickerSource
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
-  alias Minga.LSP.Client
-  alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.LSP.SyncServer
 
   @command_specs [
@@ -26,10 +24,10 @@ defmodule MingaEditor.Commands.Diagnostics do
     {:diagnostic_picker, "Show diagnostic list picker", true}
   ]
 
-  @doc "Executes a diagnostic or LSP command."
+  @doc "Executes a diagnostic command."
   @spec execute(
           EditorState.t(),
-          :next_diagnostic | :prev_diagnostic | :diagnostic_list | :diagnostic_picker | :lsp_info
+          :next_diagnostic | :prev_diagnostic | :diagnostic_list | :diagnostic_picker
         ) :: EditorState.t()
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, _cmd), do: state
 
@@ -47,30 +45,6 @@ defmodule MingaEditor.Commands.Diagnostics do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_diagnostic) do
     navigate(state, buf, &Diagnostics.prev/2)
-  end
-
-  def execute(state, :lsp_info) do
-    clients = LSPSupervisor.all_clients()
-
-    case clients do
-      [] ->
-        NoticeWorkflow.publish(state, "No language servers running")
-
-      _ ->
-        info =
-          Enum.map_join(clients, " | ", fn pid ->
-            try do
-              name = Client.server_name(pid)
-              status = Client.status(pid)
-              encoding = Client.encoding(pid)
-              "#{name}: #{status} (#{encoding})"
-            catch
-              :exit, _ -> "unknown: dead"
-            end
-          end)
-
-        NoticeWorkflow.publish(state, "LSP: #{info}")
-    end
   end
 
   @spec navigate(EditorState.t(), pid(), (String.t(), non_neg_integer() -> term())) ::
