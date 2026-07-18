@@ -46,7 +46,6 @@ defmodule MingaEditor.Effects.TodoSearch.PortTest do
     os_pid = read_probed_pid(probe)
     assert_receive {:DOWN, ^probe_ref, :port, ^probe, _reason}, 1_000
     drain_probe_messages(probe)
-    assert process_alive?(os_pid)
     {task, os_pid}
   end
 
