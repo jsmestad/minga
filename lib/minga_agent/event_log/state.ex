@@ -3,6 +3,7 @@ defmodule MingaAgent.EventLog.State do
 
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Limits
+  alias MingaAgent.EventLog.TouchedFiles
 
   @type receipt :: reference()
   @type critical_entry ::
@@ -36,7 +37,8 @@ defmodule MingaAgent.EventLog.State do
             in_flight: nil,
             pending_retention: false,
             sweep_ref: nil,
-            idle_waiters: []
+            idle_waiters: [],
+            touched_files: %TouchedFiles{}
 
   @type t :: %__MODULE__{
           path: String.t(),
@@ -52,7 +54,8 @@ defmodule MingaAgent.EventLog.State do
           in_flight: in_flight() | nil,
           pending_retention: boolean(),
           sweep_ref: reference() | nil,
-          idle_waiters: [GenServer.from()]
+          idle_waiters: [GenServer.from()],
+          touched_files: TouchedFiles.t()
         }
 
   @doc "Builds initial EventLog state from validated values."
@@ -87,6 +90,28 @@ defmodule MingaAgent.EventLog.State do
       restart_delay_ms: restart_delay_ms
     }
   end
+
+  @doc "Rebuilds the canonical touched-file projection from persisted events."
+  @spec rebuild_touched_files(t(), [EventRecord.t()]) ::
+          {:ok, t()} | {:error, TouchedFiles.rejection()}
+  def rebuild_touched_files(state, events) do
+    with {:ok, touched_files} <- TouchedFiles.rebuild(events) do
+      {:ok, %{state | touched_files: touched_files}}
+    end
+  end
+
+  @doc "Projects one event after its durable insert succeeds."
+  @spec record_persisted(t(), EventRecord.t(), pos_integer()) ::
+          {:ok, t()} | {:error, TouchedFiles.rejection()}
+  def record_persisted(state, event, event_id) do
+    with {:ok, touched_files} <- TouchedFiles.record(state.touched_files, event, event_id) do
+      {:ok, %{state | touched_files: touched_files}}
+    end
+  end
+
+  @doc "Returns one session's touched files in most-recent-first order."
+  @spec touched_files(t(), String.t()) :: [TouchedFiles.touch()]
+  def touched_files(state, session_id), do: TouchedFiles.list(state.touched_files, session_id)
 
   @doc "Marks a writer process as starting."
   @spec writer_started(t(), pid(), reference()) :: t()

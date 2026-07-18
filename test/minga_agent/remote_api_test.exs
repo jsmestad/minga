@@ -1,5 +1,6 @@
 defmodule MingaAgent.RemoteAPITest do
-  use ExUnit.Case, async: true
+  # RemoteAPI is fixed to the global SessionManager, so this test cannot isolate manager state.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.RemoteAPI
   alias MingaAgent.SessionManager

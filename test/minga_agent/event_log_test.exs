@@ -329,7 +329,8 @@ defmodule MingaAgent.EventLogTest do
 
     second_boundaries = [
       {:approval_resolved, %{approval_id: "approval-1", sequence: 4}},
-      {:file_edit_proposed, %{path: "lib/example.ex", sequence: 5}},
+      {:file_edit_proposed,
+       %{path: "lib/example.ex", before_content: "old", after_content: "new", sequence: 5}},
       {:waiting_for_input, %{status: :idle, sequence: 6}}
     ]
 
@@ -380,6 +381,184 @@ defmodule MingaAgent.EventLogTest do
 
     assert_receive {:DOWN, ^writer_ref, :process, ^writer, _reason}
     assert_receive {:DOWN, ^log_ref, :process, ^log, :shutdown}
+  end
+
+  test "touched-file query updates after durable commits and reconstructs identically", %{
+    tmp_dir: tmp_dir
+  } do
+    first_name = unique_name("touched-files-log")
+    first_child = unique_name("touched-files-child")
+    start_event_log(first_name, [db_dir: tmp_dir], first_child)
+
+    first_receipt = record_file_edit(first_name, "session", "lib/a.ex", "", "created")
+    second_receipt = record_file_edit(first_name, "session", "lib/b.ex", "before", "after")
+    third_receipt = record_file_edit(first_name, "session", "lib/a.ex", "created", "")
+
+    assert {:persisted, _first_id} = EventLog.await(first_receipt)
+    assert {:persisted, _second_id} = EventLog.await(second_receipt)
+    assert {:persisted, _third_id} = EventLog.await(third_receipt)
+
+    assert {:ok, live} = EventLog.touched_files("session", first_name)
+
+    assert Enum.map(live, &{&1.path, &1.action}) == [
+             {"lib/a.ex", :deleted},
+             {"lib/b.ex", :modified}
+           ]
+
+    stop_supervised(first_child)
+
+    second_name = unique_name("touched-files-log")
+    start_event_log(second_name, db_dir: tmp_dir)
+    record_and_await(second_name, :status_changed, %{status: :idle})
+
+    assert EventLog.touched_files("session", second_name) == {:ok, live}
+  end
+
+  test "retention rebuilds from remaining durable events when wall clocks regress", %{
+    tmp_dir: tmp_dir
+  } do
+    now = DateTime.utc_now()
+    path = EventLog.db_path(db_dir: tmp_dir)
+    {:ok, db} = Store.open(path)
+
+    retained =
+      EventRecord.new(
+        "session",
+        :file_edit_proposed,
+        %{
+          "path" => "lib/a.ex",
+          "before_content" => "",
+          "after_content" => "created"
+        },
+        wall_clock: now,
+        monotonic_ts: 10
+      )
+
+    expired =
+      EventRecord.new(
+        "session",
+        :file_edit_proposed,
+        %{
+          "path" => "lib/a.ex",
+          "before_content" => "created",
+          "after_content" => ""
+        },
+        wall_clock: DateTime.add(now, -3, :day),
+        monotonic_ts: 20
+      )
+
+    assert {:ok, 1} = Store.insert(db, retained)
+    assert {:ok, 2} = Store.insert(db, expired)
+    assert :ok = Store.close(db)
+
+    name = unique_name("retention-projection-log")
+    start_event_log(name, db_dir: tmp_dir, retention_days: 1)
+    record_and_await(name, :status_changed, %{status: :idle})
+
+    assert {:ok, [%{action: :deleted, timestamp: 20}]} =
+             EventLog.touched_files("session", name)
+
+    send(name, :retention_sweep)
+    assert :ok = EventLog.await_idle(name)
+
+    assert {:ok, [%{action: :created, timestamp: 10}]} =
+             EventLog.touched_files("session", name)
+  end
+
+  test "failed admission and persistence never enter the touched-file projection" do
+    name = unique_name("failed-touch-log")
+    start_controlled_event_log(name)
+    writer = open_controlled_writer()
+
+    assert {:error, :invalid_payload} =
+             EventLog.record("session", :file_edit_proposed, %{path: "lib/invalid.ex"}, name)
+
+    assert {:queued, receipt} =
+             EventLog.record(
+               "session",
+               :file_edit_proposed,
+               %{
+                 path: "lib/failed.ex",
+                 before_content: "before",
+                 after_content: "after"
+               },
+               name
+             )
+
+    assert_receive {:event_log_store_insert, ^writer, _record}
+    send(writer, {:event_log_store_insert_result, {:error, :disk_full}})
+
+    assert {:error, {:persistence_failed, :disk_full}} = EventLog.await(receipt)
+    assert EventLog.touched_files("session", name) == {:ok, []}
+  end
+
+  test "retention reload failure makes the projection unavailable" do
+    name = unique_name("failed-retention-reload-log")
+
+    start_event_log(name,
+      store_backend: ControllableStore,
+      store_backend_opts: [
+        controller: self(),
+        reconstruction_result: :controlled
+      ],
+      writer_restart_delay_ms: 60_000
+    )
+
+    writer = open_controlled_writer()
+    assert_receive {:event_log_store_file_edit_events, ^writer}
+    send(writer, {:event_log_store_file_edit_events_result, {:ok, []}})
+    :sys.get_state(writer)
+    assert %{status: :ready} = :sys.get_state(name)
+
+    send(name, :retention_sweep)
+    assert_receive {:event_log_store_delete_before, ^writer, _cutoff}
+    send(writer, {:event_log_store_delete_before_result, {:ok, 0}})
+    assert_receive {:event_log_store_file_edit_events, ^writer}
+
+    writer_ref = Process.monitor(writer)
+    send(writer, {:event_log_store_file_edit_events_result, {:error, :disk_read_failed}})
+
+    assert_receive {:DOWN, ^writer_ref, :process, ^writer, _reason}, @event_timeout
+    assert %{status: :unavailable} = :sys.get_state(name)
+    assert EventLog.touched_files("session", name) == {:error, :unavailable}
+  end
+
+  test "reconstruction failure leaves touched-file queries explicitly unavailable" do
+    name = unique_name("failed-reconstruction-log")
+
+    start_event_log(name,
+      store_backend: ControllableStore,
+      store_backend_opts: [
+        controller: self(),
+        reconstruction_result: {:error, :corrupt_projection_event}
+      ],
+      writer_restart_delay_ms: 60_000
+    )
+
+    writer = open_controlled_writer()
+    writer_ref = Process.monitor(writer)
+    assert_receive {:DOWN, ^writer_ref, :process, ^writer, _reason}, @event_timeout
+    :sys.get_state(name)
+
+    assert EventLog.touched_files("session", name) == {:error, :unavailable}
+  end
+
+  @spec record_file_edit(atom(), String.t(), String.t(), String.t(), String.t()) ::
+          EventLog.receipt()
+  defp record_file_edit(server, session_id, path, before_content, after_content) do
+    assert {:queued, receipt} =
+             EventLog.record(
+               session_id,
+               :file_edit_proposed,
+               %{
+                 path: path,
+                 before_content: before_content,
+                 after_content: after_content
+               },
+               server
+             )
+
+    receipt
   end
 
   @spec record_and_await(atom(), MingaAgent.EventLog.EventRecord.event_type(), map()) ::

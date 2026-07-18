@@ -12,6 +12,7 @@ defmodule MingaAgent.EventLog do
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.State
   alias MingaAgent.EventLog.Store
+  alias MingaAgent.EventLog.TouchedFiles
   alias MingaAgent.EventLog.Writer
 
   @default_db_dir Path.expand("~/.local/share/minga")
@@ -131,6 +132,15 @@ defmodule MingaAgent.EventLog do
   @spec writer_pid(GenServer.server()) :: pid() | nil
   def writer_pid(server \\ __MODULE__), do: GenServer.call(server, :writer_pid)
 
+  @doc "Returns one session's durably admitted file touches, most recent first."
+  @spec touched_files(String.t(), GenServer.server()) ::
+          {:ok, [TouchedFiles.touch()]} | {:error, :unavailable}
+  def touched_files(session_id, server \\ __MODULE__) when is_binary(session_id) do
+    GenServer.call(server, {:touched_files, session_id})
+  catch
+    :exit, _reason -> {:error, :unavailable}
+  end
+
   @doc "Queries events for a session after the given cursor."
   @spec events_after(Store.db(), String.t(), non_neg_integer(), pos_integer()) ::
           {:ok, [EventRecord.t()]} | {:error, term()}
@@ -203,6 +213,14 @@ defmodule MingaAgent.EventLog do
     )
   end
 
+  def handle_call({:touched_files, session_id}, _from, %State{status: :ready} = state) do
+    {:reply, {:ok, State.touched_files(state, session_id)}, state}
+  end
+
+  def handle_call({:touched_files, _session_id}, _from, state) do
+    {:reply, {:error, :unavailable}, state}
+  end
+
   def handle_call(:await_idle, from, state) do
     await_idle_reply(state, from, idle?(state))
   end
@@ -218,44 +236,26 @@ defmodule MingaAgent.EventLog do
 
   @impl GenServer
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()}
-  def handle_info({:event_log_writer_ready, writer}, %{writer: writer} = state) do
-    Minga.Log.info(:agent, "[AgentEventLog] started, logging to #{state.path}")
-    {:noreply, state |> State.writer_ready() |> dispatch_next()}
+  def handle_info({:event_log_writer_ready, writer, events}, %{writer: writer} = state) do
+    {:noreply, complete_writer_start(state, events)}
   end
 
   def handle_info({:event_log_writer_unavailable, writer, reason}, %{writer: writer} = state) do
-    Minga.Log.warning(:agent, "[AgentEventLog] failed to open database: #{inspect(reason)}")
-    Process.demonitor(state.writer_ref, [:flush])
-
-    state =
-      state
-      |> fail_all_events({:writer_start_failed, reason})
-      |> State.clear_writer(:unavailable)
-      |> schedule_writer_restart()
-      |> notify_idle_waiters()
-
-    {:noreply, state}
+    {:noreply, mark_writer_unavailable(state, reason)}
   end
 
   def handle_info(
         {:event_log_writer_result, writer, token, event_type, result},
         %{writer: writer, in_flight: {:event, token, entry}} = state
       ) do
-    acknowledge_entry(entry, event_type, result)
-    {:noreply, state |> State.finish_in_flight() |> dispatch_next()}
+    {:noreply, finish_event(state, entry, event_type, result)}
   end
 
   def handle_info(
         {:event_log_retention_result, writer, token, result},
-        %{writer: writer, in_flight: {:retention, token, _cutoff}} = state
+        %{writer: writer, in_flight: {:retention, token, cutoff}} = state
       ) do
-    log_retention_result(result)
-
-    {:noreply,
-     state
-     |> State.finish_in_flight()
-     |> State.schedule_sweep(schedule_retention_sweep())
-     |> dispatch_next()}
+    {:noreply, finish_retention(state, cutoff, result)}
   end
 
   def handle_info(
@@ -364,14 +364,37 @@ defmodule MingaAgent.EventLog do
   defp admit(_kind, _record, _payload_bytes, _from, state, false),
     do: {:reply, {:error, :overloaded}, state}
 
-  defp admit(:critical, record, payload_bytes, {caller, _tag}, state, true) do
+  defp admit(kind, record, payload_bytes, from, state, true) do
+    admit_validated(
+      kind,
+      record,
+      payload_bytes,
+      from,
+      state,
+      TouchedFiles.validate(record)
+    )
+  end
+
+  @spec admit_validated(
+          :critical | :best_effort,
+          EventRecord.t(),
+          non_neg_integer(),
+          GenServer.from(),
+          State.t(),
+          :ok | {:error, TouchedFiles.rejection()}
+        ) :: {:reply, admission_result() | best_effort_admission_result(), State.t()}
+  defp admit_validated(_kind, _record, _payload_bytes, _from, state, {:error, _reason}) do
+    {:reply, {:error, :invalid_payload}, state}
+  end
+
+  defp admit_validated(:critical, record, payload_bytes, {caller, _tag}, state, :ok) do
     receipt = make_ref()
     entry = {:critical, receipt, caller, record.event_type, payload_bytes, record}
     state = state |> State.enqueue(entry) |> dispatch_next()
     {:reply, {:queued, receipt}, state}
   end
 
-  defp admit(:best_effort, record, payload_bytes, _from, state, true) do
+  defp admit_validated(:best_effort, record, payload_bytes, _from, state, :ok) do
     entry = {:best_effort, record.event_type, payload_bytes, record}
     state = state |> State.enqueue(entry) |> dispatch_next()
     {:reply, :queued, state}
@@ -446,6 +469,90 @@ defmodule MingaAgent.EventLog do
     )
 
     :ok
+  end
+
+  @spec complete_writer_start(State.t(), [EventRecord.t()]) :: State.t()
+  defp complete_writer_start(state, events) do
+    case State.rebuild_touched_files(state, events) do
+      {:ok, state} ->
+        Minga.Log.info(:agent, "[AgentEventLog] started, logging to #{state.path}")
+        state |> State.writer_ready() |> dispatch_next()
+
+      {:error, reason} ->
+        stop_writer(state.writer)
+        mark_writer_unavailable(state, {:reconstruction_failed, reason})
+    end
+  end
+
+  @spec mark_writer_unavailable(State.t(), term()) :: State.t()
+  defp mark_writer_unavailable(state, reason) do
+    Minga.Log.warning(:agent, "[AgentEventLog] failed to open database: #{inspect(reason)}")
+    Process.demonitor(state.writer_ref, [:flush])
+
+    state
+    |> fail_all_events({:writer_start_failed, reason})
+    |> State.clear_writer(:unavailable)
+    |> schedule_writer_restart()
+    |> notify_idle_waiters()
+  end
+
+  @spec finish_event(State.t(), State.entry(), EventRecord.event_type(), term()) :: State.t()
+  defp finish_event(state, entry, event_type, {:ok, event_id}) do
+    case State.record_persisted(state, entry_record(entry), event_id) do
+      {:ok, state} ->
+        acknowledge_entry(entry, event_type, {:ok, event_id})
+        state |> State.finish_in_flight() |> dispatch_next()
+
+      {:error, reason} ->
+        acknowledge_entry(entry, event_type, {:error, {:projection_failed, reason}})
+        Minga.Log.error(:agent, "[AgentEventLog] projection failed: #{inspect(reason)}")
+        state = State.finish_in_flight(state)
+        stop_writer(state.writer)
+        mark_writer_unavailable(state, {:projection_failed, reason})
+    end
+  end
+
+  defp finish_event(state, entry, event_type, {:error, _reason} = result) do
+    acknowledge_entry(entry, event_type, result)
+    state |> State.finish_in_flight() |> dispatch_next()
+  end
+
+  @spec finish_retention(State.t(), DateTime.t(), term()) :: State.t()
+  defp finish_retention(state, _cutoff, {:ok, deleted_count, events}) do
+    log_retention_result({:ok, deleted_count})
+
+    case State.rebuild_touched_files(state, events) do
+      {:ok, state} -> complete_retention(state)
+      {:error, reason} -> fail_retention_projection(state, {:rebuild_failed, reason})
+    end
+  end
+
+  defp finish_retention(state, _cutoff, {:error, {:delete_failed, reason}}) do
+    log_retention_result({:error, reason})
+    complete_retention(state)
+  end
+
+  defp finish_retention(state, _cutoff, {:error, {:reload_failed, reason}}) do
+    fail_retention_projection(state, {:reload_failed, reason})
+  end
+
+  @spec complete_retention(State.t()) :: State.t()
+  defp complete_retention(state) do
+    state
+    |> State.finish_in_flight()
+    |> State.schedule_sweep(schedule_retention_sweep())
+    |> dispatch_next()
+  end
+
+  @spec fail_retention_projection(State.t(), term()) :: State.t()
+  defp fail_retention_projection(state, reason) do
+    Minga.Log.error(:agent, "[AgentEventLog] retention projection failed: #{inspect(reason)}")
+    stop_writer(state.writer)
+
+    state
+    |> State.finish_in_flight()
+    |> mark_writer_unavailable({:retention_projection_failed, reason})
+    |> State.schedule_sweep(schedule_retention_sweep())
   end
 
   @spec handle_writer_down(State.t(), term()) :: State.t()

@@ -1,13 +1,28 @@
 defmodule Minga.Extension.AgentAPITest do
-  use ExUnit.Case, async: true
+  # SessionManager starts sessions under the process-global MingaAgent.Supervisor.
+  use ExUnit.Case, async: false
 
   alias Minga.Extension.AgentAPI
+  alias MingaAgent.EventLog
   alias MingaAgent.SessionManager
 
-  setup do
-    name = :"agent_api_mgr_#{System.unique_integer([:positive])}"
-    _manager = start_supervised!({SessionManager, name: name}, id: name)
-    %{opts: [session_manager: name], manager: name}
+  @moduletag :tmp_dir
+  setup %{tmp_dir: tmp_dir} do
+    manager = :"agent_api_mgr_#{System.unique_integer([:positive])}"
+    event_log = :"agent_api_log_#{System.unique_integer([:positive])}"
+    _manager = start_supervised!({SessionManager, name: manager}, id: manager)
+
+    start_supervised!(
+      {EventLog, name: event_log, db_dir: tmp_dir, retention_sweep?: false, health_check: :none},
+      id: event_log
+    )
+
+    assert {:queued, receipt} =
+             EventLog.record("agent-api-setup", :status_changed, %{status: :idle}, event_log)
+
+    assert {:persisted, _event_id} = EventLog.await(receipt)
+
+    %{opts: [session_manager: manager, event_log: event_log], manager: manager}
   end
 
   describe "list_sessions/1" do
@@ -20,7 +35,8 @@ defmodule Minga.Extension.AgentAPITest do
     end
 
     test "returns summaries with the documented keys", %{opts: opts, manager: manager} do
-      {:ok, _id, _pid} = SessionManager.start_session(manager, [])
+      {:ok, _id, _pid} =
+        SessionManager.start_session(manager, provider: Minga.Test.StubProvider)
 
       summaries = AgentAPI.list_sessions(opts)
       assert Enum.count(summaries) == 1
@@ -33,7 +49,8 @@ defmodule Minga.Extension.AgentAPITest do
     end
 
     test "summary fields have correct types", %{opts: opts, manager: manager} do
-      {:ok, _id, session_pid} = SessionManager.start_session(manager, [])
+      {:ok, _id, session_pid} =
+        SessionManager.start_session(manager, provider: Minga.Test.StubProvider)
 
       [summary] = AgentAPI.list_sessions(opts)
 
@@ -65,7 +82,8 @@ defmodule Minga.Extension.AgentAPITest do
       opts: opts,
       manager: manager
     } do
-      {:ok, _id, session_pid} = SessionManager.start_session(manager, [])
+      {:ok, _id, session_pid} =
+        SessionManager.start_session(manager, provider: Minga.Test.StubProvider)
 
       assert {:ok, info} = AgentAPI.session_info(session_pid, opts)
 
@@ -93,6 +111,65 @@ defmodule Minga.Extension.AgentAPITest do
       assert is_integer(info.output_tokens) and info.output_tokens >= 0
       assert is_integer(info.turn_count) and info.turn_count >= 0
       assert is_list(info.files_touched)
+    end
+
+    test "reads touched files from the EventLog projection in durable order", %{
+      manager: manager,
+      opts: opts,
+      tmp_dir: tmp_dir
+    } do
+      event_log = Keyword.fetch!(opts, :event_log)
+      session_id = "agent-api-touched-files-#{System.unique_integer([:positive])}"
+
+      {:ok, ^session_id, session} =
+        SessionManager.start_session(manager,
+          session_id: session_id,
+          provider: Minga.Test.StubProvider,
+          session_store_dir: tmp_dir
+        )
+
+      assert {:queued, first_receipt} =
+               EventLog.record(
+                 session_id,
+                 :file_edit_proposed,
+                 %{
+                   path: "lib/first.ex",
+                   before_content: "",
+                   after_content: "created"
+                 },
+                 event_log
+               )
+
+      assert {:persisted, _first_id} = EventLog.await(first_receipt)
+
+      assert {:queued, second_receipt} =
+               EventLog.record(
+                 session_id,
+                 :file_edit_proposed,
+                 %{
+                   path: "lib/second.ex",
+                   before_content: "before",
+                   after_content: "after"
+                 },
+                 event_log
+               )
+
+      assert {:persisted, _second_id} = EventLog.await(second_receipt)
+      assert {:ok, info} = AgentAPI.session_info(session, opts)
+      assert info.files_touched == ["lib/second.ex", "lib/first.ex"]
+    end
+
+    test "reports unavailable when the EventLog projection cannot be queried", %{
+      manager: manager
+    } do
+      {:ok, _id, session} =
+        SessionManager.start_session(manager, provider: Minga.Test.StubProvider)
+
+      assert {:error, :unavailable} =
+               AgentAPI.session_info(session,
+                 event_log: :missing_event_log,
+                 session_manager: manager
+               )
     end
   end
 
