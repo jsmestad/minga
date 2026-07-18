@@ -1192,7 +1192,7 @@ The picker modal and `on_select/2` consume the returned items. The three command
 #### Completion evidence
 
 - **PR URL:** Pending
-- **Commit SHA:** Pending
+- **Commit SHA:** `8b10467ee49d335b4967ea9383bd2a38d7a34bf6`
 - **Merge SHA:** Pending
 - **Focused tests:** `mix format lib/minga_editor/ui/picker/sources/diagnostics.ex test/minga_editor/commands/diagnostics_picker_test.exs` passed; `mix test.debug test/minga_editor/commands/diagnostics_picker_test.exs` passed, 2 tests, seed 316808
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,867 tests, 0 failures, 1 skipped, 578 excluded)
