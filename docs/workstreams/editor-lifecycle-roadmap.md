@@ -1057,7 +1057,7 @@ Tests use exact PID identities, `start_supervised!/1`, `Process.monitor/1`, and 
 
 ### W005: Picker refresh rebuilds candidates
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L10
 - **Roadmap unit:** W005, Picker refresh rebuilds candidates
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1117,7 +1117,7 @@ Consumers are the picker renderer and subsequent selection/action dispatch, both
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2987
 - **Commit SHA:** `206a5cb8608f0c9f233bb34814f066d30aaf4a6e`
-- **Merge SHA:** Pending
+- **Merge SHA:** `d94edbffe1b15d10a0305ec7454e1fb28e3bd942`
 - **Focused tests:** `mix format lib/minga_editor/picker_ui.ex test/minga_editor/picker_ui_test.exs` passed; `mix test.debug test/minga_editor/picker_ui_test.exs test/minga_editor/ui/picker_test.exs` passed, 76 tests, seed 161951
 - **Broad validation:** `git diff --check` passed; `make lint` passed (Credo, compile, incremental Dialyzer: 0 errors); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,865 tests, 0 failures, 1 skipped, 578 excluded)
 - **Ponytail and Elixir verdict:** `LEAN`; no required findings. The one-call `Picker.replace_items/2` owner transition is the smallest natural Elixir shape, and the reused context-fed test source adds no new concept.
