@@ -1739,8 +1739,8 @@ Typing `#` at the start of File or Recent switches to Project Search without run
 - **Test lines added/removed:** 88 added / 17 removed, net +71.
 - **Concepts added/removed:** One tagged `source_switch` field replaces two nullable/sentinel fields and removes invalid combinations; no new process, protocol, scheduler, or wrapper module.
 - **Final reviewer verdict:** `PASS`; the owner transition preserves restoration, context, layout, native correlation, fetch state, prefix behavior, latest-wins rejection, and semantic projection without new architecture or exceeding the production budget.
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/3005
+- **Commit SHA:** `a2f432d40`
 - **Merge SHA:** Pending
 - **Completion date:** Pending
 
