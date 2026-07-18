@@ -918,7 +918,7 @@ All 13 conditions pass: accepted verdict; reproduction on current main; one lock
 
 ### W004: Dired targets its backing buffer
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L05
 - **Roadmap unit:** W004, Dired targets its backing buffer
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1042,7 +1042,7 @@ Tests use exact PID identities, `start_supervised!/1`, `Process.monitor/1`, and 
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/2984
 - **Commit SHA:** `d391c76e7512ab033b5088803b8072cd84f9f5c9`
-- **Merge SHA:** Pending
+- **Merge SHA:** `cb519c481a1450b5b10b7c6b2b1c320339b8bfba`
 - **Focused tests:** `mix test.debug test/minga_editor/commands/dired_mutation_test.exs test/minga_editor/state/dired_test.exs test/minga_editor/state/buffers_test.exs` passed (13); `mix test.debug test/minga_editor/state/root_purity_test.exs` passed (2)
 - **Broad validation:** `make lint` passed (format, changed-file Credo, compile, incremental Dialyzer; two non-blocking boolean-case suggestions); `ERL_FLAGS='+S 2:2' mix test.llm` passed (58 doctests, 98 properties, 9,853 tests, 0 failures, 1 skipped, 574 excluded)
 - **Ponytail and Elixir verdict:** `LEAN`; no required findings after the formatting-driven shrink
@@ -1053,7 +1053,7 @@ Tests use exact PID identities, `start_supervised!/1`, `Process.monitor/1`, and 
 - **Concepts added/removed:** Added one exact-identity Dired retirement transition across existing Dired leaf, session aggregate, and root lifecycle; removed generic Dired close through active-buffer `:kill_buffer`; consolidated repeated notice-owner qualification through one alias
 - **Findings resolved:** Focused validation covers L05 exact backing PID targeting for Dired save, force-save, live close, already-dead close, unexpected stop failure, buffer-death retirement, and exact surviving active PID preservation when a different earlier buffer is removed
 - **Discoveries affecting later work:** Reviews found the private Dired save path, shifted-index active-buffer drift, and unexpected stop-exit retirement; all were corrected within W004 and do not change later work-unit contracts
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
 
 ### W005: Picker refresh rebuilds candidates
 
