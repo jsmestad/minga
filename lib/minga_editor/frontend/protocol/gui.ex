@@ -136,7 +136,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.UI.Theme
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
-  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   alias Minga.Protocol.Opcodes
 
@@ -145,7 +144,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_file_tree Opcodes.gui_file_tree()
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
-  @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_extension_overlay Opcodes.gui_extension_overlay()
   @op_gui_extension_panel Opcodes.gui_extension_panel()
   @op_gui_extension_runtime Opcodes.gui_extension_runtime()
@@ -246,14 +244,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @search_flag_whole_word 0x04
   @search_flag_regex 0x08
 
-  @max_u8 255
   @max_u16 65_535
-  @max_u32 4_294_967_295
 
   @typedoc "macOS thermal pressure level reported by the native GUI frontend."
   @type thermal_state :: :nominal | :fair | :serious | :critical | {:unknown, non_neg_integer()}
-
-  @truncation_suffix "\n… [truncated]"
 
   # ── Sectioned format section IDs ──
   # Used by opcodes that encode their fields in self-describing sections.
@@ -546,161 +540,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
   defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Language.detect_filetype(label))
 
-  # ── Workspace bar ──
-
-  @doc """
-  Encodes the canonical gui_workspaces command.
-
-  Wire format:
-    opcode(1) + payload_len(2) + payload
-
-  Payload:
-    version(1) + active_workspace_id(2) + mode(1) + flags(1) + workspace_count(1)
-    + workspaces... + visible_tab_count(2) + visible_tabs...
-  """
-  @spec encode_gui_workspaces(ChromeState.t()) :: binary()
-  def encode_gui_workspaces(%ChromeState{} = chrome_state) do
-    payload = encode_gui_workspaces_payload(chrome_state)
-    <<@op_gui_workspaces, byte_size(payload)::16, payload::binary>>
-  end
-
-  @spec encode_gui_workspaces_payload(ChromeState.t()) :: binary()
-  defp encode_gui_workspaces_payload(%ChromeState{} = chrome_state) do
-    workspace_budget = @max_u16 - 6 - 2
-
-    {workspace_entries, remaining_budget} =
-      bounded_entries(
-        chrome_state.workspaces,
-        &encode_gui_workspace_summary/1,
-        @max_u8,
-        workspace_budget
-      )
-
-    {visible_tab_entries, _remaining_budget} =
-      bounded_entries(
-        chrome_state.visible_tabs,
-        &encode_gui_visible_tab/1,
-        @max_u16,
-        remaining_budget
-      )
-
-    IO.iodata_to_binary([
-      <<2::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
-        encode_workspace_flags(chrome_state)::8, Enum.count(workspace_entries)::8>>,
-      workspace_entries,
-      <<Enum.count(visible_tab_entries)::16>>,
-      visible_tab_entries
-    ])
-  end
-
-  @spec bounded_entries([term()], (term() -> binary()), non_neg_integer(), non_neg_integer()) ::
-          {[binary()], non_neg_integer()}
-  defp bounded_entries(items, encode_fun, max_count, budget) do
-    {entries, remaining_budget, _count} =
-      Enum.reduce_while(items, {[], budget, 0}, fn item, acc ->
-        item |> encode_fun.() |> maybe_add_bounded_entry(acc, max_count)
-      end)
-
-    {Enum.reverse(entries), remaining_budget}
-  end
-
-  @spec maybe_add_bounded_entry(
-          binary(),
-          {[binary()], non_neg_integer(), non_neg_integer()},
-          non_neg_integer()
-        ) ::
-          {:cont, {[binary()], non_neg_integer(), non_neg_integer()}}
-          | {:halt, {[binary()], non_neg_integer(), non_neg_integer()}}
-  defp maybe_add_bounded_entry(_entry, acc = {_entries, _budget, count}, max_count)
-       when count >= max_count do
-    {:halt, acc}
-  end
-
-  defp maybe_add_bounded_entry(entry, {entries, budget, count}, _max_count)
-       when byte_size(entry) <= budget do
-    {:cont, {[entry | entries], budget - byte_size(entry), count + 1}}
-  end
-
-  defp maybe_add_bounded_entry(_entry, acc, _max_count), do: {:halt, acc}
-
-  @spec encode_gui_workspace_summary(WorkspaceSummary.t()) :: binary()
-  defp encode_gui_workspace_summary(%WorkspaceSummary{} = workspace) do
-    {r, g, b} = encode_rgb(workspace.color)
-    label_bytes = utf8_prefix_bytes(workspace.label, 255)
-    icon_bytes = utf8_prefix_bytes(workspace.icon, 255)
-
-    <<workspace.id::16, encode_workspace_kind(workspace.kind)::8,
-      encode_agent_status(workspace.status)::8, encode_workspace_entry_flags(workspace)::16, r::8,
-      g::8, b::8, workspace.tab_count::16, workspace.draft_count::16,
-      workspace.conflict_count::16, workspace.running_background_count::16,
-      byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
-      icon_bytes::binary>>
-  end
-
-  @spec encode_gui_visible_tab(TabSummary.t()) :: binary()
-  defp encode_gui_visible_tab(%TabSummary{} = tab) do
-    icon_bytes = utf8_prefix_bytes(tab.icon, 255)
-    label_bytes = utf8_prefix_bytes(tab.label, @max_u16)
-    path_bytes = utf8_prefix_bytes(tab.path || "", @max_u16)
-
-    <<tab.id::32, tab.workspace_id::16, encode_tab_kind(tab.kind)::8,
-      encode_visible_tab_flags(tab)::16, path_hash(tab.path)::32, byte_size(icon_bytes)::8,
-      icon_bytes::binary, byte_size(label_bytes)::16, label_bytes::binary,
-      byte_size(path_bytes)::16, path_bytes::binary, tab.tint_color::32>>
-  end
-
-  @spec encode_workspace_mode(ChromeState.mode()) :: non_neg_integer()
-  defp encode_workspace_mode(:editor), do: 0
-  defp encode_workspace_mode(:agent), do: 1
-  defp encode_workspace_mode(:file_tree), do: 2
-  defp encode_workspace_mode(:other), do: 3
-
-  @spec encode_workspace_flags(ChromeState.t()) :: non_neg_integer()
-  defp encode_workspace_flags(%ChromeState{} = chrome_state) do
-    if chrome_state.attention_count > 0, do: 0x01, else: 0x00
-  end
-
-  @spec encode_workspace_kind(WorkspaceSummary.kind() | TabSummary.kind()) :: non_neg_integer()
-  defp encode_workspace_kind(:manual), do: 0
-  defp encode_workspace_kind(:agent), do: 1
-  defp encode_workspace_kind(:file), do: 0
-
-  @spec encode_workspace_entry_flags(WorkspaceSummary.t()) :: non_neg_integer()
-  defp encode_workspace_entry_flags(%WorkspaceSummary{} = workspace) do
-    0
-    |> maybe_workspace_flag(workspace.attention?, 0x01)
-    |> maybe_workspace_flag(workspace.closeable?, 0x02)
-  end
-
-  @spec encode_tab_kind(TabSummary.kind()) :: non_neg_integer()
-  defp encode_tab_kind(:file), do: 0
-  defp encode_tab_kind(:agent), do: 1
-
-  @spec encode_visible_tab_flags(TabSummary.t()) :: non_neg_integer()
-  defp encode_visible_tab_flags(%TabSummary{} = tab) do
-    0
-    |> maybe_workspace_flag(tab.dirty?, 0x01)
-    |> maybe_workspace_flag(tab.attention?, 0x02)
-    |> maybe_workspace_flag(tab.draft_state == :draft, 0x04)
-    |> maybe_workspace_flag(tab.draft_state == :draft_elsewhere, 0x08)
-    |> maybe_workspace_flag(tab.draft_state == :conflict, 0x10)
-    |> maybe_workspace_flag(tab.pinned?, 0x20)
-    |> maybe_workspace_flag(tab.ephemeral?, 0x40)
-  end
-
-  @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
-  defp maybe_workspace_flag(flags, true, bit), do: flags ||| bit
-  defp maybe_workspace_flag(flags, false, _bit), do: flags
-
   @spec encode_rgb(non_neg_integer()) :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   defp encode_rgb(color) when is_integer(color) do
     {Bitwise.bsr(Bitwise.band(color, 0xFF0000), 16),
      Bitwise.bsr(Bitwise.band(color, 0x00FF00), 8), Bitwise.band(color, 0x0000FF)}
   end
-
-  @spec path_hash(String.t() | nil) :: non_neg_integer()
-  defp path_hash(nil), do: 0
-  defp path_hash(path) when is_binary(path), do: :erlang.phash2(path, @max_u32)
 
   # ── Extension Overlays (forward-compatible, 0x9C) ──
 
@@ -1382,45 +1226,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # helpers) were removed once the production PickerEncoder migrated to the
   # schema-generated codec (#2225): the cross-language golden tests now prove
   # byte-exactness, which is the only role these oracles served.
-
-  @spec utf8_prefix_bytes(String.t(), non_neg_integer()) :: binary()
-  defp utf8_prefix_bytes(text, max_bytes) when byte_size(text) <= max_bytes do
-    if String.valid?(text) do
-      :erlang.iolist_to_binary([text])
-    else
-      valid_utf8_prefix(text, max_bytes)
-    end
-  end
-
-  defp utf8_prefix_bytes(text, max_bytes) do
-    suffix_bytes = :erlang.iolist_to_binary([@truncation_suffix])
-
-    if max_bytes <= byte_size(suffix_bytes) do
-      valid_utf8_prefix(text, max_bytes)
-    else
-      valid_utf8_prefix(text, max_bytes - byte_size(suffix_bytes)) <> suffix_bytes
-    end
-  end
-
-  @spec valid_utf8_prefix(String.t(), non_neg_integer()) :: binary()
-  defp valid_utf8_prefix(_text, 0), do: ""
-
-  defp valid_utf8_prefix(text, max_bytes) do
-    text
-    |> binary_part(0, min(max_bytes, byte_size(text)))
-    |> trim_invalid_utf8_suffix()
-  end
-
-  @spec trim_invalid_utf8_suffix(binary()) :: binary()
-  defp trim_invalid_utf8_suffix(<<>>), do: ""
-
-  defp trim_invalid_utf8_suffix(prefix) do
-    if String.valid?(prefix) do
-      prefix
-    else
-      prefix |> binary_part(0, byte_size(prefix) - 1) |> trim_invalid_utf8_suffix()
-    end
-  end
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Decoding (Frontend → BEAM)
