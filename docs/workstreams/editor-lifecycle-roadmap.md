@@ -2181,7 +2181,7 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Pre-acceptance reviews:** Correctness `PASS` after exact budget evidence; Elixir craftsmanship `PASS` after routing activity metadata through `Request.new/4` and documenting the process-to-data projection; Ponytail `Lean already. Ship.` after duplicate assertions were removed.
   - **Broad validation:** `mix test --max-cases 4` passed 10,446 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded after building the worktree's missing native parser and hook runner; `make lint` passed Credo, compile, format, and incremental Dialyzer after the exact frame-intent allowlist was updated and the test budget remained at 80 lines; `git diff --check` passed.
   - **Final reviewer:** `PASS`; snapshot ownership, active/inactive lifecycle semantics, process-carrier removal, explicit frame boundary, materialization, strict consumption, tests, budgets, validation evidence, and merge safety accepted with no findings.
-  - **PR URL:** Pending.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3030
   - **Merge evidence:** Pending.
   - **Completion date:** Pending merge.
 
