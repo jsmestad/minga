@@ -4,18 +4,8 @@ defmodule Minga.Frontend.Adapter.GUI.CursorAnimationEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CursorAnimationEncoder
   alias Minga.RenderModel.UI.CursorAnimation
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "encode/2" do
-    test "produces bytes identical to the legacy parity oracle" do
-      for enabled? <- [true, false] do
-        {cmd, _caches} =
-          CursorAnimationEncoder.encode(%CursorAnimation{enabled?: enabled?}, Caches.new())
-
-        assert cmd == ProtocolGUI.encode_gui_cursor_animation(enabled?)
-      end
-    end
-
     test "encodes enabled/disabled flags" do
       {on, _} = CursorAnimationEncoder.encode(%CursorAnimation{enabled?: true}, Caches.new())
       {off, _} = CursorAnimationEncoder.encode(%CursorAnimation{enabled?: false}, Caches.new())

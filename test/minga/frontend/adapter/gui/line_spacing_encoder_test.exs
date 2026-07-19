@@ -4,15 +4,14 @@ defmodule Minga.Frontend.Adapter.GUI.LineSpacingEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.LineSpacingEncoder
   alias Minga.RenderModel.UI.LineSpacing
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "encode/2" do
-    test "produces bytes identical to the legacy parity oracle" do
-      for multiplier <- [1.0, 1.2, 1.5, 2.0] do
+    test "encodes canonical spacing_x100 values" do
+      for {multiplier, spacing_x100} <- [{1.0, 100}, {1.2, 120}, {1.5, 150}, {2.0, 200}] do
         {cmd, _caches} =
           LineSpacingEncoder.encode(%LineSpacing{multiplier: multiplier}, Caches.new())
 
-        assert cmd == ProtocolGUI.encode_gui_line_spacing(multiplier)
+        assert <<0x92, 2::16, ^spacing_x100::16>> = cmd
       end
     end
 
@@ -38,7 +37,7 @@ defmodule Minga.Frontend.Adapter.GUI.LineSpacingEncoderTest do
 
     test "a fresh cache (keyframe reset) re-emits the current value" do
       {cmd, _caches} = LineSpacingEncoder.encode(%LineSpacing{multiplier: 1.2}, Caches.new())
-      assert cmd == ProtocolGUI.encode_gui_line_spacing(1.2)
+      assert <<0x92, 2::16, 120::16>> = cmd
     end
 
     test "nil model emits nothing" do

@@ -4,7 +4,6 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
   alias Minga.RenderModel.UI.ConfigState
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.RenderModel.UI.ConfigStateBuilder
 
   @sample %ConfigState{
@@ -29,18 +28,31 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoderTest do
   }
 
   describe "encode_command/1" do
-    test "produces bytes identical to the legacy parity oracle for the same logical state" do
-      # Build the wire map the legacy encoder consumes, then convert to the struct
-      # the new encoder consumes, and assert byte-for-byte equality.
+    test "encodes the canonical 0x97 envelope from projected settings state" do
       wire = %{
-        options: %{wrap: true, tab_width: 4, theme: :astrodark, font_family: "Mono"},
+        options: %{wrap: true, tab_width: 4, theme: :astrodark, font_family: "Mono", scale: 1.25},
         theme_previews: @sample.theme_previews,
         keybindings: @sample.keybindings
       }
 
-      legacy = ProtocolGUI.encode_gui_config_state(wire)
-      semantic = ConfigStateEncoder.encode_command(ConfigStateBuilder.from_wire(wire))
-      assert semantic == legacy
+      encoded = ConfigStateEncoder.encode_command(ConfigStateBuilder.from_wire(wire))
+
+      assert <<0x97, payload_len::16, payload::binary>> = encoded
+      assert payload_len == byte_size(payload)
+      assert <<5::16, options_payload::binary>> = payload
+      {options, after_options} = take_options(options_payload, 5)
+
+      assert options == %{
+               "wrap" => true,
+               "tab_width" => 4,
+               "theme" => :astrodark,
+               "font_family" => "Mono",
+               "scale" => 1.25
+             }
+
+      assert <<1::16, 9, "Astrodark", 9, "astrodark", 0x1A1B26::24, 0xC0CAF5::24, 0x7AA2F7::24,
+               1::16, 6, "normal", 3::16, "g d", 19::16, "lsp_goto_definition", 16::16,
+               "Go to definition">> = after_options
     end
 
     test "tags each config value type on the wire" do
@@ -87,4 +99,37 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoderTest do
       assert {nil, _caches} = ConfigStateEncoder.encode(nil, Caches.new())
     end
   end
+
+  defp take_options(rest, 0), do: {%{}, rest}
+
+  defp take_options(rest, count) when count > 0 do
+    {name, value, rest} = take_option(rest)
+    {options, rest} = take_options(rest, count - 1)
+    {Map.put(options, name, value), rest}
+  end
+
+  defp take_option(<<name_len::8, name::binary-size(name_len), 0x01, value::8, rest::binary>>),
+    do: {name, value == 1, rest}
+
+  defp take_option(
+         <<name_len::8, name::binary-size(name_len), 0x02, value::32-signed, rest::binary>>
+       ),
+       do: {name, value, rest}
+
+  defp take_option(
+         <<name_len::8, name::binary-size(name_len), 0x03, value_len::16,
+           value::binary-size(value_len), rest::binary>>
+       ),
+       do: {name, value, rest}
+
+  defp take_option(
+         <<name_len::8, name::binary-size(name_len), 0x04, value_len::16,
+           value::binary-size(value_len), rest::binary>>
+       ),
+       do: {name, String.to_existing_atom(value), rest}
+
+  defp take_option(
+         <<name_len::8, name::binary-size(name_len), 0x05, value::float-64, rest::binary>>
+       ),
+       do: {name, value, rest}
 end
