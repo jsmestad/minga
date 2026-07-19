@@ -1886,7 +1886,7 @@ Background Git status replacement updates the registered panel's visibility, bad
 
 ### W015: Size popup metadata from the frontend viewport
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L15
 - **Roadmap unit:** W015, Size popup metadata from the frontend viewport
 - **Ponytail verdict:** `ACCEPT/direct`
@@ -1932,7 +1932,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 - **PR URL:** https://github.com/jsmestad/minga/pull/3011
 - **Commit SHA:** `90ba545eb`
-- **Merge SHA:** Pending
+- **Merge SHA:** `e2d958d8a540d49625a73104d07a39eebcece821`
 - **Focused tests:** 30 popup lifecycle tests passed.
 - **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed; full non-heavy result: 58 doctests, 98 properties, 9,915 tests, 0 failures, 1 skipped, 578 excluded.
 - **Planner verdict:** `READY`; source owner, both construction branches, regression assertion, constraints, and validation are locked.
@@ -1943,9 +1943,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Production lines added/removed:** 4 added / 7 removed, net -3.
 - **Test lines added/removed:** 33 added / 0 removed, net +33.
 - **Concepts added/removed:** The invalid state-shape fallback is removed; no concept is added.
-- **Findings resolved:** Pending merge.
+- **Findings resolved:** L15. Split and float popup Window metadata now uses frontend-reported terminal dimensions without a stale fallback.
 - **Discoveries affecting later work:** Frontend-reported row fit and terminal dimensions must be read from `State.Frontend`, not a workspace or top-level fallback.
-- **Completion date:** Pending
+- **Completion date:** 2026-07-18
 
 ## Follow-on simplifications
 
