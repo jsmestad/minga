@@ -48,33 +48,18 @@ defmodule MingaEditor.NativeIPC.Server do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
+    task_supervisor = Keyword.fetch!(opts, :task_supervisor)
+
+    connection_opts =
+      Keyword.take(opts, [:wait_tracker, :editor_server, :open_wait, :open_request, :kill_checker])
+
     with {:ok, base} <- identity_base(opts),
          {:ok, runtime_parent} <- runtime_parent(opts),
          :ok <- validate_private_parent(runtime_parent, base.euid),
          {:ok, runtime_dir} <- runtime_dir(opts, runtime_parent),
          :ok <- prepare_runtime_dir(runtime_dir, base.euid),
-         socket_path <- random_socket_path(runtime_dir),
-         {:ok, listener} <- listen(socket_path),
-         :ok <- File.chmod(socket_path, 0o600),
-         :ok <- validate_private_file(socket_path, :other, base.euid, 0o600),
-         identity <- build_identity(base, socket_path),
-         descriptor_path <- Path.join(runtime_dir, "current.json"),
-         :ok <- publish_descriptor(descriptor_path, identity, base.euid) do
-      task_supervisor = Keyword.fetch!(opts, :task_supervisor)
-
-      connection_opts =
-        Keyword.take(opts, [
-          :wait_tracker,
-          :editor_server,
-          :open_wait,
-          :open_request,
-          :kill_checker
-        ])
-
-      acceptor =
-        spawn_link(fn -> accept_loop(listener, task_supervisor, identity, connection_opts) end)
-
-      {:ok, State.new(listener, acceptor, descriptor_path, identity)}
+         {:ok, {listener, descriptor_path, identity}} <- open_endpoint(runtime_dir, base) do
+      finalize_endpoint(listener, task_supervisor, identity, connection_opts, descriptor_path)
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -289,20 +274,82 @@ defmodule MingaEditor.NativeIPC.Server do
   @spec publish_descriptor(String.t(), Identity.t(), non_neg_integer()) ::
           :ok | {:error, term()}
   defp publish_descriptor(path, identity, euid) do
-    descriptor = Identity.descriptor(identity, @descriptor_version)
     temp = path <> ".tmp-#{random_secret(8)}"
 
-    with :ok <- File.write(temp, JSON.encode!(descriptor) <> "\n", [:exclusive]),
+    with :ok <-
+           File.write(
+             temp,
+             JSON.encode!(Identity.descriptor(identity, @descriptor_version)) <> "\n",
+             [:exclusive]
+           ),
          :ok <- File.chmod(temp, 0o600),
-         :ok <- validate_private_file(temp, :regular, euid, 0o600),
-         :ok <- File.rename(temp, path),
-         :ok <- validate_private_file(path, :regular, euid, 0o600) do
-      :ok
+         :ok <- validate_private_file(temp, :regular, euid, 0o600) do
+      publish_current_descriptor(path, temp, identity, euid)
     else
-      {:error, _reason} = error ->
-        _ = File.rm(temp)
-        error
+      {:error, _reason} = error -> remove_temp_descriptor(temp, error)
     end
+  end
+
+  defp open_endpoint(runtime_dir, base) do
+    socket_path = random_socket_path(runtime_dir)
+
+    with {:ok, listener} <- listen(socket_path) do
+      with :ok <- File.chmod(socket_path, 0o600),
+           :ok <- validate_private_file(socket_path, :other, base.euid, 0o600),
+           identity = build_identity(base, socket_path),
+           descriptor_path = Path.join(runtime_dir, "current.json"),
+           :ok <- publish_descriptor(descriptor_path, identity, base.euid) do
+        {:ok, {listener, descriptor_path, identity}}
+      else
+        {:error, _reason} = error ->
+          rollback_listener_socket(listener, socket_path)
+          error
+      end
+    end
+  end
+
+  defp finalize_endpoint(listener, task_supervisor, identity, connection_opts, descriptor_path) do
+    acceptor =
+      spawn_link(fn -> accept_loop(listener, task_supervisor, identity, connection_opts) end)
+
+    {:ok, State.new(listener, acceptor, descriptor_path, identity)}
+  catch
+    kind, reason ->
+      rollback_published_endpoint(descriptor_path, identity, listener)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp publish_current_descriptor(path, temp, identity, euid) do
+    case File.rename(temp, path) do
+      :ok ->
+        case validate_private_file(path, :regular, euid, 0o600) do
+          :ok ->
+            :ok
+
+          {:error, _reason} = error ->
+            remove_descriptor_if_current(path, identity.core_instance_id)
+            error
+        end
+
+      {:error, _reason} = error ->
+        remove_temp_descriptor(temp, error)
+    end
+  end
+
+  defp remove_temp_descriptor(temp, error) do
+    _ = File.rm(temp)
+    error
+  end
+
+  defp rollback_published_endpoint(descriptor_path, identity, listener) do
+    remove_descriptor_if_current(descriptor_path, identity.core_instance_id)
+    rollback_listener_socket(listener, identity.socket_path)
+  end
+
+  defp rollback_listener_socket(listener, socket_path) do
+    _ = :gen_tcp.close(listener)
+    _ = File.rm(socket_path)
+    :ok
   end
 
   @spec remove_descriptor_if_current(String.t(), String.t()) :: :ok

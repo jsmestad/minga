@@ -140,6 +140,51 @@ defmodule Minga.Frontend.NativeIPCTest do
     assert inspect(reason) =~ "insecure_runtime_entry"
   end
 
+  test "rolls back listener socket and temp descriptor when descriptor publication fails after listen",
+       ctx do
+    suffix = System.unique_integer([:positive])
+    parent = Path.join("/tmp", "minga-native-ipc-rollback-#{suffix}")
+    runtime_dir = Path.join(parent, "com.minga.editor")
+    blocker = Path.join(runtime_dir, "current.json")
+    File.rm_rf!(parent)
+    File.mkdir!(parent)
+    File.chmod!(parent, 0o700)
+    File.mkdir!(runtime_dir)
+    File.chmod!(runtime_dir, 0o700)
+    File.mkdir!(blocker)
+
+    on_exit(fn -> File.rm_rf!(parent) end)
+
+    previous_trap = Process.flag(:trap_exit, true)
+
+    result =
+      IPCSupervisor.start_link(
+        name: nil,
+        server_name: nil,
+        task_supervisor_name: Module.concat(__MODULE__, "RollbackTasks#{suffix}"),
+        runtime_parent: parent,
+        runtime_dir: runtime_dir,
+        app_instance_id: "app-instance-1234567890",
+        app_pid: ctx.app_pid,
+        euid: File.stat!(File.cwd!()).uid,
+        kill_checker: fn _pid -> true end
+      )
+
+    receive do
+      {:EXIT, _pid, _reason} -> :ok
+    after
+      0 -> :ok
+    end
+
+    Process.flag(:trap_exit, previous_trap)
+    assert {:error, {:shutdown, {:failed_to_start_child, _, :eisdir}}} = result
+    assert File.dir?(blocker)
+    entries = File.ls!(runtime_dir)
+    refute Enum.any?(entries, &String.starts_with?(&1, "control-"))
+    refute Enum.any?(entries, &String.starts_with?(&1, "current.json.tmp-"))
+    assert entries == ["current.json"]
+  end
+
   test "authenticates a real AF_UNIX probe and rejects a substituted token", ctx do
     socket = connect(ctx.descriptor)
     send_json(socket, hello(ctx.descriptor))

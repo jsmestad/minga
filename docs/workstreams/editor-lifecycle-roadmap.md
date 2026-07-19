@@ -2121,6 +2121,37 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Merged CI:** Run `29676744074` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
   - **Completion date:** 2026-07-19
 
+### W021: Roll back partial native IPC initialization
+
+- **Status:** ACTIVE
+- **Audit ID:** L25
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `2f5bb009d3663657d36809b7e042edbb8ad66170`
+- **Observable outcome:** Native IPC initialization failures after listener creation preserve the original failure while removing the failed generation's descriptor, temporary descriptor, listener, and socket path in reverse acquisition order.
+- **Authoritative owner:** `MingaEditor.NativeIPC.Server` owns endpoint acquisition and partial-init rollback; `Server.State` remains the unchanged steady-state owner.
+- **Locked implementation:** Fetch required options before resource acquisition. Keep all parent, directory, socket, descriptor, identity, and authentication checks unchanged. On post-listen failure, close the listener then unlink its socket. Descriptor publication removes its temp file on pre-rename failure and removes published `current.json` only when its `core_instance_id` matches the failed generation. Start the acceptor only after complete acquisition.
+- **Tests:** Pre-create `runtime_dir/current.json` as a directory, start the real IPC supervisor, assert the original `:eisdir` startup error, preserve the blocker directory, and assert no `control-*` socket or `current.json.tmp-*` remains. Preserve symlink rejection and normal endpoint lifecycle tests.
+- **Focused validation:** `mix test test/minga/frontend/native_ipc_test.exs --seed 0`.
+- **Broad validation:** `mix test`; `make lint`; `git diff --check`.
+- **Non-goals:** No endpoint struct, new module, process, registry, behavior, dependency, public API, config, protocol/schema change, test injection, trust-check weakening, runtime directory removal, helper change, or connection/request redesign.
+- **Maximum production additions:** 50 net lines.
+- **Maximum test additions:** 45 lines.
+- **Dependencies:** Existing File, Path, `:gen_tcp`, JSON, supervisor, identity, and descriptor APIs only; no unresolved implementer question remains.
+- **Completion evidence:**
+  - **Implementation result:** `MingaEditor.NativeIPC.Server.init/1` now fetches the required task supervisor before identity/runtime/socket work, validates the private parent/runtime directory before resource acquisition, opens the AF_UNIX listener inside a staged endpoint boundary, and starts the acceptor only after socket validation and descriptor publication succeed. Post-listen errors close the listener and unlink the socket while preserving the original reason; descriptor publication removes only the temp file before a successful rename and removes `current.json` after rename only when the failed generation's `core_instance_id` is still current.
+  - **Regression evidence:** Added the real filesystem/AF_UNIX blocker-directory regression in `test/minga/frontend/native_ipc_test.exs`; before the fix, `mix test test/minga/frontend/native_ipc_test.exs --seed 0` failed because `entries` still contained `control-DThY6HrvSBE_ilfh.sock` next to `current.json`. After the fix, the same test asserts the original `:eisdir` startup error, preserved blocker directory, no `control-*` socket, no `current.json.tmp-*`, and only `current.json` remaining.
+  - **Focused validation:** `mix test test/minga/frontend/native_ipc_test.exs --seed 0` passed with 8 tests on 2026-07-19.
+  - **Line budget:** Production delta `+77/-30` in `lib/minga_editor/native_ipc/server.ex` for net `+47`; test delta `+45/-0` in `test/minga/frontend/native_ipc_test.exs`, within W021 limits.
+  - **Concepts added/removed:** Added private staged endpoint acquisition and rollback helpers inside the existing server owner. Added no endpoint struct, module, process, registry, behavior, dependency, public API, config, protocol, schema, or test injection. Removed no steady-state trust check or normal terminate behavior.
+  - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS` after flattening listener-owned error flow and consolidating finalization rollback into one catch-and-reraise path; Ponytail `Lean already. Ship.`
+  - **Broad validation:** `mix test --max-cases 4` passed 10,444 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded after building the worktree's missing native parser and hook runner; `make lint` passed Credo, compile, and incremental Dialyzer after the final control-flow correction; `git diff --check` passed.
+  - **Final reviewer:** `PASS`; staged rollback, trust checks, original errors, steady-state ownership, public APIs, real IPC regression, line budgets, validation evidence, and merge safety accepted with no findings.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3028
+  - **Merge evidence:** Pending.
+  - **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely
