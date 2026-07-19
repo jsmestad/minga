@@ -2403,7 +2403,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W030: Delete D06 assistance-popup Protocol.GUI outbound parity oracles
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.3
 - **Decision:** ACCEPT/deletion, third split D06 slice
 - **Planning profile:** `D06Planner3`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2431,8 +2431,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three-oracle deletion, retained canonical byte/cache/range/builder coverage, unchanged schema/generated/Swift/Go/action contracts, budgets, validation evidence, and merge safety with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3046
 - **Implementation commit SHA:** `49d4fcd5b`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `0303c7f89bc4c2c90117296f56ee1f0944a2069e`; **Merge evidence:** PR #3046 merged after CI run `29697745648` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
