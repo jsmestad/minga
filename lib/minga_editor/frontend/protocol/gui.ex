@@ -243,8 +243,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
 
-  @op_gui_sidebars Opcodes.gui_sidebars()
-
   @search_flag_replace_mode 0x01
   @search_flag_case_sensitive 0x02
   @search_flag_whole_word 0x04
@@ -382,19 +380,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :float_popup_dismiss
           | :chat_scrolled_away_from_bottom
           | :chat_returned_to_bottom
-
-  @typedoc "Semantic sidebar metadata sent to native GUI frontends."
-  @type sidebar_metadata :: %{
-          required(:id) => String.t(),
-          required(:display_name) => String.t(),
-          required(:semantic_kind) => String.t(),
-          required(:icon) => String.t(),
-          required(:order) => non_neg_integer(),
-          required(:visible?) => boolean(),
-          required(:focused?) => boolean(),
-          required(:preferred_width) => non_neg_integer(),
-          optional(:badge_count) => non_neg_integer() | nil
-        }
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -980,43 +965,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     payload_len = 1 + 4 + text_len
 
     <<@op_clipboard_write, payload_len::32, target_byte::8, text_len::32, text_bytes::binary>>
-  end
-
-  @doc "Encodes semantic sidebar metadata for native GUI frontend hosts."
-  @spec encode_gui_sidebars([sidebar_metadata()], String.t() | nil) :: binary()
-  def encode_gui_sidebars(sidebars, active_id) when is_list(sidebars) do
-    entries =
-      sidebars
-      |> Enum.sort_by(&Map.fetch!(&1, :order))
-      |> Enum.take(@max_u16)
-      |> Enum.map(&encode_sidebar_metadata/1)
-
-    active = active_id || ""
-
-    payload =
-      IO.iodata_to_binary([<<1::8, Enum.count(entries)::16>>, encode_string16(active), entries])
-
-    <<@op_gui_sidebars, byte_size(payload)::32, payload::binary>>
-  end
-
-  @spec encode_sidebar_metadata(sidebar_metadata()) :: binary()
-  defp encode_sidebar_metadata(sidebar) do
-    flags =
-      0
-      |> maybe_flag(Map.get(sidebar, :visible?, false), 0)
-      |> maybe_flag(Map.get(sidebar, :focused?, false), 1)
-
-    badge = Map.get(sidebar, :badge_count)
-    badge_count = if is_integer(badge), do: clamp_u16(badge), else: @max_u16
-
-    IO.iodata_to_binary([
-      encode_string16(Map.fetch!(sidebar, :id)),
-      encode_string16(Map.fetch!(sidebar, :display_name)),
-      encode_string16(Map.fetch!(sidebar, :semantic_kind)),
-      encode_string16(Map.get(sidebar, :icon, "")),
-      <<clamp_u16(Map.fetch!(sidebar, :order))::16, flags::8,
-        clamp_u16(Map.get(sidebar, :preferred_width, 0))::16, badge_count::16>>
-    ])
   end
 
   # ── Config state (forward-compatible, 0x97) ──
