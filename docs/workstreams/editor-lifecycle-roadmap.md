@@ -2055,7 +2055,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W019: Retire redundant tool-status clear timers
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L23
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2082,9 +2082,11 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Concepts added/removed:** Added none. Removed the second tool-status timer lifecycle, prefix ownership inference, generic timer effect, bare Editor dispatch route, unreachable generic log levels, and obsolete duplicate tests.
   - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS` after documentation and effect types were aligned to actual ownership; Ponytail `Lean already. Ship.` after duplicate headless effect coverage was removed.
   - **Final reviewer:** `PASS`; redundant timer deletion, sole NoticeWorkflow ownership, preserved tool effects, tests, budgets, evidence, and merge safety accepted with no findings.
-  - **PR URL:** Pending.
-  - **Merge evidence:** Pending.
-  - **Completion date:** Pending merge.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3024
+  - **Implementation commit SHA:** `8d32acf16`
+  - **Merge commit SHA:** `d745a0ed51b58f47bf4f2c3427dba047e043ff74`
+  - **Merged CI:** Run `29675403567` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
+  - **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
