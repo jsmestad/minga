@@ -550,6 +550,22 @@ defmodule MingaEditor.Input.RouterTest do
       assert snapshot.buf_version == 0
     end
 
+    test "handles a dead active buffer pid" do
+      state = base_state()
+      dead = state.workspace.buffers.active
+      ref = Process.monitor(dead)
+
+      :ok = GenServer.stop(dead, :normal)
+      assert_receive {:DOWN, ^ref, :process, ^dead, :normal}
+
+      snapshot = Router.capture_snapshot(state)
+
+      assert snapshot.old_buffer == dead
+      assert snapshot.buf_version == 0
+      assert snapshot.old_cursor == nil
+      assert snapshot.old_mode == :normal
+    end
+
     test "reflects mode changes" do
       state = base_state()
 

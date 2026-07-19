@@ -529,5 +529,7 @@ defmodule MingaEditor.Input.Router do
 
   defp buffer_version(%{workspace: %{buffers: %{active: buf}}}) do
     Buffer.version(buf)
+  catch
+    :exit, _ -> 0
   end
 end

@@ -28,10 +28,14 @@ defmodule MingaEditor.FileWatcherHelpers do
         state
 
       buf ->
-        buf_state = :sys.get_state(buf)
-        {disk_mtime, disk_size} = file_stat(path)
+        case safe_buffer_state(buf) do
+          {:ok, buf_state} ->
+            {disk_mtime, disk_size} = file_stat(path)
+            handle_change(state, buf, path, buf_state, disk_mtime, disk_size)
 
-        handle_change(state, buf, path, buf_state, disk_mtime, disk_size)
+          :unavailable ->
+            state
+        end
     end
   end
 
@@ -139,6 +143,13 @@ defmodule MingaEditor.FileWatcherHelpers do
       state,
       "#{name} changed on disk. [r]eload / [k]eep"
     )
+  end
+
+  @spec safe_buffer_state(pid()) :: {:ok, BufState.t()} | :unavailable
+  defp safe_buffer_state(buf) do
+    {:ok, :sys.get_state(buf)}
+  catch
+    :exit, _ -> :unavailable
   end
 
   @spec find_buffer_for_path(state(), String.t()) :: pid() | nil

@@ -6,6 +6,9 @@ defmodule MingaEditor.FileChangeTest do
   """
 
   use Minga.Test.EditorCase, async: true, rendering: :disabled
+  alias MingaEditor.FileWatcherHelpers
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
 
   @tag :tmp_dir
   test "unmodified buffer silently reloads on file change", %{tmp_dir: tmp_dir} do
@@ -78,6 +81,29 @@ defmodule MingaEditor.FileChangeTest do
     send_key_sync(ctx, ?j)
 
     assert conflict_open?(ctx)
+  end
+
+  @tag :tmp_dir
+  test "stale buffer that exits after path lookup leaves state unchanged", %{tmp_dir: tmp_dir} do
+    path = Path.expand(Path.join(tmp_dir, "stale.txt"))
+    File.write!(path, "external")
+
+    buf =
+      spawn_link(fn ->
+        receive do
+          {:"$gen_call", from, :file_path} ->
+            GenServer.reply(from, path)
+        end
+      end)
+
+    state = %EditorState{
+      workspace: %MingaEditor.Session.State{
+        viewport: MingaEditor.Viewport.new(24, 80),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0}
+      }
+    }
+
+    assert ^state = FileWatcherHelpers.handle_file_change(state, path)
   end
 
   defp notify_file_changed(ctx, path) do

@@ -2088,6 +2088,37 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Merged CI:** Run `29675403567` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
   - **Completion date:** 2026-07-19
 
+### W020: Guard buffer lookup-to-use process exits
+
+- **Status:** ACTIVE
+- **Audit ID:** L24
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `c28eb0ee433b885513debe28fad760dd3b4c2b70`
+- **Observable outcome:** A buffer dying after file-path lookup no longer crashes file-change handling, which returns the existing Editor state unchanged. Input snapshots with a stale active PID retain the snapshot shape with version `0` and cursor `nil`.
+- **Failure path:** `FileWatcherHelpers` catches exits during path lookup but then calls unprotected `:sys.get_state/1`; `Input.Router` catches cursor exits but calls unprotected `Buffer.version/1`.
+- **Authoritative owners:** `FileWatcherHelpers` owns stale file-change fallback; `Input.Router` owns pre-action snapshot fallbacks; Buffer process APIs and the existing snapshot shape remain unchanged.
+- **Locked implementation:** Add one local safe buffer-state read returning `{:ok, Buffer.State.t()}` or `:unavailable`, with only `catch :exit`; return unchanged state before file stat on unavailable. Add only `catch :exit, _ -> 0` around Router's active-buffer version call. Do not widen catches or change other callers.
+- **Tests:** Add a direct file-change workflow regression using a raw one-shot process that answers `:file_path` then exits before `:sys.get_state/1`; add a public `Router.capture_snapshot/1` regression with a deterministically stopped active buffer. Preserve live and nil branches.
+- **Focused validation:** `mix test.debug test/minga_editor/file_change_test.exs test/minga_editor/input/router_test.exs`.
+- **Broad validation:** `mix test test/minga_editor`; `mix test.llm --max-cases 4`; `make lint`; `git diff --check`.
+- **Non-goals:** No nested test module, production module, wrapper, public Buffer API, behavior, registry, process, monitor, retry, supervision, config, dependency, compatibility shim, stale-PID removal, or catches around reload, file IO, modal, notice, render, LSP, GUI, mouse, or pure state logic.
+- **Maximum production additions:** 20 net lines, hard ceiling 50.
+- **Maximum test additions:** 60 lines, hard ceiling 80.
+- **Dependencies:** Existing Buffer process APIs and snapshot shape are merged; no unresolved dependency or implementer question remains.
+- **Completion evidence:**
+  - **Implementation result:** `FileWatcherHelpers.handle_file_change/2` now treats a buffer that disappears after path lookup as stale by reading `:sys.get_state/1` through a private `safe_buffer_state/1` tagged result and returning the original Editor state before file stat, reload, conflict modal, or notice work. `Input.Router` now falls back to version `0` only when `Buffer.version/1` exits for the active buffer; the snapshot shape and existing cursor fallback remain unchanged.
+  - **Regression reproduction:** With only the new regressions in place, `mix test test/minga_editor/file_change_test.exs:88 test/minga_editor/input/router_test.exs:553 --trace` failed deterministically on the old code with exits from `:sys.get_state(pid)` and `GenServer.call(pid, :version, 5000)`.
+  - **Focused validation:** `mix test.debug test/minga_editor/file_change_test.exs test/minga_editor/input/router_test.exs` passed 33 tests after the review correction.
+  - **Broad validation:** `mix test test/minga_editor` passed 4,476 tests with 33 excluded after building the worktree's missing native parser; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,920 tests with 0 failures, 1 skipped, and 578 excluded; `make lint` passed Credo, compile, and incremental Dialyzer; `git diff --check` passed.
+  - **Line budget:** Production net +13 lines (`file_watcher_helpers.ex` +11, `router.ex` +2); test additions +42 lines (`file_change_test.exs` +26, `router_test.exs` +16), within W020 limits.
+  - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship concern resolved by matching the repository's `spawn_link` plus `GenServer.reply/2` one-shot fixture idiom while retaining project-required monitor synchronization for the dead Buffer test; Ponytail `Lean already. Ship.`
+  - **Final reviewer:** `PASS`; both lookup-to-use exit windows, ownership, APIs, deterministic regressions, line budgets, validation evidence, and merge safety accepted with no findings.
+  - **PR URL:** Pending.
+  - **Merge evidence:** Pending.
+  - **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely
