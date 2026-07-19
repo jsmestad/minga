@@ -87,8 +87,9 @@ defmodule MingaEditor.MinibufferData do
   @doc """
   Extracts structured minibuffer data from the current editor state.
 
-  Returns a `t()` struct ready for protocol encoding via
-  `MingaEditor.Frontend.Protocol.GUI.encode_gui_minibuffer/1`.
+  Returns a `t()` struct ready for `MingaEditor.RenderModel.UI.MinibufferBuilder`
+  to project into the render model encoded by
+  `Minga.Frontend.Adapter.GUI.MinibufferEncoder`.
   """
   @spec from_state(EditorState.t() | map()) :: t()
 

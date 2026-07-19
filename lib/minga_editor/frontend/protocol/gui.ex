@@ -126,7 +126,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Row
-  alias MingaEditor.MinibufferData
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -143,11 +142,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Protocol.Opcodes
 
   @op_gui_tab_bar Opcodes.gui_tab_bar()
-  @op_gui_which_key Opcodes.gui_which_key()
   @op_gui_theme Opcodes.gui_theme()
   @op_gui_status_bar Opcodes.gui_status_bar()
   @op_gui_tool_manager Opcodes.gui_tool_manager()
-  @op_gui_minibuffer Opcodes.gui_minibuffer()
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_file_tree Opcodes.gui_file_tree()
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
@@ -1470,40 +1467,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # schema-generated codec (#2225): the cross-language golden tests now prove
   # byte-exactness, which is the only role this oracle served.
 
-  # ── Which-key ──
-
-  @doc "Encodes a gui_which_key command."
-  @spec encode_gui_which_key(MingaEditor.State.WhichKey.t()) :: binary()
-  def encode_gui_which_key(%{show: false}), do: <<@op_gui_which_key, 0::8>>
-  def encode_gui_which_key(%{show: true, node: nil}), do: <<@op_gui_which_key, 0::8>>
-
-  def encode_gui_which_key(%{show: true, node: node, prefix_keys: prefix_keys, page: page}) do
-    bindings = MingaEditor.UI.WhichKey.bindings_from_node(node)
-    prefix_bytes = prefix_keys |> Enum.join(" ") |> :erlang.iolist_to_binary()
-
-    page_size = 20
-    page_count = max(div(Enum.count(bindings) + page_size - 1, page_size), 1)
-    page_bindings = Enum.slice(bindings, page * page_size, page_size)
-
-    entries =
-      Enum.map(page_bindings, fn b ->
-        kind_byte = if b.kind == :group, do: 1, else: 0
-        key = :erlang.iolist_to_binary([b.key])
-        desc = :erlang.iolist_to_binary([b.description])
-        icon = :erlang.iolist_to_binary([b.icon || ""])
-
-        <<kind_byte::8, byte_size(key)::8, key::binary, byte_size(desc)::16, desc::binary,
-          byte_size(icon)::8, icon::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      @op_gui_which_key,
-      <<1::8, byte_size(prefix_bytes)::16, prefix_bytes::binary, page::8, page_count::8,
-        Enum.count(page_bindings)::16>>
-      | entries
-    ])
-  end
-
   # ── Breadcrumb ──
   #
   # The gui_breadcrumb parity oracle (encode_gui_breadcrumb/2) was removed once
@@ -2595,72 +2558,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_tool_method(:go_install), do: 3
   defp encode_tool_method(:github_release), do: 4
   defp encode_tool_method(_), do: 0
-
-  # ── Minibuffer ──
-
-  @doc """
-  Encodes a gui_minibuffer command (0x7F).
-
-  Sends structured minibuffer state to the GUI frontend for native rendering.
-  Includes mode, prompt, input text, cursor position, context string, and
-  completion candidates.
-
-  When `visible` is false, sends a single hide byte. When visible, encodes
-  the full payload including any completion candidates.
-  """
-  @spec encode_gui_minibuffer(MinibufferData.t()) :: binary()
-  def encode_gui_minibuffer(%MinibufferData{visible: false}),
-    do: <<@op_gui_minibuffer, 0::8>>
-
-  def encode_gui_minibuffer(
-        %{
-          visible: true,
-          mode: mode,
-          cursor_pos: cursor_pos,
-          prompt: prompt,
-          input: input,
-          context: context,
-          selected_index: selected_index,
-          candidates: candidates
-        } = data
-      ) do
-    total_candidates = Map.get(data, :total_candidates, Enum.count(candidates))
-    prompt_bytes = :erlang.iolist_to_binary([prompt])
-    input_bytes = :erlang.iolist_to_binary([input])
-    context_bytes = :erlang.iolist_to_binary([context])
-
-    candidate_data =
-      Enum.map(candidates, fn candidate ->
-        %{label: label, description: desc, match_score: score} = candidate
-        match_positions = Map.get(candidate, :match_positions, [])
-        annotation = Map.get(candidate, :annotation, "")
-
-        label_bytes = :erlang.iolist_to_binary([label])
-        desc_bytes = :erlang.iolist_to_binary([desc])
-        annotation_bytes = :erlang.iolist_to_binary([annotation])
-
-        # Per candidate: score(1) + label_len(2) + label + desc_len(2) + desc
-        #   + annotation_len(2) + annotation
-        #   + match_pos_count(1) + match_positions(count * 2)
-        pos_binary =
-          Enum.map(match_positions, fn pos -> <<min(pos, 0xFFFF)::16>> end)
-
-        [
-          <<min(score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
-            byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
-            annotation_bytes::binary, Enum.count(match_positions)::8>>
-          | pos_binary
-        ]
-      end)
-
-    IO.iodata_to_binary([
-      <<@op_gui_minibuffer, 1::8, mode::8, cursor_pos::16, byte_size(prompt_bytes)::8,
-        prompt_bytes::binary, byte_size(input_bytes)::16, input_bytes::binary,
-        byte_size(context_bytes)::16, context_bytes::binary, selected_index::16,
-        Enum.count(candidates)::16, total_candidates::16>>
-      | candidate_data
-    ])
-  end
 
   # ── Git status panel (0x85) ──
   #

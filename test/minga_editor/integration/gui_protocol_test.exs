@@ -14,6 +14,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
+  alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Completion
@@ -336,10 +337,13 @@ defmodule Minga.Integration.GUIProtocolTest do
       {bottom_panel_cmd, _caches} =
         BottomPanelEncoder.encode(%BottomPanel{visible?: false}, Caches.new())
 
+      {which_key_cmd, _caches} =
+        WhichKeyEncoder.encode(%Minga.RenderModel.UI.WhichKey{visible: false}, Caches.new())
+
       cases = [
         {"gui_agent_chat", encode_gui_agent_chat(%{visible: false})},
         {"gui_completion", CompletionEncoder.encode_command(%Completion{})},
-        {"gui_which_key", ProtocolGUI.encode_gui_which_key(%{show: false})},
+        {"gui_which_key", which_key_cmd},
         {"gui_picker", <<Opcodes.gui_picker(), 0::8>>},
         {"gui_bottom_panel", bottom_panel_cmd},
         {"gui_tool_manager", ProtocolGUI.encode_gui_tool_manager(nil)}
