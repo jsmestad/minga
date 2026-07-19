@@ -2462,8 +2462,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors after correcting one Credo readability finding (`32_768`). The default-concurrency `mix test.llm` run exposed the unrelated `MingaAgent.Providers.NativeMCPTest` `provider did not emit AgentEnd` timeout; that exact test passed alone, and `mix test.llm --seed 507295 --max-cases 4` passed 9,876 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` exited 0 with `xcodebuild not found; skipping Swift build`, preserving the required macOS CI handoff; no Swift source changed.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0.99 confidence and independently mapped every removed notification/observatory contract to canonical adapter, builder, action, schema, and frontend coverage. Elixir craftsmanship returned `PASS/Lean`; Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so the correctness review explicitly covered exact bytes, action payloads, ordering, flags, timestamps, severity, cache behavior, visibility transitions, chunking, counts, and builder fallbacks. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact 249-line production-oracle deletion, direct canonical notification/observatory encoder and builder assertions, retained adapter/action contracts, unchanged schema/generated/Swift/Go surfaces, truthful qualified validation, budgets, and merge safety with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3048
+- **Implementation commit SHA:** `9351faee4`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
