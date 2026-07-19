@@ -4,7 +4,6 @@ defmodule Minga.Frontend.Adapter.GUI.FloatPopupEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.FloatPopupEncoder
   alias Minga.RenderModel.UI.FloatPopup
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_float_popup Minga.Protocol.Opcodes.gui_float_popup()
 
@@ -48,16 +47,11 @@ defmodule Minga.Frontend.Adapter.GUI.FloatPopupEncoderTest do
       assert cmd2 == FloatPopupEncoder.encode_command(model2)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for hidden state" do
-      legacy = %{visible: false, title: "", lines: [], width: 0, height: 0}
-
-      assert FloatPopupEncoder.encode_command(%FloatPopup{}) ==
-               ProtocolGUI.encode_gui_float_popup(legacy)
+    test "encodes hidden command bytes directly" do
+      assert FloatPopupEncoder.encode_command(%FloatPopup{}) == <<@op_gui_float_popup, 0>>
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for visible popup" do
-      data = %{visible: true, title: "Inspect", lines: ["line1", "line2"], width: 40, height: 20}
-
+    test "encodes visible command bytes directly" do
       model = %FloatPopup{
         visible?: true,
         title: "Inspect",
@@ -66,7 +60,22 @@ defmodule Minga.Frontend.Adapter.GUI.FloatPopupEncoderTest do
         height: 20
       }
 
-      assert FloatPopupEncoder.encode_command(model) == ProtocolGUI.encode_gui_float_popup(data)
+      assert FloatPopupEncoder.encode_command(model) ==
+               <<@op_gui_float_popup, 1, 40::16, 20::16, 7::16, "Inspect", 2::16, 5::16, "line1",
+                 5::16, "line2">>
+    end
+
+    test "encodes visible command bytes with empty title directly" do
+      model = %FloatPopup{
+        visible?: true,
+        title: "",
+        lines: ["hello"],
+        width: 40,
+        height: 10
+      }
+
+      assert FloatPopupEncoder.encode_command(model) ==
+               <<@op_gui_float_popup, 1, 40::16, 10::16, 0::16, 1::16, 5::16, "hello">>
     end
   end
 end
