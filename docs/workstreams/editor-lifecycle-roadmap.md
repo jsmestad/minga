@@ -2495,8 +2495,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The default-concurrency `mix test.llm` run exposed the unrelated `MingaAgent.Providers.NativeMCPTest` `provider did not emit AgentEnd` timeout; that exact test passed alone, and `mix test.llm --seed 810531 --max-cases 4` passed 9,868 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` exited 0 with `xcodebuild not found; skipping Swift build`, preserving the required macOS CI handoff; no Swift source changed.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0.99 confidence and independently mapped every removed which-key/minibuffer contract to canonical adapter, builder, action, schema, integration, and frontend coverage. Elixir craftsmanship returned `PASS/Lean`; Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered exact visible/hidden bytes, command/group/icon rows, builder sorting, candidate fields/counts/positions, modes, context, sentinel, unicode byte length, range rejection, cache behavior, action decode, and integration framing. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact two-oracle deletion, direct canonical adapter byte/cache coverage, retained minibuffer-select decoder and handler, unchanged schema/generated/Swift/Go contracts, truthful qualified validation, budgets, and merge safety with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3050
+- **Implementation commit SHA:** `b625e38aa`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
