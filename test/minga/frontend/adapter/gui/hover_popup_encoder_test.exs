@@ -7,9 +7,9 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
   alias Minga.RenderModel.UI.HoverPopup
   alias Minga.RenderModel.UI.HoverPopup.Line
   alias Minga.RenderModel.UI.HoverPopup.Segment
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_hover_popup Minga.Protocol.Opcodes.gui_hover_popup()
+  @op_gui_hover_action Minga.Protocol.Opcodes.gui_hover_action()
 
   describe "encode/2" do
     test "encodes hidden hover popup" do
@@ -44,26 +44,46 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
       assert cmd2 == HoverPopupEncoder.encode_command(model2)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for hidden state" do
-      assert HoverPopupEncoder.encode_command(%HoverPopup{}) ==
-               ProtocolGUI.encode_gui_hover_popup(nil)
+    test "encodes hidden hover popup command directly" do
+      assert HoverPopupEncoder.encode_command(%HoverPopup{}) == <<@op_gui_hover_popup, 0>>
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for visible popup" do
-      legacy = %MingaEditor.HoverPopup{
+    test "encodes visible popup with hidden action sidecar" do
+      model = %HoverPopup{
+        visible?: true,
+        anchor_row: 1,
+        anchor_col: 2,
         content_lines: [
-          {[{"hello", :plain}, {"world", {:syntax, Face.new(fg: 0x112233, bold: true)}}], :text}
-        ],
-        anchor_row: 5,
-        anchor_col: 10,
-        focused: true,
-        scroll_offset: 2,
-        open_action: :open_docs
+          %Line{line_type: :text, segments: [%Segment{text: "hello", style: :plain}]}
+        ]
       }
 
-      model = hover_model()
+      assert HoverPopupEncoder.encode_command(model) ==
+               <<@op_gui_hover_popup, 1, 1::16, 2::16, 0, 0::16, 1::16, 0, 1::16, 0, 5::16,
+                 "hello", @op_gui_hover_action, 1::16, 0>>
+    end
 
-      assert HoverPopupEncoder.encode_command(model) == ProtocolGUI.encode_gui_hover_popup(legacy)
+    test "encodes visible popup with syntax segment and open action sidecar" do
+      assert HoverPopupEncoder.encode_command(hover_model()) ==
+               <<@op_gui_hover_popup, 1, 5::16, 10::16, 1, 2::16, 1::16, 0, 2::16, 0, 5::16,
+                 "hello", 13, 0x11, 0x22, 0x33, 0x01, 5::16, "world", @op_gui_hover_action,
+                 12::16, 1, 9::16, "open_docs">>
+    end
+
+    test "encodes syntax fallback foreground" do
+      model = %HoverPopup{
+        visible?: true,
+        content_lines: [
+          %Line{
+            line_type: :code,
+            segments: [%Segment{text: "def", style: {:syntax, Face.new(bold: true)}}]
+          }
+        ]
+      }
+
+      assert HoverPopupEncoder.encode_command(model) ==
+               <<@op_gui_hover_popup, 1, 0::16, 0::16, 0, 0::16, 1::16, 1, 1::16, 13, 0xBB, 0xC2,
+                 0xCF, 0x01, 3::16, "def", @op_gui_hover_action, 1::16, 0>>
     end
   end
 

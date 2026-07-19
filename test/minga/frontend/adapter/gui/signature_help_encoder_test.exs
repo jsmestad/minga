@@ -7,7 +7,6 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoderTest do
   alias Minga.RenderModel.UI.SignatureHelp
   alias Minga.RenderModel.UI.SignatureHelp.Parameter
   alias Minga.RenderModel.UI.SignatureHelp.Signature
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_signature_help Minga.Protocol.Opcodes.gui_signature_help()
 
@@ -44,19 +43,15 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoderTest do
       assert cmd2 == SignatureHelpEncoder.encode_command(model2)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for hidden state" do
-      model = %SignatureHelp{}
-
-      assert SignatureHelpEncoder.encode_command(model) ==
-               ProtocolGUI.encode_gui_signature_help(nil)
+    test "encodes hidden signature help command directly" do
+      assert SignatureHelpEncoder.encode_command(%SignatureHelp{}) ==
+               <<@op_gui_signature_help, 0::8>>
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for visible signature help" do
-      legacy = legacy_signature_help()
-      model = signature_help_model()
-
-      assert SignatureHelpEncoder.encode_command(model) ==
-               ProtocolGUI.encode_gui_signature_help(legacy)
+    test "encodes visible signature help command directly" do
+      assert SignatureHelpEncoder.encode_command(signature_help_model()) ==
+               <<@op_gui_signature_help, 1, 10::16, 5::16, 0, 1, 1, 9::16, "foo(a, b)", 15::16,
+                 "Does foo things", 2, 1::16, "a", 5::16, "first", 1::16, "b", 6::16, "second">>
     end
 
     test "raises instead of clamping active indexes to protocol byte fields" do
@@ -92,25 +87,6 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoderTest do
           ]
         }
       ]
-    }
-  end
-
-  defp legacy_signature_help do
-    %MingaEditor.SignatureHelp{
-      signatures: [
-        %{
-          label: "foo(a, b)",
-          documentation: "Does foo things",
-          parameters: [
-            %{label: "a", documentation: "first"},
-            %{label: "b", documentation: "second"}
-          ]
-        }
-      ],
-      active_signature: 0,
-      active_parameter: 1,
-      anchor_row: 10,
-      anchor_col: 5
     }
   end
 end
