@@ -2308,8 +2308,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Bug-hunt verdict:** Correctness `PASS`; same-buffer `:noproc` specificity, all four stale-buffer surfaces, live and agent behavior, synchronization, scope, budgets, and evidence accepted with no blockers.
 - **Elixir craftsmanship verdict:** Initial review required consuming `ctx.filepath` in the agent branch; recheck `PASS` after the one-line correction.
 - **Final reviewer verdict:** `PASS` after correcting the roadmap decision from `ACCEPT/direct` to the immutable audit classification `ACCEPT/shrink`; implementation, exception boundary, regressions, ownership, scope, budgets, and validation evidence accepted with no remaining findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3038
+- **Implementation commit SHA:** `dff4592ef`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
