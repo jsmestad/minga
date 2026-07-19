@@ -875,6 +875,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     worker_monitor = Process.monitor(worker)
     scheduler_monitor = Process.monitor(first_scheduler)
+    :sys.get_state(first_scheduler)
     Process.exit(first_owner, :kill)
 
     request_id = request.id
