@@ -565,10 +565,21 @@ struct PreparedFrameTransactionBuilder {
         prepared.windowGutters = Dictionary(uniqueKeysWithValues: workingGutters.filter { liveWindowIds.contains($0.key) })
         prepared.windowIndentGuides = Dictionary(uniqueKeysWithValues: workingIndentGuides.filter { liveWindowIds.contains($0.key) })
         prepared.activeWindowId = workingGutters.values.first(where: \.isActive)?.windowId
-        for command in metadataCommands.commands + windowCommands.commands {
+        if baseFrameSeq == 0 {
+            prepared.gutterCol = 0
+            prepared.viewportTopLine = 0xFFFF_FFFF
+            prepared.splitBorderColor = 0
+            prepared.verticalSeparators = []
+            prepared.horizontalSeparators = []
+        }
+        for command in metadataCommands.commands + windowCommands.commands + focusCommands.commands {
             switch command {
             case .guiLineSpacing(let spacing):
                 prepared.lineSpacing = max(spacing, 1.0)
+            case .setCursorShape(let shape):
+                prepared.cursorShape = shape
+            case .setWindowBg(let r, let g, let b):
+                prepared.defaultBg = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             case .guiGutterSeparator(let col, let r, let g, let b):
                 let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
                 prepared.scrollIndicatorColor = rgb

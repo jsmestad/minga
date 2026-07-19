@@ -1082,11 +1082,12 @@ final class EditorNSView: MTKView {
     /// The track only captures clicks when the document can scroll, the viewport top is valid,
     /// and either the indicator is currently visible or the macOS setting forces it to stay visible.
     private func shouldCaptureScrollTrackClick(_ point: NSPoint) -> Bool {
-        EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width)
+        guard let metrics = visibleScrollTrackMetrics else { return false }
+        return EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width)
             && EditorScrollTrack.shouldCaptureTrackClick(
-                totalLines: dispatcher.frameState.totalLineCount,
-                visibleRows: UInt32(dispatcher.frameState.rows),
-                viewportTopLine: dispatcher.frameState.viewportTopLine,
+                totalLines: metrics.totalLines,
+                visibleRows: metrics.visibleRows,
+                viewportTopLine: metrics.viewportTopLine,
                 scrollIndicatorAlpha: coreTextRenderer.scrollIndicatorAlpha,
                 alwaysShowScrollbar: alwaysShowScrollbar
             )
@@ -1094,40 +1095,55 @@ final class EditorNSView: MTKView {
 
     /// Captures the pointer's offset inside the rendered thumb when the user starts dragging on the thumb.
     private func scrollTrackDragOffset(forY y: CGFloat) -> CGFloat? {
-        let fs = dispatcher.frameState
-        guard let thumb = EditorScrollTrack.thumb(
-            viewHeight: bounds.height,
-            totalLines: fs.totalLineCount,
-            visibleRows: UInt32(fs.rows),
-            viewportTopLine: fs.viewportTopLine,
-            resident: activeWindowIsResident
-        ) else { return nil }
+        guard let metrics = visibleScrollTrackMetrics,
+              let thumb = EditorScrollTrack.thumb(
+                  viewHeight: bounds.height,
+                  totalLines: metrics.totalLines,
+                  visibleRows: metrics.visibleRows,
+                  viewportTopLine: metrics.viewportTopLine,
+                  resident: metrics.resident
+              ) else { return nil }
         return EditorScrollTrack.dragOffset(forY: y, thumb: thumb)
     }
 
     /// Converts a Y coordinate in the scroll track to a target line number.
     private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
-        let fs = dispatcher.frameState
-        let visibleRows = UInt32(fs.rows)
-        let resident = activeWindowIsResident
+        guard let metrics = visibleScrollTrackMetrics else { return 0 }
 
         if let scrollIndicatorDragOffset {
             return EditorScrollTrack.line(
                 forDraggedY: y,
                 dragOffset: scrollIndicatorDragOffset,
                 viewHeight: bounds.height,
-                totalLines: fs.totalLineCount,
-                visibleRows: visibleRows,
-                resident: resident
+                totalLines: metrics.totalLines,
+                visibleRows: metrics.visibleRows,
+                resident: metrics.resident
             )
         }
 
         return EditorScrollTrack.line(
             forY: y,
             viewHeight: bounds.height,
-            totalLines: fs.totalLineCount,
+            totalLines: metrics.totalLines,
+            visibleRows: metrics.visibleRows,
+            resident: metrics.resident
+        )
+    }
+
+    private var visibleScrollTrackMetrics: (totalLines: UInt32, visibleRows: UInt32, viewportTopLine: UInt32, resident: Bool)? {
+        guard let snapshot = editorPresentationSnapshot,
+              let surface = snapshot.activeSurface else { return nil }
+        let viewport = surface.paneGeometry.viewport
+        let visibleRows = viewport.rows > 0 ? UInt32(viewport.rows) : UInt32(snapshot.frameState.rows)
+        let totalLines = viewport.totalLines > 0 ? viewport.totalLines : snapshot.frameState.totalLineCount
+        return (
+            totalLines: totalLines,
             visibleRows: visibleRows,
-            resident: resident
+            viewportTopLine: viewport.top,
+            resident: Self.thumbDragCanPresentLocally(
+                scrollPresentation: surface.content.scrollPresentation,
+                totalLines: totalLines
+            )
         )
     }
 
@@ -1137,10 +1153,7 @@ final class EditorNSView: MTKView {
     /// operates on the active pane (its metrics drive `scrollTrackYToLine`), so this is the
     /// window a thumb drag scrolls.
     private var activeWindowId: UInt16? {
-        editorPresentationSnapshot?.surfaces
-            .compactMap { surface in surface.gutter.gutter?.isActive == true ? surface.windowId : nil }
-            .sorted()
-            .first
+        editorPresentationSnapshot?.activeSurface?.windowId
     }
 
     private var activeWindowIsResident: Bool {
@@ -2032,6 +2045,10 @@ final class EditorNSView: MTKView {
             scrollWindowId: localScrollPresentation?.windowId,
             scrollOffset: localScrollPresentation?.offset ?? .zero
         )
+    }
+
+    func scrollTrackLineForTesting(y: CGFloat) -> UInt32 {
+        scrollTrackYToLine(y)
     }
 #endif
 

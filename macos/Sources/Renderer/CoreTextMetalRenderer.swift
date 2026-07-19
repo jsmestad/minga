@@ -293,12 +293,21 @@ final class CoreTextMetalRenderer {
     /// Last immutable content value whose staging counters were reported.
     private var residentMetricContentIdentities: [UInt16: ObjectIdentifier] = [:]
 
-    /// Metal buffer for line GPU instances (one instanced draw call).
+    /// Metal buffer most recently promoted for line GPU instances (one instanced draw call).
     private var instanceBuffer: MTLBuffer?
     private var maxInstanceSlots: Int = 0
 
-    /// Number of in-flight frames for triple-buffered quad uploads.
-    private static let quadBufferFrameCount = 3
+    /// Number of renderer-owned reusable slots, matching the maximum allowed native generations in flight.
+    private static let nativeFrameSlotCount = 3
+    private static let quadBufferFrameCount = nativeFrameSlotCount
+
+    /// Reusable line-instance buffers, one per native frame slot. Slots grow on demand and are reused after warm-up.
+    private var lineBufferSlots: [MTLBuffer?] = Array(repeating: nil, count: CoreTextMetalRenderer.nativeFrameSlotCount)
+    private var lineBufferSlotBytes: [Int] = Array(repeating: 0, count: CoreTextMetalRenderer.nativeFrameSlotCount)
+
+    /// Reusable offscreen render targets, one per native frame slot. Slots grow on size changes and are reused after warm-up.
+    private var renderTargetSlots: [MTLTexture?] = Array(repeating: nil, count: CoreTextMetalRenderer.nativeFrameSlotCount)
+    private var renderTargetSlotSizes: [(width: Int, height: Int)] = Array(repeating: (0, 0), count: CoreTextMetalRenderer.nativeFrameSlotCount)
 
     /// Triple-buffered quad instance buffers for bg/overlay/diagnostic passes.
     ///
@@ -308,6 +317,10 @@ final class CoreTextMetalRenderer {
     /// in-flight frame (rotated each frame) avoids CPU/GPU contention: the CPU
     /// writes the next frame's buffer while the GPU reads the previous one.
     private var quadBuffers: [MTLBuffer] = []
+
+    /// Reusable quad buffer sets, one set per native frame slot. Each slot owns the buffers needed for all in-flight-safe uploads for that generation.
+    private var quadBufferSlots: [[MTLBuffer]] = Array(repeating: [], count: CoreTextMetalRenderer.nativeFrameSlotCount)
+    private var quadBufferSlotBytes: [Int] = Array(repeating: 0, count: CoreTextMetalRenderer.nativeFrameSlotCount)
 
     /// Capacity (in quads) of each entry in `quadBuffers`. Grows on demand.
     private var quadBufferCapacity: Int = 0
@@ -345,6 +358,17 @@ final class CoreTextMetalRenderer {
                 presentationInputSeq: UInt32 = 0,
                 latencyRecorder: LatencyRecorder? = nil,
                 onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) {
+        guard presentationGeneration.next &- presentationGeneration.completed < UInt64(Self.nativeFrameSlotCount) else {
+            let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+            recordNativeFailure(NativePresentationFailure(
+                phase: .command, dimension: .submission,
+                frameSequence: presentationInputSeq, reason: .unavailable
+            ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+            latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
+            return
+        }
+        let nativeFrameSlot = Int(presentationGeneration.next % UInt64(Self.nativeFrameSlotCount))
+
         let frameState = snapshot.frameState
         let themeColors = snapshot.themeColors
         let surfaces = snapshot.surfaces
@@ -500,6 +524,7 @@ final class CoreTextMetalRenderer {
         let resolvedCursor = CoreTextMetalRenderer.resolveCursor(
             windowContents: windowContents,
             gutters: renderGutters,
+            activeWindowId: snapshot.activeSurface?.windowId,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -892,33 +917,43 @@ final class CoreTextMetalRenderer {
         }
         let candidateInstanceBuffer: MTLBuffer?
         if bufferDemand.lineBytes > 0 {
-            guard let buffer = factories.makeBuffer(device, bufferDemand.lineBytes, .storageModeShared) else {
-                recordNativeFailure(NativePresentationFailure(
-                    phase: .buffers, dimension: .lineBuffer,
-                    requested: bufferDemand.lineBytes,
-                    frameSequence: presentationInputSeq, reason: .allocation
-                ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                return
+            if lineBufferSlotBytes[nativeFrameSlot] < bufferDemand.lineBytes || lineBufferSlots[nativeFrameSlot] == nil {
+                guard let buffer = factories.makeBuffer(device, bufferDemand.lineBytes, .storageModeShared) else {
+                    recordNativeFailure(NativePresentationFailure(
+                        phase: .buffers, dimension: .lineBuffer,
+                        requested: bufferDemand.lineBytes,
+                        frameSequence: presentationInputSeq, reason: .allocation
+                    ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+                    return
+                }
+                lineBufferSlots[nativeFrameSlot] = buffer
+                lineBufferSlotBytes[nativeFrameSlot] = bufferDemand.lineBytes
             }
-            candidateInstanceBuffer = buffer
+            candidateInstanceBuffer = lineBufferSlots[nativeFrameSlot]
         } else {
             candidateInstanceBuffer = nil
         }
         var candidateQuadBuffers: [MTLBuffer] = []
         if bufferDemand.quadBytesPerBuffer > 0 {
-            let dimensions: [NativeRenderResourceDimension] = [.quadBuffer0, .quadBuffer1, .quadBuffer2]
-            for index in 0..<Self.quadBufferFrameCount {
-                guard let buffer = factories.makeBuffer(device, bufferDemand.quadBytesPerBuffer,
-                                                        .storageModeShared) else {
-                    recordNativeFailure(NativePresentationFailure(
-                        phase: .buffers, dimension: dimensions[index],
-                        requested: bufferDemand.quadBytesPerBuffer,
-                        frameSequence: presentationInputSeq, reason: .allocation
-                    ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                    return
+            if quadBufferSlotBytes[nativeFrameSlot] < bufferDemand.quadBytesPerBuffer || quadBufferSlots[nativeFrameSlot].count != Self.quadBufferFrameCount {
+                var allocatedBuffers: [MTLBuffer] = []
+                let dimensions: [NativeRenderResourceDimension] = [.quadBuffer0, .quadBuffer1, .quadBuffer2]
+                for index in 0..<Self.quadBufferFrameCount {
+                    guard let buffer = factories.makeBuffer(device, bufferDemand.quadBytesPerBuffer,
+                                                            .storageModeShared) else {
+                        recordNativeFailure(NativePresentationFailure(
+                            phase: .buffers, dimension: dimensions[index],
+                            requested: bufferDemand.quadBytesPerBuffer,
+                            frameSequence: presentationInputSeq, reason: .allocation
+                        ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+                        return
+                    }
+                    allocatedBuffers.append(buffer)
                 }
-                candidateQuadBuffers.append(buffer)
+                quadBufferSlots[nativeFrameSlot] = allocatedBuffers
+                quadBufferSlotBytes[nativeFrameSlot] = bufferDemand.quadBytesPerBuffer
             }
+            candidateQuadBuffers = quadBufferSlots[nativeFrameSlot]
         }
 
         // Render into a private candidate image. The drawable remains untouched
@@ -974,15 +1009,27 @@ final class CoreTextMetalRenderer {
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
             return
         }
-        let targetDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm_srgb,
-            width: targetDemand.width,
-            height: targetDemand.height,
-            mipmapped: false
-        )
-        targetDescriptor.usage = .renderTarget
-        targetDescriptor.storageMode = .private
-        guard let candidateRenderTarget = factories.makeTexture(device, targetDescriptor) else {
+        if renderTargetSlots[nativeFrameSlot] == nil || renderTargetSlotSizes[nativeFrameSlot].width != targetDemand.width || renderTargetSlotSizes[nativeFrameSlot].height != targetDemand.height {
+            let targetDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .bgra8Unorm_srgb,
+                width: targetDemand.width,
+                height: targetDemand.height,
+                mipmapped: false
+            )
+            targetDescriptor.usage = .renderTarget
+            targetDescriptor.storageMode = .private
+            guard let renderTarget = factories.makeTexture(device, targetDescriptor) else {
+                recordNativeFailure(NativePresentationFailure(
+                    phase: .drawable, dimension: .renderTarget,
+                    requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
+                    frameSequence: presentationInputSeq, reason: .allocation
+                ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+                return
+            }
+            renderTargetSlots[nativeFrameSlot] = renderTarget
+            renderTargetSlotSizes[nativeFrameSlot] = (targetDemand.width, targetDemand.height)
+        }
+        guard let candidateRenderTarget = renderTargetSlots[nativeFrameSlot] else {
             recordNativeFailure(NativePresentationFailure(
                 phase: .drawable, dimension: .renderTarget,
                 requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
@@ -2736,22 +2783,24 @@ final class CoreTextMetalRenderer {
     nonisolated static func resolveCursor(
         windowContents: [UInt16: GUIWindowContent],
         gutters: [UInt16: Wire.WindowGutter],
+        activeWindowId: UInt16? = nil,
         cellW: Float,
         displayCellH: Float,
         scale: Float,
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float
     ) -> RenderCursor? {
-        for windowId in semanticCursorWindowIds(gutters) {
-            guard let gutter = gutters[windowId], let content = windowContents[windowId] else { continue }
+        for windowId in semanticCursorWindowIds(gutters, windowContents: windowContents, activeWindowId: activeWindowId) {
+            guard let content = windowContents[windowId] else { continue }
             guard content.cursorVisible else { continue }
 
-            let textCol = content.paneGeometry?.textRect.col ?? UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
+            let gutter = gutters[windowId]
+            let textCol = content.paneGeometry?.textRect.col ?? gutter.map { UInt16(Int($0.contentCol) + Int($0.lineNumberWidth) + Int($0.signColWidth)) } ?? 0
             let contentColOffset = Float(textCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let hScrollPx = Float(content.scrollLeft) * cellW * scale
             let cursorCol = resolvedSemanticCursorCol(content)
             let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
-            let textRow = content.paneGeometry?.textRect.row ?? gutter.contentRow
+            let textRow = content.paneGeometry?.textRect.row ?? gutter?.contentRow ?? 0
             let y = viewportLocalRowY(
                 localRow: Int(content.cursorRow),
                 origin: Float(textRow) * displayCellH * scale,
@@ -2764,8 +2813,16 @@ final class CoreTextMetalRenderer {
     }
 
     /// Returns active semantic cursor owners in deterministic priority order. The agent prompt uses a reserved window id and must win over the retained chat content when both are active during focus transitions.
-    nonisolated static func semanticCursorWindowIds(_ gutters: [UInt16: Wire.WindowGutter]) -> [UInt16] {
-        gutters.values
+    nonisolated static func semanticCursorWindowIds(
+        _ gutters: [UInt16: Wire.WindowGutter],
+        windowContents: [UInt16: GUIWindowContent] = [:],
+        activeWindowId: UInt16? = nil
+    ) -> [UInt16] {
+        if let activeWindowId, windowContents[activeWindowId] != nil {
+            return [activeWindowId]
+        }
+
+        let activeGutterWindowIds = gutters.values
             .filter(\.isActive)
             .map(\.windowId)
             .sorted { lhs, rhs in
@@ -2774,6 +2831,10 @@ final class CoreTextMetalRenderer {
                 if leftPriority == rightPriority { return lhs < rhs }
                 return leftPriority < rightPriority
             }
+
+        if !activeGutterWindowIds.isEmpty { return activeGutterWindowIds }
+
+        return windowContents.keys.sorted()
     }
 
     nonisolated static func semanticCursorPriority(windowId: UInt16) -> Int {

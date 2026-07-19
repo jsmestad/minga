@@ -713,6 +713,71 @@ struct NativeRenderResourcesTests {
         #expect(renderer.activeResourceSnapshot() != before)
     }
 
+    @Test("warm native slots reuse draw buffers and render targets after three in-flight generations")
+    @MainActor func warmNativeSlotsReuseResources() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return }
+        let row = GUIVisualRow(rowType: .normal, rowId: 51, bufLine: 0,
+                               contentHash: 51, text: "warm", spans: [])
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0,
+            cursorShape: .block, rows: [row], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )
+        var frame = FrameState(cols: 4, rows: 4)
+        frame.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 4,
+            isActive: true, contentWidth: 4, cursorLine: 0,
+            lineNumberStyle: .none, lineNumberWidth: 0, signColWidth: 0,
+            entries: [.init(bufLine: 0, displayType: .normal, signType: .none)]
+        )
+
+        var bufferAllocations = 0
+        var textureAllocations = 0
+        var factories = nativeTestFactories()
+        factories.makeBuffer = { device, length, options in
+            bufferAllocations += 1
+            return device.makeBuffer(length: length, options: options)
+        }
+        factories.makeTexture = { device, descriptor in
+            textureAllocations += 1
+            return device.makeTexture(descriptor: descriptor)
+        }
+        factories.observeCompletion = { _, completion in
+            completion(true, Int(MTLCommandBufferStatus.completed.rawValue))
+        }
+        factories.present = { _ in }
+        guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+
+        for seq in 1...3 {
+            renderer.render(
+                frameState: frame, fontManager: fontManager,
+                windowContents: [1: content], drawableProvider: { NativeTestDrawable(texture: texture) },
+                viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+                presentationInputSeq: UInt32(seq)
+            )
+        }
+        let warmBufferAllocations = bufferAllocations
+        let warmTextureAllocations = textureAllocations
+
+        renderer.render(
+            frameState: frame, fontManager: fontManager,
+            windowContents: [1: content], drawableProvider: { NativeTestDrawable(texture: texture) },
+            viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+            presentationInputSeq: 4
+        )
+
+        #expect(bufferAllocations == warmBufferAllocations)
+        #expect(textureAllocations == warmTextureAllocations)
+        #expect(renderer.lastCompletedPresentationGeneration == 4)
+    }
+
     @Test("failed frame preserves a populated completed frame")
     @MainActor func failedFramePreservesPopulatedFrame() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }

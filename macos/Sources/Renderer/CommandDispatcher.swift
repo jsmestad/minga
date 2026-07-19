@@ -517,6 +517,7 @@ final class CommandDispatcher {
         }
         if clearsResync { guiState.resyncState.clear() }
         if let snapshot = transaction.editorSnapshot {
+            frameState = snapshot.frameState
             committedEditorSnapshot = snapshot
             if finalImpact.contains(.editor) {
                 pendingEditorPresentationFrame = committed

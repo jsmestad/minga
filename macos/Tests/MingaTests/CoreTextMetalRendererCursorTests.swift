@@ -55,6 +55,44 @@ struct CoreTextMetalRendererCursorTests {
         #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
     }
 
+    @Test("gutterless snapshot active window still resolves cursor")
+    func gutterlessSnapshotActiveWindowStillResolvesCursor() throws {
+        let content = try GUIWindowContent(
+            windowId: 4, fullRefresh: true,
+            cursorRow: 3, cursorCol: 8, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            paneGeometry: GUIPaneGeometry(
+                windowId: 4,
+                totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                textRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+                clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 80, totalLines: 24, visualRowOffset: 0, totalVisualRows: 24),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+                hitRegions: []
+            )
+        )
+
+        let cursor = CoreTextMetalRenderer.resolveCursor(
+            windowContents: [4: content],
+            gutters: [:],
+            activeWindowId: 4,
+            cellW: 7,
+            displayCellH: 13,
+            scale: 2,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        )
+
+        #expect(cursor?.windowId == 4)
+        #expect(cursor?.shape == .beam)
+        #expect(cursor?.x == Float(8 * 7 * 2))
+        #expect(cursor?.y == Float(3 * 13 * 2))
+    }
+
     @Test("smooth scroll offset applies only to its target window")
     func smoothScrollOffsetAppliesOnlyToTargetWindow() {
         let offset = SIMD2<Float>(0, 7)

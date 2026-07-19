@@ -90,6 +90,8 @@ struct CommittedEditorSnapshot {
     var activeSurface: PresentedWindowSurface? {
         if let activeWindowId, let surface = surface(for: activeWindowId) { return surface }
         if let active = surfaces.first(where: { $0.gutter.isActive }) { return active }
+        let cursorVisibleSurfaces = surfaces.filter(\.content.cursorVisible)
+        if cursorVisibleSurfaces.count == 1 { return cursorVisibleSurfaces[0] }
         return surfaces.first
     }
 

@@ -200,6 +200,86 @@ struct ContentViewTests {
         )
     }
 
+    private func nativeFoldInteractionContent(prefix: String, foldLine: UInt32, contentEpoch: UInt32, totalLines: UInt32 = 4) throws -> GUIWindowContent {
+        let rows = (0..<4).map { index in
+            GUIVisualRow(
+                rowType: .normal,
+                rowId: UInt64(contentEpoch) * 10 + UInt64(index),
+                bufLine: UInt32(index),
+                contentHash: UInt32(contentEpoch) * 10 + UInt32(index),
+                text: "\(prefix) row \(index)",
+                spans: []
+            )
+        }
+        let geometry = GUIPaneGeometry(
+            windowId: 1,
+            totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            textRect: GUICellRect(row: 0, col: 7, width: 73, height: 24),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 7, height: 24),
+            clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            viewport: GUIViewportSummary(
+                top: 0,
+                left: 0,
+                rows: 4,
+                cols: 73,
+                totalLines: totalLines,
+                visualRowOffset: 0,
+                totalVisualRows: 4
+            ),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 3),
+            hitRegions: [GUIHitRegion(kind: .gutter, rect: GUICellRect(row: 0, col: 0, width: 7, height: 24), windowId: 1)]
+        )
+        return try GUIWindowContent(
+            windowId: 1,
+            fullRefresh: true,
+            contentEpoch: contentEpoch,
+            cursorRow: 1,
+            cursorCol: 2,
+            cursorShape: .block,
+            rows: rows,
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: [],
+            paneGeometry: geometry,
+            scrollPresentation: GUIScrollPresentation(
+                windowId: 1,
+                resetRequired: false,
+                anchorTop: 0,
+                anchorLeft: 0,
+                anchorVisualRowOffset: 0,
+                visibleStartLine: 0,
+                visibleEndLine: 4,
+                overscanStartLine: 0,
+                overscanEndLine: totalLines,
+                contentEpoch: contentEpoch,
+                layoutGeneration: 1
+            )
+        )
+    }
+
+    private func nativeFoldGutter(foldLine: UInt32) -> Wire.WindowGutter {
+        Wire.WindowGutter(
+            windowId: 1,
+            contentRow: 0,
+            contentCol: 7,
+            contentHeight: 24,
+            isActive: true,
+            contentWidth: 73,
+            cursorLine: foldLine,
+            lineNumberStyle: .hybrid,
+            lineNumberWidth: 4,
+            signColWidth: 3,
+            entries: [
+                Wire.GutterEntry(bufLine: foldLine, displayType: .foldStart, signType: .none, foldEndLine: foldLine + 5),
+                Wire.GutterEntry(bufLine: foldLine + 1, displayType: .normal, signType: .none),
+                Wire.GutterEntry(bufLine: foldLine + 2, displayType: .normal, signType: .none),
+                Wire.GutterEntry(bufLine: foldLine + 3, displayType: .normal, signType: .none)
+            ]
+        )
+    }
+
     private func mouseEvent(
         type: NSEvent.EventType,
         locationInWindow: NSPoint,
@@ -378,6 +458,103 @@ struct ContentViewTests {
 
         #expect(legacyOnlyStrings.contains("fallback.ex"))
         #expect((try? legacyOnlyRoot.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) != nil)
+    }
+
+    @Test(
+        "mounted editor interactions use visible snapshot while newer commit is unpresented",
+        .timeLimit(.minutes(1))
+    )
+    func mountedEditorInteractionsUseVisibleSnapshotWhileNewerCommitIsUnpresented() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "visible", foldLine: 101, contentEpoch: 1, totalLines: 100)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 101)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let root = ContentView(
+            gui: gui,
+            encoder: { spy },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            EditorView(editorNSView: editorView)
+        }
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let hostingView = NSHostingView(rootView: root)
+        hostingView.frame = frame
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+
+        let visibleSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: visibleSnapshot,
+            localTransform: EditorLocalPresentationTransform(windowId: 1, offset: CGPoint(x: 0, y: editorView.cellHeight))
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "committed", foldLine: 201, contentEpoch: 2, totalLines: 300)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 201)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.frameSeq == 2)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+
+        #expect((editorView.accessibilityValue() as? String)?.contains("visible row 1") == true)
+        #expect((editorView.accessibilityValue() as? String)?.contains("committed row") == false)
+        #expect(editorView.accessibilityInsertionPointLineNumber() == 1)
+        let scrollY = editorView.bounds.height * 0.75
+        let visibleLine = EditorScrollTrack.line(
+            forY: scrollY,
+            viewHeight: editorView.bounds.height,
+            totalLines: 100,
+            visibleRows: 4,
+            resident: true
+        )
+        let committedLine = EditorScrollTrack.line(
+            forY: scrollY,
+            viewHeight: editorView.bounds.height,
+            totalLines: 300,
+            visibleRows: 24,
+            resident: true
+        )
+        #expect(visibleLine != committedLine)
+        #expect(editorView.scrollTrackLineForTesting(y: scrollY) == visibleLine)
+
+        let textPoint = NSPoint(x: editorView.cellWidth * 12.2, y: editorView.cellHeight * 0.5)
+        let textEvent = try #require(mouseEvent(
+            type: .leftMouseDown,
+            locationInWindow: editorView.convert(textPoint, to: nil),
+            windowNumber: window.windowNumber
+        ))
+        editorView.mouseDown(with: textEvent)
+        #expect(spy.mouseEventCalls.last?.row == 1)
+        #expect(spy.mouseEventCalls.last?.col == 11)
+
+        let foldPoint = NSPoint(x: editorView.cellWidth * 10.2, y: editorView.cellHeight * 0.5)
+        let foldEvent = try #require(mouseEvent(
+            type: .leftMouseDown,
+            locationInWindow: editorView.convert(foldPoint, to: nil),
+            windowNumber: window.windowNumber
+        ))
+        editorView.mouseDown(with: foldEvent)
+        #expect(spy.guiActions.last == .foldToggleAtLine(windowId: 1, bufferLine: 101))
     }
 
     @Test(

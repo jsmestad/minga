@@ -68,6 +68,34 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.viewportTopLine == 0xFFFF_FFFF)
     }
 
+    @Test("keyframe commit prunes stale split separator metadata")
+    @MainActor func keyframeCommitPrunesStaleSplitMetadata() throws {
+        let (dispatcher, _) = makeDispatcher()
+        dispatcher.applyForTesting(.guiSplitSeparators(
+            borderColor: 0xAABBCC,
+            verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
+            horizontals: [Wire.HorizontalSeparator(row: 12, col: 0, width: 80, filename: "stale.ex")]
+        ))
+        #expect(dispatcher.frameState.splitBorderColor == 0xAABBCC)
+        #expect(!dispatcher.frameState.verticalSeparators.isEmpty)
+        #expect(!dispatcher.frameState.horizontalSeparators.isEmpty)
+
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.frameState.splitBorderColor == 0)
+        #expect(snapshot.frameState.verticalSeparators.isEmpty)
+        #expect(snapshot.frameState.horizontalSeparators.isEmpty)
+        #expect(dispatcher.frameState.splitBorderColor == 0)
+        #expect(dispatcher.frameState.verticalSeparators.isEmpty)
+        #expect(dispatcher.frameState.horizontalSeparators.isEmpty)
+    }
+
     @Test("keyframe commit prunes stale window content, gutters, and indent guides")
     @MainActor func keyframeCommitPrunesStaleWindowState() throws {
         let (dispatcher, gui) = makeDispatcher()
@@ -1452,6 +1480,44 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.gutterColors.fg == expected)
     }
 
+    @Test("staged window background is frozen into the committed editor snapshot")
+    @MainActor func stagedWindowBackgroundFreezeIntoCommittedEditorSnapshot() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+
+        #expect(dispatcher.committedEditorSnapshot?.frameState.defaultBg == expected)
+        #expect(dispatcher.frameState.defaultBg == expected)
+    }
+
+    @Test("gutterless committed snapshot remains active for cursor and resident scroll ownership")
+    @MainActor func gutterlessCommittedSnapshotRemainsActive() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let inactiveGeometry = editorGeometry(windowId: 1, lineNumberWidth: 0, signColWidth: 0)
+        let activeGeometry = editorGeometry(windowId: 2, lineNumberWidth: 0, signColWidth: 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: inactiveGeometry, cursorVisible: false)))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 2, geometry: activeGeometry, cursorVisible: true)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.activeSurface?.windowId == 2)
+        #expect(snapshot.windowGutters.isEmpty)
+        guard case .none = try #require(snapshot.activeSurface).gutter else {
+            Issue.record("expected gutterless active surface")
+            return
+        }
+    }
+
     @Test("keyframe with content but no guiTheme returns a typed rejection")
     @MainActor func keyframeWithoutThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
@@ -1531,9 +1597,10 @@ fileprivate func editorGeometry(windowId: UInt16 = 1, lineNumberWidth: UInt16 = 
     )
 }
 
-fileprivate func editorContent(windowId: UInt16 = 1, geometry: GUIPaneGeometry? = editorGeometry()) throws -> GUIWindowContent {
+fileprivate func editorContent(windowId: UInt16 = 1, geometry: GUIPaneGeometry? = editorGeometry(), cursorVisible: Bool = true) throws -> GUIWindowContent {
     try GUIWindowContent(
         windowId: windowId, fullRefresh: true,
+        cursorVisible: cursorVisible,
         cursorRow: 0, cursorCol: 0, cursorShape: .block,
         rows: [], selection: nil,
         searchMatches: [], diagnosticUnderlines: [],
