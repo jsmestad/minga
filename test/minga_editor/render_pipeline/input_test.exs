@@ -1,6 +1,14 @@
 defmodule MingaEditor.RenderPipeline.InputTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Test.EffectProbe
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Policy
+  alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Renderer.BufferChanges
+  alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.RenderPipeline.Input
@@ -69,6 +77,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         :session,
         :last_cursor_line,
         :buffer_add_context,
+        :effect_scheduler,
         :shell_runtime
       ]
 
@@ -89,6 +98,27 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       # %{workspace: %{editing: editing}} = state
       assert %{workspace: %{editing: editing}} = input
       assert editing == state.workspace.editing
+    end
+
+    test "snapshots Git syncing as data without carrying the scheduler process", %{state: state} do
+      input = Input.from_editor_state(state)
+      refute input.git_syncing
+      idle_scheduler = start_scheduler()
+      idle_input = Input.from_editor_state(%{state | effect_scheduler: idle_scheduler})
+      refute idle_input.git_syncing
+
+      %{scheduler: scheduler, worker: worker, request: request} = start_git_syncing_activity()
+      active_state = %{state | effect_scheduler: scheduler}
+      active_input = Input.from_editor_state(active_state)
+      assert active_input.git_syncing
+
+      send(worker, {:release_effect, :git_syncing})
+      assert_receive {:effect_result, ^scheduler, %Outcome{request: %{id: request_id}} = outcome}
+      assert request_id == request.id
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+      assert :ok = EffectScheduler.finalize(scheduler, outcome)
+
+      refute Input.from_editor_state(active_state).git_syncing
     end
 
     test "with_font_registry/2 attaches renderer-owned registry", %{state: state} do
@@ -177,6 +207,27 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       refute Map.has_key?(intent.frame, :caches)
       refute Map.has_key?(intent.frame, :font_registry)
+    end
+
+    test "carries Git syncing data through intent materialization and emit context", %{
+      state: state
+    } do
+      %{scheduler: scheduler, worker: worker} = start_git_syncing_activity()
+      state = %{state | effect_scheduler: scheduler}
+
+      intent = Intent.from_editor_state(state, 7)
+      assert intent.frame.git_syncing
+      refute Map.has_key?(Map.from_struct(intent.frame), :effect_scheduler)
+
+      renderer_state =
+        RendererState.new(editor_pid: nil, pipeline: &MingaEditor.RenderPipeline.run/1)
+
+      {_renderer_state, materialized} = BufferChanges.prepare(renderer_state, intent)
+      assert materialized.git_syncing
+      refute Map.has_key?(Map.from_struct(materialized), :effect_scheduler)
+      assert Context.from_editor_state(materialized).git_syncing
+
+      send(worker, {:release_effect, :git_syncing})
     end
   end
 
@@ -380,6 +431,34 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       assert Input.sync_active_window_cursor(input) == input
     end
+  end
+
+  defp start_scheduler do
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, name: nil}, id: make_ref()))
+
+    scheduler =
+      start_supervised!(
+        Supervisor.child_spec({EffectScheduler, task_supervisor: task_supervisor}, id: make_ref())
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+    scheduler
+  end
+
+  defp start_git_syncing_activity do
+    scheduler = start_scheduler()
+
+    label = :git_syncing
+    effect = %EffectProbe{test_pid: self(), label: label, payloads: [label], action: :wait}
+
+    request =
+      Request.new(effect, :git_syncing_resource, Policy.fifo(0), activity: :git_syncing)
+
+    assert {:ok, _request_id, :running} = EffectScheduler.schedule(scheduler, request)
+    assert_receive {:effect_started, :git_syncing, worker, [:git_syncing]}
+
+    %{scheduler: scheduler, worker: worker, request: request}
   end
 
   defp integrate_receipt(state, receipt) do

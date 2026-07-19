@@ -18,7 +18,6 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
-  alias MingaEditor.EffectScheduler
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.UI.FontRegistry
@@ -151,7 +150,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
         Map.get(state, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table()),
       title: title,
       status_bar_data: state.status_bar_data,
-      git_syncing: git_effect_active?(state),
+      git_syncing: state.git_syncing,
       git_toast: Map.get(shell_state, :git_toast),
       search: state.workspace.search,
       last_input_seq: Map.get(state, :last_input_seq, 0),
@@ -178,11 +177,6 @@ defmodule MingaEditor.Frontend.Emit.Context do
       # means a navigable symbol is under the pointer (#2630).
       link_cursor: gui? and state.workspace.cmd_hover_link != nil
     }
-  end
-
-  @spec git_effect_active?(map()) :: boolean()
-  defp git_effect_active?(state) do
-    EffectScheduler.active_activity?(Map.get(state, :effect_scheduler), :git_syncing)
   end
 
   @spec gui_only(boolean(), value) :: value | nil when value: var

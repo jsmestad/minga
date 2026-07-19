@@ -23,6 +23,9 @@ defmodule MingaEditor.RenderPipeline.Input do
   `message_store`, `notifications`, `face_override_registries`, `highlighting`,
   `editing_model`, `backend`, `layout`, `focus_tree`
 
+  `git_syncing` is computed once from `state.effect_scheduler` through
+  `EffectScheduler.active_activity?/2`; the scheduler process itself is excluded.
+
   `font_registry` is renderer-owned state. Editor-created snapshots carry a
   fresh fallback registry; `Renderer.Server` injects its long-lived registry
   before it runs the pipeline.
@@ -44,6 +47,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.State.Buffers
@@ -86,11 +90,11 @@ defmodule MingaEditor.RenderPipeline.Input do
     :lsp,
     :parser_status,
     :diff_views,
-    :effect_scheduler,
     :status_bar_data,
     :highlighting,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
+    git_syncing: false,
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
     terminal_viewport: Viewport.new(24, 80),
     # Render-pipeline caches (replaces process-dictionary entries)
@@ -163,7 +167,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           lsp: LSPState.t(),
           parser_status: atom(),
           diff_views: %{pid() => MingaEditor.State.Git.diff_view_info()},
-          effect_scheduler: GenServer.server() | nil,
+          git_syncing: boolean(),
           status_bar_data: StatusBarData.t() | nil,
           highlighting: Highlighting.t(),
           caches: Caches.t(),
@@ -204,7 +208,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       lsp: state.lsp,
       parser_status: state.parser.parser_status,
       diff_views: state.git.diff_views,
-      effect_scheduler: state.effect_scheduler,
+      git_syncing: EffectScheduler.active_activity?(state.effect_scheduler, :git_syncing),
       status_bar_data: safe_status_bar_data(state),
       highlighting: state.parser.highlighting,
       terminal_viewport: state.frontend.terminal_viewport,
