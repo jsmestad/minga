@@ -2249,8 +2249,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness `PASS`; Swift craftsmanship `PASS`; native UI/accessibility design `PASS`; Ponytail `Lean already. Ship.`
 - **Broad validation:** `mix swift.build` exited `0`, completed protocol generation, and printed `xcodebuild not found; skipping Swift build`; local Linux therefore did not execute Swift tests or the xcodebuild build smoke, and the macOS CI Swift job remains mandatory before merge. After `mix compile.minga_zig`, `mix test --seed 69814 --max-cases 4` passed 10,448 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded. The first branch run exposed an unrelated existing monitor-reason race in `Minga.Extension.LifecycleContractTest` (`:noproc` observed where the assertion expected `:killed`); the identical current-main SHA and seed passed, and the diagnosed branch rerun passed. `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `git diff --check` passed.
 - **Final reviewer:** `PASS`; visible/accessibility contract, state ownership, true/false regressions, locked scope, line budgets, validation evidence, and merge safety accepted with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3034
+- **Implementation commit SHA:** `b0e5ee25c`
 - **Merge evidence:** Pending.
 - **Completion date:** Pending merge.
 
