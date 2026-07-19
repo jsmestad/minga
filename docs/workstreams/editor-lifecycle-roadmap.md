@@ -1930,8 +1930,8 @@ New split and float popup windows initialize their viewport metadata from `state
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/3011
+- **Commit SHA:** `90ba545eb`
 - **Merge SHA:** Pending
 - **Focused tests:** 30 popup lifecycle tests passed.
 - **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed; full non-heavy result: 58 doctests, 98 properties, 9,915 tests, 0 failures, 1 skipped, 578 excluded.
