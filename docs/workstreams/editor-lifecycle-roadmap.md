@@ -2658,8 +2658,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The first `mix test.llm --max-cases 4` run exposed an unrelated `MingaAgent.Tools.SubagentTest` provider-context failure; the exact test passed alone, repeated full-suite runs with the same seed reproduced the suite-order failure, and a fresh-seed `mix test.llm --seed 810531 --max-cases 4` passed 9,844 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence and confirmed the exact oracle deletion, direct complete `0x9C` wire assertion, strict writer bounds, retained owners/frontends, roadmap truth, budgets, and zero concepts. Elixir craftsmanship returned `PASS/Lean`. Ponytail returned `Lean already. Ship.` No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact extension-overlay oracle deletion, direct complete `0x9C` len16 coverage, retained builder/adapter/schema/generated/Swift/Go/cache/bounds contracts, truthful validation including the isolated suite-order failure, budgets, zero concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3060
+- **Implementation commit SHA:** `83f896f52`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
