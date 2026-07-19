@@ -144,7 +144,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_file_tree Opcodes.gui_file_tree()
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
-  @op_gui_extension_overlay Opcodes.gui_extension_overlay()
   @op_gui_extension_panel Opcodes.gui_extension_panel()
   @op_gui_extension_runtime Opcodes.gui_extension_runtime()
 
@@ -545,58 +544,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     {Bitwise.bsr(Bitwise.band(color, 0xFF0000), 16),
      Bitwise.bsr(Bitwise.band(color, 0x00FF00), 8), Bitwise.band(color, 0x0000FF)}
   end
-
-  # ── Extension Overlays (forward-compatible, 0x9C) ──
-
-  @typedoc "Extension overlay entry for encoding."
-  @type extension_overlay_entry :: %{
-          extension: String.t(),
-          overlay_id: String.t(),
-          window_id: non_neg_integer(),
-          row: non_neg_integer(),
-          col: non_neg_integer(),
-          shape: non_neg_integer(),
-          fg: non_neg_integer(),
-          opacity: non_neg_integer(),
-          content: String.t()
-        }
-
-  @doc """
-  Encodes a gui_extension_overlay command (0x9C).
-
-  Sends all active extension overlays for the current frame.
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-
-  Payload: count(1) + per overlay: extension_name_len(1) + extension_name(utf8) +
-  overlay_id_len(1) + overlay_id(utf8) + window_id(2) + row(2) + col(2) +
-  shape(1) + fg_r(1) + fg_g(1) + fg_b(1) + opacity(1) + content_len(2) + content(utf8).
-  """
-  @spec encode_gui_extension_overlays([extension_overlay_entry()]) :: binary()
-  def encode_gui_extension_overlays(entries) when is_list(entries) do
-    overlay_binaries =
-      Enum.map(entries, fn entry ->
-        ext_name = to_string(entry.extension)
-        oid = to_string(entry.overlay_id)
-        content = entry.content
-        r = entry.fg >>> 16 &&& 0xFF
-        g = entry.fg >>> 8 &&& 0xFF
-        b = entry.fg &&& 0xFF
-
-        <<byte_size(ext_name)::8, ext_name::binary, byte_size(oid)::8, oid::binary,
-          entry.window_id::16, entry.row::16, entry.col::16, entry.shape::8, r::8, g::8, b::8,
-          entry.opacity::8, byte_size(content)::16, content::binary>>
-      end)
-
-    payload = IO.iodata_to_binary([<<Enum.count(entries)::8>> | overlay_binaries])
-    <<@op_gui_extension_overlay, byte_size(payload)::16, payload::binary>>
-  end
-
-  @spec overlay_shape_byte(atom()) :: non_neg_integer()
-  def overlay_shape_byte(:cursor), do: 0
-  def overlay_shape_byte(:cursor_with_label), do: 1
-  def overlay_shape_byte(:label), do: 2
-  def overlay_shape_byte(:indicator), do: 3
-  def overlay_shape_byte(_), do: 3
 
   # ── Extension Panels (forward-compatible, 0x9D) ──
 
