@@ -5,22 +5,26 @@ defmodule Minga.RenderModel.UI.AgentChat do
   Describes the agent conversation view: visibility, runtime status, the active
   model name and thinking level, the prompt buffer plus its cell-grid metadata
   (cursor, vim mode, line counts), an optional prompt completion popup, an
-  optional help overlay, and the list of
-  conversation messages with their stable BEAM-assigned IDs.
-
+  optional help overlay, and the resident conversation messages with their stable
+  BEAM-assigned IDs.
   This is pure data with domain fields and **core types only**. It does not
   reference any product module; the editor builder pre-resolves every agent
   struct into the core views defined here before putting them on the model. The
-  GUI adapter
-  (`Minga.Frontend.Adapter.GUI.AgentChatEncoder`) owns the wire encoding. A
-  hidden panel is just `%AgentChat{visible?: false}`; the encoder derives a
-  change-detection fingerprint with `:erlang.phash2/1`, so no sentinel is needed.
+  GUI adapters split the model across two commands:
+  `Minga.Frontend.Adapter.GUI.AgentChatEncoder` owns `gui_agent_chat` (`0x78`)
+  chrome encoding and chrome fingerprinting,
+  `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder` owns
+  `gui_agent_transcript` (`0x86`) resident framing, and
+  `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec` owns each transcript
+  message body. A hidden panel is just `%AgentChat{visible?: false}`; the chrome
+  encoder derives its change-detection fingerprint with `:erlang.phash2/1`, so
+  no sentinel is needed.
 
   ## Messages
 
-  `messages` is a list of `{id, body}` tuples where `id` is a stable uint32 the
-  GUI uses as a persistent identity. `body` is one of the resolved core message
-  forms produced by the editor builder:
+  `resident_messages` is a list of `{id, body}` tuples where `id` is a stable
+  uint32 the GUI uses as a persistent identity. `body` is one of the resolved
+  core message forms produced by the editor builder:
 
     * `{:user, text}` / `{:user, text, attachments}`
     * `{:assistant, text}`
@@ -38,16 +42,14 @@ defmodule Minga.RenderModel.UI.AgentChat do
 
   ## Resident transcript
 
-  `messages` is the windowed tail the legacy `gui_agent_chat` (0x78) section
-  carries. `resident_messages` is the resident transcript (same `message()`
-  shape) that rides the dedicated `gui_agent_transcript` (0x86) stream so the
-  frontend can scroll from local data (#2654). The editor builder applies
+  `resident_messages` rides the dedicated `gui_agent_transcript` (0x86) stream
+  so the frontend can scroll from local data (#2654). The editor builder applies
   `:agent_transcript_resident_max_bytes` as a contiguous most-recent suffix and
   sets `resident_truncated?` when it omits older complete messages. The adapter
   serializes that already-selected model exactly. `transcript_epoch` is an opaque change token that flips on structural change
   (session switch, display-start/compaction), driving the resident stream's
-  full-replace-vs-append decision. Both default empty/zero so surfaces that do
-  not populate them keep the historical single-transport behaviour.
+  full-replace-vs-append decision. Both default empty/zero so hidden or
+  non-transcript surfaces produce no resident frame.
   """
 
   alias __MODULE__.ApprovalView
@@ -100,7 +102,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
           help_visible?: boolean(),
           help_groups: [{String.t(), [{String.t(), String.t()}]}],
           input_focused: boolean(),
-          messages: [message()],
           resident_messages: [message()],
           resident_truncated?: boolean(),
           transcript_epoch: non_neg_integer()
@@ -120,7 +121,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
             help_visible?: false,
             help_groups: [],
             input_focused: false,
-            messages: [],
             resident_messages: [],
             resident_truncated?: false,
             transcript_epoch: 0

@@ -57,14 +57,14 @@ enum RenderCommand: Sendable {
     case guiStatusBar(StatusBarUpdate)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
     /// `trimFront` messages are first evicted from the store front, then over the remainder
     /// `baseCount` unchanged-leading messages are kept and the `count` entries are upserted;
     /// `baseCount` is the content-hash prefix of the remainder, NOT the client's resident count.
     /// full_replace carries `trimFront`/`baseCount` as 0. Each message carries its stable id in
-    /// `beamId`; bodies use the shared 0x78 codec.
+    /// `beamId`; bodies use the shared agent-chat message body codec.
     case guiAgentTranscript(mode: UInt8, epoch: UInt32, truncated: Bool, trimFront: UInt32, baseCount: UInt32, messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
@@ -1382,7 +1382,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let chatSectionCount = Int(data[rest])
         if chatSectionCount == 0 {
-            return (.guiAgentChat(visible: false, status: 0, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
+            return (.guiAgentChat(visible: false, status: 0, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: []), 2)
         }
         var chatPos = rest + 1
         var chatVisible = false
@@ -1400,7 +1400,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pendingToolSummary: String = ""
         var helpVisible = false
         var helpGroups: [Wire.HelpGroup] = []
-        var messages: [Wire.ChatMessage] = []
 
         for _ in 0..<chatSectionCount {
             guard data.count >= chatPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1509,35 +1508,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     }
                 }
 
-            case 0x06: // Messages: framed v1 payload, with legacy unframed fallback
-                guard csLen >= 2 else { break }
-                let messagesEnd = csStart + csLen
-                if data[csStart] == 0xFF {
-                    guard csLen >= 4 else { throw ProtocolDecodeError.malformed }
-                    let version = data[csStart + 1]
-                    guard version == 1 else { throw ProtocolDecodeError.malformed }
-                    let msgCount = Int(try readU16(data, csStart + 2))
-                    let decodedMessages = try decodeFramedChatMessages(
-                        data: data,
-                        start: csStart + 4,
-                        end: messagesEnd,
-                        count: msgCount
-                    )
-                    try FrameDecodeAccounting.reserve(.arrayEntries, decodedMessages.count)
-                    messages.append(contentsOf: decodedMessages)
-                } else {
-                    let msgCount = Int(try readU16(data, csStart))
-                    let messagesStart = csStart + 2
-                    let (decodedMessages, decodedEnd) = try decodeLegacyChatMessages(
-                        data: data,
-                        start: messagesStart,
-                        end: messagesEnd,
-                        remaining: msgCount
-                    )
-                    try FrameDecodeAccounting.reserve(.arrayEntries, decodedMessages.count)
-                    messages.append(contentsOf: decodedMessages)
-                    guard decodedEnd == messagesEnd else { throw ProtocolDecodeError.malformed }
-                }
 
             default: break
             }
@@ -1545,14 +1515,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups), chatPos - offset)
 
     case OP_GUI_AGENT_TRANSCRIPT:
         // len32 framing: opcode(1) + payload_len(4) + payload (GUI_PROTOCOL.md 0x86).
         //   header: version(1)=1 + mode(1) + epoch(4) + truncated(1)
         //   full_replace (mode 0): count(4)
         //   append (mode 1): trim_front(4) + base_count(4) + count(4)
-        //   both: count * [ id(4), body_len(4), body ]. Body is the shared 0x78 codec.
+        //   both: count * [ id(4), body_len(4), body ]. Body uses the shared agent-chat message body codec.
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let transcriptPayloadLen = Int(try readU32(data, rest))
         let transcriptPayloadStart = rest + 4
@@ -3637,7 +3607,7 @@ private func decodeToolPreview(data: Data, start: Int, end: Int) throws -> Decod
         guard end >= pos + 2 else { throw ProtocolDecodeError.malformed }
         let lineLen = Int(try readU16(data, pos))
         guard end >= pos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
-        let line = try decodeUTF8(data[(pos + 2)..<(pos + 2 + lineLen)]) ?? ""
+        let line = try readRequiredUTF8(data[(pos + 2)..<(pos + 2 + lineLen)])
         try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         previewLines.append(line)
         pos += 2 + lineLen
@@ -3645,59 +3615,6 @@ private func decodeToolPreview(data: Data, start: Int, end: Int) throws -> Decod
     return DecodedToolPreview(kind: previewKind, lines: previewLines, nextOffset: pos)
 }
 
-private func decodeFramedChatMessages(data: Data, start: Int, end: Int, count: Int) throws -> [Wire.ChatMessage] {
-    var messages: [Wire.ChatMessage] = []
-    try FrameDecodeAccounting.reserve(.arrayEntries, count)
-    messages.reserveCapacity(count)
-    var pos = start
-
-    for _ in 0..<count {
-        guard pos + 4 <= end else { throw ProtocolDecodeError.malformed }
-        let messageLen = Int(try readU32(data, pos))
-        let messageStart = pos + 4
-        let messageEnd = messageStart + messageLen
-        guard messageEnd <= end else { throw ProtocolDecodeError.malformed }
-
-        let candidates = try decodeChatMessageCandidates(data: data, start: messageStart, end: messageEnd)
-        guard let candidate = candidates.first(where: { $0.nextOffset == messageEnd }) else {
-            throw ProtocolDecodeError.malformed
-        }
-
-        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-        messages.append(candidate.message)
-        pos = messageEnd
-    }
-
-    guard pos == end else { throw ProtocolDecodeError.malformed }
-    return messages
-}
-
-private func decodeLegacyChatMessages(data: Data, start: Int, end: Int, remaining: Int) throws -> ([Wire.ChatMessage], Int) {
-    if remaining == 0 {
-        guard start == end else { throw ProtocolDecodeError.malformed }
-        return ([], start)
-    }
-
-    let candidates = try decodeChatMessageCandidates(data: data, start: start, end: end)
-
-    for candidate in candidates {
-        if let (rest, decodedEnd) = try? FrameDecodeAccounting.withCheckpoint({
-            try decodeLegacyChatMessages(
-                data: data,
-                start: candidate.nextOffset,
-                end: end,
-                remaining: remaining - 1
-            )
-        }) {
-            let (combinedCount, overflow) = rest.count.addingReportingOverflow(1)
-            guard !overflow else { throw FrameResourceError.arithmeticOverflow }
-            try FrameDecodeAccounting.reserve(.arrayEntries, combinedCount)
-            return ([candidate.message] + rest, decodedEnd)
-        }
-    }
-
-    throw ProtocolDecodeError.malformed
-}
 
 private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> ([[Wire.StyledTextRun]], Int) {
     guard end >= start + 2 else { throw ProtocolDecodeError.malformed }
@@ -3717,7 +3634,7 @@ private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> 
             guard end >= pos + 9 else { throw ProtocolDecodeError.malformed }
             let textLen = Int(try readU16(data, pos))
             guard end >= pos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
-            let runText = try decodeUTF8(data[(pos + 2)..<(pos + 2 + textLen)]) ?? ""
+            let runText = try readRequiredUTF8(data[(pos + 2)..<(pos + 2 + textLen)])
             let fgOff = pos + 2 + textLen
             let flags = data[fgOff + 6]
             var nextRunPos = fgOff + 7
@@ -3726,7 +3643,7 @@ private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> 
                 guard end >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
                 let urlLen = Int(try readU16(data, nextRunPos))
                 guard end >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
-                guard let decodedLinkURL = try decodeUTF8(data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)]) else { throw ProtocolDecodeError.malformed }
+                let decodedLinkURL = try readRequiredUTF8(data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)])
                 linkURL = decodedLinkURL
                 nextRunPos += 2 + urlLen
             }
@@ -3813,24 +3730,15 @@ private func readRequiredString16(data: Data, pos: inout Int, end: Int) throws -
     guard end >= pos + 2 else { throw ProtocolDecodeError.malformed }
     let length = Int(try readU16(data, pos))
     guard end >= pos + 2 + length else { throw ProtocolDecodeError.malformed }
-    let value = try decodeUTF8(data[(pos + 2)..<(pos + 2 + length)]) ?? ""
+    let value = try readRequiredUTF8(data[(pos + 2)..<(pos + 2 + length)])
     pos += 2 + length
     return value
 }
 
-private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
-    guard start + 4 <= end else { throw ProtocolDecodeError.malformed }
-
-    let beamId = try readU32(data, start)
-    return try decodeChatMessageBodyCandidates(data: data, beamId: beamId, bodyStart: start + 4, end: end)
-}
 
 /// Decodes a single chat-message body (no leading id) with an externally supplied
-/// `beamId`. The 0x78 `gui_agent_chat` messages section frames each message as
-/// `<<id::32, body>>`, so `decodeChatMessageCandidates` reads the id then calls
-/// this. The 0x86 `gui_agent_transcript` stream frames each entry as
-/// `<<id::32, body_len::32, body>>`, carrying the id and length separately, so it
-/// calls this directly with the pre-read id. Both share the exact same body codec.
+/// `beamId`. The 0x86 `gui_agent_transcript` stream frames each entry as
+/// `<<id::32, body_len::32, body>>`, carrying the id and length separately.
 private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodyStart: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
     guard bodyStart + 1 <= end else { throw ProtocolDecodeError.malformed }
 
@@ -3842,14 +3750,14 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         guard end >= pos + 5 else { throw ProtocolDecodeError.malformed }
         let tLen = Int(try readU32(data, pos + 1))
         guard end >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
-        let t = try decodeUTF8(data[(pos + 5)..<(pos + 5 + tLen)]) ?? ""
+        let t = try readRequiredUTF8(data[(pos + 5)..<(pos + 5 + tLen)])
         return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .user(text: t)), nextOffset: pos + 5 + tLen)]
 
     case 0x02: // assistant
         guard end >= pos + 5 else { throw ProtocolDecodeError.malformed }
         let tLen = Int(try readU32(data, pos + 1))
         guard end >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
-        let t = try decodeUTF8(data[(pos + 5)..<(pos + 5 + tLen)]) ?? ""
+        let t = try readRequiredUTF8(data[(pos + 5)..<(pos + 5 + tLen)])
         return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .assistant(text: t)), nextOffset: pos + 5 + tLen)]
 
     case 0x03: // thinking
@@ -3857,7 +3765,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let collapsed = data[pos + 1] != 0
         let tLen = Int(try readU32(data, pos + 2))
         guard end >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
-        let t = try decodeUTF8(data[(pos + 6)..<(pos + 6 + tLen)]) ?? ""
+        let t = try readRequiredUTF8(data[(pos + 6)..<(pos + 6 + tLen)])
         return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .thinking(text: t, collapsed: collapsed)), nextOffset: pos + 6 + tLen)]
 
     case 0x04: // tool_call
@@ -3866,16 +3774,15 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let isError = data[pos + 2] != 0
         let tcCollapsed = data[pos + 3] != 0
         let duration = try readU32(data, pos + 4)
-        let nameLen = Int(try readU16(data, pos + 8))
-        guard end >= pos + 10 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-        let name = try decodeUTF8(data[(pos + 10)..<(pos + 10 + nameLen)]) ?? ""
-        let summaryLen = Int(try readU16(data, pos + 10 + nameLen))
-        guard end >= pos + 12 + nameLen + summaryLen + 4 else { throw ProtocolDecodeError.malformed }
-        let summary = try decodeUTF8(data[(pos + 12 + nameLen)..<(pos + 12 + nameLen + summaryLen)]) ?? ""
-        let resultLen = Int(try readU32(data, pos + 12 + nameLen + summaryLen))
-        let baseOffset = pos + 16 + nameLen + summaryLen + resultLen
+        var toolPos = pos + 8
+        let name = try readRequiredString16(data: data, pos: &toolPos, end: end)
+        let summary = try readRequiredString16(data: data, pos: &toolPos, end: end)
+        guard end >= toolPos + 4 else { throw ProtocolDecodeError.malformed }
+        let resultLen = Int(try readU32(data, toolPos))
+        let resultStart = toolPos + 4
+        let baseOffset = resultStart + resultLen
         guard end >= baseOffset else { throw ProtocolDecodeError.malformed }
-        let result = try decodeUTF8(data[(pos + 16 + nameLen + summaryLen)..<(pos + 16 + nameLen + summaryLen + resultLen)]) ?? ""
+        let result = try readRequiredUTF8(data[resultStart..<baseOffset])
         var candidates: [DecodedChatMessageCandidate] = []
         if end > baseOffset {
             let autoApprovedScope = data[baseOffset]
@@ -3903,7 +3810,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let isError = data[pos + 1] != 0
         let tLen = Int(try readU32(data, pos + 2))
         guard end >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
-        let t = try decodeUTF8(data[(pos + 6)..<(pos + 6 + tLen)]) ?? ""
+        let t = try readRequiredUTF8(data[(pos + 6)..<(pos + 6 + tLen)])
         return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .system(text: t, isError: isError)), nextOffset: pos + 6 + tLen)]
 
     case 0x06: // usage
@@ -3933,7 +3840,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                 guard end >= rPos + 9 else { throw ProtocolDecodeError.malformed }
                 let textLen = Int(try readU16(data, rPos))
                 guard end >= rPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
-                let runText = try decodeUTF8(data[(rPos + 2)..<(rPos + 2 + textLen)]) ?? ""
+                let runText = try readRequiredUTF8(data[(rPos + 2)..<(rPos + 2 + textLen)])
                 let fgOff = rPos + 2 + textLen
                 let fgR = data[fgOff]
                 let fgG = data[fgOff + 1]
@@ -3948,7 +3855,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                     guard end >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
                     let urlLen = Int(try readU16(data, nextRunPos))
                     guard end >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
-                    guard let decodedLinkURL = try decodeUTF8(data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)]) else { throw ProtocolDecodeError.malformed }
+                    let decodedLinkURL = try readRequiredUTF8(data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)])
                     linkURL = decodedLinkURL
                     nextRunPos += 2 + urlLen
                 }
@@ -3976,17 +3883,15 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let stcIsError = data[pos + 2] != 0
         let stcCollapsed = data[pos + 3] != 0
         let stcDuration = try readU32(data, pos + 4)
-        let stcNameLen = Int(try readU16(data, pos + 8))
-        guard end >= pos + 10 + stcNameLen + 2 else { throw ProtocolDecodeError.malformed }
-        let stcName = try decodeUTF8(data[(pos + 10)..<(pos + 10 + stcNameLen)]) ?? ""
-        let stcSummaryLen = Int(try readU16(data, pos + 10 + stcNameLen))
-        guard end >= pos + 12 + stcNameLen + stcSummaryLen + 2 else { throw ProtocolDecodeError.malformed }
-        let stcSummary = try decodeUTF8(data[(pos + 12 + stcNameLen)..<(pos + 12 + stcNameLen + stcSummaryLen)]) ?? ""
-        let stcLineCount = Int(try readU16(data, pos + 12 + stcNameLen + stcSummaryLen))
+        var stcNamePos = pos + 8
+        let stcName = try readRequiredString16(data: data, pos: &stcNamePos, end: end)
+        let stcSummary = try readRequiredString16(data: data, pos: &stcNamePos, end: end)
+        guard end >= stcNamePos + 2 else { throw ProtocolDecodeError.malformed }
+        let stcLineCount = Int(try readU16(data, stcNamePos))
         var stcLines: [[Wire.StyledTextRun]] = []
         try FrameDecodeAccounting.reserve(.arrayEntries, stcLineCount)
         stcLines.reserveCapacity(stcLineCount)
-        var stcPos = pos + 14 + stcNameLen + stcSummaryLen
+        var stcPos = stcNamePos + 2
         for _ in 0..<stcLineCount {
             guard end >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
             let runCount = Int(try readU16(data, stcPos))
@@ -3998,7 +3903,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                 guard end >= stcPos + 9 else { throw ProtocolDecodeError.malformed }
                 let textLen = Int(try readU16(data, stcPos))
                 guard end >= stcPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
-                let runText = try decodeUTF8(data[(stcPos + 2)..<(stcPos + 2 + textLen)]) ?? ""
+                let runText = try readRequiredUTF8(data[(stcPos + 2)..<(stcPos + 2 + textLen)])
                 let fgOff = stcPos + 2 + textLen
                 let flags = data[fgOff + 6]
                 var nextRunPos = fgOff + 7
@@ -4007,7 +3912,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                     guard end >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
                     let urlLen = Int(try readU16(data, nextRunPos))
                     guard end >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
-                    guard let decodedLinkURL = try decodeUTF8(data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)]) else { throw ProtocolDecodeError.malformed }
+                    let decodedLinkURL = try readRequiredUTF8(data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)])
                     linkURL = decodedLinkURL
                     nextRunPos += 2 + urlLen
                 }
@@ -4057,18 +3962,14 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
 
     case 0x09: // approval_tool_call
         guard end >= pos + 8 else { throw ProtocolDecodeError.malformed }
-        let nameLen = Int(try readU16(data, pos + 2))
-        guard end >= pos + 4 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-        let name = try decodeUTF8(data[(pos + 4)..<(pos + 4 + nameLen)]) ?? ""
-        let summaryLen = Int(try readU16(data, pos + 4 + nameLen))
-        guard end >= pos + 6 + nameLen + summaryLen + 2 else { throw ProtocolDecodeError.malformed }
-        let summary = try decodeUTF8(data[(pos + 6 + nameLen)..<(pos + 6 + nameLen + summaryLen)]) ?? ""
-        let idLen = Int(try readU16(data, pos + 6 + nameLen + summaryLen))
-        guard end >= pos + 8 + nameLen + summaryLen + idLen + 3 else { throw ProtocolDecodeError.malformed }
-        let toolCallId = try decodeUTF8(data[(pos + 8 + nameLen + summaryLen)..<(pos + 8 + nameLen + summaryLen + idLen)]) ?? ""
-        let previewKind = data[pos + 8 + nameLen + summaryLen + idLen]
-        let lineCount = Int(try readU16(data, pos + 9 + nameLen + summaryLen + idLen))
-        var approvalPos = pos + 11 + nameLen + summaryLen + idLen
+        var approvalHeaderPos = pos + 2
+        let name = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
+        let summary = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
+        let toolCallId = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
+        guard end >= approvalHeaderPos + 3 else { throw ProtocolDecodeError.malformed }
+        let previewKind = data[approvalHeaderPos]
+        let lineCount = Int(try readU16(data, approvalHeaderPos + 1))
+        var approvalPos = approvalHeaderPos + 3
         var previewLines: [String] = []
         try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
         previewLines.reserveCapacity(lineCount)
@@ -4076,7 +3977,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
             guard end >= approvalPos + 2 else { throw ProtocolDecodeError.malformed }
             let lineLen = Int(try readU16(data, approvalPos))
             guard end >= approvalPos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
-            let line = try decodeUTF8(data[(approvalPos + 2)..<(approvalPos + 2 + lineLen)]) ?? ""
+            let line = try readRequiredUTF8(data[(approvalPos + 2)..<(approvalPos + 2 + lineLen)])
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             previewLines.append(line)
             approvalPos += 2 + lineLen

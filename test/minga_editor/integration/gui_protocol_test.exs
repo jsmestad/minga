@@ -16,7 +16,6 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
-  alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.Test.GUIHarness
@@ -40,8 +39,8 @@ defmodule Minga.Integration.GUIProtocolTest do
     GUIHarness.round_trip!(harness, command, expected_type)
   end
 
-  # Encodes an agent chat through the core semantic encoder, accepting the legacy
-  # data-map shape these round-trip tests were written against.
+  # Encodes agent-chat chrome through the core semantic encoder, accepting the
+  # data-map shape these round-trip tests use.
   defp encode_gui_agent_chat(data) do
     alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
     alias Minga.Frontend.Adapter.GUI.Caches
@@ -59,7 +58,6 @@ defmodule Minga.Integration.GUIProtocolTest do
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
             prompt: Map.get(d, :prompt, ""),
-            messages: Map.get(d, :messages, []),
             help_visible?: Map.get(d, :help_visible, false),
             help_groups: Map.get(d, :help_groups, [])
           }
@@ -260,120 +258,9 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selection_size"] == 3
     end
 
-    test "gui_agent_chat visible with messages", %{harness: harness} do
-      data = %{
-        visible: true,
-        messages: [{:user, "hello"}, {:assistant, "hi there"}],
-        status: :idle,
-        model: "claude",
-        prompt: "test prompt",
-        pending_approval: nil
-      }
-
-      cmd = encode_gui_agent_chat(data)
-      decoded = round_trip(harness, cmd, "gui_agent_chat")
-
-      assert decoded["type"] == "gui_agent_chat"
-      assert decoded["visible"] == true
-      assert decoded["model"] == "claude"
-      assert decoded["prompt"] == "test prompt"
-      assert Enum.count(decoded["messages"]) == 2
-
-      [msg1, msg2] = decoded["messages"]
-      assert msg1["kind"] == "user"
-      assert msg1["text"] == "hello"
-      assert msg2["kind"] == "assistant"
-      assert msg2["text"] == "hi there"
-    end
-
-    test "gui_agent_chat with styled_tool_call round-trips", %{harness: harness} do
-      tc = %ToolCallView{
-        name: "bash",
-        status: :complete,
-        is_error: false,
-        collapsed: false,
-        auto_approved_scope: :turn,
-        duration_ms: 1500,
-        result: "output text"
-      }
-
-      styled_lines = [
-        [{"$ ls -la", 0x98BE65, 0x000000, 0x01}],
-        [{"total 42", 0xBBC2CF, 0x000000, 0x00}]
-      ]
-
-      data = %{
-        visible: true,
-        messages: [{:styled_tool_call, tc, styled_lines}],
-        status: :idle,
-        model: "claude",
-        prompt: "",
-        pending_approval: nil
-      }
-
-      cmd = encode_gui_agent_chat(data)
-      decoded = round_trip(harness, cmd, "gui_agent_chat")
-
-      assert decoded["type"] == "gui_agent_chat"
-      assert decoded["visible"] == true
-      assert Enum.count(decoded["messages"]) == 1
-
-      [msg] = decoded["messages"]
-      assert msg["kind"] == "styled_tool_call"
-      assert msg["name"] == "bash"
-      assert msg["status"] == 1
-      assert msg["is_error"] == false
-      assert msg["collapsed"] == false
-      assert msg["auto_approved_scope"] == 2
-      assert msg["duration_ms"] == 1500
-      assert Enum.count(msg["result_lines"]) == 2
-
-      [[run1], [run2]] = msg["result_lines"]
-      assert run1["text"] == "$ ls -la"
-      assert run1["bold"] == true
-      assert run1["fg"] == [0x98, 0xBE, 0x65]
-      assert run2["text"] == "total 42"
-      assert run2["bold"] == false
-    end
-
-    test "gui_agent_chat with regular tool_call round-trips", %{harness: harness} do
-      tc = %ToolCallView{
-        name: "read_file",
-        status: :running,
-        is_error: false,
-        collapsed: true,
-        auto_approved_scope: :session,
-        duration_ms: 0,
-        result: "file content here"
-      }
-
-      data = %{
-        visible: true,
-        messages: [{:tool_call, tc}],
-        status: :tool_executing,
-        model: "claude",
-        prompt: "",
-        pending_approval: nil
-      }
-
-      cmd = encode_gui_agent_chat(data)
-      decoded = round_trip(harness, cmd, "gui_agent_chat")
-
-      assert decoded["type"] == "gui_agent_chat"
-      assert Enum.count(decoded["messages"]) == 1
-
-      [msg] = decoded["messages"]
-      assert msg["kind"] == "tool_call"
-      assert msg["name"] == "read_file"
-      assert msg["collapsed"] == true
-      assert msg["auto_approved_scope"] == 1
-      assert msg["result"] == "file content here"
-    end
-
     test "gui_agent_chat with help overlay round-trips", %{harness: harness} do
       data = %{
         visible: true,
-        messages: [],
         status: :idle,
         model: "claude",
         prompt: "",
@@ -412,7 +299,6 @@ defmodule Minga.Integration.GUIProtocolTest do
     } do
       data = %{
         visible: true,
-        messages: [],
         status: :idle,
         model: "claude",
         prompt: "",

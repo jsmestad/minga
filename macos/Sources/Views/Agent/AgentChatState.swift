@@ -66,11 +66,11 @@ public struct AgentTranscriptSnapshot {
     /// Computes the exact resulting transcript weight without materializing mapped messages.
     public func resourceWeightAfterPreparing(
         mode: UInt8, epoch: UInt32, trimFront: Int, baseCount: Int,
-        messages rawMessages: [Wire.ChatMessage]
+        messages transcriptMessages: [Wire.ChatMessage]
     ) throws -> FrameResourceWeight {
         var weight: FrameResourceWeight
         if mode == 0 {
-            weight = FrameResourceWeight(arrayEntries: rawMessages.count)
+            weight = FrameResourceWeight(arrayEntries: transcriptMessages.count)
         } else {
             guard hasTranscript else { throw AgentTranscriptPreparationFailure.beforeSeed }
             guard epoch == self.epoch else { throw AgentTranscriptPreparationFailure.epochMismatch }
@@ -78,12 +78,12 @@ public struct AgentTranscriptSnapshot {
                   messages.count >= trimFront + baseCount else {
                 throw AgentTranscriptPreparationFailure.desynced
             }
-            weight = FrameResourceWeight(arrayEntries: baseCount + rawMessages.count)
+            weight = FrameResourceWeight(arrayEntries: baseCount + transcriptMessages.count)
             for message in messages[trimFront ..< (trimFront + baseCount)] {
                 weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
             }
         }
-        for message in rawMessages {
+        for message in transcriptMessages {
             weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
         }
         return weight
@@ -211,11 +211,8 @@ public final class AgentChatState {
 
     /// Updates the chat chrome (visibility, status, model, prompt, help).
     ///
-    /// Message content is no longer sourced here (#2654 slice 2): the resident
-    /// transcript arrives on the 0x86 stream via `applyTranscript`. `rawMessages`
-    /// is retained only as an optional seeding convenience for previews and tests;
-    /// when nil (the live 0x78 path), `messages` is left untouched.
-    public func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]? = nil) {
+    /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
+    public func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup]) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -230,9 +227,6 @@ public final class AgentChatState {
         self.promptVersion += 1
         self.helpVisible = helpVisible
         self.helpGroups = helpGroups
-        if let rawMessages {
-            self.messages = rawMessages.map(Self.mapMessage)
-        }
     }
 
     /// Applies a resident transcript frame (0x86, #2654 slice 2).
@@ -245,7 +239,7 @@ public final class AgentChatState {
     /// `trimFront` messages are dropped from the FRONT of the resident store
     /// (resident byte-cap eviction). Then, over the remainder, the first
     /// `baseCount` messages stay put and everything past them is replaced by
-    /// `rawMessages`. `baseCount` is the encoder's unchanged-leading (content-hash)
+    /// the streamed messages. `baseCount` is the encoder's unchanged-leading (content-hash)
     /// prefix length over the remainder, NOT the client's resident count, so
     /// `baseCount < remainder.count` is the normal streaming in-place patch, not a
     /// dropped frame. Kept entries keep their stable `ChatMessageEntry.id`, so the
@@ -271,7 +265,7 @@ public final class AgentChatState {
     }
 
     @discardableResult
-    public func applyTranscript(mode: UInt8, epoch: UInt32, truncated: Bool = false, trimFront: Int = 0, baseCount: Int, messages rawMessages: [Wire.ChatMessage]) -> TranscriptApplyOutcome {
+    public func applyTranscript(mode: UInt8, epoch: UInt32, truncated: Bool = false, trimFront: Int = 0, baseCount: Int, messages transcriptMessages: [Wire.ChatMessage]) -> TranscriptApplyOutcome {
         switch Self.prepareTranscript(
             from: transcriptSnapshot,
             mode: mode,
@@ -279,7 +273,7 @@ public final class AgentChatState {
             truncated: truncated,
             trimFront: trimFront,
             baseCount: baseCount,
-            messages: rawMessages
+            messages: transcriptMessages
         ) {
         case .success(let prepared):
             publishTranscript(prepared)
@@ -315,9 +309,9 @@ public final class AgentChatState {
         truncated: Bool,
         trimFront: Int,
         baseCount: Int,
-        messages rawMessages: [Wire.ChatMessage]
+        messages transcriptMessages: [Wire.ChatMessage]
     ) -> Result<AgentTranscriptSnapshot, AgentTranscriptPreparationFailure> {
-        let mapped = rawMessages.map(Self.mapMessage)
+        let mapped = transcriptMessages.map(Self.mapMessage)
         if mode == 0 {
             return .success(AgentTranscriptSnapshot(
                 messages: mapped,

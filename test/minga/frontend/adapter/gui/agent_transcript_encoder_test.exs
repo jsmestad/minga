@@ -12,6 +12,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
   alias Minga.RenderModel.UI.AgentChat
 
   @op Opcodes.gui_agent_transcript()
+  alias Minga.RenderModel.UI.AgentChat.ApprovalView
+  alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
+  alias Minga.RenderModel.UI.AgentChat.ToolCallView
+  alias Minga.RenderModel.UI.AgentChat.Usage
   @mode_full_replace 0
   @mode_append 1
 
@@ -56,6 +60,29 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
 
   defp ids(decoded), do: Enum.map(decoded.entries, &elem(&1, 0))
 
+  defp section(<<op, count::8, sections::binary>>, target_id) do
+    find_section(sections, count, target_id, op)
+  end
+
+  defp find_section(
+         <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
+         _remaining,
+         target_id,
+         _op
+       ),
+       do: payload
+
+  defp find_section(
+         <<_id::8, len::16, _payload::binary-size(len), rest::binary>>,
+         remaining,
+         target_id,
+         op
+       )
+       when remaining > 0,
+       do: find_section(rest, remaining - 1, target_id, op)
+
+  defp find_section(<<>>, _remaining, _target_id, _op), do: nil
+
   describe "encode/2 mode selection" do
     test "first emit is a full_replace carrying every message" do
       messages = [user(1, "a"), user(2, "b"), user(3, "c")]
@@ -70,16 +97,198 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       assert ids(decoded) == [1, 2, 3]
     end
 
-    test "round-trips each message body byte-identically with the shared codec" do
+    test "round-trips message bodies at the 0x86 boundary" do
       messages = [user(1, "hello"), {2, {:assistant, "world"}}]
       {frame, _} = Encoder.encode(model(1, messages), Caches.new())
 
       bodies = Enum.map(decode(frame).entries, fn {_id, body} -> body end)
 
       assert bodies == [
-               Codec.encode_message_body({:user, "hello"}),
-               Codec.encode_message_body({:assistant, "world"})
+               <<0x01, 5::32, "hello">>,
+               <<0x02, 5::32, "world">>
              ]
+    end
+
+    test "keeps bare ID0 and elides user attachments at the 0x86 boundary" do
+      messages = [{:user, "hi", [%{name: "ignored"}]}]
+      {frame, _} = Encoder.encode(model(1, messages), Caches.new())
+
+      assert [{0, <<0x01, 2::32, "hi">>}] = decode(frame).entries
+    end
+
+    test "encodes every live body kind with retained kind bytes and key fields" do
+      tool = %ToolCallView{
+        name: "read",
+        summary: "lib.ex",
+        status: :running,
+        result: "ok",
+        collapsed: true,
+        auto_approved_scope: :session,
+        preview_kind: :target,
+        preview_lines: ["lib.ex"]
+      }
+
+      approval = %ApprovalView{
+        name: "edit",
+        summary: "demo.ex",
+        tool_call_id: "tc",
+        preview_kind: :diff,
+        preview_lines: ["+new"]
+      }
+
+      usage = %Usage{input: 10, output: 20, cache_read: 3, cache_write: 4, cost: 0.0005}
+      styled = [[{"docs", 0x61AFFE, 0, 0x08, "https://example.com"}]]
+
+      block = %MarkdownBlock{
+        kind: :code_block,
+        id: 7,
+        lines: styled,
+        flags: 1,
+        language: "elixir",
+        label: "Elixir",
+        target_path: "lib.ex"
+      }
+
+      messages = [
+        {1, {:thinking, "thinking", true}},
+        {2, {:system, "oops", :error}},
+        {3, {:usage, usage}},
+        {4, {:tool_call, tool}},
+        {5, {:approval_tool_call, approval}},
+        {6, {:styled_tool_call, tool, styled}},
+        {7, {:styled_assistant, styled}},
+        {8, {:assistant_markdown, [block]}}
+      ]
+
+      {frame, _} = Encoder.encode(model(1, messages), Caches.new())
+      bodies = for {_id, body} <- decode(frame).entries, do: body
+
+      assert Enum.map(bodies, &:binary.first/1) == [
+               0x03,
+               0x05,
+               0x06,
+               0x04,
+               0x09,
+               0x08,
+               0x07,
+               0x0A
+             ]
+
+      assert Enum.at(bodies, 0) == <<0x03, 1, 8::32, "thinking">>
+      assert Enum.at(bodies, 1) == <<0x05, 1, 4::32, "oops">>
+      assert Enum.at(bodies, 2) == <<0x06, 10::32, 20::32, 3::32, 4::32, 500::32>>
+      assert Enum.at(bodies, 3) =~ "read"
+      assert Enum.at(bodies, 4) =~ "tc"
+      assert Enum.at(bodies, 5) =~ "lib.ex"
+      assert Enum.at(bodies, 6) =~ "https://example.com"
+      assert Enum.at(bodies, 7) =~ "elixir"
+    end
+
+    test "direct codec preserves exact tool, approval, styled, markdown, and bounds contracts" do
+      tool = %ToolCallView{
+        name: "read",
+        summary: "lib.ex",
+        status: :error,
+        is_error: true,
+        collapsed: false,
+        duration_ms: 42,
+        result: "ok",
+        auto_approved_scope: :turn,
+        preview_kind: :diff,
+        preview_lines: ["-old", "+new"]
+      }
+
+      approval = %ApprovalView{
+        name: "edit",
+        summary: "demo.ex",
+        tool_call_id: "tc",
+        preview_kind: :command,
+        preview_lines: ["mix test"]
+      }
+
+      linked = {"docs", 0x61AFFE, 0, 0, "https://example.com"}
+      plain = {"plain", 0x61AFFE, 0, 0x08}
+
+      block = %MarkdownBlock{
+        kind: :code_block,
+        id: 7,
+        flags: 1,
+        lines: [[linked]],
+        language: "elixir",
+        label: "Elixir",
+        target_path: "lib.ex",
+        capability_flags: 1
+      }
+
+      assert <<0x01, 2::32, "hi">> =
+               Codec.encode_message_body({:user, "hi", [%{name: "ignored"}]})
+
+      assert <<0x02, 5::32, "hello">> = Codec.encode_message_body({:assistant, "hello"})
+
+      assert <<0x03, 1, 8::32, "thinking">> =
+               Codec.encode_message_body({:thinking, "thinking", true})
+
+      assert <<0x05, 1, 4::32, "oops">> = Codec.encode_message_body({:system, "oops", :error})
+
+      assert <<0x06, 10::32, 20::32, 3::32, 4::32, 500::32>> =
+               Codec.encode_message_body(
+                 {:usage,
+                  %Usage{input: 10, output: 20, cache_read: 3, cache_write: 4, cost: 0.0005}}
+               )
+
+      assert <<0x04, 2, 1, 0, 42::32, 4::16, "read", 6::16, "lib.ex", 2::32, "ok", 2, 1, 2::16,
+               4::16, "-old", 4::16, "+new">> = Codec.encode_message_body({:tool_call, tool})
+
+      assert <<0x08, 2, 1, 0, 42::32, 4::16, "read", 6::16, "lib.ex", 1::16, 1::16, 4::16, "docs",
+               _sfg::24, _sbg::24, styled_flags, 19::16, "https://example.com", 2, 1, 2::16,
+               4::16, "-old", 4::16, "+new">> =
+               Codec.encode_message_body({:styled_tool_call, tool, [[linked]]})
+
+      assert Bitwise.band(styled_flags, 0x08) == 0x08
+
+      assert <<0x09, 0, 4::16, "edit", 7::16, "demo.ex", 2::16, "tc", 2, 1::16, 8::16,
+               "mix test">> = Codec.encode_message_body({:approval_tool_call, approval})
+
+      assert <<0x07, 1::16, 2::16, 4::16, "docs", _fg::24, _bg::24, linked_flags, 19::16,
+               "https://example.com", 5::16, "plain", _fg2::24, _bg2::24, plain_flags>> =
+               Codec.encode_message_body({:styled_assistant, [[linked, plain]]})
+
+      assert Bitwise.band(linked_flags, 0x08) == 0x08
+      assert Bitwise.band(plain_flags, 0x08) == 0
+
+      assert <<0x0A, 1::16, 7::32, 0x07, 1, 6::16, "elixir", 6::16, "Elixir", 6::16, "lib.ex", 1,
+               _::binary>> = Codec.encode_message_body({:assistant_markdown, [block]})
+    end
+
+    test "direct codec reports exact EncodingError fields for retained bounds" do
+      assert %{command: :gui_agent_chat_message, field: :run_flags, actual: 256, min: 0, max: 255} =
+               assert_raise(EncodingError, fn ->
+                 Codec.encode_message_body({:styled_assistant, [[{"bad", 0, 0, 256}]]})
+               end)
+
+      assert %{
+               command: :gui_agent_chat_message,
+               field: :run_url,
+               actual: 65_536,
+               min: 0,
+               max: 65_535
+             } =
+               assert_raise(EncodingError, fn ->
+                 Codec.encode_message_body(
+                   {:styled_assistant, [[{"bad", 0, 0, 0, String.duplicate("u", 65_536)}]]}
+                 )
+               end)
+
+      tool = %ToolCallView{name: "shell", summary: String.duplicate("é", 40_000)}
+
+      assert %{
+               command: :gui_agent_chat_message,
+               field: :summary,
+               actual: 80_000,
+               min: 0,
+               max: 65_535
+             } =
+               assert_raise(EncodingError, fn -> Codec.encode_message_body({:tool_call, tool}) end)
     end
 
     test "no change between frames emits nil" do
@@ -289,14 +498,20 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       messages = [user(1, "hi"), {2, {:assistant, "yo"}}]
 
       ui = %UI{
-        agent_chat: model(1, messages, messages: messages)
+        agent_chat: model(1, messages)
       }
 
       {cmds, _caches} = GUI.encode_ui(ui, Caches.new())
       opcodes = Enum.map(cmds, fn <<op, _::binary>> -> op end)
+      chat = Enum.find(cmds, fn <<op, _::binary>> -> op == Opcodes.gui_agent_chat() end)
+
+      transcript =
+        Enum.find(cmds, fn <<op, _::binary>> -> op == Opcodes.gui_agent_transcript() end)
 
       assert Opcodes.gui_agent_chat() in opcodes
       assert Opcodes.gui_agent_transcript() in opcodes
+      assert section(chat, 0x06) == nil
+      assert ids(decode(transcript)) == [1, 2]
     end
   end
 end

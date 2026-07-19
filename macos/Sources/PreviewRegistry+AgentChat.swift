@@ -27,9 +27,9 @@ extension PreviewRegistry {
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: PreviewFixtures.agentChatMessages()
+            helpGroups: []
         )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: PreviewFixtures.agentChatMessages())
 
         return AgentChatView(state: state, isInsertMode: true, encoder: nil, cellHeight: 18)
             .frame(width: width, height: height)
@@ -55,8 +55,9 @@ extension PreviewRegistry {
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: [
+            helpGroups: []
+        )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Refactor the buffer module to separate read and write concerns into distinct GenServer processes.")),
                 Wire.ChatMessage(beamId: 2, content: .thinking(text: "The buffer module currently mixes read-only queries (content, line count, syntax tree) with mutation operations (insert, delete, undo/redo). Splitting these would let readers proceed without blocking on writes, improving latency for completions and diagnostics that only need a snapshot.", collapsed: false)),
                 Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "lib/minga/buffer/process.ex", status: 0, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 0, result: "", previewKind: 0, previewLines: [])),
@@ -87,8 +88,9 @@ extension PreviewRegistry {
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: [
+            helpGroups: []
+        )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Run the full test suite and fix any failures.")),
                 Wire.ChatMessage(beamId: 2, content: .thinking(text: "I'll run the tests first to identify failures before making changes.", collapsed: true)),
                 Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "mix.exs", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 62, result: "Read 48 lines", previewKind: 0, previewLines: [])),
@@ -120,8 +122,9 @@ extension PreviewRegistry {
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: [
+            helpGroups: []
+        )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Deploy the staging environment.")),
                 Wire.ChatMessage(beamId: 2, content: .thinking(text: "I'll check the deployment configuration and run the staging deploy script.", collapsed: true)),
                 Wire.ChatMessage(beamId: 3, content: .toolCall(name: "shell", summary: "mix release --env=staging", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 4200, result: "Release built successfully", previewKind: 0, previewLines: [])),
@@ -168,8 +171,9 @@ extension PreviewRegistry {
                 ]
             ),
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: [
+            helpGroups: []
+        )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .system(text: "Agent session started.", isError: false)),
             ]
         )
@@ -198,8 +202,9 @@ extension PreviewRegistry {
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: [
+            helpGroups: []
+        )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Add input validation to the user registration form.")),
                 Wire.ChatMessage(beamId: 2, content: .thinking(text: "I need to add validation for email format, password strength, and required fields.", collapsed: true)),
                 Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "lib/minga/accounts/registration.ex", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 95, result: "Read 82 lines", previewKind: 0, previewLines: [])),

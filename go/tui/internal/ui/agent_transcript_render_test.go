@@ -15,8 +15,6 @@ func visibleAgentChat() protocol.AgentChat {
 	return protocol.AgentChat{
 		Visible:   true,
 		ModelName: "anthropic:claude-sonnet-4",
-		// A stale 0x78 messages payload the resident store must override.
-		Messages: []protocol.AgentChatMessage{{ID: 999, Kind: 0x01, Text: "STALE_0x78_MESSAGE"}},
 	}
 }
 
@@ -38,9 +36,6 @@ func TestAgentTranscriptRendersFromResidentStore(t *testing.T) {
 	model := residentModel(t, 12)
 	body := ansi.Strip(model.content())
 
-	if strings.Contains(body, "STALE_0x78_MESSAGE") {
-		t.Fatalf("transcript must render from the resident store, not 0x78 messages: %q", body)
-	}
 	if !strings.Contains(body, "USERMSG_12") {
 		t.Fatalf("newest resident message should be visible at the bottom: %q", body)
 	}

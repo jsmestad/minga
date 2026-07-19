@@ -188,9 +188,9 @@ public enum PreviewFixtures {
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,
-            helpGroups: [],
-            rawMessages: agentChatMessages()
+            helpGroups: []
         )
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: agentChatMessages())
     }
 
     // MARK: - StatusBar Helpers

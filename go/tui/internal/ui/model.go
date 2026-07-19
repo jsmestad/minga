@@ -241,7 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if chat, ok := m.agentChat(); ok {
-			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(chat), msg); handled {
+			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(), msg); handled {
 				m.send(packet)
 				break
 			}
@@ -295,7 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case agentAnimationTickMsg:
 		m.agent.tick()
-		if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages(chat)) {
+		if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages()) {
 			cmd = agentAnimationTick()
 		} else {
 			m.agent.animationRunning = false
@@ -317,7 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
 	}
 
-	if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages(chat)) && !m.agent.animationRunning {
+	if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages()) && !m.agent.animationRunning {
 		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
 	}

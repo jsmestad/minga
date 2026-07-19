@@ -1312,14 +1312,14 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 		ModelName:     "anthropic:claude-sonnet-4",
 		ThinkingLevel: "medium",
 		Prompt:        "fix the renderer",
-		Messages: []protocol.AgentChatMessage{
-			{Kind: 0x01, Text: "please fix the agent view"},
-			{Kind: 0x02, Text: "I will make the agent surface semantic."},
-			{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Status: 1, DurationMS: 25, Collapsed: true},
-			{Kind: 0x09, Name: "edit_file", Summary: "Update agent renderer", PreviewLines: []string{"+ semantic panel"}},
-			{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 12500}},
-		},
 	}
+	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 1, Messages: []protocol.AgentChatMessage{
+		{Kind: 0x01, Text: "please fix the agent view"},
+		{Kind: 0x02, Text: "I will make the agent surface semantic."},
+		{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Status: 1, DurationMS: 25, Collapsed: true},
+		{Kind: 0x09, Name: "edit_file", Summary: "Update agent renderer", PreviewLines: []string{"+ semantic panel"}},
+		{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 12500}},
+	}})
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
 	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "Read", "read_file", "path:", "Approval edit_file", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
@@ -1540,13 +1540,13 @@ func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 	model := New(80, 24, out, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible: true,
-		Messages: []protocol.AgentChatMessage{
-			{ID: 11, Kind: agentKindUser, Text: "fix this"},
-			{ID: 22, Kind: agentKindThinking, Text: "first", Collapsed: true},
-			{ID: 33, Kind: agentKindAssistant, Text: "ok"},
-			{ID: 44, Kind: agentKindThinking, Text: "second", Collapsed: false},
-		},
 	}}}
+	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 1, Messages: []protocol.AgentChatMessage{
+		{ID: 11, Kind: agentKindUser, Text: "fix this"},
+		{ID: 22, Kind: agentKindThinking, Text: "first", Collapsed: true},
+		{ID: 33, Kind: agentKindAssistant, Text: "ok"},
+		{ID: 44, Kind: agentKindThinking, Text: "second", Collapsed: false},
+	}})
 
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModCtrl | tea.ModAlt}))
 	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(44); !bytes.Equal(got, want) {
@@ -1559,13 +1559,13 @@ func TestAgentChatShortcutTogglesLatestToolBlock(t *testing.T) {
 	model := New(80, 24, out, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible: true,
-		Messages: []protocol.AgentChatMessage{
-			{ID: 11, Kind: agentKindUser, Text: "fix this"},
-			{ID: 22, Kind: agentKindTool, Name: "read_file", Collapsed: true},
-			{ID: 33, Kind: agentKindAssistant, Text: "ok"},
-			{ID: 44, Kind: agentKindStyledTool, Name: "grep", Collapsed: false},
-		},
 	}}}
+	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 1, Messages: []protocol.AgentChatMessage{
+		{ID: 11, Kind: agentKindUser, Text: "fix this"},
+		{ID: 22, Kind: agentKindTool, Name: "read_file", Collapsed: true},
+		{ID: 33, Kind: agentKindAssistant, Text: "ok"},
+		{ID: 44, Kind: agentKindStyledTool, Name: "grep", Collapsed: false},
+	}})
 
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
 	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(44); !bytes.Equal(got, want) {
@@ -1598,7 +1598,7 @@ func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
 	}
 	chat := protocol.AgentChat{Visible: true, Status: 1}
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: chat}}
-	if !model.agent.animating(chat, chat.Messages) {
+	if !model.agent.animating(chat, nil) {
 		t.Fatalf("visible thinking agent should animate")
 	}
 }
@@ -1611,10 +1611,10 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 		ModelName:     "anthropic:claude-sonnet-4",
 		ThinkingLevel: "medium",
 		Prompt:        "",
-		Messages: []protocol.AgentChatMessage{
-			{Kind: 0x05, Text: "Session started · 14:57:49 UTC"},
-		},
 	}}}
+	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 1, Messages: []protocol.AgentChatMessage{
+		{Kind: 0x05, Text: "Session started · 14:57:49 UTC"},
+	}})
 	model.putWindow(protocol.WindowContent{ID: 7, Rows: []protocol.WindowRow{{Text: ""}}})
 	model.viewport.SetContent(model.content())
 

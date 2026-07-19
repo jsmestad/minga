@@ -2,7 +2,7 @@ defmodule MingaEditor.Agent.Transcript do
   @moduledoc """
   Pure semantic transcript projection for agent chat.
 
-  The visible transcript is the `Minga.RenderModel.UI.AgentChat.messages` semantic model. This module computes the small amount of transcript metadata that commands still need: displayed message windows, stable message ids, line-to-message lookup, code-block line classification, and provenance anchors.
+  The visible transcript is carried in `Minga.RenderModel.UI.AgentChat.resident_messages` and transported by `gui_agent_transcript` (0x86); `gui_agent_chat` (0x78) carries only chrome state. This module computes the transcript metadata that commands still need: displayed message windows, stable message ids, line-to-message lookup, code-block line classification, and provenance anchors.
   """
 
   @typedoc "Line offset: {message_index, start_line, line_count}"

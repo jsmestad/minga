@@ -18,7 +18,7 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
       assert model.prompt_completion == nil
       refute model.help_visible?
       assert model.help_groups == []
-      assert model.messages == []
+      assert model.resident_messages == []
     end
 
     test "carries semantic conversation fields, not an encoded binary" do
@@ -26,7 +26,7 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
       refute Map.has_key?(%AgentChat{}, :fingerprint)
     end
 
-    test "holds a visible conversation with messages and prompt metadata" do
+    test "holds visible chrome and resident transcript metadata" do
       model = %AgentChat{
         visible?: true,
         status: :thinking,
@@ -38,13 +38,17 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
         prompt_cursor_col: 3,
         prompt_vim_mode: :insert,
         prompt_visible_rows: 4,
-        messages: [{1, {:user, "hi"}}, {2, {:assistant, "yo"}}]
+        resident_messages: [{1, {:user, "hi"}}, {2, {:assistant, "yo"}}],
+        resident_truncated?: true,
+        transcript_epoch: 9
       }
 
       assert model.visible?
       assert model.status == :thinking
       assert model.prompt_vim_mode == :insert
-      assert Enum.count(model.messages) == 2
+      assert Enum.count(model.resident_messages) == 2
+      assert model.resident_truncated?
+      assert model.transcript_epoch == 9
     end
 
     test "selects a contiguous newest resident suffix" do

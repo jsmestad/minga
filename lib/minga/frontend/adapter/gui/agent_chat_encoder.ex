@@ -2,24 +2,21 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @moduledoc """
   Pure GUI adapter encoder for the agent chat surface (`gui_agent_chat`, 0x78).
 
-  Encodes a `Minga.RenderModel.UI.AgentChat` semantic model into the sectioned
-  wire format and gates on a `:erlang.phash2/1` fingerprint stored in
+  Encodes the `gui_agent_chat` (0x78) chrome fields of a
+  `Minga.RenderModel.UI.AgentChat` semantic model into the sectioned wire format
+  and gates on a `:erlang.phash2/1` chrome fingerprint stored in
   `Minga.Frontend.Adapter.GUI.Caches`. Depends only on the model, the protocol
   opcodes, and the caches struct; it touches no processes and references no
-  product module. The editor builder pre-resolves every agent struct into the
-  core views (`AgentChat.ToolCallView`, `AgentChat.ApprovalView`,
-  `AgentChat.Usage`) before they reach this encoder.
+  product module.
 
-  This is the legacy transcript transport. The render model decides which
-  messages belong in its `messages` field; this adapter encodes that list exactly
-  and rejects a section that exceeds the wire's uint16 payload bound. The full
-  resident transcript rides the dedicated `gui_agent_transcript` (0x86) stream
-  via `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder` (#2654). Both share the
-  per-message body codec in `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`,
-  so the two transports encode each valid message with byte-identical bytes.
+  This encoder owns only the small chrome transport for the agent chat surface.
+  Resident transcript entries ride the dedicated `gui_agent_transcript` (0x86)
+  stream via `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder`, which uses
+  `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec` for the per-message bodies
+  containing `AgentChat.ToolCallView`, `AgentChat.ApprovalView`, and
+  `AgentChat.Usage`.
   """
 
-  alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
@@ -36,7 +33,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_prompt 0x03
   @section_chat_pending 0x04
   @section_chat_help 0x05
-  @section_chat_messages 0x06
   @section_chat_completion 0x07
   @section_chat_thinking 0x08
   # input_focused: whether the composer captures keys. A frontend that owns the
@@ -57,12 +53,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   end
 
   # The 0x78 chrome frame is independent of the resident transcript stream (0x86),
-  # so exclude the resident-only fields from its change-detection fingerprint. A
-  # streaming append that lands beyond the windowed `messages` tail must not force
-  # a redundant chrome re-send.
+  # so exclude the resident-only fields from its change-detection fingerprint.
   @spec chrome_fingerprint_model(AgentChat.t()) :: AgentChat.t()
   defp chrome_fingerprint_model(%AgentChat{} = model) do
-    %{model | resident_messages: [], transcript_epoch: 0}
+    %{model | resident_messages: [], resident_truncated?: false, transcript_epoch: 0}
   end
 
   @spec encode_binary(AgentChat.t()) :: binary()
@@ -103,8 +97,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
         Writer.new(@command)
         |> Writer.uint8(:input_focused, bool_byte(model.input_focused))
         |> Writer.finish()
-      ),
-      encode_section(@section_chat_messages, encode_chat_messages(model.messages))
+      )
     ]
 
     Writer.new(@command)
@@ -203,25 +196,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     Writer.new(@command)
     |> Writer.string8(:help_binding_key, key)
     |> Writer.string16(:help_binding_description, description)
-    |> Writer.finish()
-  end
-
-  # ── Chat messages ──
-
-  @spec encode_chat_messages([AgentChat.message()]) :: binary()
-  defp encode_chat_messages(messages) do
-    Writer.new(@command)
-    |> Writer.uint8(:messages_marker, 0xFF)
-    |> Writer.uint8(:messages_version, 1)
-    |> Writer.uint16(:message_count, Enum.count(messages))
-    |> Writer.append(Enum.map(messages, &encode_chat_message/1))
-    |> Writer.finish()
-  end
-
-  @spec encode_chat_message(AgentChat.message()) :: binary()
-  defp encode_chat_message(message) do
-    Writer.new(@command)
-    |> Writer.payload32(:message, AgentChatMessageCodec.encode_message(message))
     |> Writer.finish()
   end
 

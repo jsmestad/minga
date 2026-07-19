@@ -7,10 +7,9 @@ import "fmt"
 // This carries the resident conversation (the display_start_index-scoped
 // conversation, byte-capped by the encoder to a contiguous most-recent suffix)
 // so a frontend scrolls the session from local data without a BEAM round-trip.
-// The per-message body reuses the shared AgentChatMessageCodec, so a message
-// decodes byte-identically to the 0x78 messages section (see
-// decodeAgentMessageBody). See docs/GUI_PROTOCOL.md "0x86 — gui_agent_transcript"
-// for the authoritative wire contract.
+// The per-message body reuses the shared AgentChatMessageCodec. See
+// docs/GUI_PROTOCOL.md "0x86 — gui_agent_transcript" for the authoritative wire
+// contract.
 //
 // Wire payload (after the len32 opcode + u32 length framing):
 //

@@ -62,7 +62,7 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:agent_chat, AgentChatEncoder},
     {:empty_state, EmptyStateEncoder},
     # Resident transcript stream (0x86) reads the same agent_chat model and emits
-    # alongside the legacy 0x78 chrome during the #2654 transition (dual-emit).
+    # alongside the 0x78 chrome frame.
     {:agent_chat, AgentTranscriptEncoder},
     {:bottom_panel, BottomPanelEncoder},
     {:change_summary, ChangeSummaryEncoder},

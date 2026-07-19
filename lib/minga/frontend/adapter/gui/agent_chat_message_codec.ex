@@ -2,11 +2,9 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
   @moduledoc """
   Shared wire codec for a single agent-chat transcript message body.
 
-  Both the legacy `gui_agent_chat` (0x78) messages section and the resident
-  `gui_agent_transcript` (0x86) stream use this codec, so valid messages have
-  byte-identical bodies on both transports. Every data-derived bounded field is
-  validated before it is written. Invalid values raise an encoding error rather
-  than being truncated, dropped, or downgraded.
+  The resident `gui_agent_transcript` (0x86) stream uses this codec, so every
+  data-derived bounded field is validated before it is written. Invalid values
+  raise an encoding error rather than being truncated, dropped, or downgraded.
   """
 
   import Bitwise
@@ -24,22 +22,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
   @spec message_id(AgentChat.message()) :: non_neg_integer()
   def message_id({id, _body}) when is_integer(id), do: id
   def message_id(_body), do: 0
-
-  @doc "Encodes a full message as `<<id::32, body::binary>>`."
-  @spec encode_message(AgentChat.message()) :: binary()
-  def encode_message({id, body}) when is_integer(id) do
-    Writer.new(@command)
-    |> Writer.uint32(:message_id, id)
-    |> Writer.append(encode_message_body(body))
-    |> Writer.finish()
-  end
-
-  def encode_message(body) when is_tuple(body) do
-    Writer.new(@command)
-    |> Writer.uint32(:message_id, 0)
-    |> Writer.append(encode_message_body(body))
-    |> Writer.finish()
-  end
 
   @doc "Returns the 0x86 byte cost of one resident transcript entry."
   @spec resident_entry_size(AgentChat.message()) :: pos_integer()
