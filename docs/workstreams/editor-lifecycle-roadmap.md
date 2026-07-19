@@ -2187,6 +2187,40 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Merged CI:** Run `29680427172` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
   - **Completion date:** 2026-07-19
 
+### W023: Resolve triple-click targets through `HitTest`
+
+- **Status:** ACTIVE
+- **Audit ID:** L27
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness:** Reproduced on current main SHA `edf2442ceb314e8f712dfb5de268bb529ed0b84f`.
+- **Observable outcome:** Triple-click consumes the canonical `%MingaEditor.Mouse.Target.Buffer{}` resolved for the clicked screen cell, so wrapped continuation rows and folded display rows select their source buffer line and the drag origin retains the resolved window.
+- **Current failure path:** `Mouse.handle_triple_click/3` focuses independently, derives a window with `origin_window_id_at/3`, derives a line with `mouse_to_buffer_line/2`, and reads `state.workspace.buffers.active`. The line helper bypasses `HitTest.position/7`, wrapping, folds, composed decorations, virtual text, and the resolved target buffer/window. A triple-click on the second visual row of a one-line wrapped buffer returns unchanged state; a folded row can select a hidden line.
+- **Owner and target shape:** `MingaEditor.Mouse.HitTest.resolve_buffer/3` owns screen-to-buffer resolution and returns `%MingaEditor.Mouse.Target.Buffer{window_id, buffer, line, col, local_row, local_col, viewport}`. `MingaEditor.Mouse` remains the workflow consumer and must use `target.window_id`, `target.buffer`, and `target.line`.
+- **Locked source files:** Modify only `lib/minga_editor/mouse.ex`. `lib/minga_editor/mouse/hit_test.ex` and `lib/minga_editor/mouse/target/buffer.ex` remain unchanged.
+- **Locked implementation:** Preserve the leading `maybe_focus_window_at/3` call and its focus side effects. Replace the independently derived origin, line, and active buffer in `handle_triple_click/3` with one `HitTest.resolve_buffer/3` match on `{:buffer, %BufferTarget{} = target}`. Keep the existing line-end calculation, buffer move, Visual Line transition, and drag transition, passing `target.window_id` to `MouseState.start_drag/3`. Return the focused state unchanged for commands, block no-ops, and misses. Delete the now-unused `mouse_to_buffer_line/2`. Do not change any other mouse path.
+- **Ordered steps:** Add failing wrapped-row and folded-row triple-click regressions at the `Mouse.handle/7` boundary; replace the triple-click target derivation with the canonical target; delete `mouse_to_buffer_line/2`; run the focused and broad commands.
+- **Required regression 1:** In `test/minga_editor/mouse_test.exs`, create a 100-character one-line buffer at width 20 with wrap enabled, linebreak disabled, and line numbers disabled. Triple-click the second visual row. Assert cursor `{0, 99}`, Visual Line anchor `{0, 0}`, line visual type, active drag anchor `{0, 0}`, and drag origin equal to the active window.
+- **Required regression 2:** In the same file, fold lines 0 through 2, set viewport top to 1, and triple-click the first visible content row. Assert cursor `{3, 5}`, Visual Line anchor `{3, 0}`, line visual type, drag anchor `{3, 0}`, and drag origin equal to the active window.
+- **Optional compact regression:** If it fits the locked test ceiling, triple-click a non-active split and assert the resulting active window, active buffer, drag origin, and visual anchor equal the pre-resolved `BufferTarget` fields.
+- **Focused validation:** `mix test test/minga_editor/mouse_test.exs --seed 0`
+- **Broad validation:** `mix test test/minga_editor/mouse_test.exs test/minga_editor/mouse/hit_test_test.exs --seed 0`
+- **Line budget:** Production net addition at most `+10`; test additions at most `+80`.
+- **Non-goals:** No `HitTest`, target-struct, layout, fold, decoration, renderer, protocol, router, Unicode line-end, ordinary click, double-click, shift-click, modifier-click, block-command, hover, scrolling, resize, or drag-autoscroll changes. No new abstraction, process, dependency, public API, compatibility path, or target shape.
+- **Dependencies and constraints:** Current `HitTest.resolve_buffer/3`, `%BufferTarget{}`, `WindowFocus`, buffer APIs, mode transition API, and mouse-state owner. Preserve focus-before-selection behavior and every unrelated mouse behavior. Return `NEEDS_REPLAN` rather than exceeding either line ceiling or changing a locked file.
+- **Implementation result:** `Mouse.handle_triple_click/3` now preserves the leading focus call, consumes `HitTest.resolve_buffer/3` as `{:buffer, %BufferTarget{} = target}`, uses `target.line`, `target.buffer`, and `target.window_id` for the line selection and drag origin, and deletes obsolete `mouse_to_buffer_line/2`.
+- **Failure reproduction:** Before the source correction, `mix test test/minga_editor/mouse_test.exs --seed 0` failed the two new regressions as expected: wrapped continuation row left the cursor at `{0, 0}` instead of `{0, 99}`, and folded visible-row mapping selected hidden line `{1, 5}` instead of `{3, 5}`. Result: 41/43 passed, 2 failed.
+- **Focused regression:** `mix test test/minga_editor/mouse_test.exs --seed 0` passed after the source correction. Result: 43 passed.
+- **Line budget:** After formatting, `git diff --numstat origin/main` reports `lib/minga_editor/mouse.ex` `8	33` (production net `-25`, within `+10`), `test/minga_editor/mouse_test.exs` `39	0` (test additions `+39`, within `+80`), and `docs/workstreams/editor-lifecycle-roadmap.md` `34	0`.
+- **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS`; Ponytail `Lean already. Ship.`
+- **Broad validation:** The focused mouse and hit-test command passed 51 tests. The first `mix test --max-cases 4` run exposed the worktree's missing native parser binary; after `mix compile.minga_zig`, the same command passed 10,448 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded. `make lint` passed Credo, compile, format, and incremental Dialyzer. `git diff --check` passed.
+- **Final reviewer:** `PASS`; canonical target consumption, focus/mode/drag preservation, duplicate-mapper deletion, wrapped/folded regressions, line budgets, validation evidence, and merge safety accepted with no findings.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3032
+- **Implementation commit SHA:** `309c08144`
+- **Merge evidence:** Pending.
+- **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

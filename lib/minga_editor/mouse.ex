@@ -882,14 +882,11 @@ defmodule MingaEditor.Mouse do
   @spec handle_triple_click(state(), integer(), integer()) :: state()
   defp handle_triple_click(state, row, col) do
     state = maybe_focus_window_at(state, row, col)
-    origin_window = origin_window_id_at(state, row, col)
 
-    case mouse_to_buffer_line(state, row) do
-      nil ->
-        state
-
-      line ->
-        buf = state.workspace.buffers.active
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} ->
+        line = target.line
+        buf = target.buffer
 
         line_text =
           case Buffer.lines(buf, line, 1) do
@@ -911,7 +908,10 @@ defmodule MingaEditor.Mouse do
               MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
         }
 
-        update_mouse(state, &MouseState.start_drag(&1, {line, 0}, origin_window))
+        update_mouse(state, &MouseState.start_drag(&1, {line, 0}, target.window_id))
+
+      _command_or_miss ->
+        state
     end
   end
 
@@ -1594,31 +1594,6 @@ defmodule MingaEditor.Mouse do
         BufferTarget.position(target)
 
       _command_or_miss ->
-        nil
-    end
-  end
-
-  # Like mouse_to_buffer_pos but only returns the line (for triple-click).
-  @spec mouse_to_buffer_line(state(), non_neg_integer()) :: non_neg_integer() | nil
-  defp mouse_to_buffer_line(%{workspace: %{buffers: %{active: buf}}} = state, row) do
-    layout = Layout.get(state)
-
-    case Layout.active_window_layout(layout, state) do
-      %{content: {win_row, _win_col, content_w, win_h}} ->
-        window = MingaEditor.Session.State.active_window_struct(state.workspace)
-        total_lines = Buffer.line_count(buf)
-        {cursor_line, _} = Buffer.cursor(buf)
-        scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
-        local_row = row - win_row
-        target_line = local_row + scroll_top
-
-        if local_row < 0 or local_row >= win_h or target_line >= total_lines do
-          nil
-        else
-          target_line
-        end
-
-      nil ->
         nil
     end
   end
