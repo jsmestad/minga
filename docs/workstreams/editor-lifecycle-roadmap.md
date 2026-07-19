@@ -2053,6 +2053,39 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Final reviewer:** `PASS`; locked routing and release-cleanup contract, ownership, lifecycle, API, tests, budgets, evidence, and merge safety accepted with no findings.
   - **Completion date:** 2026-07-19
 
+### W019: Retire redundant tool-status clear timers
+
+- **Status:** ACTIVE
+- **Audit ID:** L23
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `a139cf97ca0ba7d4225eab1a41dc1ae15c8e5f03`
+- **Observable outcome:** An old tool-install completion cannot dismiss a newer tool-like notice. Tool completion retains its text, log, picker refresh, and render effects, then expires only through the ordinary identity-safe notice lifecycle.
+- **Failure path:** Tool completion publishes through `NoticeWorkflow`, then also schedules bare `:clear_tool_status`. The old atom later routes through `ToolHandler`, infers ownership from the current message prefix, and can dismiss a newer `Installing ...` or `✓ ... installed` notice.
+- **Authoritative owners:** `Shell.Traditional.Notice` owns ordinary notice identity; `NoticeWorkflow` owns publish, timer cancellation/creation, and timeout delivery; `Shell.Traditional.State` installs Notice transitions. `ToolHandler` does not own notice lifecycle.
+- **Locked implementation:** Delete ToolHandler's conditional five-second clear effect, prefix-based clear handler, `send_after` effect type/executor, and the Editor atom-dispatch entry. Retain `%Notice{id, message, timer}` and `{:notice_timeout, id}` unchanged. Do not replace the redundant timer with another tagged timer.
+- **Tests:** Replace old clear scheduling/prefix tests with non-headless and headless ownership assertions; add an Editor `handle_info/2` regression proving a legacy bare clear atom cannot dismiss newer `Installing ...` or `✓ ... installed` notices; retain existing stale/matching notice-ID tests.
+- **Focused validation:** `mix test test/minga_editor/handlers/tool_handler_test.exs test/minga_editor/shell/traditional/notice_workflow_test.exs`.
+- **Broad validation:** `mix test test/minga_editor/handlers test/minga_editor/shell/traditional`; `mix test.llm --max-cases 4`; `make lint`; `git diff --check`.
+- **Non-goals:** No ToolStatus struct, tagged replacement timer, registry, process, behaviour, protocol, config, public API, compatibility shim, Tool Manager payload, notification, operation-feedback, status-bar, or frontend changes.
+- **Maximum production additions:** 0 net lines; expected net deletion. Any positive additions require explanation and remain capped at 50.
+- **Maximum test additions:** 40 lines expected, 80 hard ceiling.
+- **Dependencies:** Existing NoticeWorkflow identity-safe timeouts are merged; no unresolved dependency or implementer question remains.
+- **Completion evidence:**
+  - **Implementation result:** Deleted ToolHandler's five-second clear effect, prefix-based clear handler, timer effect type/executor, and Editor atom route. Tool completion still publishes the same success notice and returns the same log, picker refresh, and render effects; NoticeWorkflow is now the sole timeout owner.
+  - **Failure reproduced:** Before production deletion, focused regressions observed `{:send_after, :clear_tool_status, 5_000}` and a legacy bare atom dismissed a newer `Installing fd...` notice.
+  - **Regression coverage:** Non-headless completion records the NoticeWorkflow timer and no ToolHandler clear effect; headless completion records no notice timer; legacy bare delivery preserves both `Installing ...` and `✓ ... installed` notices and their IDs; existing stale/matching notice-ID tests remain unchanged.
+  - **Focused validation:** `mix test.debug test/minga_editor/handlers/tool_handler_test.exs test/minga_editor/shell/traditional/notice_workflow_test.exs` passed 16 tests; `mix test test/minga_editor/handlers test/minga_editor/shell/traditional` passed 209 tests.
+  - **Broad validation:** `make lint` passed Credo, compile, and incremental Dialyzer after the final effect-union narrowing; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,918 tests with 0 failures, 1 skipped, and 578 excluded.
+  - **Line deltas:** Production `lib/minga_editor.ex` +3/-5 and `lib/minga_editor/handlers/tool_handler.ex` +13/-59, net -48. Tests `test/minga_editor/handlers/tool_handler_test.exs` +25/-51, net -26.
+  - **Concepts added/removed:** Added none. Removed the second tool-status timer lifecycle, prefix ownership inference, generic timer effect, bare Editor dispatch route, unreachable generic log levels, and obsolete duplicate tests.
+  - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS` after documentation and effect types were aligned to actual ownership; Ponytail `Lean already. Ship.` after duplicate headless effect coverage was removed.
+  - **Final reviewer:** `PASS`; redundant timer deletion, sole NoticeWorkflow ownership, preserved tool effects, tests, budgets, evidence, and merge safety accepted with no findings.
+  - **PR URL:** Pending.
+  - **Merge evidence:** Pending.
+  - **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

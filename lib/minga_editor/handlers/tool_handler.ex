@@ -2,12 +2,9 @@ defmodule MingaEditor.Handlers.ToolHandler do
   @moduledoc """
   Owns tool installation/management transitions and external actions.
 
-  `dispatch/2` updates tool prompts/notices first, then applies focused actions
-  in list order. Picker refreshes, logs, renders, and the clear-status timer run
-  in the Editor process, so the same process creates and receives timer
-  messages. Installer supervision remains with the tool service; this workflow
-  only presents its ordered events. Unknown/stale events are ignored, install
-  failures are logged and rendered, and headless mode creates no timer.
+  `dispatch/2` updates tool prompts/notices first, then applies focused actions in list order.
+  Picker refreshes, logs, and renders run in the Editor process.
+  Installer supervision remains with the tool service; this workflow only presents its ordered events. Unknown/stale events are ignored, and install failures are logged and rendered.
   """
 
   alias MingaEditor.Shell.Traditional.ToolPrompts
@@ -18,9 +15,8 @@ defmodule MingaEditor.Handlers.ToolHandler do
   @type tool_effect ::
           :render
           | {:log_message, String.t()}
-          | {:log, atom(), :debug | :info | :warning | :error, String.t()}
+          | {:log, :editor, :debug, String.t()}
           | {:refresh_tool_picker}
-          | {:send_after, term(), non_neg_integer()}
 
   @doc "Applies one tool event and its focused actions."
   @spec dispatch(EditorState.t(), term()) :: EditorState.t()
@@ -29,12 +25,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
     apply_effects(state, effects)
   end
 
-  @doc """
-  Dispatches a tool event to the appropriate handler.
-
-  Returns `{state, effects}` where effects encode all side-effectful
-  operations.
-  """
+  @doc "Handles one tool event, returning updated state and deferred tool-local effects."
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [tool_effect()]}
 
   def handle(state, {:minga_event, :tool_install_started, %{name: name}}) do
@@ -56,21 +47,12 @@ defmodule MingaEditor.Handlers.ToolHandler do
         "\u2713 #{name} v#{version} installed"
       )
 
-    effects = [
-      {:log_message, "Tool installed: #{name} v#{version}"},
-      {:refresh_tool_picker},
-      :render
-    ]
-
-    # Schedule status clear after 5 seconds (skip in headless)
-    effects =
-      if state.frontend.backend != :headless do
-        Enum.concat(effects, [{:send_after, :clear_tool_status, 5_000}])
-      else
-        effects
-      end
-
-    {new_state, effects}
+    {new_state,
+     [
+       {:log_message, "Tool installed: #{name} v#{version}"},
+       {:refresh_tool_picker},
+       :render
+     ]}
   end
 
   def handle(state, {:minga_event, :tool_install_failed, %{name: name, reason: reason}}) do
@@ -97,23 +79,6 @@ defmodule MingaEditor.Handlers.ToolHandler do
        {:refresh_tool_picker},
        :render
      ]}
-  end
-
-  def handle(state, :clear_tool_status) do
-    current = MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) || ""
-
-    new_state =
-      if String.starts_with?(current, [
-           "\u2713 ",
-           "Installing ",
-           "Updating "
-         ]) do
-        MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss(state)
-      else
-        state
-      end
-
-    {new_state, [:render]}
   end
 
   # ── Tool missing prompt ──────────────────────────────────────────────────
@@ -150,24 +115,13 @@ defmodule MingaEditor.Handlers.ToolHandler do
     state
   end
 
-  defp apply_effect(state, {:log, subsystem, level, message}) do
-    log(subsystem, level, message)
+  defp apply_effect(state, {:log, :editor, :debug, message}) do
+    Minga.Log.debug(:editor, message)
     state
   end
 
   defp apply_effect(state, {:refresh_tool_picker}),
     do: MingaEditor.maybe_refresh_tool_picker(state)
-
-  defp apply_effect(state, {:send_after, message, delay_ms}) do
-    if state.frontend.backend != :headless, do: Process.send_after(self(), message, delay_ms)
-    state
-  end
-
-  @spec log(atom(), :debug | :info | :warning | :error, String.t()) :: :ok
-  defp log(subsystem, :debug, message), do: Minga.Log.debug(subsystem, message)
-  defp log(subsystem, :info, message), do: Minga.Log.info(subsystem, message)
-  defp log(subsystem, :warning, message), do: Minga.Log.warning(subsystem, message)
-  defp log(subsystem, :error, message), do: Minga.Log.error(subsystem, message)
 
   @spec handle_tool_missing(EditorState.t(), String.t(), boolean()) ::
           {EditorState.t(), [tool_effect()]}

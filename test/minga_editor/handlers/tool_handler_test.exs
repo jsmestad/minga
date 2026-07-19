@@ -1,14 +1,10 @@
 defmodule MingaEditor.Handlers.ToolHandlerTest do
-  @moduledoc """
-  Pure-function tests for `MingaEditor.Handlers.ToolHandler`.
-
-  Uses `RenderPipeline.TestHelpers.base_state/1` to construct state
-  without starting a GenServer.
-  """
+  @moduledoc "Focused workflow tests for `MingaEditor.Handlers.ToolHandler`."
 
   use ExUnit.Case, async: true
 
   alias MingaEditor.Handlers.ToolHandler
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -44,39 +40,30 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
   end
 
   describe "tool_install_complete" do
-    test "sets success status and returns log + render effects" do
-      state = base_state()
+    test "relies on NoticeWorkflow timer and emits no tool clear timer" do
+      state = base_state(backend: :tui)
       event = {:minga_event, :tool_install_complete, %{name: "ripgrep", version: "14.1"}}
       {new_state, effects} = ToolHandler.handle(state, event)
 
-      assert String.contains?(
-               MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state),
-               "ripgrep v14.1 installed"
-             )
-
+      assert String.contains?(NoticeWorkflow.message(new_state), "ripgrep v14.1 installed")
       assert {:log_message, "Tool installed: ripgrep v14.1"} in effects
-      assert :render in effects
       assert {:refresh_tool_picker} in effects
+      assert :render in effects
+
+      refute Enum.any?(effects, &match?({:send_after, :clear_tool_status, _}, &1))
+
+      timer = new_state.shell_runtime.state.notice.timer
+      assert is_reference(timer)
+      assert Process.read_timer(timer) in 1..2_000
+      NoticeWorkflow.dismiss(new_state)
     end
 
-    test "schedules clear_tool_status in non-headless mode" do
-      state = base_state(backend: :tui)
-      event = {:minga_event, :tool_install_complete, %{name: "ripgrep", version: "14.1"}}
-      {_state, effects} = ToolHandler.handle(state, event)
-
-      assert {:send_after, :clear_tool_status, 5_000} in effects
-    end
-
-    test "does not schedule timer in headless mode" do
+    test "headless completion creates no notice timer" do
       state = base_state()
-      # base_state defaults to headless
       event = {:minga_event, :tool_install_complete, %{name: "ripgrep", version: "14.1"}}
-      {_state, effects} = ToolHandler.handle(state, event)
+      {new_state, _effects} = ToolHandler.handle(state, event)
 
-      refute Enum.any?(effects, fn
-               {:send_after, :clear_tool_status, _} -> true
-               _ -> false
-             end)
+      assert new_state.shell_runtime.state.notice.timer == nil
     end
   end
 
@@ -123,32 +110,19 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
     end
   end
 
-  describe "clear_tool_status" do
-    test "clears status when it starts with a tool prefix" do
-      state = base_state()
+  describe "legacy clear_tool_status delivery" do
+    test "cannot dismiss newer tool-like notices" do
+      for message <- ["Installing fd...", "✓ fd v9 installed"] do
+        state =
+          base_state(rendering: :disabled)
+          |> NoticeWorkflow.publish(message)
 
-      state =
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "\u2713 ripgrep v14.1 installed"
-        )
+        notice_id = state.shell_runtime.state.notice.id
 
-      {new_state, effects} = ToolHandler.handle(state, :clear_tool_status)
-
-      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
-      assert :render in effects
-    end
-
-    test "preserves non-tool status messages" do
-      state = base_state()
-      state = MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Some other message")
-
-      {new_state, effects} = ToolHandler.handle(state, :clear_tool_status)
-
-      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
-               "Some other message"
-
-      assert :render in effects
+        assert {:noreply, delivered} = MingaEditor.handle_info(:clear_tool_status, state)
+        assert NoticeWorkflow.message(delivered) == message
+        assert delivered.shell_runtime.state.notice.id == notice_id
+      end
     end
   end
 

@@ -51,7 +51,6 @@ defmodule MingaEditor do
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.Handlers.RenderHandler
   alias MingaEditor.Handlers.SessionHandler
-  alias MingaEditor.Handlers.ToolHandler
   # WarningLog removed in #825; warnings route through MessageLog with level override
   alias MingaEditor.Window
   alias MingaEditor.Input
@@ -838,15 +837,14 @@ defmodule MingaEditor do
   end
 
   # ── Handler-delegated bare atom events ─────────────────────────────────────
-  # Bare atom messages routed to HighlightHandler, SessionHandler, or
-  # ToolHandler via a module attribute map (guard-safe via is_map_key/2).
+  # Bare atom messages routed to HighlightHandler or SessionHandler via a module
+  # attribute map (guard-safe via is_map_key/2).
 
   @handler_atom_dispatch %{
     setup_highlight: HighlightHandler,
     evict_parser_trees: HighlightHandler,
     check_swap_recovery: SessionHandler,
-    save_session: SessionHandler,
-    clear_tool_status: ToolHandler
+    save_session: SessionHandler
   }
 
   def handle_info(msg, state) when is_map_key(@handler_atom_dispatch, msg) do
