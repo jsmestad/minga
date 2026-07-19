@@ -2633,7 +2633,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W037: Delete D06 extension-overlay Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.10
 - **Implementation profile:** `D06Worker10`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner10` for current SHA `4e9bfd09a555bed4260e1f2e436c5685127866c6`; W037 removes only the `gui_extension_overlay` outbound Protocol.GUI parity oracle because live `0x9C` emission is already owned by `Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder` from `%Minga.RenderModel.UI.ExtensionOverlay{}` built by `MingaEditor.RenderModel.UI.ExtensionOverlayBuilder`.
@@ -2660,8 +2660,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact extension-overlay oracle deletion, direct complete `0x9C` len16 coverage, retained builder/adapter/schema/generated/Swift/Go/cache/bounds contracts, truthful validation including the isolated suite-order failure, budgets, zero concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3060
 - **Implementation commit SHA:** `83f896f52`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `ae1a81772044913bddc2dd200d0a0269f630c2fd`; **Merge evidence:** PR #3060 merged after CI run `29707901490` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
