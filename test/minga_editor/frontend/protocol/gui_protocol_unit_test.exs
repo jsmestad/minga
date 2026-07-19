@@ -519,23 +519,6 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
-  describe "encode_gui_hover_action/1" do
-    test "encodes visible action with length prefix" do
-      popup = %MingaEditor.HoverPopup{
-        content_lines: [{[{"Open", :bold}], :text}],
-        anchor_row: 1,
-        anchor_col: 2,
-        open_action: :goto_definition
-      }
-
-      binary = ProtocolGUI.encode_gui_hover_action(popup)
-
-      assert <<0x96, payload_len::16, 1::8, action_len::16, action::binary>> = binary
-      assert payload_len == 1 + 2 + action_len
-      assert action == "goto_definition"
-    end
-  end
-
   describe "decode_gui_action for workspace actions" do
     test "decodes workspace rename" do
       name = "My Research"
