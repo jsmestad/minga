@@ -2189,7 +2189,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W023: Resolve triple-click targets through `HitTest`
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L27
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2218,8 +2218,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer:** `PASS`; canonical target consumption, focus/mode/drag preservation, duplicate-mapper deletion, wrapped/folded regressions, line budgets, validation evidence, and merge safety accepted with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3032
 - **Implementation commit SHA:** `309c08144`
-- **Merge evidence:** Pending.
-- **Completion date:** Pending merge.
+- **Merge commit SHA:** `0f1212fed87ec94e74a1b690a1decfc7cb208fa2`
+- **Merged CI:** Run `29681853361` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
