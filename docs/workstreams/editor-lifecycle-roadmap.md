@@ -2284,6 +2284,35 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `7fe6c648371c55cac81078636edefab77e6d85b1`; PR #3036 merged after CI run `29684733018` passed every required check, including Elixir, Swift, Go, Zig, Dialyzer, lint/format, Neovim conformance, boot smoke, protocol integration, and keystroke latency.
 - **Completion date:** 2026-07-19
 
+### W026: Make title metadata reads stale-buffer safe
+
+- **Status:** ACTIVE
+- **Audit ID:** L30
+- **Decision:** ACCEPT/shrink
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `fb382a47f7fd00fc4525ad2ed32131faafc3a25b`
+- **Observable outcome:** Plain-map and `EditorState` terminal and GUI title formatting now survive stale stopped active-buffer pids. Dead buffers fall back to `[no file]`, empty filepath, empty directory, clean dirty marker, and the current mode where terminal formatting has a mode. Agent titles remain `Agent`, GUI punctuation remains unchanged, and live buffer formatting keeps the existing basename, directory, dirty, mode, special-buffer, and `bufname` behavior.
+- **Locked implementation:** `MingaEditor.Title` owns one private `read_buffer_title_metadata/1` helper that reads only `Buffer.file_path/1`, `Buffer.buffer_name/1`, and `Buffer.dirty?/1`, catching only `{:noproc, {GenServer, :call, [^buf, _request, _timeout]}}` for the same buffer pid as `:dead_buffer`. Title context no longer carries filetype, agent context carries `filepath: ""`, plain-map GUI context delegates through `buffer_content_context/1`, both `build_vars/1` context branches consume `ctx.filepath`, `build_vars_from_buffer/2` uses the same helper, and the obsolete duplicate `buffer_filepath/1` helper is deleted. No public API, process, dependency, configuration, compatibility shim, or extra abstraction was added.
+- **Regression reproduction:** With only the four dead-buffer regressions added, `mix test.debug test/minga_editor/title_test.exs` failed deterministically before the source correction. The run stopped after 3 failures: the plain-map terminal path exited from `GenServer.call(dead_pid, :file_path, 5000)` in `build_vars_from_buffer/2`; the `EditorState` terminal path exited from `Buffer.file_path/1` in `buffer_content_context/1`; and the `EditorState` GUI path exited from the same unguarded context read. Result before source correction: `8/11 passed`, `3 failed`, max-failures reached.
+- **Focused tests:** `mix test.debug test/minga_editor/title_test.exs` passed after the mandatory Ponytail and Elixir corrections. Result: `20 passed`.
+- **Broad validation:** `mix test.llm --seed 798303` exposed one unrelated five-second `MingaAgent.SessionManagerTest` timeout at the local default 64-way concurrency; the isolated 29-test module passed. The identical seed passed on unchanged current main, while a separate current-main default-concurrency run exposed a different unrelated two-second observatory timeout, confirming existing load sensitivity rather than title behavior. `mix test --max-cases 4` passed 10,452 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded. `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors.
+- **Formatting:** `mix format lib/minga_editor/title.ex test/minga_editor/title_test.exs` exited `0` for the implementation and again after the mandatory Elixir correction; `mix format test/minga_editor/title_test.exs` exited `0` after the mandatory Ponytail test simplification.
+- **Line budget:** Final `git diff --numstat -- lib/minga_editor/title.ex test/minga_editor/title_test.exs docs/workstreams/editor-lifecycle-roadmap.md` reported `60 52 lib/minga_editor/title.ex` and `78 0 test/minga_editor/title_test.exs` before this evidence correction. Production net `+8 <= +25`; tests net `+78 <= +100`.
+- **Production lines added/removed:** `60 added / 52 removed`
+- **Test lines added/removed:** `78 added / 0 removed`
+- **Concepts added/removed:** Added one private title metadata helper and one private fallback context shape inside the existing title owner. Removed title `filetype` context fields, both `Buffer.filetype/1` title reads, and the obsolete duplicate `buffer_filepath/1` read helper. Added no public API or external abstraction.
+- **Findings resolved:** L30 only.
+- **Discoveries affecting later work:** None.
+- **Ponytail verdict:** Initial review required extracting repeated dead-buffer setup; after `dead_buffer!/0`, recheck returned `Lean already. Ship.`
+- **Bug-hunt verdict:** Correctness `PASS`; same-buffer `:noproc` specificity, all four stale-buffer surfaces, live and agent behavior, synchronization, scope, budgets, and evidence accepted with no blockers.
+- **Elixir craftsmanship verdict:** Initial review required consuming `ctx.filepath` in the agent branch; recheck `PASS` after the one-line correction.
+- **Final reviewer verdict:** `PASS` after correcting the roadmap decision from `ACCEPT/direct` to the immutable audit classification `ACCEPT/shrink`; implementation, exception boundary, regressions, ownership, scope, budgets, and validation evidence accepted with no remaining findings.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely
