@@ -251,6 +251,45 @@ defmodule MingaEditor.MouseTest do
       assert BufferProcess.cursor(buffer) == {1, 2}
     end
 
+    test "triple-click on a wrapped continuation row selects the source line" do
+      {state, buffer} = start_mouse_state(String.duplicate("a", 100), width: 20)
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+      {content_row, content_col} = active_content_origin(state)
+
+      state = mouse(state, content_row + 1, content_col, :left, :press, 0, 3)
+
+      assert BufferProcess.cursor(buffer) == {0, 99}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert state.workspace.editing.mode_state.visual_type == :line
+      assert state.workspace.mouse.dragging
+      assert state.workspace.mouse.anchor == {0, 0}
+      assert state.workspace.mouse.drag_origin_window == state.workspace.windows.active
+    end
+
+    test "triple-click uses folded display-map line mapping" do
+      {state, buffer} = start_mouse_state(lines(0..49))
+      state = set_active_fold_ranges(state, [FoldRange.new!(0, 2)])
+      state = fold_active_window_at(state, 0)
+      state = set_window_top(state, state.workspace.windows.active, 1)
+      {content_row, content_col} = active_content_origin(state)
+
+      gutter_width =
+        MingaEditor.Mouse.HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
+
+      state = mouse(state, content_row, content_col + gutter_width, :left, :press, 0, 3)
+
+      assert BufferProcess.cursor(buffer) == {3, 5}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {3, 0}
+      assert state.workspace.editing.mode_state.visual_type == :line
+      assert state.workspace.mouse.dragging
+      assert state.workspace.mouse.anchor == {3, 0}
+      assert state.workspace.mouse.drag_origin_window == state.workspace.windows.active
+    end
+
     test "wrapped visual row offset maps top-screen clicks into the visible continuation row" do
       {state, buffer} = start_mouse_state(String.duplicate("a", 120), width: 20)
       assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
