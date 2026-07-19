@@ -6,7 +6,6 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoderTest do
   alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
   alias Minga.RenderModel.UI.ExtensionOverlay
   alias Minga.RenderModel.UI.ExtensionOverlay.Entry
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_extension_overlay Minga.Protocol.Opcodes.gui_extension_overlay()
 
@@ -43,30 +42,21 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoderTest do
       assert cmd2 == ExtensionOverlayEncoder.encode_command(model2)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for empty overlays" do
+    test "encodes empty overlay command directly" do
       assert ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{}) ==
-               ProtocolGUI.encode_gui_extension_overlays([])
+               <<@op_gui_extension_overlay, 1::16, 0>>
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for overlay entries" do
+    test "encodes overlay entry fields directly" do
       model = %ExtensionOverlay{entries: [entry()]}
 
-      legacy_entries = [
-        %{
-          extension: "demo",
-          overlay_id: "cursor",
-          window_id: 7,
-          row: 2,
-          col: 3,
-          shape: ProtocolGUI.overlay_shape_byte(:cursor_with_label),
-          fg: 0x51AFEF,
-          opacity: 102,
-          content: "AI"
-        }
-      ]
+      assert <<@op_gui_extension_overlay, payload_length::16, payload::binary>> =
+               ExtensionOverlayEncoder.encode_command(model)
 
-      assert ExtensionOverlayEncoder.encode_command(model) ==
-               ProtocolGUI.encode_gui_extension_overlays(legacy_entries)
+      assert payload_length == byte_size(payload)
+
+      assert <<1, 4, "demo", 6, "cursor", 7::16, 2::16, 3::16, 1, 0x51, 0xAF, 0xEF, 102, 2::16,
+               "AI">> = payload
     end
 
     test "rejects extension-controlled counts before truncating the command" do
