@@ -1248,163 +1248,49 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 	}
 }
 
-func TestDecodeAgentTimelineChrome(t *testing.T) {
-	messageBody := []byte{0, 0, 0, 42, 0x02}
-	messageBody = append(messageBody, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o')
-	messages := []byte{0xFF, 1, 0, 1, byte(len(messageBody) >> 24), byte(len(messageBody) >> 16), byte(len(messageBody) >> 8), byte(len(messageBody))}
-	messages = append(messages, messageBody...)
-	chat := []byte{generated.OPGuiAgentChat, 3}
+func TestDecodeAgentChatSkipsRetiredMessagesSection(t *testing.T) {
+	chat := []byte{generated.OPGuiAgentChat, 5}
+	prompt := string16("fix")
+	prompt = append(prompt, 2, 0, 1, 0, 3, 1, 4)
+	retired := []byte{0xFF, 1, 0, 1}
+	messageBody := append([]byte{0x01}, u32Bytes(2)...)
+	messageBody = append(messageBody, []byte("hi")...)
+	retired = append(retired, u32Bytes(uint32(4+len(messageBody)))...)
+	retired = append(retired, u32Bytes(1)...)
+	retired = append(retired, messageBody...)
 	chat = append(chat, section(0x01, []byte{1, 1})...)
 	chat = append(chat, section(0x02, string16("gpt"))...)
-	chat = append(chat, section(0x06, messages)...)
+	chat = append(chat, section(0x06, retired)...)
+	chat = append(chat, section(0x03, prompt)...)
+	chat = append(chat, section(0x09, []byte{1})...)
 	command, err := DecodeCommand(chat)
 	if err != nil {
 		t.Fatalf("DecodeCommand chat returned error: %v", err)
 	}
-	if !command.Chrome.AgentChat.Visible || command.Chrome.AgentChat.ModelName != "gpt" || len(command.Chrome.AgentChat.Messages) != 1 || command.Chrome.AgentChat.Messages[0].Text != "hello" {
-		t.Fatalf("agent chat decoded incorrectly: %+v", command.Chrome.AgentChat)
+	if command.Size != len(chat) {
+		t.Fatalf("consumed = %d, want %d", command.Size, len(chat))
 	}
+	got := command.Chrome.AgentChat
+	if !got.Visible || got.Status != 1 || got.ModelName != "gpt" || got.Prompt != "fix" || got.PromptLineCount != 2 || got.PromptCursorLine != 1 || got.PromptCursorCol != 3 || got.PromptVimMode != 1 || got.PromptVisibleRows != 4 || !got.InputFocused || got.ThinkingLevel != "" || got.Pending != "" || len(got.Completion) != 0 {
+		t.Fatalf("agent chat decoded incorrectly: %+v", got)
+	}
+	if command.Chrome.Summary != "gpt" {
+		t.Fatalf("agent chat summary = %q, want %q", command.Chrome.Summary, "gpt")
+	}
+}
 
+func TestDecodeAgentTimelineChrome(t *testing.T) {
 	timelinePayload := []byte{1, 0xFF, 0xFF, 1, 3}
 	timelinePayload = append(timelinePayload, string8("apply_patch")...)
 	timelinePayload = append(timelinePayload, 0, 0, 0, 4)
 	timeline := append([]byte{generated.OPGuiEditTimeline, byte(len(timelinePayload) >> 8), byte(len(timelinePayload))}, timelinePayload...)
-	command, err = DecodeCommand(timeline)
+	command, err := DecodeCommand(timeline)
 	if err != nil {
 		t.Fatalf("DecodeCommand timeline returned error: %v", err)
 	}
 	if !command.Chrome.Timeline.Visible || len(command.Chrome.Timeline.Entries) != 1 || command.Chrome.Timeline.Entries[0].ToolName != "apply_patch" {
 		t.Fatalf("timeline decoded incorrectly: %+v", command.Chrome.Timeline)
 	}
-}
-
-func TestDecodeAgentChatStyledRunPreservesCodeFlag(t *testing.T) {
-	messageBody := append(u32Bytes(42), 0x07)
-	messageBody = append(messageBody, 0, 1) // one line
-	messageBody = append(messageBody, 0, 1) // one run
-	messageBody = append(messageBody, string16("  def hello")...)
-	messageBody = append(messageBody, 0x98, 0xBE, 0x65, 0x21, 0x24, 0x2B, 0x10)
-	messages := []byte{0xFF, 1, 0, 1, byte(len(messageBody) >> 24), byte(len(messageBody) >> 16), byte(len(messageBody) >> 8), byte(len(messageBody))}
-	messages = append(messages, messageBody...)
-	chat := []byte{generated.OPGuiAgentChat, 2}
-	chat = append(chat, section(0x01, []byte{1, 0})...)
-	chat = append(chat, section(0x06, messages)...)
-
-	command, err := DecodeCommand(chat)
-	if err != nil {
-		t.Fatalf("DecodeCommand chat returned error: %v", err)
-	}
-	if len(command.Chrome.AgentChat.Messages) != 1 {
-		t.Fatalf("decoded %d messages, want 1", len(command.Chrome.AgentChat.Messages))
-	}
-	run := command.Chrome.AgentChat.Messages[0].StyledLines[0][0]
-	if !run.Code() || run.Flags != 0x10 {
-		t.Fatalf("styled run flags = 0x%02X, want code flag", run.Flags)
-	}
-}
-
-func TestDecodeAgentChatAssistantMarkdownCodeBlock(t *testing.T) {
-	messageBody := append(u32Bytes(77), 0x0A)
-	messageBody = append(messageBody, 0, 1) // one block
-	messageBody = append(messageBody, u32Bytes(123)...)
-	messageBody = append(messageBody, 0x07, 0x01) // code block, complete
-	messageBody = append(messageBody, string16("elixir")...)
-	messageBody = append(messageBody, string16("Elixir")...)
-	messageBody = append(messageBody, string16("lib/demo.ex")...)
-	messageBody = append(messageBody, 0x01) // copy capability
-	messageBody = append(messageBody, 0, 2) // two lines
-	messageBody = append(messageBody, 0, 1) // line one, one run
-	messageBody = append(messageBody, string16("")...)
-	messageBody = append(messageBody, 0x98, 0xBE, 0x65, 0x21, 0x24, 0x2B, 0x10)
-	messageBody = append(messageBody, 0, 1) // line two, one run
-	messageBody = append(messageBody, string16("IO.puts(:hi)")...)
-	messageBody = append(messageBody, 0x98, 0xBE, 0x65, 0x21, 0x24, 0x2B, 0x10)
-
-	chat := []byte{generated.OPGuiAgentChat, 2}
-	chat = append(chat, section(0x01, []byte{1, 0})...)
-	chat = append(chat, section(0x06, agentMessages(messageBody))...)
-
-	command, err := DecodeCommand(chat)
-	if err != nil {
-		t.Fatalf("DecodeCommand chat returned error: %v", err)
-	}
-	if len(command.Chrome.AgentChat.Messages) != 1 {
-		t.Fatalf("decoded %d messages, want 1", len(command.Chrome.AgentChat.Messages))
-	}
-	msg := command.Chrome.AgentChat.Messages[0]
-	if msg.Kind != 0x0A || len(msg.MarkdownBlocks) != 1 {
-		t.Fatalf("markdown message decoded incorrectly: %+v", msg)
-	}
-	block := msg.MarkdownBlocks[0]
-	if block.Kind != 0x07 || !block.Complete() || block.Language != "elixir" || block.Label != "Elixir" || block.TargetPath != "lib/demo.ex" {
-		t.Fatalf("code block decoded incorrectly: %+v", block)
-	}
-	if len(block.Lines) != 2 || block.Lines[0][0].Text != "" || !block.Lines[1][0].Code() {
-		t.Fatalf("code block lines decoded incorrectly: %+v", block.Lines)
-	}
-}
-
-func TestDecodeAgentChatPreservesStructuredMessageDetails(t *testing.T) {
-	tool := append(u32Bytes(7), 0x04, 1, 0, 0)
-	tool = append(tool, u32Bytes(42)...)
-	tool = append(tool, string16("read_file")...)
-	tool = append(tool, string16("lib/app.ex")...)
-	tool = append(tool, u32Bytes(2)...)
-	tool = append(tool, 'o', 'k', 1)
-	tool = append(tool, 1, 0, 2)
-	tool = append(tool, string16("-old")...)
-	tool = append(tool, string16("+new")...)
-
-	approval := append(u32Bytes(8), 0x09, 0)
-	approval = append(approval, string16("edit_file")...)
-	approval = append(approval, string16("Update lib/app.ex")...)
-	approval = append(approval, string16("tc-1")...)
-	approval = append(approval, 1, 0, 1)
-	approval = append(approval, string16("+hello")...)
-
-	usage := append(u32Bytes(9), 0x06)
-	usage = append(usage, u32Bytes(1200)...)
-	usage = append(usage, u32Bytes(300)...)
-	usage = append(usage, u32Bytes(40)...)
-	usage = append(usage, u32Bytes(20)...)
-	usage = append(usage, u32Bytes(12500)...)
-
-	prompt := string16("fix it")
-	prompt = append(prompt, 2, 0, 1, 0, 4, 1, 2)
-
-	chat := []byte{generated.OPGuiAgentChat, 3}
-	chat = append(chat, section(0x01, []byte{1, 2})...)
-	chat = append(chat, section(0x03, prompt)...)
-	chat = append(chat, section(0x06, agentMessages(tool, approval, usage))...)
-	command, err := DecodeCommand(chat)
-	if err != nil {
-		t.Fatalf("DecodeCommand chat returned error: %v", err)
-	}
-	if command.Chrome.AgentChat.Prompt != "fix it" || command.Chrome.AgentChat.PromptLineCount != 2 || command.Chrome.AgentChat.PromptCursorLine != 1 || command.Chrome.AgentChat.PromptCursorCol != 4 || command.Chrome.AgentChat.PromptVimMode != 1 || command.Chrome.AgentChat.PromptVisibleRows != 2 {
-		t.Fatalf("prompt metadata decoded incorrectly: %+v", command.Chrome.AgentChat)
-	}
-	messages := command.Chrome.AgentChat.Messages
-	if len(messages) != 3 {
-		t.Fatalf("message count = %d, want 3: %+v", len(messages), messages)
-	}
-	if got := messages[0]; got.Name != "read_file" || got.Summary != "lib/app.ex" || got.Result != "ok" || got.DurationMS != 42 || got.AutoApprovedScope != 1 || got.PreviewKind != 1 || len(got.PreviewLines) != 2 || got.PreviewLines[0] != "-old" || got.PreviewLines[1] != "+new" {
-		t.Fatalf("tool message decoded incorrectly: %+v", got)
-	}
-	if got := messages[1]; got.Name != "edit_file" || got.PreviewKind != 1 || len(got.PreviewLines) != 1 || got.PreviewLines[0] != "+hello" {
-		t.Fatalf("approval message decoded incorrectly: %+v", got)
-	}
-	if got := messages[2].Usage; got.Input != 1200 || got.Output != 300 || got.CacheRead != 40 || got.CacheWrite != 20 || got.CostMicros != 12500 {
-		t.Fatalf("usage decoded incorrectly: %+v", got)
-	}
-}
-
-func agentMessages(messages ...[]byte) []byte {
-	out := []byte{0xFF, 1, byte(len(messages) >> 8), byte(len(messages))}
-	for _, message := range messages {
-		out = append(out, u32Bytes(uint32(len(message)))...)
-		out = append(out, message...)
-	}
-	return out
 }
 
 func u32Bytes(value uint32) []byte {

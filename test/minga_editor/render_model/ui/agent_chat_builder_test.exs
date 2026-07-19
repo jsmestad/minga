@@ -23,7 +23,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
-  test "build/1 sends cached display message pairs to GUI agent chat" do
+  test "build/1 sends cached display message pairs to resident agent transcript" do
     session = fake_session_pid()
     old_message = {:assistant, "old pinned"}
     hidden_message = {:user, "hidden"}
@@ -44,7 +44,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert model.visible?
 
-    summaries = Enum.map(model.messages, &message_summary/1)
+    summaries = Enum.map(model.resident_messages, &message_summary/1)
 
     assert [
              {101, :assistant, "old pinned"},
@@ -68,7 +68,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     refute unfocused.input_focused
   end
 
-  test "build/1 emits semantic assistant markdown blocks when cache has them" do
+  test "build/1 emits semantic assistant markdown blocks in resident transcript when cache has them" do
     session = fake_session_pid()
 
     blocks = [
@@ -89,7 +89,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel, theme: Theme.Fallback.theme())
       |> AgentChatBuilder.build()
 
-    assert [{1, {:assistant_markdown, ^blocks}} | _] = model.messages
+    assert [{1, {:assistant_markdown, ^blocks}} | _] = model.resident_messages
   end
 
   test "build/1 ignores stale styled cache when theme syntax changes" do
@@ -107,10 +107,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel, theme: new_theme)
       |> AgentChatBuilder.build()
 
-    assert {1, {:assistant, "cached answer"}} = hd(model.messages)
+    assert {1, {:assistant, "cached answer"}} = hd(model.resident_messages)
   end
 
-  test "build/1 emits only messages through the manual semantic scroll viewport" do
+  test "build/1 keeps the full transcript resident for local frontend scrolling (#2654)" do
     session = fake_session_pid()
 
     panel =
@@ -128,38 +128,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel)
       |> AgentChatBuilder.build()
 
-    assert Enum.map(model.messages, &message_summary/1) == [
-             {1, :assistant, "first"},
-             {2, :assistant, "second"}
-           ]
-  end
-
-  test "build/1 keeps the full transcript resident even when messages are windowed (#2654)" do
-    session = fake_session_pid()
-
-    panel =
-      synced_panel(
-        [
-          {:assistant, "first"},
-          {:assistant, "second"},
-          {:assistant, "third"}
-        ],
-        scroll: Scroll.new(2) |> Scroll.update_metrics(5, 1),
-        styled_messages: [nil, nil, nil]
-      )
-
-    model =
-      context(session, panel)
-      |> AgentChatBuilder.build()
-
-    # The legacy 0x78 `messages` field stays windowed (drops "third")...
-    assert Enum.map(model.messages, &message_summary/1) == [
-             {1, :assistant, "first"},
-             {2, :assistant, "second"}
-           ]
-
-    # ...while the resident 0x86 transcript carries the whole conversation,
-    # including the message the scroll viewport windowed out.
     assert [
              {1, :assistant, "first"},
              {2, :assistant, "second"},
@@ -227,7 +195,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       |> AgentChatBuilder.build()
 
     assert [{_, :system, text}, {_, :system, "Agent UI registry online"}] =
-             Enum.map(model.messages, &message_summary/1)
+             Enum.map(model.resident_messages, &message_summary/1)
 
     assert text =~ "Connect a provider"
     assert text =~ "/auth anthropic <key>"
@@ -244,7 +212,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       |> AgentChatBuilder.build()
 
     assert [{_, :system, text}, {_, :system, "Agent UI registry online"}] =
-             Enum.map(model.messages, &message_summary/1)
+             Enum.map(model.resident_messages, &message_summary/1)
 
     assert text =~ "Pick a model"
     assert text =~ "/model"
@@ -261,7 +229,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       |> AgentChatBuilder.build()
 
     assert [{_, :system, "Session started"}, {_, :system, "Agent UI registry online"}] =
-             Enum.map(model.messages, &message_summary/1)
+             Enum.map(model.resident_messages, &message_summary/1)
   end
 
   test "build/1 resolves tool calls with clean summaries and inline diff previews" do
@@ -280,7 +248,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel)
       |> AgentChatBuilder.build()
 
-    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert {1, {:tool_call, view}} = List.first(model.resident_messages)
     assert view.name == "edit_file"
     assert view.summary == "lib/app.ex"
     assert view.preview_kind == :diff
@@ -310,7 +278,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel)
       |> AgentChatBuilder.build()
 
-    views = for {_id, {:tool_call, view}} <- model.messages, do: view
+    views = for {_id, {:tool_call, view}} <- model.resident_messages, do: view
 
     assert Enum.map(views, & &1.summary) ==
              Enum.map(read_only_calls, fn {_name, _args, summary} -> summary end)
@@ -333,7 +301,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel)
       |> AgentChatBuilder.build()
 
-    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert {1, {:tool_call, view}} = List.first(model.resident_messages)
     assert view.name == "write_file"
     assert view.summary == path
     assert view.preview_kind == :diff
@@ -356,7 +324,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       context(session, panel)
       |> AgentChatBuilder.build()
 
-    assert {1, {:tool_call, view}} = List.first(model.messages)
+    assert {1, {:tool_call, view}} = List.first(model.resident_messages)
     assert view.name == "write_file"
     assert view.summary == path
     assert view.preview_kind == :target

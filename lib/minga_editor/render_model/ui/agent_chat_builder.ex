@@ -13,7 +13,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.Theme
   alias Minga.Buffer
-  alias Minga.Editing.Scroll
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
@@ -56,22 +55,12 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
     {full_pairs, full_styled_cache} = full_messages_for_model(panel, session, ctx.theme)
-
-    {messages_with_ids, styled_cache} =
-      visible_message_slice(panel, full_pairs, full_styled_cache)
-
     pending_approval = TraditionalState.agent(ctx.shell_state).pending_approval
-
-    gui_messages =
-      messages_with_ids
-      |> build_gui_messages(styled_cache, pending_approval)
-      |> maybe_append_transcript_enrichments(panel, SemanticUIRegistry.default_table())
 
     # Resident transcript (#2654): the display_start_index-scoped conversation for
     # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
     # builder applies the configured byte-cap suffix bound and records whether
-    # older complete messages were omitted. `messages` above stays windowed for
-    # the legacy gui_agent_chat (0x78) section during the dual-emit transition.
+    # older complete messages were omitted.
     {resident_messages, resident_truncated?} =
       full_pairs
       |> build_gui_messages(full_styled_cache, pending_approval)
@@ -86,8 +75,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       else
         []
       end
-
-    log_agent_chat_message_stats(gui_messages)
 
     %AgentChat{
       visible?: true,
@@ -104,7 +91,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       help_visible?: help_visible,
       help_groups: help_groups,
       input_focused: panel.input_focused,
-      messages: gui_messages,
       resident_messages: resident_messages,
       resident_truncated?: resident_truncated?,
       transcript_epoch: transcript_epoch(session, panel)
@@ -132,23 +118,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @spec display_model_name(String.t()) :: String.t()
   defp display_model_name(model) when model in ["", "unknown"], do: "No model configured"
   defp display_model_name(model), do: model
-
-  @spec log_agent_chat_message_stats([{pos_integer(), term()}]) :: :ok
-  defp log_agent_chat_message_stats(messages) do
-    {styled, plain} =
-      Enum.reduce(messages, {0, 0}, fn
-        {_, {:styled_assistant, _}}, {s, p} -> {s + 1, p}
-        {_, {:assistant_markdown, _}}, {s, p} -> {s + 1, p}
-        {_, {:styled_tool_call, _, _}}, {s, p} -> {s + 1, p}
-        {_, {:assistant, _}}, {s, p} -> {s, p + 1}
-        _, acc -> acc
-      end)
-
-    Minga.Log.debug(
-      :render,
-      "[gui] sending agent chat: #{length(messages)} msgs (#{styled} styled, #{plain} plain assistant)"
-    )
-  end
 
   @spec build_prompt_completion(MingaEditor.Agent.UIState.Panel.t()) :: PromptCompletion.t() | nil
   defp build_prompt_completion(%{mention_completion: %{candidates: candidates} = comp})
@@ -217,58 +186,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     AgentSession.messages_with_ids(session)
   catch
     :exit, _ -> []
-  end
-
-  @spec visible_message_slice(
-          MingaEditor.Agent.UIState.Panel.t(),
-          [{pos_integer(), term()}],
-          [term()] | nil
-        ) ::
-          {[{pos_integer(), term()}], [term()] | nil}
-  defp visible_message_slice(%{scroll: %Scroll{pinned: true}}, pairs, styled_cache),
-    do: {pairs, styled_cache}
-
-  defp visible_message_slice(%{cached_line_index: []}, pairs, styled_cache),
-    do: {pairs, styled_cache}
-
-  defp visible_message_slice(
-         %{cached_line_index: line_index, scroll: %Scroll{} = scroll},
-         pairs,
-         styled_cache
-       ) do
-    total_lines = length(line_index)
-    visible_height = scroll.metrics.visible_height
-    offset = Scroll.resolve(scroll, total_lines, visible_height)
-    target_line = min(offset + visible_height - 1, total_lines - 1)
-
-    {target_message_index, _line_type} =
-      Enum.at(line_index, target_line, {length(pairs) - 1, :text})
-
-    count = min(target_message_index + 1, length(pairs))
-
-    {Enum.take(pairs, count), take_styled_cache(styled_cache, count)}
-  end
-
-  @spec take_styled_cache([term()] | nil, non_neg_integer()) :: [term()] | nil
-  defp take_styled_cache(nil, _count), do: nil
-
-  defp take_styled_cache(styled_cache, count) when is_list(styled_cache),
-    do: Enum.take(styled_cache, count)
-
-  @spec maybe_append_transcript_enrichments(
-          [{pos_integer(), term()}],
-          MingaEditor.Agent.UIState.Panel.t(),
-          SemanticUIRegistry.table()
-        ) :: [{pos_integer(), term()}]
-  defp maybe_append_transcript_enrichments(
-         messages,
-         %{scroll: %Scroll{pinned: false}},
-         _agent_ui_registry
-       ),
-       do: messages
-
-  defp maybe_append_transcript_enrichments(messages, _panel, agent_ui_registry) do
-    messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
   end
 
   # The resident transcript is never windowed, so its enrichments always sit at

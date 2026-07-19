@@ -132,11 +132,9 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 			if len(section) >= 1 {
 				chat.InputFocused = section[0] != 0
 			}
-		case 0x06:
-			chat.Messages = decodeAgentMessages(section)
 		}
 	}
-	return chat, fmt.Sprintf("%s %d messages", chat.ModelName, len(chat.Messages)), size
+	return chat, chat.ModelName, size
 }
 
 func decodeAgentPrompt(chat AgentChat, section []byte) AgentChat {
@@ -192,39 +190,9 @@ func decodeAgentCompletion(section []byte) []string {
 	return items
 }
 
-func decodeAgentMessages(section []byte) []AgentChatMessage {
-	if len(section) < 4 || section[0] != 0xFF {
-		return nil
-	}
-	count := int(u16(section, 2))
-	offset := 4
-	messages := make([]AgentChatMessage, 0, count)
-	for i := 0; i < count && len(section) >= offset+4; i++ {
-		size := int(u32(section, offset))
-		offset += 4
-		if len(section) < offset+size {
-			break
-		}
-		if msg, ok := decodeAgentMessage(section[offset : offset+size]); ok {
-			messages = append(messages, msg)
-		}
-		offset += size
-	}
-	return messages
-}
-
-func decodeAgentMessage(body []byte) (AgentChatMessage, bool) {
-	if len(body) < 5 {
-		return AgentChatMessage{}, false
-	}
-	return decodeAgentMessageBody(u32(body, 0), body[4:])
-}
-
 // decodeAgentMessageBody decodes a message from its id and its kind-first body
-// (the shared per-message body codec, <<kind::8, ...>>). It is the seam both
-// transports decode through: the 0x78 messages section concatenates id + body
-// (decodeAgentMessage splits them here), while the 0x86 resident transcript
-// frames the id separately and hands the raw body straight in.
+// (the shared per-message body codec, <<kind::8, ...>>). The 0x86 resident
+// transcript frames the id separately and hands the raw body straight in.
 func decodeAgentMessageBody(id uint32, body []byte) (AgentChatMessage, bool) {
 	if len(body) < 1 {
 		return AgentChatMessage{}, false
@@ -238,66 +206,71 @@ func decodeAgentMessageBody(id uint32, body []byte) (AgentChatMessage, bool) {
 		return msg, ok
 	case 0x03:
 		if len(body) < offset+5 {
-			return msg, true
+			return msg, false
 		}
 		msg.Collapsed = body[offset] != 0
 		size := int(u32(body, offset+1))
 		offset += 5
-		if len(body) >= offset+size {
-			msg.Text = string(body[offset : offset+size])
+		if len(body) != offset+size {
+			return msg, false
 		}
+		msg.Text = string(body[offset : offset+size])
 	case 0x04:
-		msg = decodeToolCallMessage(msg, body, offset, false)
+		return decodeToolCallMessage(msg, body, offset, false)
 	case 0x05:
 		if len(body) < offset+5 {
-			return msg, true
+			return msg, false
 		}
 		msg.Status = body[offset]
 		size := int(u32(body, offset+1))
 		offset += 5
-		if len(body) >= offset+size {
-			msg.Text = string(body[offset : offset+size])
+		if len(body) != offset+size {
+			return msg, false
 		}
+		msg.Text = string(body[offset : offset+size])
 	case 0x06:
-		if len(body) >= offset+20 {
-			msg.Usage = AgentUsage{Input: u32(body, offset), Output: u32(body, offset+4), CacheRead: u32(body, offset+8), CacheWrite: u32(body, offset+12), CostMicros: u32(body, offset+16)}
-			msg.Text = fmt.Sprintf("usage in:%d out:%d", msg.Usage.Input, msg.Usage.Output)
+		if len(body) != offset+20 {
+			return msg, false
 		}
+		msg.Usage = AgentUsage{Input: u32(body, offset), Output: u32(body, offset+4), CacheRead: u32(body, offset+8), CacheWrite: u32(body, offset+12), CostMicros: u32(body, offset+16)}
+		msg.Text = fmt.Sprintf("usage in:%d out:%d", msg.Usage.Input, msg.Usage.Output)
 	case 0x07:
 		lines, next, ok := decodeStyledLines(body, offset)
+		if !ok || next != len(body) {
+			return msg, false
+		}
 		msg.StyledLines = lines
 		msg.Text = plainStyledLines(lines)
-		_ = next
-		return msg, ok
 	case 0x08:
-		msg = decodeToolCallMessage(msg, body, offset, true)
+		return decodeToolCallMessage(msg, body, offset, true)
 	case 0x09:
-		msg = decodeApprovalMessage(msg, body, offset)
+		return decodeApprovalMessage(msg, body, offset)
 	case 0x0A:
 		blocks, next, ok := decodeMarkdownBlocks(body, offset)
+		if !ok || next != len(body) {
+			return msg, false
+		}
 		msg.MarkdownBlocks = blocks
 		msg.Text = plainMarkdownBlocks(blocks)
-		_ = next
-		return msg, ok
 	}
 	return msg, true
 }
 
 func decodeAgentTextBody(body []byte, offset int) (string, bool) {
 	if len(body) < offset+4 {
-		return "", true
+		return "", false
 	}
 	size := int(u32(body, offset))
 	offset += 4
-	if len(body) < offset+size {
-		return "", true
+	if len(body) != offset+size {
+		return "", false
 	}
 	return string(body[offset : offset+size]), true
 }
 
-func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled bool) AgentChatMessage {
+func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled bool) (AgentChatMessage, bool) {
 	if len(body) < offset+7 {
-		return msg
+		return msg, false
 	}
 	msg.Status = body[offset]
 	msg.IsError = body[offset+1] != 0
@@ -307,53 +280,56 @@ func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled
 
 	name, next, ok := readString16(body, offset)
 	if !ok {
-		return msg
+		return msg, false
 	}
 	msg.Name = name
 	summary, next, ok := readString16(body, next)
 	if !ok {
-		msg.Text = name
-		return msg
+		return msg, false
 	}
 	msg.Summary = summary
 	msg.Text = strings.TrimSpace(name + " " + summary)
 
 	if styled {
-		lines, next, ok := decodeStyledLines(body, next)
-		if ok {
-			msg.StyledLines = lines
-			if text := plainStyledLines(lines); text != "" {
-				msg.Result = text
-			}
+		lines, afterLines, ok := decodeStyledLines(body, next)
+		if !ok {
+			return msg, false
 		}
+		msg.StyledLines = lines
+		if text := plainStyledLines(lines); text != "" {
+			msg.Result = text
+		}
+		next = afterLines
 		if len(body) > next {
 			msg.AutoApprovedScope = body[next]
 			next++
 		}
-		msg = decodeToolPreview(msg, body, next)
-		return msg
+		return decodeToolPreview(msg, body, next)
 	}
 
 	if len(body) < next+4 {
-		return msg
+		return msg, false
 	}
 	resultLen := int(u32(body, next))
 	next += 4
-	if len(body) >= next+resultLen {
-		msg.Result = string(body[next : next+resultLen])
-		next += resultLen
+	if len(body) < next+resultLen {
+		return msg, false
 	}
+	msg.Result = string(body[next : next+resultLen])
+	next += resultLen
 	if len(body) > next {
 		msg.AutoApprovedScope = body[next]
 		next++
 	}
-	msg = decodeToolPreview(msg, body, next)
-	return msg
+	return decodeToolPreview(msg, body, next)
 }
 
-func decodeToolPreview(msg AgentChatMessage, body []byte, offset int) AgentChatMessage {
+func decodeToolPreview(msg AgentChatMessage, body []byte, offset int) (AgentChatMessage, bool) {
+	if len(body) == offset {
+		return msg, true
+	}
 	if len(body) < offset+3 {
-		return msg
+		return msg, false
 	}
 	msg.PreviewKind = body[offset]
 	lineCount := int(u16(body, offset+1))
@@ -362,54 +338,40 @@ func decodeToolPreview(msg AgentChatMessage, body []byte, offset int) AgentChatM
 	for i := 0; i < lineCount; i++ {
 		line, next, ok := readString16(body, offset)
 		if !ok {
-			break
+			return msg, false
 		}
 		msg.PreviewLines = append(msg.PreviewLines, line)
 		offset = next
 	}
-	return msg
+	return msg, offset == len(body)
 }
 
-func decodeApprovalMessage(msg AgentChatMessage, body []byte, offset int) AgentChatMessage {
+func decodeApprovalMessage(msg AgentChatMessage, body []byte, offset int) (AgentChatMessage, bool) {
 	if len(body) < offset+1 {
-		return msg
+		return msg, false
 	}
 	msg.Status = body[offset]
 	offset++
 
 	name, next, ok := readString16(body, offset)
 	if !ok {
-		return msg
+		return msg, false
 	}
 	msg.Name = name
 	summary, next, ok := readString16(body, next)
 	if !ok {
-		msg.Text = name
-		return msg
+		return msg, false
 	}
 	msg.Summary = summary
 	toolCallID, next, ok := readString16(body, next)
-	if ok && toolCallID != "" {
+	if !ok {
+		return msg, false
+	}
+	if toolCallID != "" {
 		msg.Result = toolCallID
 	}
-	if len(body) < next+3 {
-		msg.Text = strings.TrimSpace(name + " " + summary)
-		return msg
-	}
-	msg.PreviewKind = body[next]
-	lineCount := int(u16(body, next+1))
-	next += 3
-	msg.PreviewLines = make([]string, 0, lineCount)
-	for i := 0; i < lineCount; i++ {
-		line, after, ok := readString16(body, next)
-		if !ok {
-			break
-		}
-		msg.PreviewLines = append(msg.PreviewLines, line)
-		next = after
-	}
 	msg.Text = strings.TrimSpace(name + " " + summary)
-	return msg
+	return decodeToolPreview(msg, body, next)
 }
 
 func decodeStyledLines(body []byte, offset int) ([]AgentStyledLine, int, bool) {
@@ -419,7 +381,10 @@ func decodeStyledLines(body []byte, offset int) ([]AgentStyledLine, int, bool) {
 	count := int(u16(body, offset))
 	offset += 2
 	lines := make([]AgentStyledLine, 0, count)
-	for i := 0; i < count && len(body) >= offset+2; i++ {
+	for i := 0; i < count; i++ {
+		if len(body) < offset+2 {
+			return lines, offset, false
+		}
 		runCount := int(u16(body, offset))
 		offset += 2
 		line := make(AgentStyledLine, 0, runCount)

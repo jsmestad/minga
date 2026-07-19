@@ -4,13 +4,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
   alias MingaEditor.Frontend.Protocol
 
   defp gui_agent_chat_section!(sections, target_id) do
-    payload = do_gui_agent_chat_section!(sections, target_id)
-
-    if target_id == 0x06 do
-      normalize_messages_payload(payload)
-    else
-      payload
-    end
+    do_gui_agent_chat_section!(sections, target_id)
   end
 
   defp do_gui_agent_chat_section!(
@@ -24,24 +18,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
          target_id
        ),
        do: do_gui_agent_chat_section!(rest, target_id)
-
-  defp normalize_messages_payload(<<0xFF::8, 1::8, count::16, frames::binary>>) do
-    messages = unwrap_message_frames(frames, count, [])
-    IO.iodata_to_binary([<<count::16>> | messages])
-  end
-
-  defp normalize_messages_payload(payload), do: payload
-
-  defp unwrap_message_frames(<<>>, 0, acc), do: Enum.reverse(acc)
-
-  defp unwrap_message_frames(
-         <<message_len::32, message::binary-size(message_len), rest::binary>>,
-         remaining,
-         acc
-       )
-       when remaining > 0 do
-    unwrap_message_frames(rest, remaining - 1, [message | acc])
-  end
 
   # Encodes an agent chat through the core semantic encoder, accepting the legacy
   # data-map shape these tests were written against.
@@ -61,8 +37,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
             status: Map.get(d, :status, :idle),
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
-            prompt: Map.get(d, :prompt, ""),
-            messages: Map.get(d, :messages, [])
+            prompt: Map.get(d, :prompt, "")
           }
       end
 
@@ -1319,7 +1294,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     test "encodes gui_agent_chat pending section as empty compatibility section" do
       data = %{
         visible: true,
-        messages: [{:user, "hello"}],
         status: :thinking,
         model: "claude",
         prompt: "test",
@@ -1328,7 +1302,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 9, sections::binary>> = encoded
+      assert <<0x78, 8, sections::binary>> = encoded
       assert gui_agent_chat_section!(sections, 0x04) == <<0::8>>
       assert :binary.match(encoded, "shell") == :nomatch
       assert :binary.match(encoded, "ls -la") == :nomatch
@@ -1337,7 +1311,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     test "encodes gui_agent_chat without pending approval" do
       data = %{
         visible: true,
-        messages: [{:user, "hi"}],
         status: :idle,
         model: "claude",
         prompt: "",
@@ -1346,7 +1319,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 9, _sections::binary>> = encoded
+      assert <<0x78, 8, _sections::binary>> = encoded
       # Verify model is present
       assert :binary.match(encoded, "claude") != :nomatch
     end
@@ -1354,7 +1327,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     test "encodes gui_agent_chat thinking level section" do
       data = %{
         visible: true,
-        messages: [],
         status: :idle,
         model: "claude",
         thinking_level: "high",
@@ -1363,7 +1335,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       }
 
       encoded = encode_gui_agent_chat(data)
-      assert <<0x78, 9, sections::binary>> = encoded
+      assert <<0x78, 8, sections::binary>> = encoded
       assert <<4::16, "high">> = gui_agent_chat_section!(sections, 0x08)
     end
 
@@ -1371,72 +1343,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       encoded = encode_gui_agent_chat(%{visible: false})
       # gui_agent_chat hidden
       assert <<0x78, 0::8>> = encoded
-    end
-
-    test "encodes inline approval tool call message" do
-      approval = %Minga.RenderModel.UI.AgentChat.ApprovalView{
-        name: "write_file",
-        tool_call_id: "tc_1",
-        summary: "demo.ex",
-        preview_kind: :target,
-        preview_lines: ["file: demo.ex", "1 edit(s)"]
-      }
-
-      data = %{
-        visible: true,
-        messages: [{:approval_tool_call, approval}],
-        status: :thinking,
-        model: "claude",
-        prompt: "",
-        pending_approval: nil
-      }
-
-      encoded = encode_gui_agent_chat(data)
-
-      assert <<0x78, 9, sections::binary>> = encoded
-      messages_payload = gui_agent_chat_section!(sections, 0x06)
-
-      assert <<1::16, 0::32, 0x09::8, 0::8, name_len::16, rest::binary>> = messages_payload
-      assert <<name::binary-size(^name_len), summary_len::16, rest::binary>> = rest
-      assert <<summary::binary-size(^summary_len), id_len::16, rest::binary>> = rest
-
-      assert <<tool_call_id::binary-size(^id_len), 3::8, 2::16, line1_len::16, rest::binary>> =
-               rest
-
-      assert <<line1::binary-size(^line1_len), line2_len::16, rest::binary>> = rest
-      assert <<line2::binary-size(^line2_len)>> = rest
-      assert name == "write_file"
-      assert summary == "demo.ex"
-      assert tool_call_id == "tc_1"
-      assert line1 == "file: demo.ex"
-      assert line2 == "1 edit(s)"
-    end
-
-    test "encodes styled_assistant message with styled runs" do
-      styled_lines = [
-        [{"def ", 0xFF0000, 0, 1}, {"hello", 0xBBC2CF, 0, 0}],
-        [{"  :world", 0x98BE65, 0, 0}]
-      ]
-
-      data = %{
-        visible: true,
-        messages: [{:styled_assistant, styled_lines}],
-        status: :idle,
-        model: "claude",
-        prompt: "",
-        pending_approval: nil
-      }
-
-      encoded = encode_gui_agent_chat(data)
-      # Sectioned: opcode + section_count
-      assert <<0x78, 9, _sections::binary>> = encoded
-
-      # Verify styled_assistant message type byte (0x07) appears in the binary
-      assert :binary.match(encoded, <<0x07>>) != :nomatch
-      # Verify "def " text appears
-      assert :binary.match(encoded, "def ") != :nomatch
-      assert :binary.match(encoded, "hello") != :nomatch
-      assert :binary.match(encoded, ":world") != :nomatch
     end
 
     test "nil colors are skipped" do

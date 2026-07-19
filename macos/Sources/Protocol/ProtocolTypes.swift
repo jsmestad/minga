@@ -951,7 +951,7 @@ public enum Wire {
         }
     }
 
-    /// A chat message from gui_agent_chat, with a stable BEAM-assigned ID.
+    /// A chat message from gui_agent_transcript, with a stable BEAM-assigned ID.
     public struct ChatMessage: Sendable {
         /// Stable uint32 ID assigned by the BEAM. Persists across streaming updates.
         public let beamId: UInt32

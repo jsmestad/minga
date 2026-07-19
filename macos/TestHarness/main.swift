@@ -204,8 +204,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
-    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
-        let msgArray = messages.map { chatMessageToJSON($0) }
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups):
         let helpGroupArray = helpGroups.map { group -> [String: Any] in
             let bindings = group.bindings.map { ["key": $0.key, "description": $0.description] }
             return ["title": group.title, "bindings": bindings]
@@ -226,8 +225,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "pending_tool_name": pendingToolName ?? "",
             "pending_tool_summary": pendingToolSummary,
             "help_visible": helpVisible,
-            "help_groups": helpGroupArray,
-            "messages": msgArray
+            "help_groups": helpGroupArray
         ]
         _ = result // suppress unused warning
         return result
@@ -372,81 +370,6 @@ func statusBarSegmentsToJSON(_ segments: [Wire.StatusBarSegment]) -> [[String: A
     }
 }
 
-func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
-    var result: [String: Any] = ["beam_id": Int(msg.beamId)]
-    switch msg.content {
-    case .user(let text):
-        result["kind"] = "user"; result["text"] = text
-    case .assistant(let text):
-        result["kind"] = "assistant"; result["text"] = text
-    case .styledAssistant(let lines):
-        result["kind"] = "styled_assistant"; result["lines"] = styledLinesToJSON(lines)
-    case .assistantMarkdown(let blocks):
-        result["kind"] = "assistant_markdown"
-        result["blocks"] = blocks.map { block -> [String: Any] in
-            return [
-                "id": Int(block.id),
-                "kind": Int(block.kind.rawValue),
-                "flags": Int(block.flags),
-                "lines": styledLinesToJSON(block.lines),
-                "level": Int(block.level),
-                "indent": Int(block.indent),
-                "ordered": block.ordered,
-                "ordinal": Int(block.ordinal),
-                "height": Int(block.height),
-                "language": block.language,
-                "label": block.label,
-                "target_path": block.targetPath,
-                "capability_flags": Int(block.capabilityFlags),
-                "is_complete": block.isComplete
-            ]
-        }
-    case .thinking(let text, let collapsed):
-        result["kind"] = "thinking"; result["text"] = text; result["collapsed"] = collapsed
-    case .toolCall(let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let durationMs, let resultStr, let previewKind, let previewLines):
-        result["kind"] = "tool_call"; result["name"] = name; result["summary"] = summary
-        result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
-        result["auto_approved_scope"] = Int(autoApprovedScope)
-        result["duration_ms"] = Int(durationMs); result["result"] = resultStr
-        result["preview_kind"] = Int(previewKind); result["preview_lines"] = previewLines
-    case .styledToolCall(let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let durationMs, let resultLines, let previewKind, let previewLines):
-        let linesJSON = styledLinesToJSON(resultLines)
-        result["kind"] = "styled_tool_call"; result["name"] = name; result["summary"] = summary
-        result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
-        result["auto_approved_scope"] = Int(autoApprovedScope)
-        result["duration_ms"] = Int(durationMs); result["result_lines"] = linesJSON
-        result["preview_kind"] = Int(previewKind); result["preview_lines"] = previewLines
-    case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
-        result["kind"] = "approval_tool_call"
-        result["name"] = name
-        result["summary"] = summary
-        result["tool_call_id"] = toolCallId
-        result["preview_kind"] = Int(previewKind)
-        result["preview_lines"] = previewLines
-    case .system(let text, let isError):
-        result["kind"] = "system"; result["text"] = text; result["is_error"] = isError
-    case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros):
-        result["kind"] = "usage"; result["input"] = Int(input); result["output"] = Int(output)
-        result["cache_read"] = Int(cacheRead); result["cache_write"] = Int(cacheWrite)
-        result["cost_micros"] = Int(costMicros)
-    }
-    return result
-}
-
-func styledLinesToJSON(_ lines: [[Wire.StyledTextRun]]) -> [[Any]] {
-    return lines.map { runs in
-        runs.map { run -> [String: Any] in
-            return [
-                "text": run.text,
-                "fg": [Int(run.fgR), Int(run.fgG), Int(run.fgB)],
-                "bg": [Int(run.bgR), Int(run.bgG), Int(run.bgB)],
-                "bold": run.bold,
-                "italic": run.italic,
-                "underline": run.underline
-            ]
-        }
-    }
-}
 
 // MARK: - Main loop
 

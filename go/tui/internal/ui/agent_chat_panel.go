@@ -123,7 +123,7 @@ func (m Model) insetAgentLine(line string, width int) string {
 
 func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
 	limit = max(limit, 1)
-	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(m.agentTranscriptMessages(chat)) == 0
+	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(m.agentTranscriptMessages()) == 0
 	lines := []string{m.renderAgentHeader(chat, width)}
 
 	if agentDetailsVisible(width) && limit > 5 {
@@ -166,7 +166,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 		statusHeight = 1
 	}
 	contentBudget := max(transcriptBudget-statusHeight, 0)
-	messageCount := len(m.agentTranscriptMessages(chat))
+	messageCount := len(m.agentTranscriptMessages())
 	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
 	if chat.Pending != "" && len(lines) < contentBudget {
 		lines = append(lines, m.renderAgentNotice("◆ approval", chat.Pending, width))
@@ -176,7 +176,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 		lines = append(lines, m.renderAgentTranscriptHeader(width))
 	}
 
-	messageLines := m.renderAgentResidentTranscript(chat, max(contentBudget-len(lines), 0), width)
+	messageLines := m.renderAgentResidentTranscript(max(contentBudget-len(lines), 0), width)
 	lines = append(lines, messageLines...)
 
 	if empty && len(lines) < contentBudget {
@@ -217,7 +217,7 @@ func (m Model) renderAgentTranscriptHeader(width int) string {
 
 func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
 	p := m.palette()
-	messageCount := len(m.agentTranscriptMessages(chat))
+	messageCount := len(m.agentTranscriptMessages())
 	label := "messages"
 	if messageCount == 1 {
 		label = "message"
@@ -319,7 +319,7 @@ func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, ri
 }
 
 func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget int) []string {
-	messages := m.agentTranscriptMessages(chat)
+	messages := m.agentTranscriptMessages()
 	provider, model := splitAgentModelName(chat.ModelName)
 	lines := []string{m.renderAgentDetailFrame("top", "◇ Session", width)}
 	lines = append(lines, m.renderAgentDetailRow("Provider", nonEmpty(provider, "unknown"), width))
@@ -521,14 +521,12 @@ func (m Model) renderAgentNotice(label string, text string, width int) string {
 }
 
 // agentTranscriptMessages is the transcript rendering source: the resident 0x86
-// store (#2654). It falls back to the 0x78 chrome messages only when the store
-// is empty (a BEAM that has not sent a transcript frame yet), so a transitional
-// stream still renders.
-func (m Model) agentTranscriptMessages(chat protocol.AgentChat) []protocol.AgentChatMessage {
+// store (#2654).
+func (m Model) agentTranscriptMessages() []protocol.AgentChatMessage {
 	if m.transcript != nil && len(m.transcript.messages) > 0 {
 		return m.transcript.messages
 	}
-	return chat.Messages
+	return nil
 }
 
 // renderAgentResidentTranscript renders the visible transcript window from the
@@ -536,8 +534,8 @@ func (m Model) agentTranscriptMessages(chat protocol.AgentChat) []protocol.Agent
 // follows the bottom; unpinned holds a top-anchored offset so a streaming append
 // does not move the reading position. It mutates the shared *transcript pointer
 // (clamp + pin edge), which persists through the value-receiver render chain.
-func (m Model) renderAgentResidentTranscript(chat protocol.AgentChat, budget int, width int) []string {
-	messages := m.agentTranscriptMessages(chat)
+func (m Model) renderAgentResidentTranscript(budget int, width int) []string {
+	messages := m.agentTranscriptMessages()
 	t := m.transcript
 	if t == nil {
 		return m.agentTranscriptTail(messages, budget, width)

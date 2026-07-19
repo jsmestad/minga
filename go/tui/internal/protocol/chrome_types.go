@@ -451,7 +451,6 @@ type AgentChat struct {
 	// The resident transcript scroll (#2654) gates j/k on this so a scroll key is
 	// not mistaken for composer cursor motion. Absent section leaves it false.
 	InputFocused bool
-	Messages     []AgentChatMessage
 	Pending      string
 	Completion   []string
 }

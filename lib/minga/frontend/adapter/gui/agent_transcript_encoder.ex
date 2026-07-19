@@ -3,14 +3,14 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   Pure GUI adapter encoder for the resident agent-chat transcript stream
   (`gui_agent_transcript`, 0x86).
 
-  Carries the resident transcript so a frontend can scroll the session from local
-  data without a BEAM round-trip (#2654), decoupled from the small
-  `gui_agent_chat` (0x78) chrome model whose u16 sectioned frame caps its legacy
-  messages section at about 65 KB. The render model owns resident selection. This
-  adapter encodes its `resident_messages` exactly and never selects a suffix,
-  marks content truncated, or drops entries. Reuses the shared per-message body
-  codec (`Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`) so a valid message
-  encodes byte-identically on both transports.
+  Owns the `gui_agent_transcript` (0x86) resident framing so a frontend can
+  scroll the session from local data without a BEAM round-trip (#2654),
+  decoupled from the small `gui_agent_chat` (0x78) chrome model owned by
+  `Minga.Frontend.Adapter.GUI.AgentChatEncoder`. The render model owns resident
+  selection. This adapter encodes its `resident_messages` exactly and never
+  selects a suffix, marks content truncated, or drops entries. It uses
+  `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec` for the shared per-message
+  bodies.
 
   Adopts the #2652 resident-store lifecycle: a full store replace only on genuine
   structural change (`transcript_epoch` flip or a non-prefix divergence such as

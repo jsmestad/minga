@@ -773,23 +773,23 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.pickerState.markedCount == 0)
     }
 
-    @Test("guiAgentChat updates chrome but ignores its 0x78 messages section")
+    @Test("guiAgentChat updates chrome and leaves resident messages unchanged")
     @MainActor func guiAgentChatVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
-        // The 0x78 messages section is intentionally ignored (#2654 slice 2): the
-        // resident transcript is sourced from the 0x86 stream, not from here.
-        let messages: [Wire.ChatMessage] = [Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))]
+        gui.agentChatState.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))
+        ])
         dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
                                            thinkingLevel: "medium", prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 1, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
-                                           pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: messages))
+                                           pendingToolSummary: "", helpVisible: false, helpGroups: []))
 
         #expect(gui.agentChatState.visible == true)
         #expect(gui.agentChatState.model == "claude")
         #expect(gui.agentChatState.thinkingLevel == "medium")
-        #expect(gui.agentChatState.messages.isEmpty)
+        #expect(gui.agentChatState.messages.map(\.id) == [1])
     }
 
     @Test("guiAgentTranscript populates agentChatState messages")
@@ -801,7 +801,7 @@ struct CommandDispatcherRoutingTests {
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 1, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
-                                           pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []))
+                                           pendingToolSummary: "", helpVisible: false, helpGroups: []))
         dispatcher.applyForTesting(.guiAgentTranscript(mode: 0, epoch: 3, truncated: false, trimFront: 0, baseCount: 0, messages: [
             Wire.ChatMessage(beamId: 1, content: .user(text: "hello")),
             Wire.ChatMessage(beamId: 2, content: .assistant(text: "hi"))
@@ -819,7 +819,7 @@ struct CommandDispatcherRoutingTests {
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 0, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
-                                           pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []))
+                                           pendingToolSummary: "", helpVisible: false, helpGroups: []))
 
         #expect(gui.agentChatState.visible == false)
         #expect(gui.agentChatState.messages.isEmpty)
@@ -2051,7 +2051,7 @@ struct CommandDispatcherStagingTests {
             prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
             promptVimMode: 1, promptVisibleRows: 1, promptCompletion: nil,
             pendingToolName: nil, pendingToolSummary: "", helpVisible: false,
-            helpGroups: [], messages: []
+            helpGroups: []
         ))
         #expect(notificationCount.withLock { $0 } == 0)
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
@@ -2135,7 +2135,7 @@ struct CommandDispatcherStagingTests {
             prompt: "", promptLineCount: 1, promptCursorLine: 0,
             promptCursorCol: 0, promptVimMode: 1, promptVisibleRows: 1,
             promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
-            helpVisible: false, helpGroups: [], messages: []
+            helpVisible: false, helpGroups: []
         ))
         dispatcher.dispatch(.guiExtensionRuntime(runtime))
         dispatcher.dispatch(.guiCursorAnimation(enabled: false))

@@ -377,30 +377,23 @@ struct BreadcrumbStateLifecycleTests {
 
 @Suite("AgentChatState Lifecycle")
 struct AgentChatStateLifecycleTests {
-    @Test("update() converts all message types")
-    @MainActor func updateConvertsMessages() {
+    @Test("update() leaves resident messages unchanged")
+    @MainActor func updateLeavesMessagesUnchanged() {
         let state = AgentChatState()
-        let raw: [Wire.ChatMessage] = [
-            Wire.ChatMessage(beamId: 1, content: .user(text: "hello")),
-            Wire.ChatMessage(beamId: 2, content: .assistant(text: "hi")),
-            Wire.ChatMessage(beamId: 3, content: .thinking(text: "analyzing...", collapsed: false)),
-            Wire.ChatMessage(beamId: 4, content: .toolCall(name: "read_file", summary: "lib/minga.ex", status: 1, isError: false,
-                     collapsed: true, autoApprovedScope: 0, durationMs: 500, result: "contents", previewKind: 0, previewLines: [])),
-            Wire.ChatMessage(beamId: 5, content: .system(text: "session started", isError: false)),
-            Wire.ChatMessage(beamId: 6, content: .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000))
-        ]
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))
+        ])
         state.update(visible: true, status: 1, model: "claude", thinkingLevel: "high", prompt: "fix bug",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptVimMode: 1, promptVisibleRows: 1,
-                     promptCompletion: nil, helpVisible: false, helpGroups: [],
-                     rawMessages: raw)
+                     promptCompletion: nil, helpVisible: false, helpGroups: [])
 
         #expect(state.visible == true)
         #expect(state.status == 1)
         #expect(state.model == "claude")
         #expect(state.thinkingLevel == "high")
         #expect(state.prompt == "fix bug")
-        #expect(state.messages.count == 6)
+        #expect(state.messages.count == 1)
         #expect(state.isThinking == true)
         #expect(state.statusLabel == "thinking")
     }
@@ -411,8 +404,8 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: 1, model: "claude", thinkingLevel: "medium", prompt: "test",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptVimMode: 1, promptVisibleRows: 1,
-                     promptCompletion: nil, helpVisible: false, helpGroups: [],
-                     rawMessages: [Wire.ChatMessage(beamId: 1, content: .user(text: "hi"))])
+                     promptCompletion: nil, helpVisible: false, helpGroups: [])
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
 
         #expect(state.visible == false)
@@ -448,6 +441,44 @@ struct AgentChatTranscriptTests {
 
         #expect(state.transcriptEpoch == 5)
         #expect(state.messages.map(\.id) == [1, 2])
+    }
+
+    @Test("full_replace maps every retained message kind")
+    @MainActor func fullReplaceMapsEveryKind() {
+        let run = Wire.StyledTextRun(text: "x", fgR: 1, fgG: 2, fgB: 3, bgR: 0, bgG: 0, bgB: 0, bold: false, italic: false, underline: true, code: false, linkURL: "https://example.test")
+        let block = Wire.AgentMarkdownBlock(id: 1, kind: .paragraph, flags: 1, lines: [[run]], level: 0, indent: 0, ordered: false, ordinal: 0, height: 1, language: "", label: "", targetPath: "", capabilityFlags: 0)
+        let messages: [Wire.ChatMessage] = [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "u")),
+            Wire.ChatMessage(beamId: 2, content: .assistant(text: "a")),
+            Wire.ChatMessage(beamId: 3, content: .styledAssistant(lines: [[run]])),
+            Wire.ChatMessage(beamId: 4, content: .assistantMarkdown(blocks: [block])),
+            Wire.ChatMessage(beamId: 5, content: .thinking(text: "t", collapsed: true)),
+            Wire.ChatMessage(beamId: 6, content: .toolCall(name: "read", summary: "s", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 2, result: "r", previewKind: 3, previewLines: ["lib.ex"])),
+            Wire.ChatMessage(beamId: 7, content: .styledToolCall(name: "run", summary: "s2", status: 2, isError: true, collapsed: false, autoApprovedScope: 2, durationMs: 3, resultLines: [[run]], previewKind: 1, previewLines: ["-old", "+new"])),
+            Wire.ChatMessage(beamId: 8, content: .approvalToolCall(name: "edit", summary: "needs ok", toolCallId: "tc", previewKind: 2, previewLines: ["mix test"])),
+            Wire.ChatMessage(beamId: 9, content: .system(text: "sys", isError: true)),
+            Wire.ChatMessage(beamId: 10, content: .usage(input: 1, output: 2, cacheRead: 3, cacheWrite: 4, costMicros: 5))
+        ]
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 9, baseCount: 0, messages: messages)
+
+        #expect(state.messages.map(\.id) == Array(1...10))
+        guard case .user(1, "u") = state.messages[0] else { Issue.record("expected user"); return }
+        guard case .assistant(2, "a") = state.messages[1] else { Issue.record("expected assistant"); return }
+        guard case .styledAssistant(3, let styledLines) = state.messages[2] else { Issue.record("expected styled assistant"); return }
+        #expect(styledLines[0][0].linkURL == "https://example.test")
+        guard case .assistantMarkdown(4, let blocks) = state.messages[3] else { Issue.record("expected markdown"); return }
+        #expect(blocks[0].isComplete)
+        guard case .thinking(5, "t", true) = state.messages[4] else { Issue.record("expected thinking"); return }
+        guard case .toolCall(6, "read", "s", 1, false, true, 1, 2, "r", 3, let toolPreview) = state.messages[5] else { Issue.record("expected tool"); return }
+        #expect(toolPreview == ["lib.ex"])
+        guard case .styledToolCall(7, "run", "s2", 2, true, false, 2, 3, let resultLines, 1, let styledPreview) = state.messages[6] else { Issue.record("expected styled tool"); return }
+        #expect(resultLines[0][0].underline)
+        #expect(styledPreview == ["-old", "+new"])
+        guard case .approvalToolCall(8, "edit", "needs ok", "tc", 2, let approvalPreview) = state.messages[7] else { Issue.record("expected approval"); return }
+        #expect(approvalPreview == ["mix test"])
+        guard case .system(9, "sys", true) = state.messages[8] else { Issue.record("expected system"); return }
+        guard case .usage(10, 1, 2, 3, 4, 5) = state.messages[9] else { Issue.record("expected usage"); return }
     }
 
     @Test("append adds new messages while keeping prior ids stable")

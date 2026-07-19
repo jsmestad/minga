@@ -458,11 +458,11 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x01 | Header | `visible(1) + status(1)` |
 | 0x02 | Model | `model_len(2) + model` |
 | 0x03 | Prompt | `prompt_len(2) + prompt + line_count(1) + cursor_line(2) + cursor_col(2) + vim_mode(1) + visible_rows(1)` |
-| 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as message type `0x09`. |
+| 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as transcript message type `0x09`. |
 | 0x05 | Help | `visible(1) + optional groups` |
-| 0x06 | Messages | `0xFF + version(1) + message_count(2) + framed messages...` |
 | 0x07 | Completion | prompt completion popup state |
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
+| 0x09 | InputFocused | `input_focused(1)` |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
 
@@ -472,46 +472,6 @@ Pending approval payload:
 1(1) + name_len(2) + name(name_len) + summary_len(2) + summary(summary_len)
 ```
 
-Messages payload:
-```
-0xFF(1) + version(1) + message_count(2) + framed messages...
-
-version 1 framed message:
-  message_len(4) + message(message_len)
-
-message:
-  message_id(4) + typed_payload
-
-Typed payloads:
-  0x01 (user):      type(1) + text_len(4) + text
-  0x02 (assistant): type(1) + text_len(4) + text
-  0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
-  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result + auto_approved(1) + optional tool_preview_payload
-  0x05 (system):    type(1) + level(1) + text_len(4) + text
-  0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
-  0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
-  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
-  0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
-  0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
-```
-
-Markdown block payloads are BEAM-authored semantic structure. Frontends must render these blocks directly and must not infer code cards from styled-run flags, decorative rails, or all-code lines. Each block starts with `block_id(4) + kind(1) + flags(1)` and then a kind-specific payload:
-
-- `0x01 paragraph`: `line_count(2) + styled_lines`
-- `0x02 heading`: `level(1) + line_count(2) + styled_lines`
-- `0x03 list_item`: `indent(1) + ordered(1) + ordinal(4) + line_count(2) + styled_lines`
-- `0x04 blockquote`: `line_count(2) + styled_lines`
-- `0x05 rule`: no payload
-- `0x06 spacer`: `height(1)`
-- `0x07 code_block`: `language_len(2) + language + label_len(2) + label + target_path_len(2) + target_path + capability_flags(1) + line_count(2) + styled_lines`
-
-For code blocks, block flag `0x01` means complete; absence means streaming or incomplete. Capability flags are `0x01=copy`, `0x02=open`, and `0x04=apply`; frontends should only expose actions they actually implement. `block_id` is stable for a message and block index so streaming updates preserve identity.
-
-`auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust. The frame length makes appended fields deterministic and lets decoders distinguish current payloads from legacy unframed messages.
-
-`tool_preview_payload` is appended to current `tool_call` and `styled_tool_call` messages after `auto_approved`: `preview_kind(1) + preview_line_count(2) + lines...`, with each line encoded as `line_len(2) + line`. Legacy framed tool messages may omit this payload. Preview kinds match approval previews: 0=args, 1=diff, 2=command, 3=target. Tool-call previews are inline context only; `approval_tool_call` keeps the same preview payload fields as part of its required approval card shape.
-
-Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present, 0x10=code run (monospaced, preserve whitespace). The 0x10 bit is a run-level hint only and must not be used to infer fenced block boundaries, code-card containers, or language labels.
 
 ### 0x79 — gui_gutter_separator
 
@@ -1034,7 +994,7 @@ When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, n
 
 ### 0x86 — gui_agent_transcript
 
-Resident agent-chat transcript stream (#2654). Carries the conversation as resident data so a frontend scrolls it from local state without a BEAM round-trip, decoupled from the `gui_agent_chat` (0x78) chrome model whose u16 sectioned frame capped the transcript at ~65KB. Framing is `len32` (opcode + u32 payload length), so the payload can exceed 64KB and any frontend that recognizes the opcode sizes and skips it via the schema's generated `command_size`. Message bodies are byte-identical to the 0x78 messages section (shared codec).
+Resident agent-chat transcript stream (#2654). Carries the conversation as resident data so a frontend scrolls it from local state without a BEAM round-trip, decoupled from the `gui_agent_chat` (0x78) chrome model. Framing is `len32` (opcode + u32 payload length), so the payload can exceed 64KB and any frontend that recognizes the opcode sizes and skips it via the schema's generated `command_size`. Message bodies use the shared agent-chat message body codec.
 
 The semantic-model builder scopes the resident set by `display_start_index` and bounds it with `agent_transcript_resident_max_bytes` as a contiguous most-recent suffix. It retains every selected message whole, and the `truncated` flag signals when older complete messages sit outside the window. The GUI adapter serializes that selected model exactly and never applies its own cap.
 
@@ -1058,6 +1018,38 @@ payload:
 message:
   id(4) + body_len(4) + body(body_len)   # body is the shared agent-chat message codec
 ```
+
+Typed body payloads:
+```
+0x01 (user):      type(1) + text_len(4) + text
+0x02 (assistant): type(1) + text_len(4) + text
+0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
+0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result + auto_approved(1) + optional tool_preview_payload
+0x05 (system):    type(1) + level(1) + text_len(4) + text
+0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
+0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
+0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
+0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
+0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
+```
+
+Markdown block payloads are BEAM-authored semantic structure. Frontends must render these blocks directly and must not infer code cards from styled-run flags, decorative rails, or all-code lines. Each block starts with `block_id(4) + kind(1) + flags(1)` and then a kind-specific payload:
+
+- `0x01 paragraph`: `line_count(2) + styled_lines`
+- `0x02 heading`: `level(1) + line_count(2) + styled_lines`
+- `0x03 list_item`: `indent(1) + ordered(1) + ordinal(4) + line_count(2) + styled_lines`
+- `0x04 blockquote`: `line_count(2) + styled_lines`
+- `0x05 rule`: no payload
+- `0x06 spacer`: `height(1)`
+- `0x07 code_block`: `language_len(2) + language + label_len(2) + label + target_path_len(2) + target_path + capability_flags(1) + line_count(2) + styled_lines`
+
+For code blocks, block flag `0x01` means complete; absence means streaming or incomplete. Capability flags are `0x01=copy`, `0x02=open`, and `0x04=apply`; frontends should only expose actions they actually implement. `block_id` is stable for a message and block index so streaming updates preserve identity.
+
+`auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust.
+
+`tool_preview_payload` is appended to current `tool_call` and `styled_tool_call` messages after `auto_approved`: `preview_kind(1) + preview_line_count(2) + lines...`, with each line encoded as `line_len(2) + line`. Preview kinds match approval previews: 0=args, 1=diff, 2=command, 3=target. Tool-call previews are inline context only; `approval_tool_call` keeps the same preview payload fields as part of its required approval card shape.
+
+Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present, 0x10=code run (monospaced, preserve whitespace). The 0x10 bit is a run-level hint only and must not be used to infer fenced block boundaries, code-card containers, or language labels.
 
 `epoch` is an opaque change token; a frontend that receives an `epoch` different from the one its store was built under must treat the frame as authoritative for that epoch. `mode`:
 

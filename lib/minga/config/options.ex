@@ -432,7 +432,7 @@ defmodule Minga.Config.Options do
     {:resident_store_max_bytes, :pos_integer, 10_485_760,
      "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines; set :resident_store_max_lines to 0 to disable residence regardless of byte size."},
     {:agent_transcript_resident_max_bytes, :pos_integer, 8_388_608,
-     "Maximum encoded byte size of the resident agent-chat transcript (gui_agent_transcript 0x86). The semantic model builder selects a contiguous newest suffix above this cap, preserving every retained message whole and marking the stream truncated when older messages are omitted. A p95 code-heavy session is ~1-2 MB, well under the 8 MB default. Set higher only if very long sessions truncate; the legacy gui_agent_chat (0x78) tail is unaffected."},
+     "Maximum encoded byte size of the resident agent-chat transcript (gui_agent_transcript 0x86). The semantic model builder selects a contiguous newest suffix above this cap, preserving every retained message whole and marking the stream truncated when older messages are omitted. A p95 code-heavy session is ~1-2 MB, well under the 8 MB default. Set higher only if very long sessions truncate."},
     {:max_file_size, :pos_integer, 10_485_760,
      "Maximum file size in bytes Minga will open. Files larger than this show a text-only \"file too large\" surface instead of loading a buffer; the size is checked with a pre-read stat, so the gap buffer and tree-sitter parser never touch the content. Default 10 MB."}
   ]
