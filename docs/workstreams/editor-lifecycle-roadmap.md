@@ -2115,7 +2115,7 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Line budget:** Production net +13 lines (`file_watcher_helpers.ex` +11, `router.ex` +2); test additions +42 lines (`file_change_test.exs` +26, `router_test.exs` +16), within W020 limits.
   - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship concern resolved by matching the repository's `spawn_link` plus `GenServer.reply/2` one-shot fixture idiom while retaining project-required monitor synchronization for the dead Buffer test; Ponytail `Lean already. Ship.`
   - **Final reviewer:** `PASS`; both lookup-to-use exit windows, ownership, APIs, deterministic regressions, line budgets, validation evidence, and merge safety accepted with no findings.
-  - **PR URL:** Pending.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3026
   - **Merge evidence:** Pending.
   - **Completion date:** Pending merge.
 
