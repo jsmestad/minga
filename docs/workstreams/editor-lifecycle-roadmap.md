@@ -2396,8 +2396,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. Default-concurrency `mix test.llm --seed 679823` stopped on one unrelated `MingaAgent.Providers.NativeMCPTest` timeout (`provider did not emit AgentEnd`); that exact test passed alone, and `mix test.llm --seed 679823 --max-cases 4` then passed 9,894 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` exited 0 with `xcodebuild not found; skipping Swift build`, preserving the required macOS CI handoff; no Swift source changed.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with no blockers and independently checked complete deleted-symbol absence, runtime/frontend/action retention, exact wire bytes, budgets, and roadmap evidence. Elixir craftsmanship returned `PASS/Lean`; Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered hidden, visible multi-line, empty-title, cache skip/re-emit, frontend decoder, and wire-format assertions instead. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact test-only oracle deletion, canonical full-byte and cache coverage, unchanged `0x83` schema/generated/frontend/action contracts, truthful qualified validation evidence, line budgets, and merge safety with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3044
+- **Implementation commit SHA:** `005a29179`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
