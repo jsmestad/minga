@@ -56,6 +56,27 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert {:ok, "foreground done"} = Task.await(task, @event_timeout)
   end
 
+  test "foreground startup timeout returns an error and stops the child session" do
+    test_pid = self()
+    ref = make_ref()
+
+    task =
+      Task.async(fn ->
+        Subagent.execute("blocked startup",
+          provider: GatedProvider,
+          provider_opts: [test_pid: test_pid, startup_gate: {test_pid, ref}],
+          startup_timeout_ms: 10
+        )
+      end)
+
+    assert_receive {:provider_starting, ^ref, provider_pid, session_pid}, @event_timeout
+    Process.send_after(provider_pid, {ref, :continue}, 50)
+    monitor = Process.monitor(session_pid)
+
+    assert {:error, "Subagent timed out while starting"} = Task.await(task, @event_timeout)
+    assert_receive {:DOWN, ^monitor, :process, ^session_pid, _reason}, @event_timeout
+  end
+
   test "inherits parent provider context by default", %{tmp_dir: dir} do
     ref = make_ref()
     parent = start_parent_session(dir, ref)

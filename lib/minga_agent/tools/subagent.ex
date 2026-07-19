@@ -39,7 +39,8 @@ defmodule MingaAgent.Tools.Subagent do
           worktree_backend: module(),
           worktree_backend_opts: keyword(),
           session_manager: GenServer.server(),
-          notifier: module() | {module(), term()}
+          notifier: module() | {module(), term()},
+          startup_timeout_ms: pos_integer()
         ]
 
   @subagent_timeout_ms 300_000
@@ -125,7 +126,8 @@ defmodule MingaAgent.Tools.Subagent do
   defp do_start_foreground(task, opts) do
     with {:ok, session_opts} <- session_opts(opts),
          {:ok, session_pid} <- AgentSupervisor.start_session(session_opts) do
-      run_subagent(session_pid, task)
+      timeout = Keyword.get(opts, :startup_timeout_ms, @subagent_timeout_ms)
+      run_subagent(session_pid, task, timeout)
     else
       {:error, {:provider_resolution_failed, reason}} ->
         {:error, "Failed to resolve subagent provider: #{reason}"}
@@ -158,20 +160,19 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
-  @spec run_subagent(pid(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_subagent(session_pid, task) do
-    :ok = Session.subscribe(session_pid)
+  @spec run_subagent(pid(), String.t(), pos_integer()) :: {:ok, String.t()} | {:error, String.t()}
+  defp run_subagent(session_pid, task, timeout) do
+    :ok = Session.subscribe(session_pid, self(), [], timeout)
 
     case send_prompt_when_ready(session_pid, task, 0) do
-      :ok ->
-        result = collect_response(session_pid)
-        cleanup(session_pid)
-        result
-
-      {:error, reason} ->
-        cleanup(session_pid)
-        {:error, "Subagent failed to start: #{inspect(reason)}"}
+      :ok -> collect_response(session_pid)
+      {:error, reason} -> {:error, "Subagent failed to start: #{inspect(reason)}"}
     end
+  catch
+    :exit, {:timeout, {GenServer, :call, [^session_pid, {:subscribe, _pid, _opts}, ^timeout]}} ->
+      {:error, "Subagent timed out while starting"}
+  after
+    AgentSupervisor.stop_session(session_pid)
   end
 
   @spec send_prompt_when_ready(pid(), String.t(), non_neg_integer()) :: :ok | {:error, term()}
@@ -221,17 +222,6 @@ defmodule MingaAgent.Tools.Subagent do
       timeout ->
         {:error, "Subagent timed out after #{div(@subagent_timeout_ms, 1000)} seconds"}
     end
-  end
-
-  @spec cleanup(pid()) :: :ok
-  defp cleanup(session_pid) do
-    Session.unsubscribe(session_pid)
-    AgentSupervisor.stop_session(session_pid)
-    :ok
-  rescue
-    ArgumentError -> :ok
-  catch
-    :exit, _ -> :ok
   end
 
   # ── Worktree isolation ─────────────────────────────────────────────────────

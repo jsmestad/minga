@@ -307,6 +307,13 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:subscribe, pid, opts})
   end
 
+  @doc "Subscribes the given process, allowing callers to bound startup waits explicitly."
+  @spec subscribe(GenServer.server(), pid(), keyword(), timeout()) ::
+          :ok | {:error, :invalid_role}
+  def subscribe(session, pid, opts, timeout) when is_pid(pid) do
+    GenServer.call(session, {:subscribe, pid, opts}, timeout)
+  end
+
   @doc "Returns the current remote attachment role for a subscriber."
   @spec subscriber_role(GenServer.server(), pid()) :: attachment_role() | nil
   def subscriber_role(session, pid) when is_pid(pid) do

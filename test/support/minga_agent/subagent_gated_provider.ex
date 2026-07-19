@@ -39,8 +39,25 @@ defmodule Minga.Test.SubagentGatedProvider do
   @spec init(keyword()) :: {:ok, state()}
   @impl GenServer
   def init(opts) do
+    await_startup_gate(opts)
+
     {:ok,
      %{subscriber: Keyword.fetch!(opts, :subscriber), test_pid: Keyword.fetch!(opts, :test_pid)}}
+  end
+
+  @spec await_startup_gate(keyword()) :: :ok
+  defp await_startup_gate(opts) do
+    case Keyword.get(opts, :startup_gate) do
+      {test_pid, ref} ->
+        send(test_pid, {:provider_starting, ref, self(), Keyword.fetch!(opts, :subscriber)})
+
+        receive do
+          {^ref, :continue} -> :ok
+        end
+
+      nil ->
+        :ok
+    end
   end
 
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, :ok, state()}
