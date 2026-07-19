@@ -2625,8 +2625,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `mix test.llm --max-cases 4` passed 9,844 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded.
 - **Pre-acceptance reviews:** Correctness initially blocked because the replacement canonical test encoded only an agent workspace and therefore did not preserve the locked mixed manual-plus-agent ordering and entry-boundary contract. The full v2 fixture now encodes and sequentially decodes both workspace kinds before the visible-tab count; the redundant shallow manual-only test was deleted, and targeted correctness re-review returned `RESOLVED`. Ponytail returned `Lean already. Ship.`; Elixir craftsmanship returned `PASS/Lean`. The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered the canonical byte, mixed-entry, tab, cache, and bounds contracts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact workspaces-oracle deletion, direct canonical v2 bytes and strict bounds coverage, retained builder/adapter/schema/generated/Swift/Go/action contracts, truthful validation, budgets, zero concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3058
+- **Implementation commit SHA:** `651825ac7`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
