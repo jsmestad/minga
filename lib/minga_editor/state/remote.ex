@@ -48,6 +48,12 @@ defmodule MingaEditor.State.Remote do
     %{remote | buffers: Map.put(remote.buffers, {server_name, path}, buffer)}
   end
 
+  @doc "Retires every remote file registration that points at `buffer`."
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{} = remote, buffer) when is_pid(buffer) do
+    %{remote | buffers: Map.reject(remote.buffers, fn {_key, pid} -> pid == buffer end)}
+  end
+
   @doc "Finds an open buffer for a remote file."
   @spec buffer(t(), String.t(), String.t()) :: pid() | nil
   def buffer(%__MODULE__{} = remote, server_name, path)

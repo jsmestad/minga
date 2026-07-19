@@ -9,6 +9,7 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.State.Remote
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -509,15 +510,34 @@ defmodule MingaEditor.StateTest do
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf1)
         |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf2)
 
+      state = %{
+        state
+        | remote:
+            state.remote
+            |> Remote.put_buffer("server-a", "/remote/one.ex", buf1)
+            |> Remote.put_buffer("server-b", "/remote/one.ex", buf1)
+            |> Remote.put_buffer("server-a", "/remote/two.ex", buf2)
+      }
+
       removed_inactive = EditorState.remove_buffer(state, buf1)
       refute buf1 in removed_inactive.workspace.buffers.list
       assert buf2 in removed_inactive.workspace.buffers.list
       refute Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf1)
       assert Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf2)
+      refute Remote.buffer(removed_inactive.remote, "server-a", "/remote/one.ex")
+      refute Remote.buffer(removed_inactive.remote, "server-b", "/remote/one.ex")
+      assert Remote.buffer(removed_inactive.remote, "server-a", "/remote/two.ex") == buf2
+
+      refute Enum.any?(Remote.all_buffers(removed_inactive.remote), fn {_server, _path, pid} ->
+               pid == buf1
+             end)
 
       removed_active = EditorState.remove_buffer(state, buf2)
       assert removed_active.workspace.buffers.active == buf1
       assert removed_active.workspace.buffers.list == [buf1]
+      assert Remote.buffer(removed_active.remote, "server-a", "/remote/one.ex") == buf1
+      assert Remote.buffer(removed_active.remote, "server-b", "/remote/one.ex") == buf1
+      refute Remote.buffer(removed_active.remote, "server-a", "/remote/two.ex")
     end
   end
 
