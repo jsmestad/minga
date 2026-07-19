@@ -281,13 +281,7 @@ defmodule Minga.Extension.IsolatedCompiler do
     module_name = Atom.to_string(module)
 
     if valid_artifact_name?(module_name) do
-      path = Path.join(directory, module_name <> ".beam")
-
-      case File.write(path, bytecode, [:binary, :exclusive]) do
-        :ok -> errors
-        {:error, :eexist} -> ["duplicate compiler output" | errors]
-        {:error, _reason} -> ["runtime artifact write failed" | errors]
-      end
+      observe_named_loaded_artifact(directory, module_name, bytecode, errors)
     else
       ["invalid runtime artifact name" | errors]
     end
