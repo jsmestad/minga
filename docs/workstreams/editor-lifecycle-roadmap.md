@@ -2469,7 +2469,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W032: Delete D06 which-key and minibuffer Protocol.GUI outbound parity oracles
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.5
 - **Decision:** ACCEPT/deletion, fifth split D06 slice
 - **Planning profile:** `D06Planner5`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2497,8 +2497,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact two-oracle deletion, direct canonical adapter byte/cache coverage, retained minibuffer-select decoder and handler, unchanged schema/generated/Swift/Go contracts, truthful qualified validation, budgets, and merge safety with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3050
 - **Implementation commit SHA:** `b625e38aa`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `2e1c2ca248958f2c893517dac4b3c9d0605a7589`; **Merge evidence:** PR #3050 merged after CI run `29700762253` passed Elixir on the targeted rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir job exposed an unrelated `SessionManagerTest` synchronization timeout; that exact test passed locally at the CI seed before the isolated rerun passed.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
