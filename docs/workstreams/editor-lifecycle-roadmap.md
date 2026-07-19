@@ -2286,7 +2286,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W026: Make title metadata reads stale-buffer safe
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L30
 - **Decision:** ACCEPT/shrink
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2310,8 +2310,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` after correcting the roadmap decision from `ACCEPT/direct` to the immutable audit classification `ACCEPT/shrink`; implementation, exception boundary, regressions, ownership, scope, budgets, and validation evidence accepted with no remaining findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3038
 - **Implementation commit SHA:** `dff4592ef`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `c8805ecca0e3a9eabe082b21a1dac3fe25953118`; PR #3038 merged after CI run `29686552573` passed every required check, including Elixir, Swift, Go, Zig, Dialyzer, lint/format, Neovim conformance, boot smoke, protocol integration, and keystroke latency.
+- **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
