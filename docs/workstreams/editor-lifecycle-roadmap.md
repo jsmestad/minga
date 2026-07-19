@@ -2600,7 +2600,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W036: Delete D06 workspaces Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.9
 - **Implementation profile:** `D06Worker9`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner9` for current SHA `f596a743e2eb495176d9124bc2f57f1ff4acc0a1`; W036 removes only the `gui_workspaces` outbound Protocol.GUI parity oracle because live `0x98` emission is already owned by `Minga.Frontend.Adapter.GUI.WorkspacesEncoder` from `%Minga.RenderModel.UI.Workspaces{}` built by `MingaEditor.RenderModel.UI.WorkspacesBuilder`.
@@ -2627,8 +2627,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact workspaces-oracle deletion, direct canonical v2 bytes and strict bounds coverage, retained builder/adapter/schema/generated/Swift/Go/action contracts, truthful validation, budgets, zero concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3058
 - **Implementation commit SHA:** `651825ac7`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `5df5dce979fca9d7590b362090b1a3d13b839d3f`; **Merge evidence:** PR #3058 merged after CI run `29706559321` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
