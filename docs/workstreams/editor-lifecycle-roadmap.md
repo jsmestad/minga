@@ -2090,7 +2090,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W020: Guard buffer lookup-to-use process exits
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L24
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2116,8 +2116,10 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship concern resolved by matching the repository's `spawn_link` plus `GenServer.reply/2` one-shot fixture idiom while retaining project-required monitor synchronization for the dead Buffer test; Ponytail `Lean already. Ship.`
   - **Final reviewer:** `PASS`; both lookup-to-use exit windows, ownership, APIs, deterministic regressions, line budgets, validation evidence, and merge safety accepted with no findings.
   - **PR URL:** https://github.com/jsmestad/minga/pull/3026
-  - **Merge evidence:** Pending.
-  - **Completion date:** Pending merge.
+  - **Implementation commit SHA:** `1d7465b7c`
+  - **Merge commit SHA:** `4d1bcc1571c8334d94fbbcd5471210b486b679f0`
+  - **Merged CI:** Run `29676744074` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
+  - **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
