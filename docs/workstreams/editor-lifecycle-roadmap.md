@@ -2256,7 +2256,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W025: Validate omitted link and advisory color overrides
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L29
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2281,8 +2281,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS`; exact metadata scope, construction-time ownership, valid and invalid regressions, budgets, transparent validation evidence, and merge safety accepted with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3036
 - **Implementation commit SHA:** `0347ab168`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending merge.
+- **Merge SHA:** `7fe6c648371c55cac81078636edefab77e6d85b1`; PR #3036 merged after CI run `29684733018` passed every required check, including Elixir, Swift, Go, Zig, Dialyzer, lint/format, Neovim conformance, boot smoke, protocol integration, and keystroke latency.
+- **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
