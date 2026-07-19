@@ -2536,7 +2536,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W034: Delete D06 sidebars Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.7
 - **Implementation profile:** `D06Worker7`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner7` for current SHA `a20afa63d15f137e64c1ede64f748db7a46f05cf`; W034 removes only the sidebars outbound Protocol.GUI parity oracle because the live `gui_sidebars` producer is already the canonical `Minga.Frontend.Adapter.GUI.SidebarsEncoder`.
@@ -2563,8 +2563,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact four-symbol Protocol.GUI sidebars-oracle deletion, retained canonical model/builder/adapter, schema/generated, Swift/Go consumers and `sidebar_action` paths, direct 0x9F field/order/flag/badge/cache assertions, truthful qualified validation, budgets, and merge safety with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3054
 - **Implementation commit SHA:** `55a8324c2`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `3c54b11d0baf4a1d7086279dbfe751e4b1ac8d1b`; **Merge evidence:** PR #3054 merged after CI run `29703812004` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
