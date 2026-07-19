@@ -2224,7 +2224,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W024: Show omitted resident transcript history
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L28
 - **Decision:** ACCEPT/native
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2251,8 +2251,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer:** `PASS`; visible/accessibility contract, state ownership, true/false regressions, locked scope, line budgets, validation evidence, and merge safety accepted with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3034
 - **Implementation commit SHA:** `b0e5ee25c`
-- **Merge evidence:** Pending.
-- **Completion date:** Pending merge.
+- **Merge evidence:** PR #3034 merged as `dc07dacc9300a58c9809f352a76d24fa551404cc` after CI run `29683366591` passed every required check, including Swift (macOS GUI), Swift protocol integration, Elixir, Go, Zig, Dialyzer, lint/format, Neovim conformance, boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
