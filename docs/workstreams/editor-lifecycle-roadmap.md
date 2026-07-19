@@ -2216,8 +2216,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS`; Ponytail `Lean already. Ship.`
 - **Broad validation:** The focused mouse and hit-test command passed 51 tests. The first `mix test --max-cases 4` run exposed the worktree's missing native parser binary; after `mix compile.minga_zig`, the same command passed 10,448 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded. `make lint` passed Credo, compile, format, and incremental Dialyzer. `git diff --check` passed.
 - **Final reviewer:** `PASS`; canonical target consumption, focus/mode/drag preservation, duplicate-mapper deletion, wrapped/folded regressions, line budgets, validation evidence, and merge safety accepted with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3032
+- **Implementation commit SHA:** `309c08144`
 - **Merge evidence:** Pending.
 - **Completion date:** Pending merge.
 
