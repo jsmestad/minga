@@ -2011,7 +2011,8 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Concepts removed:** Resident-index collapse targeting, two-byte 0x15 payload acceptance, Go resident index selectors, and one draft single-use Transcript transform helper.
   - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS` after eliminating no-op list allocation and aligning the owner typespec; Ponytail `Lean already. Ship.`
   - **Final reviewer:** `PASS`; the stable-ID cutover, owner transition, effects, callsites, tests, budgets, and merge safety are accepted.
-  - **PR URL:** Pending.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3020
+  - **Implementation commit SHA:** `da792f30d`
   - **Merge evidence:** Pending.
 
 ## Follow-on simplifications
