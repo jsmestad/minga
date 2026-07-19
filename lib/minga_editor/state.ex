@@ -280,6 +280,7 @@ defmodule MingaEditor.State do
 
     runtime = ShellRuntime.retire_buffer(state.shell_runtime, pid)
     git = GitState.retire_buffer(state.git, pid)
+    remote = Remote.retire_buffer(state.remote, pid)
 
     %{
       state
@@ -287,7 +288,8 @@ defmodule MingaEditor.State do
         buffer_lifecycle: lifecycle,
         workspace: workspace,
         shell_runtime: runtime,
-        git: git
+        git: git,
+        remote: remote
     }
   end
 
