@@ -2020,7 +2020,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W018: Capture resize drags and clear release state
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L22
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2038,16 +2038,20 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Maximum test additions:** 80 lines.
 - **Dependencies:** W017 is VERIFIED and merged; no unresolved dependency or implementer question remains.
 - **Completion evidence:**
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3022
+  - **Implementation commit SHA:** `d4d3b5389`
+  - **Merge commit SHA:** `dd8848b879ce3c268f6cefa705224e3f2a04e19d`
   - **Implementation result:** `Input.Router.dispatch_mouse/7` now captures active `%MouseState{dragging: true}` and `%MouseState{resize_dragging: {_, _}}` left drag/release events before negative-coordinate and focus-tree routing, running the existing shell availability check and `Mouse.handle/7` path directly. `Mouse.handle/7` now runs active text and resize release cleanup before the no-active-buffer and negative-coordinate guards, preserving the existing text visual auto-copy path and owner APIs.
   - **Regression coverage:** Added router regressions for resize release outside the focus tree clearing resize state and active resize drag bypassing focus-tree node handlers. Added Mouse regressions for resize and text release clearing state after active-buffer loss. The optional negative-coordinate Mouse regression was not added so test additions stay within the locked budget; the production release clauses are still ordered before the negative-coordinate guards.
   - **Failure reproduced:** Before the production fix, the new focused regressions failed 5 times: resize drag reached `InputRouterMouseProbe`, resize release outside the focus tree left `resize_dragging` set, and text/resize release cleanup was skipped after active-buffer loss or negative coordinates.
   - **Focused validation:** `mix test.debug test/minga_editor/input/router_test.exs test/minga_editor/mouse_test.exs test/minga_editor/state/mouse_test.exs` passed with 75 tests.
   - **Broad validation:** `make lint` passed Credo, compile, and incremental Dialyzer; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,920 tests with 0 failures, 1 skipped, and 578 excluded.
+  - **Merged CI:** Run `29674129331` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
   - **Line deltas:** Production `lib/minga_editor/input/router.ex` +21/-3 and `lib/minga_editor/mouse.ex` +38/-60, net -4. Tests `test/minga_editor/input/router_test.exs` +33 and `test/minga_editor/mouse_test.exs` +41, total +74 additions.
   - **Concepts added/removed:** Added no architecture or data shape; removed duplicated release-state installation and the stale routing/guard ordering path that could swallow active resize release cleanup.
   - **Pre-acceptance reviews:** Correctness found no routing or state defect after its evidence-only correction; Elixir craftsmanship `PASS` after release clauses reused `update_mouse/2` and fixtures used `Windows.set_tree/2` and `Buffers.remove/2`; Ponytail `Lean already. Ship.`
   - **Final reviewer:** `PASS`; locked routing and release-cleanup contract, ownership, lifecycle, API, tests, budgets, evidence, and merge safety accepted with no findings.
-  - **Completion date:** Pending merge.
+  - **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
