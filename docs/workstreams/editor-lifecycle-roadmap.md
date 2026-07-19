@@ -2315,7 +2315,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W027: Delete retired 0x78 agent-chat messages section
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D05
 - **Decision:** ACCEPT/deletion
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2338,7 +2338,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The focused six-file Elixir suite passed 205 tests with 24 excluded, and the focused Go protocol/UI packages passed. The default-concurrency `mix test.llm --seed 100117` exposed a five-second `MingaAgent.SessionManager.list_sessions/0` timeout in unrelated introspection tests on two branch runs; each timed-out module passed alone, and unchanged current main passed the identical seed at default concurrency with 9,929 tests. The bounded-concurrency branch run `mix test.llm --seed 100117 --max-cases 4` passed 9,909 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. Local Linux cannot execute Swift tests or the Xcode build; `mix swift.build` confirmed the required macOS CI handoff by exiting 0 with `xcodebuild not found; skipping Swift build`.
 - **Pre-acceptance reviews:** Correctness and bug-hunt reviews returned `PASS/Lean` after correcting stale callers, retained protocol coverage, malformed-body handling, strict Swift UTF-8, and exact retired-section fixtures. Elixir craftsmanship returned `PASS`; Swift craftsmanship returned `PASS`/`Lean`; Go craftsmanship returned `PASS`; Ponytail returned `Lean already. Ship.` No unresolved pre-acceptance finding remains.
 - **Final reviewer:** `PASS` after one targeted recheck corrected the roadmap-only numstat mismatch; implementation, retained `0x78` chrome, authoritative `0x86` ownership and coverage, Swift/Go skip paths, qualified validation, production/test budgets, and merge safety were accepted with no remaining finding.
-- **PR URL:** https://github.com/jsmestad/minga/pull/3040; **Implementation commit SHA:** `66c388798`.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3040; **Implementation commit SHA:** `66c388798`; **Merge SHA:** `58ea975d1db4ca6a51a13791563a74181586d729`; **Merge evidence:** PR #3040 merged after CI run `29692045875` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency; **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
