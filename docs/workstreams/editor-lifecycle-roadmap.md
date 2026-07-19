@@ -2593,8 +2593,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** The locked zero-symbol search exposed two render-model guardrail fixture strings that mentioned `encode_gui_theme/1`; those were source-string examples rather than runtime callers and now use the retained tab-bar encoder to keep the guardrail contract without preserving a removed theme symbol. Linux lacks `swiftc` and `xcodebuild` in this worktree, so Swift validation is limited to the project tasks' documented skip behavior here.
 - **Pre-acceptance reviews:** Correctness initially blocked because the replacement test did not require all agent slots for every built-in theme or map all Doom One agent fields to wire slots. The test now does both through `ThemeBuilder` and `ThemeEncoder`; targeted correctness re-review returned `RESOLVED`. Ponytail required deletion of a redundant white-box `phash2` fingerprint formula assertion; it was removed, leaving observable skip/re-encode tests, and targeted Ponytail re-review returned `Lean already. Ship.` Elixir craftsmanship returned `PASS/Lean`. The dedicated test-analysis agent was unavailable because its runtime had no model configured; correctness explicitly reviewed the complete direct byte, all-theme, agent-slot, cache, integration, guardrail, frontend, budget, and roadmap contracts. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact theme-oracle deletion, retained canonical ThemeBuilder/ThemeEncoder/adapter and unchanged schema/Swift/Go consumers, direct 0x74 bytes, all-built-in required agent slots, every Doom One field mapping, observable cache behavior, canonical integration producer, guardrail fixtures, truthful validation, budgets, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3056
+- **Implementation commit SHA:** `5ce266774`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
