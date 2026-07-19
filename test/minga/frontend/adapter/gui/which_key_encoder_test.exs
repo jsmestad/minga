@@ -4,7 +4,6 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
   alias Minga.RenderModel.UI.WhichKey
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_which_key Minga.Protocol.Opcodes.gui_which_key()
 
@@ -15,10 +14,10 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
 
       {cmd, _caches} = WhichKeyEncoder.encode(model, caches)
 
-      assert <<@op_gui_which_key, 0::8>> = cmd
+      assert cmd == <<@op_gui_which_key, 0::8>>
     end
 
-    test "encodes visible which-key with bindings" do
+    test "encodes visible which-key with exact binding bytes" do
       model = %WhichKey{
         visible: true,
         prefix: "SPC",
@@ -26,14 +25,15 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
         page_count: 1,
         bindings: [
           %{key: "j", description: "down", kind: :command, icon: nil},
-          %{key: "k", description: "up", kind: :command, icon: nil}
+          %{key: "k", description: "up", kind: :group, icon: "folder"}
         ]
       }
 
-      caches = Caches.new()
-      {cmd, _caches} = WhichKeyEncoder.encode(model, caches)
+      {cmd, _caches} = WhichKeyEncoder.encode(model, Caches.new())
 
-      assert <<@op_gui_which_key, 1::8, _rest::binary>> = cmd
+      assert cmd ==
+               <<@op_gui_which_key, 1::8, 3::16, "SPC", 0::8, 1::8, 2::16, 0::8, 1::8, "j", 4::16,
+                 "down", 0::8, "", 1::8, 1::8, "k", 2::16, "up", 6::8, "folder">>
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do
@@ -65,31 +65,11 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
       assert cmd2 != nil
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for hidden state" do
-      legacy_binary = ProtocolGUI.encode_gui_which_key(%{show: false})
-
-      model = %WhichKey{visible: false}
-      caches = Caches.new()
-      {new_binary, _caches} = WhichKeyEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary
-    end
-
-    test "produces byte-identical output to legacy ProtocolGUI for show=true, node=nil" do
-      legacy_binary = ProtocolGUI.encode_gui_which_key(%{show: true, node: nil})
-
-      model = %WhichKey{visible: false}
-      caches = Caches.new()
-      {new_binary, _caches} = WhichKeyEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary
-    end
-
-    test "produces byte-identical output to legacy ProtocolGUI with real bindings" do
-      # Build a real keymap node (bind/4 takes root, keys, command, description)
-      node = Minga.Keymap.Bindings.new()
-      node = Minga.Keymap.Bindings.bind(node, [{?j, 0}], :move_down, "Move down")
-      node = Minga.Keymap.Bindings.bind(node, [{?k, 0}], :move_up, "Move up")
+    test "encodes builder-projected bindings directly" do
+      node =
+        Minga.Keymap.Bindings.new()
+        |> Minga.Keymap.Bindings.bind([{?j, 0}], :move_down, "Move down")
+        |> Minga.Keymap.Bindings.bind([{?k, 0}], :move_up, "Move up")
 
       wk_state = %MingaEditor.State.WhichKey{
         show: true,
@@ -98,14 +78,12 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
         page: 0
       }
 
-      legacy_binary = ProtocolGUI.encode_gui_which_key(wk_state)
-
       model = MingaEditor.RenderModel.UI.WhichKeyBuilder.build(wk_state)
-      caches = Caches.new()
-      {new_binary, _caches} = WhichKeyEncoder.encode(model, caches)
+      {cmd, _caches} = WhichKeyEncoder.encode(model, Caches.new())
 
-      assert new_binary == legacy_binary,
-             "WhichKey encoder output does not match legacy output"
+      assert cmd ==
+               <<@op_gui_which_key, 1::8, 3::16, "SPC", 0::8, 1::8, 2::16, 0::8, 1::8, "j", 9::16,
+                 "Move down", 0::8, "", 0::8, 1::8, "k", 7::16, "Move up", 0::8, "">>
     end
   end
 end
