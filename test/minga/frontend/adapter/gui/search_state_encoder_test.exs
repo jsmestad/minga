@@ -4,18 +4,24 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.RenderModel.UI.SearchState
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_search_state Minga.Protocol.Opcodes.gui_search_state()
 
   describe "encode/2" do
     test "encodes inactive search state" do
-      model = %SearchState{active: false}
+      model = %SearchState{
+        active: false,
+        case_sensitive: false,
+        whole_word: false,
+        regex: false,
+        replace_mode: false
+      }
+
       caches = Caches.new()
 
       {cmd, _caches} = SearchStateEncoder.encode(model, caches)
 
-      assert <<@op_gui_search_state, _len::16, 0::8, 0::16, 0::16, _flags::8>> = cmd
+      assert <<@op_gui_search_state, 6::16, 0::8, 0::16, 0::16, 0::8>> = cmd
     end
 
     test "encodes active search state with matches" do
@@ -32,7 +38,7 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
       caches = Caches.new()
       {cmd, _caches} = SearchStateEncoder.encode(model, caches)
 
-      assert <<@op_gui_search_state, _len::16, 1::8, 5::16, 2::16, _flags::8>> = cmd
+      assert <<@op_gui_search_state, 6::16, 1::8, 5::16, 2::16, 0x02::8>> = cmd
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do
@@ -46,80 +52,27 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
       assert cmd2 == nil
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for inactive state" do
-      legacy_binary = ProtocolGUI.encode_gui_search_state(false, 0, 0, %{})
-
-      # When inactive, the builder sets all flags to false (matching legacy %{} behavior)
-      model = %SearchState{
-        active: false,
-        case_sensitive: false,
-        whole_word: false,
-        regex: false,
-        replace_mode: false
-      }
-
-      caches = Caches.new()
-      {new_binary, _caches} = SearchStateEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary,
-             "Inactive search state: new encoder output does not match legacy output"
-    end
-
-    test "produces byte-identical output to legacy ProtocolGUI for active state with flags" do
-      gs = %{case_sensitive: true, whole_word: false, regex: false, replace_mode: false}
-      legacy_binary = ProtocolGUI.encode_gui_search_state(true, 5, 2, gs)
-
+    test "encodes all four search option flags" do
       model = %SearchState{
         active: true,
-        match_count: 5,
-        current_index: 2,
+        match_count: 10,
+        current_index: 3,
         case_sensitive: true,
-        whole_word: false,
-        regex: false,
-        replace_mode: false
+        whole_word: true,
+        regex: true,
+        replace_mode: true
       }
 
-      caches = Caches.new()
-      {new_binary, _caches} = SearchStateEncoder.encode(model, caches)
+      {cmd, _caches} = SearchStateEncoder.encode(model, Caches.new())
 
-      assert new_binary == legacy_binary,
-             "Active search state: new encoder output does not match legacy output"
-    end
-
-    test "produces byte-identical output to legacy ProtocolGUI for all flag combinations" do
-      flag_combos = [
-        %{case_sensitive: true, whole_word: true, regex: true, replace_mode: true},
-        %{case_sensitive: false, whole_word: false, regex: false, replace_mode: false},
-        %{case_sensitive: true, whole_word: false, regex: true, replace_mode: false},
-        %{case_sensitive: false, whole_word: true, regex: false, replace_mode: true}
-      ]
-
-      for gs <- flag_combos do
-        legacy_binary = ProtocolGUI.encode_gui_search_state(true, 10, 3, gs)
-
-        model = %SearchState{
-          active: true,
-          match_count: 10,
-          current_index: 3,
-          case_sensitive: gs.case_sensitive,
-          whole_word: gs.whole_word,
-          regex: gs.regex,
-          replace_mode: gs.replace_mode
-        }
-
-        caches = Caches.new()
-        {new_binary, _caches} = SearchStateEncoder.encode(model, caches)
-
-        assert new_binary == legacy_binary,
-               "Search state flags #{inspect(gs)}: new encoder output does not match legacy output"
-      end
+      assert <<@op_gui_search_state, 6::16, 1::8, 10::16, 3::16, 0x0F::8>> = cmd
     end
 
     test "rejects out-of-range match_count before narrowing it to u16" do
       model = %SearchState{
         active: true,
         match_count: 70_000,
-        current_index: 70_000,
+        current_index: 1,
         case_sensitive: false,
         whole_word: false,
         regex: false,
@@ -129,6 +82,29 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
       assert %{
                command: :gui_search_state,
                field: :match_count,
+               actual: 70_000,
+               min: 0,
+               max: 65_535
+             } =
+               assert_raise(Minga.Frontend.Adapter.GUI.EncodingError, fn ->
+                 SearchStateEncoder.encode(model, Caches.new())
+               end)
+    end
+
+    test "rejects out-of-range current_index before narrowing it to u16" do
+      model = %SearchState{
+        active: true,
+        match_count: 1,
+        current_index: 70_000,
+        case_sensitive: false,
+        whole_word: false,
+        regex: false,
+        replace_mode: false
+      }
+
+      assert %{
+               command: :gui_search_state,
+               field: :current_index,
                actual: 70_000,
                min: 0,
                max: 65_535

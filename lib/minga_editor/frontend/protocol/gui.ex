@@ -153,16 +153,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_gui_minibuffer Opcodes.gui_minibuffer()
   @op_clipboard_write Opcodes.clipboard_write()
-  @op_gui_line_spacing Opcodes.gui_line_spacing()
   @op_gui_file_tree Opcodes.gui_file_tree()
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
-  @op_gui_cursor_animation Opcodes.gui_cursor_animation()
   @op_gui_hover_popup Opcodes.gui_hover_popup()
   @op_gui_signature_help Opcodes.gui_signature_help()
   @op_gui_float_popup Opcodes.gui_float_popup()
   @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_hover_action Opcodes.gui_hover_action()
-  @op_gui_config_state Opcodes.gui_config_state()
   @op_gui_notifications Opcodes.gui_notifications()
   @op_gui_observatory Opcodes.gui_observatory()
   @op_gui_extension_overlay Opcodes.gui_extension_overlay()
@@ -260,7 +257,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
 
-  @op_gui_search_state Opcodes.gui_search_state()
   @op_gui_sidebars Opcodes.gui_sidebars()
 
   @search_flag_replace_mode 0x01
@@ -1021,75 +1017,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     <<@op_clipboard_write, payload_len::32, target_byte::8, text_len::32, text_bytes::binary>>
   end
 
-  # ── Line spacing (forward-compatible, 0x92) ──
-
-  @doc """
-  Encodes a gui_line_spacing command.
-
-  Parity oracle (#2119): production no longer pushes line spacing through this
-  function. line_spacing is emitted in-frame by
-  `Minga.Frontend.Adapter.GUI.LineSpacingEncoder`; this encoder is retained only
-  as the byte-for-byte oracle for the GUI protocol tests.
-
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-  Payload: spacing_x100(2) — the spacing multiplier times 100 as a 16-bit unsigned integer.
-  For example, 1.2 is encoded as 120, 1.0 as 100.
-  """
-  @spec encode_gui_line_spacing(number()) :: binary()
-  def encode_gui_line_spacing(spacing) when is_number(spacing) and spacing >= 1.0 do
-    spacing_x100 = round(spacing * 100)
-    <<@op_gui_line_spacing, 2::16, spacing_x100::16>>
-  end
-
-  # ── Cursor animation (forward-compatible, 0x95) ──
-
-  @doc """
-  Encodes a gui_cursor_animation command.
-
-  Parity oracle (#2119): production no longer pushes cursor animation through this
-  function. cursor_animation is emitted in-frame by
-  `Minga.Frontend.Adapter.GUI.CursorAnimationEncoder`; this encoder is retained
-  only as the byte-for-byte oracle for the GUI protocol tests.
-
-  Sends whether the GUI renderer should animate cursor movement. Reduce Motion can still disable animation on the frontend.
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + enabled(1).
-  """
-  @spec encode_gui_cursor_animation(boolean()) :: binary()
-  def encode_gui_cursor_animation(enabled) when is_boolean(enabled) do
-    enabled_byte = if enabled, do: 1, else: 0
-    <<@op_gui_cursor_animation, 1::16, enabled_byte::8>>
-  end
-
-  @doc """
-  Encodes the GUI search toolbar state.
-
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-  Payload: active(1) + match_count(2) + current_index(2) + flags(1).
-
-  Flags bits: bit 0 = replace_mode, bit 1 = case_sensitive, bit 2 = whole_word, bit 3 = regex.
-  """
-  @spec encode_gui_search_state(
-          boolean(),
-          non_neg_integer(),
-          non_neg_integer(),
-          MingaEditor.State.Search.gui_search() | %{}
-        ) :: binary()
-  def encode_gui_search_state(active, match_count, current_index, flags) do
-    active_byte = if active, do: 1, else: 0
-    count = min(match_count, @max_u16)
-    idx = min(current_index, @max_u16)
-
-    flag_byte =
-      if(flags[:replace_mode], do: @search_flag_replace_mode, else: 0) |||
-        if(flags[:case_sensitive], do: @search_flag_case_sensitive, else: 0) |||
-        if(flags[:whole_word], do: @search_flag_whole_word, else: 0) |||
-        if flags[:regex], do: @search_flag_regex, else: 0
-
-    payload = <<active_byte::8, count::16, idx::16, flag_byte::8>>
-
-    <<@op_gui_search_state, byte_size(payload)::16, payload::binary>>
-  end
-
   @doc "Encodes semantic sidebar metadata for native GUI frontend hosts."
   @spec encode_gui_sidebars([sidebar_metadata()], String.t() | nil) :: binary()
   def encode_gui_sidebars(sidebars, active_id) when is_list(sidebars) do
@@ -1309,40 +1236,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           required(:keybindings) => [keybinding_entry()]
         }
 
-  @doc """
-  Encodes the current settings panel state for native GUI frontends.
-
-  Parity oracle (#2119): production no longer pushes config_state through this
-  function. config_state is emitted in-frame by
-  `Minga.Frontend.Adapter.GUI.ConfigStateEncoder` from the cached snapshot the
-  builder projects via `MingaEditor.RenderModel.UI.ConfigStateBuilder`. The
-  projection helpers below (`config_state/2`, `settings_option?/1`) are still
-  live: the builder and the GUI action handler use them. This encoder is retained
-  only as the byte-for-byte oracle for the GUI protocol tests.
-  """
-  @spec encode_gui_config_state(config_state()) :: binary()
-  def encode_gui_config_state(%{
-        options: options,
-        theme_previews: previews,
-        keybindings: bindings
-      }) do
-    option_entries = Enum.map(options, fn {name, value} -> encode_config_option(name, value) end)
-    preview_entries = Enum.map(previews, &encode_theme_preview/1)
-    binding_entries = Enum.map(bindings, &encode_keybinding_entry/1)
-
-    payload =
-      IO.iodata_to_binary([
-        <<Enum.count(option_entries)::16>>,
-        option_entries,
-        <<Enum.count(preview_entries)::16>>,
-        preview_entries,
-        <<Enum.count(binding_entries)::16>>,
-        binding_entries
-      ])
-
-    <<@op_gui_config_state, byte_size(payload)::16, payload::binary>>
-  end
-
   @doc "Builds a full settings state payload from the current config and keymap servers."
   @spec config_state(Options.server(), Minga.Keymap.server()) :: config_state()
   def config_state(
@@ -1363,50 +1256,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec settings_option?(atom()) :: boolean()
   def settings_option?(name), do: name in @settings_options
-
-  @spec encode_config_option(Options.option_name(), term()) :: binary()
-  defp encode_config_option(name, value) when is_atom(name) do
-    name_bytes = Atom.to_string(name)
-    value_payload = encode_config_value(value)
-    <<byte_size(name_bytes)::8, name_bytes::binary, value_payload::binary>>
-  end
-
-  @spec encode_config_value(term()) :: binary()
-  defp encode_config_value(value) when is_boolean(value) do
-    encoded = if value, do: 1, else: 0
-    <<@value_boolean::8, encoded::8>>
-  end
-
-  defp encode_config_value(value) when is_integer(value),
-    do: <<@value_integer::8, value::32-signed>>
-
-  defp encode_config_value(value) when is_binary(value) do
-    bytes = :erlang.iolist_to_binary([value])
-    <<@value_string::8, byte_size(bytes)::16, bytes::binary>>
-  end
-
-  defp encode_config_value(value) when is_atom(value) do
-    bytes = Atom.to_string(value)
-    <<@value_atom::8, byte_size(bytes)::16, bytes::binary>>
-  end
-
-  defp encode_config_value(value) when is_float(value), do: <<@value_float::8, value::float-64>>
-
-  defp encode_config_value(value) do
-    bytes = inspect(value)
-    <<@value_string::8, byte_size(bytes)::16, bytes::binary>>
-  end
-
-  @spec encode_theme_preview(theme_preview()) :: binary()
-  defp encode_theme_preview(%{
-         name: name,
-         atom: atom,
-         editor_bg: bg,
-         editor_fg: fg,
-         accent: accent
-       }) do
-    <<encode_string8(name)::binary, encode_string8(atom)::binary, bg::24, fg::24, accent::24>>
-  end
 
   @spec theme_previews() :: [theme_preview()]
   defp theme_previews do
@@ -1594,12 +1443,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec command_to_string(atom() | tuple()) :: String.t()
   defp command_to_string(command) when is_atom(command), do: Atom.to_string(command)
   defp command_to_string(command), do: inspect(command)
-
-  @spec encode_keybinding_entry(keybinding_entry()) :: binary()
-  defp encode_keybinding_entry(%{mode: mode, key: key, command: command, description: desc}) do
-    <<encode_string8(mode)::binary, encode_string16(key)::binary,
-      encode_string16(command)::binary, encode_string16(desc)::binary>>
-  end
 
   # ── File tree ──
 

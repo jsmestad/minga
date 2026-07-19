@@ -2,6 +2,8 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Config.Options
+  alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
+  alias MingaEditor.RenderModel.UI.ConfigStateBuilder
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
@@ -60,7 +62,7 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
         ]
       }
 
-      encoded = ProtocolGUI.encode_gui_config_state(state)
+      encoded = state |> ConfigStateBuilder.from_wire() |> ConfigStateEncoder.encode_command()
 
       assert <<0x97, payload_len::16, payload::binary>> = encoded
       assert payload_len == byte_size(payload)

@@ -732,42 +732,6 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
-  describe "encode_gui_line_spacing/1" do
-    test "encodes spacing 1.2 as 120" do
-      binary = ProtocolGUI.encode_gui_line_spacing(1.2)
-
-      <<0x92, payload_len::16, spacing_encoded::16>> = binary
-
-      assert payload_len == 2
-      assert spacing_encoded == 120
-    end
-
-    test "encodes spacing 1.0 as 100" do
-      <<0x92, _::16, spacing_encoded::16>> = ProtocolGUI.encode_gui_line_spacing(1.0)
-      assert spacing_encoded == 100
-    end
-
-    test "encodes spacing 1.5 as 150" do
-      <<0x92, _::16, spacing_encoded::16>> = ProtocolGUI.encode_gui_line_spacing(1.5)
-      assert spacing_encoded == 150
-    end
-
-    test "forward-compatible: opcode + length prefix is skippable" do
-      binary = ProtocolGUI.encode_gui_line_spacing(1.2)
-      <<0x92, payload_len::16, _payload::binary-size(payload_len)>> = binary
-    end
-  end
-
-  describe "encode_gui_cursor_animation/1" do
-    test "encodes enabled cursor animation" do
-      assert <<0x95, 1::16, 1::8>> = ProtocolGUI.encode_gui_cursor_animation(true)
-    end
-
-    test "encodes disabled cursor animation" do
-      assert <<0x95, 1::16, 0::8>> = ProtocolGUI.encode_gui_cursor_animation(false)
-    end
-  end
-
   describe "encode_gui_status_bar/1 background subagents" do
     test "encodes background subagent count and label in buffer agent section" do
       binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})

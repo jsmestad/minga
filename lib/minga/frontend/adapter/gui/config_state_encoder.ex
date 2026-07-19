@@ -30,8 +30,7 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoder do
   end
 
   # Forward-compatible 0x97 envelope: opcode(1) + payload_length(2) + payload.
-  # The payload is byte-identical to the legacy ProtocolGUI.encode_gui_config_state
-  # so frontends decode it unchanged.
+  # Canonical in-frame 0x97 producer for native settings state decoded directly by frontends.
   @spec encode_command(ConfigState.t()) :: binary()
   def encode_command(%ConfigState{} = model) do
     writer =

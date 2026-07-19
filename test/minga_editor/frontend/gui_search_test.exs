@@ -149,54 +149,6 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     end
   end
 
-  # ── encode_gui_search_state ──
-
-  describe "encode_gui_search_state/4" do
-    test "encodes active state with matches" do
-      gs = %{replace_mode: true, case_sensitive: true, whole_word: false, regex: false}
-      binary = ProtocolGUI.encode_gui_search_state(true, 5, 2, gs)
-
-      <<0x9E, payload_len::16, active, count::16, idx::16, flags>> = binary
-      assert payload_len == 6
-      assert active == 1
-      assert count == 5
-      assert idx == 2
-      assert flags == 0x03
-    end
-
-    test "encodes inactive state" do
-      binary = ProtocolGUI.encode_gui_search_state(false, 0, 0, %{})
-
-      <<0x9E, _len::16, active, count::16, idx::16, flags>> = binary
-      assert active == 0
-      assert count == 0
-      assert idx == 0
-      assert flags == 0
-    end
-
-    test "encodes all flags" do
-      gs = %{replace_mode: true, case_sensitive: true, whole_word: true, regex: true}
-      binary = ProtocolGUI.encode_gui_search_state(true, 0, 0, gs)
-
-      <<0x9E, _len::16, _active, _count::16, _idx::16, flags>> = binary
-      assert flags == 0x0F
-    end
-
-    test "clamps match_count to u16 max" do
-      binary = ProtocolGUI.encode_gui_search_state(true, 70_000, 1, %{})
-
-      <<0x9E, _len::16, _active, count::16, _idx::16, _flags>> = binary
-      assert count == 65_535
-    end
-
-    test "clamps current_index to u16 max" do
-      binary = ProtocolGUI.encode_gui_search_state(true, 1, 70_000, %{})
-
-      <<0x9E, _len::16, _active, _count::16, idx::16, _flags>> = binary
-      assert idx == 65_535
-    end
-  end
-
   # ── full event decode ──
 
   describe "full event decode for search actions" do
