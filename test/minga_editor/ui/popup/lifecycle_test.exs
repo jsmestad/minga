@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
 
   alias MingaEditor.Layout
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
@@ -146,6 +147,38 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
 
       assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
       assert is_nil(new_state.render.layout)
+    end
+
+    test "uses frontend terminal viewport for split and float popup windows", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: table
+    } do
+      float_buf = fake_pid()
+      on_exit(fn -> Process.exit(float_buf, :kill) end)
+
+      frontend = FrontendState.resize_terminal(state.frontend, Viewport.new(40, 120))
+      state = %{state | frontend: frontend}
+
+      assert state.workspace.viewport.rows == 24
+      assert state.workspace.viewport.cols == 80
+
+      PopupRegistry.register(Rule.new("*Split*", focus: false), table)
+      PopupRegistry.register(Rule.new("*Float*", display: :float, focus: false), table)
+
+      assert {:ok, with_split} =
+               Lifecycle.open_popup(state, "*Split*", popup_buf, registry: table)
+
+      assert {:ok, with_float} =
+               Lifecycle.open_popup(with_split, "*Float*", float_buf, registry: table)
+
+      split_window = Map.fetch!(with_float.workspace.windows.map, 2)
+      float_window = Map.fetch!(with_float.workspace.windows.map, 3)
+
+      assert split_window.viewport.rows == 40
+      assert split_window.viewport.cols == 120
+      assert float_window.viewport.rows == 40
+      assert float_window.viewport.cols == 120
     end
   end
 
