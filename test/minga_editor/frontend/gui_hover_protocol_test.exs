@@ -136,43 +136,6 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
     end
   end
 
-  # ── Float Popup ────────────────────────────────────────────────────
-
-  @op_gui_float_popup 0x83
-
-  describe "encode_gui_float_popup/1" do
-    test "hidden state encodes to 2 bytes" do
-      assert <<@op_gui_float_popup, 0>> = ProtocolGUI.encode_gui_float_popup(%{visible: false})
-    end
-
-    test "visible popup with title and content lines" do
-      data = %{
-        visible: true,
-        title: "*Help*",
-        lines: ["Line one", "Line two"],
-        width: 60,
-        height: 20
-      }
-
-      result = ProtocolGUI.encode_gui_float_popup(data)
-
-      # opcode(1) + visible(1) + width(2) + height(2) + title_len(2) + title + line_count(2)
-      assert <<@op_gui_float_popup, 1, 60::16, 20::16, 6::16, "*Help*", 2::16, rest::binary>> =
-               result
-
-      # line 1
-      assert <<8::16, "Line one", remaining::binary>> = rest
-      # line 2
-      assert <<8::16, "Line two">> = remaining
-    end
-
-    test "visible popup with empty title" do
-      data = %{visible: true, title: "", lines: ["hello"], width: 40, height: 10}
-      result = ProtocolGUI.encode_gui_float_popup(data)
-      assert <<@op_gui_float_popup, 1, 40::16, 10::16, 0::16, 1::16, 5::16, "hello">> = result
-    end
-  end
-
   # ── Split Separators ──────────────────────────────────────────────
 
   @op_gui_split_separators 0x84

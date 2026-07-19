@@ -157,7 +157,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
   @op_gui_hover_popup Opcodes.gui_hover_popup()
   @op_gui_signature_help Opcodes.gui_signature_help()
-  @op_gui_float_popup Opcodes.gui_float_popup()
   @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_hover_action Opcodes.gui_hover_action()
   @op_gui_notifications Opcodes.gui_notifications()
@@ -2950,50 +2949,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       <<@op_gui_signature_help, 1::8, sh.anchor_row::16, sh.anchor_col::16,
         sh.active_signature::8, sh.active_parameter::8, Enum.count(sh.signatures)::8>>
       | sig_data
-    ])
-  end
-
-  # ── Float Popup ──
-
-  @typedoc "Data for a float popup."
-  @type float_popup_data :: %{
-          visible: boolean(),
-          title: String.t(),
-          lines: [String.t()],
-          width: non_neg_integer(),
-          height: non_neg_integer()
-        }
-
-  @doc """
-  Encodes a gui_float_popup command (0x83).
-
-  Wire format:
-    opcode(1) + visible(1) + width(2) + height(2) +
-    title_len(2) + title(title_len) + line_count(2) + lines...
-
-  Each line:
-    text_len(2) + text(text_len)
-
-  When visible=0, no further fields are sent.
-  """
-  @spec encode_gui_float_popup(float_popup_data()) :: binary()
-  def encode_gui_float_popup(%{visible: false}) do
-    <<@op_gui_float_popup, 0::8>>
-  end
-
-  def encode_gui_float_popup(%{visible: true, title: title, lines: lines, width: w, height: h}) do
-    title_bytes = IO.iodata_to_binary(title)
-
-    line_data =
-      Enum.map(lines, fn line ->
-        text = IO.iodata_to_binary(line)
-        <<byte_size(text)::16, text::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      <<@op_gui_float_popup, 1::8, w::16, h::16, byte_size(title_bytes)::16, title_bytes::binary,
-        Enum.count(lines)::16>>
-      | line_data
     ])
   end
 
