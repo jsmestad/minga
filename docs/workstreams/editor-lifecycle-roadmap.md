@@ -1884,6 +1884,69 @@ Background Git status replacement updates the registered panel's visibility, bad
 - **Discoveries affecting later work:** Registry projections must derive focus from shell-owned selection instead of inferring focus from visibility.
 - **Completion date:** 2026-07-18
 
+### W015: Size popup metadata from the frontend viewport
+
+- **Status:** ACTIVE
+- **Audit ID:** L15
+- **Roadmap unit:** W015, Size popup metadata from the frontend viewport
+- **Ponytail verdict:** `ACCEPT/direct`
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `medium`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness SHA:** `57d4e10bba0d5825164b20ca032544cac95baace`
+- **Freshness basis:** Current `HEAD` and `origin/main` contain verified W014. Popup lifecycle still matched a nonexistent top-level viewport and fell back to 24 by 80.
+
+#### Observable outcome
+
+New split and float popup windows initialize their viewport metadata from `state.frontend.terminal_viewport`, including dimensions reported after a frontend resize.
+
+#### Owner and failure path
+
+- `MingaEditor.State.Frontend` owns the terminal viewport and its resize transition.
+- `MingaEditor.UI.Popup.Lifecycle` owns popup Window construction.
+- Before this unit, both popup creation branches called `viewport_size/1`. That helper looked for `state.viewport`, which is not an `EditorState` field, then returned `{24, 80}`.
+
+#### Locked implementation
+
+1. Read `state.frontend.terminal_viewport.rows` and `.cols` directly in split popup construction.
+2. Read the same frontend-owned dimensions in float popup construction.
+3. Delete the stale helper, hardcoded fallback, and unused `Viewport` alias.
+4. Do not retain a compatibility path for a nonexistent state shape.
+
+#### Required test
+
+- `test/minga_editor/ui/popup/lifecycle_test.exs`: keep workspace viewport at 24 by 80, resize only the frontend viewport to 40 by 120, open one split and one float popup, and assert both Window viewports use 40 by 120.
+
+#### Validation
+
+- Focused: `mix test.debug test/minga_editor/ui/popup/lifecycle_test.exs`
+- Broad: `git diff --check && make lint && mix test.llm --max-cases 4`
+
+#### Non-goals and budget
+
+- Do not change layout geometry, split sizing, popup rules, protocols, rendering, or frontend resize ownership.
+- Do not add a helper, fallback, abstraction, module, or compatibility path.
+- **Maximum production additions:** 40 lines.
+- **Maximum test additions:** 40 lines.
+
+#### Completion evidence
+
+- **PR URL:** Pending
+- **Commit SHA:** Pending
+- **Merge SHA:** Pending
+- **Focused tests:** 30 popup lifecycle tests passed.
+- **Broad validation:** `git diff --check`, `make lint`, and `mix test.llm --max-cases 4` passed; full non-heavy result: 58 doctests, 98 properties, 9,915 tests, 0 failures, 1 skipped, 578 excluded.
+- **Planner verdict:** `READY`; source owner, both construction branches, regression assertion, constraints, and validation are locked.
+- **Ponytail verdict:** `LEAN`; targeted review returned `Lean already. Ship.`
+- **Elixir verdict:** `PASS`; direct frontend field access and stale helper deletion match existing Elixir conventions.
+- **Bug-hunt verdict:** `PASS`; both popup creation branches and the resize owner are covered.
+- **Final reviewer verdict:** `PASS`.
+- **Production lines added/removed:** 4 added / 7 removed, net -3.
+- **Test lines added/removed:** 33 added / 0 removed, net +33.
+- **Concepts added/removed:** The invalid state-shape fallback is removed; no concept is added.
+- **Findings resolved:** Pending merge.
+- **Discoveries affecting later work:** Frontend-reported row fit and terminal dimensions must be read from `State.Frontend`, not a workspace or top-level fallback.
+- **Completion date:** Pending
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

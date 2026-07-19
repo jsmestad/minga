@@ -34,7 +34,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.UI.Popup.Active, as: PopupActive
@@ -179,7 +178,8 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     previous_active = ws.active
 
     {next_id, ws} = Windows.allocate_id(ws)
-    {rows, cols} = viewport_size(state)
+    rows = state.frontend.terminal_viewport.rows
+    cols = state.frontend.terminal_viewport.cols
     popup_window = Window.new(next_id, buffer_pid, rows, cols)
 
     # Determine split direction from the rule's side
@@ -223,7 +223,8 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
 
     # Create the popup window (not added to the tree, only the map)
     {next_id, ws} = Windows.allocate_id(ws)
-    {rows, cols} = viewport_size(state)
+    rows = state.frontend.terminal_viewport.rows
+    cols = state.frontend.terminal_viewport.cols
     popup_window = Window.new(next_id, buffer_pid, rows, cols)
 
     # Attach popup metadata
@@ -386,10 +387,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   defp compute_popup_size({:percent, pct}, total), do: max(div(total * pct, 100), 1)
   defp compute_popup_size({:rows, n}, _total), do: max(n, 1)
   defp compute_popup_size({:cols, n}, _total), do: max(n, 1)
-
-  @spec viewport_size(state()) :: {pos_integer(), pos_integer()}
-  defp viewport_size(%{viewport: %Viewport{rows: r, cols: c}}), do: {r, c}
-  defp viewport_size(_state), do: {24, 80}
 
   @spec remove_popup_window(Windows.t(), Window.id(), PopupActive.t()) :: Windows.t()
   defp remove_popup_window(ws, window_id, %PopupActive{rule: %Rule{display: :float}}) do
