@@ -2018,6 +2018,37 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Discoveries affecting later work:** Resident semantic models already carry stable identity; frontend actions must echo that identity instead of deriving a local array position.
   - **Completion date:** 2026-07-19
 
+### W018: Capture resize drags and clear release state
+
+- **Status:** ACTIVE
+- **Audit ID:** L22
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `5aa3ea6e2b8b3ec87246610ee5b9b917f017fa58`
+- **Observable outcome:** Active left-button resize drag and release events bypass focus-tree hit routing, and active text or resize release always clears its drag state even when the pointer leaves the tree, coordinates are negative, or the active buffer disappears.
+- **Failure path:** Router captured text drags directly but routed resize drags through the focus tree, where outside coordinates or another handler could swallow them. Mouse checked for an active buffer and negative coordinates before release cleanup, preserving stale drag state on early return.
+- **Authoritative owners:** `Input.Router.dispatch_mouse/7` owns capture order; `Mouse.handle/7` owns release semantics; `State.Mouse.stop_drag/1` and `stop_resize/1` own value transitions; `Session.State.set_mouse/2` owns workspace installation.
+- **Locked implementation:** Direct-route active `%MouseState{dragging: true}` and `%MouseState{resize_dragging: {_, _}}` left drag/release events before negative-coordinate and focus-tree routing. Move existing text and resize release clauses before the no-buffer and negative-coordinate guards without changing their bodies or auto-copy behavior.
+- **Tests:** Router regressions prove resize release outside the focus tree clears state and active resize drag bypasses node handlers. Mouse regressions prove text and resize release clear state after the active buffer disappears; include negative-coordinate resize release if it remains concise.
+- **Focused validation:** `mix test.debug test/minga_editor/input/router_test.exs test/minga_editor/mouse_test.exs test/minga_editor/state/mouse_test.exs` -> 75 passed.
+- **Broad validation:** `make lint`; `mix test.llm --max-cases 4`; `git diff --check`.
+- **Non-goals:** No focus-tree, shell lifecycle, mouse protocol, separator math, drag-start, selection, auto-copy, hover, click-count, wheel, frontend, process, module, dependency, registry, config, compatibility, or data-shape changes.
+- **Maximum production additions:** 50 net lines; expected 10 to 25.
+- **Maximum test additions:** 80 lines.
+- **Dependencies:** W017 is VERIFIED and merged; no unresolved dependency or implementer question remains.
+- **Completion evidence:**
+  - **Implementation result:** `Input.Router.dispatch_mouse/7` now captures active `%MouseState{dragging: true}` and `%MouseState{resize_dragging: {_, _}}` left drag/release events before negative-coordinate and focus-tree routing, running the existing shell availability check and `Mouse.handle/7` path directly. `Mouse.handle/7` now runs active text and resize release cleanup before the no-active-buffer and negative-coordinate guards, preserving the existing text visual auto-copy path and owner APIs.
+  - **Regression coverage:** Added router regressions for resize release outside the focus tree clearing resize state and active resize drag bypassing focus-tree node handlers. Added Mouse regressions for resize and text release clearing state after active-buffer loss. The optional negative-coordinate Mouse regression was not added so test additions stay within the locked budget; the production release clauses are still ordered before the negative-coordinate guards.
+  - **Failure reproduced:** Before the production fix, the new focused regressions failed 5 times: resize drag reached `InputRouterMouseProbe`, resize release outside the focus tree left `resize_dragging` set, and text/resize release cleanup was skipped after active-buffer loss or negative coordinates.
+  - **Focused validation:** `mix test.debug test/minga_editor/input/router_test.exs test/minga_editor/mouse_test.exs test/minga_editor/state/mouse_test.exs` passed with 75 tests.
+  - **Broad validation:** `make lint` passed Credo, compile, and incremental Dialyzer; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,920 tests with 0 failures, 1 skipped, and 578 excluded.
+  - **Line deltas:** Production `lib/minga_editor/input/router.ex` +21/-3 and `lib/minga_editor/mouse.ex` +38/-60, net -4. Tests `test/minga_editor/input/router_test.exs` +33 and `test/minga_editor/mouse_test.exs` +41, total +74 additions.
+  - **Concepts added/removed:** Added no architecture or data shape; removed duplicated release-state installation and the stale routing/guard ordering path that could swallow active resize release cleanup.
+  - **Pre-acceptance reviews:** Correctness found no routing or state defect after its evidence-only correction; Elixir craftsmanship `PASS` after release clauses reused `update_mouse/2` and fixtures used `Windows.set_tree/2` and `Buffers.remove/2`; Ponytail `Lean already. Ship.`
+  - **Final reviewer:** `PASS`; locked routing and release-cleanup contract, ownership, lifecycle, API, tests, budgets, evidence, and merge safety accepted with no findings.
+  - **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

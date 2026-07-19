@@ -18,6 +18,9 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Mouse
   alias MingaEditor.Startup
   alias MingaEditor.State.Windows
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.Viewport
   alias MingaEditor.WindowTree
 
@@ -408,6 +411,35 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "active drag release cleanup" do
+    test "resize release clears state even after the active buffer disappears" do
+      {state, _buffer} = start_mouse_state("hello")
+
+      state =
+        state
+        |> install_mouse(MouseState.start_resize(state.workspace.mouse, :vertical, 10))
+        |> remove_active_buffer()
+
+      new_state = mouse(state, 0, 0, :left, :release)
+
+      assert new_state.workspace.mouse.resize_dragging == nil
+    end
+
+    test "text drag release clears dragging even after the active buffer disappears" do
+      {state, _buffer} = start_mouse_state("hello")
+
+      state =
+        state
+        |> install_mouse(MouseState.start_drag(state.workspace.mouse, {0, 0}))
+        |> remove_active_buffer()
+
+      new_state = mouse(state, 0, 0, :left, :release)
+
+      refute new_state.workspace.mouse.dragging
+      assert new_state.workspace.mouse.anchor == nil
+    end
+  end
+
   describe "drag selection" do
     test "left press and drag creates a visual selection" do
       {state, buffer} = start_mouse_state("hello world foo")
@@ -728,6 +760,15 @@ defmodule MingaEditor.MouseTest do
       )
 
     {state, buffer}
+  end
+
+  defp install_mouse(state, mouse) do
+    %{state | workspace: SessionState.set_mouse(state.workspace, mouse)}
+  end
+
+  defp remove_active_buffer(state) do
+    buffers = Buffers.remove(state.workspace.buffers, state.workspace.buffers.active)
+    %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
   end
 
   defp start_sidebar_registry(id) do
