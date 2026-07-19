@@ -38,6 +38,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: [2: content],
+            gutters: frameState.windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -221,6 +222,7 @@ struct CoreTextMetalRendererCursorTests {
 
         let rects = CoreTextMetalRenderer.gutterChromeRects(
             frameState: frameState,
+            gutters: frameState.windowGutters,
             cellW: 8,
             cellH: 16,
             scale: 2,
@@ -655,6 +657,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: [:],
+            gutters: [:],
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -688,6 +691,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: [:],
+            gutters: [:],
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -720,6 +724,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: [:],
+            gutters: [:],
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -768,6 +773,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: [1: content],
+            gutters: frameState.windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -912,6 +918,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: [1: hiddenChat, 65_534: visiblePrompt],
+            gutters: frameState.windowGutters,
             cellW: 8,
             displayCellH: 16,
             scale: 1,
@@ -950,6 +957,7 @@ struct CoreTextMetalRendererCursorTests {
         let cursor = CoreTextMetalRenderer.resolveCursor(
             frameState: dispatcher.frameState,
             windowContents: gui.windowContents,
+            gutters: dispatcher.frameState.windowGutters,
             cellW: 7.5,
             displayCellH: 16.0,
             scale: 2.0,

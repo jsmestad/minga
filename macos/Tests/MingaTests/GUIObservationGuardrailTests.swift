@@ -52,7 +52,6 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/Overlays/WhichKeyState.swift#WhichKeyState": "protocol presentation owner",
         "Sources/Views/Settings/SettingsState.swift#SettingsState": "settings observable state",
         "Sources/Views/Shared/EditTimelineState.swift#EditTimelineState": "protocol presentation owner",
-        "Sources/Views/Shared/GUIFramePresentationMetrics.swift#GUIFramePresentationMetrics": "observable native correlation tickets",
         "Sources/Views/Shared/GUIState.swift#GUIThemeBacking": "observable theme backing",
         "Sources/Views/Shared/GUIState.swift#GUIWindowContentBacking": "observable resident-window backing",
         "Sources/Views/Shared/GUIState.swift#GUIState": "aggregate observable state",
@@ -72,8 +71,6 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var lastMessage = \"\"": "feedback timing cache; rendered fields remain observed",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var showTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var spinnerOnTime: ContinuousClock.Instant?": "timing bookkeeping, not rendered state",
-        "Sources/Views/Shared/GUIFramePresentationMetrics.swift: @ObservationIgnored private let log = OSLog(subsystem: \"com.minga.editor\", category: \"GUIFramePresentation\")": "telemetry logging handle, not rendered state",
-        "Sources/Views/Shared/GUIFramePresentationMetrics.swift: @ObservationIgnored private var samples: [Sample] = []": "debug telemetry sample buffer, not rendered state",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored private let themeBacking = GUIThemeBacking()": "stable dependency reference; backing fields are observed",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored private let windowContentBacking: GUIWindowContentBacking": "stable dependency reference; backing fields are observed",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored public lazy private(set) var editorInput = EditorHostInput(": "stable host dependency bundle, not rendered state",
@@ -97,6 +94,35 @@ struct GUIObservationGuardrailTests {
             }
             for call in try revisionDrivenIdentityCalls(in: source.sanitized, original: source.contents) {
                 violations.append("\(source.path): revision/frame-token identity `\(call)`")
+            }
+        }
+
+        record(violations)
+    }
+
+    @Test("editor presentation paths do not regain fragmented authorities")
+    func editorPresentationRejectsFragmentedAuthorities() throws {
+        let bannedFragments = [
+            "func render(frameState:",
+            "render(frameState:",
+            "currentFrameWindowIds",
+            "frameState.dirty",
+            "markRendered(",
+            "editorInput?.currentWindowContents",
+            "visibleEditorSnapshot?.windowIds ?? dispatcher.committedEditorSnapshot",
+            "dispatcher.frameState.windowGutters",
+        ]
+        let allowedPaths: [String: Set<String>] = [
+            "dispatcher.frameState.windowGutters": ["Sources/PreviewRegistry.swift"],
+        ]
+        var violations: [String] = []
+
+        for source in try productionSources() {
+            for fragment in bannedFragments where source.sanitized.contains(fragment) {
+                guard allowedPaths[fragment, default: []].contains(source.path) else {
+                    violations.append("\(source.path): banned editor presentation fragment `\(fragment)`")
+                    continue
+                }
             }
         }
 
@@ -147,12 +173,8 @@ struct GUIObservationGuardrailTests {
                 "Sources/Renderer/CommandDispatcher.swift",
                 "Sources/Renderer/PreparedFrameTransaction.swift",
             ],
-            "pendingFrame": [
+            "expectedNativeDrawFrame": [
                 "Sources/Views/Shared/GUIFramePresentationMetrics.swift",
-            ],
-            "pendingEditorFrame": [
-                "Sources/Views/Shared/GUIFramePresentationMetrics.swift",
-                "Sources/Renderer/CommandDispatcher.swift",
             ],
             "pendingPresentationFrame": [
                 "Sources/Renderer/CommandDispatcher.swift",
@@ -176,14 +198,9 @@ struct GUIObservationGuardrailTests {
         }
 
         let exactAccessorOccurrences: [String: [String: Int]] = [
-            "pendingFrame": ["Sources/Views/Shared/GUIFramePresentationMetrics.swift": 2],
-            "pendingEditorFrame": [
-                "Sources/Views/Shared/GUIFramePresentationMetrics.swift": 1,
-                "Sources/Renderer/CommandDispatcher.swift": 1,
-            ],
+            "expectedNativeDrawFrame": ["Sources/Views/Shared/GUIFramePresentationMetrics.swift": 2],
             "pendingPresentationFrame": [
                 "Sources/Renderer/CommandDispatcher.swift": 1,
-                "Sources/Views/Editor/EditorNSView.swift": 1,
             ],
         ]
         for (accessor, expected) in exactAccessorOccurrences {
@@ -266,14 +283,15 @@ struct GUIObservationGuardrailTests {
         #expect(try discardedCorrelationReads(in: sanitizeSwiftSource("_ = item.id")).isEmpty)
     }
 
-    @Test("presentation metrics observe pending correlation and ignore only classified telemetry infrastructure")
+    @Test("presentation metrics remain passive frame-correlated telemetry")
     func metricsSourcePolicy() throws {
         let source = try source(at: "Sources/Views/Shared/GUIFramePresentationMetrics.swift")
-        #expect(source.sanitized.contains("@MainActor\n@Observable\npublic final class GUIFramePresentationMetrics"))
+        #expect(source.sanitized.contains("@MainActor\npublic final class GUIFramePresentationMetrics"))
+        #expect(!source.sanitized.contains("@Observable\npublic final class GUIFramePresentationMetrics"))
         #expect(source.sanitized.contains("private var pending: [GUIFrameImpact: Pending] = [:]"))
-        #expect(source.sanitized.contains("expectedFrame: metrics.pendingFrame(domain: domain)"))
+        #expect(source.sanitized.contains("expectedFrame: metrics.expectedNativeDrawFrame(domain: domain)"))
         #expect(source.sanitized.contains("func frameNativeDrawProbe("))
-        #expect(identifierTokens(in: source.sanitized).count { $0 == "pending" } == 13)
+        #expect(identifierTokens(in: source.sanitized).count { $0 == "pending" } == 12)
     }
 
     private func productionSources() throws -> [ProductionSource] {

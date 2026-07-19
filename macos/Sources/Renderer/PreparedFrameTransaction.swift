@@ -68,6 +68,10 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
     case missingTheme
     case incompleteTheme(missingSlots: [UInt8])
     case missingWindowReference(windowId: UInt16)
+    case missingWindowGeometry(windowId: UInt16)
+    case missingWindowGutter(windowId: UInt16)
+    case incompatibleWindowGeometry(windowId: UInt16)
+    case invalidActiveWindow(windowId: UInt16)
     case windowEpochMismatch(windowId: UInt16, expected: UInt32, actual: UInt32)
     case invalidRetainedRows(windowId: UInt16, contentEpoch: UInt32)
     case invalidRowSplice(windowId: UInt16, contentEpoch: UInt32)
@@ -88,7 +92,9 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
         case .baseSequenceMismatch: return GeneratedProtocol.FrameRejectionReason.baseSequenceMismatch.rawValue
         case .missingTheme: return GeneratedProtocol.FrameRejectionReason.missingTheme.rawValue
         case .incompleteTheme: return GeneratedProtocol.FrameRejectionReason.incompleteTheme.rawValue
-        case .missingWindowReference: return GeneratedProtocol.FrameRejectionReason.missingWindowReference.rawValue
+        case .missingWindowReference, .missingWindowGeometry, .missingWindowGutter,
+             .incompatibleWindowGeometry, .invalidActiveWindow:
+            return GeneratedProtocol.FrameRejectionReason.missingWindowReference.rawValue
         case .windowEpochMismatch: return GeneratedProtocol.FrameRejectionReason.windowEpochMismatch.rawValue
         case .invalidRetainedRows: return GeneratedProtocol.FrameRejectionReason.invalidRetainedRows.rawValue
         case .missingFontResource: return GeneratedProtocol.FrameRejectionReason.missingFontResource.rawValue
@@ -127,6 +133,14 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
             return "missing gui_theme slots: \(formatted)"
         case .missingWindowReference(let windowId):
             return "missing live window reference \(windowId)"
+        case .missingWindowGeometry(let windowId):
+            return "window \(windowId) is missing pane geometry"
+        case .missingWindowGutter(let windowId):
+            return "window \(windowId) is missing required gutter"
+        case .incompatibleWindowGeometry(let windowId):
+            return "window \(windowId) has incompatible gutter and pane geometry"
+        case .invalidActiveWindow(let windowId):
+            return "active window \(windowId) is not present in the committed editor snapshot"
         case .windowEpochMismatch(let windowId, let expected, let actual):
             return "window \(windowId) epoch \(actual) != \(expected)"
         case .invalidRetainedRows(let windowId, let epoch):
@@ -267,6 +281,7 @@ struct PreparedFrameTransactionBuilder {
     private var theme: PreparedThemeUpdate?
     private var semanticImpact: GUIFrameImpact = []
     private var workingWindows: [UInt16: GUIWindowContent]
+    private var workingGutters: [UInt16: Wire.WindowGutter]
     private var changedWindows: [UInt16: GUIWindowContent] = [:]
     private var referencedWindowIds: Set<UInt16> = []
     private var touchedWindowIds: Set<UInt16> = []
@@ -292,6 +307,7 @@ struct PreparedFrameTransactionBuilder {
         baseFrameSeq: UInt32,
         generation: UInt32,
         committedWindows: [UInt16: GUIWindowContent],
+        committedGutters: [UInt16: Wire.WindowGutter],
         registeredFontIds: Set<UInt8>,
         committedTranscript: AgentTranscriptSnapshot,
         stagingLimit: FrameResourceWeight = FrameResourcePolicy.default.staging.weight,
@@ -301,6 +317,7 @@ struct PreparedFrameTransactionBuilder {
         self.baseFrameSeq = baseFrameSeq
         self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
+        self.workingGutters = baseFrameSeq == 0 ? [:] : committedGutters
         self.registeredFontIds = registeredFontIds
         self.registeredFontIds.insert(0)
         self.workingTranscript = committedTranscript
@@ -355,6 +372,7 @@ struct PreparedFrameTransactionBuilder {
         case .guiGutter(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
+            workingGutters[data.windowId] = data
             stageReplacing(
                 command, key: .window(kind: .gutter, id: data.windowId),
                 weight: resourceWeight, domain: .window
@@ -438,6 +456,9 @@ struct PreparedFrameTransactionBuilder {
         if let missingReference = referencedWindowIds.subtracting(liveWindowIds).min() {
             return .failure(.missingWindowReference(windowId: missingReference))
         }
+        if let presentationRejection = validateCompleteEditorSurfaces(liveWindowIds: liveWindowIds) {
+            return .failure(presentationRejection)
+        }
         if let missingFont = requiredFontIds.subtracting(registeredFontIds).min() {
             return .failure(.missingFontResource(fontId: missingFont))
         }
@@ -480,6 +501,37 @@ struct PreparedFrameTransactionBuilder {
             )
         )
         return .success(transaction)
+    }
+
+    private func validateCompleteEditorSurfaces(liveWindowIds: Set<UInt16>) -> PreparedFrameRejection? {
+        for windowId in workingGutters.keys where !liveWindowIds.contains(windowId) {
+            return .missingWindowReference(windowId: windowId)
+        }
+
+        for content in workingWindows.values.sorted(by: { $0.windowId < $1.windowId }) {
+            guard let paneGeometry = content.paneGeometry else {
+                return .missingWindowGeometry(windowId: content.windowId)
+            }
+
+            if let gutter = workingGutters[content.windowId] {
+                guard gutter.contentRow == paneGeometry.textRect.row,
+                      gutter.contentCol == paneGeometry.textRect.col,
+                      gutter.contentHeight == paneGeometry.textRect.height,
+                      gutter.contentWidth == paneGeometry.textRect.width,
+                      gutter.lineNumberWidth == paneGeometry.gutterMetrics.lineNumberWidth,
+                      gutter.signColWidth == paneGeometry.gutterMetrics.signColWidth else {
+                    return .incompatibleWindowGeometry(windowId: content.windowId)
+                }
+            } else if paneGeometry.gutterMetrics.lineNumberWidth == 0,
+                      paneGeometry.gutterMetrics.signColWidth == 0,
+                      !paneGeometry.hitRegions.contains(where: { $0.kind == .gutter || $0.kind == .foldControl }) {
+                continue
+            } else {
+                return .missingWindowGutter(windowId: content.windowId)
+            }
+        }
+
+        return nil
     }
 
     private mutating func resolveOverlayDelta(_ delta: GUIWindowOverlayDelta) {

@@ -1,13 +1,6 @@
-/// Lightweight per-frame metadata for the Metal render pass.
+/// Lightweight editor metadata captured inside `CommittedEditorSnapshot`.
 ///
-/// Extracted from LineBuffer to separate frame metadata (cursor, gutter,
-/// cursorline, theme colors, grid dimensions) from styled run content.
-/// CommandDispatcher owns this as a mutable value; CoreTextMetalRenderer
-/// reads it synchronously during render().
-///
-/// No `clear()` method: metadata fields persist across frames and are
-/// overwritten individually by protocol opcodes. Only `dirty` resets
-/// at frame start via `beginFrame()`.
+/// CommandDispatcher still owns this mutable value while applying a prepared transaction, but production draw and input code read it only through the committed or visible editor snapshot. Missing or incompatible gutter, geometry, cursor, active-window, and split combinations must reject before snapshot publication instead of falling back during render.
 
 import MingaProtocol
 
@@ -53,9 +46,7 @@ struct FrameState {
     var cursorlineRow: UInt16 = 0xFFFF
     var cursorlineBg: UInt32 = 0
 
-    // Per-window gutter data from gui_gutter (0x7B).
-    // NOT cleared between frames: stale data serves as fallback to
-    // prevent blank-gutter flash if the gutter command hasn't arrived yet.
+    // Per-window gutter data from gui_gutter (0x7B). Keyframes prune this map inside the successful prepared transaction, and snapshot freeze rejects content that requires a missing or incompatible gutter.
     var windowGutters: [UInt16: Wire.WindowGutter] = [:]
     var activeWindowId: UInt16?
 
@@ -78,20 +69,16 @@ struct FrameState {
     // Line spacing multiplier (from gui_line_spacing opcode).
     var lineSpacing: Float = 1.0
 
-    // Dirty tracking
-    var dirty: Bool = true
-
     init(cols: UInt16, rows: UInt16) {
         self.cols = cols
         self.rows = rows
     }
 
-    /// Resize the grid. Marks dirty.
+    /// Resize the grid.
     mutating func resize(newCols: UInt16, newRows: UInt16) {
         guard newCols != cols || newRows != rows else { return }
         guard newCols > 0, newRows > 0 else { return }
         cols = newCols
         rows = newRows
-        dirty = true
     }
 }

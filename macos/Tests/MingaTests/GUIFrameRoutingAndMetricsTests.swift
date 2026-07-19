@@ -124,23 +124,22 @@ struct GUIFrameRoutingTests {
 
 @Suite("GUI frame presentation metrics")
 struct GUIFramePresentationMetricsTests {
-    @Test("pending native correlation is observable without semantic frame state")
-    @MainActor func pendingNativeCorrelationIsObservable() {
+    @Test("pending native correlation is passive telemetry")
+    @MainActor func pendingNativeCorrelationIsPassiveTelemetry() throws {
         let metrics = GUIFramePresentationMetrics()
         let notificationCount = Mutex(0)
 
         withObservationTracking {
-            _ = metrics.pendingFrame(domain: .shell)
+            _ = metrics.expectedNativeDrawFrame(domain: .shell)
         } onChange: {
             notificationCount.withLock { $0 += 1 }
         }
 
-        metrics.beginCommitted(
-            frame: GUICommittedFrame(generation: 3, frameSeq: 5),
-            impact: .shell
-        )
+        let frame = GUICommittedFrame(generation: 3, frameSeq: 5)
+        metrics.beginCommitted(frame: frame, impact: .shell)
 
-        #expect(notificationCount.withLock { $0 } == 1)
+        #expect(notificationCount.withLock { $0 } == 0)
+        #expect(try #require(metrics.expectedNativeDrawFrame(domain: .shell)) == frame)
     }
 
     @Test("stale native draw and availability callbacks cannot resolve a newer frame")
@@ -150,9 +149,9 @@ struct GUIFramePresentationMetricsTests {
         let second = GUICommittedFrame(generation: 7, frameSeq: 31)
 
         metrics.beginCommitted(frame: first, impact: .shell)
-        let staleExpected = try #require(metrics.pendingFrame(domain: .shell))
+        let staleExpected = try #require(metrics.expectedNativeDrawFrame(domain: .shell))
         metrics.beginCommitted(frame: second, impact: .shell)
-        let currentExpected = try #require(metrics.pendingFrame(domain: .shell))
+        let currentExpected = try #require(metrics.expectedNativeDrawFrame(domain: .shell))
 
         metrics.recordNativeDraw(domain: .shell, expectedFrame: staleExpected)
         metrics.discardNativeDraw(
@@ -178,19 +177,17 @@ struct GUIFramePresentationMetricsTests {
         let current = GUICommittedFrame(generation: 2, frameSeq: 30)
 
         metrics.beginCommitted(frame: stale, impact: .editor)
-        let capturedStale = try #require(metrics.pendingEditorFrame())
         metrics.beginCommitted(frame: current, impact: .editor)
-        let capturedCurrent = try #require(metrics.pendingEditorFrame())
 
-        metrics.recordMetalSubmission(presentationFrame: capturedStale)
-        metrics.recordMetalPresented(presentationFrame: capturedStale)
-        metrics.discard(domain: .editor, outcome: .failed, frame: capturedStale)
+        metrics.recordMetalSubmission(presentationFrame: stale)
+        metrics.recordMetalPresented(presentationFrame: stale)
+        metrics.discard(domain: .editor, outcome: .failed, frame: stale)
         #expect(metrics.snapshot() == [
             .init(frame: stale, domain: .editor, outcome: .superseded)
         ])
 
-        metrics.recordMetalSubmission(presentationFrame: capturedCurrent)
-        metrics.recordMetalPresented(presentationFrame: capturedCurrent)
+        metrics.recordMetalSubmission(presentationFrame: current)
+        metrics.recordMetalPresented(presentationFrame: current)
         #expect(metrics.snapshot() == [
             .init(frame: stale, domain: .editor, outcome: .superseded),
             .init(frame: current, domain: .editor, outcome: .submitted),
@@ -237,9 +234,9 @@ struct GUIFramePresentationMetricsTests {
         metrics.beginCommitted(frame: frame, impact: .all)
         #expect(metrics.snapshot().isEmpty)
 
-        let shell = try #require(metrics.pendingFrame(domain: .shell))
-        let editorOverlay = try #require(metrics.pendingFrame(domain: .editorOverlay))
-        let windowOverlay = try #require(metrics.pendingFrame(domain: .windowOverlay))
+        let shell = try #require(metrics.expectedNativeDrawFrame(domain: .shell))
+        let editorOverlay = try #require(metrics.expectedNativeDrawFrame(domain: .editorOverlay))
+        let windowOverlay = try #require(metrics.expectedNativeDrawFrame(domain: .windowOverlay))
         metrics.recordNativeDraw(domain: .shell, expectedFrame: shell)
         metrics.recordNativeDraw(domain: .editorOverlay, expectedFrame: editorOverlay)
         metrics.recordNativeDraw(domain: .windowOverlay, expectedFrame: windowOverlay)

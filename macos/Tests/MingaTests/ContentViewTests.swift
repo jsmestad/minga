@@ -407,6 +407,7 @@ struct ContentViewTests {
             label: "before.ex"
         )]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
 
         let root = ContentView(
             gui: gui,

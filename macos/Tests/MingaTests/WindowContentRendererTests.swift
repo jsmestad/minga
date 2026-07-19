@@ -326,7 +326,9 @@ struct WindowContentFrameMetricsTests {
         ]
         frameState.horizontalSeparators = [Wire.HorizontalSeparator(row: 1, col: 0, width: 80, filename: "split.ex")]
 
-        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: left, 2: right])
+        let leftSlice = RendererSignposts.visibleSlice(for: left, fallbackVisibleRows: 2)
+        let rightSlice = RendererSignposts.visibleSlice(for: right, fallbackVisibleRows: 2)
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: left, 2: right], gutters: frameState.windowGutters, visibleSlices: [1: leftSlice, 2: rightSlice])
 
         #expect(demand >= 2 + 1 + 4 + 1 + 32)
     }
@@ -356,7 +358,7 @@ struct WindowContentFrameMetricsTests {
         )
         let frameState = FrameState(cols: 80, rows: 40)
 
-        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: content])
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: content], gutters: [:], visibleSlices: [1: RendererSignposts.visibleSlice(for: content, fallbackVisibleRows: 40)])
 
         #expect(demand < 5_000)
         #expect(demand >= 40)

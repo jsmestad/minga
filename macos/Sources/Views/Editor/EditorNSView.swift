@@ -428,6 +428,15 @@ final class EditorNSView: MTKView {
         let offset: CGPoint
     }
 
+    /// The editor snapshot visible to interaction and accessibility code. Metal promotes the exact snapshot after presentation; committed-but-unpresented snapshots are draw inputs only.
+    private var editorPresentationSnapshot: CommittedEditorSnapshot? {
+        dispatcher.visibleEditorSnapshot
+    }
+
+    private func interactionContent(windowId: UInt16) -> GUIWindowContent? {
+        editorPresentationSnapshot?.content(for: windowId)
+    }
+
     /// The local scroll presentation for this frame or input event.
     /// Decouples "which window shows the offset" from "a gesture is active": during a settle or
     /// spring-back the gesture target is nil (so `onScrollPresentationReset` discards can win),
@@ -544,16 +553,12 @@ final class EditorNSView: MTKView {
         }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
 
-        // Check for cursor movement to post accessibility notifications.
-        let fs = dispatcher.frameState
-
-        if fs.cursorRow != lastAccessibilityCursorRow ||
-           fs.cursorCol != lastAccessibilityCursorCol {
-            lastAccessibilityCursorRow = fs.cursorRow
-            lastAccessibilityCursorCol = fs.cursorCol
-            NSAccessibility.post(element: self, notification: .selectedTextChanged)
-            resetCursorBlink()
+        guard let committedSnapshot = dispatcher.committedEditorSnapshot else {
+            dispatcher.discardPendingPresentation(reason: .hidden)
+            return
         }
+
+        let fs = committedSnapshot.frameState
 
         // Flash scroll indicator when viewport position changes (keyboard scroll, cursor movement).
         // Skip scroll indicator updates while the user is dragging to prevent feedback loops.
@@ -566,20 +571,16 @@ final class EditorNSView: MTKView {
         clearSmoothScrollStateIfTargetWindowMissing()
         advancePresentationScrollAnimation()
         advanceThumbDragPresentation()
-
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
-            dispatcher.currentFrameWindowIds.contains(windowId) ? windowId : nil
+            committedSnapshot.windowIds.contains(windowId) ? windowId : nil
         }
         let validGutterHoverRow = validGutterHoverWindowId == nil ? nil : gutterHoverRow
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.takePresentationInputSeq()
-        let presentationFrame = dispatcher.pendingPresentationFrame()
         let localScrollPresentation = localScrollPresentation
-        coreTextRenderer.render(frameState: fs, fontManager: fontManager,
+        coreTextRenderer.render(snapshot: committedSnapshot, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
-                                windowContents: editorInput?.currentWindowContents ?? [:],
-                                themeColors: editorInput?.currentTheme,
                                 isMouseInGutter: validMouseInGutter,
                                 gutterHoverWindowId: validGutterHoverWindowId,
                                 gutterHoverRow: validGutterHoverRow,
@@ -598,16 +599,28 @@ final class EditorNSView: MTKView {
                                 ),
                                 presentationWindowId: localScrollPresentation?.windowId,
                                 presentationInputSeq: presentationInputSeq,
-                                presentationFrame: presentationFrame,
-                                latencyRecorder: dispatcher.latency)
+                                latencyRecorder: dispatcher.latency,
+                                onPresented: { [weak self] snapshot in
+                                    self?.promotePresentedSnapshot(snapshot)
+                                })
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
         }
         if coreTextRenderer.cursorAnimating {
             needsDisplay = true
         }
-        dispatcher.markRendered()
         os_signpost(.event, log: renderLog, name: "DrawComplete")
+    }
+
+    private func promotePresentedSnapshot(_ snapshot: CommittedEditorSnapshot) {
+        dispatcher.promoteVisibleEditorSnapshot(snapshot)
+        let fs = snapshot.frameState
+        if fs.cursorRow != lastAccessibilityCursorRow || fs.cursorCol != lastAccessibilityCursorCol {
+            lastAccessibilityCursorRow = fs.cursorRow
+            lastAccessibilityCursorCol = fs.cursorCol
+            NSAccessibility.post(element: self, notification: .selectedTextChanged)
+            resetCursorBlink()
+        }
     }
 
     private func currentGridDimensions() -> GridDimensions {
@@ -1118,19 +1131,19 @@ final class EditorNSView: MTKView {
     /// operates on the active pane (its metrics drive `scrollTrackYToLine`), so this is the
     /// window a thumb drag scrolls.
     private var activeWindowId: UInt16? {
-        dispatcher.frameState.windowGutters.values
-            .filter(\.isActive)
-            .sorted { $0.windowId < $1.windowId }
-            .first?
-            .windowId
+        editorPresentationSnapshot?.surfaces
+            .compactMap { surface in surface.gutter.gutter?.isActive == true ? surface.windowId : nil }
+            .sorted()
+            .first
     }
 
     private var activeWindowIsResident: Bool {
-        guard let windowId = activeWindowId,
-              let content = editorInput?.currentWindowContents[windowId] else { return false }
+        guard let snapshot = editorPresentationSnapshot,
+              let windowId = activeWindowId,
+              let content = snapshot.content(for: windowId) else { return false }
         return Self.thumbDragCanPresentLocally(
             scrollPresentation: content.scrollPresentation,
-            totalLines: content.paneGeometry?.viewport.totalLines ?? dispatcher.frameState.totalLineCount
+            totalLines: content.paneGeometry?.viewport.totalLines ?? snapshot.frameState.totalLineCount
         )
     }
 
@@ -1143,11 +1156,12 @@ final class EditorNSView: MTKView {
         // accumulator and reconciliation bookkeeping. Reset before residency routing so the
         // round-trip path cannot leave an old settle or rebound visible either.
         resetSmoothScrollState()
-        guard let windowId = activeWindowId,
-              let content = editorInput?.currentWindowContents[windowId],
+        guard let snapshot = editorPresentationSnapshot,
+              let windowId = activeWindowId,
+              let content = snapshot.content(for: windowId),
               Self.thumbDragCanPresentLocally(
                   scrollPresentation: content.scrollPresentation,
-                  totalLines: content.paneGeometry?.viewport.totalLines ?? dispatcher.frameState.totalLineCount
+                  totalLines: content.paneGeometry?.viewport.totalLines ?? snapshot.frameState.totalLineCount
               )
         else {
             thumbDragSession = nil
@@ -1209,7 +1223,7 @@ final class EditorNSView: MTKView {
 
     /// The committed scroll presentation of the thumb-drag pane, or nil when it is gone.
     private func committedThumbDrag(for windowId: UInt16) -> ThumbDragSession.Committed? {
-        guard let sp = editorInput?.currentWindowContents[windowId]?.scrollPresentation else { return nil }
+        guard let sp = interactionContent(windowId: windowId)?.scrollPresentation else { return nil }
         return ThumbDragSession.Committed(anchorTop: sp.anchorTop, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration)
     }
 
@@ -2066,7 +2080,7 @@ final class EditorNSView: MTKView {
         for e in hEvents {
             sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
-        let targetWindowContent = scrollTargetWindowId.flatMap { editorInput?.currentWindowContents[$0] }
+        let targetWindowContent = scrollTargetWindowId.flatMap { interactionContent(windowId: $0) }
         let targetScrollPresentation = targetWindowContent?.scrollPresentation
         let scrollBounds = Self.presentationScrollBounds(
             for: targetWindowContent,
@@ -2196,7 +2210,7 @@ final class EditorNSView: MTKView {
         }
         scrollSettleWindowId = windowId
         if scrollLastConfirmedAnchorTop == nil {
-            scrollLastConfirmedAnchorTop = editorInput?.currentWindowContents[windowId]?.scrollPresentation?.anchorTop
+            scrollLastConfirmedAnchorTop = interactionContent(windowId: windowId)?.scrollPresentation?.anchorTop
         }
         scrollSettleAnimator.start(offset: residual, duration: duration)
         // Reflect the seeded offset immediately so this frame is continuous with the last.
@@ -2228,7 +2242,7 @@ final class EditorNSView: MTKView {
         var keepAnimating = false
 
         if let windowId = scrollSettleWindowId {
-            if let sp = editorInput?.currentWindowContents[windowId]?.scrollPresentation {
+            if let sp = interactionContent(windowId: windowId)?.scrollPresentation {
                 reconcileUnconfirmedLines(against: sp)
             }
             let residual = scrollSettleAnimator.offset(now: now)
@@ -2350,7 +2364,7 @@ final class EditorNSView: MTKView {
         // outlive it: if any pane owning presentation state has closed, drop the offset and cancel
         // its animation so a stale whole-cell offset can't linger after the animator finishes on a
         // vanished pane.
-        let available = Set(dispatcher.currentFrameWindowIds.filter { editorInput?.currentWindowContents[$0] != nil })
+        guard let available = dispatcher.visibleEditorSnapshot?.windowIds else { return }
         if Self.missingPresentationWindow(
             candidateWindowIds: [scrollTargetWindowId, thumbDragSession?.windowId, scrollSettleWindowId, scrollElasticWindowId],
             availableWindowIds: available
@@ -2372,17 +2386,18 @@ final class EditorNSView: MTKView {
     }
 
     private func smoothScrollTargetWindowId(row: Int16, col: Int16) -> UInt16? {
-        if let contents = editorInput?.currentWindowContents {
+        if let snapshot = editorPresentationSnapshot {
             let rowValue = Int(row)
             let colValue = Int(col)
-            let geometry = contents.values
-                .compactMap(\.paneGeometry)
+            let geometry = snapshot.surfaces
+                .map(\.paneGeometry)
                 .filter { rowColInCellRect(row: rowValue, col: colValue, rect: $0.contentRect) }
                 .max { lhs, rhs in lhs.contentRect.col < rhs.contentRect.col }
             if let geometry { return geometry.windowId }
+            return EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: snapshot.windowGutters)
         }
 
-        return EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: dispatcher.frameState.windowGutters)
+        return EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: editorPresentationSnapshot?.windowGutters ?? [:])
     }
 
     private func clearSmoothScrollOffsetIfPointerLeftTarget(row: Int16, col: Int16) {
@@ -2652,7 +2667,7 @@ final class EditorNSView: MTKView {
 
         // A tick into a document boundary can't be committed by the BEAM, so predicting it would
         // park content one cell off-grid; suppress the seed (the scroll intent already sent above).
-        let windowContent = editorInput?.currentWindowContents[windowId]
+        let windowContent = interactionContent(windowId: windowId)
         let boundary = Self.presentationScrollBoundaryAvailability(
             for: windowContent,
             scrollPresentation: windowContent?.scrollPresentation
@@ -2906,14 +2921,14 @@ final class EditorNSView: MTKView {
         let point = Self.presentationNormalizedGutterPoint(
             point,
             presentation: presentation,
-            targetGutterRect: presentation.flatMap { editorInput?.currentWindowContents[$0.windowId]?.paneGeometry?.gutterRect },
+            targetGutterRect: presentation.flatMap { interactionContent(windowId: $0.windowId)?.paneGeometry?.gutterRect },
             cellWidth: cellWidth,
             cellHeight: effectiveCellHeight
         )
         guard let (gutter, rowIndex) = gutterHit(at: point) else { return nil }
         guard Int(gutter.signColWidth) >= 3 else { return nil }
 
-        let content = editorInput?.currentWindowContents[gutter.windowId]
+        let content = interactionContent(windowId: gutter.windowId)
         let presentationBeforeRows = Self.presentationScrollPayloadOverscanBounds(
             for: content,
             scrollPresentation: content?.scrollPresentation
@@ -2940,7 +2955,7 @@ final class EditorNSView: MTKView {
         let point = Self.presentationNormalizedGutterPoint(
             point,
             presentation: presentation,
-            targetGutterRect: presentation.flatMap { editorInput?.currentWindowContents[$0.windowId]?.paneGeometry?.gutterRect },
+            targetGutterRect: presentation.flatMap { interactionContent(windowId: $0.windowId)?.paneGeometry?.gutterRect },
             cellWidth: cellWidth,
             cellHeight: effectiveCellHeight
         )
@@ -2969,13 +2984,16 @@ final class EditorNSView: MTKView {
     private func gutterHit(at point: NSPoint) -> (gutter: Wire.WindowGutter, rowIndex: Int)? {
         let screenRow = Int(point.y / effectiveCellHeight)
 
+        guard let snapshot = editorPresentationSnapshot else { return nil }
+        let gutters = snapshot.windowGutters
+
         if let geometry = paneGeometryGutterHit(at: point, screenRow: screenRow),
-           let gutter = dispatcher.frameState.windowGutters[geometry.windowId] {
+           let gutter = gutters[geometry.windowId] {
             return (gutter, screenRow - Int(geometry.gutterRect.row))
         }
 
-        for windowId in dispatcher.currentFrameWindowIds {
-            guard let gutter = dispatcher.frameState.windowGutters[windowId] else { continue }
+        for windowId in snapshot.windowIds {
+            guard let gutter = gutters[windowId] else { continue }
             let startRow = Int(gutter.contentRow)
             let endRow = startRow + Int(gutter.contentHeight)
             guard screenRow >= startRow && screenRow < endRow else { continue }
@@ -3005,7 +3023,7 @@ final class EditorNSView: MTKView {
         let rawRow = Int16(point.y / effectiveCellHeight)
         let rawCol = max(0, Int16(point.x / cellWidth))
         let rawPointWindowId = smoothScrollTargetWindowId(row: rawRow, col: rawCol)
-        let content = presentation.flatMap { editorInput?.currentWindowContents[$0.windowId] }
+        let content = presentation.flatMap { editorPresentationSnapshot?.content(for: $0.windowId) }
         return Self.presentationNormalizedPoint(
             point,
             rawPointWindowId: rawPointWindowId,
@@ -3107,21 +3125,20 @@ final class EditorNSView: MTKView {
     private func gutterForCellPosition(at point: NSPoint, row: Int16) -> Wire.WindowGutter? {
         guard row >= 0 else { return nil }
         let rowValue = Int(row)
-        let frameState = dispatcher.frameState
+        guard let snapshot = editorPresentationSnapshot else { return nil }
+        let gutters = snapshot.windowGutters
 
         if let geometry = paneGeometryHit(at: point, screenRow: rowValue),
-           let gutter = frameState.windowGutters[geometry.windowId] {
+           let gutter = gutters[geometry.windowId] {
             return gutter
         }
 
-        let windowIds = dispatcher.currentFrameWindowIds.isEmpty ? Set(frameState.windowGutters.keys) : dispatcher.currentFrameWindowIds
-
-        return windowIds.compactMap { frameState.windowGutters[$0] }
+        return snapshot.windowIds.compactMap { gutters[$0] }
             .filter { gutter in
                 let startRow = Int(gutter.contentRow)
                 let endRow = startRow + Int(gutter.contentHeight)
                 let startX = CGFloat(gutter.contentCol) * cellWidth
-                let endX = startX + CGFloat(CoreTextMetalRenderer.windowWidthCols(gutter: gutter, frameCols: frameState.cols)) * cellWidth
+                let endX = startX + CGFloat(CoreTextMetalRenderer.windowWidthCols(gutter: gutter, frameCols: snapshot.frameState.cols)) * cellWidth
                 return rowValue >= startRow && rowValue < endRow && point.x >= startX && point.x < endX
             }
             .max { lhs, rhs in lhs.contentCol < rhs.contentCol }
@@ -3143,21 +3160,21 @@ final class EditorNSView: MTKView {
     }
 
     private func paneGeometries(at point: NSPoint, screenRow: Int) -> [GUIPaneGeometry] {
-        guard let contents = editorInput?.currentWindowContents else { return [] }
+        guard let snapshot = editorPresentationSnapshot else { return [] }
         let rawCol = Int(point.x / cellWidth)
 
-        return contents.values.compactMap(\.paneGeometry).filter { geometry in
+        return snapshot.surfaces.map(\.paneGeometry).filter { geometry in
             rowColInCellRect(row: screenRow, col: rawCol, rect: geometry.totalRect)
         }
     }
 
     private func hitRegion(at point: NSPoint, kind: GUIHitRegion.Kind) -> GUIHitRegion? {
-        guard let contents = editorInput?.currentWindowContents else { return nil }
+        guard let snapshot = editorPresentationSnapshot else { return nil }
         let screenRow = Int(point.y / effectiveCellHeight)
         let rawCol = Int(point.x / cellWidth)
 
-        return contents.values
-            .compactMap(\.paneGeometry)
+        return snapshot.surfaces
+            .map(\.paneGeometry)
             .flatMap(\.hitRegions)
             .filter { region in
                 region.kind == kind && rowColInCellRect(row: screenRow, col: rawCol, rect: region.rect)
@@ -3166,12 +3183,12 @@ final class EditorNSView: MTKView {
     }
 
     private func dividerHitRegion(at point: NSPoint) -> GUIHitRegion? {
-        guard let contents = editorInput?.currentWindowContents else { return nil }
+        guard let snapshot = editorPresentationSnapshot else { return nil }
         let screenRow = Int(point.y / effectiveCellHeight)
         let rawCol = Int(point.x / cellWidth)
 
-        return contents.values
-            .compactMap(\.paneGeometry)
+        return snapshot.surfaces
+            .map(\.paneGeometry)
             .flatMap(\.hitRegions)
             .filter { region in
                 region.kind == .divider && pointInDividerHitBounds(point, screenRow: screenRow, rawCol: rawCol, region: region)
@@ -3203,7 +3220,8 @@ final class EditorNSView: MTKView {
 
     private func verticalSeparatorColFromFrameState(at point: NSPoint) -> UInt16? {
         let screenRow = Int(point.y / effectiveCellHeight)
-        return dispatcher.frameState.verticalSeparators.first { separator in
+        guard let snapshot = editorPresentationSnapshot else { return nil }
+        return snapshot.frameState.verticalSeparators.first { separator in
             let lineX = CGFloat(separator.col) * cellWidth
             return screenRow >= Int(separator.startRow) && screenRow <= Int(separator.endRow) && abs(point.x - lineX) <= dividerHitHalfTolerance
         }?.col
@@ -3211,7 +3229,8 @@ final class EditorNSView: MTKView {
 
     private func horizontalSeparatorRowFromFrameState(at point: NSPoint) -> UInt16? {
         let rawCol = Int(point.x / cellWidth)
-        return dispatcher.frameState.horizontalSeparators.first { separator in
+        guard let snapshot = editorPresentationSnapshot else { return nil }
+        return snapshot.frameState.horizontalSeparators.first { separator in
             let lineY = CGFloat(separator.row) * effectiveCellHeight + effectiveCellHeight * 0.5
             let startCol = Int(separator.col)
             let endCol = startCol + Int(separator.width)
@@ -3233,7 +3252,7 @@ final class EditorNSView: MTKView {
     }
 
     private func fallbackCellColumn(at point: NSPoint) -> Int16 {
-        let gutterCols = CGFloat(dispatcher.frameState.gutterCol)
+        let gutterCols = CGFloat((editorPresentationSnapshot)?.frameState.gutterCol ?? 0)
         guard gutterCols > 0 else {
             return max(0, Int16(point.x / cellWidth))
         }
@@ -3320,10 +3339,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
 
     /// Returns the range of the current selection (cursor position as zero-length range).
     func selectedRange() -> NSRange {
-        // The cursor position in terms of character offset from start of document.
-        // For a cell-based editor, approximate as col + row * cols.
-        let offset = Int(dispatcher.frameState.cursorRow) * Int(dispatcher.frameState.cols) + Int(dispatcher.frameState.cursorCol)
-        return NSRange(location: offset, length: 0)
+        return NSRange(location: accessibilityCursorOffset(), length: 0)
     }
 
     func hasMarkedText() -> Bool {
@@ -3335,22 +3351,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         actualRange?.pointee = range
 
-        // Position at the cursor location.
-        let col = CGFloat(dispatcher.frameState.cursorCol)
-        let row = CGFloat(dispatcher.frameState.cursorRow)
-        let gutterPad: CGFloat
-        if dispatcher.frameState.gutterCol > 0 {
-            if dispatcher.frameState.cursorCol >= dispatcher.frameState.gutterCol {
-                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
-            } else {
-                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt
-            }
-        } else {
-            gutterPad = 0
-        }
-        let displayCellHeight = effectiveCellHeight
-        let localRect = NSRect(x: col * cellWidth + gutterPad, y: row * displayCellHeight,
-                                width: cellWidth, height: displayCellHeight)
+        let localRect = visibleCursorRect()
 
         // Convert to screen coordinates.
         guard let window else { return localRect }
@@ -3363,22 +3364,10 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         guard let window else { return 0 }
         let windowPoint = window.convertPoint(fromScreen: point)
         let localPoint = convert(windowPoint, from: nil)
-        let gutterCols = CGFloat(dispatcher.frameState.gutterCol)
-        let col: Int
-        if gutterCols > 0 {
-            let leftMargin = CoreTextMetalRenderer.gutterLeftMarginPt
-            let rightGap = CoreTextMetalRenderer.gutterRightGapPt
-            let gutterPixelEnd = leftMargin + gutterCols * cellWidth
-            if localPoint.x < gutterPixelEnd {
-                col = max(0, Int((localPoint.x - leftMargin) / cellWidth))
-            } else {
-                col = max(0, Int((localPoint.x - leftMargin - rightGap) / cellWidth))
-            }
-        } else {
-            col = max(0, Int(localPoint.x / cellWidth))
-        }
-        let row = Int(localPoint.y / effectiveCellHeight)
-        return row * Int(dispatcher.frameState.cols) + col
+        let point = presentationNormalizedPoint(localPoint)
+        let row = max(0, Int(point.y / effectiveCellHeight))
+        let col = max(0, Int(cellColumn(at: point, row: Int16(clamping: row))))
+        return row * Int(editorPresentationSnapshot?.frameState.cols ?? 0) + col
     }
 
     /// Returns the attributed substring for the given range.
@@ -3392,6 +3381,36 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
     /// Attributes that can be applied to marked text.
     func validAttributesForMarkedText() -> [NSAttributedString.Key] {
         return [.underlineStyle, .underlineColor]
+    }
+
+    private func visibleCursorRect() -> NSRect {
+        guard let snapshot = editorPresentationSnapshot else {
+            return NSRect(x: 0, y: 0, width: cellWidth, height: effectiveCellHeight)
+        }
+        let fs = snapshot.frameState
+        return NSRect(
+            x: CGFloat(fs.cursorCol) * cellWidth,
+            y: CGFloat(fs.cursorRow) * effectiveCellHeight,
+            width: cellWidth,
+            height: effectiveCellHeight
+        )
+    }
+
+    private func accessibilityCursorOffset() -> Int {
+        guard let snapshot = editorPresentationSnapshot else { return 0 }
+        let fs = snapshot.frameState
+        return Int(fs.cursorRow) * Int(fs.cols) + Int(fs.cursorCol)
+    }
+
+    private func visibleAccessibilityRows() -> [GUIVisualRow] {
+        guard let snapshot = editorPresentationSnapshot else { return [] }
+        var rows: [GUIVisualRow] = []
+        for surface in snapshot.surfaces.sorted(by: { $0.windowId < $1.windowId }) {
+            let visibleRange = surface.visibleRowRange
+            guard !visibleRange.isEmpty else { continue }
+            rows.append(contentsOf: surface.content.rowStore.rows(in: visibleRange).rows)
+        }
+        return rows
     }
 }
 
@@ -3407,34 +3426,22 @@ extension EditorNSView {
     }
 
     /// Returns the full text content of all visible lines.
-    /// Reads from GUIWindowContent (0x80 opcode) semantic data.
+    /// Reads from the same visible editor snapshot that backs pointer interaction.
     override func accessibilityValue() -> Any? {
-        guard let contents = editorInput?.currentWindowContents else { return "" }
-        var lines: [String] = []
-        for (_, content) in contents.sorted(by: { $0.key < $1.key }) {
-            for row in content.rows {
-                lines.append(row.text)
-            }
-        }
+        let lines = visibleAccessibilityRows().map(\.text)
         return lines.isEmpty ? "" : lines.joined(separator: "\n")
     }
 
     override func accessibilityNumberOfCharacters() -> Int {
-        guard let contents = editorInput?.currentWindowContents else { return 0 }
-        var count = 0
-        for (_, content) in contents.sorted(by: { $0.key < $1.key }) {
-            for (i, row) in content.rows.enumerated() {
-                count += row.text.count
-                if i < content.rows.count - 1 {
-                    count += 1  // newline between rows
-                }
-            }
+        let rows = visibleAccessibilityRows()
+        return rows.enumerated().reduce(0) { count, element in
+            let newline = element.offset < rows.count - 1 ? 1 : 0
+            return count + element.element.text.count + newline
         }
-        return count
     }
 
     override func accessibilityInsertionPointLineNumber() -> Int {
-        return Int(dispatcher.frameState.cursorRow)
+        return Int(editorPresentationSnapshot?.frameState.cursorRow ?? 0)
     }
 
     override func accessibilitySelectedText() -> String? {
@@ -3443,8 +3450,7 @@ extension EditorNSView {
     }
 
     override func accessibilitySelectedTextRange() -> NSRange {
-        let offset = Int(dispatcher.frameState.cursorRow) * Int(dispatcher.frameState.cols) + Int(dispatcher.frameState.cursorCol)
-        return NSRange(location: offset, length: 0)
+        return NSRange(location: accessibilityCursorOffset(), length: 0)
     }
 
     override func isAccessibilityElement() -> Bool {

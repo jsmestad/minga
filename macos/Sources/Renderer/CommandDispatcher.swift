@@ -148,6 +148,15 @@ final class CommandDispatcher {
     /// Input sequence attached to the newest applied frame awaiting a draw.
     private var pendingPresentationInputSeq: UInt32 = 0
 
+    /// The newest complete committed editor snapshot available for Metal submission.
+    private(set) var committedEditorSnapshot: CommittedEditorSnapshot?
+
+    /// The exact committed editor snapshot associated with the last successful Metal presentation.
+    private(set) var visibleEditorSnapshot: CommittedEditorSnapshot?
+
+    /// The committed editor frame identity awaiting Metal presentation, owned by the editor lifecycle rather than telemetry.
+    private var pendingEditorPresentationFrame: GUICommittedFrame?
+
     /// Claims the newest applied input sequence for one Metal submission.
     func takePresentationInputSeq() -> UInt32 {
         let seq = pendingPresentationInputSeq
@@ -157,7 +166,29 @@ final class CommandDispatcher {
 
     /// Returns the committed editor frame waiting for native Metal presentation.
     func pendingPresentationFrame() -> GUICommittedFrame? {
-        guiState.presentationMetrics.pendingEditorFrame()
+        pendingEditorPresentationFrame
+    }
+
+    /// Promotes the exact captured snapshot after its drawable presents successfully.
+    func promoteVisibleEditorSnapshot(_ snapshot: CommittedEditorSnapshot) {
+        let presentedFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+        if let pendingFrame = pendingEditorPresentationFrame {
+            guard pendingFrame == presentedFrame else { return }
+            pendingEditorPresentationFrame = nil
+            visibleEditorSnapshot = snapshot
+            return
+        }
+
+        if let visibleFrame = visibleEditorSnapshot.map({ GUICommittedFrame(generation: $0.generation, frameSeq: $0.frameSeq) }), visibleFrame == presentedFrame {
+            visibleEditorSnapshot = snapshot
+            return
+        }
+
+        if visibleEditorSnapshot == nil,
+           let committedFrame = committedEditorSnapshot.map({ GUICommittedFrame(generation: $0.generation, frameSeq: $0.frameSeq) }),
+           committedFrame == presentedFrame {
+            visibleEditorSnapshot = snapshot
+        }
     }
 
     /// Discards an applied frame that cannot acquire a drawable/presentation path.
@@ -167,15 +198,9 @@ final class CommandDispatcher {
             pendingPresentationInputSeq = 0
         }
         let outcome: GUIFramePresentationMetrics.Outcome = reason == .hidden ? .hidden : .unavailable
-        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome)
+        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome, frame: pendingEditorPresentationFrame)
+        pendingEditorPresentationFrame = nil
     }
-
-    /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
-    /// retained pane geometry can still render without being clickable.
-    // TODO(#2241-adjacent): no reset path since the cell-era clear opcode was
-    // retired; grows by distinct window ids seen this session (bounded, ids are
-    // reused). Reset at semantic frame start when frame lifecycle is reworked.
-    private(set) var currentFrameWindowIds: Set<UInt16> = []
 
     // MARK: - Frame transaction staging (#2219 child D)
 
@@ -355,6 +380,7 @@ final class CommandDispatcher {
             baseFrameSeq: baseFrameSeq,
             generation: generation,
             committedWindows: guiState.windowContents,
+            committedGutters: frameState.windowGutters,
             registeredFontIds: registeredFontIds,
             committedTranscript: guiState.agentChatState.transcriptSnapshot,
             stagingLimit: resourcePolicy.staging.weight,
@@ -480,6 +506,23 @@ final class CommandDispatcher {
             for command in focus.commands { apply(command, effects: &effects) }
         }
         if clearsResync { guiState.resyncState.clear() }
+        if finalImpact.contains(.editor) || committedEditorSnapshot == nil {
+            switch CommittedEditorSnapshot.make(
+                generation: transaction.generation,
+                frameSeq: transaction.frameSeq,
+                frameState: frameState,
+                themeColors: guiState.themeColors,
+                windowContents: guiState.windowContents
+            ) {
+            case .success(let snapshot):
+                committedEditorSnapshot = snapshot
+                if finalImpact.contains(.editor) {
+                    pendingEditorPresentationFrame = committed
+                }
+            case .failure(let rejection):
+                PortLogger.error("Committed editor snapshot rejected after semantic apply: \(rejection.logDescription)")
+            }
+        }
         replay(effects)
         guiState.presentationMetrics.beginCommitted(frame: committed, impact: finalImpact)
         publicationCount += 1
@@ -504,13 +547,10 @@ final class CommandDispatcher {
                 effects.append(.scrollPresentationReset(windowID: windowId))
             }
             frameState.cursorVisible = content.cursorVisible
-            frameState.dirty = true
         }
         for command in updates.commands { apply(command, effects: &effects) }
         if let authoritativeWindowIds = updates.authoritativeWindowIds {
             pruneAuthoritativeFrameState(liveWindowIds: authoritativeWindowIds)
-        } else {
-            currentFrameWindowIds.formUnion(updates.touchedWindowIds)
         }
     }
 
@@ -518,7 +558,9 @@ final class CommandDispatcher {
         guiState.windowContents = Dictionary(uniqueKeysWithValues: guiState.windowContents.filter { liveWindowIds.contains($0.key) })
         frameState.windowGutters = Dictionary(uniqueKeysWithValues: frameState.windowGutters.filter { liveWindowIds.contains($0.key) })
         frameState.windowIndentGuides = Dictionary(uniqueKeysWithValues: frameState.windowIndentGuides.filter { liveWindowIds.contains($0.key) })
-        currentFrameWindowIds = liveWindowIds
+        if let activeWindowId = frameState.activeWindowId, !liveWindowIds.contains(activeWindowId) {
+            frameState.activeWindowId = nil
+        }
         refreshDerivedGutterStateAfterPrune()
     }
 
@@ -689,13 +731,6 @@ final class CommandDispatcher {
         frameState.resize(newCols: newCols, newRows: newRows)
     }
 
-    /// Clears the dirty flag after the view has consumed the current
-    /// `FrameState` for a render. The view drives the render but does not own the
-    /// state, so it calls this instead of writing `frameState.dirty` directly.
-    func markRendered() {
-        frameState.dirty = false
-    }
-
     /// Applies a zero-latency local file-tree navigation preview when the BEAM marks the current tree model as eligible.
     /// The key still goes to the BEAM; this only moves the transient selection highlight until the next authoritative file-tree payload reconciles it.
     @discardableResult
@@ -850,13 +885,10 @@ final class CommandDispatcher {
 
         case .guiIndentGuides(let data):
             frameState.windowIndentGuides[data.windowId] = data
-            currentFrameWindowIds.insert(data.windowId)
-            frameState.dirty = true
 
         case .guiLineSpacing(let spacing):
             let oldSpacing = frameState.lineSpacing
             frameState.lineSpacing = max(spacing, 1.0)
-            frameState.dirty = true
             if oldSpacing != frameState.lineSpacing {
                 effects.append(.lineSpacingChanged(frameState.lineSpacing))
             }
@@ -951,17 +983,14 @@ final class CommandDispatcher {
             frameState.scrollIndicatorColor = rgb
             frameState.gutterCol = col
             frameState.gutterSeparatorColor = rgb
-            frameState.dirty = true
 
         case .guiCursorline(let row, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             frameState.cursorlineRow = row
             frameState.cursorlineBg = rgb
-            frameState.dirty = true
 
         case .guiGutter(let data):
             frameState.windowGutters[data.windowId] = data
-            currentFrameWindowIds.insert(data.windowId)
             if data.isActive {
                 frameState.activeWindowId = data.windowId
                 frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
@@ -970,12 +999,10 @@ final class CommandDispatcher {
                     frameState.viewportTopLine = firstEntry.bufLine
                 }
             }
-            frameState.dirty = true
 
         case .guiWindowContent(let data):
             let previousScroll = guiState.windowContents[data.windowId]?.scrollPresentation
             guiState.windowContents[data.windowId] = data
-            currentFrameWindowIds.insert(data.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
                 effects.append(.scrollPresentationReset(windowID: data.windowId))
             }
@@ -985,9 +1012,7 @@ final class CommandDispatcher {
             guard let current = guiState.windowContents[delta.windowId] else { break }
             guard let updated = current.applyingOverlayDelta(delta) else { break }
             guiState.windowContents[delta.windowId] = updated
-            currentFrameWindowIds.insert(delta.windowId)
             frameState.cursorVisible = delta.cursorVisible
-            frameState.dirty = true
 
         case .guiWindowViewportDelta(let delta), .guiWindowRowsDelta(let delta):
             guard let current = guiState.windowContents[delta.windowId] else { break }
@@ -998,12 +1023,10 @@ final class CommandDispatcher {
             }
             let previousScroll = current.scrollPresentation
             guiState.windowContents[delta.windowId] = updated
-            currentFrameWindowIds.insert(delta.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
                 effects.append(.scrollPresentationReset(windowID: delta.windowId))
             }
             frameState.cursorVisible = delta.cursorVisible
-            frameState.dirty = true
 
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {
@@ -1073,7 +1096,6 @@ final class CommandDispatcher {
             frameState.splitBorderColor = borderColor
             frameState.verticalSeparators = verticals
             frameState.horizontalSeparators = horizontals
-            frameState.dirty = true
 
         case .guiFloatPopup(let visible, let width, let height, let title, let lines):
             if visible {

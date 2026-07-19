@@ -526,9 +526,11 @@ public final class GUIWindowContent: Sendable {
     /// totals remain available from `rowStore.counters`.
     public let rowStoreOperationCounters: ResidentRowStoreCounters
 
+    #if DEBUG
     /// Compatibility view for protocol tests and non-rendering diagnostics.
-    /// Renderer hot paths must request a bounded slice from `rowStore`.
+    /// Renderer hot paths must request a bounded slice from `rowStore`; Release builds do not expose full resident-document materialization.
     public var rows: [GUIVisualRow] { rowStore.rows(in: 0..<rowStore.count).rows }
+    #endif
     public let selection: GUISelectionOverlay?
     public let searchMatches: [GUISearchMatch]
     public let diagnosticUnderlines: [GUIDiagnosticUnderline]
@@ -860,12 +862,13 @@ public final class GUIWindowContent: Sendable {
         afterApplying delta: GUIWindowRowsDelta, store: ResidentRowStore,
         scrollPresentation: GUIScrollPresentation?, residentLimit: FrameResourceWeight
     ) throws -> GUIWindowContent {
+        let nextPaneGeometry = delta.paneGeometry ?? paneGeometry
         let resultingWeight = try Self.resourceWeight(
             rowWeight: store.resourceWeight, selection: delta.selection,
             searchMatches: delta.searchMatches,
             diagnosticUnderlines: delta.diagnosticUnderlines,
             documentHighlights: delta.documentHighlights,
-            lineAnnotations: delta.lineAnnotations, paneGeometry: delta.paneGeometry
+            lineAnnotations: delta.lineAnnotations, paneGeometry: nextPaneGeometry
         )
         try Self.validate(resultingWeight, limit: residentLimit)
         return GUIWindowContent(
@@ -884,7 +887,7 @@ public final class GUIWindowContent: Sendable {
             diagnosticUnderlines: delta.diagnosticUnderlines,
             documentHighlights: delta.documentHighlights,
             lineAnnotations: delta.lineAnnotations,
-            paneGeometry: delta.paneGeometry,
+            paneGeometry: nextPaneGeometry,
             cursorline: delta.cursorline,
             scrollPresentation: scrollPresentation,
             resourceWeight: resultingWeight

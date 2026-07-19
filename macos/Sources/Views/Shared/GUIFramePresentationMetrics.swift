@@ -1,11 +1,10 @@
 import AppKit
-import Observation
 import os
 import SwiftUI
 
 /// Release telemetry for commit-to-first-affected-native-presentation.
+/// This object is passive instrumentation, not an Observation dependency for editor correctness or SwiftUI invalidation.
 @MainActor
-@Observable
 public final class GUIFramePresentationMetrics {
     public enum Outcome: String, CaseIterable, Sendable {
         case submitted
@@ -29,10 +28,10 @@ public final class GUIFramePresentationMetrics {
         var submitted: Bool
     }
 
-    @ObservationIgnored private let log = OSLog(subsystem: "com.minga.editor", category: "GUIFramePresentation")
+    private let log = OSLog(subsystem: "com.minga.editor", category: "GUIFramePresentation")
     private var pending: [GUIFrameImpact: Pending] = [:]
     #if DEBUG
-    @ObservationIgnored private var samples: [Sample] = []
+    private var samples: [Sample] = []
     #endif
 
     public init() {}
@@ -47,14 +46,11 @@ public final class GUIFramePresentationMetrics {
         }
     }
 
-    /// Returns the committed editor frame currently waiting for Metal submission.
-    public func pendingEditorFrame() -> GUICommittedFrame? {
-        pending[.editor]?.frame
-    }
-
-    /// Returns the committed identity currently awaiting presentation in one domain.
-    func pendingFrame(domain: GUIFrameImpact) -> GUICommittedFrame? {
-        pending[domain]?.frame
+    /// Returns the committed identity currently awaiting native presentation in one non-editor domain.
+    /// SwiftUI probes use this only as passive expected-frame telemetry; the metrics object is intentionally not observable.
+    func expectedNativeDrawFrame(domain: GUIFrameImpact) -> GUICommittedFrame? {
+        guard domain != .editor else { return nil }
+        return pending[domain]?.frame
     }
 
     /// Resolves a native SwiftUI/AppKit consumer only from the frame captured when its draw was scheduled.
@@ -242,7 +238,7 @@ extension View {
         background {
             GUIFrameNativeDrawProbe(
                 domain: domain,
-                expectedFrame: metrics.pendingFrame(domain: domain),
+                expectedFrame: metrics.expectedNativeDrawFrame(domain: domain),
                 metrics: metrics
             )
             .frame(width: 1, height: 1)
