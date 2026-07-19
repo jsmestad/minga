@@ -9,7 +9,7 @@ defmodule MingaEditor.Agent.Ingest do
   that jitters keystroke latency under streaming load (epic #2220 AC 3, #2289).
 
   Ingest sits between the session and the Editor. It subscribes to the session
-  on the Editor's behalf via `MingaAgent.Session.subscribe/2`, so deltas land in
+  on the Editor's behalf via `MingaAgent.Session.subscribe/4`, so deltas land in
   *its* mailbox, not the Editor's. It then forwards one
   `{:agent_stream_batch, session_pid, batch}` per coalescing window instead of
   one message per delta. Keystrokes never pass through Ingest; they gain only a
@@ -88,6 +88,10 @@ defmodule MingaEditor.Agent.Ingest do
   @max_batch_items 64
   @max_batch_bytes 32_768
 
+  # Provider startup can delay the queued Session call. The outer Ingest call
+  # gets five additional seconds so the bounded inner result can reply first.
+  @session_subscribe_timeout_ms 300_000
+
   @telemetry_flush [:minga, :agent, :ingest_flush]
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -110,14 +114,18 @@ defmodule MingaEditor.Agent.Ingest do
   @doc """
   Subscribes Ingest to `session_pid` so the session's events flow through here.
 
-  Runs the `MingaAgent.Session.subscribe/2` call inside the Ingest process so
+  Runs the `MingaAgent.Session.subscribe/4` call inside the Ingest process so
   Ingest (not the caller) becomes the session subscriber. Returns the result of
   the subscribe call.
   """
   @spec subscribe_session(GenServer.server(), pid(), keyword()) ::
           :ok | {:error, term()}
   def subscribe_session(server, session_pid, opts \\ []) when is_pid(session_pid) do
-    GenServer.call(server, {:subscribe_session, session_pid, opts})
+    GenServer.call(
+      server,
+      {:subscribe_session, session_pid, opts},
+      @session_subscribe_timeout_ms + 5_000
+    )
   end
 
   # ── Server callbacks ─────────────────────────────────────────────────────────
@@ -307,7 +315,7 @@ defmodule MingaEditor.Agent.Ingest do
 
   @spec do_subscribe(pid(), keyword()) :: :ok | {:error, term()}
   defp do_subscribe(session_pid, opts) do
-    case Session.subscribe(session_pid, self(), opts) do
+    case Session.subscribe(session_pid, self(), opts, @session_subscribe_timeout_ms) do
       :ok ->
         # Monitor the session so its abrupt death (no control event) still drops
         # the per-session accumulation via the {:DOWN, ...} clause above. Only
