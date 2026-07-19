@@ -2502,7 +2502,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W033: Delete D06 status-bar Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.6
 - **Decision:** ACCEPT/deletion, sixth split D06 slice
 - **Planning profile:** `D06Planner6`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2531,8 +2531,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact 376-line production-oracle deletion, retained canonical StatusBar builder/adapter/encoder path, direct section/bounds/integration tests, unchanged schema/generated/Swift/Go contracts, qualified validation, budgets, and merge safety with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3052
 - **Implementation commit SHA:** `f4a5651fd`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `8b4bd21b8226d6b88a9cc6f13a1eb8d99e83e296`; **Merge evidence:** PR #3052 merged after CI run `29702362140` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
