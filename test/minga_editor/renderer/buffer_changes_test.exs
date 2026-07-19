@@ -146,6 +146,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :face_override_registries,
                :focus_tree,
                :force_keyframe?,
+               :git_syncing,
                :gui_config_state,
                :highlighting,
                :last_input_seq,

@@ -2154,6 +2154,37 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Merged CI:** Run `29678609780` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
   - **Completion date:** 2026-07-19
 
+### W022: Snapshot Git syncing as render data
+
+- **Status:** ACTIVE
+- **Audit ID:** L26
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `4786b2f909a714e5329559a22953a5982fee82e5`
+- **Observable outcome:** Active or queued Git mutation activity remains `git_syncing: true` across `EditorState` snapshot, cache-free frame intent, renderer materialization, and emit context; inactive states remain false, and no render transfer value carries the scheduler process.
+- **Authoritative owner:** `RenderPipeline.Input` owns snapshot derivation, `FrameIntent` owns the renderer-boundary allowlist, and `Frontend.Emit.Context` consumes the boolean without querying process state.
+- **Locked implementation:** Replace `Input.effect_scheduler` with a default-false `git_syncing` boolean computed once through `EffectScheduler.active_activity?/2`; allowlist and type the boolean on `FrameIntent`; read it strictly in `Emit.Context`; retain generic materialization unchanged and remove the obsolete scheduler alias/helper.
+- **Tests:** In `test/minga_editor/render_pipeline/input_test.exs`, prove nil/idle scheduler false, deterministic active `:git_syncing` activity true, absence of `:effect_scheduler`, boolean carriage through `FrameIntent` and `BufferChanges.prepare/2`, emit-context preservation, and false after activity ends. Retain real Git async and Git status builder coverage.
+- **Focused validation:** `mix test test/minga_editor/render_pipeline/input_test.exs test/minga_editor/handlers/gui_action_git_async_test.exs test/minga_editor/frontend/emit_test.exs test/minga_editor/render_model/ui/git_status_builder_test.exs`.
+- **Broad validation:** `mix test`; `make lint`; `git diff --check`.
+- **Non-goals:** No scheduler, policy, admission, worker, Git mutation, feedback, render-model, protocol, frontend, config, public API, dependency, process, module, behavior, registry, compatibility, or adjacent DTO redesign.
+- **Maximum production additions:** 12 net lines.
+- **Maximum test additions:** 80 lines.
+- **Dependencies:** Existing `EffectScheduler.active_activity?/2`, `activity: :git_syncing` metadata, explicit `FrameIntent` materialization, and deterministic `Minga.Test.EffectProbe`; no unresolved implementer question remains.
+- **Completion evidence:**
+  - **Implementation result:** `RenderPipeline.Input` now snapshots `git_syncing` once with `EffectScheduler.active_activity?/2`, no longer carries `effect_scheduler`, and defaults manual inputs to inactive. `FrameIntent` allowlists the boolean, renderer materialization carries it through the generic `struct!(Input, ...)` path, and `Frontend.Emit.Context` consumes `state.git_syncing` strictly without a fallback scheduler query.
+  - **Failure reproduction:** Before the source change, `mix test test/minga_editor/render_pipeline/input_test.exs` failed because `%Input{}` and `%FrameIntent{}` had no `:git_syncing` key while the new active/inactive render-boundary regression expected that snapshot field.
+  - **Focused regression:** `test/minga_editor/render_pipeline/input_test.exs` covers nil scheduler false, live idle scheduler false, deterministic active `activity: :git_syncing` true, no scheduler carrier, `Intent` carriage, `BufferChanges.prepare/2` materialization, `Emit.Context` preservation, and false after finalization. `test/minga_editor/renderer/buffer_changes_test.exs` pins the updated frame-intent allowlist.
+  - **Focused validation:** `mix test test/minga_editor/render_pipeline/input_test.exs` passed 21 tests. The four-file locked command passed 49 tests; after the allowlist assertion update, the focused five-file boundary command passed 55 tests.
+  - **Line budget:** Production delta `+11/-10` across the three locked source files for net `+1`; test delta `+79/-0` in `input_test.exs` and `+1/-0` in `buffer_changes_test.exs`, exactly matching the locked +80 total test budget.
+  - **Pre-acceptance reviews:** Correctness `PASS` after exact budget evidence; Elixir craftsmanship `PASS` after routing activity metadata through `Request.new/4` and documenting the process-to-data projection; Ponytail `Lean already. Ship.` after duplicate assertions were removed.
+  - **Broad validation:** `mix test --max-cases 4` passed 10,446 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded after building the worktree's missing native parser and hook runner; `make lint` passed Credo, compile, format, and incremental Dialyzer after the exact frame-intent allowlist was updated and the test budget remained at 80 lines; `git diff --check` passed.
+  - **Final reviewer:** `PASS`; snapshot ownership, active/inactive lifecycle semantics, process-carrier removal, explicit frame boundary, materialization, strict consumption, tests, budgets, validation evidence, and merge safety accepted with no findings.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3030
+  - **Merge evidence:** Pending.
+  - **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely
