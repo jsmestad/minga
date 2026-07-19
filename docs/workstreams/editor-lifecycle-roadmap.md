@@ -2156,7 +2156,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W022: Snapshot Git syncing as render data
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L26
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2182,8 +2182,10 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Broad validation:** `mix test --max-cases 4` passed 10,446 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded after building the worktree's missing native parser and hook runner; `make lint` passed Credo, compile, format, and incremental Dialyzer after the exact frame-intent allowlist was updated and the test budget remained at 80 lines; `git diff --check` passed.
   - **Final reviewer:** `PASS`; snapshot ownership, active/inactive lifecycle semantics, process-carrier removal, explicit frame boundary, materialization, strict consumption, tests, budgets, validation evidence, and merge safety accepted with no findings.
   - **PR URL:** https://github.com/jsmestad/minga/pull/3030
-  - **Merge evidence:** Pending.
-  - **Completion date:** Pending merge.
+  - **Implementation commit SHA:** `06c036a87`
+  - **Merge commit SHA:** `40711ed89e350a30d96242f0947176b0a9e7b443`
+  - **Merged CI:** Run `29680427172` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
+  - **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
