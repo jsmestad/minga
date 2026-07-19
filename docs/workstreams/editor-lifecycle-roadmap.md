@@ -1949,7 +1949,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W016: Retire remote buffer registrations with root buffers
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
 - **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
@@ -1958,16 +1958,16 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Failure path:** Root buffer retirement removed parser, lifecycle, workspace, shell runtime, and git state references but left `MingaEditor.State.Remote.buffers` registrations pointing at retired buffer PIDs.
 - **Locked implementation:** Add owner-local `Remote.retire_buffer/2` with a pid guard and `Map.reject/2`, call it from root `State.remove_buffer/2`, and install the returned remote state in the root struct.
 - **Focused validation:** `mix test.debug test/minga_editor/state_test.exs:502` passed 1 regression with 10 excluded; full `state_test.exs` passed 11 tests; `buffer_lifecycle_test.exs` passed 10 tests.
-- **Broad validation:** `make lint` passed; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,916 tests with 0 failures, 1 skipped, and 578 excluded.
+- **Broad validation:** `make lint` passed; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,916 tests with 0 failures, 1 skipped, and 578 excluded; merged CI run `29671111665` passed every required check.
 - **Non-goals:** No workflow changes, liveness probes, catches, wrappers, new process, module, dependency, behaviour, protocol, registry, config, data shape, root forwarding API, or changes to existing Remote read contracts.
 - **Maximum production additions:** 15 lines.
 - **Maximum test additions:** 25 lines.
 
 #### Completion evidence
 
-- **PR URL:** Pending
-- **Commit SHA:** Pending
-- **Merge SHA:** Pending
+- **PR URL:** https://github.com/jsmestad/minga/pull/3016
+- **Commit SHA:** `6540b8ee8bdcb3ac1e2a51975c4df434b5bafcb0`
+- **Merge SHA:** `73edcf5ea402f7edf7859e341af11cc44133afcd`
 - **Planner verdict:** `READY`; owner, exact filter, root installation, assertions, constraints, and validation were locked.
 - **Ponytail verdict:** `LEAN`; targeted review returned `Lean already. Ship.`
 - **Elixir verdict:** `PASS`; the owner-local transition and `Map.reject/2` are the idiomatic immutable update.
@@ -1976,9 +1976,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Production lines added/removed:** 9 added / 1 removed, net +8.
 - **Test lines added/removed:** 20 added / 0 removed, net +20.
 - **Concepts added/removed:** Added one owner-local `Remote.retire_buffer/2` transition; no new process, module, dependency, protocol, registry, config, or data shape.
-- **Findings resolved:** Pending merge.
+- **Findings resolved:** L16. Root buffer retirement now removes every Remote buffer registration for the retired PID while preserving other registrations.
 - **Discoveries affecting later work:** Buffer retirement invariants span root owners; each owner must expose its own transition and root removal must install every returned owner value atomically.
-- **Completion date:** Pending
+- **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
