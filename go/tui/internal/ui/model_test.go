@@ -1541,15 +1541,15 @@ func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible: true,
 		Messages: []protocol.AgentChatMessage{
-			{Kind: agentKindUser, Text: "fix this"},
-			{Kind: agentKindThinking, Text: "first", Collapsed: true},
-			{Kind: agentKindAssistant, Text: "ok"},
-			{Kind: agentKindThinking, Text: "second", Collapsed: false},
+			{ID: 11, Kind: agentKindUser, Text: "fix this"},
+			{ID: 22, Kind: agentKindThinking, Text: "first", Collapsed: true},
+			{ID: 33, Kind: agentKindAssistant, Text: "ok"},
+			{ID: 44, Kind: agentKindThinking, Text: "second", Collapsed: false},
 		},
 	}}}
 
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModCtrl | tea.ModAlt}))
-	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(3); !bytes.Equal(got, want) {
+	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(44); !bytes.Equal(got, want) {
 		t.Fatalf("ctrl+alt+z packet = %v, want %v", got, want)
 	}
 }
@@ -1560,16 +1560,30 @@ func TestAgentChatShortcutTogglesLatestToolBlock(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible: true,
 		Messages: []protocol.AgentChatMessage{
-			{Kind: agentKindUser, Text: "fix this"},
-			{Kind: agentKindTool, Name: "read_file", Collapsed: true},
-			{Kind: agentKindAssistant, Text: "ok"},
-			{Kind: agentKindStyledTool, Name: "grep", Collapsed: false},
+			{ID: 11, Kind: agentKindUser, Text: "fix this"},
+			{ID: 22, Kind: agentKindTool, Name: "read_file", Collapsed: true},
+			{ID: 33, Kind: agentKindAssistant, Text: "ok"},
+			{ID: 44, Kind: agentKindStyledTool, Name: "grep", Collapsed: false},
 		},
 	}}}
 
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
-	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(3); !bytes.Equal(got, want) {
+	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(44); !bytes.Equal(got, want) {
 		t.Fatalf("ctrl+alt+x packet = %v, want %v", got, want)
+	}
+}
+
+func TestAgentChatShortcutTogglesLatestToolBlockIgnoresZeroID(t *testing.T) {
+	var panel agentPanel
+	chat := protocol.AgentChat{Visible: true}
+	messages := []protocol.AgentChatMessage{
+		{ID: 7, Kind: agentKindUser, Text: "fix this"},
+		{ID: 0, Kind: agentKindTool, Name: "read_file", Collapsed: true},
+	}
+
+	packet, handled := panel.handleKey(chat, messages, tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
+	if handled || packet != nil {
+		t.Fatalf("ctrl+alt+x should not send a toggle for zero ID tool block, handled=%v packet=%v", handled, packet)
 	}
 }
 

@@ -81,7 +81,7 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendToolDismiss()
 
     // Agent chat actions
-    func sendAgentToolToggle(index: UInt16)
+    func sendAgentToolToggle(messageID: UInt32)
 
     // Generic command execution
     func sendExecuteCommand(name: String)
@@ -279,7 +279,7 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendToolUninstall(name: String) {}
     public func sendToolUpdate(name: String) {}
     public func sendToolDismiss() {}
-    public func sendAgentToolToggle(index: UInt16) {}
+    public func sendAgentToolToggle(messageID: UInt32) {}
     public func sendExecuteCommand(name: String) {}
     public func sendMinibufferSelect(index: UInt16) {}
     public func sendGitStageFile(path: String) {}

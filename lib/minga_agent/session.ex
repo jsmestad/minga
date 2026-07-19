@@ -435,10 +435,10 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:set_model, model}, timeout)
   end
 
-  @doc "Toggles the collapsed state of a tool call message."
+  @doc "Toggles the collapsed state of a tool or thinking message by stable transcript ID."
   @spec toggle_tool_collapse(GenServer.server(), non_neg_integer()) :: :ok
-  def toggle_tool_collapse(session, message_index) do
-    GenServer.call(session, {:toggle_tool_collapse, message_index})
+  def toggle_tool_collapse(session, message_id) do
+    GenServer.call(session, {:toggle_tool_collapse, message_id})
   end
 
   @doc "Toggles all tool call messages between collapsed and expanded."
@@ -1208,22 +1208,19 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
-  def handle_call({:toggle_tool_collapse, index}, _from, state) do
-    transcript =
-      Transcript.update_at(state.transcript, index, fn
-        {:tool_call, %ToolCall{} = tool_call} ->
-          {:tool_call, ToolCall.toggle_collapsed(tool_call)}
+  def handle_call({:toggle_tool_collapse, message_id}, _from, state) do
+    transcript = Transcript.toggle_message_collapse(state.transcript, message_id)
 
-        {:thinking, text, collapsed} ->
-          {:thinking, text, !collapsed}
+    if transcript == state.transcript do
+      {:reply, :ok, state}
+    else
+      state =
+        state
+        |> Map.put(:transcript, transcript)
+        |> notify_messages_changed()
 
-        other ->
-          other
-      end)
-
-    state = %{state | transcript: transcript}
-    state = notify_messages_changed(state)
-    {:reply, :ok, state}
+      {:reply, :ok, state}
+    end
   end
 
   def handle_call(:toggle_all_tool_collapses, _from, state) do

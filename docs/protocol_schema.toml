@@ -30,7 +30,9 @@ version = "2.0.0"
 # RowSplices section 0x0B (#2741).
 # protocol_version 12 appends a disposition byte to frame_rejected and appends
 # the versioned hard-dimension resource policy to frontend capabilities (#2801).
-protocol_version = 12
+# protocol_version 13 changes gui_action agent_tool_toggle (0x15) from resident
+# index(2) to stable transcript message_id(4).
+protocol_version = 13
 description = "Minga port protocol opcode registry"
 
 # Directions:

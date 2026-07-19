@@ -1188,7 +1188,7 @@ opcode(1) + action_type(1) + payload...
 | 0x12 | tool_uninstall | name_len(2) + name(name_len) | Uninstall a tool by name |
 | 0x13 | tool_update | name_len(2) + name(name_len) | Update a tool by name |
 | 0x14 | tool_dismiss | (empty) | Dismiss the tool manager panel |
-| 0x15 | agent_tool_toggle | index(2) | Toggle collapse/expand of agent tool call at message index |
+| 0x15 | agent_tool_toggle | message_id(4) | Toggle collapse/expand of the agent tool or thinking entry with the stable transcript message ID |
 | 0x16 | execute_command | name_len(2) + name(name_len) | Execute a named command from the BEAM command registry |
 | 0x17 | minibuffer_select | index(2) | Select minibuffer candidate at index |
 | 0x18 | git_stage_file | path_len(2) + path(path_len) | Stage a file |

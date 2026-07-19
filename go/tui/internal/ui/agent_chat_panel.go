@@ -39,13 +39,9 @@ func (a *agentPanel) spinner() string {
 	return frames[int(a.animationFrame)%len(frames)]
 }
 
-// handleKey handles the Ctrl+Alt+X/Z collapse toggles. The index is resolved
-// against `messages` (the resident transcript, #2654), not the windowed 0x78
-// list: the BEAM's toggle handler applies List.update_at on the full session
-// conversation, which the resident store mirrors (messages_with_ids, with
-// transcript enrichments appended after the tool/thinking messages), so the
-// latest-tool/thinking index aligns. The windowed 0x78 list would drift once the
-// conversation exceeds the window.
+// handleKey handles the Ctrl+Alt+X/Z collapse toggles. The stable message ID is
+// resolved against `messages` (the resident transcript, #2654) because it echoes
+// the BEAM-owned transcript IDs and remains valid after resident front trimming.
 func (a *agentPanel) handleKey(chat protocol.AgentChat, messages []protocol.AgentChatMessage, msg tea.KeyPressMsg) ([]byte, bool) {
 	if !chat.Visible {
 		return nil, false
@@ -56,17 +52,17 @@ func (a *agentPanel) handleKey(chat protocol.AgentChat, messages []protocol.Agen
 	}
 	switch key.Code {
 	case 'x', 'X':
-		index, ok := latestToolMessageIndex(messages)
+		messageID, ok := latestToolMessageID(messages)
 		if !ok {
 			return nil, false
 		}
-		return protocol.EncodeGUIAgentToolToggle(index), true
+		return protocol.EncodeGUIAgentToolToggle(messageID), true
 	case 'z', 'Z':
-		index, ok := latestThinkingMessageIndex(messages)
+		messageID, ok := latestThinkingMessageID(messages)
 		if !ok {
 			return nil, false
 		}
-		return protocol.EncodeGUIAgentToolToggle(index), true
+		return protocol.EncodeGUIAgentToolToggle(messageID), true
 	default:
 		return nil, false
 	}

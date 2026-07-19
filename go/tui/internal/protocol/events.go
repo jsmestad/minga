@@ -230,8 +230,8 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	return append(out, payload...)
 }
 
-func EncodeGUIAgentToolToggle(index uint16) []byte {
-	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(index >> 8), byte(index)}
+func EncodeGUIAgentToolToggle(messageID uint32) []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
 }
 
 // EncodeGUIBreadcrumbClick encodes a breadcrumb_click action. Wire format:

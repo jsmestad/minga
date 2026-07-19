@@ -621,6 +621,16 @@ struct EncoderGUIActionTests {
         #expect(payload[1] == GUI_ACTION_TOOL_DISMISS)
     }
 
+    @Test("agent_tool_toggle encodes stable message ID")
+    func agentToolToggleLayout() {
+        let payload = captureFrame { $0.sendAgentToolToggle(messageID: 0x01020304) }
+
+        #expect(payload.count == 6)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_AGENT_TOOL_TOGGLE)
+        #expect(readU32(payload, 2) == 0x01020304)
+    }
+
     @Test("execute_command encodes command name with length prefix")
     func executeCommandLayout() {
         let payload = captureFrame { $0.sendExecuteCommand(name: "buffer_prev") }

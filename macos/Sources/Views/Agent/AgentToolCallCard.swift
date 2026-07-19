@@ -2,8 +2,8 @@ import SwiftUI
 import MingaProtocol
 
 public struct AgentToolCallCard: View {
-    public init(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], encoder: InputEncoder? = nil, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
-        self.messageIndex = messageIndex
+    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], encoder: InputEncoder? = nil, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
+        self.messageID = messageID
         self.name = name
         self.summary = summary
         self.status = status
@@ -17,7 +17,7 @@ public struct AgentToolCallCard: View {
         self.encoder = encoder
         self.styledLineView = styledLineView
     }
-    public let messageIndex: Int
+    public let messageID: Int
     public let name: String
     public let summary: String
     public let status: UInt8
@@ -87,8 +87,8 @@ public struct AgentToolCallCard: View {
             .padding(.vertical, 6)
             .contentShape(Rectangle())
             .onTapGesture {
-                if hasResult, messageIndex <= Int(UInt16.max) {
-                    encoder?.sendAgentToolToggle(index: UInt16(messageIndex))
+                if hasResult, let messageID = UInt32(exactly: messageID), messageID != 0 {
+                    encoder?.sendAgentToolToggle(messageID: messageID)
                 }
             }
 

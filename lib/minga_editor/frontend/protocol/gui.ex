@@ -346,7 +346,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:tool_uninstall, name :: String.t()}
           | {:tool_update, name :: String.t()}
           | :tool_dismiss
-          | {:agent_tool_toggle, message_index :: non_neg_integer()}
+          | {:agent_tool_toggle, message_id :: non_neg_integer()}
           | {:execute_command, name :: String.t()}
           | {:minibuffer_select, candidate_index :: non_neg_integer()}
           | {:git_stage_file, path :: String.t()}
@@ -2354,8 +2354,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_tool_dismiss, <<>>), do: {:ok, :tool_dismiss}
 
-  def decode_gui_action(@gui_action_agent_tool_toggle, <<index::16>>),
-    do: {:ok, {:agent_tool_toggle, index}}
+  def decode_gui_action(@gui_action_agent_tool_toggle, <<message_id::32>>),
+    do: {:ok, {:agent_tool_toggle, message_id}}
 
   def decode_gui_action(
         @gui_action_execute_command,

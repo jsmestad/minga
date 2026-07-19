@@ -72,19 +72,14 @@ func TestAgentTranscriptLocalScrollRevealsOlderSameFrame(t *testing.T) {
 	}
 }
 
-func TestAgentToggleIndexesResidentNotWindowed(t *testing.T) {
-	// The BEAM collapse toggle applies List.update_at on the full session
-	// conversation, so the Ctrl+Alt+X/Z index must be resolved against the
-	// resident store, not the windowed 0x78 list (#2654). Here the resident list
-	// puts the latest tool at index 3; a windowed slice would have reported a
-	// different position.
+func TestAgentToggleUsesStableMessageID(t *testing.T) {
 	var panel agentPanel
 	chat := protocol.AgentChat{Visible: true}
 	resident := []protocol.AgentChatMessage{
-		{ID: 1, Kind: agentKindUser, Text: "u"},
-		{ID: 2, Kind: agentKindAssistant, Text: "a"},
-		{ID: 3, Kind: agentKindUser, Text: "u2"},
-		{ID: 4, Kind: agentKindTool, Text: "tool"},
+		{ID: 101, Kind: agentKindUser, Text: "u"},
+		{ID: 202, Kind: agentKindAssistant, Text: "a"},
+		{ID: 303, Kind: agentKindUser, Text: "u2"},
+		{ID: 404, Kind: agentKindTool, Text: "tool"},
 	}
 	press := tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt})
 
@@ -92,12 +87,11 @@ func TestAgentToggleIndexesResidentNotWindowed(t *testing.T) {
 	if !handled {
 		t.Fatalf("Ctrl+Alt+X should be handled when a tool message exists")
 	}
-	// packet = [OPGuiAction, GUIActionAgentToolToggle, idx>>8, idx].
 	if packet[0] != generated.OPGuiAction || packet[1] != generated.GUIActionAgentToolToggle {
 		t.Fatalf("unexpected toggle packet header: %v", packet)
 	}
-	if idx := int(packet[2])<<8 | int(packet[3]); idx != 3 {
-		t.Fatalf("toggle index = %d, want 3 (resident position)", idx)
+	if id := uint32(packet[2])<<24 | uint32(packet[3])<<16 | uint32(packet[4])<<8 | uint32(packet[5]); id != 404 {
+		t.Fatalf("toggle message ID = %d, want 404", id)
 	}
 }
 

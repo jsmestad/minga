@@ -600,12 +600,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  defp dispatch_action(state, {:agent_tool_toggle, message_index}) do
+  defp dispatch_action(state, {:agent_tool_toggle, message_id}) do
     session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     if session do
       try do
-        AgentSession.toggle_tool_collapse(session, message_index)
+        AgentSession.toggle_tool_collapse(session, message_id)
       catch
         :exit, _ -> :ok
       end
