@@ -2279,8 +2279,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Bug-hunt verdict:** Correctness `PASS`; both metadata paths, valid and invalid contracts, optional nil default, consumer preservation, scope, budgets, and evidence accepted with no findings.
 - **Elixir craftsmanship verdict:** `PASS`; the two ordered metadata entries and direct unit assertions are the smallest idiomatic extension of the existing validation flow.
 - **Final reviewer verdict:** `PASS`; exact metadata scope, construction-time ownership, valid and invalid regressions, budgets, transparent validation evidence, and merge safety accepted with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3036
+- **Implementation commit SHA:** `0347ab168`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending merge.
 
