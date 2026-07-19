@@ -2429,8 +2429,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `mix test.llm` passed 9,883 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` exited 0 with `xcodebuild not found; skipping Swift build`, preserving the required macOS CI handoff; no Swift source changed.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0.99 confidence after mapping the large deleted test surface to canonical adapter, builder, frontend, action, and schema coverage. Elixir craftsmanship returned `PASS/Lean`; Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly mapped every removed hidden, visible, sidecar, syntax, fallback, multiple-signature, range, cache, builder, and action contract to retained coverage. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three-oracle deletion, retained canonical byte/cache/range/builder coverage, unchanged schema/generated/Swift/Go/action contracts, budgets, validation evidence, and merge safety with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3046
+- **Implementation commit SHA:** `49d4fcd5b`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
