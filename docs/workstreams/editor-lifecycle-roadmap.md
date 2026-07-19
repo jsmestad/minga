@@ -2529,8 +2529,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The default-concurrency `mix test.llm` run exposed the unrelated `MingaAgent.SessionManagerTest` restart synchronization timeout; that exact test passed alone at seed `611741`, and `mix test.llm --seed 611741 --max-cases 4` passed 9,860 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. The focused frontend validation already ran `mix swift.build`, which exited 0 with `xcodebuild not found; skipping Swift build`; no Swift source changed.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.97 confidence and independently mapped the full legacy status test surface to canonical adapter, builder, schema, integration, Go, and Swift coverage while confirming that stale truncation/clamping/drop/sanitization behavior was correctly not preserved. Elixir craftsmanship returned `PASS/Lean`; Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered all standard sections, buffer/agent variants, workspace, pending keys, operation fields and message independence, modeline shapes and strict bounds, cache emission, integration decoding, and frontend consumers. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact 376-line production-oracle deletion, retained canonical StatusBar builder/adapter/encoder path, direct section/bounds/integration tests, unchanged schema/generated/Swift/Go contracts, qualified validation, budgets, and merge safety with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3052
+- **Implementation commit SHA:** `f4a5651fd`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
