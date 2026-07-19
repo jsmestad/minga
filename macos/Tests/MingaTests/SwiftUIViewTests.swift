@@ -1104,6 +1104,36 @@ struct AgentChatViewTests {
         return state
     }
 
+    @Test("Truncated transcript shows older messages omitted indicator")
+    @MainActor func truncatedTranscriptIndicator() throws {
+        let state = chatState()
+        state.applyTranscript(mode: 0, epoch: 1, truncated: true, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "Hello"))])
+
+        let body = try AgentChatView(state: state, isInsertMode: false, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let labels = body.findAll(ViewType.Text.self).compactMap { try? $0.accessibilityLabel().string() }
+
+        #expect(strings.contains("Older messages omitted"))
+        #expect(strings.contains("Hello"))
+        #expect(labels.contains("Older messages omitted"))
+    }
+
+    @Test("Non-truncated transcript hides older messages omitted indicator")
+    @MainActor func nonTruncatedTranscriptIndicatorHidden() throws {
+        let state = chatState()
+        state.applyTranscript(mode: 0, epoch: 1, truncated: false, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "Hello"))])
+
+        let body = try AgentChatView(state: state, isInsertMode: false, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(!strings.contains("Older messages omitted"))
+        #expect(strings.contains("Hello"))
+    }
+
     @Test("Empty messages shows header and prompt area")
     @MainActor func emptyMessages() throws {
         let state = AgentChatState()

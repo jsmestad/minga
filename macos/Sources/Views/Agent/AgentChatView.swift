@@ -51,6 +51,10 @@ public struct AgentChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 12) {
+                            if state.transcriptTruncated {
+                                olderMessagesOmittedIndicator
+                            }
+
                             ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
                                 messageViewWithDivider(msg, index: index)
                             }
@@ -127,6 +131,20 @@ public struct AgentChatView: View {
     }
 
     // MARK: - Messages
+    private var olderMessagesOmittedIndicator: some View {
+        Text("Older messages omitted")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(theme.agentMutedFg)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(theme.agentCodeBg.opacity(0.75)))
+            .overlay(Capsule().strokeBorder(theme.agentCodeBorder.opacity(0.25), lineWidth: 1))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Older messages omitted")
+            .accessibilityHint("Earlier session messages are outside the locally retained transcript.")
+    }
+
 
     /// Wraps each message with an optional divider in a single VStack.
     /// Keeping one view per ForEach iteration prevents LazyVStack from

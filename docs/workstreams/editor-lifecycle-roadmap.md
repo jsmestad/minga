@@ -2222,6 +2222,38 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merged CI:** Run `29681853361` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-19
 
+### W024: Show omitted resident transcript history
+
+- **Status:** ACTIVE
+- **Audit ID:** L28
+- **Decision:** ACCEPT/native
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness:** Reproduced on current main SHA `42b8b886e62a96f08afcdfad7525ecc623962cfb`.
+- **Observable outcome:** When the resident macOS agent transcript omits older complete messages, the chat shows a static `Older messages omitted` indicator at the top boundary of retained history and VoiceOver announces the same label. The indicator is absent for a complete transcript.
+- **Current failure path:** The BEAM computes `resident_truncated?`, 0x86 encodes and decodes it, prepared frame publication stores it as `AgentChatState.transcriptTruncated`, and state tests cover true-to-false lifecycle. `AgentChatView` never reads the flag, so the already-owned truncation fact has no visible or accessible consumer.
+- **Owner and target shape:** The BEAM remains authoritative for truncation. `AgentChatState` remains the Swift state owner for `transcriptTruncated`. `AgentChatView` owns presentation only and reads the existing boolean without mutating state or changing protocol flow.
+- **Locked files:** Modify only `macos/Sources/Views/Agent/AgentChatView.swift` and `macos/Tests/MingaTests/SwiftUIViewTests.swift`.
+- **Locked implementation:** Add `if state.transcriptTruncated { olderMessagesOmittedIndicator }` as the first child of the message `LazyVStack`, before retained messages. The private computed view is text-only with exact copy `Older messages omitted`, centered, system font size 11 medium, `theme.agentMutedFg`, horizontal padding 10, vertical padding 5, and a capsule using `theme.agentCodeBg.opacity(0.75)` plus `theme.agentCodeBorder.opacity(0.25)` at one point. Apply `.accessibilityElement(children: .ignore)`, label `Older messages omitted`, and hint `Earlier session messages are outside the locally retained transcript.` Add no value or interactive traits.
+- **Required tests:** In `AgentChatViewTests`, publish one retained `Hello` user message with `truncated: true`; assert visible copy, retained message, and accessibility label. Publish the same frame with `truncated: false`; assert the indicator copy is absent while `Hello` remains.
+- **Focused validation:** `cd macos && xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO -only-testing:MingaTests/AgentChatViewTests`
+- **Broad validation:** `cd macos && xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO -only-testing:MingaTests/SwiftUIViewTests -only-testing:MingaTests/StateLifecycleTests`
+- **Build smoke:** `cd macos && xcodebuild build -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO`
+- **Line budget:** Production net addition at most `+22`; test additions at most `+34`.
+- **Non-goals:** No BEAM, protocol, schema, opcode, decoder, dispatcher, `AgentChatState`, transcript lifecycle/cache, Go TUI, theme slot, asset, generated file, project configuration, new abstraction, dependency, API, compatibility path, or parallel state shape change.
+- **Dependencies and constraints:** Existing `transcriptTruncated`, SwiftUI, ViewInspector, `ThemeColors`, and `Wire.ChatMessage` only. Preserve the dumb-renderer and State + View boundaries. Return `NEEDS_REPLAN` rather than exceeding either line ceiling or touching another file.
+- **Implementation result:** Added the locked first `LazyVStack` child `if state.transcriptTruncated { olderMessagesOmittedIndicator }` before retained messages in `AgentChatView`, with the exact text-only private indicator copy, centered style, existing theme tokens, capsule fill/border, and accessibility label/hint. Added the locked positive and negative `AgentChatViewTests` using `AgentChatState.applyTranscript(... truncated: true/false ...)` with one retained `Hello` user message.
+- **Failure reproduction:** Local Linux substitute per revised validation contract: `command -v xcodebuild` exited `1`, so Swift UI tests were not executable locally. Static pre-fix evidence before production edit: repository search of `AgentChatView.swift` found no `transcriptTruncated` read and no `Older messages omitted` copy, while the positive test asserted visible copy, retained `Hello`, and accessibility label, and the negative test asserted the indicator copy was absent while retained `Hello` remained.
+- **Focused regression:** Local static post-fix inspection verified `if state.transcriptTruncated { olderMessagesOmittedIndicator }` is the first `LazyVStack` child before the retained-message `ForEach`; `olderMessagesOmittedIndicator` uses exact copy `Older messages omitted`, `.font(.system(size: 11, weight: .medium))`, `theme.agentMutedFg`, horizontal padding `10`, vertical padding `5`, `Capsule().fill(theme.agentCodeBg.opacity(0.75))`, `Capsule().strokeBorder(theme.agentCodeBorder.opacity(0.25), lineWidth: 1)`, centered frame, `.accessibilityElement(children: .ignore)`, label `Older messages omitted`, and hint `Earlier session messages are outside the locally retained transcript.`
+- **Line budget:** Measured with `git diff --numstat -- macos/Sources/Views/Agent/AgentChatView.swift macos/Tests/MingaTests/SwiftUIViewTests.swift docs/workstreams/editor-lifecycle-roadmap.md`: `18 0 macos/Sources/Views/Agent/AgentChatView.swift`, `30 0 macos/Tests/MingaTests/SwiftUIViewTests.swift`, `32 0 docs/workstreams/editor-lifecycle-roadmap.md`. Production `+18 <= +22`; tests `+30 <= +34`.
+- **Pre-acceptance reviews:** Correctness `PASS`; Swift craftsmanship `PASS`; native UI/accessibility design `PASS`; Ponytail `Lean already. Ship.`
+- **Broad validation:** `mix swift.build` exited `0`, completed protocol generation, and printed `xcodebuild not found; skipping Swift build`; local Linux therefore did not execute Swift tests or the xcodebuild build smoke, and the macOS CI Swift job remains mandatory before merge. After `mix compile.minga_zig`, `mix test --seed 69814 --max-cases 4` passed 10,448 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded. The first branch run exposed an unrelated existing monitor-reason race in `Minga.Extension.LifecycleContractTest` (`:noproc` observed where the assertion expected `:killed`); the identical current-main SHA and seed passed, and the diagnosed branch rerun passed. `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `git diff --check` passed.
+- **Final reviewer:** `PASS`; visible/accessibility contract, state ownership, true/false regressions, locked scope, line budgets, validation evidence, and merge safety accepted with no findings.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge evidence:** Pending.
+- **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely
