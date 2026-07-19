@@ -63,15 +63,39 @@ defmodule MingaEditor.RenderModel.UI.ObservatoryBuilderTest do
       assert model.visible?
       assert model.nodes == []
     end
+
+    test "uses current function when registered name is nil" do
+      model =
+        build_visible_node(registered_name: nil, current_function: {Minga.Buffer, :content, 1})
+
+      assert [%Node{name: "Minga.Buffer.content/1"}] = model.nodes
+    end
+
+    test "uses unnamed when registered name and current function are nil" do
+      model = build_visible_node(registered_name: nil, current_function: nil)
+
+      assert [%Node{name: "unnamed"}] = model.nodes
+    end
   end
 
-  defp tree_node do
+  defp build_visible_node(opts) do
+    data = ObservatoryData.visible(tree_node(opts), [])
+
+    shell_state =
+      %TraditionalState{}
+      |> TraditionalState.open_observatory(nil)
+      |> TraditionalState.replace_observatory_data(data)
+
+    ObservatoryBuilder.build(shell_state)
+  end
+
+  defp tree_node(opts \\ []) do
     snapshot = %ProcessSnapshot{
       memory: 1024,
       message_queue_len: 1,
       reductions: 10,
-      current_function: {MingaEditor, :loop, 1},
-      registered_name: :minga_test,
+      current_function: Keyword.get(opts, :current_function, {MingaEditor, :loop, 1}),
+      registered_name: Keyword.get(opts, :registered_name, :minga_test),
       parent_pid: nil,
       child_type: :worker,
       process_class: :worker
