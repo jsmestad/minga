@@ -57,7 +57,8 @@ defmodule MingaEditor.UI.Theme.Builder do
       :selection_bg,
       :whitespace_fg,
       :indent_guide_fg,
-      :indent_guide_active_fg
+      :indent_guide_active_fg,
+      :link_fg
     ],
     gutter: [
       :fg,
@@ -67,7 +68,8 @@ defmodule MingaEditor.UI.Theme.Builder do
       :info_fg,
       :hint_fg,
       :fold_fg,
-      :separator_fg
+      :separator_fg,
+      :advisory_fg
     ],
     git: [:added_fg, :modified_fg, :deleted_fg],
     modeline: [
