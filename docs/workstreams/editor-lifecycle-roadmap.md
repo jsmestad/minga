@@ -2561,8 +2561,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The default-concurrency `mix test.llm` run exposed an unrelated `MingaAgent.SessionManagerTest` background-subagent call timeout; that exact test passed alone at seed `67088`, and `mix test.llm --seed 67088 --max-cases 4` passed 9,858 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` had already exited 0 with the documented Linux `xcodebuild not found` handoff; no Swift source changed.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence and independently traced the exact deletion, retained semantic model/builder/adapter/action/schema/frontend owners, complete direct wire assertions, roadmap truth, line budgets, and zero-new-concept claim. Elixir craftsmanship returned `PASS/Lean`; Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered envelope length, version, count, active id, input-order normalization, every entry string, flags, widths, badge sentinel/value, empty model, cache no-op, builder projection, Swift/Go decoders, and action routing. No unresolved pre-acceptance finding remains.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact four-symbol Protocol.GUI sidebars-oracle deletion, retained canonical model/builder/adapter, schema/generated, Swift/Go consumers and `sidebar_action` paths, direct 0x9F field/order/flag/badge/cache assertions, truthful qualified validation, budgets, and merge safety with no findings.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3054
+- **Implementation commit SHA:** `55a8324c2`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
