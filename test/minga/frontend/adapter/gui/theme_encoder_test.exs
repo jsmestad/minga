@@ -4,7 +4,7 @@ defmodule Minga.Frontend.Adapter.GUI.ThemeEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.RenderModel.UI.Theme
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.RenderModel.UI.ThemeBuilder
 
   @op_gui_theme 0x74
 
@@ -72,40 +72,98 @@ defmodule Minga.Frontend.Adapter.GUI.ThemeEncoderTest do
       assert <<@op_gui_theme, 0::8>> = cmd
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI.encode_gui_theme/1" do
+    test "encodes every built-in theme with all required agent slots" do
       for theme_name <- MingaEditor.UI.Theme.available() do
         editor_theme = MingaEditor.UI.Theme.get!(theme_name)
+        model = ThemeBuilder.build(editor_theme)
+        {binary, _caches} = ThemeEncoder.encode(model, Caches.new())
 
-        # Legacy path: ProtocolGUI encodes directly from the editor theme
-        legacy_binary = ProtocolGUI.encode_gui_theme(editor_theme)
+        assert_theme_binary(binary, model)
 
-        # New path: builder produces a model, encoder produces binary
-        model = MingaEditor.RenderModel.UI.ThemeBuilder.build(editor_theme)
-        caches = Caches.new()
-        {new_binary, _caches} = ThemeEncoder.encode(model, caches)
+        slots = encoded_slot_map(binary)
 
-        assert new_binary == legacy_binary,
-               "Theme #{theme_name}: new encoder output does not match legacy output"
+        for slot_id <- 0xA0..0xAE do
+          assert Map.has_key?(slots, slot_id),
+                 "#{theme_name} missing agent slot 0x#{Integer.to_string(slot_id, 16)}"
+        end
       end
     end
 
-    test "fingerprint matches legacy fingerprint for skip behavior" do
-      editor_theme = MingaEditor.UI.Theme.get!(:doom_one)
-      model = MingaEditor.RenderModel.UI.ThemeBuilder.build(editor_theme)
+    test "encodes every doom_one agent field in its canonical slot" do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      model = ThemeBuilder.build(theme)
+      {binary, _caches} = ThemeEncoder.encode(model, Caches.new())
+      slots = encoded_slot_map(binary)
 
-      # The legacy fingerprint was: phash2({theme.name, Slots.to_color_pairs(theme)})
-      # The new fingerprint is: phash2({model.name, model.color_slots})
-      # The model.color_slots are the to_color_pairs output with nils rejected.
-      # These won't be identical if the legacy included nils, but within each
-      # path the skip behavior is internally consistent. What matters is that
-      # the same model produces the same fingerprint.
-      caches = Caches.new()
-      {_cmd, caches} = ThemeEncoder.encode(model, caches)
-      assert caches.last_theme_fp != nil
-
-      # Same model should produce same fingerprint
-      fp = :erlang.phash2({model.name, model.color_slots})
-      assert caches.last_theme_fp == fp
+      assert Map.take(slots, Enum.to_list(0xA0..0xAE)) == expected_agent_slots(theme)
+      assert Map.fetch!(slots, 0xA7) == {0x51, 0xAF, 0xEF}
     end
+  end
+
+  defp assert_theme_binary(binary, %Theme{} = model) do
+    assert <<@op_gui_theme, count::8, rest::binary>> = binary
+    assert count == length(model.color_slots)
+    assert byte_size(rest) == count * 4
+    assert rest == expected_slot_bytes(model.color_slots)
+  end
+
+  defp expected_slot_bytes(color_slots) do
+    color_slots
+    |> Enum.map(fn {slot, rgb} ->
+      r = Bitwise.bsr(Bitwise.band(rgb, 0xFF0000), 16)
+      g = Bitwise.bsr(Bitwise.band(rgb, 0x00FF00), 8)
+      b = Bitwise.band(rgb, 0x0000FF)
+      <<slot::8, r::8, g::8, b::8>>
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  defp expected_agent_slots(theme) do
+    agent = MingaEditor.UI.Theme.agent_theme(theme)
+
+    [
+      agent.panel_bg,
+      agent.header_bg,
+      agent.header_fg,
+      agent.user_border,
+      agent.user_label,
+      agent.assistant_border,
+      agent.assistant_label,
+      agent.input_border,
+      agent.input_bg,
+      agent.input_placeholder,
+      agent.text_fg,
+      agent.tool_border,
+      agent.tool_header,
+      agent.code_bg,
+      agent.code_border
+    ]
+    |> Enum.with_index(0xA0)
+    |> Map.new(fn {rgb, slot} -> {slot, rgb_tuple(rgb)} end)
+  end
+
+  defp rgb_tuple(rgb) do
+    {
+      Bitwise.bsr(Bitwise.band(rgb, 0xFF0000), 16),
+      Bitwise.bsr(Bitwise.band(rgb, 0x00FF00), 8),
+      Bitwise.band(rgb, 0x0000FF)
+    }
+  end
+
+  defp encoded_slot_map(binary) do
+    assert <<@op_gui_theme, count::8, rest::binary>> = binary
+
+    rest
+    |> parse_slots(count, [])
+    |> Map.new()
+  end
+
+  defp parse_slots(rest, 0, acc) do
+    assert rest == ""
+    acc
+  end
+
+  defp parse_slots(<<slot::8, r::8, g::8, b::8, rest::binary>>, remaining, acc) do
+    parse_slots(rest, remaining - 1, [{slot, {r, g, b}} | acc])
   end
 end
