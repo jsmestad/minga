@@ -2372,7 +2372,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W029: Delete D06 float-popup Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.2
 - **Decision:** ACCEPT/deletion, second split D06 slice
 - **Planning profile:** `D06Planner2`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2398,8 +2398,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact test-only oracle deletion, canonical full-byte and cache coverage, unchanged `0x83` schema/generated/frontend/action contracts, truthful qualified validation evidence, line budgets, and merge safety with no findings.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3044
 - **Implementation commit SHA:** `005a29179`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `d79a97bfa865551ece0d3323a0c4c24c5c8ab7ef`; **Merge evidence:** PR #3044 merged after CI run `29695779502` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The initial Elixir job and first rerun each exposed a different unrelated concurrency-only failure; both exact tests passed independently, and the final CI rerun passed the full required suite.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
