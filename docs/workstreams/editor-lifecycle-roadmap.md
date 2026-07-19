@@ -1982,7 +1982,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W017: Target agent tool collapse by stable message ID
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L19
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2004,8 +2004,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Completion evidence:**
   - **Implementation result:** Protocol schema/docs cut over GUI action 0x15 to big-endian `message_id(4)` and protocol version 13; BEAM decodes only 4-byte payloads; `MingaAgent.Session.Transcript.toggle_message_collapse/2` owns stable-ID tool/thinking mutation; Session only publishes/saves on changed transcript; macOS and Go producers echo resident stable IDs and suppress zero IDs.
   - **Failure reproduced:** `mix run -e ...` before the fix returned `old_uint16: {:ok, {:agent_tool_toggle, 7}}` and `uint32_id: :error`.
-  - **Focused validation:** `mix protocol.gen --check` passed; the locked BEAM protocol, Transcript, and Session set passed 171 tests, then 28 focused tests and the 11-test Transcript suite passed after review fixes; the locked Go protocol/UI selection passed both packages. Swift encoder tests are committed but cannot run on Linux because `xcodebuild` is unavailable.
-  - **Broad validation:** `make lint` passed after the final production edit; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,916 tests with 0 failures, 1 skipped, and 578 excluded; `cd go/tui && go test ./...` passed 7 packages with 1 package containing no tests.
+  - **Focused validation:** `mix protocol.gen --check` passed; the locked BEAM protocol, Transcript, and Session set passed 171 tests, then 28 focused tests and the 11-test Transcript suite passed after review fixes; the locked Go protocol/UI selection passed both packages. Local Swift validation was unavailable on Linux; merged macOS CI passed the Swift GUI and protocol integration suites.
+  - **Broad validation:** `make lint` passed after the final production edit; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,916 tests with 0 failures, 1 skipped, and 578 excluded; `cd go/tui && go test ./...` passed 7 packages with 1 package containing no tests; merged CI run `29672836893` passed every required check.
   - **Line deltas:** Production Elixir/Swift/Go net +23 lines, under the +45 cap. Tests net +118 lines, under the +120 cap. Docs/schema net +2 lines. Generated Go protocol version net 0.
   - **Concepts added:** One Transcript-owned stable message-ID collapse transition and the uint32 GUI action payload for `agent_tool_toggle`.
   - **Concepts removed:** Resident-index collapse targeting, two-byte 0x15 payload acceptance, Go resident index selectors, and one draft single-use Transcript transform helper.
@@ -2013,7 +2013,10 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Final reviewer:** `PASS`; the stable-ID cutover, owner transition, effects, callsites, tests, budgets, and merge safety are accepted.
   - **PR URL:** https://github.com/jsmestad/minga/pull/3020
   - **Implementation commit SHA:** `da792f30d`
-  - **Merge evidence:** Pending.
+  - **Merge SHA:** `afa39a0221604629d48be73a86fb6ef9f97452aa`
+  - **Findings resolved:** L19. Agent tool and thinking collapse now targets stable transcript identity across BEAM, macOS, and Go even after resident front trimming.
+  - **Discoveries affecting later work:** Resident semantic models already carry stable identity; frontend actions must echo that identity instead of deriving a local array position.
+  - **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
