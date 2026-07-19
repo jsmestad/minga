@@ -14,6 +14,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
+  alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
@@ -33,6 +34,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Test.GUIHarness
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
+  alias MingaEditor.RenderModel.UI.ThemeBuilder
 
   @harness_path Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
@@ -81,8 +83,13 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "GUI chrome opcode round-trip" do
     test "gui_theme encodes and decodes correctly", %{harness: harness} do
-      theme = MingaEditor.UI.Theme.get!(:doom_one)
-      cmd = ProtocolGUI.encode_gui_theme(theme)
+      model =
+        :doom_one
+        |> MingaEditor.UI.Theme.get!()
+        |> ThemeBuilder.build()
+
+      {cmd, _caches} = ThemeEncoder.encode(model, Caches.new())
+      assert cmd != nil
 
       decoded = round_trip(harness, cmd, "gui_theme")
 

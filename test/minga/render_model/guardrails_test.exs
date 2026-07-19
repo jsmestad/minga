@@ -88,7 +88,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
       defmodule MingaEditor.RenderModel.UI.GuardrailFixture do
         alias MingaEditor.Frontend.Protocol.{GUI}
 
-        def render(theme), do: GUI.encode_gui_theme(theme)
+        def render(tab_bar), do: GUI.encode_gui_tab_bar(tab_bar)
       end
       """)
 
@@ -101,7 +101,7 @@ defmodule Minga.RenderModel.GuardrailsTest do
       defmodule MingaEditor.RenderModel.UI.GuardrailFixture do
         alias MingaEditor.Frontend.Protocol
 
-        def render(theme), do: Protocol.GUI.encode_gui_theme(theme)
+        def render(tab_bar), do: Protocol.GUI.encode_gui_tab_bar(tab_bar)
       end
       """)
 

@@ -845,8 +845,8 @@ defmodule Minga.Test.ProtocolGolden do
 
   # gui_theme is a header-only command_fields unit (only color_count is modeled
   # in the schema), so there is no top-level golden decoder for the color list;
-  # it is covered by the encoder parity oracle tests instead. No cross-language
-  # fixture is emitted here.
+  # canonical adapter tests cover BEAM theme bytes and frontend decoder tests
+  # cover cross-language decoding. No cross-language fixture is emitted here.
   @spec theme_fixtures() :: [fixture()]
   defp theme_fixtures, do: []
 end

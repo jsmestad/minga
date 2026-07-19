@@ -134,7 +134,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Language
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Theme
-  alias MingaEditor.UI.Theme.Slots
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
@@ -142,7 +141,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Protocol.Opcodes
 
   @op_gui_tab_bar Opcodes.gui_tab_bar()
-  @op_gui_theme Opcodes.gui_theme()
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_file_tree Opcodes.gui_file_tree()
@@ -384,34 +382,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
-
-  # ── Theme ──
-
-  @doc """
-  Encodes a gui_theme command from a `Theme.t()`.
-
-  Takes a `Theme.t()` and produces a binary with `{slot_id:u8, r:u8, g:u8, b:u8}`
-  entries for every color slot the GUI needs. Colors that are nil are skipped.
-  """
-  @spec encode_gui_theme(MingaEditor.UI.Theme.t()) :: binary()
-  def encode_gui_theme(%MingaEditor.UI.Theme{} = theme) do
-    pairs =
-      theme
-      |> Slots.to_color_pairs()
-      |> Enum.reject(fn {_slot, color} -> is_nil(color) end)
-
-    count = Enum.count(pairs)
-
-    entries =
-      Enum.map(pairs, fn {slot, rgb} ->
-        r = bsr(band(rgb, 0xFF0000), 16)
-        g = bsr(band(rgb, 0x00FF00), 8)
-        b = band(rgb, 0x0000FF)
-        <<slot::8, r::8, g::8, b::8>>
-      end)
-
-    IO.iodata_to_binary([@op_gui_theme, <<count::8>> | entries])
-  end
 
   # ── Tab bar ──
 
