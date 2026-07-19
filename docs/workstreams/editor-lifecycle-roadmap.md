@@ -2254,6 +2254,36 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge evidence:** PR #3034 merged as `dc07dacc9300a58c9809f352a76d24fa551404cc` after CI run `29683366591` passed every required check, including Swift (macOS GUI), Swift protocol integration, Elixir, Go, Zig, Dialyzer, lint/format, Neovim conformance, boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-19
 
+### W025: Validate omitted link and advisory color overrides
+
+- **Status:** ACTIVE
+- **Audit ID:** L29
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `b233b970ad340c10612eb150ad0bd7278159d247`
+- **Observable outcome:** Invalid nested `editor.link_fg` and `gutter.advisory_fg` overrides now raise the same exact color-validation errors as existing color fields, while valid non-negative integers land on `theme.editor.link_fg` and `theme.gutter.advisory_fg`.
+- **Locked plan:** Add exactly `:link_fg` to `@color_fields.editor` after `:indent_guide_active_fg` and `:advisory_fg` to `@color_fields.gutter` after `:separator_fg`; extend only the existing nested valid override test and invalid override value shapes test; do not change Builder validation architecture, Theme structs, Loader, renderer, consumers, public APIs, dependencies, configuration, or data shapes.
+- **Failure reproduction:** Before production changes, `mix run -e 'palette=%{variant: :dark, bg: 0x1E1E2E, fg: 0xCDD6F4, surface: 0x313244, overlay: 0x181825, muted: 0x6C7086, subtle: 0x45475A, highlight: 0x89B4FA, selection_bg: 0x585B70, error: 0xF38BA8, warning: 0xF9E2AF, info: 0x89B4FA, success: 0xA6E3A1, match: 0xF9E2AF, link: 0x89B4FA, border: 0x7F849C, contrast_fg: 0x1E1E2E, builtin: 0x94E2D5, functions: 0x89B4FA, keywords: 0xCBA6F7, methods: 0x89B4FA, operators: 0x89DCEB, constants: 0xFAB387, strings: 0xA6E3A1, numbers: 0xFAB387, type: 0xF9E2AF, variables: 0xCDD6F4, comments: 0x6C7086}; alias MingaEditor.UI.Theme.Builder; editor=Builder.from_palette(:palette_test, palette, %{editor: %{link_fg: :oops}}); gutter=Builder.from_palette(:palette_test, palette, %{gutter: %{advisory_fg: :oops}}); IO.inspect({editor.editor.link_fg, gutter.gutter.advisory_fg}, label: "escaped override values")'` printed `escaped override values: {:oops, :oops}` and exited `0`, proving invalid values escaped construction.
+- **Implementation result:** `Theme.Builder` now treats the two existing struct fields as color override fields in the existing `@color_fields` metadata. The existing nested override test now asserts `editor.link_fg == 0x112233` and `gutter.advisory_fg == 0x445566`; the existing invalid-shapes test now asserts the exact `theme override editor.link_fg must be a color` and `theme override gutter.advisory_fg must be a color` errors.
+- **Focused tests:** `mix test.debug test/minga_editor/ui/theme/builder_test.exs` passed with seed `996522`: `Result: 5 passed`.
+- **Broad validation:** The scoped theme/consumer command passed 130 tests with 0 failures. `mix test.llm --seed 184212` exposed two `MingaAgent.SessionManagerTest` five-second timeouts at the default 64-way concurrency; the identical command reproduced both failures on unchanged current main, while the isolated 29-test session-manager module passed, confirming unrelated cross-suite load sensitivity. `mix test --max-cases 4` then passed 10,448 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded. `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors.
+- **Formatting:** `mix format lib/minga_editor/ui/theme/builder.ex test/minga_editor/ui/theme/builder_test.exs` exited `0`.
+- **Line budget:** `git diff --numstat -- lib/minga_editor/ui/theme/builder.ex test/minga_editor/ui/theme/builder_test.exs` reported `4 2 lib/minga_editor/ui/theme/builder.ex` and `12 0 test/minga_editor/ui/theme/builder_test.exs`. Production net `+2 <= +2`; tests net `+12 <= +16`.
+- **Production lines added/removed:** `4 added / 2 removed`
+- **Test lines added/removed:** `12 added / 0 removed`
+- **Concepts added/removed:** Added no new concept beyond two entries in the existing color-validation metadata; removed none.
+- **Findings resolved:** L29 only.
+- **Discoveries affecting later work:** None.
+- **Ponytail verdict:** `Lean already. Ship.`
+- **Bug-hunt verdict:** Correctness `PASS`; both metadata paths, valid and invalid contracts, optional nil default, consumer preservation, scope, budgets, and evidence accepted with no findings.
+- **Elixir craftsmanship verdict:** `PASS`; the two ordered metadata entries and direct unit assertions are the smallest idiomatic extension of the existing validation flow.
+- **Final reviewer verdict:** `PASS`; exact metadata scope, construction-time ownership, valid and invalid regressions, budgets, transparent validation evidence, and merge safety accepted with no findings.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3036
+- **Implementation commit SHA:** `0347ab168`
+- **Merge SHA:** Pending.
+- **Completion date:** Pending merge.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

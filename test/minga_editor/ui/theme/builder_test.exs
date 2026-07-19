@@ -33,6 +33,8 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
           popup: %{title_fg: 0x123456},
           git: %{modified_fg: 0x654321},
           modeline: %{mode_colors: %{normal: {0x000000, 0xFFFFFF}}},
+          editor: %{link_fg: 0x112233},
+          gutter: %{advisory_fg: 0x445566},
           syntax: %{"keyword" => [fg: 0xABCDEF]}
         })
 
@@ -40,6 +42,8 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert theme.git.modified_fg == 0x654321
       assert theme.modeline.mode_colors.normal == {0x000000, 0xFFFFFF}
       assert theme.modeline.mode_colors.insert == {0x1E1E2E, 0xA6E3A1}
+      assert theme.editor.link_fg == 0x112233
+      assert theme.gutter.advisory_fg == 0x445566
       assert theme.syntax["keyword"] == [fg: 0xABCDEF]
       assert theme.syntax["string"] == [fg: 0xA6E3A1]
     end
@@ -57,6 +61,14 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
     test "rejects invalid override value shapes" do
       assert_raise ArgumentError, ~r/theme override popup\.title_fg must be a color/, fn ->
         Builder.from_palette(:palette_test, sample_palette(), %{popup: %{title_fg: :oops}})
+      end
+
+      assert_raise ArgumentError, ~r/theme override editor\.link_fg must be a color/, fn ->
+        Builder.from_palette(:palette_test, sample_palette(), %{editor: %{link_fg: :oops}})
+      end
+
+      assert_raise ArgumentError, ~r/theme override gutter\.advisory_fg must be a color/, fn ->
+        Builder.from_palette(:palette_test, sample_palette(), %{gutter: %{advisory_fg: :oops}})
       end
 
       assert_raise ArgumentError,
