@@ -2568,7 +2568,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W035: Delete D06 theme Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.8
 - **Implementation profile:** `D06Worker8`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner8` for current SHA `ab73eefb89dcedb003140b8aa751daa0f0c367c0`; W035 removes only the theme outbound Protocol.GUI parity oracle because the live `gui_theme` producer is already the canonical `MingaEditor.RenderModel.UI.ThemeBuilder` to `Minga.Frontend.Adapter.GUI.ThemeEncoder` path.
@@ -2595,8 +2595,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact theme-oracle deletion, retained canonical ThemeBuilder/ThemeEncoder/adapter and unchanged schema/Swift/Go consumers, direct 0x74 bytes, all-built-in required agent slots, every Doom One field mapping, observable cache behavior, canonical integration producer, guardrail fixtures, truthful validation, budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3056
 - **Implementation commit SHA:** `5ce266774`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `eee7e45c0e1e2bd858cdbcd6824441da7cfa262b`; **Merge evidence:** PR #3056 merged after CI run `29705261476` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-19.
 
 ## Follow-on simplifications
 
