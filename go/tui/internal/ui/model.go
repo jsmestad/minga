@@ -1157,19 +1157,21 @@ func (m *Model) toggleHUD(msg tea.KeyPressMsg) bool {
 	return false
 }
 
-func latestToolMessageIndex(messages []protocol.AgentChatMessage) (uint16, bool) {
+func latestToolMessageID(messages []protocol.AgentChatMessage) (uint32, bool) {
 	for index := len(messages) - 1; index >= 0; index-- {
-		if (messages[index].Kind == agentKindTool || messages[index].Kind == agentKindStyledTool) && index <= 0xFFFF {
-			return uint16(index), true
+		msg := messages[index]
+		if (msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.ID > 0 {
+			return msg.ID, true
 		}
 	}
 	return 0, false
 }
 
-func latestThinkingMessageIndex(messages []protocol.AgentChatMessage) (uint16, bool) {
+func latestThinkingMessageID(messages []protocol.AgentChatMessage) (uint32, bool) {
 	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Kind == agentKindThinking && index <= 0xFFFF {
-			return uint16(index), true
+		msg := messages[index]
+		if msg.Kind == agentKindThinking && msg.ID > 0 {
+			return msg.ID, true
 		}
 	}
 	return 0, false

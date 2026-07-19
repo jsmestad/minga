@@ -1980,6 +1980,41 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** Buffer retirement invariants span root owners; each owner must expose its own transition and root removal must install every returned owner value atomically.
 - **Completion date:** 2026-07-19
 
+### W017: Target agent tool collapse by stable message ID
+
+- **Status:** ACTIVE
+- **Audit ID:** L19
+- **Decision:** ACCEPT/direct
+- **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
+- **Implementation profile:** `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`
+- **Freshness commit SHA:** `129f1dd9f981ef4cdbc73c4d4bc35deefd833f5e`
+- **Observable outcome:** macOS and Go actions for resident tool or thinking entries send the existing stable uint32 transcript message ID, and Session toggles only the full-transcript entry with that ID after any resident front trim.
+- **Failure path:** Both frontends sent a resident suffix index in GUI action 0x15; BEAM decoded `index(2)` and applied it through `Transcript.update_at/3` to the full transcript, so resident index zero could mutate an unrelated older message.
+- **Wire contract:** Clean cutover of GUI action 0x15 from `index(2)` to big-endian `message_id(4)` and protocol version 12 to 13. No old two-byte fallback. Zero, unknown, and non-collapsible IDs are Session no-ops without notification or save scheduling.
+- **Authoritative owner:** `MingaAgent.Session.Transcript` owns stable-ID collapse mutation; Session owns effects; `MingaEditor.Frontend.Protocol.GUI` owns BEAM decoding; Swift and Go echo IDs already present in their resident models.
+- **Locked implementation:** Add owner-local `Transcript.toggle_message_collapse/2`; update Session without changing `toggle_tool_collapse/2` arity; decode uint32 IDs; update macOS card/input encoding and Go shortcut/protocol encoding; bump and regenerate protocol version outputs; update GUI protocol documentation.
+- **Accepted mutations:** Matching tool calls use `ToolCall.toggle_collapsed/1`; matching thinking entries invert their collapsed flag. Every other message kind and missing ID returns the original transcript.
+- **Tests:** Lock BEAM 4-byte decode and malformed old payloads, owner no-op/revision behavior, Session later-ID targeting, Swift six-byte encoding, and Go stable-ID shortcut encoding including zero-ID refusal.
+- **Focused validation:** `mix protocol.gen --check`; focused BEAM protocol/transcript/session tests; focused Go protocol/UI tests; focused Swift GUI action encoder tests.
+- **Broad validation:** `make lint`; `mix test.llm --max-cases 4`; `cd go/tui && go test ./...`; `cd macos && xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO`.
+- **Non-goals:** No resident-store redesign, new action, compatibility shim, old-index fallback, negotiation branch, config, process, module, dependency, parallel data shape, new UI state, liveness behavior, or changes to toggle-all, approvals, scrolling, epochs, or other actions.
+- **Maximum production additions:** 45 net lines across Elixir, Swift, and Go; documentation and generated outputs excluded.
+- **Maximum test additions:** 120 lines across BEAM, Swift, and Go.
+- **Dependencies:** W016 is VERIFIED and merged; no unresolved dependency or implementer question remains.
+- **Completion evidence:**
+  - **Implementation result:** Protocol schema/docs cut over GUI action 0x15 to big-endian `message_id(4)` and protocol version 13; BEAM decodes only 4-byte payloads; `MingaAgent.Session.Transcript.toggle_message_collapse/2` owns stable-ID tool/thinking mutation; Session only publishes/saves on changed transcript; macOS and Go producers echo resident stable IDs and suppress zero IDs.
+  - **Failure reproduced:** `mix run -e ...` before the fix returned `old_uint16: {:ok, {:agent_tool_toggle, 7}}` and `uint32_id: :error`.
+  - **Focused validation:** `mix protocol.gen --check` passed; the locked BEAM protocol, Transcript, and Session set passed 171 tests, then 28 focused tests and the 11-test Transcript suite passed after review fixes; the locked Go protocol/UI selection passed both packages. Swift encoder tests are committed but cannot run on Linux because `xcodebuild` is unavailable.
+  - **Broad validation:** `make lint` passed after the final production edit; `mix test.llm --max-cases 4` passed 58 doctests, 98 properties, and 9,916 tests with 0 failures, 1 skipped, and 578 excluded; `cd go/tui && go test ./...` passed 7 packages with 1 package containing no tests.
+  - **Line deltas:** Production Elixir/Swift/Go net +23 lines, under the +45 cap. Tests net +118 lines, under the +120 cap. Docs/schema net +2 lines. Generated Go protocol version net 0.
+  - **Concepts added:** One Transcript-owned stable message-ID collapse transition and the uint32 GUI action payload for `agent_tool_toggle`.
+  - **Concepts removed:** Resident-index collapse targeting, two-byte 0x15 payload acceptance, Go resident index selectors, and one draft single-use Transcript transform helper.
+  - **Pre-acceptance reviews:** Correctness `PASS`; Elixir craftsmanship `PASS` after eliminating no-op list allocation and aligning the owner typespec; Ponytail `Lean already. Ship.`
+  - **Final reviewer:** `PASS`; the stable-ID cutover, owner transition, effects, callsites, tests, budgets, and merge safety are accepted.
+  - **PR URL:** https://github.com/jsmestad/minga/pull/3020
+  - **Implementation commit SHA:** `da792f30d`
+  - **Merge evidence:** Pending.
+
 ## Follow-on simplifications
 
 ### Remove Dired completely

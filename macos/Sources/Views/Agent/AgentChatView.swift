@@ -157,12 +157,12 @@ public struct AgentChatView: View {
             assistantMarkdownBlock(blocks)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines):
-            AgentToolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
+        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines):
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
-        case .styledToolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines):
-            AgentToolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
+        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines):
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
         case .approvalToolCall(_, let name, let summary, let toolCallId, let previewKind, let previewLines):

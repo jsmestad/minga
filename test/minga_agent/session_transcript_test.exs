@@ -18,24 +18,78 @@ defmodule MingaAgent.SessionTranscriptTest do
       )
 
       # GenServer.call after send ensures all handle_info have run
-      messages = Session.messages(session)
+      pairs = Session.messages_with_ids(session)
 
-      tool_index =
-        Enum.find_index(messages, fn
-          {:tool_call, _} -> true
+      {tool_id, {:tool_call, tc}} =
+        Enum.find(pairs, fn
+          {_id, {:tool_call, _}} -> true
           _ -> false
         end)
 
-      assert tool_index != nil
-
-      {:tool_call, tc} = Enum.at(messages, tool_index)
       assert tc.collapsed == true
 
-      :ok = Session.toggle_tool_collapse(session, tool_index)
+      :ok = Session.toggle_tool_collapse(session, tool_id)
 
       messages = Session.messages(session)
-      {:tool_call, tc} = Enum.at(messages, tool_index)
+      {:tool_call, tc} = Enum.find(messages, &match?({:tool_call, _}, &1))
       assert tc.collapsed == false
+
+      flush_messages_changed(session)
+      :ok = Session.toggle_tool_collapse(session, 0)
+      refute_receive {:agent_event, ^session, :messages_changed}, 20
+    end
+
+    test "stable ID targets later tool without toggling earlier full-transcript entry" do
+      session = start_subscribed_session()
+      assert :ok = Session.continue(session)
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "first"}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "grep", args: %{}}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc2", name: "grep", result: "second"}}
+      )
+
+      pairs_before = Session.messages_with_ids(session)
+      ids_before = Enum.map(pairs_before, &elem(&1, 0))
+
+      tools_before =
+        Enum.filter(pairs_before, fn {_id, message} -> match?({:tool_call, _}, message) end)
+
+      [{_first_id, {:tool_call, first_before}}, {later_id, {:tool_call, later_before}}] =
+        tools_before
+
+      assert first_before.collapsed == true
+      assert later_before.collapsed == true
+
+      :ok = Session.toggle_tool_collapse(session, later_id)
+
+      pairs_after = Session.messages_with_ids(session)
+
+      tools_after =
+        Enum.filter(pairs_after, fn {_id, message} -> match?({:tool_call, _}, message) end)
+
+      [{_first_id, {:tool_call, first_after}}, {^later_id, {:tool_call, later_after}}] =
+        tools_after
+
+      assert first_after.collapsed == true
+      assert later_after.collapsed == false
+      assert Enum.map(pairs_after, &elem(&1, 0)) == ids_before
     end
   end
 
@@ -386,10 +440,10 @@ defmodule MingaAgent.SessionTranscriptTest do
       pairs_before = Session.messages_with_ids(session)
       ids_before = Enum.map(pairs_before, &elem(&1, 0))
 
-      tool_index =
-        Enum.find_index(pairs_before, fn {_id, msg} -> match?({:tool_call, _}, msg) end)
+      {tool_id, _message} =
+        Enum.find(pairs_before, fn {_id, msg} -> match?({:tool_call, _}, msg) end)
 
-      :ok = Session.toggle_tool_collapse(session, tool_index)
+      :ok = Session.toggle_tool_collapse(session, tool_id)
       assert Enum.map(Session.messages_with_ids(session), &elem(&1, 0)) == ids_before
 
       :ok = Session.toggle_all_tool_collapses(session)
@@ -428,6 +482,14 @@ defmodule MingaAgent.SessionTranscriptTest do
       assert length(ids_after) == length(pairs_before) + 1
       assert Enum.at(ids_after, -1) > max_id_before
       assert length(pairs_after) == length(Session.messages(session))
+    end
+  end
+
+  defp flush_messages_changed(session) do
+    receive do
+      {:agent_event, ^session, :messages_changed} -> flush_messages_changed(session)
+    after
+      0 -> :ok
     end
   end
 end

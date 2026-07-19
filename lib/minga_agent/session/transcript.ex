@@ -205,6 +205,34 @@ defmodule MingaAgent.Session.Transcript do
     replace_entries_if_changed(transcript, entries)
   end
 
+  @doc "Toggles collapse for one collapsible active entry by stable transcript ID."
+  @spec toggle_message_collapse(t(), non_neg_integer()) :: t()
+  def toggle_message_collapse(%__MODULE__{} = transcript, message_id)
+      when is_integer(message_id) and message_id > 0 do
+    index =
+      Enum.find_index(transcript.entries, fn
+        %TranscriptEntry{id: ^message_id, message: {:tool_call, %ToolCall{}}} -> true
+        %TranscriptEntry{id: ^message_id, message: {:thinking, _, _}} -> true
+        _ -> false
+      end)
+
+    case index do
+      nil ->
+        transcript
+
+      index ->
+        update_at(transcript, index, fn
+          {:tool_call, %ToolCall{} = tool_call} ->
+            {:tool_call, ToolCall.toggle_collapsed(tool_call)}
+
+          {:thinking, text, collapsed} ->
+            {:thinking, text, !collapsed}
+        end)
+    end
+  end
+
+  def toggle_message_collapse(%__MODULE__{} = transcript, _message_id), do: transcript
+
   @doc "Updates the matching tool-call entry while preserving its stable identity."
   @spec update_tool_call(t(), String.t(), (ToolCall.t() -> ToolCall.t())) :: t()
   def update_tool_call(%__MODULE__{} = transcript, tool_call_id, update)

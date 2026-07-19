@@ -52,6 +52,32 @@ defmodule MingaAgent.Session.TranscriptTest do
              Transcript.messages(changed)
   end
 
+  test "toggle_message_collapse targets collapsible stable IDs only" do
+    tool = %ToolCall{id: "tool-1", name: "shell", status: :complete, collapsed: true}
+
+    transcript =
+      Transcript.new(
+        [{:user, "u"}, {:tool_call, tool}, {:thinking, "t", false}, {:assistant, "a"}],
+        @now
+      )
+
+    tool_toggled = Transcript.toggle_message_collapse(transcript, 2)
+    assert entry_ids(tool_toggled) == [1, 2, 3, 4]
+    assert Transcript.revision(tool_toggled) == Transcript.revision(transcript) + 1
+
+    assert {:tool_call, %{collapsed: false}} = Enum.at(Transcript.messages(tool_toggled), 1)
+
+    thinking_toggled = Transcript.toggle_message_collapse(tool_toggled, 3)
+
+    assert {:thinking, "t", true} = Enum.at(Transcript.messages(thinking_toggled), 2)
+
+    for id <- [999, 0, 1] do
+      unchanged = Transcript.toggle_message_collapse(transcript, id)
+      assert unchanged == transcript
+      assert Transcript.revision(unchanged) == Transcript.revision(transcript)
+    end
+  end
+
   test "branching freezes identified entries and switching restores them without ID reuse" do
     transcript =
       Transcript.new(

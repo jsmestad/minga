@@ -687,12 +687,12 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: agent_tool_toggle. Layout: opcode(1) + action_type(1) + index(2).
-    func sendAgentToolToggle(index: UInt16) {
-        var buf = Data(count: 4)
+    /// Send a gui_action: agent_tool_toggle. Layout: opcode(1) + action_type(1) + message_id(4).
+    func sendAgentToolToggle(messageID: UInt32) {
+        var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_TOOL_TOGGLE
-        writeU16(&buf, 2, index)
+        writeU32(&buf, 2, messageID)
         writeFrame(buf)
     }
 

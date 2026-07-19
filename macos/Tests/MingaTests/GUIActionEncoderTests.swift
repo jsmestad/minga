@@ -214,6 +214,15 @@ struct GUIActionEncoderTests {
         ])
     }
 
+    @Test("sendAgentToolToggle records stable message ID")
+    func agentToolToggle() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendAgentToolToggle(messageID: 0x01020304)
+
+        #expect(spy.guiActions == [.agentToolToggle(messageID: 0x01020304)])
+    }
+
     @Test("sendOpenFile records path")
     func openFile() {
         let spy = SpyEncoder()
