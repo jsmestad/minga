@@ -25,6 +25,12 @@ defmodule MingaEditor.Title do
   @typedoc "Editor state (same as MingaEditor.State.t())."
   @type state :: EditorState.t() | map()
 
+  @typep buffer_title_metadata :: %{
+           path: String.t() | nil,
+           name: String.t() | nil,
+           dirty: boolean()
+         }
+
   @doc """
   Formats the terminal title from the current editor state and format string.
   """
@@ -72,9 +78,9 @@ defmodule MingaEditor.Title do
         %{
           type: :agent,
           display_name: "Agent",
+          filepath: "",
           directory: project_directory(),
-          dirty: false,
-          filetype: :markdown
+          dirty: false
         }
 
       _window ->
@@ -84,41 +90,47 @@ defmodule MingaEditor.Title do
 
   defp build_content_context(%{workspace: %{buffers: %{active: buf}}} = _state)
        when is_pid(buf) do
-    path = Minga.Buffer.file_path(buf)
-    name = Minga.Buffer.buffer_name(buf)
-    dirty = Minga.Buffer.dirty?(buf)
-    display_name = if path, do: Path.basename(path), else: name || "[no file]"
-    directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
-
-    %{
-      type: :buffer,
-      display_name: display_name,
-      directory: directory,
-      dirty: dirty,
-      filetype: Minga.Buffer.filetype(buf) || :text
-    }
+    buffer_content_context(buf)
   end
 
   defp build_content_context(_state) do
-    %{type: :buffer, display_name: "[no file]", directory: "", dirty: false, filetype: :text}
+    buffer_context_fallback()
+  end
+
+  @spec buffer_context_fallback() :: map()
+  defp buffer_context_fallback do
+    %{type: :buffer, display_name: "[no file]", filepath: "", directory: "", dirty: false}
+  end
+
+  @spec read_buffer_title_metadata(pid()) :: {:ok, buffer_title_metadata()} | :dead_buffer
+  defp read_buffer_title_metadata(buf) do
+    {:ok,
+     %{path: Buffer.file_path(buf), name: Buffer.buffer_name(buf), dirty: Buffer.dirty?(buf)}}
+  catch
+    :exit, {:noproc, {GenServer, :call, [^buf, _request, _timeout]}} -> :dead_buffer
   end
 
   @spec buffer_content_context(pid() | nil) :: map()
   defp buffer_content_context(buffer) when is_pid(buffer) do
-    path = Buffer.file_path(buffer)
-    name = Buffer.buffer_name(buffer)
+    case read_buffer_title_metadata(buffer) do
+      {:ok, metadata} ->
+        path = metadata.path
 
-    %{
-      type: :buffer,
-      display_name: if(path, do: Path.basename(path), else: name || "[no file]"),
-      directory: if(path, do: path |> Path.dirname() |> Path.basename(), else: ""),
-      dirty: Buffer.dirty?(buffer),
-      filetype: Buffer.filetype(buffer) || :text
-    }
+        %{
+          type: :buffer,
+          display_name: if(path, do: Path.basename(path), else: metadata.name || "[no file]"),
+          filepath: path || "",
+          directory: if(path, do: path |> Path.dirname() |> Path.basename(), else: ""),
+          dirty: metadata.dirty
+        }
+
+      :dead_buffer ->
+        buffer_context_fallback()
+    end
   end
 
   defp buffer_content_context(_buffer) do
-    %{type: :buffer, display_name: "[no file]", directory: "", dirty: false, filetype: :text}
+    buffer_context_fallback()
   end
 
   @spec project_directory() :: String.t()
@@ -140,7 +152,7 @@ defmodule MingaEditor.Title do
       :agent ->
         [
           {"filename", ctx.display_name},
-          {"filepath", ""},
+          {"filepath", ctx.filepath},
           {"directory", ctx.directory},
           {"dirty", ""},
           {"readonly", ""},
@@ -149,7 +161,7 @@ defmodule MingaEditor.Title do
         ]
 
       :buffer ->
-        filepath = buffer_filepath(state)
+        filepath = ctx.filepath
 
         [
           {"filename", ctx.display_name},
@@ -180,24 +192,27 @@ defmodule MingaEditor.Title do
 
   @spec build_vars_from_buffer(pid(), atom()) :: [{String.t(), String.t()}]
   defp build_vars_from_buffer(buf, mode) do
-    path = Buffer.file_path(buf)
-    dirty = Buffer.dirty?(buf)
-    name = Buffer.buffer_name(buf)
+    case read_buffer_title_metadata(buf) do
+      {:ok, metadata} ->
+        path = metadata.path
+        filename = if path, do: Path.basename(path), else: metadata.name || "[no file]"
+        directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
+        filepath = path || ""
+        bufname = metadata.name || filename
 
-    filename = if path, do: Path.basename(path), else: name || "[no file]"
-    directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
-    filepath = path || ""
-    bufname = name || filename
+        [
+          {"filename", filename},
+          {"filepath", filepath},
+          {"directory", directory},
+          {"dirty", if(metadata.dirty, do: "[+] ", else: "")},
+          {"readonly", ""},
+          {"mode", mode |> to_string() |> String.upcase()},
+          {"bufname", bufname}
+        ]
 
-    [
-      {"filename", filename},
-      {"filepath", filepath},
-      {"directory", directory},
-      {"dirty", if(dirty, do: "[+] ", else: "")},
-      {"readonly", ""},
-      {"mode", mode |> to_string() |> String.upcase()},
-      {"bufname", bufname}
-    ]
+      :dead_buffer ->
+        default_vars(mode)
+    end
   end
 
   @spec default_vars(atom()) :: [{String.t(), String.t()}]
@@ -212,11 +227,4 @@ defmodule MingaEditor.Title do
       {"bufname", "[no file]"}
     ]
   end
-
-  @spec buffer_filepath(EditorState.t()) :: String.t()
-  defp buffer_filepath(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    Buffer.file_path(buf) || ""
-  end
-
-  defp buffer_filepath(_), do: ""
 end

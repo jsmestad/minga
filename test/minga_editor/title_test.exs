@@ -36,6 +36,45 @@ defmodule MingaEditor.TitleTest do
     }
   end
 
+  defp editor_state_with_buffer_window(buf) do
+    window = Window.new(1, buf, 24, 80)
+
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      workspace: %MingaEditor.Session.State{
+        viewport: Viewport.new(24, 80),
+        editing: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        }
+      },
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: MingaEditor.Input.default_stack()
+      }
+    }
+  end
+
+  defp stop_buffer!(pid) do
+    ref = Process.monitor(pid)
+    GenServer.stop(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    pid
+  end
+
+  defp dead_buffer! do
+    {:ok, buf} =
+      BufferProcess.start_link(
+        content: "hello",
+        file_path: "/home/user/project/lib/editor.ex"
+      )
+
+    stop_buffer!(buf)
+  end
+
   describe "format/2" do
     test "default format produces expected title" do
       state = state_with()
@@ -95,6 +134,21 @@ defmodule MingaEditor.TitleTest do
       state = %{buffers: %{active: nil}, editing: %{mode: :normal}}
       result = Title.format(state, "{filename} - Minga")
       assert result == "[no file] - Minga"
+    end
+
+    test "dead active buffer falls back to no-file variables and keeps mode" do
+      buf = dead_buffer!()
+
+      state = %{
+        workspace: %{
+          buffers: %{active: buf},
+          editing: %{mode: :insert}
+        }
+      }
+
+      result = Title.format(state, "{filename}|{filepath}|{directory}|{dirty}|{mode}|{bufname}")
+
+      assert result == "[no file]||||INSERT|[no file]"
     end
   end
 
@@ -157,9 +211,25 @@ defmodule MingaEditor.TitleTest do
 
       assert result == "editor.ex (lib) - Minga"
     end
+
+    test "dead active buffer falls back to no-file variables and keeps mode" do
+      state = dead_buffer!() |> editor_state_with_buffer_window()
+
+      result = Title.format(state, "{filename}|{filepath}|{directory}|{dirty}|{mode}|{bufname}")
+
+      assert result == "[no file]||||NORMAL|[no file]"
+    end
   end
 
   describe "format_gui/1" do
+    test "dead active buffer uses the GUI no-file fallback for plain maps" do
+      state = %{workspace: %{buffers: %{active: dead_buffer!()}}}
+
+      result = Title.format_gui(state)
+
+      assert result == "[no file] — Minga"
+    end
+
     test "buffer window shows clean GUI title" do
       {:ok, buf} =
         BufferProcess.start_link(
@@ -278,6 +348,14 @@ defmodule MingaEditor.TitleTest do
 
       result = Title.format_gui(state)
       assert String.starts_with?(result, "Agent")
+    end
+
+    test "dead active buffer uses the GUI no-file fallback for EditorState" do
+      state = dead_buffer!() |> editor_state_with_buffer_window()
+
+      result = Title.format_gui(state)
+
+      assert result == "[no file] — Minga"
     end
   end
 end
