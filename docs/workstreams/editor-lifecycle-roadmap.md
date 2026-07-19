@@ -2123,7 +2123,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W021: Roll back partial native IPC initialization
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** L25
 - **Decision:** ACCEPT/direct
 - **Planning profile:** `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only
@@ -2149,8 +2149,10 @@ New split and float popup windows initialize their viewport metadata from `state
   - **Broad validation:** `mix test --max-cases 4` passed 10,444 tests, including 58 doctests and 99 properties, with 0 failures, 1 skipped, and 210 excluded after building the worktree's missing native parser and hook runner; `make lint` passed Credo, compile, and incremental Dialyzer after the final control-flow correction; `git diff --check` passed.
   - **Final reviewer:** `PASS`; staged rollback, trust checks, original errors, steady-state ownership, public APIs, real IPC regression, line budgets, validation evidence, and merge safety accepted with no findings.
   - **PR URL:** https://github.com/jsmestad/minga/pull/3028
-  - **Merge evidence:** Pending.
-  - **Completion date:** Pending merge.
+  - **Implementation commit SHA:** `6e29b355f`
+  - **Merge commit SHA:** `f7b75be60c4321e1064bb358de1ae5c3e0af8e90`
+  - **Merged CI:** Run `29678609780` passed every required check, including Elixir, Dialyzer, lint/format, Zig, Go, Swift, protocol integration, Neovim conformance, boot smoke, and keystroke latency.
+  - **Completion date:** 2026-07-19
 
 ## Follow-on simplifications
 
