@@ -181,6 +181,46 @@ defmodule MingaEditor.Mouse do
           pos_integer()
         ) :: state()
 
+  # ── Left release ──
+
+  def handle(
+        %{workspace: %{mouse: %MouseState{dragging: true}, editing: %{mode: :visual}}} = state,
+        _r,
+        _c,
+        :left,
+        _m,
+        :release,
+        _cc
+      ) do
+    state
+    |> update_mouse(&MouseState.stop_drag/1)
+    |> auto_copy_selection()
+  end
+
+  def handle(
+        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
+        _r,
+        _c,
+        :left,
+        _m,
+        :release,
+        _cc
+      ) do
+    update_mouse(state, &MouseState.stop_drag/1)
+  end
+
+  def handle(
+        %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
+        _r,
+        _c,
+        :left,
+        _m,
+        :release,
+        _cc
+      ) do
+    update_mouse(state, &MouseState.stop_resize/1)
+  end
+
   # Ignore mouse events when no buffer is open.
   def handle(
         %{workspace: %{buffers: %{active: nil}}} = state,
@@ -204,47 +244,6 @@ defmodule MingaEditor.Mouse do
         _cc
       ) do
     handle_left_drag(state, row, col, anchor, dcc)
-  end
-
-  def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}, editing: %{mode: :visual}}} = state,
-        _r,
-        _c,
-        :left,
-        _m,
-        :release,
-        _cc
-      ) do
-    state = %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_mouse(
-            state.workspace,
-            (&MouseState.stop_drag/1).(state.workspace.mouse)
-          )
-    }
-
-    # TUI keeps legacy selection auto-copy. Native GUI selection stays separate from the clipboard.
-    auto_copy_selection(state)
-  end
-
-  def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
-        _r,
-        _c,
-        :left,
-        _m,
-        :release,
-        _cc
-      ) do
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_mouse(
-            state.workspace,
-            (&MouseState.stop_drag/1).(state.workspace.mouse)
-          )
-    }
   end
 
   # Ignore negative coordinates except active drags, which clamp to the originating window edge.
@@ -355,27 +354,6 @@ defmodule MingaEditor.Mouse do
         _cc
       ) do
     handle_separator_drag(state, :horizontal, sep_pos, row)
-  end
-
-  # ── Left release ──
-
-  def handle(
-        %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
-        _r,
-        _c,
-        :left,
-        _m,
-        :release,
-        _cc
-      ) do
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_mouse(
-            state.workspace,
-            (&MouseState.stop_resize/1).(state.workspace.mouse)
-          )
-    }
   end
 
   # ── Mouse motion (hover tracking + Cmd/Ctrl link preview) ──

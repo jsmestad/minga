@@ -16,6 +16,8 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.Input
   alias MingaEditor.Input.Router
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.State.Mouse, as: MouseState
+  alias MingaEditor.State.Windows
 
   @async_render_timeout 5_000
 
@@ -148,6 +150,19 @@ defmodule MingaEditor.Input.RouterTest do
     after
       0 -> count
     end
+  end
+
+  defp install_resize_drag(state) do
+    windows = Windows.set_tree(state.workspace.windows, {:leaf, state.workspace.windows.active})
+
+    workspace =
+      state.workspace
+      |> MingaEditor.Session.State.set_mouse(
+        MouseState.start_resize(state.workspace.mouse, :vertical, 10)
+      )
+      |> MingaEditor.Session.State.set_windows(windows)
+
+    %{state | workspace: workspace}
   end
 
   describe "dispatch/3" do
@@ -453,6 +468,24 @@ defmodule MingaEditor.Input.RouterTest do
       state = state_with_focus_tree(separator_gap_tree())
 
       assert ^state = Router.dispatch_mouse(state, 3, 10, :left, 0, :press, 1)
+      refute_receive {:mouse_probe, _type, _ref}, 20
+    end
+
+    test "active resize release outside the focus tree bypasses hit routing and clears resize state" do
+      state = probe_tree(:deep) |> state_with_focus_tree() |> install_resize_drag()
+
+      new_state = Router.dispatch_mouse(state, 25, 5, :left, 0, :release, 1)
+
+      assert new_state.workspace.mouse.resize_dragging == nil
+      refute_receive {:mouse_probe, _type, _ref}, 20
+    end
+
+    test "active resize drag bypasses focus-tree node handlers" do
+      state = probe_tree(:deep) |> state_with_focus_tree() |> install_resize_drag()
+
+      new_state = Router.dispatch_mouse(state, 5, 5, :left, 0, :drag, 1)
+
+      assert new_state.workspace.mouse.resize_dragging == {:vertical, 10}
       refute_receive {:mouse_probe, _type, _ref}, 20
     end
 

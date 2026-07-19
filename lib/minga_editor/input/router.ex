@@ -26,6 +26,7 @@ defmodule MingaEditor.Input.Router do
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Mouse, as: MouseState
 
   @typedoc "Pre-action snapshot for housekeeping comparisons."
   @type snapshot :: %{
@@ -336,7 +337,7 @@ defmodule MingaEditor.Input.Router do
           pos_integer()
         ) :: EditorState.t()
   def dispatch_mouse(
-        %{workspace: %{mouse: %{dragging: true}}} = state,
+        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
         row,
         col,
         :left,
@@ -345,8 +346,20 @@ defmodule MingaEditor.Input.Router do
         click_count
       )
       when event_type in [:drag, :release] do
-    state = MingaEditor.Shell.Workflow.ensure_available(state)
-    MingaEditor.Mouse.handle(state, row, col, :left, mods, event_type, click_count)
+    direct_mouse(state, row, col, :left, mods, event_type, click_count)
+  end
+
+  def dispatch_mouse(
+        %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
+        row,
+        col,
+        :left,
+        mods,
+        event_type,
+        click_count
+      )
+      when event_type in [:drag, :release] do
+    direct_mouse(state, row, col, :left, mods, event_type, click_count)
   end
 
   def dispatch_mouse(state, row, col, _button, _mods, _event_type, _click_count)
@@ -370,6 +383,11 @@ defmodule MingaEditor.Input.Router do
     |> FocusTree.get()
     |> mouse_path(row, col, button)
     |> dispatch_mouse_path(state, event)
+  end
+
+  defp direct_mouse(state, row, col, button, mods, event_type, click_count) do
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+    MingaEditor.Mouse.handle(state, row, col, button, mods, event_type, click_count)
   end
 
   @spec mouse_path(FocusTree.t(), integer(), integer(), atom()) :: FocusTree.path()
