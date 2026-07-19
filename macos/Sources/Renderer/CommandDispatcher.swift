@@ -151,8 +151,11 @@ final class CommandDispatcher {
     /// The newest complete committed editor snapshot available for Metal submission.
     private(set) var committedEditorSnapshot: CommittedEditorSnapshot?
 
-    /// The exact committed editor snapshot associated with the last successful Metal presentation.
-    private(set) var visibleEditorSnapshot: CommittedEditorSnapshot?
+    /// The exact editor presentation associated with the last successful Metal presentation.
+    private(set) var visibleEditorPresentation: VisibleEditorPresentation?
+
+    /// Backward-compatible view of the visible semantic snapshot.
+    var visibleEditorSnapshot: CommittedEditorSnapshot? { visibleEditorPresentation?.snapshot }
 
     /// The committed editor frame identity awaiting Metal presentation, owned by the editor lifecycle rather than telemetry.
     private var pendingEditorPresentationFrame: GUICommittedFrame?
@@ -169,26 +172,32 @@ final class CommandDispatcher {
         pendingEditorPresentationFrame
     }
 
-    /// Promotes the exact captured snapshot after its drawable presents successfully.
-    func promoteVisibleEditorSnapshot(_ snapshot: CommittedEditorSnapshot) {
-        let presentedFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
-        if let pendingFrame = pendingEditorPresentationFrame {
-            guard pendingFrame == presentedFrame else { return }
+    /// Promotes the exact captured presentation after its drawable presents successfully.
+    func promoteVisibleEditorPresentation(snapshot: CommittedEditorSnapshot, localTransform: EditorLocalPresentationTransform?) {
+        let presentedFrame = editorFrame(for: snapshot)
+        if let visibleFrame = visibleEditorSnapshot.map(editorFrame(for:)),
+           Self.isPresentedFrame(presentedFrame, olderThan: visibleFrame) {
+            return
+        }
+
+        visibleEditorPresentation = VisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform)
+        if pendingEditorPresentationFrame == presentedFrame {
             pendingEditorPresentationFrame = nil
-            visibleEditorSnapshot = snapshot
-            return
         }
+    }
 
-        if let visibleFrame = visibleEditorSnapshot.map({ GUICommittedFrame(generation: $0.generation, frameSeq: $0.frameSeq) }), visibleFrame == presentedFrame {
-            visibleEditorSnapshot = snapshot
-            return
-        }
+    /// Test and compatibility seam for callers that have no frontend-local transform.
+    func promoteVisibleEditorSnapshot(_ snapshot: CommittedEditorSnapshot) {
+        promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: nil)
+    }
 
-        if visibleEditorSnapshot == nil,
-           let committedFrame = committedEditorSnapshot.map({ GUICommittedFrame(generation: $0.generation, frameSeq: $0.frameSeq) }),
-           committedFrame == presentedFrame {
-            visibleEditorSnapshot = snapshot
-        }
+    private func editorFrame(for snapshot: CommittedEditorSnapshot) -> GUICommittedFrame {
+        GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+    }
+
+    private static func isPresentedFrame(_ lhs: GUICommittedFrame, olderThan rhs: GUICommittedFrame) -> Bool {
+        if lhs.generation != rhs.generation { return lhs.generation < rhs.generation }
+        return lhs.frameSeq < rhs.frameSeq
     }
 
     /// Discards an applied frame that cannot acquire a drawable/presentation path.
@@ -381,6 +390,7 @@ final class CommandDispatcher {
             generation: generation,
             committedWindows: guiState.windowContents,
             committedGutters: frameState.windowGutters,
+            committedIndentGuides: frameState.windowIndentGuides,
             registeredFontIds: registeredFontIds,
             committedTranscript: guiState.agentChatState.transcriptSnapshot,
             stagingLimit: resourcePolicy.staging.weight,
@@ -440,7 +450,7 @@ final class CommandDispatcher {
             return
         }
 
-        switch transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots) {
+        switch transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots, frameState: frameState, themeColors: guiState.themeColors) {
         case .failure(let rejection):
             reject(rejection, frameSeq: frameSeq, logReason: rejection.logDescription)
             return
@@ -506,21 +516,10 @@ final class CommandDispatcher {
             for command in focus.commands { apply(command, effects: &effects) }
         }
         if clearsResync { guiState.resyncState.clear() }
-        if finalImpact.contains(.editor) || committedEditorSnapshot == nil {
-            switch CommittedEditorSnapshot.make(
-                generation: transaction.generation,
-                frameSeq: transaction.frameSeq,
-                frameState: frameState,
-                themeColors: guiState.themeColors,
-                windowContents: guiState.windowContents
-            ) {
-            case .success(let snapshot):
-                committedEditorSnapshot = snapshot
-                if finalImpact.contains(.editor) {
-                    pendingEditorPresentationFrame = committed
-                }
-            case .failure(let rejection):
-                PortLogger.error("Committed editor snapshot rejected after semantic apply: \(rejection.logDescription)")
+        if let snapshot = transaction.editorSnapshot {
+            committedEditorSnapshot = snapshot
+            if finalImpact.contains(.editor) {
+                pendingEditorPresentationFrame = committed
             }
         }
         replay(effects)

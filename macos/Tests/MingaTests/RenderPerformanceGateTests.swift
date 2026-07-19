@@ -21,8 +21,8 @@ struct RenderPerformanceGateTests {
 
     @Test("exact relative boundary passes and the next representable value fails")
     func relativeBoundary() {
-        #expect(failures(stage: 1.20, combined: 2.40).isEmpty)
-        #expect(failures(stage: 1.20.nextUp, combined: 2.40).contains { $0.contains("1.20x baseline") })
+        #expect(failures(stage: 1.10, combined: 2.20).isEmpty)
+        #expect(failures(stage: 1.10.nextUp, combined: 2.20).contains { $0.contains("1.10x baseline") })
     }
 
     @Test("sub-millisecond references include a fixed host-noise allowance")
@@ -56,10 +56,10 @@ struct RenderPerformanceGateTests {
         ).isEmpty)
     }
 
-    @Test("HEAD combined-p50 regression above 1.20x fails")
+    @Test("HEAD combined-p50 regression above 1.10x fails")
     func pairedCombinedP50RegressionFails() {
         let base = Array(repeating: pairedMeasurement(combinedP50: 1.0), count: 3)
-        let head = Array(repeating: pairedMeasurement(combinedP50: 1.21), count: 3)
+        let head = Array(repeating: pairedMeasurement(combinedP50: 1.11), count: 3)
         let failures = RenderPerformanceGate.pairedFailures(
             baseMeasurements: base,
             headMeasurements: head
@@ -82,7 +82,7 @@ struct RenderPerformanceGateTests {
     @Test("five-pair confirmation decides over all pair ratios")
     func fivePairConfirmationMedianPasses() {
         let base = Array(repeating: pairedMeasurement(combinedP50: 1.0), count: 5)
-        let ratios = [1.30, 1.30, 1.0, 1.0, 1.0]
+        let ratios = [1.15, 1.15, 1.0, 1.0, 1.0]
         let head = ratios.map { pairedMeasurement(combinedP50: $0) }
         let initialFailures = RenderPerformanceGate.pairedFailures(
             baseMeasurements: Array(base.prefix(3)),

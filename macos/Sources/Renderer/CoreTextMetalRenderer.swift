@@ -498,7 +498,6 @@ final class CoreTextMetalRenderer {
         }
 
         let resolvedCursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: windowContents,
             gutters: renderGutters,
             cellW: cellW,
@@ -818,8 +817,8 @@ final class CoreTextMetalRenderer {
         for windowGutter in renderGutters.values where windowGutter.lineNumberWidth > 0 || windowGutter.signColWidth > 0 || !windowGutter.entries.isEmpty {
             renderGutterEntries(
                 gutter: windowGutter,
-                frameState: frameState,
                 cellW: cellW, cellH: displayCellH, scale: scale,
+                frameState: frameState,
                 gutterLeftMarginPx: gutterLeftMarginPx,
                 gutterPaddingPx: gutterPaddingPx,
                 viewportWidthPx: Float(viewportSize.width),
@@ -1675,8 +1674,8 @@ final class CoreTextMetalRenderer {
     /// Diagnostic signs are rendered as CTLine textures.
     private func renderGutterEntries(
         gutter: Wire.WindowGutter,
-        frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
+        frameState: FrameState,
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float,
         viewportWidthPx: Float,
@@ -1717,7 +1716,7 @@ final class CoreTextMetalRenderer {
                     frameState: frameState,
                     clipTop: clipTop, clipBottom: clipBottom,
                     atlas: atlas, windowRenderer: windowRenderer,
-                    bgQuads: &bgQuads, lineInstances: &lineInstances,
+                    bgQuads: &bgQuads, lineInstances: &lineInstances
                 )
             }
 
@@ -1728,12 +1727,12 @@ final class CoreTextMetalRenderer {
                     gutter: gutter, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
+                    frameState: frameState,
                     gutterPaddingPx: gutterPaddingPx,
                     viewportWidthPx: viewportWidthPx,
                     gutterHoverWindowId: gutterHoverWindowId,
                     gutterHoverRow: gutterHoverRow,
-                    frameState: frameState,
-                    clipTop: clipTop, clipBottom: clipBottom,
+                            clipTop: clipTop, clipBottom: clipBottom,
                     bgQuads: &bgQuads,
                 )
 
@@ -1741,11 +1740,11 @@ final class CoreTextMetalRenderer {
                     entry: entry, yPos: yPos, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
+                    frameState: frameState,
                     isMouseInGutter: isMouseInGutter,
                     gutterHoverWindowId: gutterHoverWindowId,
                     gutter: gutter,
-                    frameState: frameState,
-                    clipTop: clipTop, clipBottom: clipBottom,
+                            clipTop: clipTop, clipBottom: clipBottom,
                     bgQuads: &bgQuads,
                 )
             }
@@ -1756,9 +1755,9 @@ final class CoreTextMetalRenderer {
                     entry: entry, gutter: gutter,
                     atlasRow: atlasRow, yPos: yPos, xOffset: xOffset,
                     signColWidth: signColWidth,
-                    cellW: cellW, cellH: cellH, scale: scale,
-                    frameState: frameState,
-                    clipTop: clipTop, clipBottom: clipBottom,
+                            cellW: cellW, cellH: cellH, scale: scale,
+                            frameState: frameState,
+                            clipTop: clipTop, clipBottom: clipBottom,
                     atlas: atlas, windowRenderer: windowRenderer,
                     lineInstances: &lineInstances,
                 )
@@ -1811,7 +1810,7 @@ final class CoreTextMetalRenderer {
         atlas: LineTextureAtlas,
         windowRenderer: WindowContentRenderer,
         bgQuads: inout [QuadGPU],
-        lineInstances: inout [LineGPU],
+        lineInstances: inout [LineGPU]
     ) {
         switch entry.signType {
         case .gitAdded:
@@ -1859,11 +1858,11 @@ final class CoreTextMetalRenderer {
         gutter: Wire.WindowGutter, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
+        frameState: FrameState,
         gutterPaddingPx: Float,
         viewportWidthPx: Float,
         gutterHoverWindowId: UInt16?,
         gutterHoverRow: UInt16?,
-        frameState: FrameState,
         clipTop: Float, clipBottom: Float,
         bgQuads: inout [QuadGPU],
     ) {
@@ -1890,10 +1889,10 @@ final class CoreTextMetalRenderer {
         entry: Wire.GutterEntry, yPos: Float, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
+        frameState: FrameState,
         isMouseInGutter: Bool,
         gutterHoverWindowId: UInt16?,
         gutter: Wire.WindowGutter,
-        frameState: FrameState,
         clipTop: Float, clipBottom: Float,
         bgQuads: inout [QuadGPU],
     ) {
@@ -2733,9 +2732,8 @@ final class CoreTextMetalRenderer {
     }
 
     /// Resolve the cursor position in the same coordinate system as the text renderer.
-    /// Semantic GUI window content is preferred because it carries window-relative cursor coordinates and horizontal scroll. Legacy frameState cursor data remains the fallback for transition frames and non-semantic surfaces.
+    /// Cursor authority lives in the active presented window surface. There is no legacy `FrameState` fallback because drawing a cursor from a different semantic source would recreate the #2999 split-brain presentation bug.
     nonisolated static func resolveCursor(
-        frameState: FrameState,
         windowContents: [UInt16: GUIWindowContent],
         gutters: [UInt16: Wire.WindowGutter],
         cellW: Float,
@@ -2744,14 +2742,12 @@ final class CoreTextMetalRenderer {
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float
     ) -> RenderCursor? {
-        var sawActiveSemanticCursorOwner = false
         for windowId in semanticCursorWindowIds(gutters) {
             guard let gutter = gutters[windowId], let content = windowContents[windowId] else { continue }
-            sawActiveSemanticCursorOwner = true
             guard content.cursorVisible else { continue }
 
-            let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
-            let contentColOffset = Float(content.paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let textCol = content.paneGeometry?.textRect.col ?? UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
+            let contentColOffset = Float(textCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let hScrollPx = Float(content.scrollLeft) * cellW * scale
             let cursorCol = resolvedSemanticCursorCol(content)
             let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
@@ -2764,15 +2760,7 @@ final class CoreTextMetalRenderer {
             )
             return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: windowId)
         }
-
-        if sawActiveSemanticCursorOwner { return nil }
-        guard frameState.cursorVisible else { return nil }
-
-        let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
-            ? gutterLeftMarginPx + gutterPaddingPx : 0
-        let x = Float(frameState.cursorCol) * cellW * scale + cursorPadding
-        let y = Float(frameState.cursorRow) * displayCellH * scale
-        return RenderCursor(x: x, y: y, shape: frameState.cursorShape)
+        return nil
     }
 
     /// Returns active semantic cursor owners in deterministic priority order. The agent prompt uses a reserved window id and must win over the retained chat content when both are active during focus transitions.

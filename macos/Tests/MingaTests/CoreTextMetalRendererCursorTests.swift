@@ -36,7 +36,6 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [2: content],
             gutters: frameState.windowGutters,
             cellW: cellW,
@@ -640,14 +639,8 @@ struct CoreTextMetalRendererCursorTests {
         #expect(CoreTextMetalRenderer.clipVerticalQuad(y: 0, height: 5, top: 10, bottom: 20) == nil)
     }
 
-    @Test("legacy cursor is used when semantic content is unavailable")
+    @Test("legacy frameState cursor is not used when semantic content is unavailable")
     func legacyCursorFallback() {
-        let cellW: Float = 7.5
-        let displayCellH: Float = 16.0
-        let scale: Float = 2.0
-        let gutterLeft: Float = 3.0
-        let gutterPadding: Float = 5.0
-
         var frameState = FrameState(cols: 80, rows: 24)
         frameState.cursorRow = 3
         frameState.cursorCol = 10
@@ -655,26 +648,20 @@ struct CoreTextMetalRendererCursorTests {
         frameState.gutterCol = 5
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [:],
             gutters: [:],
-            cellW: cellW,
-            displayCellH: displayCellH,
-            scale: scale,
-            gutterLeftMarginPx: gutterLeft,
-            gutterPaddingPx: gutterPadding
+            cellW: 7.5,
+            displayCellH: 16,
+            scale: 2,
+            gutterLeftMarginPx: 3,
+            gutterPaddingPx: 5
         )
 
-        let expectedX = Float(10) * cellW * scale + gutterLeft + gutterPadding
-        let expectedY = Float(3) * displayCellH * scale
-
-        #expect(cursor?.shape == .underline)
-        #expect(abs((cursor?.x ?? 0) - expectedX) < 0.001)
-        #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
+        #expect(cursor == nil)
     }
 
-    @Test("cursor row Y uses spaced cell height at line spacing 1.2")
-    func cursorRowYUsesSpacedCellHeightAtSpacing1_2() {
+    @Test("semantic cursor row Y uses spaced cell height at line spacing 1.2")
+    func cursorRowYUsesSpacedCellHeightAtSpacing1_2() throws {
         let cellW: Float = 7.5
         let baseCellH: Float = 16.0
         let lineSpacing: Float = 1.2
@@ -683,15 +670,22 @@ struct CoreTextMetalRendererCursorTests {
 
         var frameState = FrameState(cols: 80, rows: 24)
         frameState.lineSpacing = lineSpacing
-        frameState.cursorRow = 10
-        frameState.cursorCol = 4
-        frameState.cursorShape = .block
-        frameState.gutterCol = 0
+        frameState.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 10, cursorCol: 4, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
-            windowContents: [:],
-            gutters: [:],
+            windowContents: [1: content],
+            gutters: frameState.windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -699,15 +693,14 @@ struct CoreTextMetalRendererCursorTests {
             gutterPaddingPx: 0
         )
 
-        // Row Y must land on the spaced row position, not the unspaced one.
         let spacedY = Float(10) * displayCellH * scale
         let unspacedY = Float(10) * baseCellH * scale
         #expect(abs((cursor?.y ?? 0) - spacedY) < 0.001)
         #expect(abs((cursor?.y ?? 0) - unspacedY) > 0.001)
     }
 
-    @Test("cursor row Y at line spacing 1.0 matches the unspaced baseline")
-    func cursorRowYAtSpacing1_0MatchesUnspacedBaseline() {
+    @Test("semantic cursor row Y at line spacing 1.0 matches the unspaced baseline")
+    func cursorRowYAtSpacing1_0MatchesUnspacedBaseline() throws {
         let cellW: Float = 7.5
         let baseCellH: Float = 16.0
         let lineSpacing: Float = 1.0
@@ -716,15 +709,22 @@ struct CoreTextMetalRendererCursorTests {
 
         var frameState = FrameState(cols: 80, rows: 24)
         frameState.lineSpacing = lineSpacing
-        frameState.cursorRow = 10
-        frameState.cursorCol = 4
-        frameState.cursorShape = .block
-        frameState.gutterCol = 0
+        frameState.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 10, cursorCol: 4, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
-            windowContents: [:],
-            gutters: [:],
+            windowContents: [1: content],
+            gutters: frameState.windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -732,8 +732,6 @@ struct CoreTextMetalRendererCursorTests {
             gutterPaddingPx: 0
         )
 
-        // At 1.0 the spaced and unspaced positions are identical (byte-for-byte
-        // parity with pre-1.2-default behavior).
         let expectedY = Float(10) * baseCellH * scale
         #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
     }
@@ -771,7 +769,6 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [1: content],
             gutters: frameState.windowGutters,
             cellW: cellW,
@@ -916,7 +913,6 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [1: hiddenChat, 65_534: visiblePrompt],
             gutters: frameState.windowGutters,
             cellW: 8,
@@ -955,7 +951,6 @@ struct CoreTextMetalRendererCursorTests {
         dispatcher.applyForTesting(.guiWindowContent(data: content))
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: dispatcher.frameState,
             windowContents: gui.windowContents,
             gutters: dispatcher.frameState.windowGutters,
             cellW: 7.5,

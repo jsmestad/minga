@@ -1429,6 +1429,29 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.themeColors.hasAppliedTheme)
     }
 
+    @Test("staged theme colors are frozen into the committed editor snapshot")
+    @MainActor func stagedThemeColorsFreezeIntoCommittedEditorSnapshot() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let expected: UInt32 = (0x12 << 16) | (0x34 << 8) | 0x56
+        let slots = completeThemeSlots().map { slot, r, g, b in
+            slot == GUI_COLOR_GUTTER_FG ? (slot, 0x12, 0x34, 0x56) : (slot, r, g, b)
+        }
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: slots))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiIndentGuides(data: IndentGuideData(
+            windowId: 1, tabWidth: 4, activeGuideCol: 0xFFFF,
+            guideCols: [], lineIndentLevels: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+
+        #expect(dispatcher.committedEditorSnapshot?.frameState.gutterColors.fg == expected)
+        #expect(dispatcher.frameState.gutterColors.fg == expected)
+    }
+
     @Test("keyframe with content but no guiTheme returns a typed rejection")
     @MainActor func keyframeWithoutThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
@@ -1679,6 +1702,30 @@ struct CommandDispatcherStagingTests {
         }
     }
 
+    @Test("freeze rejects multiple active gutter owners before publication")
+    @MainActor func freezeRejectsMultipleActiveGutters() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let firstGeometry = editorGeometry(windowId: 1)
+        let secondGeometry = editorGeometry(windowId: 2)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: firstGeometry)))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 2, geometry: secondGeometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: firstGeometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 2, geometry: secondGeometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+
+        #expect(gui.windowContents.isEmpty)
+        #expect(dispatcher.committedEditorSnapshot == nil)
+        guard case .rejected(generation: 1, frameSeq: 5, lastAppliedFrameSeq: 0, reason: .invalidActiveWindow(windowId: 2)) = results.first else {
+            Issue.record("expected multiple-active-window rejection")
+            return
+        }
+    }
+
     @Test("visible editor snapshot advances only after matching presentation")
     @MainActor func visibleSnapshotAdvancesOnlyAfterMatchingPresentation() throws {
         let (dispatcher, _) = makeDispatcher()
@@ -1718,6 +1765,52 @@ struct CommandDispatcherStagingTests {
         dispatcher.promoteVisibleEditorSnapshot(thirdSnapshot)
         #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 3)
         #expect(dispatcher.pendingPresentationFrame() == nil)
+    }
+
+    @Test("older in-flight presentation promotes when a newer commit is pending")
+    @MainActor func olderInFlightPresentationPromotesWhileNewerCommitIsPending() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(lineNumberWidth: 0, signColWidth: 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let visibleBase = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorSnapshot(visibleBase)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let inFlightA = try #require(dispatcher.committedEditorSnapshot)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        let inFlightB = try #require(dispatcher.committedEditorSnapshot)
+        let inFlightBFrame = GUICommittedFrame(generation: inFlightB.generation, frameSeq: inFlightB.frameSeq)
+        #expect(dispatcher.pendingPresentationFrame() == inFlightBFrame)
+
+        dispatcher.promoteVisibleEditorSnapshot(inFlightA)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 2)
+        #expect(dispatcher.pendingPresentationFrame() == inFlightBFrame)
+    }
+
+    @Test("visible presentation retains captured local transform")
+    @MainActor func visiblePresentationRetainsCapturedLocalTransform() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(lineNumberWidth: 0, signColWidth: 0)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        let transform = EditorLocalPresentationTransform(windowId: 1, offset: CGPoint(x: 7, y: 11))
+
+        dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: transform)
+
+        #expect(dispatcher.visibleEditorPresentation?.snapshot.frameSeq == 1)
+        #expect(dispatcher.visibleEditorPresentation?.localTransform == transform)
     }
 
     // MARK: - Nothing paints between begin and commit

@@ -221,7 +221,6 @@ struct RendererResidentSliceTests {
         var frame = FrameState(cols: 80, rows: 40)
         frame.windowGutters = [1: gutter(entries: [])]
         let cursor = try #require(CoreTextMetalRenderer.resolveCursor(
-            frameState: frame,
             windowContents: [1: resident],
             gutters: frame.windowGutters,
             cellW: 8,

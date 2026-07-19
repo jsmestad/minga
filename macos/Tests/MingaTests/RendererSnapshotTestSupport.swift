@@ -21,13 +21,16 @@ func rendererSnapshot(
         frameSeq: frameSeq,
         frameState: frameState,
         themeColors: themeColors,
-        windowContents: normalizedContents
+        windowContents: normalizedContents,
+        windowGutters: frameState.windowGutters,
+        windowIndentGuides: frameState.windowIndentGuides
     ) {
     case .success(let snapshot):
         return snapshot
     case .failure(let rejection):
-        Issue.record("Invalid renderer snapshot fixture: \(rejection.logDescription)")
-        fatalError("Invalid renderer snapshot fixture: \(rejection.logDescription)")
+        let message = "Invalid renderer snapshot fixture: \(String(describing: rejection.logDescription))"
+        Issue.record(Comment(rawValue: message))
+        fatalError(message)
     }
 }
 

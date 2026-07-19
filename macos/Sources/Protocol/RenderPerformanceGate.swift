@@ -143,7 +143,7 @@ public enum RenderPerformanceGate {
     /// Absolute p95 ceiling for the combined native preparation path.
     public static let combinedAbsoluteBudgetMs = 8.0
     /// Largest allowed ratio between a measurement and its checked-in reference.
-    public static let maximumRegressionRatio = 1.20
+    public static let maximumRegressionRatio = 1.10
     /// Minimum absolute allowance for sub-millisecond measurement variance.
     public static let minimumRegressionAllowanceMs = 0.05
     /// Number of independent batches required for the authoritative median aggregate.

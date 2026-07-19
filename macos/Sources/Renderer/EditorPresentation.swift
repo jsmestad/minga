@@ -2,6 +2,18 @@ import Foundation
 import MingaProtocol
 import MingaUI
 
+/// Frontend-local transform captured with the Metal draw that produced a visible editor frame.
+struct EditorLocalPresentationTransform: Sendable, Equatable {
+    let windowId: UInt16
+    let offset: CGPoint
+}
+
+/// One editor presentation known to have reached the display surface.
+struct VisibleEditorPresentation: Sendable {
+    let snapshot: CommittedEditorSnapshot
+    let localTransform: EditorLocalPresentationTransform?
+}
+
 /// Immutable gutter state owned by one committed editor surface.
 enum GutterPresentation: Sendable {
     case none
@@ -11,6 +23,13 @@ enum GutterPresentation: Sendable {
         switch self {
         case .none: nil
         case .present(let gutter): gutter
+        }
+    }
+
+    var isActive: Bool {
+        switch self {
+        case .none: false
+        case .present(let gutter): gutter.isActive
         }
     }
 }
@@ -36,7 +55,7 @@ struct PresentedWindowSurface: Sendable {
                 contentRow: paneGeometry.textRect.row,
                 contentCol: paneGeometry.textRect.col,
                 contentHeight: paneGeometry.textRect.height,
-                isActive: activeByGeometry,
+                isActive: false,
                 contentWidth: paneGeometry.textRect.width,
                 cursorLine: UInt32(content.cursorRow),
                 lineNumberStyle: .absolute,
@@ -54,7 +73,9 @@ struct PresentedWindowSurface: Sendable {
         return min(start, content.rowStore.count)..<min(max(end, start), content.rowStore.count)
     }
 
-    private var activeByGeometry: Bool { false }
+    var cursorLineOffset: Int {
+        Int(content.cursorRow) * Int(paneGeometry.viewport.cols) + Int(content.cursorCol)
+    }
 }
 
 /// Complete semantic editor presentation captured once by Metal and input geometry consumers.
@@ -65,6 +86,12 @@ struct CommittedEditorSnapshot {
     let themeColors: ThemeColors?
     let surfaces: [PresentedWindowSurface]
     let activeWindowId: UInt16?
+
+    var activeSurface: PresentedWindowSurface? {
+        if let activeWindowId, let surface = surface(for: activeWindowId) { return surface }
+        if let active = surfaces.first(where: { $0.gutter.isActive }) { return active }
+        return surfaces.first
+    }
 
     var windowContents: [UInt16: GUIWindowContent] {
         Dictionary(uniqueKeysWithValues: surfaces.map { ($0.windowId, $0.content) })
@@ -97,7 +124,9 @@ struct CommittedEditorSnapshot {
         frameSeq: UInt32,
         frameState: FrameState,
         themeColors: ThemeColors?,
-        windowContents: [UInt16: GUIWindowContent]
+        windowContents: [UInt16: GUIWindowContent],
+        windowGutters: [UInt16: Wire.WindowGutter],
+        windowIndentGuides: [UInt16: IndentGuideData]
     ) -> Result<CommittedEditorSnapshot, PreparedFrameRejection> {
         var surfaces: [PresentedWindowSurface] = []
         surfaces.reserveCapacity(windowContents.count)
@@ -108,7 +137,7 @@ struct CommittedEditorSnapshot {
             }
 
             let gutterPresentation: GutterPresentation
-            if let gutter = frameState.windowGutters[content.windowId] {
+            if let gutter = windowGutters[content.windowId] {
                 guard gutter.contentRow == paneGeometry.textRect.row,
                       gutter.contentCol == paneGeometry.textRect.col,
                       gutter.contentHeight == paneGeometry.textRect.height,
@@ -130,12 +159,16 @@ struct CommittedEditorSnapshot {
                 content: content,
                 gutter: gutterPresentation,
                 paneGeometry: paneGeometry,
-                indentGuides: frameState.windowIndentGuides[content.windowId]
+                indentGuides: windowIndentGuides[content.windowId]
             ))
         }
 
-        if let activeWindowId = frameState.activeWindowId,
-           !windowContents.keys.contains(activeWindowId) {
+        let activeGutters = windowGutters.values.filter(\.isActive)
+        if activeGutters.count > 1 {
+            return .failure(.invalidActiveWindow(windowId: activeGutters.sorted(by: { $0.windowId < $1.windowId })[1].windowId))
+        }
+        let activeWindowId = activeGutters.first?.windowId
+        if let activeWindowId, !windowContents.keys.contains(activeWindowId) {
             return .failure(.invalidActiveWindow(windowId: activeWindowId))
         }
 
@@ -145,7 +178,7 @@ struct CommittedEditorSnapshot {
             frameState: frameState,
             themeColors: themeColors,
             surfaces: surfaces,
-            activeWindowId: frameState.activeWindowId
+            activeWindowId: activeWindowId
         ))
     }
 }

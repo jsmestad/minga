@@ -423,14 +423,20 @@ final class EditorNSView: MTKView {
     private var scrollElasticWindowId: UInt16?
 
     /// One immutable snapshot of the pane and effective offset used by both drawing and pointer normalization.
-    struct LocalScrollPresentation: Equatable {
-        let windowId: UInt16
-        let offset: CGPoint
+    typealias LocalScrollPresentation = EditorLocalPresentationTransform
+
+    /// The editor presentation visible to interaction and accessibility code. Metal promotes the exact presentation after presentation; committed-but-unpresented values are draw inputs only.
+    private var editorPresentation: VisibleEditorPresentation? {
+        dispatcher.visibleEditorPresentation
     }
 
     /// The editor snapshot visible to interaction and accessibility code. Metal promotes the exact snapshot after presentation; committed-but-unpresented snapshots are draw inputs only.
     private var editorPresentationSnapshot: CommittedEditorSnapshot? {
-        dispatcher.visibleEditorSnapshot
+        editorPresentation?.snapshot
+    }
+
+    private var visibleLocalScrollPresentation: LocalScrollPresentation? {
+        editorPresentation?.localTransform
     }
 
     private func interactionContent(windowId: UInt16) -> GUIWindowContent? {
@@ -600,8 +606,8 @@ final class EditorNSView: MTKView {
                                 presentationWindowId: localScrollPresentation?.windowId,
                                 presentationInputSeq: presentationInputSeq,
                                 latencyRecorder: dispatcher.latency,
-                                onPresented: { [weak self] snapshot in
-                                    self?.promotePresentedSnapshot(snapshot)
+                                onPresented: { [weak self, localScrollPresentation] snapshot in
+                                    self?.promotePresentedSnapshot(snapshot, localScrollPresentation: localScrollPresentation)
                                 })
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
@@ -612,12 +618,12 @@ final class EditorNSView: MTKView {
         os_signpost(.event, log: renderLog, name: "DrawComplete")
     }
 
-    private func promotePresentedSnapshot(_ snapshot: CommittedEditorSnapshot) {
-        dispatcher.promoteVisibleEditorSnapshot(snapshot)
-        let fs = snapshot.frameState
-        if fs.cursorRow != lastAccessibilityCursorRow || fs.cursorCol != lastAccessibilityCursorCol {
-            lastAccessibilityCursorRow = fs.cursorRow
-            lastAccessibilityCursorCol = fs.cursorCol
+    private func promotePresentedSnapshot(_ snapshot: CommittedEditorSnapshot, localScrollPresentation: LocalScrollPresentation?) {
+        dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: localScrollPresentation)
+        let cursor = snapshot.activeSurface.map { ($0.content.cursorRow, $0.content.cursorCol) } ?? (0, 0)
+        if cursor.0 != lastAccessibilityCursorRow || cursor.1 != lastAccessibilityCursorCol {
+            lastAccessibilityCursorRow = cursor.0
+            lastAccessibilityCursorCol = cursor.1
             NSAccessibility.post(element: self, notification: .selectedTextChanged)
             resetCursorBlink()
         }
@@ -2853,7 +2859,8 @@ final class EditorNSView: MTKView {
     // MARK: - Helpers
 
     private var effectiveCellHeight: CGFloat {
-        cellHeight * CGFloat(dispatcher.frameState.lineSpacing)
+        let lineSpacing = editorPresentationSnapshot?.frameState.lineSpacing ?? dispatcher.committedEditorSnapshot?.frameState.lineSpacing ?? dispatcher.frameState.lineSpacing
+        return cellHeight * CGFloat(lineSpacing)
     }
 
     private func shouldSendTextDrag(for event: NSEvent) -> Bool {
@@ -2917,7 +2924,7 @@ final class EditorNSView: MTKView {
     }
 
     private func foldChevronEntry(at point: NSPoint) -> (gutter: Wire.WindowGutter, entry: Wire.GutterEntry)? {
-        let presentation = localScrollPresentation
+        let presentation = visibleLocalScrollPresentation
         let point = Self.presentationNormalizedGutterPoint(
             point,
             presentation: presentation,
@@ -2951,7 +2958,7 @@ final class EditorNSView: MTKView {
     }
 
     private func updateGutterHover(at point: NSPoint) {
-        let presentation = localScrollPresentation
+        let presentation = visibleLocalScrollPresentation
         let point = Self.presentationNormalizedGutterPoint(
             point,
             presentation: presentation,
@@ -3019,7 +3026,7 @@ final class EditorNSView: MTKView {
     }
 
     private func presentationNormalizedPoint(_ point: NSPoint) -> NSPoint {
-        let presentation = localScrollPresentation
+        let presentation = visibleLocalScrollPresentation
         let rawRow = Int16(point.y / effectiveCellHeight)
         let rawCol = max(0, Int16(point.x / cellWidth))
         let rawPointWindowId = smoothScrollTargetWindowId(row: rawRow, col: rawCol)
@@ -3384,22 +3391,19 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
     }
 
     private func visibleCursorRect() -> NSRect {
-        guard let snapshot = editorPresentationSnapshot else {
+        guard let surface = editorPresentationSnapshot?.activeSurface else {
             return NSRect(x: 0, y: 0, width: cellWidth, height: effectiveCellHeight)
         }
-        let fs = snapshot.frameState
-        return NSRect(
-            x: CGFloat(fs.cursorCol) * cellWidth,
-            y: CGFloat(fs.cursorRow) * effectiveCellHeight,
-            width: cellWidth,
-            height: effectiveCellHeight
-        )
+        let content = surface.content
+        let scrollLeft = CGFloat(content.scrollLeft) * cellWidth
+        let localOffset = visibleLocalScrollPresentation?.windowId == surface.windowId ? visibleLocalScrollPresentation?.offset ?? .zero : .zero
+        let x = CGFloat(surface.paneGeometry.textRect.col) * cellWidth + CGFloat(content.cursorCol) * cellWidth - scrollLeft - localOffset.x
+        let y = CGFloat(surface.paneGeometry.textRect.row) * effectiveCellHeight + CGFloat(content.cursorRow) * effectiveCellHeight - localOffset.y
+        return NSRect(x: x, y: y, width: cellWidth, height: effectiveCellHeight)
     }
 
     private func accessibilityCursorOffset() -> Int {
-        guard let snapshot = editorPresentationSnapshot else { return 0 }
-        let fs = snapshot.frameState
-        return Int(fs.cursorRow) * Int(fs.cols) + Int(fs.cursorCol)
+        editorPresentationSnapshot?.activeSurface?.cursorLineOffset ?? 0
     }
 
     private func visibleAccessibilityRows() -> [GUIVisualRow] {
@@ -3441,7 +3445,7 @@ extension EditorNSView {
     }
 
     override func accessibilityInsertionPointLineNumber() -> Int {
-        return Int(editorPresentationSnapshot?.frameState.cursorRow ?? 0)
+        return Int(editorPresentationSnapshot?.activeSurface?.content.cursorRow ?? 0)
     }
 
     override func accessibilitySelectedText() -> String? {

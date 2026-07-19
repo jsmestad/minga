@@ -213,6 +213,7 @@ struct PreparedFrameTransaction {
     let resources: PreparedResourceUpdates?
     let focus: PreparedFocusUpdates?
     let metadata: PreparedMetadataUpdates?
+    let editorSnapshot: CommittedEditorSnapshot?
     let operationCounts: PreparedFrameOperationCounts
 }
 
@@ -282,6 +283,7 @@ struct PreparedFrameTransactionBuilder {
     private var semanticImpact: GUIFrameImpact = []
     private var workingWindows: [UInt16: GUIWindowContent]
     private var workingGutters: [UInt16: Wire.WindowGutter]
+    private var workingIndentGuides: [UInt16: IndentGuideData]
     private var changedWindows: [UInt16: GUIWindowContent] = [:]
     private var referencedWindowIds: Set<UInt16> = []
     private var touchedWindowIds: Set<UInt16> = []
@@ -308,6 +310,7 @@ struct PreparedFrameTransactionBuilder {
         generation: UInt32,
         committedWindows: [UInt16: GUIWindowContent],
         committedGutters: [UInt16: Wire.WindowGutter],
+        committedIndentGuides: [UInt16: IndentGuideData],
         registeredFontIds: Set<UInt8>,
         committedTranscript: AgentTranscriptSnapshot,
         stagingLimit: FrameResourceWeight = FrameResourcePolicy.default.staging.weight,
@@ -318,6 +321,7 @@ struct PreparedFrameTransactionBuilder {
         self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
         self.workingGutters = baseFrameSeq == 0 ? [:] : committedGutters
+        self.workingIndentGuides = baseFrameSeq == 0 ? [:] : committedIndentGuides
         self.registeredFontIds = registeredFontIds
         self.registeredFontIds.insert(0)
         self.workingTranscript = committedTranscript
@@ -381,6 +385,7 @@ struct PreparedFrameTransactionBuilder {
         case .guiIndentGuides(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
+            workingIndentGuides[data.windowId] = data
             stageReplacing(
                 command, key: .window(kind: .indentGuides, id: data.windowId),
                 weight: resourceWeight, domain: .window
@@ -442,7 +447,7 @@ struct PreparedFrameTransactionBuilder {
         }
     }
 
-    func freeze(requiredThemeSlots: [UInt8]) -> Result<PreparedFrameTransaction, PreparedFrameRejection> {
+    func freeze(requiredThemeSlots: [UInt8], frameState: FrameState, themeColors: ThemeColors?) -> Result<PreparedFrameTransaction, PreparedFrameRejection> {
         if let rejection { return .failure(rejection) }
 
         if baseFrameSeq == 0, theme == nil { return .failure(.missingTheme) }
@@ -470,6 +475,32 @@ struct PreparedFrameTransactionBuilder {
             // local AppKit scroll-presentation discard performed during promotion.
             finalImpact.formUnion([.editor, .editorOverlay])
         }
+        let preparedThemeColors = preparedThemeColors(from: themeColors)
+        let editorSnapshot: CommittedEditorSnapshot?
+        if finalImpact.contains(.editor) || baseFrameSeq == 0 {
+            let snapshotFrameState = preparedFrameState(
+                from: frameState,
+                themeColors: preparedThemeColors,
+                liveWindowIds: liveWindowIds
+            )
+            switch CommittedEditorSnapshot.make(
+                generation: generation,
+                frameSeq: frameSeq,
+                frameState: snapshotFrameState,
+                themeColors: preparedThemeColors,
+                windowContents: workingWindows,
+                windowGutters: workingGutters,
+                windowIndentGuides: workingIndentGuides
+            ) {
+            case .success(let snapshot):
+                editorSnapshot = snapshot
+            case .failure(let rejection):
+                return .failure(rejection)
+            }
+        } else {
+            editorSnapshot = nil
+        }
+
         let transaction = PreparedFrameTransaction(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
@@ -490,6 +521,7 @@ struct PreparedFrameTransactionBuilder {
             resources: resourceCommands.isEmpty ? nil : PreparedResourceUpdates(commands: resourceCommands.commands),
             focus: focusCommands.isEmpty ? nil : PreparedFocusUpdates(commands: focusCommands.commands),
             metadata: metadataCommands.isEmpty ? nil : PreparedMetadataUpdates(commands: metadataCommands.commands),
+            editorSnapshot: editorSnapshot,
             operationCounts: PreparedFrameOperationCounts(
                 theme: theme == nil ? 0 : 1,
                 windows: windowsChanged ? 1 : 0,
@@ -503,9 +535,77 @@ struct PreparedFrameTransactionBuilder {
         return .success(transaction)
     }
 
+    private func preparedThemeColors(from themeColors: ThemeColors?) -> ThemeColors? {
+        guard let theme else { return themeColors }
+        let replacement = ThemeColors()
+        replacement.applySlots(theme.slots)
+        return replacement
+    }
+
+    private func preparedFrameState(
+        from frameState: FrameState,
+        themeColors: ThemeColors?,
+        liveWindowIds: Set<UInt16>
+    ) -> FrameState {
+        var prepared = frameState
+        if let themeColors {
+            prepared.gutterColors = GutterThemeColors(
+                fg: themeColors.gutterFgRGB,
+                currentFg: themeColors.gutterCurrentFgRGB,
+                errorFg: themeColors.gutterErrorFgRGB,
+                warningFg: themeColors.gutterWarningFgRGB,
+                infoFg: themeColors.gutterInfoFgRGB,
+                hintFg: themeColors.gutterHintFgRGB,
+                foldFg: themeColors.gutterFoldFgRGB,
+                gitAddedFg: themeColors.gitAddedFgRGB,
+                gitModifiedFg: themeColors.gitModifiedFgRGB,
+                gitDeletedFg: themeColors.gitDeletedFgRGB
+            )
+        }
+        prepared.windowGutters = Dictionary(uniqueKeysWithValues: workingGutters.filter { liveWindowIds.contains($0.key) })
+        prepared.windowIndentGuides = Dictionary(uniqueKeysWithValues: workingIndentGuides.filter { liveWindowIds.contains($0.key) })
+        prepared.activeWindowId = workingGutters.values.first(where: \.isActive)?.windowId
+        for command in metadataCommands.commands + windowCommands.commands {
+            switch command {
+            case .guiLineSpacing(let spacing):
+                prepared.lineSpacing = max(spacing, 1.0)
+            case .guiGutterSeparator(let col, let r, let g, let b):
+                let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+                prepared.scrollIndicatorColor = rgb
+                prepared.gutterCol = col
+                prepared.gutterSeparatorColor = rgb
+            case .guiCursorline(let row, let r, let g, let b):
+                prepared.cursorlineRow = row
+                prepared.cursorlineBg = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            case .guiGutter(let data):
+                if data.isActive {
+                    prepared.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
+                    if let firstEntry = data.entries.first { prepared.viewportTopLine = firstEntry.bufLine }
+                }
+            case .guiSplitSeparators(let borderColor, let verticals, let horizontals):
+                prepared.verticalSeparators = verticals
+                prepared.horizontalSeparators = horizontals
+                prepared.splitBorderColor = borderColor
+            case .guiStatusBar(let update):
+                prepared.totalLineCount = update.lineCount
+            default:
+                break
+            }
+        }
+        return prepared
+    }
+
     private func validateCompleteEditorSurfaces(liveWindowIds: Set<UInt16>) -> PreparedFrameRejection? {
         for windowId in workingGutters.keys where !liveWindowIds.contains(windowId) {
             return .missingWindowReference(windowId: windowId)
+        }
+
+        let activeGutters = workingGutters.values.filter(\.isActive)
+        if activeGutters.count > 1 {
+            return .invalidActiveWindow(windowId: activeGutters.sorted(by: { $0.windowId < $1.windowId })[1].windowId)
+        }
+        if let activeWindowId = activeGutters.first?.windowId, !liveWindowIds.contains(activeWindowId) {
+            return .invalidActiveWindow(windowId: activeWindowId)
         }
 
         for content in workingWindows.values.sorted(by: { $0.windowId < $1.windowId }) {
