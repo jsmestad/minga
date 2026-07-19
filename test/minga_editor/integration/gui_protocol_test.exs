@@ -15,10 +15,21 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
+  alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Picker, as: PickerModel
+  alias Minga.RenderModel.UI.StatusBar
+  alias Minga.RenderModel.UI.StatusBar.Agent
+  alias Minga.RenderModel.UI.StatusBar.Cursor
+  alias Minga.RenderModel.UI.StatusBar.Data
+  alias Minga.RenderModel.UI.StatusBar.Diagnostics
+  alias Minga.RenderModel.UI.StatusBar.File, as: StatusFile
+  alias Minga.RenderModel.UI.StatusBar.Git
+  alias Minga.RenderModel.UI.StatusBar.Indent
+  alias Minga.RenderModel.UI.StatusBar.Language
+  alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.Test.GUIHarness
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
@@ -119,41 +130,33 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_status_bar buffer variant encodes and decodes correctly", %{harness: harness} do
-      data =
-        {:buffer,
-         %{
-           mode: :normal,
-           mode_state: nil,
-           safe_mode: true,
-           cursor_line: 41,
-           cursor_col: 9,
-           line_count: 200,
-           file_name: "foo.ex",
-           filetype: :elixir,
-           dirty: true,
-           git_branch: "main",
-           git_diff_summary: {5, 3, 1},
-           diagnostic_counts: {2, 4, 1, 0},
-           diagnostic_hint: "✖ undefined function foo/0 [ElixirLS]",
-           indent_type: :spaces,
-           indent_size: 2,
-           selection_info: {:chars, 42},
-           lsp_status: :ready,
-           parser_status: :available,
-           buf_index: 1,
-           buf_count: 3,
-           macro_recording: {true, "q"},
-           agent_status: :thinking,
-           active_tool_name: "read_file",
-           agent_theme_colors: nil,
-           notice: "Wrote foo.ex",
-           modeline_segments: %{
-             left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
-             right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
-           }
-         }}
+      model = %StatusBar{
+        content_kind: :buffer,
+        data: %Data{
+          mode: :normal,
+          safe_mode?: true,
+          dirty?: true,
+          cursor: %Cursor{line: 41, col: 9, line_count: 200},
+          diagnostics: %Diagnostics{
+            counts: {2, 4, 1, 0},
+            hint: "✖ undefined function foo/0 [ElixirLS]"
+          },
+          language: %Language{lsp_status: :ready, parser_status: :available},
+          git: %Git{branch: "main", diff_summary: {5, 3, 1}},
+          file: %StatusFile{name: "foo.ex", filetype: :elixir, icon: "", icon_color: 0xA074C4},
+          message: "Wrote foo.ex",
+          recording: {true, "q"},
+          indent: %Indent{type: :spaces, size: 2},
+          selection: %Selection{mode: :chars, size: 42},
+          agent: %Agent{agent_status: :thinking, active_tool_name: "read_file"},
+          modeline_segments: %{
+            left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
+            right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
+          }
+        }
+      }
 
-      cmd = ProtocolGUI.encode_gui_status_bar(data)
+      cmd = StatusBarEncoder.encode_command(model)
       decoded = round_trip(harness, cmd, "gui_status_bar")
 
       assert decoded["type"] == "gui_status_bar"
@@ -194,41 +197,34 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_status_bar agent variant encodes and decodes correctly", %{harness: harness} do
-      data =
-        {:agent,
-         %{
-           mode: :normal,
-           mode_state: nil,
-           safe_mode: true,
-           model_name: "claude-3-5-sonnet",
-           session_status: :thinking,
-           message_count: 7,
-           macro_recording: false,
-           agent_status: :thinking,
-           active_tool_name: "shell",
-           agent_theme_colors: nil,
-           # Background buffer context
-           cursor_line: 10,
-           cursor_col: 5,
-           line_count: 100,
-           file_name: "editor.ex",
-           filetype: :elixir,
-           dirty: true,
-           git_branch: "feat/agent",
-           git_diff_summary: {3, 2, 0},
-           diagnostic_counts: {1, 2, 0, 1},
-           diagnostic_hint: "⚠ unused variable [ElixirLS]",
-           indent_type: :tabs,
-           indent_size: 4,
-           selection_info: {:lines, 3},
-           lsp_status: :ready,
-           parser_status: :available,
-           buf_index: 2,
-           buf_count: 4,
-           notice: nil
-         }}
+      model = %StatusBar{
+        content_kind: :agent,
+        data: %Data{
+          mode: :normal,
+          safe_mode?: true,
+          dirty?: true,
+          cursor: %Cursor{line: 10, col: 5, line_count: 100},
+          diagnostics: %Diagnostics{
+            counts: {1, 2, 0, 1},
+            hint: "⚠ unused variable [ElixirLS]"
+          },
+          language: %Language{lsp_status: :ready, parser_status: :available},
+          git: %Git{branch: "feat/agent", diff_summary: {3, 2, 0}},
+          file: %StatusFile{name: "editor.ex", filetype: :elixir, icon: "", icon_color: 0xA074C4},
+          recording: false,
+          indent: %Indent{type: :tabs, size: 4},
+          selection: %Selection{mode: :lines, size: 3},
+          agent: %Agent{
+            model_name: "claude-3-5-sonnet",
+            session_status: :thinking,
+            message_count: 7,
+            agent_status: :thinking,
+            active_tool_name: "shell"
+          }
+        }
+      }
 
-      cmd = ProtocolGUI.encode_gui_status_bar(data)
+      cmd = StatusBarEncoder.encode_command(model)
       decoded = round_trip(harness, cmd, "gui_status_bar")
 
       assert decoded["type"] == "gui_status_bar"
