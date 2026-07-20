@@ -65,7 +65,6 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
     tui = ShellState.git_status_tui_state(Runtime.state(state.shell_runtime))
     assert tui != nil
     assert tui.cursor_index == 0
-    assert tui.amend_mode == false
     assert tui.discard_confirmation == nil
   end
 

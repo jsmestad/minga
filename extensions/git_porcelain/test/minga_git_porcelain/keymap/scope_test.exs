@@ -51,11 +51,6 @@ defmodule MingaGitPorcelain.Keymap.ScopeTest do
       assert {:command, :git_status_start_commit} = Scope.resolve_key_in_node(c_node, {?c, 0})
     end
 
-    test "ca amends the last commit" do
-      {:prefix, c_node} = Scope.resolve_key(:git_status, :normal, {?c, 0})
-      assert {:command, :git_status_amend} = Scope.resolve_key_in_node(c_node, {?a, 0})
-    end
-
     test "cg generates a commit message" do
       {:prefix, c_node} = Scope.resolve_key(:git_status, :normal, {?c, 0})
       assert {:command, :git_generate_commit_message} = Scope.resolve_key_in_node(c_node, {?g, 0})

@@ -13,8 +13,7 @@ defmodule MingaEditor.GitStatus.TUIState do
   defstruct [
     :cursor_index,
     :collapsed,
-    discard_confirmation: nil,
-    amend_mode: false
+    discard_confirmation: nil
   ]
 
   @type flat_entry ::
@@ -27,8 +26,7 @@ defmodule MingaEditor.GitStatus.TUIState do
   @type t :: %__MODULE__{
           cursor_index: non_neg_integer(),
           collapsed: %{atom() => true},
-          discard_confirmation: discard_confirmation(),
-          amend_mode: boolean()
+          discard_confirmation: discard_confirmation()
         }
 
   @sections [:conflicts, :staged, :changes, :untracked]
@@ -88,10 +86,6 @@ defmodule MingaEditor.GitStatus.TUIState do
   @doc "Clears pending discard confirmation state."
   @spec clear_discard_confirmation(t()) :: t()
   def clear_discard_confirmation(%__MODULE__{} = tui), do: %{tui | discard_confirmation: nil}
-
-  @doc "Toggles amend mode for the TUI panel."
-  @spec toggle_amend(t()) :: t()
-  def toggle_amend(%__MODULE__{} = tui), do: %{tui | amend_mode: not tui.amend_mode}
 
   @doc "Returns the selected file entry, if the cursor is on a file row."
   @spec selected_file(t(), [StatusEntry.t()]) :: StatusEntry.t() | nil
