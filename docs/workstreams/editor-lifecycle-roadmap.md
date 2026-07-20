@@ -2889,7 +2889,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,744 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact query-helper and orphan predicate deletion, zero remaining traces, retained live DisplayMap contracts, meaningful renderer-facing row-order coverage, truthful negative budgets, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-helper and orphan predicate deletion, retained live APIs and struct shape, specified test cuts and behavioral retarget, clean traces, truthful budgets, complete validation evidence, zero added concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3098
+- **Implementation commit SHA:** `e70be1c80`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
