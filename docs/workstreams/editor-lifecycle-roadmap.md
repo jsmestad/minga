@@ -2626,7 +2626,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W048: Delete D11 write-only renderer cache fields
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W048/D11
 - **Planning profile:** `D11Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D11Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2650,5 +2650,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact seven-field and private-helper deletion, retained emit, adapter, frame-lineage, recovery, content, telemetry, and WindowCache contracts, truthful focused and broad validation, zero trace, budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3082
 - **Implementation commit SHA:** `f85c96d33`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `c896310ca374db96ba84ede175c2ad1086726f30`.
+- **Merge evidence:** PR #3082 merged after CI run `29742040183` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
