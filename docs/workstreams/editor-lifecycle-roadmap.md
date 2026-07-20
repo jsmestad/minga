@@ -2532,3 +2532,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `7bfe1f1329e3ecb5ef8a780f63289afa8af8eb99`.
 - **Merge evidence:** PR #3074 merged after CI run `29722106093` passed on its isolated failed-job rerun. The first Elixir attempt exposed an unrelated extension event-effect timeout; its exact test passed alone, and the rerun passed Elixir while Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency had already passed.
 - **Completion date:** 2026-07-20.
+
+### W045: Delete D24 no-op parser routing hook
+
+- **Status:** ACTIVE
+- **Audit ID:** W045/D24
+- **Planning profile:** `D24Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only.
+- **Implementation profile:** `D24Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`.
+- **Freshness commit SHA:** `3674339474d82e3b2df33415cd178c7625b80160`.
+- **Observable result:** Removed the exact no-op parser routing path from post-action housekeeping without replacement. `MingaEditor.Input.Router.post_action_housekeeping/2` now runs highlight reset directly into selection, LSP, inlay-hint, and render housekeeping; parser synchronization remains event-driven through buffer change events and `Minga.Parser.Manager`.
+- **Failure reproduction / source trace:** Before deletion, the focused reference check found the only live path: `Router.post_action_housekeeping/2` called `MingaEditor.do_maybe_reparse/2`, that delegated to `MingaEditor.HighlightEvents.maybe_reparse/2`, and `maybe_reparse/2` returned the editor state unchanged.
+- **Implementation result:** Deleted the router pipeline call, the `MingaEditor.do_maybe_reparse/2` delegate block, and the `HighlightEvents.maybe_reparse/2` identity function. No replacement function, data shape, process, protocol, public API, compatibility shim, test hook, or parser synchronization path was added.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/input/router.ex`; `lib/minga_editor.ex`; `lib/minga_editor/highlight_events.ex`.
+- **Focused validation:** `mix test test/minga_editor/input/router_test.exs test/minga_editor/highlight_sync_test.exs test/minga/parser/manager_test.exs` passed with 62 tests after building the missing local Zig parser binary with `zig build` from `zig/`. `mix format --check-formatted lib/minga_editor/input/router.ex lib/minga_editor.ex lib/minga_editor/highlight_events.ex` passed.
+- **Reference validation:** Focused forbidden-reference search for `do_maybe_reparse|maybe_reparse` across `lib` and `test` returned no matches.
+- **Diff validation:** `git diff --check` passed before roadmap evidence.
+- **Current pre-roadmap numstat:** `lib/minga_editor.ex 0 6; lib/minga_editor/highlight_events.ex 0 4; lib/minga_editor/input/router.ex 2 3`.
+- **Production lines added/removed:** `2 added / 13 removed` (net `-11`, within production net `<= 0`).
+- **Test lines added/removed:** `0 added / 0 removed`.
+- **Concepts removed:** Removed the obsolete no-op parser routing hook concept from the editor post-action lifecycle.
+- **Concepts added:** None.
+- **Findings resolved:** D24 implementation slice removes the dead parser hook while preserving event-driven parser synchronization.
+- **Discoveries affecting later work:** The worktree lacked `zig/zig-out/bin/minga-parser` before validation; building the parser with the project-local Zig build fixed the focused parser-manager suite. No source or contract drift required replanning.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,768 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0.99 confidence. Elixir craftsmanship returned `PASS / Lean`. Ponytail returned `PASS / Lean already. Ship.` All confirmed the exact three-hop deletion, retained event-driven parser owner path, truthful budgets, zero residual symbols, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three-hop deletion, zero forbidden references or replacement concepts, retained `BufferChangedEvent` to `Parser.Manager` to `ParseSync.mark_dirty/6` ownership, truthful budgets, focused and broad validation, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
