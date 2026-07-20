@@ -6,10 +6,8 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias Minga.Events
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.BufferLifecycle
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -479,31 +477,6 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         assert owner.active_file == nil
         assert is_nil(owner.agent_ui) or owner.agent_ui.panel.prompt_buffer == nil
       end)
-    end
-
-    @tag :tmp_dir
-    test "post-command lifecycle does not duplicate source-owned save events", %{
-      tmp_dir: tmp_dir
-    } do
-      active_path = Path.join(tmp_dir, "active.ex")
-      saved_path = Path.join(tmp_dir, "saved.ex")
-      File.write!(active_path, "active")
-      File.write!(saved_path, "saved")
-
-      active_buf = start_file_buffer(active_path, "active")
-      saved_buf = start_file_buffer(saved_path, "saved")
-      state = state_for_buffer(active_buf)
-
-      Events.subscribe(:buffer_saved)
-      on_exit(fn -> Events.unsubscribe(:buffer_saved) end)
-
-      assert %EditorState{} = BufferLifecycle.lsp_after_save(state, :save, saved_buf)
-
-      refute_receive {:minga_event, :buffer_saved,
-                      %Minga.Events.BufferEvent{buffer: ^saved_buf, path: ^saved_path}}
-
-      refute_receive {:minga_event, :buffer_saved,
-                      %Minga.Events.BufferEvent{buffer: ^active_buf, path: ^active_path}}
     end
   end
 

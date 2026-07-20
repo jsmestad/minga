@@ -21,7 +21,6 @@ defmodule MingaEditor do
   alias Minga.Git
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
-  alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.CompletionHandling
   alias MingaEditor.Effect.Outcome
@@ -310,9 +309,6 @@ defmodule MingaEditor do
     if state.frontend.backend != :headless do
       Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     end
-
-    # Legacy no-op retained for callers from the former transcript-buffer path.
-    state = AgentLifecycle.setup_agent_highlight(state)
 
     StartupTimer.mark(:editor_init_done)
     StartupTimer.schedule_fallback_report()

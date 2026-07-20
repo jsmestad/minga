@@ -13,10 +13,8 @@ defmodule MingaEditor.HighlightEvents do
   alias Minga.Core.Decorations
   alias Minga.Core.Face
   alias MingaEditor.HighlightSync
-  alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.UI.PrettifySymbolsEffect
 
   @doc """
   Handles `:highlight_names` events from the parser (for the active buffer).
@@ -24,25 +22,6 @@ defmodule MingaEditor.HighlightEvents do
   @spec handle_names(EditorState.t(), [String.t()]) :: EditorState.t()
   def handle_names(state, names) do
     HighlightSync.handle_names(state, names)
-  end
-
-  @doc """
-  Handles `:highlight_spans` events from the parser (for the active buffer).
-
-  Updates the buffer's highlight data and triggers a render.
-  """
-  @spec handle_spans(EditorState.t(), non_neg_integer(), term()) :: EditorState.t()
-  def handle_spans(state, version, spans) do
-    new_state = HighlightSync.handle_spans(state, version, spans)
-    buffer = new_state.workspace.buffers.active
-
-    new_state =
-      case buffer do
-        pid when is_pid(pid) -> PrettifySymbolsEffect.schedule(new_state, pid)
-        nil -> new_state
-      end
-
-    Renderer.render(new_state)
   end
 
   @doc """

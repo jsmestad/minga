@@ -20,7 +20,7 @@ defmodule MingaEditor.UI.PrettifySymbols do
 
   ## Integration
 
-  Called from `HighlightEvents.handle_spans/3` after highlights are stored.
+  Scheduled by the highlight handler after accepted highlight spans are stored.
   Clears previous prettify conceals (group `:prettify_symbols`) and applies
   new ones based on the current highlight spans.
   """

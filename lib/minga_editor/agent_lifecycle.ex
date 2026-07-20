@@ -113,14 +113,6 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   @doc """
-  Legacy hook retained for callers from the former transcript-buffer path.
-
-  The agent transcript is now semantic-only, so there is no buffer to register here.
-  """
-  @spec setup_agent_highlight(state()) :: state()
-  def setup_agent_highlight(%EditorState{} = state), do: state
-
-  @doc """
   Caches the semantic agent transcript metadata for the current session messages.
 
   Called as a surface effect when the agent view receives new messages.
