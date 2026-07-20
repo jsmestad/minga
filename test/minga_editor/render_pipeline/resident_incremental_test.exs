@@ -19,8 +19,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
   # Builds the active window's semantic model for one frame, returning the model
   # and the state carrying the updated resident build cache into the next frame.
-  # Resets the per-frame rasterized counter so `Content.rows_rasterized/1` reads
-  # only this frame's freshly composed rows.
+  # Resets the per-frame rasterized counter because this helper manually enters
+  # the Content stage outside `RenderPipeline.run_windows_pipeline/2`.
   defp build_frame(%EditorState{} = editor) do
     build_frame(%{
       editor: editor,
@@ -175,8 +175,6 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       _renderer = BufferChanges.commit(renderer, output, intent)
       model = contents |> List.first() |> Map.fetch!(:models) |> List.first()
 
-      assert Content.rows_rasterized(output) == 2
-
       assert [
                %{start_index: 32, delete_count: 1, insert_rows: [first]},
                %{start_index: 96, delete_count: 1, insert_rows: [second]}
@@ -309,8 +307,6 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
         {model, state} = build_frame(state)
 
-        assert Content.rows_rasterized(state.output) == 1
-
         measurements = drain_render_measurements([])
         fetched = sum_measurement(measurements, [:minga, :render, :line_fetch], :lines_fetched)
 
@@ -334,7 +330,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         assert model.row_delta.base_row_count == line_count
         assert model.row_delta.result_row_count == line_count
         assert Enum.count_until(model.rows, 2) <= 1
-        assert Enum.sum(Enum.map(model.row_delta.splices, &length(&1.insert_rows))) <= 1
+        rows_composed = model.row_delta.splices |> Enum.map(&length(&1.insert_rows)) |> Enum.sum()
+        assert rows_composed == 1
 
         receipt =
           MingaEditor.Renderer.RenderReceipt.from_output(
@@ -351,7 +348,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
           full_resets: resets,
           changelog_consumes: consumes,
           lines_fetched: fetched,
-          rows_composed: Content.rows_rasterized(state.output),
+          rows_composed: rows_composed,
           swift_chunks_touched: 0,
           editor_rows_visited: 0,
           visible_rows: 0,
