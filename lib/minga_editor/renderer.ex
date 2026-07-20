@@ -3,8 +3,8 @@ defmodule MingaEditor.Renderer do
   Buffer and UI rendering for the editor.
 
   This module is the public API for rendering. It delegates to
-  `RenderPipeline`, which decomposes rendering into seven named stages:
-  Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit.
+  `RenderPipeline`, which runs Layout, Scroll, Content, Agent content,
+  Chrome, Compose, and Emit in order.
 
   Every rendering path uses `Renderer.Server` as the persistent owner of window caches, resident content, and frontend acknowledgement state. The Editor submits typed, cache-free intents and applies only focused editor-owned receipts.
 
