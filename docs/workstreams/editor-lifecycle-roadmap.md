@@ -2837,7 +2837,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W055: Delete D40 Content rows-rasterized getter
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W055/D40
 - **Planning profile:** `D40RasterPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D40RasterWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2861,5 +2861,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact `Content.rows_rasterized/1` deletion, behavioral row-delta test retarget, preserved cache reset/private accumulation and both telemetry consumers, truthful production and test budgets, zero added concepts, complete validation evidence, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3096
 - **Implementation commit SHA:** `996373d5e`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `14a14055e042552e36a5ee0ea1cc4668d90d61d9`.
+- **Merge evidence:** PR #3096 merged after CI run `29784304166` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
