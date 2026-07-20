@@ -62,8 +62,8 @@ public final class GUIState {
     @ObservationIgnored public lazy private(set) var windowOverlayInput = WindowOverlayHostInput(
         theme: themeBacking, notificationCenterState: notificationCenterState,
         whichKeyState: whichKeyState, pickerState: pickerState,
-        bottomPanelState: bottomPanelState, toolManagerState: toolManagerState,
-        floatPopupState: floatPopupState, extensionPanelState: extensionPanelState,
+        bottomPanelState: bottomPanelState, floatPopupState: floatPopupState,
+        extensionPanelState: extensionPanelState,
         frontendExtensions: frontendExtensions, protocolErrorState: protocolErrorState,
         latencyHUDState: latencyHUDState, resyncState: resyncState
     )
@@ -125,8 +125,6 @@ public final class GUIState {
     /// Bottom panel container state.
     public let bottomPanelState = BottomPanelState()
 
-    /// Tool manager panel state.
-    public let toolManagerState = ToolManagerState()
 
     /// Native minibuffer state (0x7F).
     public let minibufferState = MinibufferState()
@@ -308,7 +306,6 @@ public final class WindowOverlayHostInput {
     public let whichKeyState: WhichKeyState
     public let pickerState: PickerState
     public let bottomPanelState: BottomPanelState
-    public let toolManagerState: ToolManagerState
     public let floatPopupState: FloatPopupState
     public let extensionPanelState: ExtensionPanelState
     public let frontendExtensions: FrontendExtensionRuntimeRegistry
@@ -321,8 +318,8 @@ public final class WindowOverlayHostInput {
     fileprivate init(
         theme: GUIThemeBacking, notificationCenterState: NotificationCenterState,
         whichKeyState: WhichKeyState, pickerState: PickerState,
-        bottomPanelState: BottomPanelState, toolManagerState: ToolManagerState,
-        floatPopupState: FloatPopupState, extensionPanelState: ExtensionPanelState,
+        bottomPanelState: BottomPanelState, floatPopupState: FloatPopupState,
+        extensionPanelState: ExtensionPanelState,
         frontendExtensions: FrontendExtensionRuntimeRegistry,
         protocolErrorState: ProtocolErrorState, latencyHUDState: LatencyHUDState,
         resyncState: ResyncState
@@ -332,7 +329,6 @@ public final class WindowOverlayHostInput {
         self.whichKeyState = whichKeyState
         self.pickerState = pickerState
         self.bottomPanelState = bottomPanelState
-        self.toolManagerState = toolManagerState
         self.floatPopupState = floatPopupState
         self.extensionPanelState = extensionPanelState
         self.frontendExtensions = frontendExtensions

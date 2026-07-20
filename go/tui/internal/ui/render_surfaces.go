@@ -95,12 +95,8 @@ func panelSeparatorLine(theme palette, width int, bg color.Color) string {
 }
 
 // Registry surface ids (mirror MingaEditor.Layout.SurfaceRegistry.surface_id_u16/1).
-// Every overlay surface is now BEAM registry-placed: #2281 promoted the eight
-// footer-band secondary overlays (float popup through extension overlay) so the
-// BEAM owns their geometry and z, alongside the earlier cursor-anchored popups
-// (hover, signature help) and the completion/bottom-panel surfaces. There is no
-// transitional fallback table any more; ordering and positioning are placement
-// data end to end (see overlayCandidates / overlayLayer).
+// Every overlay surface is now BEAM registry-placed: #2281 promoted the seven remaining footer-band secondary overlays (float popup through extension overlay) so the BEAM owns their geometry and z, alongside the earlier cursor-anchored popups (hover, signature help) and the completion/bottom-panel surfaces.
+// There is no transitional fallback table any more; ordering and positioning are placement data end to end (see overlayCandidates / overlayLayer).
 const (
 	surfaceIDBottomPanel      uint16 = 12
 	surfaceIDCompletionMenu   uint16 = 16
@@ -108,7 +104,6 @@ const (
 	surfaceIDSignatureHelp    uint16 = 18
 	surfaceIDFloatPopup       uint16 = 19
 	surfaceIDAgentContext     uint16 = 20
-	surfaceIDToolManager      uint16 = 21
 	surfaceIDExtensionPanel   uint16 = 22
 	surfaceIDObservatory      uint16 = 23
 	surfaceIDEditTimeline     uint16 = 24
@@ -166,21 +161,15 @@ func (m Model) overlayWinner() (overlayCandidate, bool) {
 	return winner, found
 }
 
-// overlayCandidates lists every floating overlay surface paired with its BEAM
-// placement. Every surface is registry-placed now (#2281), so each candidate's
-// stacking order is purely its gui_surface_layout z (surfaceOrder), looked up by
-// surfaceID. The historical top-to-bottom precedence is preserved by the emitted
-// z values themselves (completion 301 > hover 290 > signature help 280 > float
-// 270 > agent context 260 > tool manager 240 > bottom panel 200 > extension
-// panel 190 > observatory 180 > edit timeline 170 > notifications 160 > extension
-// overlay 150), not by any Go-side ordering.
+// overlayCandidates lists every floating overlay surface paired with its BEAM placement.
+// Every surface is registry-placed now (#2281), so each candidate's stacking order is purely its gui_surface_layout z (surfaceOrder), looked up by surfaceID.
+// The historical top-to-bottom precedence is preserved by emitted z values, not by any Go-side ordering.
 func (m Model) overlayCandidates() []overlayCandidate {
 	completion, completionOK := m.completion()
 	hover, hoverOK := m.hoverPopup()
 	sig, sigOK := m.signatureHelp()
 	float, floatOK := m.floatPopup()
 	context, contextOK := m.agentContext()
-	tools, toolsOK := m.toolManager()
 	bottom, bottomOK := m.bottomPanel()
 	ext, extOK := m.extensionPanel()
 	obs, obsOK := m.observatory()
@@ -194,7 +183,6 @@ func (m Model) overlayCandidates() []overlayCandidate {
 		m.candidate(surfaceIDSignatureHelp, sigOK && sig.Visible && len(sig.Signatures) > 0, func() []string { return m.renderSignature(sig) }),
 		m.candidate(surfaceIDFloatPopup, floatOK && float.Visible, func() []string { return m.renderFloat(float) }),
 		m.candidate(surfaceIDAgentContext, contextOK && context.Visible, func() []string { return m.renderAgentContext(context) }),
-		m.candidate(surfaceIDToolManager, toolsOK && tools.Visible, func() []string { return m.renderToolManager(tools) }),
 		m.candidate(surfaceIDBottomPanel, bottomOK && bottom.Visible, func() []string { return m.renderBottomPanel(bottom) }),
 		m.candidate(surfaceIDExtensionPanel, extOK && visiblePanelCount(ext) > 0, func() []string { return m.renderExtensionPanels(ext) }),
 		m.candidate(surfaceIDObservatory, obsOK && obs.Visible, func() []string { return m.renderObservatory(obs) }),
@@ -304,33 +292,6 @@ func todoStatusName(status byte) string {
 		return "done"
 	default:
 		return "todo"
-	}
-}
-
-func (m Model) renderToolManager(tools protocol.ToolManager) []string {
-	items := make([]componentItem, 0, len(tools.Tools))
-	selected := min(int(tools.Selected), max(len(tools.Tools)-1, 0))
-	for _, tool := range tools.Tools {
-		items = append(items, componentItem{title: tool.Label, description: strings.TrimSpace(tool.Name + " " + toolStatusName(tool.Status))})
-	}
-	if len(items) == 0 {
-		items = append(items, componentItem{title: "No tools", description: "No matching tools"})
-	}
-	return takeLines(m.charmList("Tool manager", items, selected, m.maxOverlayHeight(), true), m.maxOverlayHeight())
-}
-
-func toolStatusName(status byte) string {
-	switch status {
-	case 1:
-		return "installed"
-	case 2:
-		return "installing"
-	case 3:
-		return "update available"
-	case 4:
-		return "failed"
-	default:
-		return "not installed"
 	}
 }
 

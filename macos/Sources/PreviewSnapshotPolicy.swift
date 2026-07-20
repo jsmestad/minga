@@ -22,7 +22,6 @@ enum PreviewSnapshotPolicy {
         case "BottomPanelView", "BottomPanelEmpty": CGSize(width: 800, height: 250)
         case "MessagesContentView": CGSize(width: 800, height: 360)
         case "SettingsView": CGSize(width: 600, height: 480)
-        case "ToolManagerView": CGSize(width: 800, height: 600)
         case "ObservatoryView": CGSize(width: 320, height: 640)
         case "AgentChatView", "AgentChatStreaming", "AgentChatApproval", "AgentChatError", "AgentChatCompletion", "AgentChatSummary": CGSize(width: 760, height: 600)
         case "ChangeSummaryView": CGSize(width: 280, height: 400)

@@ -993,10 +993,6 @@ final class SpyEncoder: InputEncoder, Sendable {
         case panelDismiss
         case panelResize(heightPercent: UInt8)
         case openFile(path: String)
-        case toolInstall(name: String)
-        case toolUninstall(name: String)
-        case toolUpdate(name: String)
-        case toolDismiss
         case agentToolToggle(messageID: UInt32)
         case executeCommand(name: String)
         case minibufferSelect(index: UInt16)
@@ -1103,10 +1099,6 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendPanelDismiss() { state.withLock { $0.guiActions.append(.panelDismiss) } }
     func sendPanelResize(heightPercent: UInt8) { state.withLock { $0.guiActions.append(.panelResize(heightPercent: heightPercent)) } }
     func sendOpenFile(path: String) { state.withLock { $0.guiActions.append(.openFile(path: path)) } }
-    func sendToolInstall(name: String) { state.withLock { $0.guiActions.append(.toolInstall(name: name)) } }
-    func sendToolUninstall(name: String) { state.withLock { $0.guiActions.append(.toolUninstall(name: name)) } }
-    func sendToolUpdate(name: String) { state.withLock { $0.guiActions.append(.toolUpdate(name: name)) } }
-    func sendToolDismiss() { state.withLock { $0.guiActions.append(.toolDismiss) } }
     func sendAgentToolToggle(messageID: UInt32) { state.withLock { $0.guiActions.append(.agentToolToggle(messageID: messageID)) } }
     func sendExecuteCommand(name: String) { state.withLock { $0.guiActions.append(.executeCommand(name: name)) } }
     func sendMinibufferSelect(index: UInt16) { state.withLock { $0.guiActions.append(.minibufferSelect(index: index)) } }

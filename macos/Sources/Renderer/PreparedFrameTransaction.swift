@@ -30,8 +30,7 @@ extension GUIFrameImpact {
             return .editorOverlay
 
         case .guiWhichKey, .guiPicker, .guiPickerPreview, .guiFloatPopup,
-             .guiToolManager, .guiNotifications, .guiExtensionRuntime,
-             .protocolError:
+             .guiNotifications, .guiExtensionRuntime, .protocolError:
             return .windowOverlay
 
         case .guiTabBar, .guiFileTree, .guiFileTreeSelection, .guiObservatory,
@@ -414,7 +413,7 @@ struct PreparedFrameTransactionBuilder {
             stageAppending(command, weight: resourceWeight, domain: .chrome)
 
         case .guiTabBar, .guiFileTree, .guiObservatory, .guiBreadcrumb,
-             .guiToolManager, .guiGitStatus, .guiWorkspaces, .guiAgentContext,
+             .guiGitStatus, .guiWorkspaces, .guiAgentContext,
              .guiChangeSummary, .guiNotifications, .guiEditTimeline,
              .guiExtensionPanel, .guiSidebars:
             stageReplacing(
@@ -752,7 +751,6 @@ private extension RenderCommand {
         case .guiWindowOverlayDelta: 29
         case .guiWindowViewportDelta: 30
         case .guiWindowRowsDelta: 31
-        case .guiToolManager: 32
         case .guiMinibuffer: 33
         case .guiHoverPopup: 34
         case .guiHoverAction: 35

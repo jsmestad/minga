@@ -197,22 +197,6 @@ struct GUIActionEncoderTests {
         ])
     }
 
-    @Test("tool manager actions record name correctly")
-    func toolActions() {
-        let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendToolInstall(name: "elixir_ls")
-        encoder.sendToolUninstall(name: "prettier")
-        encoder.sendToolUpdate(name: "rust_analyzer")
-        encoder.sendToolDismiss()
-
-        #expect(spy.guiActions == [
-            .toolInstall(name: "elixir_ls"),
-            .toolUninstall(name: "prettier"),
-            .toolUpdate(name: "rust_analyzer"),
-            .toolDismiss
-        ])
-    }
 
     @Test("sendAgentToolToggle records stable message ID")
     func agentToolToggle() {

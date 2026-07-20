@@ -42,7 +42,7 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return sectionedCommandSize(payload)
 	case OPGuiWindowViewportDelta, OPGuiWindowRowsDelta:
 		return sectioned32CommandSize(payload)
-	case OPSetFont, OPSetFontFallback, OPRegisterFont, OPGuiTabBar, OPGuiWhichKey, OPGuiCompletion, OPGuiTheme, OPGuiBreadcrumb, OPGuiPicker, OPGuiAgentChat, OPGuiBottomPanel, OPGuiPickerPreview, OPGuiToolManager, OPGuiMinibuffer, OPGuiHoverPopup, OPGuiSignatureHelp, OPGuiFloatPopup, OPGuiSplitSeparators, OPGuiGitStatus, OPGuiAgentContext, OPGuiChangeSummary, OPGuiWindowOverlayDelta:
+	case OPSetFont, OPSetFontFallback, OPRegisterFont, OPGuiTabBar, OPGuiWhichKey, OPGuiCompletion, OPGuiTheme, OPGuiBreadcrumb, OPGuiPicker, OPGuiAgentChat, OPGuiBottomPanel, OPGuiPickerPreview, OPGuiMinibuffer, OPGuiHoverPopup, OPGuiSignatureHelp, OPGuiFloatPopup, OPGuiSplitSeparators, OPGuiGitStatus, OPGuiAgentContext, OPGuiChangeSummary, OPGuiWindowOverlayDelta:
 		return 0, CommandSizeCustom
 	default:
 		// Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.

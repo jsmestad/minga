@@ -1651,13 +1651,6 @@ func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 		t.Fatalf("agent context overlay missing content: %q", got)
 	}
 
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiToolManager: {ToolManager: protocol.ToolManager{Visible: true, Tools: []protocol.ToolSummary{{Name: "elixir-ls", Label: "Elixir LS", Status: 1}}}}}
-	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDToolManager, Z: 240, HitKind: 8},
-	}
-	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "Elixir LS") || !strings.Contains(got, "installed") {
-		t.Fatalf("tool manager overlay missing content: %q", got)
-	}
 }
 
 func TestSplitSeparatorsRenderOnContent(t *testing.T) {

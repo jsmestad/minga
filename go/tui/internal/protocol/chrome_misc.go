@@ -31,19 +31,6 @@ type ConfigState struct {
 	Present bool
 }
 
-type ToolManager struct {
-	Visible  bool
-	Filter   byte
-	Selected uint16
-	Tools    []ToolSummary
-}
-
-type ToolSummary struct {
-	Name   string
-	Label  string
-	Status byte
-}
-
 func decodeCursorlineChrome(payload []byte) (CursorlineChrome, string, int) {
 	if len(payload) < 6 {
 		return CursorlineChrome{}, "", len(payload)
@@ -117,74 +104,4 @@ func decodeConfigState(payload []byte) (ConfigState, string, int) {
 		return ConfigState{}, "", len(payload)
 	}
 	return ConfigState{Present: true}, "tui no-op", size
-}
-
-func decodeToolManager(payload []byte) (ToolManager, string, int) {
-	if len(payload) < 2 {
-		return ToolManager{}, "", len(payload)
-	}
-	if payload[1] == 0 {
-		return ToolManager{}, "hidden", 2
-	}
-	if len(payload) < 7 {
-		return ToolManager{Visible: true}, "visible", len(payload)
-	}
-	manager := ToolManager{Visible: true, Filter: payload[2], Selected: u16(payload, 3)}
-	count := int(u16(payload, 5))
-	offset := 7
-	manager.Tools = make([]ToolSummary, 0, count)
-	for i := 0; i < count; i++ {
-		tool, next, ok := decodeToolSummary(payload, offset)
-		if !ok {
-			break
-		}
-		manager.Tools = append(manager.Tools, tool)
-		offset = next
-	}
-	return manager, "tools", offset
-}
-
-func decodeToolSummary(payload []byte, offset int) (ToolSummary, int, bool) {
-	name, offset, ok := readString8(payload, offset)
-	if !ok {
-		return ToolSummary{}, offset, false
-	}
-	label, offset, ok := readString8(payload, offset)
-	if !ok {
-		return ToolSummary{}, offset, false
-	}
-	_, offset, ok = readString16(payload, offset)
-	if !ok || len(payload) < offset+4 {
-		return ToolSummary{}, offset, false
-	}
-	status := payload[offset+1]
-	offset += 4
-	langCount := int(payload[offset-1])
-	for i := 0; i < langCount; i++ {
-		_, offset, ok = readString8(payload, offset)
-		if !ok {
-			return ToolSummary{}, offset, false
-		}
-	}
-	_, offset, ok = readString8(payload, offset)
-	if !ok {
-		return ToolSummary{}, offset, false
-	}
-	_, offset, ok = readString16(payload, offset)
-	if !ok || len(payload) < offset+1 {
-		return ToolSummary{}, offset, false
-	}
-	providesCount := int(payload[offset])
-	offset++
-	for i := 0; i < providesCount; i++ {
-		_, offset, ok = readString8(payload, offset)
-		if !ok {
-			return ToolSummary{}, offset, false
-		}
-	}
-	_, offset, ok = readString16(payload, offset)
-	if !ok {
-		return ToolSummary{}, offset, false
-	}
-	return ToolSummary{Name: name, Label: label, Status: status}, offset, true
 }

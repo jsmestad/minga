@@ -28,7 +28,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x7B   | gui_gutter      | Structured gutter data         |
   | 0x7C   | gui_bottom_panel| Bottom panel container state   |
   | 0x7D   | gui_picker_preview | Picker preview content      |
-  | 0x7E   | gui_tool_manager| Tool manager panel           |
   | 0x7F   | gui_minibuffer  | Native minibuffer + candidates|
   | 0x81   | gui_hover_popup | Native hover tooltip popup    |
   | 0x82   | gui_signature_help | Signature help popup       |
@@ -65,10 +64,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x30       | file_tree_delete       |
   | 0x0F       | file_tree_collapse_all |
   | 0x10       | file_tree_refresh    |
-  | 0x11       | tool_install         |
-  | 0x12       | tool_uninstall       |
-  | 0x13       | tool_update          |
-  | 0x14       | tool_dismiss         |
   | 0x15       | agent_tool_toggle    |
   | 0x16       | execute_command      |
   | 0x17       | minibuffer_select    |
@@ -126,7 +121,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   alias Minga.Protocol.Opcodes
 
-  @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_extension_runtime Opcodes.gui_extension_runtime()
 
@@ -147,10 +141,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_new_folder Opcodes.gui_action_file_tree_new_folder()
   @gui_action_file_tree_collapse_all Opcodes.gui_action_file_tree_collapse_all()
   @gui_action_file_tree_refresh Opcodes.gui_action_file_tree_refresh()
-  @gui_action_tool_install Opcodes.gui_action_tool_install()
-  @gui_action_tool_uninstall Opcodes.gui_action_tool_uninstall()
-  @gui_action_tool_update Opcodes.gui_action_tool_update()
-  @gui_action_tool_dismiss Opcodes.gui_action_tool_dismiss()
   @gui_action_agent_tool_toggle Opcodes.gui_action_agent_tool_toggle()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_minibuffer_select Opcodes.gui_action_minibuffer_select()
@@ -276,10 +266,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :file_tree_edit_cancel
           | :file_tree_collapse_all
           | :file_tree_refresh
-          | {:tool_install, name :: String.t()}
-          | {:tool_uninstall, name :: String.t()}
-          | {:tool_update, name :: String.t()}
-          | :tool_dismiss
           | {:agent_tool_toggle, message_id :: non_neg_integer()}
           | {:execute_command, name :: String.t()}
           | {:minibuffer_select, candidate_index :: non_neg_integer()}
@@ -748,20 +734,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_file_tree_refresh, <<>>), do: {:ok, :file_tree_refresh}
 
-  def decode_gui_action(@gui_action_tool_install, <<name_len::16, name::binary-size(name_len)>>),
-    do: {:ok, {:tool_install, name}}
-
-  def decode_gui_action(
-        @gui_action_tool_uninstall,
-        <<name_len::16, name::binary-size(name_len)>>
-      ),
-      do: {:ok, {:tool_uninstall, name}}
-
-  def decode_gui_action(@gui_action_tool_update, <<name_len::16, name::binary-size(name_len)>>),
-    do: {:ok, {:tool_update, name}}
-
-  def decode_gui_action(@gui_action_tool_dismiss, <<>>), do: {:ok, :tool_dismiss}
-
   def decode_gui_action(@gui_action_agent_tool_toggle, <<message_id::32>>),
     do: {:ok, {:agent_tool_toggle, message_id}}
 
@@ -1164,173 +1136,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       _ -> :error
     end
   end
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Tool Manager (BEAM → Frontend)
-  # ═══════════════════════════════════════════════════════════════════════════
-
-  @doc """
-  Encodes the tool manager panel state.
-
-  Parity oracle / future wiring (#2119): this opcode has no live BEAM emitter.
-  The macOS frontend has a fully wired decode -> `ToolManagerState` -> `ToolManagerView`
-  path designed to be BEAM-driven, but the BEAM half (a semantic tool-manager
-  model and emission) was never built. Rather than orphan the frontend decoder
-  and break the GUI protocol round-trip tests, this encoder is retained as the
-  byte-for-byte parity oracle until a tool-manager feature is built on the
-  semantic path. The `gui_protocol_test.exs` round-trip suite exercises it.
-
-  Sends a rich structured view of all available tools with their install
-  status, versions, categories, and progress info. The GUI frontend
-  renders this as a native management panel.
-
-  ## Wire format
-
-      When visible:
-        opcode(1) + 1(1) + filter(1) + selected_index(2) + tool_count(2) + tools...
-
-      Per tool:
-        name_len(1) + name(name_len) + label_len(1) + label(label_len)
-        + desc_len(2) + desc(desc_len) + category(1) + status(1)
-        + method(1) + language_count(1) + languages...
-        + version_len(1) + version(version_len)
-        + homepage_len(2) + homepage(homepage_len)
-        + provides_count(1) + provides...
-        + error_reason_len(2) + error_reason(error_reason_len)
-
-      Per language:
-        lang_len(1) + lang(lang_len)
-
-      Per provides:
-        cmd_len(1) + cmd(cmd_len)
-
-      When hidden:
-        opcode(1) + 0(1)
-
-  ## Status values
-
-  | Value | Status          |
-  |-------|-----------------|
-  | 0     | not_installed   |
-  | 1     | installed       |
-  | 2     | installing      |
-  | 3     | update_available|
-  | 4     | failed          |
-
-  ## Category values
-
-  | Value | Category    |
-  |-------|-------------|
-  | 0     | lsp_server  |
-  | 1     | formatter   |
-  | 2     | linter      |
-  | 3     | debugger    |
-
-  ## Method values
-
-  | Value | Method          |
-  |-------|-----------------|
-  | 0     | npm             |
-  | 1     | pip             |
-  | 2     | cargo           |
-  | 3     | go_install      |
-  | 4     | github_release  |
-
-  ## Filter values
-
-  | Value | Filter        |
-  |-------|---------------|
-  | 0     | all           |
-  | 1     | installed     |
-  | 2     | not_installed |
-  | 3     | lsp_servers   |
-  | 4     | formatters    |
-  """
-  @spec encode_gui_tool_manager(map() | nil) :: binary()
-  def encode_gui_tool_manager(nil), do: <<@op_gui_tool_manager, 0::8>>
-
-  def encode_gui_tool_manager(%{visible: false}), do: <<@op_gui_tool_manager, 0::8>>
-
-  def encode_gui_tool_manager(%{
-        visible: true,
-        filter: filter,
-        selected_index: selected,
-        tools: tools
-      }) do
-    filter_byte = encode_tool_filter(filter)
-    tool_count = Enum.count(tools)
-
-    tool_data =
-      Enum.map(tools, fn tool ->
-        name_str = Atom.to_string(tool.name)
-        name_len = byte_size(name_str)
-        label_len = byte_size(tool.label)
-        desc_len = byte_size(tool.description)
-        category = encode_tool_category(tool.category)
-        status = encode_tool_status(tool.status)
-        method = encode_tool_method(tool.method)
-        version = tool.version || ""
-        version_len = byte_size(version)
-        homepage = tool.homepage || ""
-        homepage_len = byte_size(homepage)
-        error_reason = tool.error_reason || ""
-        error_reason_len = byte_size(error_reason)
-
-        lang_data =
-          Enum.map(tool.languages, fn lang ->
-            lang_str = Atom.to_string(lang)
-            <<byte_size(lang_str)::8, lang_str::binary>>
-          end)
-
-        provides_data =
-          Enum.map(tool.provides, fn cmd ->
-            <<byte_size(cmd)::8, cmd::binary>>
-          end)
-
-        <<name_len::8, name_str::binary, label_len::8, tool.label::binary, desc_len::16,
-          tool.description::binary, category::8, status::8, method::8,
-          Enum.count(tool.languages)::8>> <>
-          IO.iodata_to_binary(lang_data) <>
-          <<version_len::8, version::binary, homepage_len::16, homepage::binary,
-            Enum.count(tool.provides)::8>> <>
-          IO.iodata_to_binary(provides_data) <>
-          <<error_reason_len::16, error_reason::binary>>
-      end)
-
-    <<@op_gui_tool_manager, 1::8, filter_byte::8, selected::16, tool_count::16>> <>
-      IO.iodata_to_binary(tool_data)
-  end
-
-  @spec encode_tool_filter(atom()) :: non_neg_integer()
-  defp encode_tool_filter(:all), do: 0
-  defp encode_tool_filter(:installed), do: 1
-  defp encode_tool_filter(:not_installed), do: 2
-  defp encode_tool_filter(:lsp_servers), do: 3
-  defp encode_tool_filter(:formatters), do: 4
-  defp encode_tool_filter(_), do: 0
-
-  @spec encode_tool_category(atom()) :: non_neg_integer()
-  defp encode_tool_category(:lsp_server), do: 0
-  defp encode_tool_category(:formatter), do: 1
-  defp encode_tool_category(:linter), do: 2
-  defp encode_tool_category(:debugger), do: 3
-  defp encode_tool_category(_), do: 0
-
-  @spec encode_tool_status(atom()) :: non_neg_integer()
-  defp encode_tool_status(:not_installed), do: 0
-  defp encode_tool_status(:installed), do: 1
-  defp encode_tool_status(:installing), do: 2
-  defp encode_tool_status(:update_available), do: 3
-  defp encode_tool_status(:failed), do: 4
-  defp encode_tool_status(_), do: 0
-
-  @spec encode_tool_method(atom()) :: non_neg_integer()
-  defp encode_tool_method(:npm), do: 0
-  defp encode_tool_method(:pip), do: 1
-  defp encode_tool_method(:cargo), do: 2
-  defp encode_tool_method(:go_install), do: 3
-  defp encode_tool_method(:github_release), do: 4
-  defp encode_tool_method(_), do: 0
 
   # ── Git status panel (0x85) ──
   #

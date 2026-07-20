@@ -2714,17 +2714,3 @@ func DecodeGuiFileTreeFields(data []byte, offset int, windowEnd int) (GuiFileTre
 		Status:  status,
 	}, pos, nil
 }
-
-// Command field decoder for gui_tool_manager
-
-func DecodeGuiToolManagerFields(data []byte, offset int, windowEnd int) (GuiToolManagerFields, int, error) {
-	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
-		return GuiToolManagerFields{}, offset, err
-	}
-	visible := data[pos]
-	pos++
-	return GuiToolManagerFields{
-		Visible: visible,
-	}, pos, nil
-}

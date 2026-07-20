@@ -849,30 +849,6 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.bottomPanelState.visible == false)
     }
 
-    @Test("guiToolManager visible updates toolManagerState")
-    @MainActor func guiToolManagerVisible() throws {
-        let (dispatcher, gui) = makeDispatcher()
-        let tools = [Wire.ToolEntry(name: "elixir_ls", label: "ElixirLS",
-                                  description: "LSP", category: 0, status: 1,
-                                  method: 0, languages: ["elixir"], version: "0.22",
-                                  homepage: "", provides: ["elixir-ls"],
-                                  errorReason: "")]
-        dispatcher.applyForTesting(.guiToolManager(visible: true, filter: 0,
-                                             selectedIndex: 0, tools: tools))
-
-        #expect(gui.toolManagerState.visible == true)
-        #expect(gui.toolManagerState.tools.count == 1)
-        #expect(gui.toolManagerState.tools[0].name == "elixir_ls")
-    }
-
-    @Test("guiToolManager hidden clears toolManagerState")
-    @MainActor func guiToolManagerHidden() throws {
-        let (dispatcher, gui) = makeDispatcher()
-        dispatcher.applyForTesting(.guiToolManager(visible: false, filter: 0,
-                                             selectedIndex: 0, tools: []))
-        #expect(gui.toolManagerState.visible == false)
-        #expect(gui.toolManagerState.tools.isEmpty)
-    }
 
     @Test("guiWindowContent stores content in guiState")
     @MainActor func guiWindowContentRouting() throws {

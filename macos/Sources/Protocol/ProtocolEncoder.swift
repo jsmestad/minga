@@ -651,41 +651,6 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: tool_install. Layout: opcode(1) + action_type(1) + name_len(2) + name.
-    func sendToolInstall(name: String) {
-        sendToolAction(GUI_ACTION_TOOL_INSTALL, name: name)
-    }
-
-    /// Send a gui_action: tool_uninstall. Layout: opcode(1) + action_type(1) + name_len(2) + name.
-    func sendToolUninstall(name: String) {
-        sendToolAction(GUI_ACTION_TOOL_UNINSTALL, name: name)
-    }
-
-    /// Send a gui_action: tool_update. Layout: opcode(1) + action_type(1) + name_len(2) + name.
-    func sendToolUpdate(name: String) {
-        sendToolAction(GUI_ACTION_TOOL_UPDATE, name: name)
-    }
-
-    /// Send a gui_action: tool_dismiss.
-    func sendToolDismiss() {
-        var buf = Data(count: 2)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_TOOL_DISMISS
-        writeFrame(buf)
-    }
-
-    private func sendToolAction(_ actionType: UInt8, name: String) {
-        let utf8 = Array(name.utf8)
-        let nameLen = min(utf8.count, Int(UInt16.max))
-        var buf = Data(count: 4 + nameLen)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = actionType
-        writeU16(&buf, 2, UInt16(nameLen))
-        if nameLen > 0 {
-            buf.replaceSubrange(4..<(4 + nameLen), with: utf8[0..<nameLen])
-        }
-        writeFrame(buf)
-    }
 
     /// Send a gui_action: agent_tool_toggle. Layout: opcode(1) + action_type(1) + message_id(4).
     func sendAgentToolToggle(messageID: UInt32) {

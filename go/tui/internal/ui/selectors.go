@@ -249,15 +249,6 @@ func (m Model) editTimeline() (protocol.EditTimeline, bool) {
 	return protocol.EditTimeline{}, false
 }
 
-func (m Model) toolManager() (protocol.ToolManager, bool) {
-	for _, payload := range m.chrome {
-		if payload.ToolManager.Visible {
-			return payload.ToolManager, true
-		}
-	}
-	return protocol.ToolManager{}, false
-}
-
 func (m Model) emptyState() (protocol.EmptyState, bool) {
 	for _, payload := range m.chrome {
 		if payload.EmptyState.Visible {

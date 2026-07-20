@@ -104,7 +104,6 @@ pub const OP_GUI_CURSORLINE = opcodes.OP_GUI_CURSORLINE;
 pub const OP_GUI_GUTTER = opcodes.OP_GUI_GUTTER;
 pub const OP_GUI_BOTTOM_PANEL = opcodes.OP_GUI_BOTTOM_PANEL;
 pub const OP_GUI_PICKER_PREVIEW = opcodes.OP_GUI_PICKER_PREVIEW;
-pub const OP_GUI_TOOL_MANAGER = opcodes.OP_GUI_TOOL_MANAGER;
 pub const OP_GUI_MINIBUFFER = opcodes.OP_GUI_MINIBUFFER;
 pub const OP_CLIPBOARD_WRITE = opcodes.OP_CLIPBOARD_WRITE;
 pub const OP_GUI_INDENT_GUIDES = opcodes.OP_GUI_INDENT_GUIDES;
@@ -156,10 +155,6 @@ pub const GUI_ACTION_FILE_TREE_NEW_FILE = opcodes.GUI_ACTION_FILE_TREE_NEW_FILE;
 pub const GUI_ACTION_FILE_TREE_NEW_FOLDER = opcodes.GUI_ACTION_FILE_TREE_NEW_FOLDER;
 pub const GUI_ACTION_FILE_TREE_COLLAPSE_ALL = opcodes.GUI_ACTION_FILE_TREE_COLLAPSE_ALL;
 pub const GUI_ACTION_FILE_TREE_REFRESH = opcodes.GUI_ACTION_FILE_TREE_REFRESH;
-pub const GUI_ACTION_TOOL_INSTALL = opcodes.GUI_ACTION_TOOL_INSTALL;
-pub const GUI_ACTION_TOOL_UNINSTALL = opcodes.GUI_ACTION_TOOL_UNINSTALL;
-pub const GUI_ACTION_TOOL_UPDATE = opcodes.GUI_ACTION_TOOL_UPDATE;
-pub const GUI_ACTION_TOOL_DISMISS = opcodes.GUI_ACTION_TOOL_DISMISS;
 pub const GUI_ACTION_AGENT_TOOL_TOGGLE = opcodes.GUI_ACTION_AGENT_TOOL_TOGGLE;
 pub const GUI_ACTION_EXECUTE_COMMAND = opcodes.GUI_ACTION_EXECUTE_COMMAND;
 pub const GUI_ACTION_MINIBUFFER_SELECT = opcodes.GUI_ACTION_MINIBUFFER_SELECT;
@@ -1178,7 +1173,6 @@ fn customCommandSize(payload: []const u8) usize {
         OP_GUI_OBSERVATORY => len32CommandSize(payload),
         OP_GUI_SIDEBARS => len32CommandSize(payload),
         OP_GUI_AGENT_CONTEXT => guiAgentContextSize(payload),
-        OP_GUI_TOOL_MANAGER => guiToolManagerSize(payload),
         OP_GUI_CURSORLINE => fixedCommandSize(payload, 6),
         OP_GUI_GUTTER_SEP => fixedCommandSize(payload, 6),
         OP_GUI_LINE_SPACING => len16CommandSize(payload),
@@ -1286,40 +1280,6 @@ fn guiAgentContextSize(payload: []const u8) usize {
     if (payload.len < 4) return payload.len;
     const task_len: usize = std.mem.readInt(u16, payload[2..][0..2], .big);
     return @min(4 + task_len + 10, payload.len);
-}
-
-fn guiToolManagerSize(payload: []const u8) usize {
-    if (payload.len < 2) return payload.len;
-    if (payload[1] == 0) return 2;
-    if (payload.len < 7) return payload.len;
-
-    const count = std.mem.readInt(u16, payload[5..][0..2], .big);
-    var offset: usize = 7;
-    var index: u16 = 0;
-    while (index < count) : (index += 1) {
-        if (!readString8Size(payload, &offset)) return payload.len;
-        if (!readString8Size(payload, &offset)) return payload.len;
-        _ = readString16Size(payload, &offset) orelse return payload.len;
-        if (payload.len < offset + 4) return payload.len;
-        offset += 3;
-        const language_count = payload[offset];
-        offset += 1;
-        var language_index: u8 = 0;
-        while (language_index < language_count) : (language_index += 1) {
-            if (!readString8Size(payload, &offset)) return payload.len;
-        }
-        if (!readString8Size(payload, &offset)) return payload.len;
-        _ = readString16Size(payload, &offset) orelse return payload.len;
-        if (payload.len < offset + 1) return payload.len;
-        const provides_count = payload[offset];
-        offset += 1;
-        var provides_index: u8 = 0;
-        while (provides_index < provides_count) : (provides_index += 1) {
-            if (!readString8Size(payload, &offset)) return payload.len;
-        }
-        _ = readString16Size(payload, &offset) orelse return payload.len;
-    }
-    return offset;
 }
 
 fn guiBreadcrumbSize(payload: []const u8) usize {
@@ -2045,7 +2005,6 @@ test "all generated GUI render opcodes are accounted for by TUI semantic noops" 
         &[_]u8{ OP_GUI_GUTTER, 0 },
         &[_]u8{ OP_GUI_BOTTOM_PANEL, 0 },
         &[_]u8{ OP_GUI_PICKER_PREVIEW, 0 },
-        &[_]u8{ OP_GUI_TOOL_MANAGER, 0 },
         &[_]u8{ OP_GUI_MINIBUFFER, 0 },
         &[_]u8{ OP_GUI_WINDOW_CONTENT, 0, 0, 0, 1, 0 },
         &[_]u8{ OP_GUI_HOVER_POPUP, 0 },
@@ -2953,7 +2912,7 @@ test "commandSize: extension footer summary packets" {
     try std.testing.expectEqual(observatory.len - 1, commandSize(&observatory));
 }
 
-test "commandSize: agent context and tool manager custom packets" {
+test "commandSize: agent context custom packet" {
     const context = [_]u8{
         OP_GUI_AGENT_CONTEXT,
         1,
@@ -2977,42 +2936,7 @@ test "commandSize: agent context and tool manager custom packets" {
         1,
         OP_COMMIT_FRAME,
     };
-    const tools = [_]u8{
-        OP_GUI_TOOL_MANAGER,
-        1,
-        0,
-        0,
-        0,
-        0,
-        1,
-        4,
-        'r',
-        'e',
-        'a',
-        'd',
-        4,
-        'R',
-        'e',
-        'a',
-        'd',
-        0,
-        0,
-        0,
-        2,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        OP_COMMIT_FRAME,
-    };
-    const hidden_tools = [_]u8{ OP_GUI_TOOL_MANAGER, 0, OP_COMMIT_FRAME };
     try std.testing.expectEqual(context.len - 1, commandSize(&context));
-    try std.testing.expectEqual(tools.len - 1, commandSize(&tools));
-    try std.testing.expectEqual(@as(usize, 2), commandSize(&hidden_tools));
 }
 
 test "commandSize: small retained semantic state packets" {

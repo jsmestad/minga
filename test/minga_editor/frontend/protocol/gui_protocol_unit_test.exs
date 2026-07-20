@@ -19,6 +19,15 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for retired tool manager actions" do
+    test "rejects old native panel action slots" do
+      assert :error == ProtocolGUI.decode_gui_action(0x11, <<0::16>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x12, <<7::16, "oldtool">>)
+      assert :error == ProtocolGUI.decode_gui_action(0x13, <<7::16, "oldtool">>)
+      assert :error == ProtocolGUI.decode_gui_action(0x14, <<>>)
+    end
+  end
+
   describe "decode_gui_action for agent chat pin intents (#2654)" do
     test "decodes the two no-payload pin intents" do
       assert {:ok, :chat_scrolled_away_from_bottom} ==

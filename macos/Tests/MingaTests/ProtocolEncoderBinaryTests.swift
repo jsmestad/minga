@@ -602,24 +602,6 @@ struct EncoderGUIActionTests {
         #expect(payload[4 + Int(pathLen)] == 2)
     }
 
-    @Test("tool_install encodes name with length prefix")
-    func toolInstallLayout() {
-        let payload = captureFrame { $0.sendToolInstall(name: "elixir_ls") }
-
-        #expect(payload[1] == GUI_ACTION_TOOL_INSTALL)
-        let nameLen = readU16(payload, 2)
-        #expect(nameLen == 9)
-        let name = String(data: payload[4..<(4 + Int(nameLen))], encoding: .utf8)
-        #expect(name == "elixir_ls")
-    }
-
-    @Test("tool_dismiss is just opcode + action_type")
-    func toolDismissLayout() {
-        let payload = captureFrame { $0.sendToolDismiss() }
-
-        #expect(payload.count == 2)
-        #expect(payload[1] == GUI_ACTION_TOOL_DISMISS)
-    }
 
     @Test("agent_tool_toggle encodes stable message ID")
     func agentToolToggleLayout() {

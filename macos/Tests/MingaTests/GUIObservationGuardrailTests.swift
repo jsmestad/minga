@@ -38,7 +38,6 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/EditorChrome/WorkspaceState.swift#WorkspaceState": "protocol presentation owner",
         "Sources/Views/Extensions/ExtensionOverlayState.swift#ExtensionOverlayState": "protocol presentation owner",
         "Sources/Views/Extensions/ExtensionPanelState.swift#ExtensionPanelState": "protocol presentation owner",
-        "Sources/Views/Extensions/ToolManagerState.swift#ToolManagerState": "protocol presentation owner",
         "Sources/Views/Overlays/CompletionState.swift#CompletionState": "protocol presentation owner",
         "Sources/Views/Overlays/FloatPopupState.swift#FloatPopupState": "protocol presentation owner",
         "Sources/Views/Overlays/HoverPopupState.swift#HoverPopupState": "protocol presentation owner",
@@ -110,7 +109,7 @@ struct GUIObservationGuardrailTests {
         let sources = try productionSources()
         let actualObservable = try Set(sources.flatMap(observableDeclarations(in:)))
         #expect(actualObservable == Set(Self.observationTypeAllowlist.keys))
-        #expect(Self.observationTypeAllowlist.count == 39)
+        #expect(Self.observationTypeAllowlist.count == 38)
 
         let actualIgnored = occurrenceCounts(sources.flatMap(ignoredDeclarations(in:)))
         let expectedIgnored = Dictionary(uniqueKeysWithValues: Self.ignoredDeclarationAllowlist.keys.map { ($0, 1) })

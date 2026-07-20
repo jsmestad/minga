@@ -40,7 +40,6 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.RenderModel.UI.StatusBar.Language
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.Test.GUIHarness
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
 
@@ -371,8 +370,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         {"gui_completion", CompletionEncoder.encode_command(%Completion{})},
         {"gui_which_key", which_key_cmd},
         {"gui_picker", <<Opcodes.gui_picker(), 0::8>>},
-        {"gui_bottom_panel", bottom_panel_cmd},
-        {"gui_tool_manager", ProtocolGUI.encode_gui_tool_manager(nil)}
+        {"gui_bottom_panel", bottom_panel_cmd}
       ]
 
       for {type, command} <- cases do
@@ -662,94 +660,6 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert entry_decoded["id"] == 42
       assert entry_decoded["level"] == 1
       assert entry_decoded["text"] == "File opened"
-    end
-  end
-
-  describe "gui_tool_manager visible" do
-    test "round-trips visible tool manager with tools", %{harness: harness} do
-      # Tool: name_len(1)+name, label_len(1)+label, desc_len(2)+desc,
-      #       category(1)+status(1)+method(1)+lang_count(1),
-      #       lang_len(1)+lang, version_len(1)+version,
-      #       homepage_len(2)+homepage, provides_count(1)+provides_len(1)+provides,
-      #       error_reason_len(2)+error_reason
-      name = "elixir_ls"
-      label = "ElixirLS"
-      desc = "Elixir LSP"
-      lang = "elixir"
-      version = "0.22"
-      homepage = "https://github.com/elixir-lsp/elixir-ls"
-      provides = "elixir-ls"
-
-      tool =
-        <<byte_size(name)::8, name::binary, byte_size(label)::8, label::binary,
-          byte_size(desc)::16, desc::binary, 0::8, 1::8, 0::8, 1::8, byte_size(lang)::8,
-          lang::binary, byte_size(version)::8, version::binary, byte_size(homepage)::16,
-          homepage::binary, 1::8, byte_size(provides)::8, provides::binary, 0::16>>
-
-      cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
-
-      decoded = round_trip(harness, cmd, "gui_tool_manager")
-
-      assert decoded["type"] == "gui_tool_manager"
-      assert decoded["visible"] == true
-      assert decoded["filter"] == 0
-      assert Enum.count(decoded["tools"]) == 1
-
-      t = hd(decoded["tools"])
-      assert t["name"] == "elixir_ls"
-      assert t["label"] == "ElixirLS"
-      assert t["description"] == "Elixir LSP"
-      assert t["category"] == 0
-      assert t["status"] == 1
-      assert t["languages"] == ["elixir"]
-      assert t["version"] == "0.22"
-      assert t["homepage"] == "https://github.com/elixir-lsp/elixir-ls"
-      assert t["provides"] == ["elixir-ls"]
-    end
-
-    test "round-trips failed tool with error reason", %{harness: harness} do
-      error = "No matching asset for darwin_arm64"
-
-      tool =
-        <<5::8, "pyrit"::binary, 6::8, "Pyrite"::binary, 4::16, "Test"::binary, 0::8, 4::8, 0::8,
-          0::8, 0::8, ""::binary, 0::16, ""::binary, 0::8, byte_size(error)::16, error::binary>>
-
-      cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
-      decoded = round_trip(harness, cmd, "gui_tool_manager")
-
-      t = hd(decoded["tools"])
-      assert t["status"] == 4
-      assert t["error_reason"] == "No matching asset for darwin_arm64"
-    end
-
-    test "encodes failed tool error_reason through Elixir encoder", %{harness: harness} do
-      tool = %{
-        name: :pyrite,
-        label: "Pyrite",
-        description: "Test",
-        category: :lsp_server,
-        status: :failed,
-        method: :npm,
-        languages: [],
-        version: nil,
-        homepage: nil,
-        provides: [],
-        error_reason: "No matching asset for darwin_arm64"
-      }
-
-      cmd =
-        ProtocolGUI.encode_gui_tool_manager(%{
-          visible: true,
-          filter: :all,
-          selected_index: 0,
-          tools: [tool]
-        })
-
-      decoded = round_trip(harness, cmd, "gui_tool_manager")
-
-      t = hd(decoded["tools"])
-      assert t["status"] == 4
-      assert t["error_reason"] == "No matching asset for darwin_arm64"
     end
   end
 

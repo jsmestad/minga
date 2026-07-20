@@ -956,7 +956,6 @@ struct GUIFrameSwiftUIInvalidationTests {
             ("ProtocolErrorState", "Sources/Views/Overlays/ProtocolErrorState.swift", []),
             ("ResyncState", "Sources/Views/Overlays/ResyncState.swift", []),
             ("MessagesContentState", "Sources/Views/Overlays/MessagesContentState.swift", []),
-            ("ToolManagerState", "Sources/Views/Extensions/ToolManagerState.swift", []),
             ("ExtensionOverlayState", "Sources/Views/Extensions/ExtensionOverlayState.swift", []),
             ("ExtensionPanelState", "Sources/Views/Extensions/ExtensionPanelState.swift", []),
             ("FeedbackState", "Sources/Views/EditorChrome/FeedbackState.swift", [
@@ -981,7 +980,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
         ]
         let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder"]
-        #expect(owners.count == 31)
+        #expect(owners.count == 30)
         #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
         #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))
 

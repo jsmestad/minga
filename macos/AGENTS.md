@@ -132,7 +132,6 @@ macos/
       AgentChatState.swift / AgentChatView.swift
       BottomPanelState.swift / BottomPanelView.swift
       MessagesContentState.swift / MessagesContentView.swift
-      ToolManagerState.swift / ToolManagerView.swift
       WorkspaceIconPicker.swift
 
     Extensions/

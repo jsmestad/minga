@@ -81,8 +81,6 @@ enum PreviewRegistry {
             bottomPanelEmptyPreview()
         case "SettingsView":
             settingsPreview()
-        case "ToolManagerView":
-            toolManagerPreview()
         case "ObservatoryView":
             observatoryPreview()
         case "AgentChatView":

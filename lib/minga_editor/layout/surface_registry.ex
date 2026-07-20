@@ -173,7 +173,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
           | :signature_help
           | :float_popup
           | :agent_context
-          | :tool_manager
           | :extension_panel
           | :observatory
           | :edit_timeline
@@ -214,7 +213,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   @z_floating_overlay 280
   @z_overlay 300
 
-  # Footer-band secondary overlays (#2281). These eight occupy the historical
+  # Footer-band secondary overlays (#2281). These seven occupy the historical
   # transitional stacking the Go compositor encoded by hand. The owner ruled them
   # mouse-driven (#2330), so the BEAM now owns their geometry and z. The exact z
   # values are preserved from the Go transitional table so promotion is behaviour-
@@ -224,7 +223,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   # placements are expressible but Go renders only the highest-z winner.
   @z_float_popup 270
   @z_agent_context 260
-  @z_tool_manager 240
   @z_extension_panel 190
   @z_observatory 180
   @z_edit_timeline 170
@@ -431,7 +429,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id(:signature_help), do: :signature_help
   def surface_id(:float_popup), do: :float_popup
   def surface_id(:agent_context), do: :agent_context
-  def surface_id(:tool_manager), do: :tool_manager
   def surface_id(:extension_panel), do: :extension_panel
   def surface_id(:observatory), do: :observatory
   def surface_id(:edit_timeline), do: :edit_timeline
@@ -470,7 +467,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:signature_help), do: 18
   def surface_id_u16(:float_popup), do: 19
   def surface_id_u16(:agent_context), do: 20
-  def surface_id_u16(:tool_manager), do: 21
   def surface_id_u16(:extension_panel), do: 22
   def surface_id_u16(:observatory), do: 23
   def surface_id_u16(:edit_timeline), do: 24
@@ -513,7 +509,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   # from the Go transitional table so promotion is behaviour-neutral.
   defp z_for(:float_popup), do: @z_float_popup
   defp z_for(:agent_context), do: @z_agent_context
-  defp z_for(:tool_manager), do: @z_tool_manager
   defp z_for(:extension_panel), do: @z_extension_panel
   defp z_for(:observatory), do: @z_observatory
   defp z_for(:edit_timeline), do: @z_edit_timeline
@@ -538,7 +533,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
        when id in [
               :float_popup,
               :agent_context,
-              :tool_manager,
               :extension_panel,
               :observatory,
               :edit_timeline,

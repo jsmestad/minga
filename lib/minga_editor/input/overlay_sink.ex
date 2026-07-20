@@ -2,9 +2,9 @@ defmodule MingaEditor.Input.OverlaySink do
   @moduledoc """
   Swallow-by-default mouse handler for placed secondary overlays (#2281).
 
-  The eight footer-band overlays (float popup, agent context, tool manager,
-  extension panel, observatory, edit timeline, notifications, extension overlay)
-  are now FocusTree nodes with a real rect. A FocusTree node with no handler
+  The seven footer-band overlays (float popup, agent context, extension panel,
+  observatory, edit timeline, notifications, extension overlay) are now FocusTree
+  nodes with a real rect. A FocusTree node with no handler
   bubbles its mouse events to ancestors (router passthrough semantics), which
   would let a click or scroll over a visible overlay reach the buffer underneath
   and move its cursor. That is the exact bug the epic's AC-2 forbids.

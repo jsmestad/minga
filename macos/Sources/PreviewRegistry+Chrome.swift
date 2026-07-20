@@ -477,30 +477,6 @@ extension PreviewRegistry {
             .environment(\.themeColors, appState.gui.themeColors)
     }
 
-    // MARK: - ToolManagerView
-
-    static func toolManagerPreview() -> some View {
-        let state = ToolManagerState()
-        let theme = PreviewFixtures.theme()
-        state.update(
-            visible: true,
-            filter: .all,
-            selectedIndex: 1,
-            tools: [
-                ToolEntry(id: "elixir_ls", name: "elixir_ls", label: "ElixirLS", description: "Elixir language server with debugger support", category: .lspServer, status: .installed, method: .githubRelease, languages: ["Elixir", "HEEx"], version: "0.22.1", homepage: "", provides: ["elixir-ls"], errorReason: ""),
-                ToolEntry(id: "lua_ls", name: "lua_ls", label: "Lua Language Server", description: "Lua language server for Neovim configs and scripts", category: .lspServer, status: .notInstalled, method: .githubRelease, languages: ["Lua"], version: "", homepage: "", provides: ["lua-language-server"], errorReason: ""),
-                ToolEntry(id: "prettier", name: "prettier", label: "Prettier", description: "Opinionated code formatter for web languages", category: .formatter, status: .installed, method: .npm, languages: ["TypeScript", "JavaScript", "CSS", "HTML"], version: "3.2.5", homepage: "", provides: ["prettier"], errorReason: ""),
-                ToolEntry(id: "ruff", name: "ruff", label: "Ruff", description: "Extremely fast Python linter and formatter", category: .linter, status: .installing, method: .pip, languages: ["Python"], version: "", homepage: "", provides: ["ruff"], errorReason: ""),
-                ToolEntry(id: "rust_analyzer", name: "rust_analyzer", label: "rust-analyzer", description: "Rust language server with full IDE features", category: .lspServer, status: .updateAvailable, method: .githubRelease, languages: ["Rust"], version: "2024.03.04", homepage: "", provides: ["rust-analyzer"], errorReason: ""),
-                ToolEntry(id: "codelldb", name: "codelldb", label: "CodeLLDB", description: "LLDB-based debugger for C, C++, and Rust", category: .debugger, status: .failed, method: .githubRelease, languages: ["C", "C++", "Rust"], version: "", homepage: "", provides: ["codelldb"], errorReason: "Error: GitHub API rate limit exceeded. Try again in 42 minutes."),
-            ]
-        )
-
-        return ToolManagerView(state: state, encoder: nil)
-            .frame(width: 800, height: 600)
-            .background(theme.editorBg)
-            .environment(theme)
-    }
 
     // MARK: - ObservatoryView
 

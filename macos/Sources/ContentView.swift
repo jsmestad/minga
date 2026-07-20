@@ -1205,10 +1205,6 @@ public struct ContentView<EditorSurface: View>: View {
             )
         }
 
-        ToolManagerView(
-            state: input.toolManagerState,
-            encoder: encoder
-        )
 
         if input.floatPopupState.visible {
             let geo = editorGeometry()

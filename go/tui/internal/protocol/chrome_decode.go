@@ -69,8 +69,6 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.CursorlineChrome, chrome.Summary, chrome.Bytes = decodeCursorlineChrome(payload)
 	case generated.OPGuiGutter:
 		chrome.WindowGutter, chrome.Summary, chrome.Bytes = decodeGutter(payload)
-	case generated.OPGuiToolManager:
-		chrome.ToolManager, chrome.Summary, chrome.Bytes = decodeToolManager(payload)
 	case generated.OPGuiIndentGuides:
 		chrome.IndentGuides, chrome.Summary, chrome.Bytes = decodeIndentGuides(payload)
 	case generated.OPGuiLineSpacing:

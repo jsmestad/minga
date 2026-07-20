@@ -114,7 +114,6 @@ type ChromePayload struct {
 	FileTreeSelection FileTreeSelection
 	CursorAnimation   CursorAnimation
 	ConfigState       ConfigState
-	ToolManager       ToolManager
 	Splits            SplitSeparators
 	EmptyState        EmptyState
 	// Placements carries the authoritative per-frame surface layout from
