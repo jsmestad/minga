@@ -65,12 +65,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     end)
   end
 
-  @doc """
-  Agent chat is semantic-only and has no buffer snapshot to prefetch.
-  """
-  @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{}
-  def prefetch_agent_chat_windows(_input, _layout), do: %{}
-
   # ── Private ──────────────────────────────────────────────────────────────
 
   # Scrolls a single window and detects invalidation. Guards against buffer

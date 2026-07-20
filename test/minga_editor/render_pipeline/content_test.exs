@@ -160,8 +160,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       {_renderer, input} = BufferChanges.prepare(renderer, intent)
       layout = Layout.put(input) |> Layout.get()
 
-      {[content], _cursor, output} =
-        Content.build_agent_chat_content(input, layout, %{})
+      {[content], _cursor, output} = Content.build_agent_chat_content(input, layout)
 
       [prompt_model] = content.models
       updated_window = Map.fetch!(output.workspace.windows.map, win_id)
