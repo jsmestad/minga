@@ -2774,3 +2774,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `3ed79ca67af9645ef6567d0647bc0d100184adf2`.
 - **Merge evidence:** PR #3090 merged after CI run `29766651979` passed Elixir on the failed-job rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir run failed in unrelated `MingaEditor.Extension.EventEffectTest`; its exact test passed locally with CI seed `313637` before the full failed-job rerun passed.
 - **Completion date:** 2026-07-20.
+
+### W053: Delete D40 WindowCache boundary snapshot dead API
+
+- **Status:** ACTIVE
+- **Audit ID:** W053/D40
+- **Planning profile:** `D40Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
+- **Implementation profile:** `D40Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
+- **Freshness commit SHA:** `cf65a4ec856eb0c8a1ab582f304688e576118908`.
+- **Observable result:** `MingaEditor.Renderer.WindowCache` no longer exports the stale `boundary_snapshot/1` placeholder API. Rendering behavior is unchanged because the current source/test trace had no caller and the live renderer boundary already materializes cache through `BufferChanges` and `RenderWindow`.
+- **Failure reproduction / source trace:** Before deletion, focused search found `boundary_snapshot` only in `lib/minga_editor/renderer/window_cache.ex:149-153`, where it documented and returned a fresh `%WindowCache{}` placeholder. `WindowCache.boundary_snapshot` and `RenderCache.boundary_snapshot` had no source or test callsites across `lib`, `extensions`, `test`, `bench`, `macos`, or `go`.
+- **Implementation result:** Deleted only the `boundary_snapshot/1` doc, spec, and function from `WindowCache`. No replacement helper, shim, deprecation, public API, config, process, dependency, behaviour, protocol, registry, or data representation was added.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/renderer/window_cache.ex`.
+- **Focused validation:** `mix test.debug test/minga_editor/window/render_cache_test.exs` passed 8 tests after the final source formatting with seed `269651`. Post-delete zero-trace searches for `boundary_snapshot` and for `WindowCache.boundary_snapshot|RenderCache.boundary_snapshot` across `lib`, `extensions`, `test`, `bench`, `macos`, and `go` returned no matches.
+- **Formatting and diff validation:** `mix format lib/minga_editor/renderer/window_cache.ex` ran because `mix format --check-formatted lib/minga_editor/renderer/window_cache.ex` reported the deletion left an extra blank line. The final `mix format --check-formatted lib/minga_editor/renderer/window_cache.ex` and `git diff --check` passed.
+- **Numstat before roadmap evidence:** `lib/minga_editor/renderer/window_cache.ex 0 6`.
+- **Production lines added/removed:** `0 added / 6 removed` (net `-6`, within production net `<= 0`).
+- **Test lines added/removed:** `0 added / 0 removed` (net `0`, within test net `<= 0`).
+- **Concepts removed:** Removed one obsolete exported renderer cache placeholder function, `WindowCache.boundary_snapshot/1`.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, cache shape, telemetry path, DisplayMap query, agent-chat prefetch path, or resident-scroll path was added.
+- **Retained contracts:** `WindowCache.reset/0`, `reset/1`, `with_fetch_version/2`, dirty/invalidation/snapshot handling, retained row and wrap-line caches, resident-build hydration, content epoch, line identity, pending edit deltas, changed snapshots, resident-scroll fields and transitions, `DisplayMap` live queries, agent-chat prefetch, and row-rasterization telemetry remain unchanged. `RenderPipeline.Intent` and `WindowIntent` remain cache-free editor-owned carriers, while renderer materialization continues to inject resident or reset caches through `BufferChanges` and `RenderWindow`.
+- **Findings resolved:** D40 implementation slice removes only the dead WindowCache boundary-snapshot API. Agent-chat prefetch, DisplayMap query cleanup, and row-rasterization getter cleanup remain out of scope for separate future slices.
+- **Discoveries affecting later work:** No production caller, test caller, renderer materialization dependency, resident-scroll dependency, telemetry dependency, DisplayMap dependency, or agent-chat prefetch dependency was found for `boundary_snapshot/1`.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,752 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They independently confirmed the exact six-line deletion, zero remaining traces, renderer-owned cache materialization and retention, unchanged live DisplayMap, telemetry, agent-chat prefetch, resident-scroll and cache contracts, truthful budgets, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact `WindowCache.boundary_snapshot/1` deletion, zero references and concepts, truthful production and test budgets, retained renderer materialization, cache retention, resident-scroll, DisplayMap, telemetry, and agent-chat contracts, complete validation evidence, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3092
+- **Implementation commit SHA:** `20637e7b6`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
