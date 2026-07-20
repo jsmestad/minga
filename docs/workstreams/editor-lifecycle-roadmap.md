@@ -2648,7 +2648,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed twice, including after the test deletion and documentation correction, with Credo, compile, format, and incremental Dialyzer reporting 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,752 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Elixir craftsmanship returned `PASS / Lean`. Correctness and Ponytail confirmed the code deletion was exact and lean, and required truthful ledger corrections after the structural absence test was deleted; correctness also found one stale Emit moduledoc claim. The ledger now records the 17-test focused pass and final numstat, the obsolete test remains deleted without replacement, and the Emit moduledoc names only live semantic encoding and side-channel ownership. Both targeted rechecks returned `RESOLVED/PASS`.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact seven-field and private-helper deletion, retained emit, adapter, frame-lineage, recovery, content, telemetry, and WindowCache contracts, truthful focused and broad validation, zero trace, budgets, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3082
+- **Implementation commit SHA:** `f85c96d33`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
