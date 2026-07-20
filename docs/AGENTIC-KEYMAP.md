@@ -195,7 +195,6 @@ These vim keys are reserved for their standard meanings and are not repurposed, 
 The key repurposing follows established Doom Emacs / Evil conventions for read-only special buffers:
 
 - **magit:** `s` = stage, `o` = toggle section, `q` = close, `Tab` = toggle collapse
-- **dired:** `d` = mark, `u` = unmark, `q` = close
 - **org-agenda:** `q` = close, various single keys for mode-specific actions
 - **which-key:** SPC leader popups work in all modes
 

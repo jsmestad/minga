@@ -172,15 +172,15 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
-  describe "dired / oil" do
-    test "dired and oil parse optional paths" do
+  describe "dired / oil removal" do
+    test "dired and oil parse as unknown commands" do
       assert_parse_cases([
-        {"dired", {:dired, nil}},
-        {"oil", {:dired, nil}},
-        {"dired /tmp/foo", {:dired, "/tmp/foo"}},
-        {"oil /tmp/foo", {:dired, "/tmp/foo"}},
-        {"dired   ", {:dired, nil}},
-        {"oil   ", {:dired, nil}}
+        {"dired", {:unknown, "dired"}},
+        {"oil", {:unknown, "oil"}},
+        {"dired /tmp/foo", {:unknown, "dired /tmp/foo"}},
+        {"oil /tmp/foo", {:unknown, "oil /tmp/foo"}},
+        {"dired   ", {:unknown, "dired"}},
+        {"oil   ", {:unknown, "oil"}}
       ])
     end
   end
