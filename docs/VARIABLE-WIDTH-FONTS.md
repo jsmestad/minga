@@ -107,7 +107,7 @@ When a feature wants variable width:
 
 1. **Phase 1:** ship `window_paint` as a new opcode alongside the existing `draw_text` series. GUI frontends can opt in per window via a capability bit (`incremental_layout`); TUI frontends never opt in. BEAM emits whichever opcode set the frontend negotiated at startup.
 2. **Phase 2:** convert chrome (modeline, tab bar, popups) to the new spec shape. Chrome is the easiest win because its content is small and the BEAM doesn't currently reason about chrome character widths anyway.
-3. **Phase 3:** convert buffer rendering. This is the hard part: `Renderer.Line`, `Renderer.SearchHighlight`, `Renderer.Gutter`, and friends become spec emitters. The existing renderer-owned dirty lines and content epochs scope what to re-emit without adding a parallel invalidation shape.
+3. **Phase 3:** convert buffer rendering. This is the hard part: `Renderer.Line`, `Renderer.SearchHighlight`, and friends become spec emitters. The gutter already uses a semantic model rendered by each frontend. The existing renderer-owned dirty lines and content epochs scope what to re-emit without adding a parallel invalidation shape.
 4. **Phase 4:** add the `hit_test` callback for click handling and `cursor_pixel_at` for floats. These are the only synchronous BEAM↔frontend round-trips and should be rare per frame.
 
 Each phase is shippable on its own. The TUI frontend always uses the existing IR.

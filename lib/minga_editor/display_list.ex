@@ -13,8 +13,6 @@ defmodule MingaEditor.DisplayList do
   semantic frontends render those surfaces natively. `draw/4` and the `Overlay`
   carrier are retained for the remaining legitimate consumers:
 
-    * `Renderer.Gutter` — the styled-run gutter draw primitives (line numbers
-      and git signs) emitted alongside the semantic window model.
     * `Minga.Core.Decorations.BlockDecoration` — raw draw tuples for extension
       block decorations.
     * `FloatingWindow.Spec` / `HoverPopup` / `SignatureHelp` — the `:content`
