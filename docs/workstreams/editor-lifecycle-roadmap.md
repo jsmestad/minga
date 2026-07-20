@@ -2777,7 +2777,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W053: Delete D40 WindowCache boundary snapshot dead API
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W053/D40
 - **Planning profile:** `D40Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D40Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2801,5 +2801,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact `WindowCache.boundary_snapshot/1` deletion, zero references and concepts, truthful production and test budgets, retained renderer materialization, cache retention, resident-scroll, DisplayMap, telemetry, and agent-chat contracts, complete validation evidence, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3092
 - **Implementation commit SHA:** `20637e7b6`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `d5620a60ed72b1779d6bcbb2c622f92f8ca8ca9a`.
+- **Merge evidence:** PR #3092 merged after CI run `29772722227` passed Elixir on the failed-job rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir run failed in unrelated `MingaAgent.Tools.OutputLimitTest`; its exact test passed locally with CI seed `300117` before the full failed-job rerun passed.
+- **Completion date:** 2026-07-20.
