@@ -2505,7 +2505,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W044: Delete D08 dead render dirty modules and no-op stage
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W044/D08
 - **Planning profile:** `D08Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only.
 - **Implementation profile:** `D08Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`.
@@ -2515,19 +2515,20 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Implementation result:** Removed the no-op stage wrapper and helper from `MingaEditor.RenderPipeline`, renumbered the live stage comments and docs, updated renderer facade docs, deleted the two dead production modules and their tests, replaced the stale docs telemetry/sample wording, and added one direct telemetry contract test for the exact live stage order.
 - **Changed files:** `AGENTS.md`; `CONTRIBUTING.md`; `docs/VARIABLE-WIDTH-FONTS.md`; `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/render_pipeline.ex`; `lib/minga_editor/renderer.ex`; `lib/minga_editor/render_pipeline/invalidation.ex`; `lib/minga_editor/render_pipeline/window_dirty.ex`; `test/minga_editor/render_pipeline/invalidation_test.exs`; `test/minga_editor/render_pipeline/pipeline_stage_telemetry_test.exs`.
 - **Focused validation:** `mix test test/minga_editor/render_pipeline/pipeline_stage_telemetry_test.exs test/minga_editor/render_pipeline/scroll_test.exs test/minga_editor/render_pipeline/content_test.exs test/minga_editor/render_model/window/builder_test.exs test/minga/telemetry/dev_handler_test.exs` passed with `64 passed`. `mix format --check-formatted lib/minga_editor/render_pipeline.ex lib/minga_editor/renderer.ex test/minga_editor/render_pipeline/pipeline_stage_telemetry_test.exs` passed after running `mix format` on the touched Elixir files.
-- **Reference validation:** Focused forbidden-reference searches over `lib`, `test`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/VARIABLE-WIDTH-FONTS.md` returned no matches. A repository-wide forbidden-reference search found only the immutable `FINDINGS.md` D08 audit row before this ACTIVE evidence was added.
+- **Reference validation:** Focused forbidden-reference searches over `lib`, `test`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/VARIABLE-WIDTH-FONTS.md` returned no matches. A repository-wide forbidden-reference search found only the immutable `FINDINGS.md` D08 audit row before this W044 evidence was added.
 - **Numstat before roadmap evidence:** Tracked diff plus the new test reports production `15 added / 198 removed` and tests `42 added / 60 removed`; docs outside the roadmap report `4 added / 4 removed`. Per-file tracked numstat before roadmap evidence: `AGENTS.md 2 2; CONTRIBUTING.md 1 1; docs/VARIABLE-WIDTH-FONTS.md 1 1; lib/minga_editor/render_pipeline.ex 13 47; lib/minga_editor/render_pipeline/invalidation.ex 0 85; lib/minga_editor/render_pipeline/window_dirty.ex 0 64; lib/minga_editor/renderer.ex 2 2; test/minga_editor/render_pipeline/invalidation_test.exs 0 60`; the new telemetry test has 42 lines.
 - **Production lines added/removed:** `15 added / 198 removed` (net `-183`, within production net `<= 0`).
 - **Test lines added/removed:** `42 added / 60 removed` (net `-18`, within test net `<= +20`).
 - **Concepts removed:** Removed the obsolete BEAM-side dirty data shape and identity render stage concept.
 - **Concepts added:** Added no production concept, module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, or data representation. Tests add only the direct render stage telemetry order assertion.
 - **Retained contracts:** `Renderer.WindowCache`, `Renderer.RenderWindow`, `RenderPipeline.BufferPrefetch`, and `RenderPipeline.Content` remain the live dirty-line, epoch, retained-row, and context-fingerprint path. Frontend frame recovery, protocol invalidation, keyframe, and WindowCache contracts were not changed.
-- **Findings resolved:** D08 implementation slice is active in this worktree pending review and merge evidence.
+- **Findings resolved:** D08 is verified after merge with the dead modules, identity stage, and obsolete telemetry atom absent from current main.
 - **Discoveries affecting later work:** The docs still use generic frontend invalidation terminology in protocol and architecture contexts that are outside D08 and remain intentionally untouched.
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,768 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Ponytail returned `PASS / Lean already. Ship.` Elixir craftsmanship and correctness each identified one exact blocker: the telemetry test initially filtered out server-emitted events, and the docs example omitted the live `:agent_content` stage. The test was serialized with an explicit global-telemetry reason and changed to forward server events; the docs now list all seven stage timings with a correct total.
 - **Final reviewer verdict:** `PASS` with 0.98 confidence. The reviewer confirmed the exact D08 deletion scope, retained WindowCache ownership, seven-stage renderer-process telemetry coverage, zero forbidden references outside immutable audit history, truthful validation and budget evidence, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3074
 - **Implementation commit SHA:** `420fc221e`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `7bfe1f1329e3ecb5ef8a780f63289afa8af8eb99`.
+- **Merge evidence:** PR #3074 merged after CI run `29722106093` passed on its isolated failed-job rerun. The first Elixir attempt exposed an unrelated extension event-effect timeout; its exact test passed alone, and the rerun passed Elixir while Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency had already passed.
+- **Completion date:** 2026-07-20.
