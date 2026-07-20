@@ -2565,7 +2565,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W046: Shrink D09 gutter renderer to geometry helpers
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W046/D09
 - **Planning profile:** `D09Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D09Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2590,5 +2590,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence after targeted re-review. The reviewer confirmed the exact cell-painter deletion, retained geometry and semantic producer/encoder/frontend paths, truthful documentation and numstat, focused and broad validation, budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3078
 - **Implementation commit SHA:** `61a869eeb`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `e3d98d043c9353e1d5f41e76fee14b5950d3b547`.
+- **Merge evidence:** PR #3078 merged after CI run `29731906524` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
