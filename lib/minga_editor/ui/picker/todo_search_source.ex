@@ -38,10 +38,6 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   def preview?, do: true
 
   @impl true
-  @spec async?() :: boolean()
-  def async?, do: true
-
-  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_context), do: []
 
