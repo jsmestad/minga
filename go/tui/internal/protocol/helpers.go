@@ -139,8 +139,6 @@ func opcodeName(opcode byte) string {
 		return "cursorline"
 	case generated.OPGuiGutter:
 		return "gutter"
-	case generated.OPGuiToolManager:
-		return "tool manager"
 	case generated.OPGuiIndentGuides:
 		return "indent guides"
 	case generated.OPGuiLineSpacing:

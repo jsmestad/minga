@@ -540,66 +540,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
-  defp dispatch_action(state, {:tool_install, name_str}) do
-    name = String.to_existing_atom(name_str)
-
-    case Minga.Tool.Manager.install(name) do
-      :ok ->
-        NoticeWorkflow.publish(state, "Installing #{name_str}...")
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Cannot install #{name_str}: #{reason}"
-        )
-    end
-  rescue
-    ArgumentError ->
-      NoticeWorkflow.publish(state, "Unknown tool: #{name_str}")
-  end
-
-  defp dispatch_action(state, {:tool_uninstall, name_str}) do
-    name = String.to_existing_atom(name_str)
-
-    case Minga.Tool.Manager.uninstall(name) do
-      :ok ->
-        NoticeWorkflow.publish(state, "Uninstalled #{name_str}")
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Cannot uninstall #{name_str}: #{reason}"
-        )
-    end
-  rescue
-    ArgumentError ->
-      NoticeWorkflow.publish(state, "Unknown tool: #{name_str}")
-  end
-
-  defp dispatch_action(state, {:tool_update, name_str}) do
-    name = String.to_existing_atom(name_str)
-
-    case Minga.Tool.Manager.update(name) do
-      :ok ->
-        NoticeWorkflow.publish(state, "Updating #{name_str}...")
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Cannot update #{name_str}: #{reason}"
-        )
-    end
-  rescue
-    ArgumentError ->
-      NoticeWorkflow.publish(state, "Unknown tool: #{name_str}")
-  end
-
-  defp dispatch_action(state, :tool_dismiss) do
-    # The tool manager panel is closed; no state change needed since
-    # visibility is driven by the BEAM's render cycle
-    state
-  end
-
   defp dispatch_action(state, {:agent_tool_toggle, message_id}) do
     session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 

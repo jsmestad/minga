@@ -513,7 +513,6 @@ struct DecoderEdgeCaseTests {
             (Data([OP_GUI_PICKER_PREVIEW, 0]), "picker_preview"),
             (Data([OP_GUI_AGENT_CHAT, 0]), "agent_chat"),
             (Data([OP_GUI_BOTTOM_PANEL, 0]), "bottom_panel"),
-            (Data([OP_GUI_TOOL_MANAGER, 0]), "tool_manager"),
         ]
 
         for (payload, name) in hiddenPayloads {

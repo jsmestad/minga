@@ -186,47 +186,6 @@ struct CursorShapeTests {
     }
 }
 
-// MARK: - ToolCategory/Status/Method labels
-
-@Suite("Tool Enum Display Labels")
-struct ToolEnumLabelTests {
-
-    @Test("ToolCategory labels match expected strings")
-    func categoryLabels() {
-        #expect(ToolCategory.lspServer.label == "Language Servers")
-        #expect(ToolCategory.formatter.label == "Formatters")
-        #expect(ToolCategory.linter.label == "Linters")
-        #expect(ToolCategory.debugger.label == "Debuggers")
-    }
-
-    @Test("ToolStatus labels match expected strings")
-    func statusLabels() {
-        #expect(ToolStatus.notInstalled.label == "Not installed")
-        #expect(ToolStatus.installed.label == "Installed")
-        #expect(ToolStatus.installing.label == "Installing...")
-        #expect(ToolStatus.updateAvailable.label == "Update available")
-        #expect(ToolStatus.failed.label == "Failed")
-    }
-
-    @Test("ToolMethod labels match expected strings")
-    func methodLabels() {
-        #expect(ToolMethod.npm.label == "npm")
-        #expect(ToolMethod.pip.label == "pip")
-        #expect(ToolMethod.cargo.label == "cargo")
-        #expect(ToolMethod.goInstall.label == "go install")
-        #expect(ToolMethod.githubRelease.label == "GitHub Release")
-    }
-
-    @Test("ToolFilter labels match expected strings")
-    func filterLabels() {
-        #expect(ToolFilter.all.label == "All")
-        #expect(ToolFilter.installed.label == "Installed")
-        #expect(ToolFilter.notInstalled.label == "Available")
-        #expect(ToolFilter.lspServers.label == "Servers")
-        #expect(ToolFilter.formatters.label == "Formatters")
-    }
-}
-
 // MARK: - WhichKeyBinding
 
 @Suite("WhichKeyBinding Computed Properties")

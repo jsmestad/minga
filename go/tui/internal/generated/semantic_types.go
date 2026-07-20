@@ -671,7 +671,3 @@ type GuiFileTreeFields struct {
 	Flags   uint8
 	Status  uint8
 }
-
-type GuiToolManagerFields struct {
-	Visible uint8
-}

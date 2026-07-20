@@ -1203,35 +1203,6 @@ func TestDecodePanelAndSidebarChrome(t *testing.T) {
 		t.Fatalf("extension panel decoded incorrectly: %+v", command.Chrome.Extensions)
 	}
 
-	tool := []byte{generated.OPGuiToolManager, 1, 0, 0, 0, 0, 1}
-	tool = append(tool, string8("elixir-ls")...)
-	tool = append(tool, string8("Elixir LS")...)
-	tool = append(tool, string16("Language server")...)
-	tool = append(tool, 0, 1, 0, 0)
-	tool = append(tool, string8("")...)
-	tool = append(tool, string16("")...)
-	tool = append(tool, 0)
-	tool = append(tool, string16("")...)
-	// Trailing commit_frame is a fixed:9 sentinel (opcode + frame_seq + echoed input_seq).
-	tool = append(tool, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
-	command, err = DecodeCommand(tool)
-	if err != nil {
-		t.Fatalf("DecodeCommand tool manager returned error: %v", err)
-	}
-	if !command.Chrome.ToolManager.Visible || len(command.Chrome.ToolManager.Tools) != 1 || command.Chrome.ToolManager.Tools[0].Label != "Elixir LS" {
-		t.Fatalf("tool manager decoded incorrectly: %+v", command.Chrome.ToolManager)
-	}
-	if command.Size != len(tool)-9 {
-		t.Fatalf("tool manager size = %d, want %d", command.Size, len(tool)-9)
-	}
-	second, err := DecodeCommand(tool[command.Size:])
-	if err != nil {
-		t.Fatalf("DecodeCommand commit_frame returned error: %v", err)
-	}
-	if second.Kind != CommandCommitFrame {
-		t.Fatalf("second kind = %v, want commit frame", second.Kind)
-	}
-
 	node := string8("<0.1.0>")
 	node = append(node, string8("")...)
 	node = append(node, string16("Editor")...)

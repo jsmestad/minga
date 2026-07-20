@@ -682,35 +682,6 @@ public enum Wire {
         }
     }
 
-    // MARK: - Tool manager
-
-    public struct ToolEntry: Sendable {
-        public let name: String
-        public let label: String
-        public let description: String
-        public let category: UInt8
-        public let status: UInt8
-        public let method: UInt8
-        public let languages: [String]
-        public let version: String
-        public let homepage: String
-        public let provides: [String]
-        public let errorReason: String
-
-        public init(name: String, label: String, description: String, category: UInt8, status: UInt8, method: UInt8, languages: [String], version: String, homepage: String, provides: [String], errorReason: String) {
-            self.name = name
-            self.label = label
-            self.description = description
-            self.category = category
-            self.status = status
-            self.method = method
-            self.languages = languages
-            self.version = version
-            self.homepage = homepage
-            self.provides = provides
-            self.errorReason = errorReason
-        }
-    }
 
     // MARK: - Gutter
 

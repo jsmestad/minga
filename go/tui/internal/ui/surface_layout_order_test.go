@@ -228,13 +228,6 @@ func TestPromotedFooterOverlaysRenderAtPlacementRect(t *testing.T) {
 			needle:    "Review diff",
 		},
 		{
-			name:      "tool manager",
-			surfaceID: surfaceIDToolManager,
-			z:         240,
-			chrome:    map[byte]protocol.ChromePayload{generated.OPGuiToolManager: {ToolManager: protocol.ToolManager{Visible: true, Tools: []protocol.ToolSummary{{Name: "elixir-ls", Label: "Elixir LS", Status: 1}}}}},
-			needle:    "Elixir LS",
-		},
-		{
 			name:      "extension panel",
 			surfaceID: surfaceIDExtensionPanel,
 			z:         190,

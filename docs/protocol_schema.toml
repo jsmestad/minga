@@ -32,7 +32,8 @@ version = "2.0.0"
 # the versioned hard-dimension resource policy to frontend capabilities (#2801).
 # protocol_version 13 changes gui_action agent_tool_toggle (0x15) from resident
 # index(2) to stable transcript message_id(4).
-protocol_version = 13
+# protocol_version 14 retires the native Tool Manager panel opcode (0x7E) and GUI actions 0x11-0x14. The Tool Manager service and picker command path remain live; stale frontends are rejected by the existing ready handshake.
+protocol_version = 14
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -545,13 +546,6 @@ framing = "custom"
 
 [[opcodes]]
 category = "gui_chrome"
-name = "gui_tool_manager"
-value = 0x7E
-direction = "beam_to_frontend"
-framing = "custom"
-
-[[opcodes]]
-category = "gui_chrome"
 name = "gui_minibuffer"
 value = 0x7F
 direction = "beam_to_frontend"
@@ -878,21 +872,6 @@ value = 0x0F
 name = "file_tree_refresh"
 value = 0x10
 
-[[gui_actions]]
-name = "tool_install"
-value = 0x11
-
-[[gui_actions]]
-name = "tool_uninstall"
-value = 0x12
-
-[[gui_actions]]
-name = "tool_update"
-value = 0x13
-
-[[gui_actions]]
-name = "tool_dismiss"
-value = 0x14
 
 [[gui_actions]]
 name = "agent_tool_toggle"
@@ -2291,7 +2270,3 @@ fields = [
   { name = "flags", type = "u8" },
   { name = "status", type = "u8" },
 ]
-
-[[command_fields]]
-opcode = "gui_tool_manager"
-fields = [{ name = "visible", type = "u8" }]

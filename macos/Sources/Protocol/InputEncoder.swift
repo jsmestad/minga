@@ -74,11 +74,6 @@ public protocol InputEncoder: AnyObject, Sendable {
     // File actions
     func sendOpenFile(path: String)
 
-    // Tool manager actions
-    func sendToolInstall(name: String)
-    func sendToolUninstall(name: String)
-    func sendToolUpdate(name: String)
-    func sendToolDismiss()
 
     // Agent chat actions
     func sendAgentToolToggle(messageID: UInt32)
@@ -275,10 +270,6 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendPanelDismiss() {}
     public func sendPanelResize(heightPercent: UInt8) {}
     public func sendOpenFile(path: String) {}
-    public func sendToolInstall(name: String) {}
-    public func sendToolUninstall(name: String) {}
-    public func sendToolUpdate(name: String) {}
-    public func sendToolDismiss() {}
     public func sendAgentToolToggle(messageID: UInt32) {}
     public func sendExecuteCommand(name: String) {}
     public func sendMinibufferSelect(index: UInt16) {}

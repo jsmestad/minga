@@ -76,7 +76,6 @@ enum RenderCommand: Sendable {
     case guiWindowOverlayDelta(data: GUIWindowOverlayDelta)
     case guiWindowViewportDelta(data: GUIWindowRowsDelta)
     case guiWindowRowsDelta(data: GUIWindowRowsDelta)
-    case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [Wire.ToolEntry])
     case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
     case guiHoverAction(visible: Bool, actionName: String)
@@ -1870,102 +1869,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: true)
         return (.guiWindowRowsDelta(data: delta), consumed)
 
-    case OP_GUI_TOOL_MANAGER:
-        // visible(1)
-        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let visible = data[rest] != 0
-        guard visible else {
-            return (.guiToolManager(visible: false, filter: 0, selectedIndex: 0, tools: []), 2)
-        }
-        // filter(1) + selected_index(2) + tool_count(2)
-        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
-        let tmFilter = data[rest + 1]
-        let tmSelectedIndex = try readU16(data, rest + 2)
-        let toolCount = Int(try readU16(data, rest + 4))
-        var pos = rest + 6
-        var tools: [Wire.ToolEntry] = []
-        try FrameDecodeAccounting.reserve(.arrayEntries, toolCount)
-        tools.reserveCapacity(toolCount)
-        for _ in 0..<toolCount {
-            // name_len(1) + name
-            guard data.count >= pos + 1 else { break }
-            let nameLen = Int(data[pos]); pos += 1
-            guard data.count >= pos + nameLen else { break }
-            let name = try decodeUTF8(data[pos..<(pos + nameLen)]) ?? ""
-            pos += nameLen
-            // label_len(1) + label
-            guard data.count >= pos + 1 else { break }
-            let labelLen = Int(data[pos]); pos += 1
-            guard data.count >= pos + labelLen else { break }
-            let toolLabel = try decodeUTF8(data[pos..<(pos + labelLen)]) ?? ""
-            pos += labelLen
-            // desc_len(2) + desc
-            guard data.count >= pos + 2 else { break }
-            let descLen = Int(try readU16(data, pos)); pos += 2
-            guard data.count >= pos + descLen else { break }
-            let desc = try decodeUTF8(data[pos..<(pos + descLen)]) ?? ""
-            pos += descLen
-            // category(1) + status(1) + method(1) + language_count(1)
-            guard data.count >= pos + 4 else { break }
-            let cat = data[pos]
-            let stat = data[pos + 1]
-            let meth = data[pos + 2]
-            let langCount = Int(data[pos + 3])
-            pos += 4
-            var langs: [String] = []
-            for _ in 0..<langCount {
-                guard data.count >= pos + 1 else { break }
-                let lLen = Int(data[pos]); pos += 1
-                guard data.count >= pos + lLen else { break }
-                let lang = try decodeUTF8(data[pos..<(pos + lLen)]) ?? ""
-                pos += lLen
-                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                langs.append(lang)
-            }
-            // version_len(1) + version
-            guard data.count >= pos + 1 else { break }
-            let verLen = Int(data[pos]); pos += 1
-            guard data.count >= pos + verLen else { break }
-            let version = try decodeUTF8(data[pos..<(pos + verLen)]) ?? ""
-            pos += verLen
-            // homepage_len(2) + homepage
-            guard data.count >= pos + 2 else { break }
-            let hpLen = Int(try readU16(data, pos)); pos += 2
-            guard data.count >= pos + hpLen else { break }
-            let homepage = try decodeUTF8(data[pos..<(pos + hpLen)]) ?? ""
-            pos += hpLen
-            // provides_count(1) + provides
-            guard data.count >= pos + 1 else { break }
-            let provCount = Int(data[pos]); pos += 1
-            var provides: [String] = []
-            for _ in 0..<provCount {
-                guard data.count >= pos + 1 else { break }
-                let cLen = Int(data[pos]); pos += 1
-                guard data.count >= pos + cLen else { break }
-                let cmd = try decodeUTF8(data[pos..<(pos + cLen)]) ?? ""
-                pos += cLen
-                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                provides.append(cmd)
-            }
-            // error_reason_len(2) + error_reason
-            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-            let errLen = Int(try readU16(data, pos)); pos += 2
-            guard data.count >= pos + errLen else { throw ProtocolDecodeError.malformed }
-            let errorReason = errLen > 0
-                ? (try decodeUTF8(data[pos..<(pos + errLen)]) ?? "")
-                : ""
-            pos += errLen
-            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            tools.append(Wire.ToolEntry(
-                name: name, label: toolLabel, description: desc,
-                category: cat, status: stat, method: meth,
-                languages: langs, version: version,
-                homepage: homepage, provides: provides,
-                errorReason: errorReason
-            ))
-        }
-        return (.guiToolManager(visible: true, filter: tmFilter,
-                                 selectedIndex: tmSelectedIndex, tools: tools), pos - offset)
 
     case OP_GUI_MINIBUFFER:
         // visible(1)

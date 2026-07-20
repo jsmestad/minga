@@ -154,9 +154,6 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiThemeFields":
 		v, n, err := DecodeGuiThemeFields(payload, 0, len(payload))
 		return v, n, err
-	case "GuiToolManagerFields":
-		v, n, err := DecodeGuiToolManagerFields(payload, 0, len(payload))
-		return v, n, err
 	case "GuiWhichKeyFields":
 		v, n, err := DecodeGuiWhichKeyFields(payload, 0, len(payload))
 		return v, n, err
