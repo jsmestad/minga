@@ -2656,7 +2656,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W049: Delete D25 TODO generic async advertisement
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W049/D25
 - **Planning profile:** `D25Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D25Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2681,5 +2681,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact generic-async advertisement deletion, retained typed TODO workflow/effect owner path, meaningful generic async coverage, resolved alias blocker, truthful validation, budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3084
 - **Implementation commit SHA:** `0503f0259`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `0d7108eb3285e0170c29391285c983462e74bc30`.
+- **Merge evidence:** PR #3084 merged after CI run `29748112590` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
