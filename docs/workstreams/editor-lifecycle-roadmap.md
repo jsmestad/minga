@@ -2496,7 +2496,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,773 tests with 58 doctests, 98 properties, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages, with one package reporting no tests. Post-review focused Elixir, Go, protocol-generation, Zig, and diff checks passed after the residual cuts.
 - **Pre-acceptance reviews:** Go craftsmanship returned `PASS/Lean` with no mandatory issues. Swift craftsmanship returned `PASS/Lean` after correcting two stale inventory cardinalities and explicitly deferred compilation to macOS CI because Linux lacks `xcodebuild` and `xcodegen`. Elixir craftsmanship returned `PASS/Lean`. Ponytail returned `Lean already. Ship.` Test analysis found no mandatory test gap after the compact canonical adapter assertions were added.
 - **Final reviewer verdict:** `PASS` after targeted re-review with every prior blocker resolved: Zig retired artifacts, preview script listing, Go prose, direct negative surface assertion, Swift inventory cardinalities, and full zero-reference scope.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3072
+- **Implementation commit SHA:** `441782a9f`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
