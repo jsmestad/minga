@@ -2679,7 +2679,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,753 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Elixir craftsmanship returned `PASS / Lean` with 0.99 confidence. Correctness and Ponytail found one exact generic-async test bug: the first test edit removed the `MingaEditor.UI.Picker.FetchEffect` alias while retained finalization assertions still referenced `FetchEffect`, making those checks target an inert nested module atom. The alias was restored, the module documentation was corrected to distinguish generic test-source coverage from the dedicated TODO effect, and the focused 64-test suite passed again. The targeted recheck returned `RESOLVED/PASS` and confirmed the handler identity plus exact numstat. Test-analysis was unavailable because its runtime had no model configured.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact generic-async advertisement deletion, retained typed TODO workflow/effect owner path, meaningful generic async coverage, resolved alias blocker, truthful validation, budgets, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3084
+- **Implementation commit SHA:** `0503f0259`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
