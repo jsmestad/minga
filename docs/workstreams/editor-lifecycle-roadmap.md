@@ -2527,7 +2527,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,768 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Ponytail returned `PASS / Lean already. Ship.` Elixir craftsmanship and correctness each identified one exact blocker: the telemetry test initially filtered out server-emitted events, and the docs example omitted the live `:agent_content` stage. The test was serialized with an explicit global-telemetry reason and changed to forward server events; the docs now list all seven stage timings with a correct total.
 - **Final reviewer verdict:** `PASS` with 0.98 confidence. The reviewer confirmed the exact D08 deletion scope, retained WindowCache ownership, seven-stage renderer-process telemetry coverage, zero forbidden references outside immutable audit history, truthful validation and budget evidence, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3074
+- **Implementation commit SHA:** `420fc221e`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
