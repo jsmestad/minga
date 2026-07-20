@@ -136,7 +136,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_file_tree Opcodes.gui_file_tree()
   @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
-  @op_gui_extension_panel Opcodes.gui_extension_panel()
   @op_gui_extension_runtime Opcodes.gui_extension_runtime()
 
   @gui_action_select_tab Opcodes.gui_action_select_tab()
@@ -374,52 +373,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
      Bitwise.bsr(Bitwise.band(color, 0x00FF00), 8), Bitwise.band(color, 0x0000FF)}
   end
 
-  # ── Extension Panels (forward-compatible, 0x9D) ──
-
-  @doc """
-  Encodes a gui_extension_panel command (0x9D).
-
-  Sends all visible extension panels with their structured content.
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-
-  Payload: panel_count(1) + per panel: ext_name_len(1) + ext_name + panel_id_len(1) + panel_id +
-  title_len(1) + title + position(1) + size_type(1) + size_value(1) + visible(1) +
-  block_count(1) + content blocks.
-
-  Each content block: type(1) + type-specific payload.
-  """
-  @spec encode_gui_extension_panels([Minga.Extension.Panel.entry()]) :: binary()
-  def encode_gui_extension_panels(panels) when is_list(panels) do
-    panel_binaries =
-      Enum.map(panels, fn panel ->
-        ext = to_string(panel.extension)
-        pid = to_string(panel.panel_id)
-        title = panel.title
-
-        {size_type, size_val} =
-          case panel.size do
-            {:percent, n} -> {0, min(n, 255)}
-            {:lines, n} -> {1, min(n, 255)}
-          end
-
-        pos =
-          case panel.position do
-            :bottom -> 0
-            :right -> 1
-            :float -> 2
-          end
-
-        blocks = encode_content_blocks(panel.content)
-
-        <<byte_size(ext)::8, ext::binary, byte_size(pid)::8, pid::binary, byte_size(title)::8,
-          title::binary, pos::8, size_type::8, size_val::8, if(panel.visible, do: 1, else: 0)::8,
-          Enum.count(panel.content)::8, blocks::binary>>
-      end)
-
-    payload = IO.iodata_to_binary([<<Enum.count(panels)::8>> | panel_binaries])
-    <<@op_gui_extension_panel, byte_size(payload)::16, payload::binary>>
-  end
-
   @doc """
   Encodes a generic frontend-extension runtime message.
 
@@ -435,103 +388,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         channel::binary, payload::binary>>
 
     <<@op_gui_extension_runtime, byte_size(envelope)::32, envelope::binary>>
-  end
-
-  @spec encode_content_blocks([Minga.Extension.Panel.content_block()]) :: binary()
-  defp encode_content_blocks(blocks) do
-    IO.iodata_to_binary(Enum.map(blocks, &encode_content_block/1))
-  end
-
-  @spec encode_content_block(Minga.Extension.Panel.content_block()) :: binary()
-  defp encode_content_block({:text, text}) do
-    <<0::8, byte_size(text)::16, text::binary>>
-  end
-
-  defp encode_content_block({:styled_text, runs}) do
-    run_data =
-      IO.iodata_to_binary(
-        Enum.map(runs, fn {text, fg, attrs} ->
-          bold = if Keyword.get(attrs, :bold, false), do: 1, else: 0
-          italic = if Keyword.get(attrs, :italic, false), do: 1, else: 0
-          r = fg >>> 16 &&& 0xFF
-          g = fg >>> 8 &&& 0xFF
-          b = fg &&& 0xFF
-          <<byte_size(text)::16, text::binary, r::8, g::8, b::8, bold::8, italic::8>>
-        end)
-      )
-
-    <<1::8, Enum.count(runs)::8, run_data::binary>>
-  end
-
-  defp encode_content_block({:table, %{columns: cols, rows: rows} = table}) do
-    selected = Map.get(table, :selected, 0xFFFF)
-
-    col_data =
-      IO.iodata_to_binary(Enum.map(cols, fn c -> <<byte_size(c)::16, c::binary>> end))
-
-    row_data =
-      IO.iodata_to_binary(
-        Enum.map(rows, fn row ->
-          IO.iodata_to_binary(
-            Enum.map(row, fn cell ->
-              cell_str = to_string(cell)
-              <<byte_size(cell_str)::16, cell_str::binary>>
-            end)
-          )
-        end)
-      )
-
-    <<2::8, Enum.count(cols)::8, Enum.count(rows)::16, selected::16, col_data::binary,
-      row_data::binary>>
-  end
-
-  defp encode_content_block({:key_value, pairs}) do
-    pair_data =
-      IO.iodata_to_binary(
-        Enum.map(pairs, fn {k, v} ->
-          ks = to_string(k)
-          vs = to_string(v)
-          <<byte_size(ks)::16, ks::binary, byte_size(vs)::16, vs::binary>>
-        end)
-      )
-
-    <<3::8, Enum.count(pairs)::8, pair_data::binary>>
-  end
-
-  defp encode_content_block({:separator}) do
-    <<4::8>>
-  end
-
-  defp encode_content_block({:progress, %{label: label, percent: pct}}) do
-    pct_int = round(pct * 100)
-    <<5::8, byte_size(label)::16, label::binary, pct_int::16>>
-  end
-
-  defp encode_content_block({:tree, %{nodes: nodes}}) do
-    node_data = encode_tree_nodes(nodes)
-    <<6::8, byte_size(node_data)::16, node_data::binary>>
-  end
-
-  defp encode_content_block(_unknown), do: <<255::8>>
-
-  @spec encode_tree_nodes([map()]) :: binary()
-  defp encode_tree_nodes(nodes) do
-    count = Enum.count(nodes)
-
-    node_binaries =
-      IO.iodata_to_binary(
-        Enum.map(nodes, fn node ->
-          label = node.label
-          children = Map.get(node, :children, [])
-          expanded = if Map.get(node, :expanded, false), do: 1, else: 0
-          child_data = encode_tree_nodes(children)
-
-          <<byte_size(label)::16, label::binary, expanded::8, Enum.count(children)::8,
-            child_data::binary>>
-        end)
-      )
-
-    <<count::8, node_binaries::binary>>
   end
 
   # ── Clipboard write (forward-compatible, 0x90+) ──

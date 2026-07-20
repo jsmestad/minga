@@ -16,7 +16,6 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
   alias Minga.RenderModel.UI.ExtensionPanel.Content.TreeNode
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
   alias Minga.RenderModel.UI.ExtensionPanel.Panel
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_extension_panel Minga.Protocol.Opcodes.gui_extension_panel()
 
@@ -53,31 +52,63 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
       assert cmd2 == ExtensionPanelEncoder.encode_command(model2)
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for empty panels" do
-      assert ExtensionPanelEncoder.encode_command(%ExtensionPanel{}) ==
-               ProtocolGUI.encode_gui_extension_panels([])
+    test "emits exact typed panel content bytes" do
+      assert ExtensionPanelEncoder.encode_command(%ExtensionPanel{panels: [panel()]}) ==
+               <<
+                 @op_gui_extension_panel,
+                 95::16,
+                 1,
+                 4,
+                 "demo",
+                 6,
+                 "status",
+                 6,
+                 "Status",
+                 0,
+                 0,
+                 30,
+                 1,
+                 6,
+                 0,
+                 5::16,
+                 "Hello",
+                 1,
+                 1,
+                 4::16,
+                 "Bold",
+                 0x11,
+                 0x22,
+                 0x33,
+                 1,
+                 0,
+                 3,
+                 1,
+                 4::16,
+                 "Mode",
+                 5::16,
+                 "Ready",
+                 5,
+                 5::16,
+                 "Build",
+                 42::16,
+                 6,
+                 20::16,
+                 1,
+                 4::16,
+                 "root",
+                 1,
+                 1,
+                 1,
+                 5::16,
+                 "child",
+                 0,
+                 0,
+                 0,
+                 4
+               >>
     end
 
-    test "produces byte-identical output to legacy ProtocolGUI for panel content" do
-      model = %ExtensionPanel{panels: [panel()]}
-
-      legacy_panels = [
-        %{
-          extension: :demo,
-          panel_id: :status,
-          title: "Status",
-          position: :bottom,
-          size: {:percent, 30},
-          visible: true,
-          content: legacy_content(panel().content)
-        }
-      ]
-
-      assert ExtensionPanelEncoder.encode_command(model) ==
-               ProtocolGUI.encode_gui_extension_panels(legacy_panels)
-    end
-
-    test "produces byte-identical output for table, line-sized, and unknown content blocks" do
+    test "emits exact table, line-sized, and unknown content block bytes" do
       panel = %Panel{
         extension: "demo",
         panel_id: "table",
@@ -91,23 +122,43 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
         ]
       }
 
-      legacy_panels = [
-        %{
-          extension: :demo,
-          panel_id: :table,
-          title: "Table",
-          position: :right,
-          size: {:lines, 7},
-          visible: false,
-          content: legacy_content(panel.content)
-        }
-      ]
-
       assert ExtensionPanelEncoder.encode_command(%ExtensionPanel{panels: [panel]}) ==
-               ProtocolGUI.encode_gui_extension_panels(legacy_panels)
+               <<
+                 @op_gui_extension_panel,
+                 62::16,
+                 1,
+                 4,
+                 "demo",
+                 5,
+                 "table",
+                 5,
+                 "Table",
+                 1,
+                 1,
+                 7,
+                 0,
+                 2,
+                 2,
+                 2,
+                 2::16,
+                 1::16,
+                 4::16,
+                 "Name",
+                 5::16,
+                 "Count",
+                 5::16,
+                 "alpha",
+                 1::16,
+                 "1",
+                 4::16,
+                 "beta",
+                 1::16,
+                 "2",
+                 255
+               >>
     end
 
-    test "encodes nil table selection as the legacy sentinel" do
+    test "encodes nil table selection as the direct sentinel" do
       panel = %Panel{
         extension: "demo",
         panel_id: "table",
@@ -115,30 +166,30 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
         position: :right,
         size: {:lines, 7},
         visible?: false,
-        content: [
-          %Table{
-            columns: ["Name", "Count"],
-            rows: [["alpha", "1"], ["beta", "2"]],
-            selected: nil
-          },
-          %Unknown{}
-        ]
+        content: [%Table{columns: [], rows: [], selected: nil}]
       }
 
-      legacy_panels = [
-        %{
-          extension: :demo,
-          panel_id: :table,
-          title: "Table",
-          position: :right,
-          size: {:lines, 7},
-          visible: false,
-          content: legacy_content(panel.content)
-        }
-      ]
-
       assert ExtensionPanelEncoder.encode_command(%ExtensionPanel{panels: [panel]}) ==
-               ProtocolGUI.encode_gui_extension_panels(legacy_panels)
+               <<
+                 @op_gui_extension_panel,
+                 29::16,
+                 1,
+                 4,
+                 "demo",
+                 5,
+                 "table",
+                 5,
+                 "Table",
+                 1,
+                 1,
+                 7,
+                 0,
+                 1,
+                 2,
+                 0,
+                 0::16,
+                 0xFFFF::16
+               >>
     end
 
     test "rejects extension-controlled counts before truncating the command" do
@@ -213,49 +264,5 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
         }
       ]
     }
-  end
-
-  defp legacy_content(blocks), do: Enum.map(blocks, &legacy_content_block/1)
-  defp legacy_content_block(%Text{text: text}), do: {:text, text}
-
-  defp legacy_content_block(%StyledText{runs: runs}) do
-    {:styled_text,
-     Enum.map(runs, fn %StyledRun{} = run -> {run.text, run.fg, legacy_attrs(run)} end)}
-  end
-
-  defp legacy_content_block(%Table{} = table) do
-    {:table,
-     %{
-       columns: table.columns,
-       rows: table.rows,
-       selected: legacy_table_selected(table.selected)
-     }}
-  end
-
-  defp legacy_content_block(%KeyValue{pairs: pairs}), do: {:key_value, pairs}
-  defp legacy_content_block(%Separator{}), do: {:separator}
-
-  defp legacy_content_block(%Progress{} = progress),
-    do: {:progress, %{label: progress.label, percent: progress.percent}}
-
-  defp legacy_content_block(%Tree{nodes: nodes}),
-    do: {:tree, %{nodes: Enum.map(nodes, &legacy_tree_node/1)}}
-
-  defp legacy_content_block(%Unknown{}), do: {:unknown_block, %{}}
-
-  defp legacy_table_selected(nil), do: 0xFFFF
-  defp legacy_table_selected(selected) when is_integer(selected) and selected >= 0, do: selected
-  defp legacy_table_selected(_selected), do: 0xFFFF
-
-  defp legacy_tree_node(%TreeNode{} = node) do
-    %{
-      label: node.label,
-      expanded: node.expanded?,
-      children: Enum.map(node.children, &legacy_tree_node/1)
-    }
-  end
-
-  defp legacy_attrs(%StyledRun{} = run) do
-    [bold: Map.get(run.attrs, :bold?, false), italic: Map.get(run.attrs, :italic?, false)]
   end
 end
