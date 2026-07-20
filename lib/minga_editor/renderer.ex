@@ -10,7 +10,7 @@ defmodule MingaEditor.Renderer do
 
   Sub-modules handle focused rendering concerns:
 
-  * `Renderer.Gutter`          — line number rendering
+  * `Renderer.Gutter`          — gutter geometry helpers
   * `Renderer.Composition`     — line content styling (conceals, virtual text, invisible chars)
   * `Renderer.SearchHighlight` — search/substitute highlight overlays
   * `Renderer.Regions`         — region definition commands
