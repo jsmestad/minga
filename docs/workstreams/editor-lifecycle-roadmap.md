@@ -2807,7 +2807,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W054: Delete D40 empty agent-chat prefetch chain
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W054/D40
 - **Planning profile:** `D40PrefetchPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D40PrefetchWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2831,5 +2831,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` after one evidence correction. The reviewer confirmed the production and test cutover exactly matches the locked D40 deletion, preserves render contracts, meets line and concept budgets, and is supported by focused, lint, scoped, and full-suite passes. Its sole blocker was an incomplete quick-test failure ledger; all omitted exact locations passed with their original seed, the ledger now names all failures, and the targeted recheck returned `RESOLVED/PASS`.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3094
 - **Implementation commit SHA:** `0ab9593e8`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `9fb7d11dc09069152c9e84221f9173ea4ac474a6`.
+- **Merge evidence:** PR #3094 merged after CI run `29779533406` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
