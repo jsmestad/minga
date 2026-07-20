@@ -206,16 +206,6 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_fetch),
     do: MingaGitPorcelain.Commands.schedule_remote(state, :fetch)
 
-  defp execute_command(state, :git_status_amend) do
-    case resolve_git_root() do
-      nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
-
-      _git_root ->
-        update_tui_state(state, fn tui, _entries -> TuiState.toggle_amend(tui) end)
-    end
-  end
-
   defp execute_command(state, :git_status_start_commit) do
     PromptUI.open(state, CommitPrompt)
   end

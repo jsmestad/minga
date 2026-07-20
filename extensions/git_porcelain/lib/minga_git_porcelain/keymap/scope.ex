@@ -64,7 +64,6 @@ defmodule MingaGitPorcelain.Keymap.Scope do
          {"l", "Pull from remote"},
          {"f", "Fetch from remote"},
          {"cc", "Start commit (enter message)"},
-         {"ca", "Amend last commit"},
          {"cg", "Generate AI commit message"}
        ]},
       {"Discard Confirmation",
@@ -105,7 +104,6 @@ defmodule MingaGitPorcelain.Keymap.Scope do
     |> Bindings.bind(~k(o), :git_status_open_file, "Open file")
     |> Bindings.bind(~k(RET), :git_status_open_file, "Open file")
     |> Bindings.bind(~k(c c), :git_status_start_commit, "Start commit")
-    |> Bindings.bind(~k(c a), :git_status_amend, "Amend last commit")
     |> Bindings.bind(~k(c g), :git_generate_commit_message, "Generate AI commit message")
     # Discard confirmation
     |> Bindings.bind(~k(y), :git_status_confirm_discard, "Confirm discard")
