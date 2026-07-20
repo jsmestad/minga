@@ -2723,8 +2723,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The first `mix test.llm --max-cases 4` run exposed one unrelated `MingaAgent.Tools.SubagentTest` provider-context failure; its exact test passed alone at the same seed, and `mix test.llm --seed 810531 --max-cases 4` then passed 9,835 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` exited 0 with `xcodebuild not found; skipping Swift build`.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence and confirmed the exact oracle deletion, retained owner/frontend/action/runtime contracts, direct wire coverage, truthful evidence, and budgets. Elixir craftsmanship returned `PASS/Lean`. Ponytail required deleting a duplicate empty-command test and shrinking the nil-selection test to a minimal one-panel empty-table command; both cuts were applied, then the adapter and full focused suites, format check, protocol generation check, focused Go tests, and diff check passed. The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered the required test contracts after the cuts.
 - **Final reviewer verdict:** `PASS` with 0 blockers and 0.99 confidence. The reviewer confirmed the exact Protocol.GUI `0x9D` oracle deletion, retained canonical builder/model/adapter/schema/Swift/Go/action/runtime/file-tree/D03 contracts, direct byte coverage after the mandatory Ponytail cuts, truthful validation, budgets, zero production concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3064
+- **Implementation commit SHA:** `96e7fd3db`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
