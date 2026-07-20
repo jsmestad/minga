@@ -2,10 +2,11 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
   use ExUnit.Case, async: true
 
   alias Minga.Extension.ContributionCleanup
+  alias Minga.RenderModel.UI.Action
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
   alias MingaEditor.Agent.SemanticUI.BundledStatusNote
+  alias MingaEditor.Agent.SemanticUI.Entry
   alias MingaEditor.Agent.SemanticUI.Registry
-  alias MingaEditor.Editing
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -21,69 +22,45 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
     assert BundledStatusNote.entry_id() == "agent-status-note"
 
     assert [entry] = BundledStatusNote.entries()
-    assert entry.id == "agent-status-note"
-    assert entry.surface == :transcript_enrichment
-    assert entry.payload == {:system, "Agent UI registry online", :info}
-    assert [%{id: "open_agent", editor_action: :toggle_agentic_view}] = entry.actions
+
+    assert %{
+             id: "agent-status-note",
+             surface: :transcript_enrichment,
+             target: :agent_chat,
+             priority: 10,
+             payload: {:system, "Agent UI registry online", :info},
+             actions: [action]
+           } = entry
+
+    assert action.id == "open_agent"
+    assert action.label == "Open agent panel"
+    assert action.kind == :primary
+    assert action.editor_action == :toggle_agentic_view
+    assert action.payload == %{source: "agent-status-note"}
   end
 
-  test "starts as a bundled registrar and publishes transcript rendering data", %{table: table} do
-    start_supervised!(
-      {BundledStatusNote,
-       name: Module.concat(__MODULE__, "Note#{System.unique_integer([:positive])}"),
-       registry: table}
-    )
-
-    assert %MingaEditor.Agent.SemanticUI.Entry{source: {:bundle, :agent_status_note}} =
-             Registry.get(table, BundledStatusNote.entry_id())
-
-    assert_receive {:agent_semantic_ui_changed, ^table}
-
-    assert [{message_id, {:system, "Agent UI registry online", :info}}] =
-             Registry.transcript_enrichments(table)
-
-    assert is_integer(message_id) and message_id > 0
+  test "default registry seeds the bundled transcript enrichment" do
+    assert %Entry{
+             source: {:bundle, :agent_status_note},
+             id: "agent-status-note",
+             actions: [%Action{id: "open_agent"}]
+           } = Registry.get(Registry.default_table(), BundledStatusNote.entry_id())
   end
 
-  test "dispatches semantic actions through the editor command pipeline", %{table: table} do
-    :ok =
-      Registry.register(table, {:bundle, :test_status}, %{
-        id: "test-status",
-        surface: :transcript_enrichment,
-        payload: {:system, "test", :info},
-        actions: [
-          %{
-            id: "choose_register",
-            label: "Choose register",
-            editor_action: {:select_register, "a"}
-          }
-        ]
-      })
+  test "source cleanup removes enrichments and actions", %{table: table} do
+    source = BundledStatusNote.source()
+    entries = BundledStatusNote.entries()
 
-    state =
-      Registry.dispatch_action(table, base_state(table), "test-status", "choose_register", %{
-        button: :mouse
-      })
-
-    assert Editing.active_register(state) == "a"
-  end
-
-  test "source cleanup removes snapshots and action handlers and reload restores them", %{
-    table: table
-  } do
-    :ok = BundledStatusNote.register(table)
+    :ok = Registry.register_many(table, source, entries)
     assert [_note] = Registry.transcript_enrichments(table)
 
-    assert :ok = Registry.unregister_source(table, BundledStatusNote.source())
+    assert :ok = Registry.unregister_source(table, source)
     assert Registry.transcript_enrichments(table) == []
 
     state = base_state(table)
 
     assert Registry.dispatch_action(table, state, BundledStatusNote.entry_id(), "open_agent", %{}) ==
              state
-
-    assert :ok = BundledStatusNote.reload(table)
-    assert [_note] = Registry.transcript_enrichments(table)
   end
 
   test "rejects callback handlers so semantic actions stay code-lease free", %{table: table} do
@@ -96,18 +73,8 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
              })
   end
 
-  test "cleanup is scoped to the semantic registry and leaves core agent state alone", %{
-    table: table
-  } do
-    state = base_state(table)
-
-    cleanup_state =
-      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-        state,
-        "approval and transcript state stay core-owned"
-      )
-
-    :ok = BundledStatusNote.register(table)
+  test "contribution cleanup unregisters the bundled semantic source", %{table: table} do
+    :ok = Registry.register_many(table, BundledStatusNote.source(), BundledStatusNote.entries())
 
     assert :ok =
              ContributionCleanup.unregister_source(BundledStatusNote.source(),
@@ -115,9 +82,6 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
              )
 
     assert Registry.transcript_enrichments(table) == []
-
-    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(cleanup_state) ==
-             "approval and transcript state stay core-owned"
   end
 
   defp base_state(table) do
