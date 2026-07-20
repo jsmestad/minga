@@ -2747,7 +2747,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W052: Delete D27 BundledStatusNote registrar lifecycle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W052/D27
 - **Planning profile:** `D27Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D27Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2771,5 +2771,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact unused registrar lifecycle deletion, unchanged static declaration, Registry-owned seed, normalization, cleanup, and action paths, zero lifecycle callsites, distinct retained tests, truthful negative budgets, zero concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3090
 - **Implementation commit SHA:** `53a11d9bf`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `3ed79ca67af9645ef6567d0647bc0d100184adf2`.
+- **Merge evidence:** PR #3090 merged after CI run `29766651979` passed Elixir on the failed-job rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir run failed in unrelated `MingaEditor.Extension.EventEffectTest`; its exact test passed locally with CI seed `313637` before the full failed-job rerun passed.
+- **Completion date:** 2026-07-20.
