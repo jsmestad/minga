@@ -59,16 +59,15 @@ defmodule Minga.Keymap.DefaultsTest do
 
     # ── File bindings ──────────────────────────────────────────────────────────
 
-    test "SPC f f → :find_file" do
+    test "SPC f keeps file neighbors without dired" do
       trie = Defaults.leader_trie()
       {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
-      assert {:command, :find_file} = Bindings.lookup(f_node, {?f, 0})
-    end
 
-    test "SPC f s → :save" do
-      trie = Defaults.leader_trie()
-      {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
+      assert {:command, :find_file} = Bindings.lookup(f_node, {?f, 0})
+      assert {:command, :find_file_other_window} = Bindings.lookup(f_node, {?F, 0})
       assert {:command, :save} = Bindings.lookup(f_node, {?s, 0})
+      assert {:command, :open_config} = Bindings.lookup(f_node, {?p, 0})
+      assert :not_found = Bindings.lookup(f_node, {?d, 0})
     end
 
     # ── Buffer bindings ────────────────────────────────────────────────────────

@@ -10,11 +10,15 @@ defmodule Minga.Keymap.ActiveTest do
   end
 
   describe "leader_trie/1" do
-    test "returns defaults on startup", %{store: s} do
+    test "returns file defaults without dired on startup", %{store: s} do
       trie = Active.leader_trie(s)
-      # SPC f f should resolve to :find_file
       {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
+
       assert {:command, :find_file} = Bindings.lookup(f_node, {?f, 0})
+      assert {:command, :find_file_other_window} = Bindings.lookup(f_node, {?F, 0})
+      assert {:command, :save} = Bindings.lookup(f_node, {?s, 0})
+      assert {:command, :open_config} = Bindings.lookup(f_node, {?p, 0})
+      assert :not_found = Bindings.lookup(f_node, {?d, 0})
     end
 
     test "has SPC m prefix for filetype bindings", %{store: s} do

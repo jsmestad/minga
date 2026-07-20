@@ -153,8 +153,7 @@ defmodule Minga.Keymap.Scope do
   @builtin_scopes [
     Minga.Keymap.Scope.Editor,
     Minga.Keymap.Scope.Agent,
-    Minga.Keymap.Scope.FileTree,
-    Minga.Keymap.Scope.Dired
+    Minga.Keymap.Scope.FileTree
   ]
 
   @doc "Registers a scope module for a source."

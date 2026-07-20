@@ -52,7 +52,6 @@ defmodule Minga.Keymap.Defaults do
     {~k(f F), :find_file_other_window, "Find file other window"},
     {~k(f s), :save, "Save file"},
     {~k(f p), :open_config, "Open config file"},
-    {~k(f d), :dired_open, "Open directory (Dired)"},
 
     # ── Buffer ────────────────────────────────────────────────────────────────
     {~k(b b), :buffer_list, "Switch buffer"},
