@@ -2596,7 +2596,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W047: Remove dead editor compatibility lifecycle paths
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W047/D13
 - **Planning profile:** `D13Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D13Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2620,5 +2620,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact D13 rescope, source-owned save publication, save-before-stage behavior, retained editor/parser lifecycle owners, semantic transcript ownership, live highlight effects, truthful tests and budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3080
 - **Implementation commit SHA:** `3cc473a3c`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `7729d732e47b4bbdc8524323365fbc24506db18e`.
+- **Merge evidence:** PR #3080 merged after CI run `29736782257` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
