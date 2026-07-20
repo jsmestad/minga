@@ -12,14 +12,23 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.PickerUI
+  alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
+  alias MingaEditor.UI.Picker.Source
 
   setup do
     original_workspace = Project.snapshot()
     on_exit(fn -> restore_project(original_workspace) end)
     :ok
+  end
+
+  test "does not advertise generic async fetching and keeps fallback candidates inert" do
+    context = Context.from_editor_state(base_state(content: "scratch"))
+
+    refute Source.async?(TodoSearchSource)
+    assert TodoSearchSource.candidates(context) == []
   end
 
   describe "parse_output/2" do

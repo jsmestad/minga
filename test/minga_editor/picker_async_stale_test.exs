@@ -7,9 +7,8 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     * results are revision-tagged so a stale (older-revision) result is dropped
       latest-wins and never overwrites the live picker (AC2/AC6).
 
-  Uses the TODO search source (async). The stale-drop assertion is robust against
-  the real background fetch: a sentinel item carried on a non-live revision can
-  never appear, regardless of whether the real fetch has landed.
+  Covers the generic async picker path with test sources and the dedicated TODO
+  search effect's revision handling.
   """
 
   # TODO fetches spawn git/grep Ports and read the process-global Project workspace.
@@ -21,9 +20,8 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.EffectScheduler
   alias MingaEditor.PickerUI
-  alias MingaEditor.UI.Picker.Candidate
-  alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FetchEffect
+  alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
 
@@ -139,22 +137,19 @@ defmodule MingaEditor.PickerAsyncStaleTest do
 
     state = :sys.get_state(ctx.editor, @sync_timeout)
 
-    request =
-      FetchEffect.request(
-        TodoSearchSource,
-        nil,
-        Context.from_editor_state(state),
-        stale_revision
-      )
+    request = TodoSearch.request(Project.snapshot(), stale_revision)
 
-    outcome =
-      Outcome.completed(
-        request,
-        {:ok, stale_items, Candidate.from_items(stale_items), %{}}
-      )
+    result = %TodoSearch.Result{
+      revision: stale_revision,
+      items: stale_items,
+      candidates: Candidate.from_items(stale_items),
+      meta: %{}
+    }
+
+    outcome = Outcome.completed(request, result)
 
     assert {^state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
-             FetchEffect.apply(state, outcome)
+             TodoSearch.apply(state, outcome)
   end
 
   @spec await_ready_picker(pid(), module()) :: MingaEditor.State.ModalOverlay.Picker.t()
@@ -253,16 +248,17 @@ defmodule MingaEditor.PickerAsyncStaleTest do
 
     state = :sys.get_state(ctx.editor, @sync_timeout)
 
-    request =
-      FetchEffect.request(
-        TodoSearchSource,
-        nil,
-        Context.from_editor_state(state),
-        live_revision
-      )
+    request = TodoSearch.request(Project.snapshot(), live_revision)
 
-    outcome = Outcome.completed(request, {:ok, items, candidates, %{}})
-    assert {new_state, ^outcome} = FetchEffect.apply(state, outcome)
+    result = %TodoSearch.Result{
+      revision: live_revision,
+      items: items,
+      candidates: candidates,
+      meta: %{}
+    }
+
+    outcome = Outcome.completed(request, result)
+    assert {new_state, ^outcome} = TodoSearch.apply(state, outcome)
     {:picker, payload} = new_state.shell_runtime.state.modal
 
     labels = Enum.map(payload.picker_ui.picker.items, & &1.label)

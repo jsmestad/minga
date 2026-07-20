@@ -2653,3 +2653,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `c896310ca374db96ba84ede175c2ad1086726f30`.
 - **Merge evidence:** PR #3082 merged after CI run `29742040183` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-20.
+
+### W049: Delete D25 TODO generic async advertisement
+
+- **Status:** ACTIVE
+- **Audit ID:** W049/D25
+- **Planning profile:** `D25Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
+- **Implementation profile:** `D25Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
+- **Freshness commit SHA:** `48623dd013f9c6aae790dc08533cffe74fecda9e`.
+- **Observable result:** `MingaEditor.UI.Picker.Source.async?(MingaEditor.UI.Picker.TodoSearchSource)` now returns `false` through the existing callback fallback, while `TodoSearchSource.candidates/1` remains behaviour-compliant and intentionally returns `[]`. The live `:search_todos` path remains the dedicated `TodoSearchWorkflow.open/1` loading picker plus `%MingaEditor.Effects.TodoSearch{}` scheduler request and `TodoSearch.apply/2` result path.
+- **Failure reproduction / source trace:** Before deletion, `mix run -e 'alias MingaEditor.UI.Picker.{Source,TodoSearchSource}; IO.inspect({Source.async?(TodoSearchSource), TodoSearchSource.candidates(nil), Source.fetch(TodoSearchSource, nil)})'` returned `{true, [], {:ok, [], %{}}}`, proving the source advertised generic async fetching while the generic fallback could only return an empty candidate set. The dedicated command path already used `TodoSearchWorkflow` and `TodoSearch`, not `FetchEffect`, for repository TODO scanning.
+- **Implementation result:** Deleted only `TodoSearchSource.async?/0`. Added the locked source-callback assertions, changed TODO stale/live-result tests to construct `TodoSearch.request(Project.snapshot(), revision)` and `%TodoSearch.Result{}` before calling `TodoSearch.apply/2`, and retargeted the generic delayed shell-switch `FetchEffect` test to `FileSource`.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/ui/picker/todo_search_source.ex`; `test/minga_editor/ui/picker/todo_search_source_test.exs`; `test/minga_editor/picker_async_stale_test.exs`; `test/minga_editor/delayed_callback_shell_switch_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/ui/picker/todo_search_source_test.exs test/minga_editor/shell/traditional/todo_search_workflow_test.exs test/minga_editor/picker_async_stale_test.exs test/minga_editor/delayed_callback_shell_switch_test.exs test/minga_editor/ui/picker/fetch_effect_test.exs test/minga_editor/ui/picker/source_test.exs` passed with 64 tests.
+- **Formatting, reference, and diff validation:** `mix format` ran on the touched Elixir source and tests. `mix format --check-formatted lib/minga_editor/ui/picker/todo_search_source.ex test/minga_editor/ui/picker/todo_search_source_test.exs test/minga_editor/picker_async_stale_test.exs test/minga_editor/delayed_callback_shell_switch_test.exs` passed. Focused search found no `async?/0` definition or spec in `TodoSearchSource` and no remaining `FetchEffect.request(TodoSearchSource, ...)` trace in the retargeted stale tests. `git diff --check` passed.
+- **Callback validation:** After deletion, `mix run -e 'alias MingaEditor.UI.Picker.{Source,TodoSearchSource}; IO.inspect({Source.async?(TodoSearchSource), TodoSearchSource.candidates(nil), Source.fetch(TodoSearchSource, nil)})'` returned `{false, [], {:ok, [], %{}}}`.
+- **Numstat before roadmap evidence:** `lib/minga_editor/ui/picker/todo_search_source.ex 0 4; test/minga_editor/delayed_callback_shell_switch_test.exs 3 3; test/minga_editor/picker_async_stale_test.exs 23 27; test/minga_editor/ui/picker/todo_search_source_test.exs 9 0`.
+- **Production lines added/removed:** `0 added / 4 removed` (net `-4`, within production net `<= 0`).
+- **Test lines added/removed:** `35 added / 30 removed` (net `+5`, within test net `<= +10`).
+- **Concepts removed:** Removed the misleading generic async callback advertisement from TODO search.
+- **Concepts added:** None. No production module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, scheduler path, generic wrapper, or callback contract was added.
+- **Retained contracts:** `TodoSearchSource.candidates/1`, parsing, candidate building, select, cancel, and preview behavior remain. `TodoSearchWorkflow.open/1`, `TodoSearch.request/2`, scheduler latest-wins policy, root authorization, repository probing, stale workspace/revision guards, `PickerUI.apply_fetch_result/4`, command registration, keymap binding, and generic async picker support for real async sources remain unchanged.
+- **Findings resolved:** D25 implementation slice removes the dormant generic TODO fetch advertisement while preserving the dedicated workflow/effect owner path.
+- **Discoveries affecting later work:** No replan trigger was found. The focused test command emitted one transient `erl_child_setup: failed with error 32 on line 284` line on an initial passing run, then passed cleanly on rerun; no source or contract drift was required.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,753 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Elixir craftsmanship returned `PASS / Lean` with 0.99 confidence. Correctness and Ponytail found one exact generic-async test bug: the first test edit removed the `MingaEditor.UI.Picker.FetchEffect` alias while retained finalization assertions still referenced `FetchEffect`, making those checks target an inert nested module atom. The alias was restored, the module documentation was corrected to distinguish generic test-source coverage from the dedicated TODO effect, and the focused 64-test suite passed again. The targeted recheck returned `RESOLVED/PASS` and confirmed the handler identity plus exact numstat. Test-analysis was unavailable because its runtime had no model configured.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact generic-async advertisement deletion, retained typed TODO workflow/effect owner path, meaningful generic async coverage, resolved alias blocker, truthful validation, budgets, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3084
+- **Implementation commit SHA:** `0503f0259`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.

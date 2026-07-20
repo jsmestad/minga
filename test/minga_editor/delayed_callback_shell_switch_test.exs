@@ -17,7 +17,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.UI.Picker.Item
-  alias MingaEditor.UI.Picker.TodoSearchSource
+  alias MingaEditor.UI.Picker.FileSource
 
   setup do
     Registry.reset_for_test()
@@ -43,7 +43,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   test "picker candidate delivery is dropped without touching or replaying a foreign shell" do
     {traditional_state, revision} =
       TestHelpers.base_state(rendering: :disabled)
-      |> PickerUI.open_loading(TodoSearchSource)
+      |> PickerUI.open_loading(FileSource)
 
     assert is_reference(revision)
     context = Context.from_editor_state(traditional_state)
@@ -53,7 +53,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     items = [%Item{id: %{path: "/tmp/stale.ex", line: 1}, label: "stale candidate"}]
     result = {:ok, items, Candidate.from_items(items), %{status: "stale status"}}
 
-    request = FetchEffect.request(TodoSearchSource, nil, context, revision)
+    request = FetchEffect.request(FileSource, nil, context, revision)
 
     outcome = Outcome.completed(request, result)
 
