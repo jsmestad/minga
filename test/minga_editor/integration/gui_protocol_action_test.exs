@@ -5,7 +5,9 @@ defmodule Minga.Integration.GUIProtocolActionTest do
   use ExUnit.Case, async: false
 
   alias Minga.Test.GUIHarness
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Adapter.GUI.TabBarEncoder
+  alias Minga.RenderModel.UI.TabBar
+  alias Minga.RenderModel.UI.TabBar.Tab
 
   @harness_path Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
@@ -21,14 +23,19 @@ defmodule Minga.Integration.GUIProtocolActionTest do
   end
 
   test "tab bar triggers an opted-in harness select_tab gui_action", %{harness: harness} do
-    tab1 = %MingaEditor.State.Tab{id: 1, kind: :file, label: "main.ex"}
-    tab2 = %MingaEditor.State.Tab{id: 2, kind: :file, label: "test.ex"}
-    tab_bar = %MingaEditor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
+    tab_bar = %TabBar{
+      visible?: true,
+      active_tab_id: 1,
+      tabs: [
+        %Tab{id: 1, workspace_id: 1, kind: :file, label: "main.ex", icon: ""},
+        %Tab{id: 2, workspace_id: 1, kind: :file, label: "test.ex", icon: ""}
+      ]
+    }
 
     {decoded, action} =
       GUIHarness.round_trip_with_action!(
         harness,
-        ProtocolGUI.encode_gui_tab_bar(tab_bar),
+        TabBarEncoder.encode_command(tab_bar),
         "gui_tab_bar",
         {:gui_action, {:select_tab, 2}}
       )
