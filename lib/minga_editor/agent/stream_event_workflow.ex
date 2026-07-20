@@ -2,7 +2,7 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
   @moduledoc """
   Applies transcript and coalesced stream events in mailbox order.
 
-  A batch performs one auto-scroll transition, folds preview updates in arrival order, requests one render, and synchronizes the transcript at most once.
+  A batch folds preview updates in arrival order, requests one render, and synchronizes the transcript at most once.
   """
 
   alias MingaEditor.Agent.ToolEventWorkflow
@@ -23,8 +23,6 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
   @doc "Applies a messages-changed event and refreshes transcript-derived presentation."
   @spec messages_changed(EditorState.t()) :: EditorState.t()
   def messages_changed(%EditorState{} = state) do
-    state = TraditionalWorkflow.maybe_agent_auto_scroll(state)
-
     state =
       TraditionalWorkflow.install_agent_panel(
         state,
@@ -42,7 +40,6 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
   def batch(%EditorState{} = state, []), do: state
 
   def batch(%EditorState{} = state, events) when is_list(events) do
-    state = TraditionalWorkflow.maybe_agent_auto_scroll(state)
     state = Enum.reduce(events, state, &replay_delta/2)
     sync_transcript? = transcript_affecting_batch?(events)
 

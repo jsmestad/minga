@@ -110,11 +110,6 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
   def engage_agent_scroll(%EditorState{} = state),
     do: install_agent_ui(state, UIState.engage_auto_scroll(state.workspace.agent_ui))
 
-  @doc "Re-evaluates active agent chat auto-scroll."
-  @spec maybe_agent_auto_scroll(EditorState.t()) :: EditorState.t()
-  def maybe_agent_auto_scroll(%EditorState{} = state),
-    do: install_agent_ui(state, UIState.maybe_auto_scroll(state.workspace.agent_ui))
-
   @doc "Installs a changed Traditional agent lifecycle value."
   @spec install_agent_state(EditorState.t(), AgentState.t()) :: EditorState.t()
   def install_agent_state(

@@ -229,10 +229,6 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | scroll: Minga.Editing.scroll_to_top(panel.scroll)}}
   end
 
-  @doc "No-op. Streaming events call this; renderer handles pinning."
-  @spec maybe_auto_scroll(t()) :: t()
-  def maybe_auto_scroll(%__MODULE__{} = state), do: state
-
   @doc "Re-engages auto-scroll. Delegates to `Minga.Editing.pin_to_bottom/1`."
   @spec engage_auto_scroll(t()) :: t()
   def engage_auto_scroll(%__MODULE__{panel: panel} = state) do
