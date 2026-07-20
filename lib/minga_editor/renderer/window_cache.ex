@@ -146,12 +146,6 @@ defmodule MingaEditor.Renderer.WindowCache do
     }
   end
 
-  @doc "Builds the fixed-size cache placeholder allowed in an Editor-to-Renderer intent."
-  @spec boundary_snapshot(t()) :: t()
-  def boundary_snapshot(%__MODULE__{}) do
-    %__MODULE__{}
-  end
-
   @doc "Returns a fresh cache invalidation while preserving retained-render epoch state."
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = cache) do
