@@ -2535,7 +2535,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W045: Delete D24 no-op parser routing hook
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W045/D24
 - **Planning profile:** `D24Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only.
 - **Implementation profile:** `D24Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`.
@@ -2559,5 +2559,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three-hop deletion, zero forbidden references or replacement concepts, retained `BufferChangedEvent` to `Parser.Manager` to `ParseSync.mark_dirty/6` ownership, truthful budgets, focused and broad validation, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3076
 - **Implementation commit SHA:** `01ee6017e`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `17f0a1d1322427e9f3ec5387ae51390717c4d19b`.
+- **Merge evidence:** PR #3076 merged after CI run `29726716191` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
