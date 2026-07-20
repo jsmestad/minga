@@ -78,10 +78,6 @@ defmodule MingaEditor.HighlightEvents do
     end
   end
 
-  @doc "Returns editor presentation state unchanged; parser synchronization is event-driven."
-  @spec maybe_reparse(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  def maybe_reparse(state, _version_before), do: state
-
   @doc """
   Handles `:conceal_spans` events from the parser.
 

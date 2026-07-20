@@ -1472,12 +1472,6 @@ defmodule MingaEditor do
     as: :maybe_reset_highlight
 
   @doc false
-  @spec do_maybe_reparse(state(), non_neg_integer()) :: state()
-  defdelegate do_maybe_reparse(state, version_before),
-    to: HighlightEvents,
-    as: :maybe_reparse
-
-  @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()
   defdelegate dispatch_command(state, cmd), to: KeyDispatch
 
