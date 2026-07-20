@@ -2588,7 +2588,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed twice, including after the residual type and documentation corrections, with Credo, compile, format, and incremental Dialyzer reporting 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,754 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0.99 confidence. Ponytail and Elixir craftsmanship each found the same residual public `line_number_style` type; Elixir craftsmanship also found three stale documentation claims and one overly broad first correction. The type was deleted, the documentation now distinguishes BEAM semantic construction, shared geometry, the `gui_gutter` entry path, and frontend rendering, and both targeted rechecks returned `RESOLVED/PASS`. The focused 90-test suite passed again. The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness and final acceptance review cover the retained geometry and semantic contract tests.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence after targeted re-review. The reviewer confirmed the exact cell-painter deletion, retained geometry and semantic producer/encoder/frontend paths, truthful documentation and numstat, focused and broad validation, budgets, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3078
+- **Implementation commit SHA:** `61a869eeb`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
