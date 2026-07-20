@@ -2780,8 +2780,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts added:** Added no production module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, or data representation. Tests add only negative assertions plus retained-neighbor assertions for parser, registry, default/active keymap, scope registry, and input registry behavior.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0 blockers and 0.99 confidence, confirming every live producer and consumer was removed, existing unknown-command behavior remains, ordinary neighbors and the exact Dired.2 residual boundary are preserved, and evidence and budgets are truthful. Elixir craftsmanship returned `PASS/Lean`. Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered the locked parser/registry/keymap/scope/input/save/close contracts.
 - **Final reviewer verdict:** `PASS` with 1.00 confidence after targeted evidence re-review. The reviewer confirmed the full diff reports exactly 24 roadmap additions, resolving the sole initial blocker; the prior implementation PASS remains preserved.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3068
+- **Implementation commit SHA:** `35c8acbc1`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 - **Remaining references:** Residual Dired surfaces remain only where locked for Dired.2: `lib/minga/dired.ex`, `lib/minga_editor/state/dired.ex`, Dired field and retirement lines in `lib/minga_editor/session/state.ex`, `lib/minga_editor/state/tab/context.ex`, and `lib/minga_editor/state.ex`, with their residual tests plus historical roadmap/FINDINGS/spec mentions. Ordinary file opening, file finder, file tree, buffer save/force-save/save-quit/save-all, buffer close/kill, ES09/ES10/S10/D03/D04, and Dired residual state/persistence were preserved.
