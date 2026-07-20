@@ -286,40 +286,6 @@ defmodule Minga.Buffer.BlockDecorationTest do
       assert Enum.count(fold_entries) == 1
     end
 
-    test "next_visible_line skips block entries" do
-      fm = FoldMap.new()
-      decs = Decorations.new()
-
-      {_, decs} =
-        Decorations.add_block_decoration(decs, 5,
-          placement: :above,
-          render: fn _w -> [{"header", Minga.Core.Face.new()}] end
-        )
-
-      dm = DisplayMap.compute(fm, decs, 0, 15, 20)
-
-      # Line 4 → next should be 5 (skipping the block entry)
-      assert DisplayMap.next_visible_line(dm, 4) == 5
-      # Line 5 → next should be 6 (block is above 5, doesn't affect forward nav)
-      assert DisplayMap.next_visible_line(dm, 5) == 6
-    end
-
-    test "prev_visible_line skips block entries" do
-      fm = FoldMap.new()
-      decs = Decorations.new()
-
-      {_, decs} =
-        Decorations.add_block_decoration(decs, 5,
-          placement: :below,
-          render: fn _w -> [{"separator", Minga.Core.Face.new()}] end
-        )
-
-      dm = DisplayMap.compute(fm, decs, 0, 15, 20)
-
-      # Line 6 → prev should be 5 (skipping the block below 5)
-      assert DisplayMap.prev_visible_line(dm, 6) == 5
-    end
-
     test "block consumes display rows" do
       fm = FoldMap.new()
       decs = Decorations.new()

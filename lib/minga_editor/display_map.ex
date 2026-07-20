@@ -141,16 +141,7 @@ defmodule MingaEditor.DisplayMap do
     has_window_folds or closed_dec_folds != [] or has_virtual_lines or has_blocks
   end
 
-  # ── Public query API ─────────────────────────────────────────────────────
-
-  @doc "Returns the buffer line range needed to fetch all visible lines."
-  @spec buffer_range(t()) :: {non_neg_integer(), non_neg_integer()} | nil
-  def buffer_range(%__MODULE__{entries: []}), do: nil
-
-  def buffer_range(%__MODULE__{entries: entries}) do
-    buf_lines = entries |> Enum.map(fn {line, _} -> line end) |> Enum.uniq()
-    {Enum.min(buf_lines), Enum.max(buf_lines)}
-  end
+  # ── Public live API ─────────────────────────────────────────────────────
 
   @doc "Returns the entry list for the content renderer."
   @spec to_visible_line_map(t()) :: [entry()]
@@ -160,83 +151,6 @@ defmodule MingaEditor.DisplayMap do
   @spec display_row_for_buf_line(t(), non_neg_integer()) :: non_neg_integer() | nil
   def display_row_for_buf_line(%__MODULE__{entries: entries}, buf_line) do
     Enum.find_index(entries, fn {line, type} -> line == buf_line and buffer_line_entry?(type) end)
-  end
-
-  @doc "Returns the buffer line at the given display row."
-  @spec buf_line_for_display_row(t(), non_neg_integer()) :: non_neg_integer() | nil
-  def buf_line_for_display_row(%__MODULE__{entries: entries}, display_row) do
-    case Enum.at(entries, display_row) do
-      nil -> nil
-      {line, _} -> line
-    end
-  end
-
-  @doc "Returns the next visible buffer line after the given line."
-  @spec next_visible_line(t(), non_neg_integer()) :: non_neg_integer()
-  def next_visible_line(%__MODULE__{entries: entries}, line) do
-    idx = Enum.find_index(entries, fn {l, type} -> l == line and buffer_line_entry?(type) end)
-
-    case idx do
-      nil ->
-        line + 1
-
-      i ->
-        entries
-        |> Enum.drop(i + 1)
-        |> Enum.find(fn {_l, type} -> buffer_line_entry?(type) end)
-        |> case do
-          nil -> line + 1
-          {next_line, _} -> next_line
-        end
-    end
-  end
-
-  @doc "Returns the previous visible buffer line before the given line."
-  @spec prev_visible_line(t(), non_neg_integer()) :: non_neg_integer()
-  def prev_visible_line(%__MODULE__{entries: entries}, line) do
-    idx = Enum.find_index(entries, fn {l, type} -> l == line and buffer_line_entry?(type) end)
-
-    case idx do
-      nil ->
-        max(line - 1, 0)
-
-      0 ->
-        max(line - 1, 0)
-
-      i ->
-        entries
-        |> Enum.take(i)
-        |> Enum.reverse()
-        |> Enum.find(fn {_l, type} -> buffer_line_entry?(type) end)
-        |> case do
-          nil -> max(line - 1, 0)
-          {prev_line, _} -> prev_line
-        end
-    end
-  end
-
-  @doc "Total display lines for the entire buffer (scrollbar calculations)."
-  @spec total_display_lines(FoldMap.t(), Decorations.t(), non_neg_integer(), pos_integer()) ::
-          non_neg_integer()
-  def total_display_lines(fold_map, decorations, total_buf_lines, content_width \\ 80) do
-    window_hidden =
-      FoldMap.visible_folds(fold_map)
-      |> Enum.reduce(0, fn f, acc -> acc + (f.end_line - f.start_line) end)
-
-    dec_hidden =
-      Decorations.closed_fold_regions(decorations)
-      |> Enum.reduce(0, fn f, acc -> acc + FoldRegion.hidden_count(f) end)
-
-    virt_lines = Decorations.virtual_line_count(decorations, 0, total_buf_lines)
-
-    all_folds = FoldMap.visible_folds(fold_map) ++ Decorations.closed_fold_regions(decorations)
-
-    block_rows =
-      decorations.block_decorations
-      |> Enum.reject(fn b -> line_inside_fold?(b.anchor_line, all_folds) end)
-      |> Enum.reduce(0, fn b, acc -> acc + BlockDecoration.resolve_height(b, content_width) end)
-
-    max(total_buf_lines - window_hidden - dec_hidden + virt_lines + block_rows, 0)
   end
 
   # ── Private: entry classification ────────────────────────────────────────
@@ -351,12 +265,5 @@ defmodule MingaEditor.DisplayMap do
 
   defp find_dec_fold(dec_folds, line) do
     Enum.find(dec_folds, fn fold -> fold.start_line == line end)
-  end
-
-  defp line_inside_fold?(line, folds) do
-    Enum.any?(folds, fn
-      %FoldRange{start_line: s, end_line: e} -> line > s and line <= e
-      %FoldRegion{start_line: s, end_line: e} -> line > s and line <= e
-    end)
   end
 end
