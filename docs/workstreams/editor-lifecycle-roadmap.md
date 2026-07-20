@@ -2717,7 +2717,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W051: Delete D23 dead Git status amend toggle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W051/D23
 - **Planning profile:** `D23Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D23Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2741,5 +2741,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact dead `ca` toggle, private command, write-only TUI state, and obsolete-test deletion; retained normal commit, AI generation, top-level and GUI amend paths; truthful focused and broad validation; negative budgets; zero concepts; and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3088
 - **Implementation commit SHA:** `ca08117db`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `e1ce2b08a838dd1cec95616eb354a242dd0e762b`.
+- **Merge evidence:** PR #3088 merged after CI run `29760402292` passed Elixir on the failed-job rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir attempt timed out in unrelated `MingaAgent.SessionRecoveryTest`; its exact test passed locally with the CI seed before the full failed-job rerun passed.
+- **Completion date:** 2026-07-20.
