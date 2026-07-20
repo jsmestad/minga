@@ -2731,7 +2731,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W040: Delete D06 file-tree Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.13
 - **Implementation profile:** `D06Worker13`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner13` for current SHA `584fb01226edcdb0d1a3452399de98844fc41082`; W040 removes the coherent full plus selection file-tree Protocol.GUI outbound oracle because runtime `gui_file_tree` `0x93` and `gui_file_tree_selection` `0x94` emission is already owned by `%Minga.RenderModel.UI.FileTree{}` and `Minga.Frontend.Adapter.GUI.FileTreeEncoder`.
@@ -2758,8 +2758,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact full-plus-selection file-tree oracle deletion, direct canonical adapter coverage, canonical Swift-harness producer, retained adapter/schema/Swift/Go/action/local-navigation/D03/D04/ES09/ES10/S10 contracts, zero legacy references, truthful validation and Swift-tooling disclosure, net production deletion, zero concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3066
 - **Implementation commit SHA:** `8d177b13f`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `a14555c4dd3efba0b94130ad7dc667ef3a4a8f95`; **Merge evidence:** PR #3066 merged after CI run `29711531448` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
 - **Findings resolved:** D06.13 implementation slice only. Full D06 remains split; extension runtime remains preserved under D04, native Tool Manager remains blocked under D03, and file-tree action/frontend/local-navigation/ES09/ES10/S10/D03/D04 contracts were untouched.
 - **Discoveries affecting later work:** Canonical file-tree diagnostics use the shared writer contract and raise `Minga.Frontend.Adapter.GUI.EncodingError` for values above `65_535`; the deleted Protocol.GUI oracle clamped those counts, so later D06 replacements should assert canonical owner behavior directly instead of preserving stale oracle overflow behavior. The Swift harness command is structurally migrated but cannot be executed on this workstation without `swiftc`.
 
