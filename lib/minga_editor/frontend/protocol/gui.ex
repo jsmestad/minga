@@ -122,20 +122,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
-  alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.DropIntent
-  alias MingaEditor.FileTree.Row
-  alias MingaEditor.State.FileTree, as: FileTreeState
-  alias Minga.Language
-  alias Minga.Language.Devicon
-  alias MingaEditor.UI.Theme
 
   alias Minga.Protocol.Opcodes
 
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_clipboard_write Opcodes.clipboard_write()
-  @op_gui_file_tree Opcodes.gui_file_tree()
-  @op_gui_file_tree_selection Opcodes.gui_file_tree_selection()
   @op_gui_extension_runtime Opcodes.gui_extension_runtime()
 
   @gui_action_select_tab Opcodes.gui_action_select_tab()
@@ -233,8 +225,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @search_flag_case_sensitive 0x02
   @search_flag_whole_word 0x04
   @search_flag_regex 0x08
-
-  @max_u16 65_535
 
   @typedoc "macOS thermal pressure level reported by the native GUI frontend."
   @type thermal_state :: :nominal | :fair | :serious | :critical | {:unknown, non_neg_integer()}
@@ -366,12 +356,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
-
-  @spec encode_rgb(non_neg_integer()) :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp encode_rgb(color) when is_integer(color) do
-    {Bitwise.bsr(Bitwise.band(color, 0xFF0000), 16),
-     Bitwise.bsr(Bitwise.band(color, 0x00FF00), 8), Bitwise.band(color, 0x0000FF)}
-  end
 
   @doc """
   Encodes a generic frontend-extension runtime message.
@@ -646,196 +630,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec command_to_string(atom() | tuple()) :: String.t()
   defp command_to_string(command) when is_atom(command), do: Atom.to_string(command)
   defp command_to_string(command), do: inspect(command)
-
-  # ── File tree ──
-
-  @doc """
-  Encodes the semantic GUI file-tree command.
-
-  Wire format uses a 32-bit length-prefixed envelope:
-
-      opcode(1) + payload_len(4) + payload(payload_len)
-
-  Payload v2:
-
-      version(1) + tree_flags(1) + tree_state(1) + selected_id_len(2) + selected_id + root_len(2) + root + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason + rows...
-
-  Per row:
-
-      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text + icon_color(3) + heat_level(1)
-
-  String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
-  `icon_color` is three bytes (R, G, B), following the editing payload. `heat_level`
-  is one trailing byte: an extension familiarity/heat bucket 0..4, or 0xFF for none.
-  """
-  @type file_tree_status :: FileTreeState.tree_status()
-
-  @spec encode_gui_file_tree(String.t() | nil, non_neg_integer(), file_tree_status(), boolean(), [
-          Row.t()
-        ]) :: binary()
-  def encode_gui_file_tree(root_path, tree_width, status, focused?, rows) when is_list(rows) do
-    root = root_path || ""
-    selected_id = selected_row_id(rows)
-    error_reason = file_tree_error_reason(status)
-
-    payload =
-      IO.iodata_to_binary([
-        <<2::8, file_tree_flags(status, focused?)::8, encode_file_tree_status(status)::8>>,
-        encode_string16(selected_id),
-        encode_string16(root),
-        <<tree_width::16, Enum.count(rows)::16>>,
-        encode_string16(error_reason),
-        Enum.map(rows, &encode_file_tree_row(&1, root))
-      ])
-
-    <<@op_gui_file_tree, byte_size(payload)::32, payload::binary>>
-  end
-
-  @doc "Encodes a hidden semantic GUI file-tree command while preserving the project root."
-  @spec encode_hidden_gui_file_tree(String.t() | nil) :: binary()
-  def encode_hidden_gui_file_tree(root_path),
-    do: encode_gui_file_tree(root_path, 0, :hidden, false, [])
-
-  @doc "Encodes a lightweight file-tree selection update."
-  @spec encode_gui_file_tree_selection(String.t(), boolean()) :: binary()
-  def encode_gui_file_tree_selection(selected_id, focused?) when is_binary(selected_id) do
-    payload =
-      IO.iodata_to_binary([
-        <<file_tree_selection_flags(focused?)::8>>,
-        encode_string16(selected_id)
-      ])
-
-    <<@op_gui_file_tree_selection, byte_size(payload)::16, payload::binary>>
-  end
-
-  @spec file_tree_selection_flags(boolean()) :: non_neg_integer()
-  defp file_tree_selection_flags(focused?), do: maybe_flag(0, focused?, 0)
-
-  @spec encode_file_tree_row(Row.t(), String.t()) :: iodata()
-  defp encode_file_tree_row(%Row{} = row, root) do
-    icon = file_tree_row_icon(row)
-    {icon_r, icon_g, icon_b} = encode_rgb(file_tree_row_icon_color(row))
-    editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
-    editing_text = if row.editing, do: row.editing.text, else: ""
-    guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
-
-    {diagnostic_errors, diagnostic_warnings, diagnostic_info, diagnostic_hints} =
-      row.diagnostics
-      |> FileTreeDiagnostics.to_tuple()
-      |> clamp_file_tree_diagnostics()
-
-    [
-      <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row)::16, row.depth::8,
-        encode_git_status(row.git_status)::8, diagnostic_errors::16, diagnostic_warnings::16,
-        diagnostic_info::16, diagnostic_hints::16, Enum.count(row.guides)::8>>,
-      guides,
-      encode_string16(row.id),
-      encode_string16(row.path),
-      encode_string16(Path.relative_to(row.path, root)),
-      encode_string16(row.name),
-      encode_string8(icon),
-      <<editing_type::8>>,
-      encode_string16(editing_text),
-      <<icon_r::8, icon_g::8, icon_b::8>>,
-      <<encode_file_tree_heat_level(row.heat_level)::8>>
-    ]
-  end
-
-  # Familiarity/heat bucket 0..4, or 0xFF for "no decoration".
-  @spec encode_file_tree_heat_level(0..4 | nil) :: non_neg_integer()
-  defp encode_file_tree_heat_level(nil), do: 0xFF
-  defp encode_file_tree_heat_level(level) when level in 0..4, do: level
-
-  @spec clamp_file_tree_diagnostics(FileTreeDiagnostics.counts()) :: FileTreeDiagnostics.counts()
-  defp clamp_file_tree_diagnostics({errors, warnings, info, hints}) do
-    {clamp_u16(errors), clamp_u16(warnings), clamp_u16(info), clamp_u16(hints)}
-  end
-
-  @spec clamp_u16(non_neg_integer()) :: non_neg_integer()
-  defp clamp_u16(value), do: min(value, @max_u16)
-
-  @spec selected_row_id([Row.t()]) :: String.t()
-  defp selected_row_id(rows) do
-    case Enum.find(rows, & &1.selected?) do
-      %Row{id: id} -> id
-      nil -> ""
-    end
-  end
-
-  @spec file_tree_flags(FileTreeState.tree_status(), boolean()) :: non_neg_integer()
-  defp file_tree_flags(status, focused?) do
-    0
-    |> maybe_flag(FileTreeState.visible_status?(status), 0)
-    |> maybe_flag(focused?, 1)
-    |> maybe_flag(status == :empty, 4)
-  end
-
-  @spec encode_file_tree_status(FileTreeState.tree_status()) :: non_neg_integer()
-  defp encode_file_tree_status(:hidden), do: 0
-  defp encode_file_tree_status(:loading), do: 1
-  defp encode_file_tree_status(:empty), do: 2
-  defp encode_file_tree_status(:ready), do: 3
-  defp encode_file_tree_status({:error, _reason}), do: 4
-
-  @spec file_tree_error_reason(FileTreeState.tree_status()) :: String.t()
-  defp file_tree_error_reason({:error, reason}), do: reason
-  defp file_tree_error_reason(_status), do: ""
-
-  @spec file_tree_row_flags(Row.t()) :: non_neg_integer()
-  defp file_tree_row_flags(%Row{} = row) do
-    0
-    |> maybe_flag(row.directory?, 0)
-    |> maybe_flag(row.expanded?, 1)
-    |> maybe_flag(row.selected?, 2)
-    |> maybe_flag(row.focused?, 3)
-    |> maybe_flag(row.active?, 4)
-    |> maybe_flag(row.dirty?, 5)
-    |> maybe_flag(row.editing != nil, 6)
-    |> maybe_flag(row.last_child?, 7)
-  end
-
-  @spec maybe_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
-  defp maybe_flag(flags, true, bit), do: bor(flags, bsl(1, bit))
-  defp maybe_flag(flags, false, _bit), do: flags
-
-  @spec encode_string16(String.t()) :: binary()
-  defp encode_string16(value) do
-    bytes = :erlang.iolist_to_binary([value])
-    <<byte_size(bytes)::16, bytes::binary>>
-  end
-
-  @spec encode_string8(String.t()) :: binary()
-  defp encode_string8(value) do
-    bytes = :erlang.iolist_to_binary([value])
-    <<byte_size(bytes)::8, bytes::binary>>
-  end
-
-  @spec encode_editing_type(atom()) :: non_neg_integer()
-  defp encode_editing_type(:new_file), do: 0
-  defp encode_editing_type(:new_folder), do: 1
-  defp encode_editing_type(:rename), do: 2
-
-  @spec file_tree_row_icon(Row.t()) :: String.t()
-  defp file_tree_row_icon(%Row{directory?: true, name: name}),
-    do: elem(Devicon.folder_icon_and_color(name), 0)
-
-  defp file_tree_row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
-
-  @spec file_tree_row_icon_color(Row.t()) :: non_neg_integer()
-  defp file_tree_row_icon_color(%Row{directory?: true, name: name}),
-    do: elem(Devicon.folder_icon_and_color(name), 1)
-
-  defp file_tree_row_icon_color(%Row{name: name}),
-    do: Theme.default_icon_color(Language.detect_filetype(name))
-
-  @spec encode_git_status(atom() | nil) :: non_neg_integer()
-  defp encode_git_status(nil), do: 0
-  defp encode_git_status(:modified), do: 1
-  defp encode_git_status(:staged), do: 2
-  defp encode_git_status(:untracked), do: 3
-  defp encode_git_status(:conflict), do: 4
-  defp encode_git_status(:renamed), do: 5
-  defp encode_git_status(:deleted), do: 6
 
   # ── Completion ──
   #
@@ -1545,8 +1339,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # git_status_panel_data types) was removed once the production GitStatusEncoder
   # migrated to the schema-generated codec (#2225): the cross-language golden
   # tests now prove byte-exactness, which is the only role this oracle served.
-  # The git_status decode path (decode_gui_action) and the file_tree row's
-  # encode_git_status/1 helper are unrelated and remain.
+  # The git_status decode path (decode_gui_action) is unrelated and remains.
   #
   # The git_toast/git_toast_action types stay: they are the canonical shape for
   # git toast data carried by the production emit context and traditional shell

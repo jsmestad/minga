@@ -13,6 +13,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
@@ -21,6 +22,10 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Completion
+  alias Minga.RenderModel.UI.FileTree
+  alias Minga.RenderModel.UI.FileTree.Editing
+  alias Minga.RenderModel.UI.FileTree.Flags
+  alias Minga.RenderModel.UI.FileTree.Row
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.TabBar
   alias Minga.RenderModel.UI.TabBar.Tab
@@ -753,48 +758,48 @@ defmodule Minga.Integration.GUIProtocolTest do
       root = "/project"
 
       rows = [
-        MingaEditor.FileTree.Row.new(
+        %Row{
           id: "/project/lib",
           path: "/project/lib",
-          relative_path: "lib",
           name: "lib",
-          directory?: true,
-          expanded?: true,
-          selected?: true,
-          focused?: true,
+          icon: "󱉇",
+          icon_color: 0x42A5F5,
+          flags: %Flags{
+            directory?: true,
+            expanded?: true
+          },
           depth: 0,
-          guides: [],
-          last_child?: false,
-          editing: nil
-        ),
-        MingaEditor.FileTree.Row.new(
+          guides: []
+        },
+        %Row{
           id: "/project/lib/editor.ex",
           path: "/project/lib/editor.ex",
-          relative_path: "lib/editor.ex",
           name: "editor.ex",
-          directory?: false,
-          expanded?: false,
-          active?: true,
-          dirty?: true,
+          icon: "",
+          icon_color: 0x9B59B6,
+          flags: %Flags{
+            active?: true,
+            dirty?: true,
+            last_child?: true
+          },
           git_status: :modified,
           depth: 1,
           guides: [true],
-          last_child?: true,
-          editing: %{
-            index: 1,
-            text: "editor_renamed.ex",
-            type: :rename,
-            original_name: "editor.ex"
-          }
-        )
+          editing: %Editing{type: :rename, text: "editor_renamed.ex"}
+        }
       ]
 
-      decoded =
-        round_trip(
-          harness,
-          ProtocolGUI.encode_gui_file_tree(root, 30, :ready, true, rows),
-          "gui_file_tree"
-        )
+      command =
+        FileTreeEncoder.encode_command(%FileTree{
+          root_path: root,
+          tree_width: 30,
+          status: :ready,
+          focused?: true,
+          selected_id: "/project/lib",
+          rows: rows
+        })
+
+      decoded = round_trip(harness, command, "gui_file_tree")
 
       assert decoded["type"] == "gui_file_tree"
       assert decoded["version"] == 2
