@@ -383,13 +383,13 @@ Both macros accumulate metadata at compile time. When the extension loads, the f
 
 Minga's extension registries track who contributed each entry. The common source identifiers are `:builtin`, `:config`, and `{:extension, name}`. That source tag is what makes reload safe: stopping an extension removes only that extension's commands, keybindings, scopes, input handlers, language data, themes, tool recipes, modeline segments, and feature-owned UI state.
 
-Feature-owned UI state is the place for per-workspace presentation state that should survive tab switches but disappear when its owner reloads. A sidebar can keep its selected row there. A Dired-like feature can keep its local filter there. A daemon, cache, or external connection still belongs in the extension's own process tree.
+Feature-owned UI state is the place for per-workspace presentation state that should survive tab switches but disappear when its owner reloads. A sidebar can keep its selected row there. A project navigator can keep a local filter there. A daemon, cache, or external connection still belongs in the extension's own process tree.
 
 Interactive sidebars use the same ownership rule. An extension registers stable sidebar metadata with `MingaEditor.Extension.Sidebar.register/2`, then publishes cached semantic snapshots with `publish_snapshot/3` whenever its state changes. Layout, input, TUI rendering, and GUI emit paths read that cached snapshot. They do not call extension render callbacks per frame, and extensions never emit raw GUI opcodes or raw TUI cells.
 
 Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, modeline segments, sidebars, and feature-owned UI state still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
 
-This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, Dired, FileTree, Git UI, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
+This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, FileTree, Git UI, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
 
 ### The imperative path (for runtime-dynamic contributions)
 

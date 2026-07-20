@@ -172,19 +172,6 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
-  describe "dired / oil removal" do
-    test "dired and oil parse as unknown commands" do
-      assert_parse_cases([
-        {"dired", {:unknown, "dired"}},
-        {"oil", {:unknown, "oil"}},
-        {"dired /tmp/foo", {:unknown, "dired /tmp/foo"}},
-        {"oil /tmp/foo", {:unknown, "oil /tmp/foo"}},
-        {"dired   ", {:unknown, "dired"}},
-        {"oil   ", {:unknown, "oil"}}
-      ])
-    end
-  end
-
   defp assert_parse_cases(cases) do
     for {input, expected} <- cases do
       assert normalize(Parser.parse(input)) == normalize(expected),

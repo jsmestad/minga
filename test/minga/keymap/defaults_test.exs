@@ -59,7 +59,7 @@ defmodule Minga.Keymap.DefaultsTest do
 
     # ── File bindings ──────────────────────────────────────────────────────────
 
-    test "SPC f keeps file neighbors without dired" do
+    test "SPC f keeps file neighbors" do
       trie = Defaults.leader_trie()
       {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
 

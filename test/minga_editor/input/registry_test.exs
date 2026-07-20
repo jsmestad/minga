@@ -14,10 +14,8 @@ defmodule MingaEditor.Input.RegistryTest do
     :ok
   end
 
-  test "surface handlers are served from the source-owned registry in stable order without dired" do
+  test "surface handlers are served from the source-owned registry in stable order" do
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
-
-    refute MingaEditor.Input.Dired in handlers
 
     assert Enum.find_index(handlers, &(&1 == MingaEditor.Input.EmptyState)) <
              Enum.find_index(handlers, &(&1 == MingaEditor.Input.Popup))

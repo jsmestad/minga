@@ -149,34 +149,6 @@ defmodule Minga.Command.RegistryTest do
       assert Enum.count(names) >= Enum.count(required_commands)
     end
 
-    test "deleted dired commands are absent while neighboring built-ins remain", %{registry: r} do
-      names = r |> Registry.all() |> Enum.map(& &1.name)
-
-      deleted_commands = [
-        :dired_open,
-        :dired_open_entry,
-        :dired_parent,
-        :dired_close,
-        :dired_toggle_hidden,
-        :dired_cycle_sort,
-        :dired_toggle_details,
-        :dired_open_external,
-        :dired_refresh,
-        :dired_apply_changes,
-        :dired_confirm_apply,
-        :dired_cancel_apply
-      ]
-
-      for cmd <- deleted_commands do
-        refute cmd in names
-        assert :error = Registry.lookup(r, cmd)
-      end
-
-      for cmd <- [:find_file, :save, :kill_buffer, :toggle_file_tree] do
-        assert {:ok, %Command{name: ^cmd}} = Registry.lookup(r, cmd)
-      end
-    end
-
     test "looking up :save returns the built-in save command", %{registry: r} do
       assert {:ok, %Command{name: :save, description: desc}} = Registry.lookup(r, :save)
       assert is_binary(desc) and byte_size(desc) > 0

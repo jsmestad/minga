@@ -10,7 +10,7 @@ defmodule Minga.Keymap.ActiveTest do
   end
 
   describe "leader_trie/1" do
-    test "returns file defaults without dired on startup", %{store: s} do
+    test "returns file defaults on startup", %{store: s} do
       trie = Active.leader_trie(s)
       {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
 
