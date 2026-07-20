@@ -23,13 +23,12 @@ defmodule Minga.Keymap.ScopeTest do
   end
 
   describe "all_scopes/0" do
-    test "returns retained built-in scopes without dired" do
+    test "returns retained built-in scopes" do
       scopes = Scope.all_scopes()
       assert :editor in scopes
       assert :agent in scopes
       assert :file_tree in scopes
       refute :git_status in scopes
-      refute :dired in scopes
       assert Enum.count(scopes) >= 3
     end
   end
@@ -173,14 +172,6 @@ defmodule Minga.Keymap.ScopeTest do
   describe "resolve_key/4 with unknown scope" do
     test "returns :not_found" do
       assert :not_found = Scope.resolve_key(:nonexistent, :normal, {?j, 0})
-    end
-  end
-
-  describe "resolve_key/4 with removed dired scope" do
-    test "returns :not_found without raising" do
-      assert Scope.module_for(:dired) == nil
-      assert :not_found = Scope.resolve_key(:dired, :normal, {13, 0})
-      assert :not_found = Scope.resolve_key(:dired, :normal, {?g, 0})
     end
   end
 

@@ -223,7 +223,7 @@ When a PR intentionally changes the visual system, include before/after screensh
 
 ## Follow-up boundaries
 
-Do not fold Dired-level bulk operations into the visual polish workstream. Bulk mark, batch delete, batch rename, permissions editing, and recursive operation previews are separate product work.
+Do not fold bulk filesystem operations into the visual polish workstream. Bulk mark, batch delete, batch rename, permissions editing, and recursive operation previews are separate product work.
 
 Do not replace the file-tree architecture wholesale as part of visual polish. The epic should close the visual contract gap first: shared semantic rows, versioned GUI protocol, equivalent frontend rendering, and targeted regression coverage.
 

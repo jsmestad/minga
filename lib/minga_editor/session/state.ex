@@ -16,7 +16,6 @@ defmodule MingaEditor.Session.State do
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.HoverObservation
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
@@ -42,7 +41,6 @@ defmodule MingaEditor.Session.State do
           keymap_scope: Scope.scope_name(),
           buffers: Buffers.t(),
           windows: Windows.t(),
-          dired: DiredState.t(),
           file_tree: FileTreeState.t(),
           viewport: Viewport.t(),
           mouse: Mouse.t(),
@@ -60,7 +58,6 @@ defmodule MingaEditor.Session.State do
   defstruct keymap_scope: :editor,
             buffers: %Buffers{},
             windows: %Windows{},
-            dired: %DiredState{},
             file_tree: %FileTreeState{},
             viewport: nil,
             mouse: %Mouse{},
@@ -460,23 +457,6 @@ defmodule MingaEditor.Session.State do
     end
   end
 
-  @doc "Retires the exact Dired backing buffer and normalizes only a stale Dired scope."
-  @spec retire_dired_buffer(t(), pid()) :: t()
-  def retire_dired_buffer(
-        %__MODULE__{dired: %DiredState{buffer: pid} = dired, keymap_scope: scope} = workspace,
-        pid
-      )
-      when is_pid(pid) do
-    workspace = set_dired(workspace, DiredState.retire_buffer(dired, pid))
-
-    case scope do
-      :dired -> set_keymap_scope(workspace, :editor)
-      _other_scope -> workspace
-    end
-  end
-
-  def retire_dired_buffer(%__MODULE__{} = workspace, _pid), do: workspace
-
   # ── Field mutation functions (Rule 2 enforcement) ──────────────────────
 
   @doc "Replaces the editing (VimState) sub-struct."
@@ -505,12 +485,6 @@ defmodule MingaEditor.Session.State do
   @spec drop_file_tree(t()) :: t()
   def drop_file_tree(%__MODULE__{} = wspace) do
     %{wspace | file_tree: %FileTreeState{}}
-  end
-
-  @doc "Replaces the dired sub-struct."
-  @spec set_dired(t(), DiredState.t()) :: t()
-  def set_dired(%__MODULE__{} = wspace, %DiredState{} = dired) do
-    %{wspace | dired: dired}
   end
 
   @doc "Updates the mouse sub-struct."

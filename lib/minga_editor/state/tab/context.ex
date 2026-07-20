@@ -9,7 +9,6 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
@@ -26,7 +25,6 @@ defmodule MingaEditor.State.Tab.Context do
     :keymap_scope,
     :buffers,
     :windows,
-    :dired,
     :file_tree,
     :viewport,
     :mouse,
@@ -59,7 +57,6 @@ defmodule MingaEditor.State.Tab.Context do
           :keymap_scope
           | :buffers
           | :windows
-          | :dired
           | :file_tree
           | :viewport
           | :mouse
@@ -82,7 +79,6 @@ defmodule MingaEditor.State.Tab.Context do
           keymap_scope: Scope.scope_name() | nil,
           buffers: Buffers.t() | nil,
           windows: Windows.t() | nil,
-          dired: DiredState.t() | nil,
           file_tree: FileTreeState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
@@ -99,7 +95,6 @@ defmodule MingaEditor.State.Tab.Context do
             keymap_scope: nil,
             buffers: nil,
             windows: nil,
-            dired: nil,
             file_tree: nil,
             viewport: nil,
             mouse: nil,
@@ -149,7 +144,6 @@ defmodule MingaEditor.State.Tab.Context do
       keymap_scope: ws.keymap_scope,
       buffers: ws.buffers,
       windows: ws.windows,
-      dired: ws.dired,
       file_tree: ws.file_tree,
       viewport: ws.viewport,
       mouse: ws.mouse,
@@ -331,7 +325,6 @@ defmodule MingaEditor.State.Tab.Context do
       keymap_scope: scope,
       buffers: buffers,
       windows: windows,
-      dired: %DiredState{},
       file_tree: %FileTreeState{project_root: project_root},
       viewport: viewport,
       mouse: %Mouse{},
@@ -429,7 +422,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:keymap_scope, _value), do: false
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
-  defp valid_field?(:dired, %DiredState{}), do: true
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
