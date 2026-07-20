@@ -10,9 +10,8 @@ defmodule MingaEditor.Renderer.Caches do
   - **Chrome** (`chrome_prev_*`): `RenderPipeline`, stage 5 fingerprint cache.
   - **Content** (`search_decoration_cache`, `doc_highlight_cache`): consumed by
     `ContentHelpers.build_render_ctx/3`; cleared when the fingerprint changes.
-    `block_render_cache` is a within-frame cache reset after each window render.
-  - **Emit** (`emit_prev_*`, `last_title`, `last_window_bg`):
-    consumed by `Frontend.Emit` stage 7.
+  - **Emit** (`last_title`, `last_window_bg`, `last_link_cursor`): consumed by
+    `Frontend.Emit` stage 7.
   - **Adapter** (`adapter_gui_caches`): core GUI adapter fingerprint state.
   """
 
@@ -26,9 +25,6 @@ defmodule MingaEditor.Renderer.Caches do
     doc_highlight_cache: nil,
     cmd_hover_link_cache: nil,
 
-    # ── Content stage: within-frame cache (reset after each window render) ────
-    block_render_cache: %{},
-
     # Number of buffer rows freshly rasterized (composed) this frame, summed
     # across windows. Reset at the start of the Content stage and read by the
     # pipeline telemetry span as `rows_rasterized` (#2287). A transient
@@ -41,12 +37,6 @@ defmodule MingaEditor.Renderer.Caches do
     frame_render_path: :full,
 
     # ── Emit stage ────────────────────────────────────────────────────────────
-    emit_prev_viewport_tops: %{},
-    emit_prev_content_rects: %{},
-    emit_prev_gutter_ws: %{},
-    emit_prev_buf_versions: %{},
-    emit_prev_cursor_lines: %{},
-    emit_prev_editing_mode: nil,
     last_title: nil,
     last_window_bg: nil,
     last_link_cursor: nil,
@@ -73,15 +63,8 @@ defmodule MingaEditor.Renderer.Caches do
           search_decoration_cache: term(),
           doc_highlight_cache: term(),
           cmd_hover_link_cache: term(),
-          block_render_cache: %{term() => term()},
           frame_rows_rasterized: non_neg_integer(),
           frame_render_path: :patch | :full,
-          emit_prev_viewport_tops: %{term() => non_neg_integer()},
-          emit_prev_content_rects: %{term() => term()},
-          emit_prev_gutter_ws: %{term() => non_neg_integer()},
-          emit_prev_buf_versions: %{term() => non_neg_integer()},
-          emit_prev_cursor_lines: %{term() => non_neg_integer()},
-          emit_prev_editing_mode: atom() | nil,
           last_title: String.t() | nil,
           last_window_bg: non_neg_integer() | nil,
           last_link_cursor: boolean() | nil,
