@@ -2765,7 +2765,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W041/Dired.1: Remove live Dired editor entrypoints and dispatch surface
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W041/Dired.1
 - **Implementation result:** Removed every live Dired editor activation path without replacement: the command registry no longer seeds `MingaEditor.Commands.Dired`; the parser no longer emits `{:dired, ...}` for `:dired` or `:oil`; `SPC f d` is absent from default and active keymaps; `:dired` is no longer a built-in keymap scope; `MingaEditor.Input.Dired` is no longer in the surface handler stack; BufferManagement no longer special-cases Dired save, force-save, or Ex dispatch; and the Dired command, input, and keymap-scope modules plus their module-level tests are deleted. `docs/AGENTIC-KEYMAP.md` no longer advertises the Dired special-buffer key precedent.
 - **Failure reproduction / source trace:** Before deletion, `mix run -e 'IO.inspect(Minga.Command.Parser.parse("dired")); {:ok, r} = Minga.Command.Registry.start_link(name: :dired_repro_registry); :sys.get_state(r); IO.inspect(Minga.Command.Registry.lookup(:dired_repro_registry, :dired_open)); trie = Minga.Keymap.Defaults.leader_trie(); IO.inspect(Minga.Keymap.Bindings.lookup_sequence(trie, [{?f, 0}, {?d, 0}])); IO.inspect(Minga.Keymap.Scope.module_for(:dired))'` returned `{:dired, nil}`, a registered `%Minga.Command{name: :dired_open}`, `{:command, :dired_open, "Open directory (Dired)"}`, and `Minga.Keymap.Scope.Dired`.
@@ -2782,8 +2782,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 1.00 confidence after targeted evidence re-review. The reviewer confirmed the full diff reports exactly 24 roadmap additions, resolving the sole initial blocker; the prior implementation PASS remains preserved.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3068
 - **Implementation commit SHA:** `35c8acbc1`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `8c7abfe83ba1b993631a7dbba4b4894050461de9`; **Merge evidence:** PR #3068 merged after CI run `29713135112` passed every required check. The first Elixir CI attempt failed only the parser manager's real-parser alias test; after building the parser locally the exact test passed, the failed CI job passed on its isolated rerun, and Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency all passed.
+- **Completion date:** 2026-07-20.
 - **Remaining references:** Residual Dired surfaces remain only where locked for Dired.2: `lib/minga/dired.ex`, `lib/minga_editor/state/dired.ex`, Dired field and retirement lines in `lib/minga_editor/session/state.ex`, `lib/minga_editor/state/tab/context.ex`, and `lib/minga_editor/state.ex`, with their residual tests plus historical roadmap/FINDINGS/spec mentions. Ordinary file opening, file finder, file tree, buffer save/force-save/save-quit/save-all, buffer close/kill, ES09/ES10/S10/D03/D04, and Dired residual state/persistence were preserved.
 - **Discoveries affecting later work:** The retained `SessionState.retire_dired_buffer/2` can still normalize a stale `:dired` scope to `:editor` when a residual Dired backing PID is retired; that is residual state cleanup for Dired.2, not a live activation path after this slice.
 
