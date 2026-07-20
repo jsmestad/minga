@@ -2756,8 +2756,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. The initial `mix test.llm --max-cases 4` passed 9,830 tests with 0 failures, and the post-review `mix test.llm --seed 810531 --max-cases 4` passed 9,832 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests. `mix swift.build` exited 0 with `xcodebuild not found; skipping Swift build`.
 - **Review resolution:** Targeted correctness re-review returned `RESOLVED`, confirming all eight row flag bits, both selection focus states, editing bytes `0`, `1`, `2`, and `0xFF`, heat bytes `0..4` and `0xFF`, the corrected Git-status comment, and direct canonical ownership. Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered the locked wire/cache/edge contracts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact full-plus-selection file-tree oracle deletion, direct canonical adapter coverage, canonical Swift-harness producer, retained adapter/schema/Swift/Go/action/local-navigation/D03/D04/ES09/ES10/S10 contracts, zero legacy references, truthful validation and Swift-tooling disclosure, net production deletion, zero concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3066
+- **Implementation commit SHA:** `8d177b13f`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 - **Findings resolved:** D06.13 implementation slice only. Full D06 remains split; extension runtime remains preserved under D04, native Tool Manager remains blocked under D03, and file-tree action/frontend/local-navigation/ES09/ES10/S10/D03/D04 contracts were untouched.
