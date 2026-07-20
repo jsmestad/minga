@@ -119,27 +119,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   import Bitwise
 
-  alias Minga.Buffer
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Row
-  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.Tab
-  alias MingaEditor.State.Tab.Context, as: TabContext
-  alias MingaEditor.State.TabBar
   alias Minga.Language
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Session.ChromeState
-  alias MingaEditor.Session.ChromeState.TabSummary
 
   alias Minga.Protocol.Opcodes
 
-  @op_gui_tab_bar Opcodes.gui_tab_bar()
   @op_gui_tool_manager Opcodes.gui_tool_manager()
   @op_clipboard_write Opcodes.clipboard_write()
   @op_gui_file_tree Opcodes.gui_file_tree()
@@ -375,169 +367,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
-
-  # ── Tab bar ──
-
-  @doc """
-  Encodes a gui_tab_bar command with the current tab bar state.
-
-  Each tab entry includes: flags byte (is_active, is_dirty, is_agent,
-  has_attention, agent_status in upper bits), tab id, group_id for
-  workspace grouping, Nerd Font icon, and display label. When the active
-  tab is omitted from `ChromeState.visible_tabs`, active_index is 255 to
-  signal that no visible tab is active.
-  """
-  @no_visible_active_tab 255
-
-  @spec encode_gui_tab_bar(TabBar.t() | ChromeState.t(), pid() | nil) :: binary()
-  def encode_gui_tab_bar(tab_bar_or_chrome_state, active_win_buffer \\ nil)
-
-  def encode_gui_tab_bar(%ChromeState{} = chrome_state, _active_win_buffer) do
-    active_index = active_summary_index(chrome_state)
-
-    entries =
-      Enum.map(chrome_state.visible_tabs, fn tab ->
-        encode_gui_tab_entry(tab, chrome_state.active_tab_id)
-      end)
-
-    IO.iodata_to_binary([
-      @op_gui_tab_bar,
-      <<active_index::8, Enum.count(chrome_state.visible_tabs)::8>>
-      | entries
-    ])
-  end
-
-  def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer) do
-    visible_tabs = TabBar.visible_workspace_tabs(tb)
-
-    active_index =
-      case Enum.find_index(visible_tabs, &(&1.id == tb.active_id)) do
-        nil -> @no_visible_active_tab
-        index -> index
-      end
-
-    entries =
-      Enum.map(visible_tabs, fn tab ->
-        encode_gui_tab_entry(tab, tb.active_id, active_win_buffer)
-      end)
-
-    IO.iodata_to_binary([
-      @op_gui_tab_bar,
-      <<active_index::8, Enum.count(visible_tabs)::8>>
-      | entries
-    ])
-  end
-
-  @spec active_summary_index(ChromeState.t()) :: non_neg_integer()
-  defp active_summary_index(%ChromeState{visible_tabs: tabs, active_tab_id: active_id}) do
-    case Enum.find_index(tabs, &(&1.id == active_id)) do
-      nil -> @no_visible_active_tab
-      index -> index
-    end
-  end
-
-  @spec encode_gui_tab_entry(Tab.t(), pos_integer(), pid() | nil) :: binary()
-  defp encode_gui_tab_entry(tab, active_id, active_win_buffer) do
-    is_active = if tab.id == active_id, do: 1, else: 0
-    flags = build_tab_flags(tab, is_active, active_win_buffer)
-    group_id = Map.get(tab, :group_id, 0)
-
-    icon = tab_icon(tab)
-    icon_bytes = :erlang.iolist_to_binary([icon])
-    label_bytes = :erlang.iolist_to_binary([MingaEditor.State.Tab.display_label(tab)])
-
-    <<flags::8, tab.id::32, group_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary, tab_tint_color(tab)::32>>
-  end
-
-  @spec encode_gui_tab_entry(TabSummary.t(), Tab.id() | nil) :: binary()
-  defp encode_gui_tab_entry(%TabSummary{} = tab, active_id) do
-    is_active = if tab.id == active_id, do: 1, else: 0
-    flags = build_tab_summary_flags(tab, is_active)
-    icon_bytes = :erlang.iolist_to_binary([tab.icon])
-    label_bytes = :erlang.iolist_to_binary([tab.label])
-
-    <<flags::8, tab.id::32, tab.workspace_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary, tab.tint_color::32>>
-  end
-
-  @spec build_tab_flags(Tab.t(), 0 | 1, pid() | nil) :: non_neg_integer()
-  defp build_tab_flags(tab, is_active, active_win_buffer) do
-    is_dirty = tab_dirty_bit(tab, is_active, active_win_buffer)
-    is_agent = if tab.kind == :agent, do: 1, else: 0
-    has_attention = if tab.attention, do: 1, else: 0
-    is_pinned = if tab.pinned?, do: 1, else: 0
-    kind_status = tab_kind_status_bits(tab)
-
-    tab_flags(is_active, is_dirty, is_agent, has_attention, kind_status, is_pinned)
-  end
-
-  @spec build_tab_summary_flags(TabSummary.t(), 0 | 1) :: non_neg_integer()
-  defp build_tab_summary_flags(%TabSummary{} = tab, is_active) do
-    is_dirty = if tab.dirty?, do: 1, else: 0
-    is_agent = if tab.kind == :agent, do: 1, else: 0
-    has_attention = if tab.attention?, do: 1, else: 0
-    is_pinned = if tab.pinned?, do: 1, else: 0
-    kind_status = if tab.kind == :file and tab.ephemeral?, do: 1, else: 0
-    tab_flags(is_active, is_dirty, is_agent, has_attention, kind_status, is_pinned)
-  end
-
-  # Bits 4-6 of the tab flags byte are kind-scoped: agent tabs carry the
-  # agent status there; file tabs use bit 4 as the ephemeral (not-on-disk)
-  # marker. Decoders must check the is_agent bit before interpreting them.
-  @spec tab_kind_status_bits(Tab.t()) :: non_neg_integer()
-  defp tab_kind_status_bits(%{kind: :agent} = tab), do: encode_agent_status(tab.agent_status)
-  defp tab_kind_status_bits(%{kind: :file, file_ref: nil}), do: 1
-  defp tab_kind_status_bits(_tab), do: 0
-
-  @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer(), 0 | 1) :: non_neg_integer()
-  defp tab_flags(is_active, is_dirty, is_agent, has_attention, kind_status, is_pinned) do
-    bor(
-      bor(is_active, bsl(is_dirty, 1)),
-      bor(
-        bor(bsl(is_agent, 2), bsl(has_attention, 3)),
-        bor(bsl(band(kind_status, 0x07), 4), bsl(is_pinned, 7))
-      )
-    )
-  end
-
-  @spec tab_tint_color(Tab.t()) :: non_neg_integer()
-  defp tab_tint_color(%Tab{kind: :agent}), do: 0x7AA2F7
-  defp tab_tint_color(%Tab{}), do: 0
-
-  @spec tab_dirty_bit(Tab.t(), 0 | 1, pid() | nil) :: 0 | 1
-  defp tab_dirty_bit(%{kind: :agent}, _is_active, _buf), do: 0
-
-  defp tab_dirty_bit(tab, is_active, active_win_buffer) do
-    pid = resolve_tab_buffer(tab, is_active, active_win_buffer)
-    if pid && Buffer.dirty?(pid), do: 1, else: 0
-  end
-
-  @spec resolve_tab_buffer(Tab.t(), 0 | 1, pid() | nil) :: pid() | nil
-  defp resolve_tab_buffer(%{context: context}, is_active, buf) when is_map(context) do
-    case TabContext.to_workspace_map(context) do
-      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> pid
-      _ -> active_tab_buffer(is_active, buf)
-    end
-  end
-
-  defp resolve_tab_buffer(_tab, is_active, buf), do: active_tab_buffer(is_active, buf)
-
-  @spec active_tab_buffer(0 | 1, pid() | nil) :: pid() | nil
-  defp active_tab_buffer(1, buf) when is_pid(buf), do: buf
-  defp active_tab_buffer(_is_active, _buf), do: nil
-
-  @spec encode_agent_status(atom() | nil) :: non_neg_integer()
-  defp encode_agent_status(:idle), do: 0
-  defp encode_agent_status(:thinking), do: 1
-  defp encode_agent_status(:tool_executing), do: 2
-  defp encode_agent_status(:error), do: 3
-  defp encode_agent_status(:plan), do: 4
-  defp encode_agent_status(_), do: 0
-
-  @spec tab_icon(Tab.t()) :: String.t()
-  defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
-  defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Language.detect_filetype(label))
 
   @spec encode_rgb(non_neg_integer()) :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   defp encode_rgb(color) when is_integer(color) do

@@ -1145,28 +1145,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert editing_text == "renamed.txt"
     end
 
-    test "encodes gui_tab_bar with tabs" do
-      tab1 = %MingaEditor.State.Tab{id: 1, kind: :file, label: "editor.ex"}
-      tab2 = %MingaEditor.State.Tab{id: 2, kind: :agent, label: "Agent", agent_status: :thinking}
-      tb = %MingaEditor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
-
-      encoded = ProtocolGUI.encode_gui_tab_bar(tb)
-
-      # First byte is opcode 0x71 (gui_tab_bar)
-      assert <<0x71, active_index::8, tab_count::8, rest::binary>> = encoded
-      assert active_index == 0
-      assert tab_count == 1
-
-      # First tab: flags has is_active=1
-      assert <<flags1::8, id1::32, _rest1::binary>> = rest
-      assert Bitwise.band(flags1, 0x01) == 1
-      assert id1 == 1
-
-      # Verify it's a valid binary (no crashes)
-      assert is_binary(encoded)
-      assert byte_size(encoded) > 10
-    end
-
     test "encodes gui_agent_chat pending section as empty compatibility section" do
       data = %{
         visible: true,

@@ -16,11 +16,14 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
+  alias Minga.Frontend.Adapter.GUI.TabBarEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Picker, as: PickerModel
+  alias Minga.RenderModel.UI.TabBar
+  alias Minga.RenderModel.UI.TabBar.Tab
   alias Minga.RenderModel.UI.StatusBar
   alias Minga.RenderModel.UI.StatusBar.Agent
   alias Minga.RenderModel.UI.StatusBar.Cursor
@@ -106,22 +109,37 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_tab_bar encodes and decodes correctly", %{harness: harness} do
-      tab1 = %MingaEditor.State.Tab{id: 1, kind: :file, label: "editor.ex"}
-      tab2 = %MingaEditor.State.Tab{id: 2, kind: :agent, label: "Agent", agent_status: :thinking}
-      tb = %MingaEditor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
+      model = %TabBar{
+        visible?: true,
+        active_tab_id: 1,
+        tabs: [
+          %Tab{id: 1, workspace_id: 1, kind: :file, label: "editor.ex", icon: ""},
+          %Tab{
+            id: 2,
+            workspace_id: 2,
+            kind: :agent,
+            label: "Agent",
+            icon: "󰚩",
+            agent_status: :thinking
+          }
+        ]
+      }
 
-      cmd = ProtocolGUI.encode_gui_tab_bar(tb)
+      cmd = TabBarEncoder.encode_command(model)
       decoded = round_trip(harness, cmd, "gui_tab_bar")
 
       assert decoded["type"] == "gui_tab_bar"
       assert decoded["active_index"] == 0
-      assert Enum.count(decoded["tabs"]) == 1
+      assert Enum.count(decoded["tabs"]) == 2
 
-      [t1] = decoded["tabs"]
+      [t1, t2] = decoded["tabs"]
       assert t1["id"] == 1
       assert t1["label"] == "editor.ex"
       assert t1["is_active"] == true
       assert t1["is_agent"] == false
+      assert t2["id"] == 2
+      assert t2["is_agent"] == true
+      assert t2["agent_status"] == 1
     end
 
     test "gui_breadcrumb encodes and decodes correctly", %{harness: harness} do

@@ -5,9 +5,6 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
   alias Minga.Frontend.Adapter.GUI.TabBarEncoder
   alias Minga.RenderModel.UI.TabBar
   alias Minga.RenderModel.UI.TabBar.Tab
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
-  alias MingaEditor.Session.ChromeState
-  alias MingaEditor.Session.ChromeState.TabSummary
 
   @op_gui_tab_bar Minga.Protocol.Opcodes.gui_tab_bar()
 
@@ -16,20 +13,27 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
       assert {nil, _caches} = TabBarEncoder.encode(%TabBar{}, Caches.new())
     end
 
-    test "matches legacy ChromeState wire format" do
-      chrome_state = chrome_state()
-
+    test "encodes semantic tab bytes directly" do
       model = %TabBar{
         visible?: true,
-        active_tab_id: chrome_state.active_tab_id,
+        active_tab_id: 7,
         tabs: [
+          %Tab{
+            id: 3,
+            workspace_id: 1,
+            label: "agent",
+            icon: "A",
+            kind: :agent,
+            attention?: true,
+            agent_status: :tool_executing,
+            tint_color: 0x7AA2F7
+          },
           %Tab{
             id: 7,
             workspace_id: 2,
             label: "README.md",
             icon: "󰈙",
             dirty?: true,
-            attention?: true,
             pinned?: true,
             tint_color: 0x123456
           }
@@ -38,60 +42,80 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
 
       {cmd, _caches} = TabBarEncoder.encode(model, Caches.new())
 
-      assert cmd == ProtocolGUI.encode_gui_tab_bar(chrome_state)
+      assert <<@op_gui_tab_bar, 1::8, 2::8, entries::binary>> = cmd
+      {agent_tab, entries} = decode_tab(entries)
+      {file_tab, ""} = decode_tab(entries)
+
+      assert agent_tab == %{
+               flags: 0x2C,
+               id: 3,
+               workspace_id: 1,
+               icon: "A",
+               label: "agent",
+               tint_color: 0x7AA2F7
+             }
+
+      assert file_tab == %{
+               flags: 0x83,
+               id: 7,
+               workspace_id: 2,
+               icon: "󰈙",
+               label: "README.md",
+               tint_color: 0x123456
+             }
     end
 
-    test "encodes semantic tabs" do
+    test "encodes every agent status in bits 4 through 6" do
+      for {status, expected} <- [
+            {nil, 0},
+            {:idle, 0},
+            {:thinking, 1},
+            {:tool_executing, 2},
+            {:error, 3},
+            {:plan, 4},
+            {:unknown, 0}
+          ] do
+        model = %TabBar{
+          visible?: true,
+          active_tab_id: 1,
+          tabs: [
+            %Tab{
+              id: 1,
+              workspace_id: 0,
+              label: "Agent",
+              icon: "A",
+              kind: :agent,
+              agent_status: status
+            }
+          ]
+        }
+
+        assert <<@op_gui_tab_bar, 0::8, 1::8, flags::8, _rest::binary>> =
+                 TabBarEncoder.encode_command(model)
+
+        assert Bitwise.band(flags, 0x04) == 0x04
+        assert Bitwise.band(Bitwise.bsr(flags, 4), 0x07) == expected
+      end
+    end
+
+    test "uses hidden-active sentinel when no visible tab is active" do
+      model = %TabBar{
+        visible?: true,
+        active_tab_id: 99,
+        tabs: [%Tab{id: 1, workspace_id: 2, label: "other.ex", icon: ""}]
+      }
+
+      assert <<@op_gui_tab_bar, 255::8, 1::8, flags::8, _rest::binary>> =
+               TabBarEncoder.encode_command(model)
+
+      assert Bitwise.band(flags, 0x01) == 0
+    end
+
+    test "encodes ephemeral file tabs in bit 4 without agent bit" do
       model = %TabBar{
         visible?: true,
         active_tab_id: 1,
-        tabs: [
-          %Tab{id: 1, workspace_id: 0, label: "README.md", icon: "󰈙", dirty?: true, pinned?: true}
-        ]
-      }
-
-      {cmd, _caches} = TabBarEncoder.encode(model, Caches.new())
-
-      assert <<@op_gui_tab_bar, 0::8, 1::8, flags::8, 1::32, 0::16, rest::binary>> = cmd
-      assert Bitwise.band(flags, 0x01) == 0x01
-      assert Bitwise.band(flags, 0x02) == 0x02
-      assert Bitwise.band(flags, 0x80) == 0x80
-      assert byte_size(rest) > 0
-    end
-
-    test "encodes agent tab flags" do
-      model = %TabBar{
-        visible?: true,
-        active_tab_id: 9,
-        tabs: [
-          %Tab{
-            id: 9,
-            workspace_id: 1,
-            label: "Agent",
-            icon: "󰚩",
-            kind: :agent,
-            attention?: true,
-            agent_status: :thinking
-          }
-        ]
-      }
-
-      {cmd, _caches} = TabBarEncoder.encode(model, Caches.new())
-
-      assert <<@op_gui_tab_bar, 0::8, 1::8, flags::8, _rest::binary>> = cmd
-      assert Bitwise.band(flags, 0x01) == 0x01
-      assert Bitwise.band(flags, 0x04) == 0x04
-      assert Bitwise.band(flags, 0x08) == 0x08
-      assert Bitwise.band(flags, 0x70) == 0x10
-    end
-
-    test "encodes ephemeral file tabs in bit 4" do
-      model = %TabBar{
-        visible?: true,
-        active_tab_id: 1,
-        tabs: [
-          %Tab{id: 1, workspace_id: 0, label: "Untitled-1", icon: "󰈔", ephemeral?: true}
-        ]
+        tabs: [%Tab{id: 1, workspace_id: 0, label: "Untitled-1", icon: "󰈔", ephemeral?: true}]
       }
 
       {cmd, _caches} = TabBarEncoder.encode(model, Caches.new())
@@ -148,32 +172,17 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
     end
   end
 
-  @spec chrome_state() :: ChromeState.t()
-  defp chrome_state do
-    %ChromeState{
-      workspaces: [],
-      visible_tabs: [
-        TabSummary.new(
-          id: 7,
-          workspace_id: 2,
-          kind: :file,
-          label: "README.md",
-          path: "/project/README.md",
-          icon: "󰈙",
-          dirty?: true,
-          draft_state: :none,
-          attention?: true,
-          pinned?: true,
-          tint_color: 0x123456
-        )
-      ],
-      mode: :editor,
-      active_workspace_id: 2,
-      active_tab_id: 7,
-      background_count: 0,
-      attention_count: 1,
-      draft_count: 0,
-      conflict_count: 0
-    }
+  defp decode_tab(
+         <<flags::8, id::32, workspace_id::16, icon_len::8, icon::binary-size(icon_len),
+           label_len::16, label::binary-size(label_len), tint_color::32, rest::binary>>
+       ) do
+    {%{
+       flags: flags,
+       id: id,
+       workspace_id: workspace_id,
+       icon: icon,
+       label: label,
+       tint_color: tint_color
+     }, rest}
   end
 end
