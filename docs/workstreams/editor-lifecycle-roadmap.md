@@ -2699,7 +2699,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W039: Delete D06 extension-panel Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.12
 - **Implementation profile:** `D06Worker12`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner12` for current SHA `a3976713256c7342e65a26382a69606f2cf5544b`; W039 removes only the `gui_extension_panel` outbound Protocol.GUI parity oracle because live `0x9D` emission is already owned by `Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder` from `%Minga.RenderModel.UI.ExtensionPanel{}` built by `MingaEditor.RenderModel.UI.ExtensionPanelBuilder`.
@@ -2725,8 +2725,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0 blockers and 0.99 confidence. The reviewer confirmed the exact Protocol.GUI `0x9D` oracle deletion, retained canonical builder/model/adapter/schema/Swift/Go/action/runtime/file-tree/D03 contracts, direct byte coverage after the mandatory Ponytail cuts, truthful validation, budgets, zero production concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3064
 - **Implementation commit SHA:** `96e7fd3db`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `56053bcb505a8b17efdac50bbbe38aa3ad9c82ca`; **Merge evidence:** PR #3064 merged after CI run `29710036281` passed every required check. The first Elixir CI attempt failed only `NativeMCPTest`'s secret-redaction case; that exact test passed locally, the failed CI job passed on its isolated rerun, and Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency all passed.
+- **Completion date:** 2026-07-20.
 
 ## Follow-on simplifications
 
