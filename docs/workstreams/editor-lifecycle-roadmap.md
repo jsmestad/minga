@@ -2666,7 +2666,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W038: Delete D06 tab-bar Protocol.GUI outbound parity oracle
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D06.11
 - **Implementation profile:** `D06Worker11`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, one dedicated parent-authored worktree, no delegation
 - **Ready provenance:** Locked by `agent://D06Planner11` for current SHA `b612fee6837284962fe657f2f61f3bc1f01bf004`; W038 removes only the `gui_tab_bar` outbound Protocol.GUI parity oracle because live `0x71` emission is already owned by `Minga.Frontend.Adapter.GUI.TabBarEncoder` from `%Minga.RenderModel.UI.TabBar{}` built by `MingaEditor.RenderModel.UI.TabBarBuilder`.
@@ -2694,8 +2694,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact tab-bar oracle deletion, migration of every test and Swift-harness producer to the canonical semantic encoder, retained tab actions/schema/generated/Swift/Go/headless/builder/adapter contracts, full flags/status/sentinel/field/tint/cache coverage, truthful validation, budgets, zero concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3062
 - **Implementation commit SHA:** `e6b9ff665`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `5ff29a611731509b76d9e416f2f8777b471ffaeb`; **Merge evidence:** PR #3062 merged after CI run `29709079386` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
 
 ## Follow-on simplifications
 
