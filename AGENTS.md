@@ -750,7 +750,7 @@ The keystroke-to-render critical path is instrumented with `:telemetry` spans vi
 | Event | Metadata | What it measures |
 |-------|----------|------------------|
 | `[:minga, :render, :pipeline]` | `window_count` | Full render frame |
-| `[:minga, :render, :stage]` | `stage` atom | Individual render stage (invalidation, layout, scroll, content, agent_content, chrome, compose, emit) |
+| `[:minga, :render, :stage]` | `stage` atom | Individual render stage (layout, scroll, content, agent_content, chrome, compose, emit) |
 | `[:minga, :input, :dispatch]` | | Keystroke dispatch through input router |
 | `[:minga, :command, :execute]` | `command` atom | Named command execution |
 | `[:minga, :port, :emit]` | `byte_count` | Protocol encoding + port write |
@@ -800,7 +800,7 @@ Key design decisions:
 - **Styled text runs over cell grids:** GUIs don't think in terminal cells. The IR uses `{col, text, style}` tuples organized by line within positioned rectangles. The TUI quantizes runs to cells; a GUI renders runs with its font engine.
 - **GUI chrome protocol:** Native GUI frontends receive structured data opcodes (0x70-0x78) for chrome elements like tab bars, file trees, status bars, and popups. These are rendered with platform-native widgets (SwiftUI, GTK4), not painted as cells. See `docs/GUI_PROTOCOL.md`.
 - **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
-- **Pipeline stages:** Seven named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) with per-stage timing via telemetry.
+- **Pipeline stages:** Seven named stages (Layout, Scroll, Content, Agent content, Chrome, Compose, Emit) with per-stage timing via telemetry.
 
 ### Ownership: what the BEAM decides vs what frontends decide
 

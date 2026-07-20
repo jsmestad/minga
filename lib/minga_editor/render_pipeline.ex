@@ -2,14 +2,14 @@ defmodule MingaEditor.RenderPipeline do
   @moduledoc """
   Orchestrator for the rendering pipeline.
 
-  Runs seven named stages in sequence, each implemented in its own module:
+  Runs the render stages in sequence, each implemented in its own module or focused owner:
 
-  1. **Invalidation** — decides what needs redrawing (currently a stub).
-  2. **Layout** — computes screen rectangles via `Layout.put/1`.
-  3. **Scroll** — applies pre-fetched per-window viewport and buffer data without process calls.
+  1. **Layout** — computes screen rectangles via `Layout.put/1`.
+  2. **Scroll** — applies pre-fetched per-window viewport and buffer data without process calls.
      See `RenderPipeline.Scroll`.
-  4. **Content** — builds display list draws for each window's lines,
+  3. **Content** — builds display list draws for each window's lines,
      gutter, and tildes. See `RenderPipeline.Content`.
+  4. **Agent content** — builds agent chat window content and prompt chrome.
   5. **Chrome** — builds modeline, minibuffer, overlays, separators,
      file tree, agent panel, and region definitions.
      See `RenderPipeline.Chrome`.
@@ -17,7 +17,7 @@ defmodule MingaEditor.RenderPipeline do
      resolves cursor position and shape.
      See `RenderPipeline.Compose`.
   7. **Emit** — converts frame to protocol commands and sends to the
-     Zig port. See `RenderPipeline.Emit`.
+     frontend. See `RenderPipeline.Emit`.
 
   ## Observability
 
@@ -43,12 +43,6 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.UI.FontRegistry
   alias Minga.Telemetry
-
-  # The Invalidation type lives in its own module
-  # (MingaEditor.RenderPipeline.Invalidation) carrying first-class
-  # per-window and per-region dirty info. Stage 1's producer always
-  # returns full_redraw: true today; the consumers' dirty-bit gating
-  # is the Phase 1/2 follow-up work in #1431.
 
   # ── Orchestrator ───────────────────────────────────────────────────────────
 
@@ -79,13 +73,7 @@ defmodule MingaEditor.RenderPipeline do
       [:minga, :render, :pipeline],
       %{window_count: window_count},
       fn ->
-        # Stage 1: Invalidation (global triggers: visual selection, search, theme)
-        input =
-          Telemetry.span([:minga, :render, :stage], %{stage: :invalidation}, fn ->
-            invalidate(input)
-          end)
-
-        # Stage 2: Layout
+        # Stage 1: Layout
         input =
           Telemetry.span([:minga, :render, :stage], %{stage: :layout}, fn ->
             compute_layout(input)
@@ -105,8 +93,8 @@ defmodule MingaEditor.RenderPipeline do
   end
 
   @doc """
-  Runs the windows render pipeline stages: scroll, content, chrome,
-  compose, and emit.
+  Runs the windows render pipeline stages: scroll, content, agent content,
+  chrome, compose, and emit.
 
   Core rendering logic for buffer editing. Called directly by the
   pipeline dispatcher.
@@ -126,7 +114,7 @@ defmodule MingaEditor.RenderPipeline do
     # independently (#2287).
     input = put_render_path(input, Classifier.classify(input, prefetched_scrolls))
 
-    # Stage 3: Scroll consumes pre-fetched per-window data without process calls.
+    # Stage 2: Scroll consumes pre-fetched per-window data without process calls.
     {scrolls, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :scroll}, fn ->
         Scroll.scroll_windows(input, layout, prefetched_scrolls)
@@ -135,7 +123,7 @@ defmodule MingaEditor.RenderPipeline do
     # Scroll updates per-window viewports; rebuild the tree so overlay hit regions match what chrome renders.
     input = %{input | focus_tree: FocusTree.from_state(input)}
 
-    # Stage 4: Content (skips clean lines, updates window caches)
+    # Stage 3: Content (skips clean lines, updates window caches)
     {buffer_frames, cursor_info, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :content}, fn ->
         Content.build_content(input, scrolls)
@@ -143,7 +131,7 @@ defmodule MingaEditor.RenderPipeline do
 
     prefetched_agent_chats = BufferPrefetch.prefetch_agent_chat_windows(input, layout)
 
-    # Stage 4b: Agent chat window content (buffer pipeline + prompt chrome)
+    # Stage 4: Agent chat window content (buffer pipeline + prompt chrome)
     {agent_chat_frames, agent_cursor, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :agent_content}, fn ->
         Content.build_agent_chat_content(input, layout, prefetched_agent_chats)
@@ -211,29 +199,7 @@ defmodule MingaEditor.RenderPipeline do
 
   defp update_shell_click_regions(shell_state, %Chrome{}), do: shell_state
 
-  # ── Stage 1: Invalidation ─────────────────────────────────────────────────
-
-  @doc """
-  Invalidation stage (Stage 1). Currently a pass-through.
-
-  All invalidation is handled by two mechanisms downstream:
-
-  * **Structural invalidation** in `Scroll.scroll_windows/2`: viewport scroll,
-    gutter width, line count, buffer version changes detected via
-    `Window.detect_invalidation/5`.
-
-  * **Context invalidation** in `Content.build_content/2`: visual
-    selection, search matches, syntax highlights, diagnostic/git signs,
-    horizontal scroll, active status, and theme colors detected via
-    `Window.detect_context_change/2` using a fingerprint of the
-    render context.
-  """
-  @spec invalidate(input()) :: input()
-  def invalidate(input) do
-    input
-  end
-
-  # ── Stage 2: Layout ────────────────────────────────────────────────────────
+  # ── Stage 1: Layout ────────────────────────────────────────────────────────
 
   @doc """
   Computes and caches the layout in editor state.

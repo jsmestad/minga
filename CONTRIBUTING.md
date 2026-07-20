@@ -106,10 +106,10 @@ set :log_level_render, :debug
 This shows output like:
 
 ```
-[render:invalidation] 0µs
 [render:layout] 12µs
 [render:scroll] 45µs
 [render:content] 89µs
+[render:agent_content] 4µs
 [render:chrome] 34µs
 [render:compose] 18µs
 [render:emit] 22µs
