@@ -14,7 +14,6 @@ defmodule MingaEditor.KeyDispatch do
   alias Minga.Editing, as: CoreEditing
 
   alias Minga.Editing.Model.Vim, as: VimModel
-  alias MingaEditor.BufferLifecycle
   alias MingaEditor.ChangeTracking
   alias MingaEditor.Commands
   alias MingaEditor.Editing
@@ -136,7 +135,6 @@ defmodule MingaEditor.KeyDispatch do
   """
   @spec dispatch_command(EditorState.t(), Mode.command()) :: EditorState.t()
   def dispatch_command(state, cmd) do
-    old_buffer = state.workspace.buffers.active
     cmd_name = command_name(cmd)
 
     execute = fn s ->
@@ -147,9 +145,7 @@ defmodule MingaEditor.KeyDispatch do
       end
     end
 
-    result = Config.wrap_with_advice(cmd_name, execute).(state)
-
-    BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
+    Config.wrap_with_advice(cmd_name, execute).(state)
   end
 
   @spec command_name(Mode.command()) :: atom()

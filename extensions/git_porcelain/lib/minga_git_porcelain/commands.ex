@@ -12,7 +12,6 @@ defmodule MingaGitPorcelain.Commands do
   alias Minga.Core.Diff
   alias Minga.Core.DiffView
   alias Minga.Core.Face
-  alias MingaEditor.BufferLifecycle
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Commands
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
@@ -571,7 +570,6 @@ defmodule MingaGitPorcelain.Commands do
   @spec save_and_stage_resolved_file(state(), pid(), String.t()) :: state()
   defp save_and_stage_resolved_file(state, buf, file_path) do
     with :ok <- Buffer.save(buf),
-         :ok <- broadcast_save_lifecycle(state, buf),
          {:ok, git_root} <- git_root_for_file(file_path),
          rel_path = Git.relative_path(git_root, file_path),
          :ok <- Git.stage(git_root, rel_path) do
@@ -594,12 +592,6 @@ defmodule MingaGitPorcelain.Commands do
           "Resolved conflicts, but save/stage failed: #{inspect(reason)}"
         )
     end
-  end
-
-  @spec broadcast_save_lifecycle(state(), pid()) :: :ok
-  defp broadcast_save_lifecycle(state, buf) do
-    BufferLifecycle.lsp_after_save(state, :save, buf)
-    :ok
   end
 
   @spec git_root_for_file(String.t()) :: {:ok, String.t()} | :not_git | {:error, String.t()}

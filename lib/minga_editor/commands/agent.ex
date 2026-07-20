@@ -26,7 +26,6 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias Minga.Clipboard
-  alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.AgentSubStates
@@ -997,7 +996,6 @@ defmodule MingaEditor.Commands.Agent do
     state
     |> create_active_agent_tab()
     |> reset_agent_state_for_new_session()
-    |> AgentLifecycle.setup_agent_highlight()
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
   end
 
