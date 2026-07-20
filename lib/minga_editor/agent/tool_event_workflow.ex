@@ -125,12 +125,10 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
   @spec transition_updated(EditorState.t(), String.t(), String.t()) :: EditorState.t()
   defp transition_updated(state, "shell", partial) do
     state
-    |> TraditionalWorkflow.maybe_agent_auto_scroll()
     |> update_preview(&Preview.update_shell_output(&1, partial))
   end
 
-  defp transition_updated(state, _name, _partial),
-    do: TraditionalWorkflow.maybe_agent_auto_scroll(state)
+  defp transition_updated(state, _name, _partial), do: state
 
   @spec transition_ended(EditorState.t(), String.t(), String.t(), atom()) ::
           {:render | :no_render, EditorState.t()}

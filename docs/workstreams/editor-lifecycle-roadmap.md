@@ -2684,3 +2684,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `0d7108eb3285e0170c29391285c983462e74bc30`.
 - **Merge evidence:** PR #3084 merged after CI run `29748112590` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-20.
+
+### W050: Delete D39 agent auto-scroll no-op chain
+
+- **Status:** ACTIVE
+- **Audit ID:** W050/D39
+- **Planning profile:** `D39Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
+- **Implementation profile:** `D39Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
+- **Freshness commit SHA:** `a4932c61b0a7d18c0b7d167828ca1c7731f5a051`.
+- **Observable result:** Agent stream and tool update paths no longer reinstall the same agent UI value through the obsolete auto-scroll pre-pass. Stream message changes still bump the panel message version, schedule render, synchronize transcript display, and refresh tab labels. Stream batches still replay tool deltas, bump transcript-affecting message versions, schedule one render, and synchronize the transcript at most once. Shell tool updates still update the live shell preview. Explicit pin paths remain unchanged through `UIState.engage_auto_scroll/1`, `UIState.scroll_to_bottom/1`, `UIState.set_pinned/2`, `Minga.Editing.Scroll.pin_to_bottom/1`, `Minga.Editing.Scroll.set_pinned/2`, and `TraditionalWorkflow.engage_agent_scroll/1`.
+- **Failure reproduction / source trace:** Before deletion, focused source search found `StreamEventWorkflow.messages_changed/1`, `StreamEventWorkflow.batch/2`, and `ToolEventWorkflow.transition_updated/3` calling `TraditionalWorkflow.maybe_agent_auto_scroll/1`; `TraditionalWorkflow.maybe_agent_auto_scroll/1` only called `UIState.maybe_auto_scroll/1` and reinstalled the result; `UIState.maybe_auto_scroll/1` returned its input unchanged. The chain changed no panel scroll, transcript cache, message version, preview, render, or highlight data.
+- **Implementation result:** Deleted only `UIState.maybe_auto_scroll/1`, `TraditionalWorkflow.maybe_agent_auto_scroll/1`, and their exact callsites. Updated the stream workflow module documentation to stop describing the removed pre-pass. No tests were edited.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/agent/stream_event_workflow.ex`; `lib/minga_editor/agent/tool_event_workflow.ex`; `lib/minga_editor/agent/ui_state.ex`; `lib/minga_editor/shell/traditional/workflow.ex`.
+- **Focused validation:** `mix test.debug test/minga_editor/agent/focused_event_workflows_test.exs` passed with 17 tests. `mix test.debug test/minga_editor/handlers/gui_action_handler_test.exs` passed with 23 tests. `mix test.debug test/minga_editor/agent/ui_state_test.exs` passed with 16 tests.
+- **Formatting, reference, and diff validation:** `mix format` ran on the four touched Elixir source files. `mix format --check-formatted lib/minga_editor/agent/ui_state.ex lib/minga_editor/shell/traditional/workflow.ex lib/minga_editor/agent/stream_event_workflow.ex lib/minga_editor/agent/tool_event_workflow.ex` passed. Focused search across `lib/minga_editor` and `test/minga_editor` for `maybe_agent_auto_scroll|UIState\.maybe_auto_scroll|TraditionalWorkflow\.maybe_agent_auto_scroll|def maybe_auto_scroll` returned no matches. `git diff --check` passed.
+- **Numstat before roadmap evidence:** `lib/minga_editor/agent/stream_event_workflow.ex 1 4; lib/minga_editor/agent/tool_event_workflow.ex 1 3; lib/minga_editor/agent/ui_state.ex 0 4; lib/minga_editor/shell/traditional/workflow.ex 0 5`.
+- **Production lines added/removed:** `2 added / 16 removed` (net `-14`, within production net `<= 0`).
+- **Test lines added/removed:** `0 added / 0 removed`.
+- **Concepts removed:** Removed the obsolete identity auto-scroll pre-pass chain from stream/tool update workflows.
+- **Concepts added:** None. No production module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, scroll owner, transcript owner, or frontend path was added.
+- **Retained contracts:** Explicit agent scroll re-engagement and pinning remain in `UIState.engage_auto_scroll/1`, `UIState.scroll_to_bottom/1`, `UIState.set_pinned/2`, `Minga.Editing.Scroll.pin_to_bottom/1`, `Minga.Editing.Scroll.set_pinned/2`, and `TraditionalWorkflow.engage_agent_scroll/1`. Transcript invalidation and projection remain in `Panel.bump_message_version/1`, `AgentLifecycle.sync_transcript/1`, Markdown highlighting, and `AgentChatBuilder.build_visible/2`. Shell preview updates remain in `ToolEventWorkflow.transition_updated/3` through `update_preview/2`.
+- **Findings resolved:** D39 implementation slice removes the no-op agent auto-scroll reinstall chain while preserving explicit pin, transcript, highlight, message-version, render, and shell-preview behavior.
+- **Discoveries affecting later work:** No replan trigger, stale test reference, dependency drift, frontend protocol change, or replacement owner was found.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,753 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness returned `PASS / Lean` with 0.99 confidence, Elixir craftsmanship returned `PASS / Lean`, and Ponytail returned `PASS / Lean`. All confirmed the exact identity-chain deletion, retained explicit pin, transcript, highlight, message-version, render, and shell-preview paths, truthful negative budgets, and zero added concepts. Silent-failure analysis was unavailable because its runtime had no model configured.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact D39 identity-chain deletion, retained pin, transcript, highlight, agent-chat projection, render, tab-label, and shell-preview contracts, consistent validation and budgets, zero references, zero concepts, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
