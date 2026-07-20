@@ -2687,7 +2687,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W050: Delete D39 agent auto-scroll no-op chain
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W050/D39
 - **Planning profile:** `D39Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
 - **Implementation profile:** `D39Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2711,5 +2711,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact D39 identity-chain deletion, retained pin, transcript, highlight, agent-chat projection, render, tab-label, and shell-preview contracts, consistent validation and budgets, zero references, zero concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3086
 - **Implementation commit SHA:** `7f5b17960`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `9e5ecf1f816a716d0a9edaaf7c988b4059f28702`.
+- **Merge evidence:** PR #3086 merged after CI run `29754288888` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-20.
