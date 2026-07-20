@@ -2466,7 +2466,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** No live caller required a migration, shim, replacement owner, or new persistence path. Legacy tab maps with removed keys are ignored by the existing unknown-field normalization once the field is absent from `TabContext`.
 - **Pre-acceptance reviews:** Correctness and Ponytail initially blocked only on inaccurate compressed W003 historical evidence; the truthful implementation and merge SHAs, scheduler disclosure, and line totals were restored. Elixir craftsmanship returned `PASS / Lean` with 0 mandatory issues and 0.99 confidence. The dedicated test-analysis agent was unavailable because its runtime had no model configured; correctness review covered retained generic persistence, state, retirement, and zero-trace contracts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence, confirming exact clean deletion, 0 production additions, retained workspace/tab-context/buffer-retirement owners, truthful budgets and validation evidence, and forbidden tokens only in the explicit immutable/historical allowlist.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3070
+- **Implementation commit SHA:** `3fe838c0e`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
