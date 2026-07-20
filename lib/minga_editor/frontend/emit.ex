@@ -2,7 +2,7 @@ defmodule MingaEditor.Frontend.Emit do
   @moduledoc """
   Stage 7: Emit.
 
-  Encodes the composed frame as semantic render-model protocol commands, then handles shared concerns (viewport tracking, title, window background).
+  Encodes the composed frame as semantic render-model protocol commands, then handles shared title and window-background side channels.
   """
 
   alias MingaEditor.RenderModel.Builder, as: RenderModelBuilder
@@ -145,7 +145,6 @@ defmodule MingaEditor.Frontend.Emit do
       )
     end
 
-    caches = update_tracking(ctx, caches)
     caches = %{caches | last_emitted_frame_seq: frame_seq, last_frame_keyframe?: keyframe?}
 
     caches =
@@ -211,67 +210,6 @@ defmodule MingaEditor.Frontend.Emit do
 
     commands
   end
-
-  # ── Tracking state (shared) ──────────────────────────────────────────────
-
-  @spec update_tracking(ctx(), Caches.t()) :: Caches.t()
-  defp update_tracking(ctx, caches) do
-    layout = ctx.layout
-
-    tops =
-      Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(ctx.windows.map, win_id)
-
-        {win_id, window_cache_field(window, :last_viewport_top, :viewport_top)}
-      end)
-
-    rects =
-      Map.new(layout.window_layouts, fn {win_id, wl} ->
-        {win_id, wl.content}
-      end)
-
-    gutter_ws =
-      Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(ctx.windows.map, win_id)
-
-        {win_id, window_cache_field(window, :last_gutter_w)}
-      end)
-
-    buf_versions =
-      Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(ctx.windows.map, win_id)
-
-        {win_id, window_cache_field(window, :last_buf_version, :buffer_version)}
-      end)
-
-    cursor_lines =
-      Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(ctx.windows.map, win_id)
-
-        {win_id, window_cache_field(window, :last_cursor_line, :cursor_line)}
-      end)
-
-    editing_mode = if ctx.editing, do: ctx.editing.mode, else: nil
-
-    %{
-      caches
-      | emit_prev_viewport_tops: tops,
-        emit_prev_content_rects: rects,
-        emit_prev_gutter_ws: gutter_ws,
-        emit_prev_buf_versions: buf_versions,
-        emit_prev_cursor_lines: cursor_lines,
-        emit_prev_editing_mode: editing_mode
-    }
-  end
-
-  @spec window_cache_field(map() | nil, atom(), atom() | nil) :: integer()
-  defp window_cache_field(window, renderer_field, editor_field \\ nil)
-
-  defp window_cache_field(%{render_cache: cache}, renderer_field, editor_field) do
-    Map.get(cache, renderer_field, Map.get(cache, editor_field, -1))
-  end
-
-  defp window_cache_field(nil, _renderer_field, _editor_field), do: -1
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 

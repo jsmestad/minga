@@ -11,7 +11,6 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias Minga.Editing.Completion
   alias Minga.RenderModel.Cursor
   alias MingaEditor.RenderPipeline.ComposedFrame
-  alias MingaEditor.Layout
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
@@ -332,23 +331,6 @@ defmodule MingaEditor.Frontend.EmitTest do
                <<0x52, 1, _::binary>> -> true
                _ -> false
              end)
-    end
-  end
-
-  describe "update_tracking (shared)" do
-    test "writes viewport tracking state into returned caches" do
-      frame = build_frame_with_window(emit_state(), viewport_top: 0)
-      state = emit_state()
-      _layout = Layout.put(state)
-      ctx = Context.from_editor_state(state)
-
-      {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
-      _ = assert_receive_frame_commands()
-
-      assert is_map(caches.emit_prev_viewport_tops)
-      assert is_map(caches.emit_prev_content_rects)
-      assert is_map(caches.emit_prev_gutter_ws)
-      assert is_map(caches.emit_prev_buf_versions)
     end
   end
 

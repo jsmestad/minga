@@ -2623,3 +2623,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `7729d732e47b4bbdc8524323365fbc24506db18e`.
 - **Merge evidence:** PR #3080 merged after CI run `29736782257` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-20.
+
+### W048: Delete D11 write-only renderer cache fields
+
+- **Status:** ACTIVE
+- **Audit ID:** W048/D11
+- **Planning profile:** `D11Planner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, high, read-only.
+- **Implementation profile:** `D11Worker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
+- **Freshness commit SHA:** `825a6b2164cd26adca611e9cb1ba33db8f8d3249`.
+- **Observable result:** `MingaEditor.Renderer.Caches` no longer carries the seven write-only renderer cache fields, and `MingaEditor.Frontend.Emit` no longer builds the obsolete viewport, content-rect, gutter-width, buffer-version, cursor-line, editing-mode, or block-render tracking values before recording frame lineage. Emit still returns `{Caches.t(), FontRegistry.t(), MessageStore.t()}`, updates adapter GUI caches, advances emitted and acknowledged frame state, preserves recovery generation behavior, and keeps title, window background, and link-cursor side-channel dedupe.
+- **Failure reproduction / source trace:** Before deletion, `Caches` constructed and typed the unused `block_render_cache` field plus six `emit_prev_*` fields. `Emit.emit_encoded_frame/7` called private `update_tracking/2`, which computed and wrote those six maps or values into the returned caches. Focused source tracing found no production consumer for those fields or helpers; the only test consumer was the obsolete structural assertion in `test/minga_editor/frontend/emit_test.exs`.
+- **Implementation result:** Deleted only the seven fields from `Caches.defstruct/1`, `Caches.t/0`, and stale ownership docs; removed the `update_tracking/2` call plus private `update_tracking/2` and `window_cache_field/3` helpers from `Emit`; deleted the obsolete structural emit test without replacement.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/frontend/emit.ex`; `lib/minga_editor/renderer/caches.ex`; `test/minga_editor/frontend/emit_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/frontend/emit_test.exs test/minga_editor/frontend/emit/keyframe_side_channel_test.exs` passed with 17 tests after deleting the structural test. `mix test test/minga_editor/render_pipeline/content_test.exs test/minga_editor/window/render_cache_test.exs test/minga_editor/render_pipeline/scroll_test.exs test/minga_editor/renderer/buffer_changes_test.exs test/minga_editor/renderer/server_test.exs` passed with 70 tests.
+- **Formatting, reference, and diff validation:** `mix format --check-formatted lib/minga_editor/renderer/caches.ex lib/minga_editor/frontend/emit.ex test/minga_editor/frontend/emit_test.exs` passed. Focused forbidden-reference search over `lib/` and `test/` for `emit_prev_`, `block_render_cache`, `update_tracking`, and `window_cache_field` returned no matches. `git diff --check` passed.
+- **Numstat before roadmap evidence:** `lib/minga_editor/frontend/emit.ex 1 63; lib/minga_editor/renderer/caches.ex 2 19; test/minga_editor/frontend/emit_test.exs 0 18`.
+- **Production lines added/removed:** `3 added / 82 removed` (net `-79`, within production net `<= 0`).
+- **Test lines added/removed:** `0 added / 18 removed` (net `-18`, within test net `<= +20`).
+- **Concepts removed:** Removed one write-only renderer cache tracking surface and its private emit helper path.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, telemetry, or cache owner was added.
+- **Retained contracts:** `chrome_prev_fingerprint`, `chrome_prev_result`, `search_decoration_cache`, `doc_highlight_cache`, `cmd_hover_link_cache`, `frame_rows_rasterized`, `frame_render_path`, `last_title`, `last_window_bg`, `last_link_cursor`, `last_emitted_frame_seq`, `last_acknowledged_frame_seq`, `recovery_generation`, `last_frame_keyframe?`, and `adapter_gui_caches` remain in `Caches`. WindowCache resident, retention, scroll, epoch, dirty, lineage, and snapshot fields were not touched.
+- **Findings resolved:** D11 implementation slice removes the locked write-only cache fields and helpers while preserving the live emit, adapter, side-channel, acknowledgement, recovery, content-cache, telemetry, and WindowCache contracts.
+- **Discoveries affecting later work:** No source-shape replacement test was retained. The compile gate and zero-trace source check prove the removed private fields and helpers are gone, while existing emit, keyframe, content, WindowCache, scroll, buffer-change, and renderer-server tests continue to cover the retained observable contracts.
+- **Broad validation:** `make lint` passed twice, including after the test deletion and documentation correction, with Credo, compile, format, and incremental Dialyzer reporting 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,752 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Elixir craftsmanship returned `PASS / Lean`. Correctness and Ponytail confirmed the code deletion was exact and lean, and required truthful ledger corrections after the structural absence test was deleted; correctness also found one stale Emit moduledoc claim. The ledger now records the 17-test focused pass and final numstat, the obsolete test remains deleted without replacement, and the Emit moduledoc names only live semantic encoding and side-channel ownership. Both targeted rechecks returned `RESOLVED/PASS`.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact seven-field and private-helper deletion, retained emit, adapter, frame-lineage, recovery, content, telemetry, and WindowCache contracts, truthful focused and broad validation, zero trace, budgets, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3082
+- **Implementation commit SHA:** `f85c96d33`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
