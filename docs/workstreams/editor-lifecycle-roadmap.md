@@ -2829,7 +2829,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `mix test.llm test/minga_editor/render_pipeline/` passed 90 tests with 4 excluded. `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,752 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded. Two `mix test.quick` attempts exposed four unrelated suite-load timing failures: `SessionRecoveryTest` and `NativeMCPTest` under seed `880159`, then two `NativeMCPTest` cases and `SessionManagerTest` under seed `814510`. Every exact failing location passed with its original seed in three focused reruns, and the lower-concurrency full `test.llm` gate passed.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact empty-producer/forwarder/ignored-consumer deletion, clean arity-2 cutover, unchanged seven-stage ordering and state/content behavior, preserved owner boundaries, truthful negative budgets, mechanical test-only callsite change, zero placeholder traces, and zero added concepts.
 - **Final reviewer verdict:** `PASS` after one evidence correction. The reviewer confirmed the production and test cutover exactly matches the locked D40 deletion, preserves render contracts, meets line and concept budgets, and is supported by focused, lint, scoped, and full-suite passes. Its sole blocker was an incomplete quick-test failure ledger; all omitted exact locations passed with their original seed, the ledger now names all failures, and the targeted recheck returned `RESOLVED/PASS`.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3094
+- **Implementation commit SHA:** `0ab9593e8`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
