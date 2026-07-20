@@ -129,12 +129,10 @@ defmodule MingaEditor.RenderPipeline do
         Content.build_content(input, scrolls)
       end)
 
-    prefetched_agent_chats = BufferPrefetch.prefetch_agent_chat_windows(input, layout)
-
     # Stage 4: Agent chat window content (buffer pipeline + prompt chrome)
     {agent_chat_frames, agent_cursor, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :agent_content}, fn ->
-        Content.build_agent_chat_content(input, layout, prefetched_agent_chats)
+        Content.build_agent_chat_content(input, layout)
       end)
 
     # If the agent chat window set a cursor, use it (overrides buffer cursor).

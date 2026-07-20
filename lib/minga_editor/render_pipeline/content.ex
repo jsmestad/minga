@@ -63,12 +63,6 @@ defmodule MingaEditor.RenderPipeline.Content do
   @spec build_agent_chat_content(state(), Layout.t()) ::
           {[WindowContent.t()], Cursor.t() | nil, state()}
   def build_agent_chat_content(state, layout) do
-    build_agent_chat_content(state, layout, %{})
-  end
-
-  @spec build_agent_chat_content(state(), Layout.t(), map()) ::
-          {[WindowContent.t()], Cursor.t() | nil, state()}
-  def build_agent_chat_content(state, layout, _prefetched_agent_chats) do
     layout.window_layouts
     |> Enum.reduce({[], nil, state}, fn {win_id, win_layout}, {frames, cursor, st} ->
       window = Map.get(st.workspace.windows.map, win_id)
