@@ -2692,8 +2692,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `mix test.llm --seed 810531 --max-cases 4` passed 9,835 tests, including 58 doctests and 98 properties, with 0 failures, 1 skipped, and 575 excluded. `cd go/tui && go test ./...` passed all seven tested packages with one package reporting no tests.
 - **Pre-acceptance reviews:** Correctness initially blocked because the direct canonical test covered only `:tool_executing` status bits and the Swift harness did not assert its decoded `:thinking` status. A table-driven test now locks nil, idle, thinking, tool-executing, error, plan, and unknown mappings while requiring the agent bit, and the harness assertion requires decoded status `1`; targeted correctness re-review returned `RESOLVED`. Elixir craftsmanship returned `PASS/Lean`. Ponytail returned `Lean already. Ship.` The dedicated test-analysis agent was unavailable because its runtime had no model configured, so correctness review explicitly covered the direct wire and harness replacement contracts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact tab-bar oracle deletion, migration of every test and Swift-harness producer to the canonical semantic encoder, retained tab actions/schema/generated/Swift/Go/headless/builder/adapter contracts, full flags/status/sentinel/field/tint/cache coverage, truthful validation, budgets, zero concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3062
+- **Implementation commit SHA:** `e6b9ff665`
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
 
