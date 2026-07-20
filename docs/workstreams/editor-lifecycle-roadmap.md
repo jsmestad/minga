@@ -2448,7 +2448,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W042/Dired.2: Remove residual Dired model, state, persistence, tests, and docs
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W042/Dired.2
 - **Planning profile:** `DiredPlanner2`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, `high`, read-only.
 - **Implementation profile:** `DiredWorker2`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, `medium`.
@@ -2468,5 +2468,5 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence, confirming exact clean deletion, 0 production additions, retained workspace/tab-context/buffer-retirement owners, truthful budgets and validation evidence, and forbidden tokens only in the explicit immutable/historical allowlist.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3070
 - **Implementation commit SHA:** `3fe838c0e`
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `6fe2e0fca29463cb1b2582f93326e363a9ba4495`; **Merge evidence:** PR #3070 merged after CI run `29715031589` passed every required check. The first Elixir CI attempt exposed unrelated shared extension-source contamination in the chaos property and source-finalizer test; the isolated failed-job rerun passed. Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency passed on the initial run.
+- **Completion date:** 2026-07-20.
