@@ -76,10 +76,6 @@ defmodule MingaEditor.RenderPipeline.Content do
     %{state | caches: %{state.caches | frame_rows_rasterized: 0}}
   end
 
-  @doc "Returns the number of buffer rows rasterized so far this frame (#2287)."
-  @spec rows_rasterized(state()) :: non_neg_integer()
-  def rows_rasterized(state), do: state.caches.frame_rows_rasterized
-
   # ── Private ──────────────────────────────────────────────────────────────
 
   @spec build_window_model_with_slot_reset(state(), WindowScroll.t(), Window.t(), Context.t()) ::
