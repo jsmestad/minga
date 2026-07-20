@@ -2769,7 +2769,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,752 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Correctness returned `PASS / Lean` and Elixir craftsmanship returned `PASS / Lean`. Ponytail required three test cuts: remove duplicate seed metadata assertions, remove generic re-registration that recreated deleted reload behavior, and remove a tautological NoticeWorkflow state assertion. All cuts were applied; the focused 5-test and 42-test suites passed again with test numstat reduced to `30 added / 66 removed`, and the targeted recheck returned `RESOLVED/PASS`. Test-analysis was unavailable because its runtime had no model configured.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact unused registrar lifecycle deletion, unchanged static declaration, Registry-owned seed, normalization, cleanup, and action paths, zero lifecycle callsites, distinct retained tests, truthful negative budgets, zero concepts, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3090
+- **Implementation commit SHA:** `53a11d9bf`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
