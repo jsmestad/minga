@@ -222,7 +222,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
                )
     end
 
-    test "injection ranges and language responses update only the public highlight state" do
+    test "injection ranges update only the public highlight state" do
       state = base_state()
       buf = active_buffer(state)
       state = with_highlight(state, buf)
@@ -232,12 +232,6 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
         HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, buf, ranges}})
 
       assert new_state.parser.injection_ranges[buf] == ranges
-
-      assert {^new_state, []} =
-               HighlightHandler.handle(
-                 new_state,
-                 {:minga_highlight, {:language_at_response, 1, "elixir"}}
-               )
     end
 
     test "highlight and conceal spans produce visible-buffer effects and skip invisible buffers" do

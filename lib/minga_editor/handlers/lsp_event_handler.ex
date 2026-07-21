@@ -179,11 +179,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     {apply_traditional_lsp_response(:hover, state, result), [:render_now]}
   end
 
-  defp dispatch_tracked_response(state, ref, result, {:ok, {:hover_mouse, _, _} = kind}) do
-    state = delete_lsp_pending(state, ref)
-    {apply_traditional_lsp_response(kind, state, result), [:render_now]}
-  end
-
   defp dispatch_tracked_response(
          state,
          ref,
@@ -252,9 +247,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp dispatch_lsp_response(:hover, state, result),
     do: LspActions.handle_hover_response(state, result)
-
-  defp dispatch_lsp_response({:hover_mouse, row, col}, state, result),
-    do: LspActions.handle_hover_mouse_response(state, result, row, col)
 
   defp dispatch_lsp_response(
          {:hover_mouse, row, col, buffer, line, buffer_col, version},

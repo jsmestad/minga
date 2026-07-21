@@ -14,7 +14,6 @@ defmodule MingaEditor.Input do
      after overlays pass through.
   """
 
-  alias MingaEditor.Input.AgentMouse
   alias MingaEditor.Input.AgentNav
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.BottomPanel
@@ -65,8 +64,7 @@ defmodule MingaEditor.Input do
     {Scoped, 100},
     {AgentNav, 110},
     {GlobalBindings, 120},
-    {BottomPanel, 125},
-    {AgentMouse, 130}
+    {BottomPanel, 125}
   ]
 
   @doc """

@@ -24,6 +24,8 @@ defmodule MingaEditor.Input.RegistryTest do
              Enum.find_index(handlers, &(&1 == MingaEditor.Input.Scoped))
 
     assert Enum.at(handlers, -1) == MingaEditor.Input.ModeFSM
+
+    refute MingaEditor.Input.AgentMouse in handlers
   end
 
   test "dispatch entries preserve exact built-in, config, and extension sources" do
