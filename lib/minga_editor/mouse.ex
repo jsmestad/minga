@@ -1197,15 +1197,6 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_content_click(state, row, col) do
-    case modeline_click(state, row, col) do
-      {:command, cmd} -> MingaEditor.dispatch_command(state, cmd)
-      :not_modeline -> handle_non_modeline_content_click(state, row, col)
-    end
-  end
-
-  @spec handle_non_modeline_content_click(state(), non_neg_integer(), non_neg_integer()) ::
-          state()
-  defp handle_non_modeline_content_click(state, row, col) do
     state
     |> maybe_unfocus_file_tree_for_content_click()
     |> maybe_focus_window_at(row, col)
@@ -1975,33 +1966,6 @@ defmodule MingaEditor.Mouse do
 
   defp tab_bar_command_at(_state, _row, _col), do: nil
 
-  # ── Modeline segment click detection ─────────────────────────────────────
-
-  # Click regions are attached to modeline segments at render time (like
-  # Doom Emacs local-map text properties). The mouse handler just does a
-  # range lookup against the cached regions.
-  @spec modeline_click(state(), non_neg_integer(), non_neg_integer()) ::
-          {:command, atom()} | :not_modeline
-  defp modeline_click(state, row, col) do
-    layout = Layout.get(state)
-
-    # Check if the click row is a modeline row in any window
-    is_modeline =
-      Enum.any?(layout.window_layouts, fn {_id, wl} ->
-        {ml_row, ml_col, ml_width, ml_height} = wl.modeline
-        ml_height > 0 and row == ml_row and col >= ml_col and col < ml_col + ml_width
-      end)
-
-    if is_modeline do
-      case modeline_command_at(state, col) do
-        nil -> :not_modeline
-        command -> {:command, command}
-      end
-    else
-      :not_modeline
-    end
-  end
-
   # GUI frontends accumulate pixel deltas and emit one scroll event per
   # line height crossed, so each event = 1 line. TUI frontends send one
   # event per wheel tick, so each event = 3 lines for usable speed.
@@ -2034,13 +1998,4 @@ defmodule MingaEditor.Mouse do
       state
       | workspace: MingaEditor.Session.State.update_current_viewport(state.workspace, new_vp)
     }
-
-  @spec modeline_command_at(state(), non_neg_integer()) :: atom() | nil
-  defp modeline_command_at(
-         %{shell_runtime: %{state: %TraditionalState{} = shell_state}},
-         col
-       ),
-       do: TraditionalState.modeline_command_at(shell_state, col)
-
-  defp modeline_command_at(_state, _col), do: nil
 end

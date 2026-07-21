@@ -31,8 +31,7 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
       window_layouts: %{
         1 => %{
           total: {1, 0, 80, 21},
-          content: {1, 0, 80, 21},
-          modeline: {22, 0, 80, 0}
+          content: {1, 0, 80, 21}
         }
       },
       horizontal_separators: [],
@@ -53,8 +52,8 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
       editor_area: {1, 0, 80, 21},
       file_tree: {1, 0, 30, 21},
       window_layouts: %{
-        1 => %{total: {1, 30, 25, 21}, content: {1, 30, 25, 21}, modeline: {22, 30, 25, 0}},
-        2 => %{total: {1, 55, 25, 21}, content: {1, 55, 25, 21}, modeline: {22, 55, 25, 0}}
+        1 => %{total: {1, 30, 25, 21}, content: {1, 30, 25, 21}},
+        2 => %{total: {1, 55, 25, 21}, content: {1, 55, 25, 21}}
       },
       horizontal_separators: [],
       agent_panel: nil,
@@ -111,7 +110,6 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
                  :text,
                  :gutter,
                  :fold_control,
-                 :modeline,
                  :status_bar,
                  :divider,
                  :chrome,
@@ -262,7 +260,6 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
         :tab_bar,
         :buffer_content,
         :agent_chat_content,
-        :modeline,
         :file_tree,
         :sidebar,
         :custom_sidebar,

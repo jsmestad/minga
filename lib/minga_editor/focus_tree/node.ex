@@ -22,7 +22,6 @@ defmodule MingaEditor.FocusTree.Node do
           | :window
           | :gutter
           | :buffer_content
-          | :modeline
           | :status_bar
           | :agent_panel
           | :agent_chat_window

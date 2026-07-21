@@ -29,8 +29,7 @@ defmodule MingaEditor.FocusTreeTest do
       window_layouts: %{
         1 => %{
           total: {1, 0, 80, 21},
-          content: {1, 0, 80, 21},
-          modeline: {22, 0, 80, 0}
+          content: {1, 0, 80, 21}
         }
       },
       horizontal_separators: [],
@@ -47,8 +46,8 @@ defmodule MingaEditor.FocusTreeTest do
       editor_area: {1, 0, 80, 21},
       file_tree: {1, 0, 30, 21},
       window_layouts: %{
-        1 => %{total: {1, 30, 25, 21}, content: {1, 30, 25, 21}, modeline: {22, 30, 25, 0}},
-        2 => %{total: {1, 55, 25, 21}, content: {1, 55, 25, 21}, modeline: {22, 55, 25, 0}}
+        1 => %{total: {1, 30, 25, 21}, content: {1, 30, 25, 21}},
+        2 => %{total: {1, 55, 25, 21}, content: {1, 55, 25, 21}}
       },
       horizontal_separators: [],
       agent_panel: nil,
@@ -107,12 +106,12 @@ defmodule MingaEditor.FocusTreeTest do
       assert content.ref == 1
     end
 
-    test "zero-height modelines are not added as children" do
+    test "windows do not add per-window modeline children" do
       tree = FocusTree.from_layout(single_window_layout())
       editor = Enum.find(tree.children, &(&1.content_type == :editor_area))
       window = hd(editor.children)
 
-      refute Enum.any?(window.children, &(&1.content_type == :modeline))
+      assert Enum.map(window.children, & &1.content_type) == [:buffer_content]
     end
   end
 
