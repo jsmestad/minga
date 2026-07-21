@@ -1156,14 +1156,11 @@ defmodule MingaEditor do
   def apply_runtime_config_option(state, :theme, theme_name) when is_atom(theme_name) do
     theme = MingaEditor.UI.Theme.get!(theme_name)
 
-    # No out-of-band theme push (#2119): applying the theme then invalidating every
-    # window and the layout forces a full re-render, and the frame transaction's
-    # ThemeEncoder re-emits gui_theme semantically (the new theme changes the
-    # adapter cache fingerprint). A keyframe re-emits it for free. See
-    # MingaEditor.RuntimeThemePushTest for the proof.
+    # No out-of-band theme push (#2119): applying the theme then invalidating the
+    # layout forces a full re-render, and the frame transaction's ThemeEncoder
+    # re-emits gui_theme semantically (the new theme changes the adapter cache
+    # fingerprint). A keyframe re-emits it for free. See MingaEditor.RuntimeThemePushTest for the proof.
     state = EditorState.apply_theme(state, theme)
-    workspace = MingaEditor.Session.State.invalidate_all_windows(state.workspace)
-    state = %{state | workspace: workspace}
     Layout.invalidate(state)
   end
 
@@ -1184,14 +1181,10 @@ defmodule MingaEditor do
       Buffer.set_option(buffer, name, value)
     end)
 
-    workspace = MingaEditor.Session.State.invalidate_all_windows(state.workspace)
-    state = %{state | workspace: workspace}
     Layout.invalidate(state)
   end
 
   def apply_runtime_config_option(state, :cursorline, _value) do
-    workspace = MingaEditor.Session.State.invalidate_all_windows(state.workspace)
-    state = %{state | workspace: workspace}
     Layout.invalidate(state)
   end
 

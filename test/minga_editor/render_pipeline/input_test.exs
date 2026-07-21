@@ -189,6 +189,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert Enum.map(result.render.message_store.entries, & &1.text) == ["first"]
       assert result.render.render_correlation.keyframe_pending?
       assert result.render.render_correlation.latest_intent_revision == revision
+      assert result.workspace == state.workspace
     end
   end
 

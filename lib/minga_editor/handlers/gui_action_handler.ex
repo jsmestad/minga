@@ -118,8 +118,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     LspSupervisor.restart_all_clients()
     LspSyncServer.resync_buffers(buffers_for_lsp_resync(state))
 
-    workspace = State.invalidate_all_windows(state.workspace)
-    state = %{state | workspace: workspace}
     state |> Layout.invalidate() |> Renderer.render_or_async()
   end
 
@@ -1067,18 +1065,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> State.set_file_tree(file_tree)
       |> State.set_keymap_scope(:file_tree)
 
-    state = %{state | workspace: workspace}
-    state = Layout.invalidate(state)
-    workspace = State.invalidate_all_windows(state.workspace)
     %{state | workspace: workspace}
+    |> Layout.invalidate()
   end
 
   defp focus_visible_sidebar(state, "git_status") do
     workspace = State.set_keymap_scope(state.workspace, :git_status)
-    state = %{state | workspace: workspace}
-    state = Layout.invalidate(state)
-    workspace = State.invalidate_all_windows(state.workspace)
+
     %{state | workspace: workspace}
+    |> Layout.invalidate()
   end
 
   defp focus_visible_sidebar(state, "observatory") do
@@ -1089,10 +1084,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> State.set_file_tree(file_tree)
       |> State.set_keymap_scope(:editor)
 
-    state = %{state | workspace: workspace}
-    state = Layout.invalidate(state)
-    workspace = State.invalidate_all_windows(state.workspace)
     %{state | workspace: workspace}
+    |> Layout.invalidate()
   end
 
   @spec remember_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()

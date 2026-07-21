@@ -162,7 +162,6 @@ defmodule MingaGitPorcelain.Commands do
       state
       |> SidebarWorkflow.close_git_status()
       |> Layout.invalidate()
-      |> invalidate_all_windows()
     else
       open_git_status_panel(state)
     end
@@ -1256,7 +1255,6 @@ defmodule MingaGitPorcelain.Commands do
         |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
         |> SidebarWorkflow.select("git_status")
         |> Layout.invalidate()
-        |> invalidate_all_windows()
     end
   end
 
@@ -1285,12 +1283,7 @@ defmodule MingaGitPorcelain.Commands do
     |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
     |> SidebarWorkflow.select("git_status")
     |> Layout.invalidate()
-    |> invalidate_all_windows()
   end
-
-  @spec invalidate_all_windows(state()) :: state()
-  defp invalidate_all_windows(%EditorState{} = state),
-    do: %{state | workspace: SessionState.invalidate_all_windows(state.workspace)}
 
   @spec git_status_last_commit_message(state()) :: String.t()
   defp git_status_last_commit_message(state) do

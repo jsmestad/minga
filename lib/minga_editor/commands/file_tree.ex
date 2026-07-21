@@ -63,9 +63,7 @@ defmodule MingaEditor.Commands.FileTree do
     workspace = State.set_keymap_scope(state.workspace, :file_tree)
     state = %{state | workspace: workspace}
 
-    state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
-    workspace = State.invalidate_all_windows(state.workspace)
-    %{state | workspace: workspace}
+    state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
   end
 
   # Reveals a hidden-but-loaded tree. The data, buffer, and watchers are still
@@ -76,9 +74,7 @@ defmodule MingaEditor.Commands.FileTree do
     workspace = State.set_keymap_scope(state.workspace, :file_tree)
     state = %{state | workspace: workspace}
 
-    state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
-    workspace = State.invalidate_all_windows(state.workspace)
-    %{state | workspace: workspace}
+    state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
   end
 
   # Hides the sidebar without tearing down the tree. The backing buffer keeps
@@ -91,9 +87,7 @@ defmodule MingaEditor.Commands.FileTree do
     workspace = State.set_keymap_scope(state.workspace, scope)
     state = %{state | workspace: workspace}
 
-    state = state |> SidebarWorkflow.select(nil) |> Layout.invalidate()
-    workspace = State.invalidate_all_windows(state.workspace)
-    %{state | workspace: workspace}
+    state |> SidebarWorkflow.select(nil) |> Layout.invalidate()
   end
 
   @spec restore_scope(state()) :: atom()
@@ -633,9 +627,7 @@ defmodule MingaEditor.Commands.FileTree do
 
         workspace = State.set_keymap_scope(state.workspace, :file_tree)
         state = %{state | workspace: workspace}
-        state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
-        workspace = State.invalidate_all_windows(state.workspace)
-        %{state | workspace: workspace}
+        state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
     end
   end
 
@@ -1012,9 +1004,7 @@ defmodule MingaEditor.Commands.FileTree do
       |> State.set_keymap_scope(:file_tree)
 
     state = %{state | workspace: workspace}
-    state = state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
-    workspace = State.invalidate_all_windows(state.workspace)
-    %{state | workspace: workspace}
+    state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
   end
 
   @spec install_tree_error(state(), FileTree.t(), File.posix()) :: state()
