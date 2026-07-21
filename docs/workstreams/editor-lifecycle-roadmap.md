@@ -3047,7 +3047,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W062/D20.2: Delete Popup.Registry compatibility facade
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D20.2 split slice
 - **Planning profile:** `D20NextFacadePlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D20PopupRegistryWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3072,5 +3072,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact registry-facade cut, canonical API and ETS/config/lifecycle paths, unchanged canonical test assertions, required notice and evidence, truthful budgets and validation, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3110
 - **Implementation commit SHA:** `ba4366471`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `85cf228a650af182a85157a98fd89d24cfa656d3`.
+- **Merge evidence:** PR #3110 merged after CI run `29806152783` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
