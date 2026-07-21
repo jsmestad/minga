@@ -3324,7 +3324,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W071/D32: Delete narrowed safe local no-op branches
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D32/S32 narrowed local deletion, with breadcrumb click retained as compatibility ignore.
 - **Planning profile:** `D32LocalPlanner`, `editor-lifecycle-planner`, read-only; `D32ProtocolPlanner` confirmed breadcrumb deletion is blocked unless the ignore is retained.
 - **Implementation profile:** `D32LocalWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3348,5 +3348,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-concept deletion, complete retained compatibility boundary, exact accounting, corroborated validation, current-main freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3128
 - **Implementation commit SHA:** `4c082369f`.
-- **Merge SHA:** Pending.
+- **Merge SHA:** `8af5a2747925c351454c7340d724a985fdff52ea`.
+- **Merge evidence:** PR #3128 merged after CI run `29838920358` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The Elixir job initially exposed unrelated order-dependent extension and auto-save failures; after diagnosis, the final rerun passed 10,245 checks with 1 skipped and 207 excluded.
 - **Completion date:** 2026-07-21.
