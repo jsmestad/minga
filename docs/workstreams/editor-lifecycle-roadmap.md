@@ -2897,7 +2897,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W057: Delete D40 DisplayMap total_display_lines field
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W057/D40
 - **Planning profile:** `D40DisplayFieldPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D40DisplayFieldWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2921,5 +2921,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact entries-only owner cut, intact live producers and consumers, zero remaining field readers or non-roadmap traces, truthful budgets, complete validation evidence, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3100
 - **Implementation commit SHA:** `c87217a93`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `7100f921e9fba2a7b58fd9997eee92c55f466d16`.
+- **Merge evidence:** PR #3100 merged after CI run `29792726119` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
