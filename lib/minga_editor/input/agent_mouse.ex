@@ -26,7 +26,6 @@ defmodule MingaEditor.Input.AgentMouse do
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
   alias Minga.Config
-  alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
@@ -45,27 +44,6 @@ defmodule MingaEditor.Input.AgentMouse do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
-
-  @impl true
-  @spec handle_mouse(
-          state(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: MingaEditor.Input.Handler.result()
-
-  def handle_mouse(state, row, col, button, mods, event_type, click_count) do
-    case routed_agent_node(state, row, col, button) do
-      %FocusNode{} = node ->
-        handle_mouse_at_node(state, node, row, col, button, mods, event_type, click_count)
-
-      nil ->
-        {:passthrough, state}
-    end
-  end
 
   @impl true
   @spec handle_mouse_at_node(
@@ -110,18 +88,6 @@ defmodule MingaEditor.Input.AgentMouse do
 
   def handle_mouse_at_node(state, _node, _row, _col, _button, _mods, _event_type, _click_count) do
     {:passthrough, state}
-  end
-
-  @spec routed_agent_node(EditorState.t(), integer(), integer(), atom()) :: FocusNode.t() | nil
-  defp routed_agent_node(state, row, col, button) do
-    tree = FocusTree.from_state(state)
-
-    path =
-      if button in [:wheel_down, :wheel_up],
-        do: FocusTree.scroll_path(tree, row, col),
-        else: FocusTree.hit_path(tree, row, col)
-
-    Enum.find(path, &(&1.handler == __MODULE__))
   end
 
   # ── Agent chat window (split pane) dispatch ────────────────────────────────

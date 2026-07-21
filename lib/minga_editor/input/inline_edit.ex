@@ -29,18 +29,6 @@ defmodule MingaEditor.Input.InlineEdit do
     end
   end
 
-  @impl true
-  @spec handle_mouse(
-          state(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: MingaEditor.Input.Handler.result()
-  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc), do: {:passthrough, state}
-
   @spec handle_inline_key(state(), InlineEdit.t(), non_neg_integer()) :: state()
   defp handle_inline_key(state, edit, 27), do: InlineEditCommand.reject(state, edit)
   defp handle_inline_key(state, edit, ?n), do: InlineEditCommand.reject(state, edit)

@@ -48,11 +48,4 @@ defmodule MingaEditor.Input.PromptTest do
       assert {:passthrough, ^state} = InputPrompt.handle_key(state, ?a, 0)
     end
   end
-
-  describe "handle_mouse/7" do
-    test "always passes through" do
-      state = PromptUI.open(base_state(), TestHandler, default: "hello")
-      assert {:passthrough, ^state} = InputPrompt.handle_mouse(state, 10, 5, :left, 0, :press, 1)
-    end
-  end
 end

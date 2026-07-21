@@ -172,28 +172,6 @@ defmodule Minga.Test.ScopedInputHelpers do
   @spec ft(EditorState.t()) :: FileTreeState.t()
   def ft(state), do: state.workspace.file_tree
 
-  @spec walk_surface_mouse(
-          EditorState.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: handler_result()
-  def walk_surface_mouse(state, row, col, button, mods, event_type, cc) do
-    handlers =
-      MingaEditor.Input.surface_handlers()
-      |> Enum.filter(&function_exported?(&1, :handle_mouse, 7))
-
-    Enum.reduce_while(handlers, {:passthrough, state}, fn handler, {_, acc} ->
-      case handler.handle_mouse(acc, row, col, button, mods, event_type, cc) do
-        {:handled, new_state} -> {:halt, {:handled, new_state}}
-        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
-      end
-    end)
-  end
-
   @spec make_tree_state(String.t()) :: EditorState.t()
   def make_tree_state(tmp_dir), do: make_tree_state(tmp_dir, 5)
 

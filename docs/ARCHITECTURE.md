@@ -599,7 +599,7 @@ Each content-type handler is responsible for its own region. `Editor.Mouse` hand
 
 Multi-click detection works differently per frontend. The GUI sends `NSEvent.clickCount` directly in the protocol, so the BEAM trusts the native OS timing. The TUI sends `click_count=1` and the BEAM's `State.Mouse.record_press/4` detects multi-clicks using a timing window and position threshold, cycling 1 → 2 → 3 → 1.
 
-The `handle_mouse_at_node/8` and legacy `handle_mouse/7` callbacks are optional on `Input.Handler`. Nodes without a mouse-capable handler pass through during FocusTree bubbling. This keeps keyboard-only handlers simple until they need mouse support.
+Node-aware built-in FocusTree handlers implement `handle_mouse_at_node/8` directly when they need routed node context; they should not add coordinate-only `handle_mouse/7` wrappers that rebuild the tree and self-hit-test after the router has already selected a node. The `handle_mouse_at_node/8` and legacy `handle_mouse/7` callbacks are optional on `Input.Handler`. Router keeps `handle_mouse/7` as the legacy fallback for external or simple handlers without node context, including simple built-in handlers that do not need node metadata. Nodes without a mouse-capable handler pass through during FocusTree bubbling. This keeps keyboard-only handlers simple until they need mouse support.
 
 ---
 

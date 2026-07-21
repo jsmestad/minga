@@ -9,7 +9,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
   alias MingaEditor.State.WhichKey
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Input.Completion, as: CompletionInput
+  alias MingaEditor.Input.Router
   alias Minga.Mode
 
   defp completion_state(items, opts \\ []) do
@@ -46,41 +46,16 @@ defmodule MingaEditor.Input.CompletionMouseTest do
     test "wheel_down moves completion selection down" do
       state = completion_state(sample_items())
 
-      {:handled, new_state} =
-        CompletionInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
 
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(new_state).selected == 1
     end
 
     test "wheel_up moves completion selection up" do
       state = completion_state(sample_items())
-      {:handled, state} = CompletionInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
-      {:handled, new_state} = CompletionInput.handle_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
+      state = Router.dispatch_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(new_state).selected == 0
-    end
-  end
-
-  describe "passthrough when inactive" do
-    test "passes through when no completion is active" do
-      state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: nil},
-        shell_runtime:
-          Runtime.new(
-            Runtime.default_entry(),
-            %MingaEditor.Shell.Traditional.State{whichkey: %WhichKey{}}
-          ),
-        workspace: %MingaEditor.Session.State{
-          editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
-          viewport: Viewport.new(30, 80)
-        }
-      }
-
-      {:passthrough, ^state} = CompletionInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)
-    end
-
-    test "passes through when in normal mode even with completion" do
-      state = completion_state(sample_items(), mode: :normal)
-      {:passthrough, ^state} = CompletionInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)
     end
   end
 end

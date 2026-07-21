@@ -17,7 +17,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
-  alias MingaEditor.Input.AgentMouse
   alias MingaEditor.Input.Router
   alias Minga.Mode
 
@@ -141,24 +140,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
     end)
   end
 
-  # ── Events outside agent regions pass through ──────────────────────────────
-
-  describe "passthrough" do
-    test "events pass through when no agent UI is visible" do
-      state = base_state()
-      assert {:passthrough, _} = AgentMouse.handle_mouse(state, 5, 5, :wheel_down, 0, :press, 1)
-      assert {:passthrough, _} = AgentMouse.handle_mouse(state, 5, 5, :left, 0, :press, 1)
-    end
-
-    test "events outside agent regions pass through when agent split is active" do
-      state = base_state() |> with_agent_split()
-      # Click in the editor area (left pane), not the agent pane
-      # The editor window occupies the left ~60% of columns
-      assert {:passthrough, _} = AgentMouse.handle_mouse(state, 5, 5, :left, 0, :press, 1)
-      assert {:passthrough, _} = AgentMouse.handle_mouse(state, 5, 5, :wheel_down, 0, :press, 1)
-    end
-  end
-
   # ── Agent chat window (split pane) scroll ──────────────────────────────────
 
   describe "agent chat window scroll" do
@@ -174,8 +155,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
     } do
       {row, col, _w, _h} = rect
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
       # Window should be unpinned so viewport follows cursor
       case MingaEditor.Session.State.find_agent_chat_window(new_state.workspace) do
@@ -190,11 +170,17 @@ defmodule MingaEditor.Input.AgentMouseTest do
     } do
       {row, col, _w, _h} = rect
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_up, 0, :press, 1)
+      down_state = Router.dispatch_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
-      # Should not crash and should unpin
-      assert %EditorState{} = new_state
+      {agent_win_id, _window} =
+        MingaEditor.Session.State.find_agent_chat_window(down_state.workspace)
+
+      before_top = Map.fetch!(down_state.workspace.windows.map, agent_win_id).viewport.top
+
+      new_state = Router.dispatch_mouse(down_state, row + 2, col + 2, :wheel_up, 0, :press, 1)
+
+      assert Map.fetch!(new_state.workspace.windows.map, agent_win_id).viewport.top < before_top
+      refute Map.fetch!(new_state.workspace.windows.map, agent_win_id).pinned
     end
 
     test "focus-tree routing scrolls inactive agent chat window without moving focus" do
@@ -223,11 +209,11 @@ defmodule MingaEditor.Input.AgentMouseTest do
       # Use a column well to the right of the chat area.
       sidebar_col = state.workspace.viewport.cols - 5
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 2, sidebar_col, :wheel_down, 0, :press, 1)
+      before_offset = state.workspace.agent_ui.view.preview.scroll.offset
 
-      # Preview scroll should have changed (or at least not crash)
-      assert %EditorState{} = new_state
+      new_state = Router.dispatch_mouse(state, row + 2, sidebar_col, :wheel_down, 0, :press, 1)
+
+      assert new_state.workspace.agent_ui.view.preview.scroll.offset > before_offset
     end
   end
 
@@ -240,13 +226,27 @@ defmodule MingaEditor.Input.AgentMouseTest do
       {:ok, state: state, rect: rect}
     end
 
-    test "click in chat area passthroughs to standard mouse handler", %{state: state, rect: rect} do
+    test "click in chat area routes without consuming agent-specific input focus", %{
+      state: state,
+      rect: rect
+    } do
       {row, col, _w, _h} = rect
 
-      # Click in the chat area (near the top of the agent window)
-      # should passthrough to ModeFSM for standard buffer mouse handling
-      {:passthrough, _state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
+        )
+
+      new_state = Router.dispatch_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
+
+      {agent_win_id, _window} =
+        Enum.find(new_state.workspace.windows.map, fn {_id, window} ->
+          Content.agent_chat?(window.content)
+        end)
+
+      assert new_state.workspace.windows.active == agent_win_id
+      refute new_state.workspace.agent_ui.panel.input_focused
     end
 
     test "click in input area focuses input", %{state: state, rect: rect} do
@@ -264,8 +264,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       # Click near the bottom of the agent window (where input lives)
       input_row = rect |> elem(0) |> Kernel.+(h - 2)
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, input_row, col + 2, :left, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, input_row, col + 2, :left, 0, :press, 1)
 
       assert new_state.workspace.agent_ui.panel.input_focused
     end
@@ -283,9 +282,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       rect = agent_chat_window_rect(state)
       {row, col, _w, _h} = rect
 
-      # Chat content click passthroughs after focusing the semantic agent pane.
-      {:passthrough, new_state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
       assert new_state.workspace.windows.active == agent_win_id
     end
@@ -303,8 +300,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       {row, col, _w, _h} = panel_rect
       old_viewport_top = state.workspace.viewport.top
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
 
       # Chat scroll offset should change
       panel = new_state.workspace.agent_ui.panel
@@ -317,13 +313,11 @@ defmodule MingaEditor.Input.AgentMouseTest do
     test "scroll up over agent panel scrolls chat", %{state: state, panel_rect: panel_rect} do
       {row, col, _w, _h} = panel_rect
 
-      {:handled, state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
+      state = Router.dispatch_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
+      before_offset = state.workspace.agent_ui.panel.scroll.offset
+      new_state = Router.dispatch_mouse(state, row + 1, col + 2, :wheel_up, 0, :press, 1)
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :wheel_up, 0, :press, 1)
-
-      assert %EditorState{} = new_state
+      assert new_state.workspace.agent_ui.panel.scroll.offset < before_offset
     end
   end
 
@@ -342,8 +336,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       assert state.workspace.agent_ui.panel.input_focused
 
       # Click near the top of the panel (chat area)
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
       refute new_state.workspace.agent_ui.panel.input_focused
     end
@@ -363,8 +356,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       # Click near the bottom of the panel (input area)
       input_row = elem(panel_rect, 0) + h - 2
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, input_row, col + 2, :left, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, input_row, col + 2, :left, 0, :press, 1)
 
       assert new_state.workspace.agent_ui.panel.input_focused
     end
@@ -383,8 +375,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
       {row, col, _w, _h} = rect
 
-      {:handled, new_state} =
-        AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
       # Window should be unpinned
       case MingaEditor.Session.State.find_agent_chat_window(new_state.workspace) do
@@ -398,9 +389,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       rect = agent_chat_window_rect(state)
       {row, col, _w, _h} = rect
 
-      # Chat content click passthroughs after focusing the agent window
-      {:passthrough, new_state} =
-        AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
+      new_state = Router.dispatch_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
       # Window focus happened before passthrough
       {agent_win_id, _} =

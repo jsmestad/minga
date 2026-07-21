@@ -36,18 +36,4 @@ defmodule MingaEditor.Input.Prompt do
   def handle_key(state, _cp, _mods) do
     {:passthrough, state}
   end
-
-  @impl true
-  @spec handle_mouse(
-          state(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: MingaEditor.Input.Handler.result()
-  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc) do
-    {:passthrough, state}
-  end
 end

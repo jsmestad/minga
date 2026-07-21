@@ -35,18 +35,6 @@ defmodule MingaEditor.Input.InlineAsk do
     end
   end
 
-  @impl true
-  @spec handle_mouse(
-          state(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: MingaEditor.Input.Handler.result()
-  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc), do: {:passthrough, state}
-
   @spec handle_inline_key(state(), InlineAsk.t(), non_neg_integer(), non_neg_integer(), keyword()) ::
           state()
   defp handle_inline_key(state, ask, 27, _modifiers, opts),

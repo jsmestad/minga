@@ -35,6 +35,21 @@ defmodule MingaEditor.Input.RouterTest do
     :ok
   end
 
+  defmodule LegacyMouseProbe do
+    @moduledoc false
+
+    @behaviour MingaEditor.Input.Handler
+
+    @impl true
+    def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
+
+    @impl true
+    def handle_mouse(state, row, col, button, mods, event_type, click_count) do
+      send(self(), {:legacy_mouse_probe, row, col, button, mods, event_type, click_count})
+      {:handled, state}
+    end
+  end
+
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nthird")
 
@@ -78,6 +93,17 @@ defmodule MingaEditor.Input.RouterTest do
             )
           ]
         )
+      ]
+    })
+  end
+
+  defp legacy_probe_tree do
+    FocusTree.link_tree(%FocusNode{
+      id: :viewport,
+      content_type: :viewport,
+      rect: {0, 0, 20, 10},
+      children: [
+        FocusNode.new(:legacy_region, {0, 0, 20, 10}, handler: LegacyMouseProbe)
       ]
     })
   end
@@ -420,6 +446,14 @@ defmodule MingaEditor.Input.RouterTest do
 
       assert_receive {:mouse_probe, :buffer_content, {:pass, :child}}
       assert_receive {:mouse_probe, :window, :window}
+    end
+
+    test "falls back to legacy handle_mouse/7 when a node handler has no node-aware callback" do
+      state = state_with_focus_tree(legacy_probe_tree())
+
+      assert ^state = Router.dispatch_mouse(state, 4, 6, :left, 0, :press, 1)
+
+      assert_receive {:legacy_mouse_probe, 4, 6, :left, 0, :press, 1}
     end
 
     test "wheel events start at the deepest scrollable node under the cursor" do
