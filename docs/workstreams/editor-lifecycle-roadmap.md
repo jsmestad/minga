@@ -3534,7 +3534,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W078/S05: Shrink input registry entries to source and priority
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S05
 - **Planning profile:** `S05Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S05Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3557,5 +3557,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** The extension subproject's local exqlite precompiled artifact can be invalid on this workstation after a fresh `mix deps.get`; the root worktree NIF was valid and unblocked the focused extension lifecycle validation. No owner, contract, scope, dependency, or production-line budget assumption failed.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3144
 - **Implementation commit SHA:** `7c441800f`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `aaff6d768503277bed2b7ec4e3f81b57bc769ed5`.
+- **Merge evidence:** PR #3144 merged after CI run `29872328140` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
