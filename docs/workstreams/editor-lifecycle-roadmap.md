@@ -3232,7 +3232,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W068/D28: Clean cutover agent collapse command surface
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D28
 - **Planning profile:** `D28CommandPlannerRetry`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D28CommandWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3257,5 +3257,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact one-command clean cutover, command/keymap and session transition ownership, complete stale trace deletion without aliases, truthful validation and budgets, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3122
 - **Implementation commit SHA:** `37e40fcd3`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `dd88063ead535c0b4e6e67e978da0dfa93c3d479`.
+- **Merge evidence:** PR #3122 merged after CI run `29825845953` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
