@@ -10,7 +10,7 @@ defmodule MingaEditor.UserQueryOverrideTest do
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.HighlightSync
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.UI.Highlight.Grammar
+  alias Minga.Language.Grammar
 
   describe ":reload-highlights command" do
     test "resets active highlights and requests a new parse" do

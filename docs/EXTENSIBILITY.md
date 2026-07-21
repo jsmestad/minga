@@ -466,6 +466,8 @@ This single call handles the full pipeline:
 
 Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Highlight.InjectionRange` has been removed. Extension and config code that constructs injection ranges should use `Minga.Language.Highlight.InjectionRange.new/3` or `%Minga.Language.Highlight.InjectionRange{}` directly. Parser `injection_ranges` events and editor parser state keep the same `start_byte`/`end_byte`/`language` fields.
 
+Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Highlight.Grammar` has been removed. Extension and config code should use `Minga.Language.Grammar` for grammar registry initialization, runtime filetype registration, unregistering, filetype lookup, query lookup, query reading, and dynamic grammar paths. Use `Minga.Language.Grammar.query_path/1` instead of the removed `highlight_query_path/1` compatibility name. Query loading order, user query overrides, dynamic filetype mappings, and parser events are unchanged.
+
 The dynamic grammar registry is an ETS table (`read_concurrency: true`) initialized at application startup. Dynamic mappings take precedence over the registered language definitions, so extensions can override bundled grammars if needed.
 
 ---
