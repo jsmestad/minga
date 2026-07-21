@@ -3613,7 +3613,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed all four state transitions and effects, singular outer render ownership, deterministic regression coverage, exact budgets, diagnosed validation evidence, zero concepts, and merge safety.
 - **Findings resolved:** S07's duplicate GUI action render submissions are removed; the outer GUI action path now owns exactly one render intent for the locked actions.
 - **Discoveries affecting later work:** None. The locked owner, contract, scope, test layer, dependencies, and production-line budget remained valid.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3148
+- **Implementation commit SHA:** `968cd658d`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
