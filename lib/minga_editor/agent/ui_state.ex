@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.UIState do
 
   `Panel` holds prompt editing and chat display state (buffer, history,
   scroll, model config, paste blocks). `View` holds layout, search,
-  preview, toasts, and diff baselines. Splitting into sub-structs keeps
+  preview, toasts, and edit timeline. Splitting into sub-structs keeps
   each under 16 fields while providing a single access point on
   `EditorState.agent_ui`.
 
@@ -516,22 +516,11 @@ defmodule MingaEditor.Agent.UIState do
     %{state | view: View.clear_toasts(view)}
   end
 
-  # ── Diff baselines (delegate to View) ───────────────────────────────────────
+  # ── Edit timeline (delegate to View) ────────────────────────────────────────
 
-  @doc "Records the baseline content for a file path (first edit only)."
-  @spec record_baseline(t(), String.t(), String.t()) :: t()
-  def record_baseline(%__MODULE__{view: view} = state, path, content) do
-    %{state | view: View.record_baseline(view, path, content)}
-  end
-
-  @doc "Returns the baseline content for a path, or nil if none recorded."
-  @spec get_baseline(t() | View.t(), String.t()) :: String.t() | nil
-  def get_baseline(%__MODULE__{view: view}, path), do: View.get_baseline(view, path)
-  def get_baseline(%View{} = view, path), do: View.get_baseline(view, path)
-
-  @doc "Clears all diff baselines."
-  @spec clear_baselines(t()) :: t()
-  def clear_baselines(%__MODULE__{view: view} = state) do
-    %{state | view: View.clear_baselines(view)}
+  @doc "Resets the edit timeline and cleans up file-backed entry snapshots."
+  @spec reset_edit_timeline(t()) :: t()
+  def reset_edit_timeline(%__MODULE__{view: view} = state) do
+    %{state | view: View.reset_edit_timeline(view)}
   end
 end

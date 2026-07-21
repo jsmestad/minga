@@ -1,8 +1,12 @@
 defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Git
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
@@ -399,38 +403,39 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
     end
   end
 
-  describe "diff baselines" do
-    test "record_baseline stores content on first call" do
-      ui = UIState.new()
-      ui = UIState.record_baseline(ui, "lib/foo.ex", "original content")
-      assert UIState.get_baseline(ui, "lib/foo.ex") == "original content"
-    end
+  describe "resolve_diff_review/2" do
+    test "reject current reprojects timeline and returns write target" do
+      review = DiffReview.new("lib/a.ex", "a", "x\na")
 
-    test "record_baseline is a no-op on subsequent calls for same path" do
-      ui = UIState.new()
-      ui = UIState.record_baseline(ui, "lib/foo.ex", "original")
-      ui = UIState.record_baseline(ui, "lib/foo.ex", "modified")
-      assert UIState.get_baseline(ui, "lib/foo.ex") == "original"
-    end
+      view = %{
+        View.new()
+        | preview: Preview.set_diff(Preview.new(), review),
+          edit_timeline: EditTimeline.reproject(EditTimeline.new(), "lib/a.ex", ["a"], ["x", "a"])
+      }
 
-    test "record_baseline tracks multiple paths independently" do
-      ui = UIState.new()
-      ui = UIState.record_baseline(ui, "lib/a.ex", "content_a")
-      ui = UIState.record_baseline(ui, "lib/b.ex", "content_b")
-      assert UIState.get_baseline(ui, "lib/a.ex") == "content_a"
-      assert UIState.get_baseline(ui, "lib/b.ex") == "content_b"
-    end
+      assert {:ok, view, {:write_file, "lib/a.ex", "a"}} =
+               View.resolve_diff_review(view, :reject_current)
 
-    test "clear_baselines removes all baselines" do
-      ui = UIState.new()
-      ui = UIState.record_baseline(ui, "lib/foo.ex", "content")
-      ui = UIState.clear_baselines(ui)
-      assert UIState.get_baseline(ui, "lib/foo.ex") == nil
-    end
+      assert EditTimeline.cumulative_hunks(view.edit_timeline, "lib/a.ex") ==
+               Git.diff_lines(["a"], ["a"])
 
-    test "get_baseline returns nil for unknown path" do
-      ui = UIState.new()
-      assert UIState.get_baseline(ui, "lib/unknown.ex") == nil
+      refute Preview.diff_review(view.preview)
+    end
+  end
+
+  describe "edit timeline reset" do
+    test "reset_edit_timeline clears entries and hunk projections" do
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "old", "new")
+        |> EditTimeline.set_viewing("lib/foo.ex", 0)
+
+      ui =
+        UIState.new()
+        |> UIState.replace_edit_timeline(timeline)
+        |> UIState.reset_edit_timeline()
+
+      assert ui.view.edit_timeline == EditTimeline.new()
     end
   end
 end

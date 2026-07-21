@@ -88,6 +88,21 @@ defmodule MingaEditor.Agent.View.PreviewTest do
       p = Preview.new()
       assert Preview.diff_review(p) == nil
     end
+
+    test "replace_diff preserves scroll while a diff remains and clears for nil" do
+      review = DiffReview.new("test.ex", "old\n", "new\n")
+      next_review = DiffReview.new("test.ex", "old\n", "newer\n")
+
+      p = Preview.new() |> Preview.set_diff(review) |> Preview.scroll_down(4)
+      p = Preview.replace_diff(p, next_review)
+
+      assert {:diff, ^next_review} = p.content
+      assert p.scroll.offset == 4
+
+      p = Preview.replace_diff(p, nil)
+      assert p.content == :empty
+      assert p.scroll.offset == 0
+    end
   end
 
   describe "file content" do

@@ -8,21 +8,18 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.ChatSearch
-  alias MingaEditor.Agent.DiffReview
   alias MingaAgent.FileMention
   alias MingaAgent.ProjectView
   alias MingaAgent.Session
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
-  alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
-  alias Minga.Git
 
   import Bitwise
 
@@ -171,81 +168,19 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @doc "Accepts the current diff hunk during review."
   @spec accept_hunk(state()) :: state()
-  def accept_hunk(state) do
-    case state.workspace.agent_ui.view.preview do
-      %Preview{content: {:diff, _review}} ->
-        state =
-          update_preview(
-            state,
-            &Preview.update_diff(&1, fn r -> DiffReview.accept_current(r) end)
-          )
-
-        maybe_finish_review(state)
-
-      _ ->
-        state
-    end
-  end
+  def accept_hunk(state), do: resolve_diff_review(state, :accept_current)
 
   @doc "Rejects the current diff hunk during review."
   @spec reject_hunk(state()) :: state()
-  def reject_hunk(state) do
-    case state.workspace.agent_ui.view.preview do
-      %Preview{content: {:diff, review}} ->
-        hunk = DiffReview.current_hunk(review)
-        if hunk, do: revert_hunk(state, review, hunk)
-
-        state =
-          update_preview(
-            state,
-            &Preview.update_diff(&1, fn r -> DiffReview.reject_current(r) end)
-          )
-
-        maybe_finish_review(state)
-
-      _ ->
-        state
-    end
-  end
+  def reject_hunk(state), do: resolve_diff_review(state, :reject_current)
 
   @doc "Accepts all remaining diff hunks."
   @spec accept_all_hunks(state()) :: state()
-  def accept_all_hunks(state) do
-    case state.workspace.agent_ui.view.preview do
-      %Preview{content: {:diff, _}} ->
-        state =
-          update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
-
-        maybe_finish_review(state)
-
-      _ ->
-        state
-    end
-  end
+  def accept_all_hunks(state), do: resolve_diff_review(state, :accept_all)
 
   @doc "Rejects all remaining diff hunks."
   @spec reject_all_hunks(state()) :: state()
-  def reject_all_hunks(state) do
-    case state.workspace.agent_ui.view.preview do
-      %Preview{content: {:diff, review}} ->
-        unresolved_hunks =
-          review.hunks
-          |> Enum.with_index()
-          |> Enum.reject(fn {_hunk, idx} -> Map.has_key?(review.resolutions, idx) end)
-          |> Enum.map(fn {hunk, _idx} -> hunk end)
-          |> Enum.reverse()
-
-        revert_hunks(state, review, unresolved_hunks)
-
-        state =
-          update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
-
-        maybe_finish_review(state)
-
-      _ ->
-        state
-    end
-  end
+  def reject_all_hunks(state), do: resolve_diff_review(state, :reject_all)
 
   # ── Tool approval commands ─────────────────────────────────────────────────
 
@@ -580,30 +515,53 @@ defmodule MingaEditor.Commands.AgentSubStates do
     end
   end
 
-  @spec maybe_finish_review(state()) :: state()
-  defp maybe_finish_review(state) do
-    case Preview.diff_review(state.workspace.agent_ui.view.preview) do
-      %DiffReview{} = review ->
-        if DiffReview.resolved?(review), do: update_preview(state, &Preview.clear/1), else: state
+  @spec resolve_diff_review(
+          state(),
+          MingaEditor.Agent.UIState.View.diff_resolution_action()
+        ) :: state()
+  defp resolve_diff_review(state, action) do
+    case MingaEditor.Agent.UIState.View.resolve_diff_review(state.workspace.agent_ui.view, action) do
+      {:ok, view, :no_write} ->
+        MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
 
-      nil ->
+      {:ok, view, {:write_file, path, content}} ->
+        case persist_diff_resolution(state, path, content) do
+          :ok ->
+            MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
+
+          {:error, reason} ->
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Could not reject hunk in #{path}: #{inspect(reason)}"
+            )
+        end
+
+      :no_diff ->
+        state
+
+      :no_hunk ->
         state
     end
   end
 
-  @spec revert_hunk(state(), DiffReview.t(), map()) :: :ok | {:error, term()}
-  defp revert_hunk(state, review, hunk) do
+  @spec persist_diff_resolution(state(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp persist_diff_resolution(state, path, content) do
     case active_project_view(state) do
-      %ProjectView{} = project_view -> revert_project_view_hunks(project_view, review, [hunk])
-      nil -> revert_hunk_on_disk(review.path, hunk)
+      %ProjectView{} = project_view ->
+        persist_project_view_resolution(project_view, path, content)
+
+      nil ->
+        File.write(path, content)
     end
   end
 
-  @spec revert_hunks(state(), DiffReview.t(), [map()]) :: :ok | {:error, term()}
-  defp revert_hunks(state, review, hunks) do
-    case active_project_view(state) do
-      %ProjectView{} = project_view -> revert_project_view_hunks(project_view, review, hunks)
-      nil -> revert_hunks_on_disk(review.path, hunks)
+  @spec persist_project_view_resolution(ProjectView.t(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  defp persist_project_view_resolution(%ProjectView{} = project_view, path, content) do
+    case review_relative_path(project_view, path) do
+      {:ok, relative_path} -> ProjectView.write_file(project_view, relative_path, content)
+      :outside_project -> File.write(path, content)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -616,62 +574,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   defp active_project_view(_state), do: nil
-
-  @spec revert_project_view_hunks(ProjectView.t(), DiffReview.t(), [map()]) ::
-          :ok | {:error, term()}
-  defp revert_project_view_hunks(%ProjectView{} = project_view, %DiffReview{} = review, hunks) do
-    case review_relative_path(project_view, review.path) do
-      {:ok, relative_path} ->
-        revert_project_view_hunks(project_view, relative_path, review, hunks)
-
-      :outside_project ->
-        revert_hunks_on_disk(review.path, hunks)
-
-      {:error, _reason} ->
-        :ok
-    end
-  end
-
-  @spec revert_project_view_hunks(ProjectView.t(), String.t(), DiffReview.t(), [map()]) ::
-          :ok | {:error, term()}
-  defp revert_project_view_hunks(project_view, relative_path, review, hunks) do
-    case project_view_content(project_view, relative_path, review) do
-      {:ok, content} ->
-        write_reverted_project_view_hunks(project_view, relative_path, content, hunks)
-
-      {:error, _reason} ->
-        :ok
-    end
-  end
-
-  @spec write_reverted_project_view_hunks(ProjectView.t(), String.t(), String.t(), [map()]) ::
-          :ok | {:error, term()}
-  defp write_reverted_project_view_hunks(project_view, relative_path, content, hunks) do
-    reverted =
-      hunks
-      |> Enum.reduce(String.split(content, "\n"), fn hunk, lines ->
-        Git.revert_hunk(lines, hunk)
-      end)
-      |> Enum.join("\n")
-
-    write_project_view_content(project_view, relative_path, reverted)
-  end
-
-  @spec project_view_content(ProjectView.t(), String.t(), DiffReview.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  defp project_view_content(project_view, relative_path, review) do
-    case ProjectView.read_file(project_view, relative_path) do
-      {:ok, content} -> {:ok, content}
-      {:error, :deleted} -> {:ok, Enum.join(review.after_lines, "\n")}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  @spec write_project_view_content(ProjectView.t(), String.t(), String.t()) ::
-          :ok | {:error, term()}
-  defp write_project_view_content(project_view, relative_path, content) do
-    ProjectView.write_file(project_view, relative_path, content)
-  end
 
   @spec review_relative_path(ProjectView.t(), String.t()) ::
           {:ok, String.t()} | :outside_project | {:error, term()}
@@ -693,37 +595,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
       ProjectView.normalize_relative_path(Path.relative_to(expanded_path, expanded_root))
     else
       :outside_project
-    end
-  end
-
-  @spec revert_hunk_on_disk(String.t(), map()) :: :ok
-  defp revert_hunk_on_disk(path, hunk) do
-    case File.read(path) do
-      {:ok, content} ->
-        current_lines = String.split(content, "\n")
-        reverted = Git.revert_hunk(current_lines, hunk)
-        File.write(path, Enum.join(reverted, "\n"))
-
-      {:error, _} ->
-        :ok
-    end
-  end
-
-  @spec revert_hunks_on_disk(String.t(), [map()]) :: :ok
-  defp revert_hunks_on_disk(path, hunks) do
-    case File.read(path) do
-      {:ok, content} ->
-        current_lines = String.split(content, "\n")
-
-        reverted =
-          Enum.reduce(hunks, current_lines, fn hunk, lines ->
-            Git.revert_hunk(lines, hunk)
-          end)
-
-        File.write(path, Enum.join(reverted, "\n"))
-
-      {:error, _} ->
-        :ok
     end
   end
 
@@ -751,16 +622,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
         state,
         fun.(state.workspace.agent_ui)
       )
-
-  @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
-  defp update_preview(state, fun) do
-    MingaEditor.Shell.Traditional.Workflow.install_agent_view(
-      state,
-      (fn v ->
-         %{v | preview: fun.(v.preview)}
-       end).(state.workspace.agent_ui.view)
-    )
-  end
 
   @spec sync_mention_to_buffer(state(), String.t(), non_neg_integer(), non_neg_integer()) ::
           state()

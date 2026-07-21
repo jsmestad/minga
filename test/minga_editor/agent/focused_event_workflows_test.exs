@@ -2,6 +2,9 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   use Minga.Test.SessionCase, async: true
 
   alias MingaEditor.Agent.Compaction
+  alias Minga.Git
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.FileEventWorkflow
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.SessionEventWorkflow
@@ -9,6 +12,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.Agent.StreamEventWorkflow
   alias MingaEditor.Agent.ToolEventWorkflow
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -129,16 +133,98 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
-  test "file workflow records baseline and timeline before installing the diff render" do
+  test "file workflow records cumulative hunks and timeline before installing the diff render" do
     state = event_state()
 
     state = FileEventWorkflow.changed(state, "/tmp/a.ex", "before", "after", "tc1", "edit")
+    timeline = state.workspace.agent_ui.view.edit_timeline
 
-    assert UIState.get_baseline(state.workspace.agent_ui, "/tmp/a.ex") == "before"
-    assert [entry] = state.workspace.agent_ui.view.edit_timeline.entries["/tmp/a.ex"]
+    assert EditTimeline.cumulative_hunks(timeline, "/tmp/a.ex") ==
+             Git.diff_lines(["before"], ["after"])
+
+    assert [entry] = timeline.entries["/tmp/a.ex"]
     assert entry.tool_call_id == "tc1"
+    assert %DiffReview{path: "/tmp/a.ex"} = diff_review(state)
+    refute Map.has_key?(Map.from_struct(state.workspace.agent_ui.view), :diff_baselines)
     assert state.workspace.agent_ui.view.presentation.focus == :file_viewer
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
+  end
+
+  test "file workflow keeps displaced previews cumulative from first before to latest after" do
+    state =
+      event_state()
+      |> FileEventWorkflow.changed("/tmp/a.ex", "a0", "a1", "tc1", "edit")
+      |> FileEventWorkflow.changed("/tmp/b.ex", "b0", "b1", "tc2", "edit")
+      |> FileEventWorkflow.changed("/tmp/a.ex", "a1", "a2", "tc3", "edit")
+
+    assert %DiffReview{path: "/tmp/a.ex"} = review = diff_review(state)
+
+    display_lines = DiffReview.to_display_lines(review)
+    assert {"a0", :removed, 0} in display_lines
+    assert {"a2", :added, 0} in display_lines
+    refute {"a1", :removed, 0} in display_lines
+    refute Map.has_key?(Map.from_struct(state.workspace.agent_ui.view), :diff_baselines)
+  end
+
+  @tag :tmp_dir
+  test "rejecting an added hunk synchronizes cumulative authority before the next same-path edit",
+       %{
+         tmp_dir: dir
+       } do
+    path = Path.join(dir, "a.ex")
+    File.write!(path, "x\na")
+
+    state =
+      event_state()
+      |> FileEventWorkflow.changed(path, "a", "x\na", "tc1", "edit")
+      |> AgentSubStates.reject_hunk()
+
+    assert File.read!(path) == "a"
+
+    File.write!(path, "a\nb")
+    state = FileEventWorkflow.changed(state, path, "a", "a\nb", "tc2", "edit")
+    review = diff_review(state)
+
+    assert DiffReview.summary(review) == {1, 0}
+    display_lines = DiffReview.to_display_lines(review)
+    assert {"b", :added, 0} in display_lines
+    refute {"a", :added, 0} in display_lines
+    refute {"a", :removed, 0} in display_lines
+
+    state = AgentSubStates.reject_hunk(state)
+    assert File.read!(path) == "a"
+    refute diff_review(state)
+  end
+
+  @tag :tmp_dir
+  test "path switch after rejection does not reuse stale hunks for the original path", %{
+    tmp_dir: dir
+  } do
+    path_a = Path.join(dir, "a.ex")
+    path_b = Path.join(dir, "b.ex")
+    File.write!(path_a, "x\na")
+
+    state =
+      event_state()
+      |> FileEventWorkflow.changed(path_a, "a", "x\na", "tc1", "edit")
+      |> AgentSubStates.reject_hunk()
+      |> FileEventWorkflow.changed(path_b, "b0", "b1", "tc2", "edit")
+
+    assert EditTimeline.cumulative_hunks(state.workspace.agent_ui.view.edit_timeline, path_b) ==
+             Git.diff_lines(["b0"], ["b1"])
+
+    File.write!(path_a, "a\nb")
+    state = FileEventWorkflow.changed(state, path_a, "a", "a\nb", "tc3", "edit")
+    review = diff_review(state)
+
+    assert %DiffReview{path: ^path_a} = review
+    assert DiffReview.summary(review) == {1, 0}
+    display_lines = DiffReview.to_display_lines(review)
+    assert {"b", :added, 0} in display_lines
+    refute {"a", :added, 0} in display_lines
+
+    _state = AgentSubStates.reject_hunk(state)
+    assert File.read!(path_a) == "a"
   end
 
   test "spinner ticks advance only while the foreground agent is busy" do
@@ -275,6 +361,11 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     after
       remaining -> flunk("Agent: error was not routed to the messages log")
     end
+  end
+
+  @spec diff_review(EditorState.t()) :: DiffReview.t() | nil
+  defp diff_review(state) do
+    MingaEditor.Agent.View.Preview.diff_review(state.workspace.agent_ui.view.preview)
   end
 
   @spec event_state(pid() | nil, EffectScheduler.server() | nil) :: EditorState.t()
