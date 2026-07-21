@@ -17,8 +17,8 @@ See `Minga.Keymap.Scope` for the behaviour contract, `Minga.Input.Scoped` for th
 ## Design Principles
 
 1. **Sacred vim motions stay.** j/k, gg/G, Ctrl-d/u, /, n/N work exactly as a vim user expects.
-2. **Editing keys are repurposed.** i/a focus the input (semantic parallel to "enter insert mode"). o toggles collapse (magit precedent). y copies (yank = copy). q/Esc returns to the editor context for the same workspace.
-3. **Standard prefixes for multi-key sequences.** `z` for folds, `]`/`[` for next/prev navigation, `g` for go-to actions.
+2. **Editing keys are repurposed.** i/a focus the input (semantic parallel to "enter insert mode"). y copies structured content. q/Esc returns to the editor context for the same workspace.
+3. **Standard prefixes for multi-key sequences.** `z` for all-block collapse toggling, `]`/`[` for next/prev code-block or diff-hunk navigation, `g` for go-to actions.
 4. **SPC leader always works.** In navigation mode, SPC delegates to the mode FSM so leader sequences and which-key popups function normally.
 
 ## Chat Navigation Mode
@@ -40,21 +40,15 @@ The default mode when the agentic view is open and the input is not focused.
 
 | Key | Action |
 |-----|--------|
-| `za` | Toggle collapse at cursor (tool call or thinking block) |
-| `zA` | Toggle ALL collapses |
-| `zo` | Expand at cursor |
-| `zc` | Collapse at cursor |
-| `zM` | Collapse all |
-| `zR` | Expand all |
-| `o` | Toggle collapse at cursor (alias for `za`, magit precedent) |
+| `zA` | Toggle all collapsible tool-call and thinking blocks |
+
+Migration notice: the old built-in at-cursor, directional collapse/expand, message navigation, and tool-call navigation command atoms and keys are removed without aliases. Use `zA` / `:agent_toggle_all_collapse` for the built-in all-toggle, or define a user or extension command for custom behavior.
 
 ### Bracket Navigation (]/[ prefix)
 
 | Key | Action |
 |-----|--------|
-| `]m` / `[m` | Next / previous message |
 | `]c` / `[c` | Next / previous diff hunk (when diff review is active) or code block |
-| `]t` / `[t` | Next / previous tool call |
 
 ### Go-to (g prefix)
 

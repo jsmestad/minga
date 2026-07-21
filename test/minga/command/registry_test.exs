@@ -154,6 +154,38 @@ defmodule Minga.Command.RegistryTest do
       assert is_binary(desc) and byte_size(desc) > 0
     end
 
+    test "agent scoped collapse surface keeps only the all-toggle command", %{registry: r} do
+      assert {:ok,
+              %Command{
+                name: :agent_toggle_all_collapse,
+                description: description,
+                requires_buffer: false,
+                scope: :agent
+              }} = Registry.lookup(r, :agent_toggle_all_collapse)
+
+      assert description =~ "Toggle"
+      assert description =~ "all"
+
+      removed_commands =
+        for suffix <- [
+              "toggle_collapse",
+              "expand_at_cursor",
+              "collapse_at_cursor",
+              "collapse_all",
+              "expand_all",
+              "next_message",
+              "next_tool_call",
+              "prev_message",
+              "prev_tool_call"
+            ] do
+          String.to_atom("agent_" <> suffix)
+        end
+
+      for removed <- removed_commands do
+        assert :error = Registry.lookup(r, removed)
+      end
+    end
+
     test "all built-in commands have non-empty descriptions", %{registry: r} do
       for cmd <- Registry.all(r) do
         assert is_binary(cmd.description) and byte_size(cmd.description) > 0,

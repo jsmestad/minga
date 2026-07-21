@@ -94,21 +94,12 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind(~k(g d), :goto_definition, "Go to definition")
     |> Bindings.bind(~k(g b), :agent_provenance_return, "Back to source line")
     # z-prefix: domain fold/collapse commands
-    |> Bindings.bind(~k(z a), :agent_toggle_collapse, "Toggle collapse at cursor")
-    |> Bindings.bind(~k(z A), :agent_toggle_all_collapse, "Toggle all collapses")
-    |> Bindings.bind(~k(z o), :agent_expand_at_cursor, "Expand at cursor")
-    |> Bindings.bind(~k(z c), :agent_collapse_at_cursor, "Collapse at cursor")
-    |> Bindings.bind(~k(z M), :agent_collapse_all, "Collapse all")
-    |> Bindings.bind(~k(z R), :agent_expand_all, "Expand all")
+    |> Bindings.bind(~k(z A), :agent_toggle_all_collapse, "Toggle all collapsible blocks")
     # ]-prefix: semantic navigation (domain-specific)
-    |> Bindings.bind(~k(] m), :agent_next_message, "Next message")
     |> Bindings.bind(~k(] c), :agent_next_code_block, "Next code block/hunk")
-    |> Bindings.bind(~k(] t), :agent_next_tool_call, "Next tool call")
     |> Bindings.bind(~k(] f), :timeline_next_file, "Next changed file")
     # [-prefix: semantic navigation (domain-specific)
-    |> Bindings.bind(~k([ m), :agent_prev_message, "Previous message")
     |> Bindings.bind(~k([ c), :agent_prev_code_block, "Previous code block/hunk")
-    |> Bindings.bind(~k([ t), :agent_prev_tool_call, "Previous tool call")
     |> Bindings.bind(~k([ f), :timeline_prev_file, "Previous changed file")
     # Copy (domain: structured copy, not raw yank)
     |> Bindings.bind(~k(y), :agent_copy_code_block, "Copy code block")
@@ -118,8 +109,6 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind(~k(a), :agent_focus_input, "Focus input")
     |> Bindings.bind(~k(A), :agent_focus_input, "Focus input (append)")
     |> Bindings.bind(~k(RET), :agent_focus_input, "Focus input")
-    # Collapse toggle (magit-style o)
-    |> Bindings.bind(~k(o), :agent_toggle_collapse, "Toggle collapse")
     # Panel
     |> Bindings.bind(~k(}), :agent_grow_panel, "Grow chat panel")
     |> Bindings.bind(~k({), :agent_shrink_panel, "Shrink chat panel")
@@ -204,16 +193,11 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"Fold / Collapse",
        [
-         {"o / za", "Toggle collapse at cursor"},
-         {"zA", "Toggle all collapses"},
-         {"zM", "Collapse all"},
-         {"zR", "Expand all"}
+         {"zA", "Toggle all collapsible blocks"}
        ]},
       {"Jump",
        [
-         {"]m / [m", "Next / prev message"},
          {"]c / [c", "Next / prev code block"},
-         {"]t / [t", "Next / prev tool call"},
          {"gb", "Back to source line (after SPC g w)"}
        ]},
       {"Copy",

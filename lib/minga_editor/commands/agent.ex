@@ -1283,35 +1283,17 @@ defmodule MingaEditor.Commands.Agent do
 
   # ── Fold / Collapse ────────────────────────────────────────────────────────
 
-  @doc "Toggles collapse at cursor (currently toggles all)."
-  @spec scope_toggle_collapse(state()) :: state()
-  def scope_toggle_collapse(state), do: toggle_all_collapses(state)
-
-  @doc "Toggles ALL collapses."
+  @doc "Toggles all collapsible agent blocks."
   @spec scope_toggle_all_collapse(state()) :: state()
-  def scope_toggle_all_collapse(state), do: toggle_all_collapses(state)
+  def scope_toggle_all_collapse(state) do
+    if session = Runtime.active_session(state.shell_runtime) do
+      Session.toggle_all_tool_collapses(session)
+    end
 
-  @doc "Expands at cursor (stubbed, toggles all for now)."
-  @spec scope_expand_at_cursor(state()) :: state()
-  def scope_expand_at_cursor(state), do: state
-
-  @doc "Collapses at cursor (stubbed, toggles all for now)."
-  @spec scope_collapse_at_cursor(state()) :: state()
-  def scope_collapse_at_cursor(state), do: state
-
-  @doc "Collapses all thinking/tool blocks."
-  @spec scope_collapse_all(state()) :: state()
-  def scope_collapse_all(state), do: toggle_all_collapses(state)
-
-  @doc "Expands all thinking/tool blocks."
-  @spec scope_expand_all(state()) :: state()
-  def scope_expand_all(state), do: toggle_all_collapses(state)
+    state
+  end
 
   # ── Bracket navigation ────────────────────────────────────────────────────
-
-  @doc "Jumps to next message (stubbed)."
-  @spec scope_next_message(state()) :: state()
-  def scope_next_message(state), do: state
 
   @doc "Jumps to next code block or diff hunk."
   @spec scope_next_code_block(state()) :: state()
@@ -1325,14 +1307,6 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @doc "Jumps to next tool call (stubbed)."
-  @spec scope_next_tool_call(state()) :: state()
-  def scope_next_tool_call(state), do: state
-
-  @doc "Jumps to previous message (stubbed)."
-  @spec scope_prev_message(state()) :: state()
-  def scope_prev_message(state), do: state
-
   @doc "Jumps to previous code block or diff hunk."
   @spec scope_prev_code_block(state()) :: state()
   def scope_prev_code_block(state) do
@@ -1344,10 +1318,6 @@ defmodule MingaEditor.Commands.Agent do
         state
     end
   end
-
-  @doc "Jumps to previous tool call (stubbed)."
-  @spec scope_prev_tool_call(state()) :: state()
-  def scope_prev_tool_call(state), do: state
 
   # ── Copy ───────────────────────────────────────────────────────────────────
 
@@ -2010,15 +1980,6 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec toggle_all_collapses(state()) :: state()
-  defp toggle_all_collapses(state) do
-    if Runtime.active_session(state.shell_runtime) do
-      Session.toggle_all_tool_collapses(Runtime.active_session(state.shell_runtime))
-    end
-
-    state
-  end
-
   @spec scroll_context(state()) ::
           {non_neg_integer(), Message.t(), Transcript.line_type()} | nil
   defp scroll_context(state) do
@@ -2210,18 +2171,10 @@ defmodule MingaEditor.Commands.Agent do
   # via the `scope` field, so individual command functions no
   # longer need internal guards.
   @scoped_agent_commands [
-    {:agent_toggle_collapse, "Toggle collapse at cursor", :scope_toggle_collapse},
-    {:agent_toggle_all_collapse, "Toggle collapse all", :scope_toggle_all_collapse},
-    {:agent_expand_at_cursor, "Expand at cursor", :scope_expand_at_cursor},
-    {:agent_collapse_at_cursor, "Collapse at cursor", :scope_collapse_at_cursor},
-    {:agent_collapse_all, "Collapse all", :scope_collapse_all},
-    {:agent_expand_all, "Expand all", :scope_expand_all},
-    {:agent_next_message, "Next message", :scope_next_message},
+    {:agent_toggle_all_collapse, "Toggle all collapsible agent blocks",
+     :scope_toggle_all_collapse},
     {:agent_next_code_block, "Next code block", :scope_next_code_block},
-    {:agent_next_tool_call, "Next tool call", :scope_next_tool_call},
-    {:agent_prev_message, "Previous message", :scope_prev_message},
     {:agent_prev_code_block, "Previous code block", :scope_prev_code_block},
-    {:agent_prev_tool_call, "Previous tool call", :scope_prev_tool_call},
     {:agent_copy_code_block, "Copy code block", :scope_copy_code_block},
     {:agent_copy_message, "Copy message", :scope_copy_message},
     {:agent_open_code_block, "Open code block", :scope_open_code_block},
