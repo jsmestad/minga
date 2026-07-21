@@ -3563,7 +3563,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W079/S06: Make buffer creation the sole buffer-open event owner
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S06
 - **Planning profile:** `S06Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S06Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3586,5 +3586,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** The locked owner, contract, scope, test layer, dependencies, LSP reattachment constraint, and production-line budget remained valid.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3146
 - **Implementation commit SHA:** `271d1ed5b`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `b567439c10d8336b5d67a015115e30ad9f8c4146`.
+- **Merge evidence:** PR #3146 merged after CI run `29875173753` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
