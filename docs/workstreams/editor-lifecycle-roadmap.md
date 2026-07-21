@@ -3478,7 +3478,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W076/D06: Verify Protocol.GUI parity-oracle cleanup is exhausted
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** D06
 - **Planning profile:** `D06NextPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** None; current-main verification found no remaining D06 implementation slice.
@@ -3499,5 +3499,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed current Protocol.GUI ownership, W028-W040 exhaustion, preserved D04 runtime and live clipboard/settings/actions, separate Tool Manager retirement, roadmap truth, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3140
 - **Implementation commit SHA:** `acddf4721`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `498d5cc84050bde730fcf480ed01a7ca4f02c014`.
+- **Merge evidence:** PR #3140 merged after CI run `29865904012` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
