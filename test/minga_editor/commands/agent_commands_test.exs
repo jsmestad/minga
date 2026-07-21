@@ -137,7 +137,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       file_tab
       |> TabBar.new()
       |> TabBar.add_workspace_file(0, source_ref)
-      |> TabBar.set_workspace_active_file(0, source_ref)
 
     then(state, fn root ->
       shell_state =
@@ -1012,13 +1011,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert active_workspace.kind == :agent
       assert active_workspace.files == []
-      assert active_workspace.active_file == nil
       assert is_pid(active_workspace.session)
       assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
       assert new_state.workspace.buffers.active == nil
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
-      assert manual_workspace.active_file == source_workspace.active_file
       assert manual_workspace.session == source_workspace.session
       assert TabBar.active(tab_bar).session == active_workspace.session
     end
@@ -1114,9 +1111,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert TabBar.active_workspace_id(tab_bar) == 0
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
-      assert manual_workspace.active_file == source_workspace.active_file
       assert manual_workspace.session == source_workspace.session
-      assert [%{files: [], active_file: nil, session: session}] = agent_workspaces
+      assert [%{files: [], session: session}] = agent_workspaces
       assert is_pid(session)
     end
   end

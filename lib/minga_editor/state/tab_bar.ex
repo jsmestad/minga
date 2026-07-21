@@ -298,12 +298,11 @@ defmodule MingaEditor.State.TabBar do
   def rebind_buffer_file(%__MODULE__{} = tab_bar, buffer_pid, %FileRef{} = file_ref)
       when is_pid(buffer_pid) do
     matching_tabs = Enum.filter(tab_bar.tabs, &tab_matches_buffer?(&1, buffer_pid))
-    active_id = tab_bar.active_id
 
     Enum.reduce(matching_tabs, tab_bar, fn %Tab{} = tab, acc ->
       acc
       |> replace_matching_tab(tab.id, &Tab.set_file_ref(&1, file_ref))
-      |> retarget_matching_workspace(tab, file_ref, tab.id == active_id)
+      |> retarget_matching_workspace(tab, file_ref)
     end)
   end
 
@@ -381,15 +380,14 @@ defmodule MingaEditor.State.TabBar do
 
   defp tab_matches_buffer?(%Tab{}, _buffer_pid), do: false
 
-  @spec retarget_matching_workspace(t(), Tab.t(), FileRef.t(), boolean()) :: t()
+  @spec retarget_matching_workspace(t(), Tab.t(), FileRef.t()) :: t()
   defp retarget_matching_workspace(
          %__MODULE__{} = tab_bar,
          %Tab{group_id: workspace_id, file_ref: old_file_ref},
-         %FileRef{} = file_ref,
-         active?
+         %FileRef{} = file_ref
        ) do
     replace_matching_workspace(tab_bar, workspace_id, fn workspace ->
-      Workspace.retarget_file(workspace, old_file_ref, file_ref, active?)
+      Workspace.retarget_file(workspace, old_file_ref, file_ref)
     end)
   end
 
@@ -435,13 +433,13 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc "Retargets one tab and its workspace to a concrete file identity."
-  @spec retarget_tab_file(t(), Tab.id(), FileRef.t(), boolean()) :: t()
-  def retarget_tab_file(%__MODULE__{} = tab_bar, tab_id, %FileRef{} = file_ref, active?) do
+  @spec retarget_tab_file(t(), Tab.id(), FileRef.t()) :: t()
+  def retarget_tab_file(%__MODULE__{} = tab_bar, tab_id, %FileRef{} = file_ref) do
     case get(tab_bar, tab_id) do
       %Tab{} = tab ->
         tab_bar
         |> replace_matching_tab(tab_id, &Tab.set_file_ref(&1, file_ref))
-        |> retarget_matching_workspace(tab, file_ref, active?)
+        |> retarget_matching_workspace(tab, file_ref)
 
       nil ->
         tab_bar
@@ -1134,12 +1132,6 @@ defmodule MingaEditor.State.TabBar do
     replace_matching_workspace(tab_bar, workspace_id, &Workspace.remove_file(&1, file_ref))
   end
 
-  @doc "Selects the active file identity in the identified workspace."
-  @spec set_workspace_active_file(t(), non_neg_integer(), FileRef.t() | nil) :: t()
-  def set_workspace_active_file(tab_bar, workspace_id, file_ref) do
-    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_active_file(&1, file_ref))
-  end
-
   @doc "Records pending durable catch-up events on the identified workspace."
   @spec set_workspace_pending_catchup_events(t(), non_neg_integer(), [term()]) :: t()
   def set_workspace_pending_catchup_events(tab_bar, workspace_id, events) when is_list(events) do
@@ -1162,11 +1154,10 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc "Retargets one file identity in the identified workspace."
-  @spec retarget_workspace_file(t(), non_neg_integer(), FileRef.t() | nil, FileRef.t(), boolean()) ::
-          t()
-  def retarget_workspace_file(tab_bar, workspace_id, old_file_ref, %FileRef{} = file_ref, active?) do
+  @spec retarget_workspace_file(t(), non_neg_integer(), FileRef.t() | nil, FileRef.t()) :: t()
+  def retarget_workspace_file(tab_bar, workspace_id, old_file_ref, %FileRef{} = file_ref) do
     replace_matching_workspace(tab_bar, workspace_id, fn workspace ->
-      Workspace.retarget_file(workspace, old_file_ref, file_ref, active?)
+      Workspace.retarget_file(workspace, old_file_ref, file_ref)
     end)
   end
 

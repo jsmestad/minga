@@ -354,12 +354,10 @@ defmodule MingaEditor.StateTest do
         |> TabBar.get_workspace(0)
         |> WorkspaceModel.add_file(old_active_ref)
         |> WorkspaceModel.add_file(old_list_ref)
-        |> WorkspaceModel.set_active_file(old_active_ref)
 
       agent_workspace =
         agent_workspace
         |> WorkspaceModel.add_file(agent_ref)
-        |> WorkspaceModel.set_active_file(agent_ref)
 
       tab_bar =
         tab_bar
@@ -383,10 +381,8 @@ defmodule MingaEditor.StateTest do
       assert TabBar.get(updated_tb, matching_tab.id).file_ref == target_ref
       assert TabBar.get(updated_tb, list_only_tab.id).file_ref == old_list_ref
       assert TabBar.get(updated_tb, agent_tab.id).file_ref == agent_ref
-      assert TabBar.get_workspace(updated_tb, 0).active_file == target_ref
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), target_ref)
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_list_ref)
-      assert TabBar.get_workspace(updated_tb, agent_workspace.id).active_file == agent_ref
 
       assert WorkspaceModel.has_file?(
                TabBar.get_workspace(updated_tb, agent_workspace.id),
@@ -452,7 +448,6 @@ defmodule MingaEditor.StateTest do
         tab_bar
         |> TabBar.get_workspace(0)
         |> WorkspaceModel.add_file(active_ref)
-        |> WorkspaceModel.set_active_file(active_ref)
 
       tab_bar = TabBar.accept_workspace(tab_bar, manual_workspace)
 
@@ -472,7 +467,6 @@ defmodule MingaEditor.StateTest do
 
       assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
       assert TabBar.get(updated_tb, active_tab.id).file_ref == active_ref
-      assert TabBar.get_workspace(updated_tb, 0).active_file == active_ref
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), new_ref)
       refute WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_ref)
     end

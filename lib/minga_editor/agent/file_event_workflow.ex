@@ -401,12 +401,7 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
       tab_bar =
         tab_bar
         |> TabBar.move_tab_to_workspace(tab_id, workspace_id)
-        |> TabBar.retarget_workspace_file(
-          workspace_id,
-          nil,
-          file_ref,
-          tab_id == tab_bar.active_id
-        )
+        |> TabBar.retarget_workspace_file(workspace_id, nil, file_ref)
 
       install_tab_bar(state, tab_bar)
     else

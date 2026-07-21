@@ -194,7 +194,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       tab_bar =
         tab_bar
         |> TabBar.move_tab_to_workspace(tab.id, agent_workspace.id)
-        |> TabBar.retarget_tab_file(tab.id, first_ref, true)
+        |> TabBar.retarget_tab_file(tab.id, first_ref)
         |> TabBar.update_context(tab.id, MingaEditor.State.Tab.Context.snapshot(workspace))
 
       shell_state = TraditionalState.install_tab_bar(state.shell_runtime.state, tab_bar)
@@ -212,7 +212,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert {:ok, persisted} =
                Persistence.read(Persistence.path_for(dir, agent_workspace.id), dir)
 
-      assert FileRef.equal?(persisted.active_file, second_ref)
+      assert Enum.any?(persisted.files, &FileRef.equal?(&1, second_ref))
     end
 
     test "Traditional: agent tab context.buffers.active tracks workspace after switch" do

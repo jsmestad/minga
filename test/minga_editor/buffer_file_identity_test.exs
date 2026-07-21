@@ -42,7 +42,6 @@ defmodule MingaEditor.BufferFileIdentityTest do
       tab_bar
       |> TabBar.accept_tab(second)
       |> TabBar.add_workspace_file(0, buffer_ref)
-      |> TabBar.set_workspace_active_file(0, buffer_ref)
 
     state = %EditorState{
       workspace: %SessionState{
@@ -64,7 +63,6 @@ defmodule MingaEditor.BufferFileIdentityTest do
              &FileRef.equal?(&1, expected)
            )
 
-    assert FileRef.equal?(TabBar.get_workspace(rebound_tab_bar, 0).active_file, expected)
     assert Enum.all?(tab_bar.tabs, &FileRef.equal?(&1.file_ref, buffer_ref))
   end
 

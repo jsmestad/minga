@@ -374,7 +374,6 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb =
         tb
         |> TabBar.add_workspace_file(workspace.id, active_ref)
-        |> TabBar.set_workspace_active_file(workspace.id, active_ref)
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
@@ -402,7 +401,6 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert TabBar.get(tb, tab2.id).group_id == workspace.id
       assert Workspace.has_file?(agent_workspace, test_ref)
       assert Workspace.has_file?(agent_workspace, active_ref)
-      assert agent_workspace.active_file == active_ref
     end
 
     test "file_changed derives missing tab file ref from snapshotted buffer context" do

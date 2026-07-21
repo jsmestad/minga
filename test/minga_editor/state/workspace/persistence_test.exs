@@ -22,17 +22,20 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
 
   @moduletag :tmp_dir
 
-  test "round-trips the manual workspace with files and active file", %{tmp_dir: dir} do
+  test "round-trips the manual workspace with files", %{tmp_dir: dir} do
     {:ok, file_ref} = FileRef.from_path(dir, "lib/a.ex")
 
     workspace =
       dir
       |> Workspace.new_manual()
       |> Workspace.rename("Project")
-      |> Workspace.set_active_file(file_ref)
+      |> Workspace.add_file(file_ref)
 
     assert :ok = Persistence.write(workspace, dir)
     assert {:ok, restored} = Persistence.read(Persistence.path_for(dir, 0), dir)
+
+    json = Persistence.path_for(dir, 0) |> File.read!() |> JSON.decode!()
+    refute Map.has_key?(json, "active_file")
 
     assert restored.id == 0
     assert restored.kind == :manual
@@ -40,7 +43,6 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert restored.custom_name == "Project"
     assert restored.session == nil
     assert restored.agent_status == :stopped
-    assert FileRef.equal?(restored.active_file, file_ref)
     assert Enum.any?(restored.files, &FileRef.equal?(&1, file_ref))
   end
 
@@ -53,7 +55,7 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
       |> Workspace.new_agent("Agent", nil, dir)
       |> Workspace.rename("Investigate parser")
       |> Workspace.set_icon("sparkles")
-      |> Workspace.set_active_file(file_ref)
+      |> Workspace.add_file(file_ref)
       |> Workspace.set_review(review)
 
     assert :ok = Persistence.write(workspace, dir)
@@ -69,6 +71,43 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert restored.review.state == :needs_review
     refute restored.review.in_progress?
     assert Enum.any?(restored.review.changed_files, &FileRef.equal?(&1, file_ref))
+  end
+
+  test "reads legacy workspace JSON with active_file and omits it when re-serializing", %{
+    tmp_dir: dir
+  } do
+    {:ok, file_ref} = FileRef.from_path(dir, "lib/legacy.ex")
+
+    legacy_file =
+      Workspace.new_agent(3, "Legacy", nil, dir)
+      |> Workspace.add_file(file_ref)
+      |> Workspace.to_persisted_map()
+      |> Map.fetch!("files")
+      |> List.first()
+
+    legacy = %{
+      "schema_version" => 1,
+      "id" => 3,
+      "kind" => "agent",
+      "label" => "Legacy",
+      "custom_name" => "Legacy",
+      "icon" => "cpu",
+      "color" => 5_000_000,
+      "files" => [legacy_file],
+      "active_file" => %{"kind" => "path", "relative_path" => "lib/legacy.ex"},
+      "review" => %{"state" => "clean", "changed_files" => [], "conflict_files" => []}
+    }
+
+    path = Persistence.path_for(dir, 3)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, JSON.encode!(legacy))
+
+    assert {:ok, restored} = Persistence.read(path, dir)
+    assert restored.id == 3
+    assert restored.kind == :agent
+    assert restored.label == "Legacy"
+    assert Enum.any?(restored.files, &FileRef.equal?(&1, file_ref))
+    refute Map.has_key?(Workspace.to_persisted_map(restored), "active_file")
   end
 
   test "scan skips corrupt JSON and ignores unknown fields", %{tmp_dir: dir} do
@@ -227,7 +266,6 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     tab_bar =
       tab_bar
       |> TabBar.add_workspace_file(workspace.id, file_ref)
-      |> TabBar.set_workspace_active_file(workspace.id, file_ref)
 
     traditional_entry = Runtime.default_entry()
     traditional = TraditionalState.install_tab_bar(%TraditionalState{}, tab_bar)
@@ -254,7 +292,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
 
     path = Persistence.path_for(dir, workspace.id)
     assert :ok = Persistence.write(TabBar.get_workspace(tab_bar, workspace.id), dir)
-    assert %{"files" => [_], "active_file" => %{}} = path |> File.read!() |> JSON.decode!()
+    assert %{"files" => [_]} = json = path |> File.read!() |> JSON.decode!()
+    refute Map.has_key?(json, "active_file")
 
     current = EditorState.remove_buffer(previous, retired)
     assert Runtime.state(current.shell_runtime) == %{marker: :foreign}
@@ -264,10 +303,10 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
 
     cleaned_workspace = TabBar.get_workspace(cleaned_tab_bar, workspace.id)
     assert cleaned_workspace.files == []
-    assert cleaned_workspace.active_file == nil
 
     assert ^current = WorkspaceWorkflow.persist_changes(previous, current)
-    assert %{"files" => [], "active_file" => nil} = path |> File.read!() |> JSON.decode!()
+    assert %{"files" => []} = json = path |> File.read!() |> JSON.decode!()
+    refute Map.has_key?(json, "active_file")
 
     restored_runtime =
       Runtime.activate(current.shell_runtime, traditional_entry, %TraditionalState{})
@@ -275,7 +314,6 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     restored_tab_bar = Runtime.state(restored_runtime).tab_bar
     restored_workspace = TabBar.get_workspace(restored_tab_bar, workspace.id)
     assert restored_workspace.files == []
-    assert restored_workspace.active_file == nil
     refute Enum.any?(restored_tab_bar.tabs, &(&1.file_ref == file_ref))
 
     send(retired, :stop)
