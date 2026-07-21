@@ -28,20 +28,24 @@ defmodule MingaEditor.Input.RegistryTest do
     refute MingaEditor.Input.AgentMouse in handlers
   end
 
+  test "first surface lookup seeds built-ins when the registry is missing" do
+    :persistent_term.erase({Input, :surface_handlers})
+
+    handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
+
+    assert Enum.find_index(handlers, &(&1 == MingaEditor.Input.EmptyState)) <
+             Enum.find_index(handlers, &(&1 == MingaEditor.Input.Popup))
+
+    assert MingaEditor.Input.MentionCompletion in handlers
+    assert Enum.at(handlers, -1) == MingaEditor.Input.ModeFSM
+  end
+
   test "dispatch entries preserve exact built-in, config, and extension sources" do
     extension_source = {:extension, :input_registry_test}
 
-    :ok =
-      Input.register_handler(:config, MingaEditor.Input.ExtensionOne,
-        phase: :surface,
-        priority: -30
-      )
+    :ok = Input.register_handler(:config, MingaEditor.Input.ExtensionOne, priority: -30)
 
-    :ok =
-      Input.register_handler(extension_source, MingaEditor.Input.ExtensionTwo,
-        phase: :surface,
-        priority: -20
-      )
+    :ok = Input.register_handler(extension_source, MingaEditor.Input.ExtensionTwo, priority: -20)
 
     entries = Input.surface_handler_entries(%{editing_model: Minga.Editing.Model.Vim})
 
@@ -54,14 +58,9 @@ defmodule MingaEditor.Input.RegistryTest do
   test "extension handler priority controls relative order without callbacks on the hot path" do
     source = {:extension, :input_registry_test}
 
-    :ok =
-      Input.register_handler(source, MingaEditor.Input.GlobalBindings,
-        phase: :surface,
-        priority: -10
-      )
+    :ok = Input.register_handler(source, MingaEditor.Input.GlobalBindings, priority: -10)
 
-    :ok =
-      Input.register_handler(source, MingaEditor.Input.AgentMouse, phase: :surface, priority: -20)
+    :ok = Input.register_handler(source, MingaEditor.Input.AgentMouse, priority: -20)
 
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
 
@@ -86,11 +85,7 @@ defmodule MingaEditor.Input.RegistryTest do
   test "unregister_source removes extension-owned handlers without removing built-ins" do
     source = {:extension, :input_registry_test}
 
-    :ok =
-      Input.register_handler(source, MingaEditor.Input.GlobalBindings,
-        phase: :surface,
-        priority: -10
-      )
+    :ok = Input.register_handler(source, MingaEditor.Input.GlobalBindings, priority: -10)
 
     handlers_with_extension = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
     assert Enum.count(handlers_with_extension, &(&1 == MingaEditor.Input.GlobalBindings)) == 2
@@ -100,21 +95,35 @@ defmodule MingaEditor.Input.RegistryTest do
     assert Enum.count(handlers_after_cleanup, &(&1 == MingaEditor.Input.GlobalBindings)) == 1
   end
 
+  test "explicit reset reseeds built-in handler priority without hot-path refresh" do
+    state = %{editing_model: Minga.Editing.Model.Vim}
+
+    :ok = Input.register_handler(:builtin, MingaEditor.Input.Popup, priority: -100)
+
+    first_handlers = Input.surface_handlers(state)
+    second_handlers = Input.surface_handlers(state)
+
+    assert first_handlers == second_handlers
+
+    assert Enum.find_index(first_handlers, &(&1 == MingaEditor.Input.Popup)) <
+             Enum.find_index(first_handlers, &(&1 == MingaEditor.Input.EmptyState))
+
+    Input.reset_handlers()
+    reset_handlers = Input.surface_handlers(state)
+
+    assert Enum.find_index(reset_handlers, &(&1 == MingaEditor.Input.EmptyState)) <
+             Enum.find_index(reset_handlers, &(&1 == MingaEditor.Input.Popup))
+
+    assert Enum.count(reset_handlers, &(&1 == MingaEditor.Input.Popup)) == 1
+  end
+
   test "unregister_source preserves another extension source's handler and ordering" do
     source = {:extension, :input_registry_test}
     other_source = {:extension, :input_registry_other}
 
-    :ok =
-      Input.register_handler(source, MingaEditor.Input.ExtensionOne,
-        phase: :surface,
-        priority: -30
-      )
+    :ok = Input.register_handler(source, MingaEditor.Input.ExtensionOne, priority: -30)
 
-    :ok =
-      Input.register_handler(other_source, MingaEditor.Input.ExtensionTwo,
-        phase: :surface,
-        priority: -20
-      )
+    :ok = Input.register_handler(other_source, MingaEditor.Input.ExtensionTwo, priority: -20)
 
     handlers_with_extension = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
 
