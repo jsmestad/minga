@@ -3286,7 +3286,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** Direct extension tests must be run from `extensions/git_porcelain`, not root paths. The extension-cwd attempt stopped before tests because `exqlite` could not load its NIF in this environment (`/lib64/libc.so: invalid ELF header`); generated extension dependencies, build output, and lockfile were removed. Future Git Porcelain work should keep focused validation in the extension project and use an environment where the pinned NIF loads.
 - **Pre-acceptance reviews:** Ponytail and Elixir craftsmanship returned `PASS/Lean`. Correctness initially blocked on one arithmetic mismatch and routing documentation that omitted dedicated handlers and direct active drag/release ownership. The exact accounting and docs corrections were applied; targeted rechecks returned `RESOLVED/PASS` for budgets, generated artifacts, mouse ownership, keyboard handler ordering, and agent panel ownership.
 - **Final reviewer verdict:** The broad reviewer initially returned `BLOCKED` on stale docs accounting and a false search-handler claim. Both were corrected; the targeted final recheck returned `RESOLVED/PASS` with 1.0 confidence and confirmed exact numstat plus the registered pre-Scoped handler set.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3124
+- **Implementation commit SHA:** `552a5321e`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
