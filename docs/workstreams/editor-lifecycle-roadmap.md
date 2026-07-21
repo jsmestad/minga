@@ -3346,7 +3346,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** `breadcrumb_click` is a retained residual, not a safe local deletion, while Swift `BreadcrumbBar` and Go semantic mouse still produce it. `tool_dismiss` is already absent from local live code outside `FINDINGS.md`, so any future Tool Manager deletion work should start from the retained protocol/frontend surface rather than a handler branch.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or mandatory cuts. They independently confirmed the exact five-concept local deletion, behavior-preserving catch-all paths, retained identity-rich hover contract, retained AgentMouse node routing, complete protocol/frontend/parser compatibility boundary, proportional tests, exact budgets, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-concept deletion, complete retained compatibility boundary, exact accounting, corroborated validation, current-main freshness, and merge safety.
-- **PR URL:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3128
 - **Implementation commit SHA:** `4c082369f`.
 - **Merge SHA:** Pending.
 - **Completion date:** 2026-07-21.
