@@ -2927,7 +2927,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W058: Shrink D14 FloatingWindow spec to geometry
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W058/D14
 - **Planning profile:** `D14FloatingPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D14FloatingWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2951,5 +2951,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.98 confidence. The reviewer confirmed the exact geometry-only owner cut, zero remaining painter/theme callers, preserved hover/signature dimension formulas, untouched semantic frontend/protocol code, truthful production/test budgets, consistent ownership documentation, complete evidence, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3102
 - **Implementation commit SHA:** `d07f548b7`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `ed6b094d271f65ed0f5d08300006411d1c05c891`.
+- **Merge evidence:** PR #3102 merged after CI run `29797754647` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
