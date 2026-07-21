@@ -3194,7 +3194,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors; Credo still reported two existing refactoring opportunities in `lib/minga_editor/commands/buffer_management.ex` but the lint target exited successfully. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,731 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Correctness initially returned `PASS/Lean`. Ponytail required replacing Loader's duplicate top-level editor override engine with direct `Builder.apply_overrides/2` delegation, and Elixir craftsmanship identified the same duplicate path's avoidable per-field allocation. The larger canonical-owner cut superseded the allocation-only fix. After the cut, correctness and Ponytail returned `RESOLVED/PASS`, and Elixir craftsmanship returned `PASS/Lean`; all confirmed exact compatibility, canonical error wording, the negative production budget, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three-field and duplicate-parser deletion, valid deprecated parse-and-ignore behavior, canonical Builder errors, retained live consumers, truthful budgets and validation, freshness, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3118
+- **Implementation commit SHA:** `9658a6625`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
