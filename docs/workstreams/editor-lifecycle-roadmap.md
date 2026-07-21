@@ -2949,7 +2949,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors after the mandatory theme cut, then passed again after the final documentation corrections. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,743 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded before the documentation-only corrections.
 - **Pre-acceptance reviews:** Correctness found stale display-list ownership claims in the lifecycle modules, architecture guide, DisplayList docs, Overlay docs, and BlockDecoration docs; all were corrected, and the final targeted documentation recheck returned `RESOLVED/PASS`. Elixir craftsmanship required deleting the final dead presenter/FocusTree theme flow; the targeted recheck returned `PASS / Lean`. Ponytail returned `PASS / Lean` with no cuts and confirmed the negative production/test budgets and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.98 confidence. The reviewer confirmed the exact geometry-only owner cut, zero remaining painter/theme callers, preserved hover/signature dimension formulas, untouched semantic frontend/protocol code, truthful production/test budgets, consistent ownership documentation, complete evidence, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3102
+- **Implementation commit SHA:** `d07f548b7`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
