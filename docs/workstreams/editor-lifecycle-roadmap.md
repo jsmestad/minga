@@ -3505,7 +3505,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W077/S04: Share workspace auto-name installation in WorkspaceWorkflow
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S04
 - **Planning profile:** `S04Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S04Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3528,5 +3528,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** None. The locked owner, contract, scope, test layer, dependencies, and production-line budget remained valid.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3142
 - **Implementation commit SHA:** `782504475`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `0cf66e76ce96b2fb79215473e4ad0ad76a23d5c4`.
+- **Merge evidence:** PR #3142 merged after CI run `29869404537` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
