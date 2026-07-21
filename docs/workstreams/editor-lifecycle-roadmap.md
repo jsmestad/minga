@@ -3013,3 +3013,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `b344206f53f886266b0c6bc4a3f77a96bd6da316`.
 - **Merge evidence:** PR #3106 merged after CI run `29802442167` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W061/D20.1: Delete InjectionRange compatibility facade
+
+- **Status:** ACTIVE
+- **Audit ID:** D20.1 split slice
+- **Planning profile:** `D20FacadePlanner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `D20InjectionRangeWorker`, `editor-lifecycle-worker`, no delegation.
+- **Freshness commit SHA:** `d1aa3980db15c9c4cf828c81c1ab4c12c0a1cb6b`.
+- **Observable result:** The old Layer 2 InjectionRange delegate is removed from production and test source. Parser injection-range events, editor parser state, comment-prefix resolution, and the canonical `%Minga.Language.Highlight.InjectionRange{start_byte, end_byte, language}` data shape remain unchanged.
+- **Failure reproduction / source trace:** Before deletion, focused source search found the obsolete facade module only in `lib/minga_editor/ui/highlight/injection_range.ex` and the stale facade-named test module. The production file delegated `new/3` directly to `Minga.Language.Highlight.InjectionRange.new/3`, and the existing test already aliased the canonical owner.
+- **Implementation result:** Deleted only `lib/minga_editor/ui/highlight/injection_range.ex`; moved `test/minga_editor/ui/highlight/injection_range_test.exs` to `test/minga/language/highlight/injection_range_test.exs`; renamed the test module to `Minga.Language.Highlight.InjectionRangeTest` without changing the constructor or enforced-key assertions; added the compatibility notice in `docs/EXTENSIBILITY.md`.
+- **Changed files:** `docs/EXTENSIBILITY.md`; `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/ui/highlight/injection_range.ex`; `test/minga/language/highlight/injection_range_test.exs`; `test/minga_editor/ui/highlight/injection_range_test.exs`.
+- **Focused validation:** `mix test test/minga/language/highlight/injection_range_test.exs test/minga/editing/comment_test.exs test/minga_editor/handlers/highlight_handler_test.exs` passed with 29 tests.
+- **Formatting, reference, and diff validation:** `mix format --check-formatted test/minga/language/highlight/injection_range_test.exs docs/EXTENSIBILITY.md docs/workstreams/editor-lifecycle-roadmap.md` passed before roadmap evidence. Focused forbidden-reference search across `lib`, `test`, `extensions`, `README.md`, and `CHANGELOG.md` returned no matches; the only allowed compatibility-notice match is in `docs/EXTENSIBILITY.md`. `git diff --check` and `git diff --cached --check` passed before roadmap evidence.
+- **Numstat before roadmap evidence:** `docs/EXTENSIBILITY.md 2 0; lib/minga_editor/ui/highlight/injection_range.ex 0 11; test/{minga_editor/ui => minga/language}/highlight/injection_range_test.exs 1 1`.
+- **Production lines added/removed:** `0 added / 11 removed` (net `-11`, within production net `<= 0`).
+- **Test lines added/removed:** `1 added / 1 removed` (net `0`, within test net `<= +5`).
+- **Docs lines before roadmap evidence:** `2 added / 0 removed` in `docs/EXTENSIBILITY.md`.
+- **Concepts removed:** Removed one obsolete Layer 2 compatibility facade concept and its stale test namespace.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, parser path, state path, protocol path, handler path, or consumer path was added.
+- **Retained contracts:** `Minga.Language.Highlight.InjectionRange.new/3`, the `%Minga.Language.Highlight.InjectionRange{start_byte, end_byte, language}` struct, parser opcode `0x34` decode shape, `MingaEditor.State.Parser.accept_injection_ranges/2`, `MingaEditor.Handlers.HighlightHandler` injection-range storage, and `Minga.Editing.Comment.comment_prefix_at/4` consumers remain unchanged. `MingaEditor.UI.Popup.Registry`, `MingaEditor.UI.Popup.Rule`, and `MingaEditor.UI.Highlight.Grammar` remain CANDIDATE follow-ups.
+- **Findings resolved:** D20.1 implementation slice removes only the stale InjectionRange facade while preserving the canonical Layer 0 owner and live parser/editor consumers.
+- **Discoveries affecting later work:** No replan trigger, production caller, test caller of the facade API, docs/extensions reference outside the new compatibility notice, parser-state dependency, protocol dependency, or replacement API need was found. The remaining three D20 facades require separately locked slices because `Popup.Rule` has test aliases and `Highlight.Grammar` has a production caller plus the `highlight_query_path/1` compatibility name.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,730 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact facade-only deletion, canonical Layer 0 owner and live parser/state/comment paths, truthful compatibility notice, unchanged test assertions in the canonical namespace, preserved remaining D20 facades, negative production budget, neutral test budget, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact facade-only cut, canonical owner and constructor/enforced-key contracts, correlated parser event routing and consumers, public compatibility notice, clean staged diff, truthful budgets and validation, freshness, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3108
+- **Implementation commit SHA:** `3a781d6fa`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.

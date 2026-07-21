@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Highlight.InjectionRangeTest do
+defmodule Minga.Language.Highlight.InjectionRangeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Language.Highlight.InjectionRange
