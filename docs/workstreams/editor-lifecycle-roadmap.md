@@ -3294,7 +3294,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W070/D31: Delete stale built-in mouse wrappers and no-op callbacks
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D31
 - **Planning profile:** `D31InputPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D31InputWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3318,5 +3318,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** The broad reviewer initially returned `BLOCKED` only because the final cache-state evidence was stale after cleanup. The sentence was corrected; the targeted recheck returned `RESOLVED/PASS` with 1.0 confidence and confirmed all five named artifact paths were absent.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3126
 - **Implementation commit SHA:** `05be7e05f`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `8d1d43de1a778a7919c7c0e9f864ce24f3931972`.
+- **Merge evidence:** PR #3126 merged after CI run `29834767842` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
