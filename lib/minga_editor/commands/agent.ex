@@ -576,16 +576,14 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  # Clears the input and resets diff baselines after a prompt is submitted.
+  # Clears the input and resets the edit timeline after a prompt is submitted.
   @spec clear_input_after_submit(state()) :: state()
   defp clear_input_after_submit(state) do
     state = update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
 
     TraditionalWorkflow.install_agent_ui(
       state,
-      (fn _ ->
-         UIState.clear_baselines(state.workspace.agent_ui)
-       end).(state.workspace.agent_ui)
+      UIState.reset_edit_timeline(state.workspace.agent_ui)
     )
   end
 

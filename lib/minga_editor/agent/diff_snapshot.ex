@@ -1,11 +1,10 @@
 defmodule MingaEditor.Agent.DiffSnapshot do
   @moduledoc """
-  File-backed snapshots for large-file diff review.
+  File-backed snapshots for large-file edit timeline entries.
 
-  When a file exceeds the `:agent_diff_size_threshold` config, the before/after
-  content is written to temp files instead of held in memory. The DiffReview
-  reads lines lazily from these files. Temp files are cleaned up when the
-  diff review is dismissed or the session ends.
+  When a file exceeds the `:agent_diff_size_threshold` config, entry post-image
+  content is written to temp files instead of held in memory. Temp files are cleaned
+  up when the edit timeline is reset or the session ends.
   """
 
   @typedoc "A diff snapshot, either memory-backed or file-backed."
@@ -27,16 +26,6 @@ defmodule MingaEditor.Agent.DiffSnapshot do
     else
       {:memory, content}
     end
-  end
-
-  @doc "Returns the lines from a snapshot."
-  @spec lines(t()) :: [String.t()]
-  def lines({:memory, content}), do: String.split(content, "\n")
-
-  def lines({:file, path}) do
-    path
-    |> File.stream!()
-    |> Enum.map(&String.trim_trailing(&1, "\n"))
   end
 
   @doc "Returns the raw content from a snapshot."

@@ -3,14 +3,15 @@ defmodule MingaEditor.Agent.UIState.View do
   Layout, search, preview, and toast state for the agent UI.
 
   Holds the data for the full-screen agentic view (focus, split sizing,
-  preview pane, search, toasts, diff baselines, context estimate). This is
-  the "view" half of the agent UI, separated from prompt editing concerns
-  in `UIState.Panel`.
+  preview pane, search, toasts, edit timeline, context estimate). This is the
+  "view" half of the agent UI, separated from prompt editing concerns in
+  `UIState.Panel`.
 
   Most callers interact through `UIState` functions rather than accessing
   this struct directly.
   """
 
+  alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.UIState.Presentation
@@ -55,7 +56,6 @@ defmodule MingaEditor.Agent.UIState.View do
           search: search_state() | nil,
           toast: toast() | nil,
           toast_queue: term(),
-          diff_baselines: %{String.t() => String.t()},
           edit_timeline: EditTimeline.t(),
           activity: Activity.t(),
           context_estimate: non_neg_integer(),
@@ -81,7 +81,6 @@ defmodule MingaEditor.Agent.UIState.View do
             compact_triggered: false,
             compact_pending_fill_pct: nil,
             compaction_in_progress: false,
-            diff_baselines: %{},
             edit_timeline: EditTimeline.new(),
             activity: Activity.new()
 
@@ -265,6 +264,48 @@ defmodule MingaEditor.Agent.UIState.View do
     %{view | preview: preview}
   end
 
+  @type diff_resolution_action :: :accept_current | :reject_current | :accept_all | :reject_all
+  @type diff_resolution_write :: :no_write | {:write_file, String.t(), String.t()}
+  @type diff_resolution_result :: {:ok, t(), diff_resolution_write()} | :no_diff | :no_hunk
+
+  @doc "Applies a diff-review resolution and reprojects the edit timeline authority atomically."
+  @spec resolve_diff_review(t(), diff_resolution_action()) :: diff_resolution_result()
+  def resolve_diff_review(%__MODULE__{} = view, action)
+      when action in [:accept_current, :reject_current, :accept_all, :reject_all] do
+    with %DiffReview{} = review <- Preview.diff_review(view.preview),
+         {:ok, resolved_review} <- resolve_review_action(review, action) do
+      original_lines = DiffReview.original_lines(review)
+      materialized_lines = DiffReview.materialized_lines(resolved_review)
+
+      timeline =
+        EditTimeline.reproject(
+          view.edit_timeline,
+          resolved_review.path,
+          original_lines,
+          materialized_lines
+        )
+
+      updated_review =
+        resolved_review
+        |> DiffReview.update_after_lines(
+          materialized_lines,
+          EditTimeline.cumulative_hunks(timeline, resolved_review.path)
+        )
+        |> unresolved_review()
+
+      updated_view = %{
+        view
+        | edit_timeline: timeline,
+          preview: Preview.replace_diff(view.preview, updated_review)
+      }
+
+      {:ok, updated_view, write_request(action, resolved_review.path, materialized_lines)}
+    else
+      nil -> :no_diff
+      :no_hunk -> :no_hunk
+    end
+  end
+
   # ── Search ──────────────────────────────────────────────────────────────────
 
   @doc "Starts a search, saving the current scroll position."
@@ -396,34 +437,51 @@ defmodule MingaEditor.Agent.UIState.View do
     %{view | toast: nil, toast_queue: :queue.new()}
   end
 
+  @spec resolve_review_action(DiffReview.t(), diff_resolution_action()) ::
+          {:ok, DiffReview.t()} | :no_hunk
+  defp resolve_review_action(%DiffReview{} = review, :accept_current) do
+    if DiffReview.current_hunk(review),
+      do: {:ok, DiffReview.accept_current(review)},
+      else: :no_hunk
+  end
+
+  defp resolve_review_action(%DiffReview{} = review, :reject_current) do
+    if DiffReview.current_hunk(review),
+      do: {:ok, DiffReview.reject_current(review)},
+      else: :no_hunk
+  end
+
+  defp resolve_review_action(%DiffReview{} = review, :accept_all),
+    do: {:ok, DiffReview.accept_all(review)}
+
+  defp resolve_review_action(%DiffReview{} = review, :reject_all),
+    do: {:ok, DiffReview.reject_all(review)}
+
+  @spec unresolved_review(DiffReview.t() | nil) :: DiffReview.t() | nil
+  defp unresolved_review(nil), do: nil
+
+  defp unresolved_review(%DiffReview{} = review),
+    do: if(DiffReview.resolved?(review), do: nil, else: review)
+
+  @spec write_request(diff_resolution_action(), String.t(), [String.t()]) ::
+          diff_resolution_write()
+  defp write_request(action, path, materialized_lines)
+       when action in [:reject_current, :reject_all] do
+    {:write_file, path, Enum.join(materialized_lines, "\n")}
+  end
+
+  defp write_request(_action, _path, _materialized_lines), do: :no_write
+
   @spec make_toast(String.t(), :info | :warning | :error) :: toast()
   defp make_toast(message, :info), do: %{message: message, icon: "✓", level: :info}
   defp make_toast(message, :warning), do: %{message: message, icon: "⚠", level: :warning}
   defp make_toast(message, :error), do: %{message: message, icon: "✗", level: :error}
 
-  # ── Diff baselines ──────────────────────────────────────────────────────────
+  # ── Edit timeline ──────────────────────────────────────────────────────────
 
-  @doc "Records the baseline content for a file path (first edit only)."
-  @spec record_baseline(t(), String.t(), String.t()) :: t()
-  def record_baseline(%__MODULE__{diff_baselines: baselines} = view, path, content)
-      when is_binary(path) and is_binary(content) do
-    if Map.has_key?(baselines, path) do
-      view
-    else
-      %{view | diff_baselines: Map.put(baselines, path, content)}
-    end
-  end
-
-  @doc "Returns the baseline content for a path, or nil if none recorded."
-  @spec get_baseline(t(), String.t()) :: String.t() | nil
-  def get_baseline(%__MODULE__{diff_baselines: baselines}, path) when is_binary(path) do
-    Map.get(baselines, path)
-  end
-
-  @doc "Clears all diff baselines (called at the start of a new turn)."
-  @spec clear_baselines(t()) :: t()
-  def clear_baselines(%__MODULE__{} = view) do
-    EditTimeline.cleanup(view.edit_timeline)
-    %{view | diff_baselines: %{}, edit_timeline: EditTimeline.new()}
+  @doc "Resets the edit timeline and cleans up file-backed entry snapshots."
+  @spec reset_edit_timeline(t()) :: t()
+  def reset_edit_timeline(%__MODULE__{} = view) do
+    %{view | edit_timeline: EditTimeline.reset(view.edit_timeline)}
   end
 end

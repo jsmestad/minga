@@ -75,12 +75,6 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
        ) do
     {state, notices} = reload_remote_buffer_if_open(state, path, after_content)
 
-    state =
-      TraditionalWorkflow.install_agent_ui(
-        state,
-        UIState.record_baseline(state.workspace.agent_ui, path, before_content)
-      )
-
     state = update_activity(state, &Activity.record_file(&1, path))
     state = record_edit(state, path, tool_call_id, tool_name, before_content, after_content)
     state = track_active_shell_agent_file(state, path)
@@ -119,12 +113,13 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
 
   @spec install_diff_review(EditorState.t(), String.t(), String.t()) :: EditorState.t()
   defp install_diff_review(state, path, after_content) do
-    baseline = UIState.get_baseline(state.workspace.agent_ui, path)
+    cumulative_hunks =
+      EditTimeline.cumulative_hunks(state.workspace.agent_ui.view.edit_timeline, path)
 
     review =
       case existing_diff_for_path(state, path) do
-        nil -> DiffReview.new(path, baseline, after_content)
-        existing -> DiffReview.update_after(existing, after_content)
+        nil -> DiffReview.from_hunks(path, after_content, cumulative_hunks)
+        existing -> DiffReview.update_after(existing, after_content, cumulative_hunks)
       end
 
     install_diff_review(state, review)

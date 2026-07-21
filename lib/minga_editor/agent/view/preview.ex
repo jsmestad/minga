@@ -84,6 +84,14 @@ defmodule MingaEditor.Agent.View.Preview do
     %{preview | content: {:diff, review}, scroll: Minga.Editing.new_scroll()}
   end
 
+  @doc "Replaces the current diff review, preserving scroll while a diff remains."
+  @spec replace_diff(t(), DiffReview.t() | nil) :: t()
+  def replace_diff(%__MODULE__{} = preview, %DiffReview{} = review) do
+    %{preview | content: {:diff, review}}
+  end
+
+  def replace_diff(%__MODULE__{} = preview, nil), do: clear(preview)
+
   @doc "Updates the diff review within the preview."
   @spec update_diff(t(), (DiffReview.t() -> DiffReview.t())) :: t()
   def update_diff(%__MODULE__{content: {:diff, review}} = preview, fun)

@@ -6,9 +6,9 @@ defmodule MingaEditor.Agent.EditTimeline do
   scrub through the agent's edit history. Each entry stores the file
   content *after* that edit, keyed by tool call ID.
 
-  Baselines (the content before the first edit) are stored separately so
-  the timeline can show the full range from "before agent touched the
-  file" to the current state.
+  Cumulative hunks are the per-path review authority. They represent the
+  first pre-agent content to latest post-image without storing another full
+  baseline copy.
   """
 
   alias MingaEditor.Agent.DiffSnapshot
@@ -31,7 +31,7 @@ defmodule MingaEditor.Agent.EditTimeline do
 
   @type t :: %__MODULE__{
           entries: %{String.t() => [Entry.t()]},
-          baselines: %{String.t() => DiffSnapshot.t()},
+          cumulative_hunks: %{String.t() => [Minga.Core.Diff.hunk()]},
           viewing: %{String.t() => non_neg_integer() | nil}
         }
 
@@ -46,7 +46,7 @@ defmodule MingaEditor.Agent.EditTimeline do
         }
 
   defstruct entries: %{},
-            baselines: %{},
+            cumulative_hunks: %{},
             viewing: %{}
 
   @spec new() :: t()
@@ -61,7 +61,13 @@ defmodule MingaEditor.Agent.EditTimeline do
         before_content,
         after_content
       ) do
-    timeline = maybe_record_baseline(timeline, path, before_content)
+    before_lines = String.split(before_content, "\n")
+    after_lines = String.split(after_content, "\n")
+
+    hunks =
+      original_lines(timeline, path, before_lines)
+      |> Git.diff_lines(after_lines)
+      |> detach_hunk_old_lines()
 
     existing = Map.get(timeline.entries, path, [])
     index = Enum.count(existing)
@@ -74,7 +80,18 @@ defmodule MingaEditor.Agent.EditTimeline do
       snapshot: DiffSnapshot.from_content(after_content)
     }
 
-    %{timeline | entries: Map.put(timeline.entries, path, Enum.concat(existing, [entry]))}
+    %{
+      timeline
+      | entries: Map.put(timeline.entries, path, Enum.concat(existing, [entry])),
+        cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks)
+    }
+  end
+
+  @spec reproject(t(), String.t(), [String.t()], [String.t()]) :: t()
+  def reproject(%__MODULE__{} = timeline, path, original_lines, materialized_lines)
+      when is_binary(path) and is_list(original_lines) and is_list(materialized_lines) do
+    hunks = original_lines |> Git.diff_lines(materialized_lines) |> detach_hunk_old_lines()
+    %{timeline | cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks)}
   end
 
   @spec entries_for(t(), String.t()) :: [Entry.t()]
@@ -82,24 +99,11 @@ defmodule MingaEditor.Agent.EditTimeline do
     Map.get(entries, path, [])
   end
 
-  @spec baseline_for(t(), String.t()) :: DiffSnapshot.t() | nil
-  def baseline_for(%__MODULE__{baselines: baselines}, path) do
-    Map.get(baselines, path)
-  end
-
   @spec content_at(t(), String.t(), non_neg_integer()) :: {:ok, String.t()} | :error
   def content_at(%__MODULE__{} = timeline, path, index) do
     case Enum.find(entries_for(timeline, path), &(&1.index == index)) do
       nil -> :error
       entry -> {:ok, DiffSnapshot.content(entry.snapshot)}
-    end
-  end
-
-  @spec baseline_content(t(), String.t()) :: {:ok, String.t()} | :error
-  def baseline_content(%__MODULE__{baselines: baselines}, path) do
-    case Map.get(baselines, path) do
-      nil -> :error
-      snapshot -> {:ok, DiffSnapshot.content(snapshot)}
     end
   end
 
@@ -180,27 +184,46 @@ defmodule MingaEditor.Agent.EditTimeline do
     |> Enum.sort_by(& &1.path)
   end
 
-  @spec cleanup(t()) :: :ok
-  def cleanup(%__MODULE__{entries: entries, baselines: baselines}) do
+  @spec reset(t()) :: t()
+  def reset(%__MODULE__{} = timeline) do
+    cleanup_snapshots(timeline)
+    new()
+  end
+
+  @spec cleanup_snapshots(t()) :: :ok
+  defp cleanup_snapshots(%__MODULE__{entries: entries}) do
     Enum.each(entries, fn {_path, path_entries} ->
       Enum.each(path_entries, fn %Entry{snapshot: snapshot} ->
         DiffSnapshot.cleanup(snapshot)
       end)
     end)
 
-    Enum.each(baselines, fn {_path, snapshot} ->
-      DiffSnapshot.cleanup(snapshot)
-    end)
-
     :ok
   end
 
-  defp maybe_record_baseline(%__MODULE__{baselines: baselines} = timeline, path, before_content) do
-    if Map.has_key?(baselines, path) do
-      timeline
-    else
-      %{timeline | baselines: Map.put(baselines, path, DiffSnapshot.from_content(before_content))}
-    end
+  @spec cumulative_hunks(t(), String.t()) :: [Minga.Core.Diff.hunk()]
+  def cumulative_hunks(%__MODULE__{cumulative_hunks: hunks}, path) do
+    Map.get(hunks, path, [])
+  end
+
+  @spec original_lines(t(), String.t(), [String.t()]) :: [String.t()]
+  defp original_lines(%__MODULE__{} = timeline, path, before_lines) do
+    timeline
+    |> cumulative_hunks(path)
+    |> Enum.reverse()
+    |> Enum.reduce(before_lines, &Git.revert_hunk(&2, &1))
+  end
+
+  @spec detach_hunk_old_lines([Minga.Core.Diff.hunk()]) :: [Minga.Core.Diff.hunk()]
+  defp detach_hunk_old_lines(hunks) do
+    Enum.map(hunks, fn hunk ->
+      %{hunk | old_lines: Enum.map(hunk.old_lines, &detach_binary/1)}
+    end)
+  end
+
+  @spec detach_binary(String.t()) :: String.t()
+  defp detach_binary(line) do
+    if byte_size(line) < :binary.referenced_byte_size(line), do: :binary.copy(line), else: line
   end
 
   @spec non_empty_file_entries(%{String.t() => [Entry.t()]}) :: [{String.t(), [Entry.t()]}]
@@ -219,8 +242,7 @@ defmodule MingaEditor.Agent.EditTimeline do
   defp file_summary(_timeline, {_path, []}), do: []
 
   defp file_summary(%__MODULE__{} = timeline, {path, entries}) do
-    latest = Enum.at(entries, -1)
-    {added, removed} = diff_counts(baseline_for(timeline, path), latest.snapshot)
+    {added, removed} = diff_counts(cumulative_hunks(timeline, path))
 
     [
       %{
@@ -233,16 +255,8 @@ defmodule MingaEditor.Agent.EditTimeline do
     ]
   end
 
-  @spec diff_counts(DiffSnapshot.t() | nil, DiffSnapshot.t()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp diff_counts(nil, _latest), do: {0, 0}
-
-  defp diff_counts(baseline, latest) do
-    baseline
-    |> DiffSnapshot.lines()
-    |> Git.diff_lines(DiffSnapshot.lines(latest))
-    |> Enum.reduce({0, 0}, &add_hunk_counts/2)
-  end
+  @spec diff_counts([Minga.Core.Diff.hunk()]) :: {non_neg_integer(), non_neg_integer()}
+  defp diff_counts(hunks), do: Enum.reduce(hunks, {0, 0}, &add_hunk_counts/2)
 
   @spec add_hunk_counts(Minga.Core.Diff.hunk(), {non_neg_integer(), non_neg_integer()}) ::
           {non_neg_integer(), non_neg_integer()}

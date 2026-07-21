@@ -1,9 +1,8 @@
 defmodule MingaEditor.Agent.DiffReviewTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Git
   alias MingaEditor.Agent.DiffReview
-
-  # ── new/3 ───────────────────────────────────────────────────────────────────
 
   describe "new/3" do
     test "returns nil when content is identical" do
@@ -40,14 +39,70 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert [_ | _] = review.hunks
     end
 
-    test "stores before_lines and after_lines" do
+    test "stores after_lines and hunks" do
       review = DiffReview.new("f.ex", "a\nb\n", "a\nc\n")
-      assert review.before_lines == ["a", "b", ""]
       assert review.after_lines == ["a", "c", ""]
+      assert [%{old_lines: ["b"]}] = review.hunks
+      refute Map.has_key?(Map.from_struct(review), :before_lines)
+    end
+
+    test "detaches retained large old_lines from source binaries" do
+      old_line = String.duplicate("x", 128)
+      before = "one\n" <> old_line <> "\nthree"
+      after_ = "one\nnew\nthree"
+
+      review = DiffReview.new("test.ex", before, after_)
+
+      assert [%{old_lines: [^old_line]}] = review.hunks
+
+      assert :binary.referenced_byte_size(hd(hd(Enum.map(review.hunks, & &1.old_lines)))) ==
+               byte_size(old_line)
     end
   end
 
-  # ── Navigation ──────────────────────────────────────────────────────────────
+  describe "materialized_lines/1" do
+    test "applies rejected hunks in descending coordinate order" do
+      before = "top\nold upper\nmiddle\ndeleted\nold lower\nbottom"
+      after_ = "inserted\ntop\nnew upper\nmiddle\nnew lower\nbottom"
+      review = DiffReview.new("test.ex", before, after_)
+
+      review =
+        review
+        |> DiffReview.reject_current()
+        |> DiffReview.reject_current()
+        |> DiffReview.reject_current()
+
+      assert DiffReview.materialized_lines(review) == String.split(before, "\n")
+    end
+  end
+
+  describe "from_hunks/3" do
+    test "returns nil when no hunks are provided" do
+      assert DiffReview.from_hunks("f.ex", "a\n", []) == nil
+    end
+
+    test "builds additions from precomputed hunks and after-content" do
+      review = from_contents("f.ex", "a\n", "a\nb\n")
+      assert %DiffReview{} = review
+      assert {added, 0} = DiffReview.summary(review)
+      assert added > 0
+    end
+
+    test "builds deletions from precomputed hunks and after-content" do
+      review = from_contents("f.ex", "a\nb\n", "a\n")
+      assert %DiffReview{} = review
+      assert {0, removed} = DiffReview.summary(review)
+      assert removed > 0
+    end
+
+    test "builds modifications from precomputed hunks and after-content" do
+      review = from_contents("f.ex", "a\nold\n", "a\nnew\n")
+      assert %DiffReview{} = review
+      assert {added, removed} = DiffReview.summary(review)
+      assert added > 0
+      assert removed > 0
+    end
+  end
 
   describe "next_hunk/1" do
     test "advances to the next hunk" do
@@ -69,7 +124,6 @@ defmodule MingaEditor.Agent.DiffReviewTest do
     test "skips resolved hunks" do
       review = multi_hunk_review()
       review = DiffReview.accept_current(review)
-      # Should have advanced past hunk 0 (now accepted)
       assert review.current_hunk_index != 0 or DiffReview.resolved?(review)
     end
   end
@@ -86,12 +140,9 @@ defmodule MingaEditor.Agent.DiffReviewTest do
     test "wraps around to last hunk" do
       review = multi_hunk_review()
       review = DiffReview.prev_hunk(review)
-      # Should wrap to last hunk
       assert review.current_hunk_index == Enum.count(review.hunks) - 1
     end
   end
-
-  # ── Resolution ──────────────────────────────────────────────────────────────
 
   describe "accept_current/1" do
     test "marks current hunk as accepted" do
@@ -132,7 +183,6 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.reject_current(review)
       review = DiffReview.accept_all(review)
 
-      # First hunk was rejected, should stay rejected
       assert DiffReview.resolution_at(review, 0) == :rejected
       assert DiffReview.resolved?(review)
     end
@@ -149,8 +199,6 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       end
     end
   end
-
-  # ── Queries ─────────────────────────────────────────────────────────────────
 
   describe "resolved?/1" do
     test "false when no hunks are resolved" do
@@ -211,8 +259,6 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert line >= 0
     end
   end
-
-  # ── Display lines ──────────────────────────────────────────────────────────
 
   describe "to_display_lines/1" do
     test "includes hunk headers" do
@@ -275,22 +321,28 @@ defmodule MingaEditor.Agent.DiffReviewTest do
 
       assert context_lines == ["l1", "l3", "l4", "l6", "l7", "l8"]
     end
+
+    test "renders removed and modified old text from hunks without full baseline lines" do
+      review = DiffReview.new("f.ex", "a\nold\nc\n", "a\nnew\nc\n")
+      lines = DiffReview.to_display_lines(review)
+
+      assert {"old", :removed, 0} in lines
+      assert {"new", :added, 0} in lines
+      refute Map.has_key?(Map.from_struct(review), :before_lines)
+    end
   end
 
-  # ── update_after/2 ──────────────────────────────────────────────────────────
-
-  describe "update_after/2" do
+  describe "update_after/3" do
     test "returns updated review with new after-content" do
       before = "line1\nline2\nline3"
       after_v1 = "line1\nmodified\nline3"
       review = DiffReview.new("test.ex", before, after_v1)
 
       after_v2 = "line1\nmodified\nline3\nnew_line"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
       assert updated.path == "test.ex"
-      assert updated.before_lines == String.split(before, "\n")
       assert updated.after_lines == String.split(after_v2, "\n")
     end
 
@@ -299,8 +351,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       after_v1 = "line1\nmodified\nline3"
       review = DiffReview.new("test.ex", before, after_v1)
 
-      # Revert to original
-      result = DiffReview.update_after(review, before)
+      result = update_after(review, before, before)
       assert result == nil
     end
 
@@ -310,17 +361,13 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.new("test.ex", before, after_v1)
       assert review != nil
 
-      # Accept the first hunk
       review = DiffReview.accept_current(review)
       assert DiffReview.resolution_at(review, 0) == :accepted
 
-      # Second edit: add a new line at the end (original hunk unchanged)
       after_v2 = "aaa\nBBB\nccc\n\n\nddd\neee\nfff\nnew_line"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
-      # The original hunk's resolution should be preserved
-      # (It's the same modification: bbb -> BBB at the same position)
       assert DiffReview.resolution_at(updated, 0) == :accepted
     end
 
@@ -334,7 +381,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert DiffReview.resolution_at(review, 0) == :accepted
 
       after_v2 = "inserted\naaa\nbbb\nccc\nddd\neee\nFFF\nggg"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
       assert DiffReview.resolution_at(updated, 0) == nil
@@ -353,7 +400,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert DiffReview.resolution_at(review, 1) == :rejected
 
       after_v2 = "a\nX\nb\nc\nd\nX\ne\nnew"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
       assert DiffReview.resolution_at(updated, 0) == :accepted
@@ -371,7 +418,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert DiffReview.resolution_at(review, 0) == :accepted
 
       after_v2 = "a\nX\nb\nc\nd\nX\ne"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
       assert DiffReview.resolution_at(updated, 0) == :accepted
@@ -388,7 +435,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert DiffReview.resolution_at(review, 0) == :accepted
 
       after_v2 = "a\nX\nb\nc\nd\nX\ne"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
       assert DiffReview.resolution_at(updated, 0) == nil
@@ -401,17 +448,13 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.new("test.ex", before, after_v1)
       assert review != nil
 
-      # Accept the hunk
       review = DiffReview.accept_current(review)
       assert DiffReview.resolution_at(review, 0) == :accepted
 
-      # Second edit: completely change the after-content so the hunk signature won't match.
-      # The baseline stays "aaa\nbbb\nccc" but the after changes to modify a different line.
       after_v2 = "aaa\nbbb\nYYY"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
-      # The hunk signature changed (different line changed), so resolution should be dropped
       assert DiffReview.resolution_at(updated, 0) == nil
     end
 
@@ -421,46 +464,58 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.new("test.ex", before, after_v1)
       assert review != nil
 
-      # Navigate to the last hunk
       review = DiffReview.next_hunk(review)
 
-      # Second edit removes one of the changes
       after_v2 = "aaa\nBBB\nccc\nddd\neee"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, before, after_v2)
 
       assert updated != nil
       assert updated.current_hunk_index <= Enum.count(updated.hunks) - 1
     end
 
-    test "cumulative diff shows all changes from baseline" do
-      # Simulate: original file, then two sequential edits
-      original = "line1\nline2\nline3\nline4\nline5"
+    test "repeated rejection follows the next unresolved hunk after reprojection" do
+      before = numbered_lines(15)
+      after_v1 = replace_lines(before, %{2 => "changed2", 8 => "changed8", 14 => "changed14"})
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert Enum.count(review.hunks) == 3
 
-      # First edit: modify line 2
+      after_first_reject =
+        review
+        |> DiffReview.reject_current()
+        |> reproject_rejection(before)
+
+      assert Enum.count(after_first_reject.hunks) == 2
+      assert current_added_lines(after_first_reject) == ["changed8"]
+
+      after_second_reject =
+        after_first_reject
+        |> DiffReview.reject_current()
+        |> reproject_rejection(before)
+
+      assert Enum.count(after_second_reject.hunks) == 1
+      assert current_added_lines(after_second_reject) == ["changed14"]
+    end
+
+    test "cumulative diff shows all changes from baseline" do
+      original = "line1\nline2\nline3\nline4\nline5"
       after_v1 = "line1\nmodified2\nline3\nline4\nline5"
       review = DiffReview.new("test.ex", original, after_v1)
       assert review != nil
 
-      # Second edit: also modify line 4
       after_v2 = "line1\nmodified2\nline3\nmodified4\nline5"
-      updated = DiffReview.update_after(review, after_v2)
+      updated = update_after(review, original, after_v2)
 
       assert updated != nil
-      # Should have hunks covering BOTH modifications (line 2 AND line 4)
       {added, removed} = DiffReview.summary(updated)
       assert added >= 2
       assert removed >= 2
     end
   end
 
-  # ── Helpers ─────────────────────────────────────────────────────────────────
-
-  # A review with exactly one hunk
   defp simple_review do
     DiffReview.new("test.ex", "line1\nline2\n", "line1\nchanged\n")
   end
 
-  # A review with multiple hunks (changes in different parts of the file)
   defp multi_hunk_review do
     before = """
     line1
@@ -489,5 +544,39 @@ defmodule MingaEditor.Agent.DiffReviewTest do
     """
 
     DiffReview.new("test.ex", before, after_)
+  end
+
+  defp from_contents(path, before, after_) do
+    DiffReview.from_hunks(path, after_, diff_hunks(before, after_))
+  end
+
+  defp update_after(review, before, after_) do
+    DiffReview.update_after(review, after_, diff_hunks(before, after_))
+  end
+
+  defp reproject_rejection(review, before) do
+    after_rejection = review |> DiffReview.materialized_lines() |> Enum.join("\n")
+    update_after(review, before, after_rejection)
+  end
+
+  defp numbered_lines(count) do
+    1..count
+    |> Enum.map_join("\n", fn line -> "line#{line}" end)
+  end
+
+  defp replace_lines(content, replacements) do
+    content
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {line, number} -> Map.get(replacements, number, line) end)
+  end
+
+  defp current_added_lines(review) do
+    hunk = DiffReview.current_hunk(review)
+    Enum.slice(review.after_lines, hunk.start_line, hunk.count)
+  end
+
+  defp diff_hunks(before, after_) do
+    Git.diff_lines(String.split(before, "\n"), String.split(after_, "\n"))
   end
 end

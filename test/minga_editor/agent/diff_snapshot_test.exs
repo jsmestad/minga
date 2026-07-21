@@ -14,11 +14,6 @@ defmodule MingaEditor.Agent.DiffSnapshotTest do
       assert DiffSnapshot.content(snap) == "hello\nworld"
     end
 
-    test "lines returns split lines for memory snapshot" do
-      snap = DiffSnapshot.from_content("a\nb\nc")
-      assert DiffSnapshot.lines(snap) == ["a", "b", "c"]
-    end
-
     test "cleanup is a no-op for memory snapshots" do
       snap = DiffSnapshot.from_content("hello")
       assert :ok = DiffSnapshot.cleanup(snap)
@@ -35,7 +30,6 @@ defmodule MingaEditor.Agent.DiffSnapshotTest do
       snap = {:file, path}
 
       assert DiffSnapshot.content(snap) == content
-      assert DiffSnapshot.lines(snap) == ["line1", "line2", "line3"]
 
       assert :ok = DiffSnapshot.cleanup(snap)
       refute File.exists?(path)
