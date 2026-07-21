@@ -3078,7 +3078,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W063/D20.3: Delete Popup.Rule compatibility facade
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D20.3 Popup.Rule compatibility facade deletion
 - **Planning profile:** `D20ThirdFacadePlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D20PopupRuleWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3103,5 +3103,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact rule-facade cut, canonical 13-field owner and API across traced producers and consumers, unchanged tests in the canonical namespace, both alias redirects, accurate notice, budgets, freshness, validation, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3112
 - **Implementation commit SHA:** `44a242715`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `7e2d1a724958963ad64474c5ba81f30306d1b498`.
+- **Merge evidence:** PR #3112 merged after CI run `29808395487` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
