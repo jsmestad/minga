@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Theme.AstroDark do
   @moduledoc """
   AstroDark theme, ported from AstroNvim's astrotheme (`astrodark` palette).
 
-  This theme exists primarily as a 1:1 visual reference so Minga's TUI surfaces can be compared directly against AstroNvim. The palette is split the same way astrotheme splits it: a brighter `ui` group drives chrome and diagnostics, and a slightly muted `syntax` group drives in-buffer tree-sitter captures. Chrome surfaces Minga defines but AstroNvim does not (agent panels, dashboards, pickers) derive from the semantic builder so they stay consistent with the upstream palette.
+  This theme exists primarily as a 1:1 visual reference so Minga's TUI surfaces can be compared directly against AstroNvim. The palette is split the same way astrotheme splits it: a brighter `ui` group drives chrome and diagnostics, and a slightly muted `syntax` group drives in-buffer tree-sitter captures. Chrome surfaces Minga defines but AstroNvim does not derive from the semantic builder so they stay consistent with the upstream palette.
 
   Source: https://github.com/AstroNvim/astrotheme/blob/main/lua/astrotheme/palettes/astrodark.lua
   """
@@ -34,12 +34,10 @@ defmodule MingaEditor.UI.Theme.AstroDark do
   @bg_tool 0x16181D
   @bg_statusline 0x111317
   @bg_float 0x14161B
-  @bg_prompt 0x21242A
   @bg_current_line 0x1E222A
   @bg_selection 0x26343F
   @bg_inactive 0x16181D
   @ui_highlight 0x23272F
-  @ui_text_match 0xE0E0EE
   @indent_guide 0x2D313A
   @indent_guide_active 0x494D56
 
@@ -94,7 +92,6 @@ defmodule MingaEditor.UI.Theme.AstroDark do
         indent_guide_active_fg: @indent_guide_active
       },
       popup: %{bg: @bg_float},
-      picker: %{bg: @bg_float, prompt_bg: @bg_prompt, match_fg: @ui_text_match},
       tab_bar: %{bg: @bg_statusline, inactive_bg: @bg_inactive},
       syntax: syntax_overrides(),
       icon: icon_overrides()

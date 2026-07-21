@@ -37,8 +37,6 @@ defmodule MingaEditor.UI.Theme.AstroDarkTest do
     assert theme.tree.bg == p.bg_tool
     assert theme.modeline.bar_bg == p.bg_statusline
     assert theme.popup.bg == p.bg_float
-    assert theme.picker.bg == p.bg_float
-    assert theme.picker.match_fg == 0xE0E0EE
     assert theme.editor.highlight_read_bg == 0x23272F
     assert theme.tab_bar.inactive_bg == 0x16181D
     assert theme.tab_bar.bg == p.bg_statusline

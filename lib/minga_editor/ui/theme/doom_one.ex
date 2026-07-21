@@ -95,26 +95,6 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         lsp_starting: @base5,
         lsp_error: @red
       },
-      picker: %MingaEditor.UI.Theme.Picker{
-        bg: 0x1E2127,
-        sel_bg: @dark_blue,
-        prompt_bg: 0x1E2127,
-        dim_fg: 0x5C6370,
-        text_fg: 0xABB2BF,
-        highlight_fg: 0xFFFFFF,
-        match_fg: 0xE5C07B,
-        border_fg: 0x61AFEF,
-        menu_bg: @bg,
-        menu_fg: 0xABB2BF,
-        menu_sel_bg: @dark_blue,
-        menu_sel_fg: 0xFFFFFF
-      },
-      minibuffer: %MingaEditor.UI.Theme.Minibuffer{
-        fg: @base8,
-        bg: 0x000000,
-        warning_fg: 0xFFCC00,
-        dim_fg: @base6
-      },
       search: %MingaEditor.UI.Theme.Search{
         highlight_fg: 0x000000,
         highlight_bg: @yellow,

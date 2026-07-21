@@ -91,14 +91,12 @@ defmodule Minga.ThemeTest do
       assert Keyword.get(Theme.style_for_capture(theme, "variable"), :fg) == 0xDCAEEA
     end
 
-    test "doom one follows upstream popup, picker, tree, and git colors" do
+    test "doom one follows upstream popup, tree, and git colors" do
       theme = Theme.get!(:doom_one)
 
       assert theme.popup.bg == 0x21242B
       assert theme.popup.sel_bg == 0x2257A0
       assert theme.popup.sel_fg == 0xDFDFDF
-      assert theme.picker.sel_bg == theme.popup.sel_bg
-      assert theme.picker.menu_sel_bg == theme.popup.sel_bg
       assert theme.git.modified_fg == 0xDA8548
       assert theme.tree.git_modified_fg == 0xA9A1E1
       assert theme.tree.dir_fg == theme.editor.fg
@@ -160,18 +158,6 @@ defmodule Minga.ThemeTest do
           assert is_integer(fg)
           assert is_integer(bg)
         end
-
-        # Picker colors
-        assert is_integer(theme.picker.bg)
-        assert is_integer(theme.picker.sel_bg)
-        assert is_integer(theme.picker.text_fg)
-        assert is_integer(theme.picker.match_fg)
-
-        # Minibuffer colors
-        assert is_integer(theme.minibuffer.fg)
-        assert is_integer(theme.minibuffer.bg)
-        assert is_integer(theme.minibuffer.warning_fg)
-        assert is_integer(theme.minibuffer.dim_fg)
 
         # Search colors
         assert is_integer(theme.search.highlight_fg)
@@ -273,8 +259,6 @@ defmodule Minga.ThemeTest do
         assert %Theme.Editor{} = theme.editor
         assert %Theme.Gutter{} = theme.gutter
         assert %Theme.Modeline{} = theme.modeline
-        assert %Theme.Picker{} = theme.picker
-        assert %Theme.Minibuffer{} = theme.minibuffer
         assert %Theme.Search{} = theme.search
         assert %Theme.Popup{} = theme.popup
         assert %Theme.Tree{} = theme.tree
@@ -381,8 +365,6 @@ defmodule Minga.ThemeTest do
         gutter: Theme.get!(:doom_one).gutter,
         git: Theme.get!(:doom_one).git,
         modeline: Theme.get!(:doom_one).modeline,
-        picker: Theme.get!(:doom_one).picker,
-        minibuffer: Theme.get!(:doom_one).minibuffer,
         search: Theme.get!(:doom_one).search,
         popup: Theme.get!(:doom_one).popup,
         tree: Theme.get!(:doom_one).tree,

@@ -434,6 +434,8 @@ Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Popup.Registry` has
 
 Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Popup.Rule` has been removed. Use `Minga.Popup.Rule.new/2`, `%Minga.Popup.Rule{}`, or `Minga.Config.popup/2` for normal declarations. Popup rule data and behavior are unchanged.
 
+Compatibility note: concrete theme override sections `:picker` and `:minibuffer` have been removed. They were accepted by the theme parser but did not affect runtime rendering; configure picker and minibuffer chrome through `:popup` colors instead.
+
 ---
 
 ## Runtime grammar loading for extensions
