@@ -2957,7 +2957,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W059: Delete D15 BottomPanel local tab and dismissal model
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W059/D15
 - **Planning profile:** `D15BottomPanelPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D15BottomPanelWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2981,5 +2981,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact four-field Messages-only owner cut, preserved transition and dispatch behavior, retained wire compatibility, complete focused and broad validation, truthful budgets, owner-rule compliance, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3104
 - **Implementation commit SHA:** `76d4f5e74`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `ebe37f97a95c46ae8c2d80a41a7d2b58b2df084a`.
+- **Merge evidence:** PR #3104 merged after CI run `29799802142` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
