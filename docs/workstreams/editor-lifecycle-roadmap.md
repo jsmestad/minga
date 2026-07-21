@@ -3255,7 +3255,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** No replan trigger, extension caller, protocol/frontend dependency, replacement API need, compatibility shim need, custom binding regression, or leader/which-key ownership change was found.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or cuts. They confirmed the exact nine-command and ten-binding cut, the single direct `zA` all-toggle path, canonical session ownership, retained custom override/leader and `]c`/`[c` behavior, cheapest-layer registry/keymap tests, truthful budgets, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact one-command clean cutover, command/keymap and session transition ownership, complete stale trace deletion without aliases, truthful validation and budgets, freshness, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3122
+- **Implementation commit SHA:** `37e40fcd3`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
