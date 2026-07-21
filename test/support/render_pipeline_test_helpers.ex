@@ -28,7 +28,6 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Input
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.UI.Theme
 
@@ -83,7 +82,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
           next_id: win_id + 1
         }
       },
-      interaction: Interaction.new(focus_stack: Input.default_stack()),
+      interaction: Interaction.new(),
       shell_runtime: Runtime.new(shell_entry, %ShellState{}),
       appearance: Appearance.select_theme(%Appearance{}, Theme.get!(:doom_one))
     }

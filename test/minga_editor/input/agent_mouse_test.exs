@@ -60,7 +60,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
           next_id: win_id + 1
         }
       },
-      interaction: %MingaEditor.State.Interaction{focus_stack: []},
+      interaction: %MingaEditor.State.Interaction{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

@@ -1,11 +1,10 @@
 defmodule MingaEditor.Input.Scoped do
   @moduledoc """
-  Scope-aware input handler that replaces per-view focus stack entries.
+  Scope-aware input handler for the active surface handler list.
 
-  Sits in the focus stack between modal overlays (picker, completion, conflict
-  prompt) and the vim mode FSM fallback. Resolves keys through the active
-  keymap scope, handling scope-specific bindings, prefix sequences, and
-  sub-state dispatch (search input, mention completion).
+  Runs after modal overlay handlers and before the mode FSM fallback. Resolves
+  keys through the active keymap scope, handling scope-specific bindings,
+  prefix sequences, and sub-state dispatch (search input, mention completion).
 
   For the `:editor` scope, keys pass through to the mode FSM unless the agent
   side panel is visible, in which case panel-specific handling applies.
@@ -131,9 +130,8 @@ defmodule MingaEditor.Input.Scoped do
   defp dispatch_agent_key_inner(state, cp, mods) do
     panel = state.workspace.agent_ui.panel
 
-    # Sub-state handlers (search, mention, approval, diff review) are now
-    # separate Input.Handler modules in the surface handler list. They run
-    # before Scoped in the focus stack walk. See Input.surface_handlers/0.
+    # Sub-state handlers (search, mention, approval, diff review) are separate
+    # Input.Handler modules in the surface handler list. They run before Scoped.
 
     # CUA mode: resolve all keys through the :cua trie. No vim modes.
     if cua_active?(state) do

@@ -51,7 +51,7 @@ The converged `MingaEditor.State` has 16 top-level values. This is the full ledg
 | `render` | `MingaEditor.State.Render` | Renderer connection, render correlation, semantic message store, committed layout and focus observations, and cursor-line observation describe one Editor render revision. |
 | `parser` | `MingaEditor.State.Parser` | Parser manager, availability, highlighting, injection ranges, and face-override registries share parser lifecycle and presentation identity. |
 | `agent_connection` | `MingaEditor.State.AgentConnection` | Provider configuration and the supervised ingest connection describe the Editor's live agent integration. |
-| `interaction` | `MingaEditor.State.Interaction` | Editing model, keymap and option servers, focus stack, and keystroke history define input dispatch context. |
+| `interaction` | `MingaEditor.State.Interaction` | Editing model, keymap and option servers, and keystroke history define input dispatch context. |
 | `extension_surfaces` | `MingaEditor.State.ExtensionSurfaces` | Event, sidebar, and semantic-agent registries define the extension surfaces visible to this Editor. |
 | `buffer_lifecycle` | `MingaEditor.State.BufferLifecycle` | Buffer monitor references and add context remain aligned with Editor-owned buffer lifecycle decisions. |
 | `git` | `MingaEditor.State.Git` | Remote operation correlation, commit-generation correlation, and generated diff views represent in-flight Git presentation work. |

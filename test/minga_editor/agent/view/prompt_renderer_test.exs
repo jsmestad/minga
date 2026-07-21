@@ -13,7 +13,6 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
   alias MingaEditor.State.Highlighting
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Input
   alias MingaEditor.UI.Theme
 
   defp base_state(opts \\ []) do
@@ -56,7 +55,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         agent_ui: agentic
       },
-      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()},
+      interaction: %MingaEditor.State.Interaction{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

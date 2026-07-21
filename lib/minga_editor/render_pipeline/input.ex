@@ -3,7 +3,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   Narrow rendering contract between the Editor GenServer and the render pipeline.
 
   Bundles exactly the fields that the pipeline stages read from EditorState,
-  excluding Editor-owned process and correlation fields the pipeline never touches (`render_correlation`, buffer monitors, focus stack, session lifecycle, and similar state).
+  excluding Editor-owned process and correlation fields the pipeline never touches (`render_correlation`, buffer monitors, session lifecycle, and similar state).
 
   The Editor builds this before calling `RenderPipeline.run/1`. Pipeline stages
   read from Input and never reach back into EditorState. `Renderer.Server` returns a focused receipt that the Editor integrates atomically.

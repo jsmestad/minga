@@ -1,6 +1,6 @@
 # Keymap Scopes
 
-Keymap scopes determine which keybindings are active based on the type of view you're in. They replace the old approach of having per-view handlers in the focus stack, giving you a single, uniform system for all keybindings.
+Keymap scopes determine which trie bindings are active based on the type of view you're in. They work inside the shell's ordered input-handler chain, alongside dedicated handlers for overlays, sub-states, navigation, mouse input, and editing-model fallback.
 
 If you're coming from **Emacs**, keymap scopes are Minga's equivalent of major modes. A keymap scope is set per-view and determines which keys do what, just like `python-mode` or `magit-status-mode` provide buffer-type-specific keymaps. If you're coming from **Vim**, think buffer-local keymaps. If you're from **VS Code**, think keybinding contexts (the `when` clauses in `keybindings.json`).
 
@@ -16,25 +16,22 @@ Minga ships three scopes:
 
 ## How resolution works
 
-When you press a key, Minga resolves it through layers in priority order:
+When you press a key, the active shell runs an ordered handler chain. Modal overlays run first. Dedicated surface and sub-state handlers can then consume input before `Input.Scoped`. If the key reaches `Input.Scoped`, scope bindings resolve in this order:
 
-1. **Modal overlays** (picker, completion, conflict prompt) intercept all keys when active. These are truly modal and sit above the scope system.
-2. **User scope overrides** for the active scope and vim state. These are bindings you define in `config.exs` targeting a specific scope.
-3. **Scope-specific bindings** from the scope module for the active vim state.
-4. **Shared scope bindings** that apply regardless of vim state within the scope (e.g., a key that works the same in both normal and insert mode).
-5. **Global bindings** (leader sequences via SPC, Ctrl+S, Ctrl+Q). These work in every scope.
-6. **Mode FSM fallback** for the `:editor` scope. The existing vim mode system (motions, operators, text objects) handles everything the scope doesn't claim.
+1. **User scope overrides** for the active scope and vim state. These are bindings you define in `config.exs` targeting a specific scope.
+2. **Scope-specific bindings** from the scope module for the active vim state.
+3. **Shared scope bindings** that apply regardless of vim state within the scope.
 
-For the `:file_tree` scope, keys that don't match any scope binding also fall through to the mode FSM with the tree buffer swapped in as the active buffer. This gives you full vim navigation (j/k, gg/G, Ctrl-d/u, etc.) in the file tree for free.
+If no scope binding matches, later surface handlers run. These include agent navigation, global bindings, bottom-panel input, and agent mouse handling. The editing-model fallback runs last. For the `:editor` scope, that fallback is the Vim or CUA mode system. For `:file_tree`, unmatched keys reach the mode fallback with the tree buffer active, which provides Vim navigation such as j/k, gg/G, and Ctrl-d/u.
 
 ### Agent side panel
 
-The agent side panel (`SPC a a`) lives in the `:editor` scope. When visible, the `Input.Scoped` handler intercepts keys for the panel:
+The agent side panel (`SPC a a`) lives in the `:editor` scope. `MingaEditor.Input.AgentPanel` runs before `Input.Scoped` and owns focused prompt input plus panel navigation:
 
-- **Input focused**: all keys go to the chat input field, using the same bindings as the agentic view's insert mode.
-- **Navigation mode**: panel-specific keys (q to close, i to focus input, ESC to close) are handled directly. Everything else delegates to the mode FSM with the agent buffer, giving you full vim navigation of chat content.
+- **Input focused**: the panel handler resolves the agent prompt bindings and applies text input.
+- **Navigation mode**: the panel handler consumes panel actions such as closing or focusing the prompt, and delegates or passes through other keys to the remaining handler chain.
 
-This means leader sequences (`SPC f f`, `SPC b b`, etc.) work from inside the side panel just like anywhere else.
+Leader sequences such as `SPC f f` and `SPC b b` continue through the normal chain when the panel does not consume them.
 
 ## Leader sequences (SPC) always work
 
@@ -146,13 +143,13 @@ Each scope is a module implementing the `Minga.Keymap.Scope` behaviour:
 
 Bindings are declared as trie data (using `Minga.Keymap.Bindings`) and resolved through `Minga.Keymap.Scope.resolve_key/4`. The `context` parameter in `keymap/2` is reserved for future filetype parameterization of scope bindings.
 
-The `Input.Scoped` handler sits in the focus stack and routes keys through the appropriate scope based on `state.keymap_scope`. It also handles sub-states within a scope (search input, mention completion, tool approval, diff review) before trie lookup. The focus stack is:
+The `Input.Scoped` handler sits in the shell's surface handler list and routes remaining scope-owned keys through the appropriate scope based on `state.keymap_scope`. The full shell handler order is broader than the scope system: overlay handlers run first, dedicated surface and sub-state handlers such as mention completion, tool approval, diff review, agent panel, sidebar, popup, and CUA space-leader may consume input before `Input.Scoped`, then later surface handlers such as agent navigation, global bindings, bottom panel, agent mouse, and the editing-model fallback run after it.
 
 ```
-ConflictPrompt → Scoped → Picker → Completion → GlobalBindings → ModeFSM
+Overlay handlers → earlier surface/sub-state handlers → Input.Scoped → later surface handlers → editing-model fallback
 ```
 
-Only truly modal overlays remain as separate handlers. All view-type-specific keybindings are unified under the scope system.
+Scope trie bindings are unified under the scope system. Dedicated modal, sub-state, navigation, mouse, and fallback handlers remain separate shell-provided handlers.
 
 ## Relationship to future work
 
@@ -166,5 +163,5 @@ Only truly modal overlays remain as separate handlers. All view-type-specific ke
 | `lib/minga/keymap/scope/editor.ex` | Editor scope (pass-through to mode system) |
 | `lib/minga/keymap/scope/agent.ex` | Agent scope (trie-based bindings) |
 | `lib/minga/keymap/scope/file_tree.ex` | File tree scope (trie-based bindings) |
-| `lib/minga/input/scoped.ex` | Focus stack handler that routes through scopes |
+| `lib/minga_editor/input/scoped.ex` | Surface handler that routes through scopes |
 | `lib/minga/keymap/active.ex` | Runtime keymap store (overrides, filetype, scope) |

@@ -2,10 +2,9 @@ defmodule MingaEditor.Input.ModeFSM do
   @moduledoc """
   Input handler for the vim mode finite state machine.
 
-  This is the fallback handler at the bottom of the focus stack. It
+  This is the fallback handler at the bottom of the surface handler list. It
   processes keys through the mode system (normal, insert, visual,
-  operator-pending, command, search, etc.) and dispatches resulting
-  commands.
+  operator-pending, command, search, etc.) and dispatches resulting commands.
 
   Also serves as the fallback mouse handler, delegating to
   `MingaEditor.Mouse.handle/7` for editor-level mouse interactions.

@@ -71,7 +71,6 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       excluded = [
         :render_correlation,
         :buffer_monitors,
-        :focus_stack,
         :pending_quit,
         :last_test_command,
         :session,

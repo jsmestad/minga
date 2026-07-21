@@ -44,9 +44,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       workspace:
         %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
         |> SessionState.set_file_tree(%FileTreeState{} |> FileTreeState.open(tree, buf)),
-      interaction: %MingaEditor.State.Interaction{
-        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
-      }
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 

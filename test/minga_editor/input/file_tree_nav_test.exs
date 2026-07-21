@@ -38,9 +38,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       extension_surfaces: %MingaEditor.State.ExtensionSurfaces{sidebar_registry: sidebar_registry},
       workspace: workspace,
-      interaction: %MingaEditor.State.Interaction{
-        focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
-      }
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 

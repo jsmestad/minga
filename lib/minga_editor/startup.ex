@@ -206,8 +206,7 @@ defmodule MingaEditor.Startup do
         Interaction.new(
           editing_model: editing_model,
           keymap_server: keymap_server,
-          options_server: options_server,
-          focus_stack: MingaEditor.Input.default_stack()
+          options_server: options_server
         ),
       extension_surfaces:
         ExtensionSurfaces.new(

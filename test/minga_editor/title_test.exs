@@ -52,9 +52,7 @@ defmodule MingaEditor.TitleTest do
           next_id: 2
         }
       },
-      interaction: %MingaEditor.State.Interaction{
-        focus_stack: MingaEditor.Input.default_stack()
-      }
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 
@@ -170,9 +168,7 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: MingaEditor.Input.default_stack()
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       result = Title.format(state, "{filename} ({directory}) - Minga")
@@ -202,9 +198,7 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: MingaEditor.Input.default_stack()
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       result = Title.format(state, "{filename} ({directory}) - Minga")
@@ -252,9 +246,7 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: MingaEditor.Input.default_stack()
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       result = Title.format_gui(state)
@@ -284,9 +276,7 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: MingaEditor.Input.default_stack()
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       result = Title.format_gui(state)
@@ -315,9 +305,7 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: MingaEditor.Input.default_stack()
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       result = Title.format_gui(state)
@@ -341,9 +329,7 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: MingaEditor.Input.default_stack()
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       result = Title.format_gui(state)

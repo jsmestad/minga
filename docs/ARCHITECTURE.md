@@ -138,7 +138,7 @@ The root `MingaEditor.State` contains 16 cohesive values:
 | `render` | `MingaEditor.State.Render` | Renderer connection, render correlation, messages, layout, focus, and cursor observations. |
 | `parser` | `MingaEditor.State.Parser` | Parser manager and status, highlighting, injections, and face registries. |
 | `agent_connection` | `MingaEditor.State.AgentConnection` | Agent provider configuration and ingest connection. |
-| `interaction` | `MingaEditor.State.Interaction` | Editing model, keymap and option servers, focus stack, and keystroke history. |
+| `interaction` | `MingaEditor.State.Interaction` | Editing model, keymap and option servers, and keystroke history. |
 | `extension_surfaces` | `MingaEditor.State.ExtensionSurfaces` | Event, sidebar, and semantic-agent registries. |
 | `buffer_lifecycle` | `MingaEditor.State.BufferLifecycle` | Buffer monitors and add context. |
 | `git` | `MingaEditor.State.Git` | Remote and commit-generation correlation plus diff views. |
@@ -540,7 +540,7 @@ sequenceDiagram
 
 ### Keymap Scopes
 
-Different views need different keybindings. The agentic chat view repurposes `j`/`k` for scrolling, the file tree uses `h`/`l` for collapse/expand, and the normal editor uses the full vim mode FSM. Rather than maintaining parallel focus stack handlers that manually pass keys through to the mode system, Minga uses **keymap scopes** to declare view-specific bindings as trie data.
+Different views need different keybindings. The agentic chat view repurposes `j`/`k` for scrolling, the file tree uses `h`/`l` for collapse/expand, and the normal editor uses the full vim mode FSM. Rather than maintaining parallel per-view handlers that manually pass keys through to the mode system, Minga uses **keymap scopes** to declare view-specific bindings as trie data.
 
 ```
 Keystroke arrives
@@ -558,7 +558,7 @@ Input.Scoped checks keymap_scope on EditorState
           └─ Not found → passthrough (vim mode FSM via buffer swap)
 ```
 
-Each scope module implements the `Minga.Keymap.Scope` behaviour, declaring its keybindings as trie nodes per vim state (normal, insert). The `Input.Scoped` handler sits in the focus stack above the mode FSM and routes keys through the active scope before falling through to vim navigation.
+Each scope module implements the `Minga.Keymap.Scope` behaviour, declaring its keybindings as trie nodes per vim state (normal, insert). The `Input.Scoped` handler sits in the shell's surface handler list above the mode FSM and routes keys through the active scope before falling through to vim navigation.
 
 Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines which keys are active, the same way `python-mode` or `magit-status-mode` provide buffer-type-specific keymaps in Emacs.
 
@@ -566,9 +566,9 @@ Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines 
 
 ### Mouse Event Routing
 
-Mouse events flow through the same focus stack as keyboard input, but with a key difference: **mouse routing is position-based, not scope-based.** Keyboard input routes through `keymap_scope` (which pane has focus). Mouse input routes by hit-testing the cursor position against `Layout.get(state)` rects (where on screen did the event happen). This means scrolling over the agent chat scrolls the chat regardless of which pane has keyboard focus.
+Mouse routing is position-based, not scope-based. Keyboard input routes through the active shell's overlay and surface handler lists, where scoped handlers read `keymap_scope` for keyboard focus. Initial clicks, wheels, and ordinary routed mouse events use the `FocusTree` built from layout rects; active editor drag/release and resize drag/release keep their direct `MingaEditor.Mouse.handle/7` ownership so an in-progress drag is not retargeted. This means scrolling over the agent chat scrolls the chat regardless of which pane has keyboard focus.
 
-Both the Go TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/7`, which walks the focus stack calling `handle_mouse/7` on each handler that implements it.
+Both the Go TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/7`, which either preserves the active drag/resize direct route or resolves a `FocusTree` hit or scroll path and bubbles through node handlers.
 
 ```
 Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + click_count)
@@ -577,21 +577,14 @@ Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + 
 Editor.handle_info decodes via Port.Protocol
     │
     ▼
-Input.Router.dispatch_mouse walks overlay handlers, then surface handlers
+Input.Router.dispatch_mouse preserves active drag/resize direct routes or resolves a FocusTree path
     │
-    ├─ Overlays (Picker, Completion) - intercept when their UI is visible
+    ├─ Overlay or surface node under the cursor
+    │     ├─ Handler implements handle_mouse_at_node/8 → called with node context
+    │     ├─ Handler implements handle_mouse/7 → called as legacy fallback
+    │     └─ Passthrough → bubble to the parent node
     │
-    ├─ Input.FileTreeHandler - hit-tests against Layout.file_tree rect
-    │     ├─ Inside file tree → handle tree click/scroll
-    │     └─ Outside → :passthrough
-    │
-    ├─ Input.AgentMouse - hit-tests against agent regions (position-based)
-    │     ├─ Agent chat window (WindowTree + Content.agent_chat?) → scroll chat, click-to-focus
-    │     ├─ Agent side panel (Layout.agent_panel rect) → scroll chat, click-to-focus
-    │     ├─ File viewer sidebar (right of chat_width_pct) → scroll preview
-    │     └─ Outside agent regions → :passthrough
-    │
-    └─ Input.ModeFSM (fallback) - buffer-content mouse handling
+    └─ Buffer-content fallback
           └─ Editor.Mouse.handle/7
                 ├─ click_count=1 → position cursor, start drag
                 ├─ click_count=2 → select word (visual char), word-snapped drag
@@ -606,7 +599,7 @@ Each content-type handler is responsible for its own region. `Editor.Mouse` hand
 
 Multi-click detection works differently per frontend. The GUI sends `NSEvent.clickCount` directly in the protocol, so the BEAM trusts the native OS timing. The TUI sends `click_count=1` and the BEAM's `State.Mouse.record_press/4` detects multi-clicks using a timing window and position threshold, cycling 1 → 2 → 3 → 1.
 
-The `handle_mouse/7` callback is optional on `Input.Handler`. Handlers that don't implement it are skipped during the focus stack walk. This keeps keyboard-only handlers (like `Completion` or `Picker`) simple until they need mouse support.
+The `handle_mouse_at_node/8` and legacy `handle_mouse/7` callbacks are optional on `Input.Handler`. Nodes without a mouse-capable handler pass through during FocusTree bubbling. This keeps keyboard-only handlers simple until they need mouse support.
 
 ---
 

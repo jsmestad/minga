@@ -4,15 +4,15 @@ The agentic view (`SPC a t`) is a full-screen OpenCode-style interface for inter
 
 ## Architecture
 
-All agentic view keybindings are declared as trie data in `Minga.Keymap.Scope.Agent` and resolved through the [keymap scope system](KEYMAP-SCOPES.md). The scope module defines separate tries for normal mode (navigation) and insert mode (input focused), plus shared bindings that apply in both.
+Agent scope keybindings are declared as trie data in `Minga.Keymap.Scope.Agent` and resolved through the [keymap scope system](KEYMAP-SCOPES.md). The scope module defines separate tries for normal mode (navigation) and insert mode (input focused), plus shared bindings that apply in both.
 
-When the agentic view is active, the `Input.Scoped` handler routes keys through the agent scope. Sub-states (search input, tool approval, diff review, @-mentions) are handled before trie lookup. The `?` help overlay content comes from `Scope.Agent.help_groups/1`.
+When the agentic view is active, shell overlay handlers run first, then dedicated surface and sub-state handlers can consume input before `MingaEditor.Input.Scoped` resolves remaining agent scope bindings. Tool approval, diff review, and @-mention completion are separate handlers before trie lookup. The `?` help overlay content comes from `Scope.Agent.help_groups/1`.
 
 The agent side panel (`SPC a a`) uses the same input handling for its chat input field, but navigation mode delegates to the vim mode FSM with the agent buffer for full vim navigation of chat content.
 
-There are no per-view focus stack handlers for the agent. All agent keybindings flow through `Input.Scoped` and `Keymap.Scope.Agent`. Users will be able to customize these bindings via the config system in phase 2 ([#215](https://github.com/jsmestad/minga/issues/215)).
+The agent does not own an interaction-level handler stack. Agent scope bindings live in `Minga.Keymap.Scope.Agent` and are resolved by `MingaEditor.Input.Scoped`; dedicated agent sub-state, navigation, panel, and mouse handlers remain separate entries in the shell's surface handler list. Users will be able to customize these bindings via the config system in phase 2 ([#215](https://github.com/jsmestad/minga/issues/215)).
 
-See `Minga.Keymap.Scope` for the behaviour contract, `Minga.Input.Scoped` for the dispatch logic, and [Keymap Scopes](KEYMAP-SCOPES.md) for the full architecture.
+See `Minga.Keymap.Scope` for the behaviour contract, `MingaEditor.Input.Scoped` for the dispatch logic, and [Keymap Scopes](KEYMAP-SCOPES.md) for the full architecture.
 
 ## Design Principles
 

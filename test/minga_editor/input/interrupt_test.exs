@@ -46,7 +46,7 @@ defmodule MingaEditor.Input.InterruptTest do
           active_index: 0
         }
       },
-      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()}
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 
@@ -351,11 +351,6 @@ defmodule MingaEditor.Input.InterruptTest do
   describe "handler ordering" do
     test "Interrupt is first in overlay_handlers" do
       [first | _] = Input.overlay_handlers()
-      assert first == Interrupt
-    end
-
-    test "Interrupt is first in default_stack" do
-      [first | _] = Input.default_stack()
       assert first == Interrupt
     end
   end

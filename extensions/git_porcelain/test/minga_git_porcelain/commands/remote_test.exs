@@ -411,9 +411,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       | workspace:
           state.workspace
           |> MingaEditor.Session.State.set_keymap_scope(:git_status),
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
-        }
+        interaction: %MingaEditor.State.Interaction{}
     }
 
     state
