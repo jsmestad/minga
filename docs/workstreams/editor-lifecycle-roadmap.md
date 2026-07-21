@@ -2987,7 +2987,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W060: Delete D18 per-window modeline layout state
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W060/D18
 - **Planning profile:** `D18ModelinePlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D18ModelineWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -3010,5 +3010,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact per-window modeline deletion, preserved geometry, separators, row-fit ownership, global status-bar/modeline encoding, hit-kind numbering, remaining surface IDs, truthful budgets and evidence, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3106
 - **Implementation commit SHA:** `5b1d7a33b`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `b344206f53f886266b0c6bc4a3f77a96bd6da316`.
+- **Merge evidence:** PR #3106 merged after CI run `29802442167` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
