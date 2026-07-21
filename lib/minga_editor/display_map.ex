@@ -49,13 +49,11 @@ defmodule MingaEditor.DisplayMap do
 
   @typedoc "The computed display map for a viewport."
   @type t :: %__MODULE__{
-          entries: [entry()],
-          total_display_lines: non_neg_integer()
+          entries: [entry()]
         }
 
   @enforce_keys [:entries]
-  defstruct entries: [],
-            total_display_lines: 0
+  defstruct entries: []
 
   # Frame-level constants bundled to avoid threading 5+ args through every
   # recursive call. Only `buf_line`, `remaining`, and `acc` change per step.
@@ -111,10 +109,7 @@ defmodule MingaEditor.DisplayMap do
 
       entries = build_entries(ctx, first_buf_line, visible_rows, [])
 
-      %__MODULE__{
-        entries: entries,
-        total_display_lines: Enum.count(entries)
-      }
+      %__MODULE__{entries: entries}
     else
       nil
     end

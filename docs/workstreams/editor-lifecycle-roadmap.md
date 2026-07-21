@@ -2894,3 +2894,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `79956797cafe66e146019c04b02930cd3eab1003`.
 - **Merge evidence:** PR #3098 merged after CI run `29788478208` passed Elixir on the failed-job rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir attempt failed in unrelated `DirtyFlagPropertyTest`; its exact location passed locally with CI seed `530854` before the full failed-job rerun passed.
 - **Completion date:** 2026-07-21.
+
+### W057: Delete D40 DisplayMap total_display_lines field
+
+- **Status:** ACTIVE
+- **Audit ID:** W057/D40
+- **Planning profile:** `D40DisplayFieldPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
+- **Implementation profile:** `D40DisplayFieldWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
+- **Freshness commit SHA:** `e5bc6bc51b1fa5a91018da7209d5204f288a6d9a`.
+- **Observable result:** `MingaEditor.DisplayMap` no longer stores the residual `total_display_lines` struct field. The live DisplayMap data shape is `%DisplayMap{entries: entries}` and all entry-list contracts remain unchanged through `compute/5,6`, `required?/2`, `to_visible_line_map/1`, `display_row_for_buf_line/2`, and `entry/0`.
+- **Failure reproduction / source trace:** Before deletion, focused trace found `total_display_lines` only in `lib/minga_editor/display_map.ex` at the type field, defstruct default, and `Enum.count(entries)` constructor assignment, plus W056 roadmap history. No field reader, external struct pattern, frontend serialization, extension path, mouse path, render path, movement path, or test assertion consumed the stored count.
+- **Implementation result:** Deleted exactly the three locked production sites in `lib/minga_editor/display_map.ex`: the `@type t` field, the `defstruct` default, and the `compute/6` `Enum.count(entries)` assignment. Kept `@enforce_keys [:entries]`, the `entries` field, `compute/5,6`, `required?/2`, `to_visible_line_map/1`, `display_row_for_buf_line/2`, and all entry-building behavior.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/display_map.ex`.
+- **Focused validation:** `mix test.debug test/minga_editor/display_map_test.exs test/minga/buffer/block_decoration_test.exs` passed 43 tests. `mix test.debug test/minga_editor/mouse/hit_test_test.exs test/minga_editor/mouse_test.exs` passed 51 tests. `mix test.debug test/minga_editor/render_pipeline/content_test.exs test/minga_editor/render_pipeline/scroll_test.exs test/minga_editor/render_model/window/builder_test.exs` passed 53 tests.
+- **Formatting, reference, and diff validation:** `mix format lib/minga_editor/display_map.ex` ran. `mix format --check-formatted lib/minga_editor/display_map.ex` passed. `git diff --check` passed. Post-delete source/test/frontend/extension/bench trace for `total_display_lines|totalDisplayLines|total-display-lines|total display lines` found matches only in roadmap history. Retained contract trace confirmed live `DisplayMap.compute`, `required?`, `to_visible_line_map`, `display_row_for_buf_line`, and `%DisplayMap{entries: ...}` consumers remain.
+- **Numstat before roadmap evidence:** `lib/minga_editor/display_map.ex 3 8`.
+- **Production lines added/removed:** `3 added / 8 removed` (net `-5`, within production net `< 0`).
+- **Test lines added/removed:** `0 added / 0 removed` (net `0`, within test budget `0`).
+- **Concepts removed:** Removed the obsolete stored DisplayMap total-count field and its avoidable per-frame `Enum.count(entries)` traversal.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, helper, telemetry path, frontend path, mouse path, render path, movement path, or test contract was added.
+- **Retained contracts:** `DisplayMap.compute/5,6`, `required?/2`, `to_visible_line_map/1`, `display_row_for_buf_line/2`, `entry/0`, `%DisplayMap{entries: ...}`, buffer prefetch cursor visibility, render content visible-line-map handoff, mouse hit testing, fold-target hit testing, movement wrap gating, block decoration ordering, virtual-line ordering, and fold row construction remain unchanged.
+- **Findings resolved:** W057 implements only the residual D40 DisplayMap struct-field deletion slice while preserving live DisplayMap producers and consumers.
+- **Discoveries affecting later work:** No replan trigger, production caller, test caller, extension caller, frontend caller, telemetry dependency, replacement API need, or D40 completed-surface dependency was found. Remaining field spellings are historical roadmap evidence only.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,744 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact three-site owner-shape deletion, sole constructor, zero semantic readers or traces, retained entry-list consumers, removed per-frame traversal, truthful budgets, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact entries-only owner cut, intact live producers and consumers, zero remaining field readers or non-roadmap traces, truthful budgets, complete validation evidence, freshness, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
