@@ -3140,7 +3140,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W065/D21: Remove dead picker and minibuffer theme sections
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D21
 - **Planning profile:** `D21ThemePlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D21ThemeWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3165,5 +3165,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact dead-section deletion, fail-fast obsolete-key path, retained popup/accent runtime ownership, truthful focused and broad evidence, budgets, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3116
 - **Implementation commit SHA:** `a684a0dd3`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `9a4fca156ac326b3223995ceda3a0dafc69d8e4e`.
+- **Merge evidence:** PR #3116 merged after CI run `29815457660` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
