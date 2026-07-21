@@ -3416,7 +3416,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W074/D36: Align Tool Manager footer placement documentation with current main
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** D36
 - **Planning profile:** `D36PlacementPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D36PlacementWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3441,5 +3441,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked D36 scope, accurate seven-producer and protocol-retirement documentation, preserved historical evidence, exact budgets, corroborated validation, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3134
 - **Implementation commit SHA:** `f8ed217b7`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `ced977864aef34c06db962ed66db2b8aec236a99`.
+- **Merge evidence:** PR #3134 merged after CI run `29851991470` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
