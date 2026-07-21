@@ -3316,7 +3316,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** Direct Git Porcelain focused tests still need an environment where the pinned `exqlite` NIF loads; this matches the earlier D30 residual and is not introduced by D31. The review-fix cleanup also found that `mix deps.get` in the extension creates an untracked `extensions/git_porcelain/mix.lock`, so later extension validation should remove it with the generated `deps/` and `_build/` artifacts before handoff.
 - **Pre-acceptance reviews:** Elixir craftsmanship and Ponytail returned `PASS/Lean`. Correctness initially blocked on one generated extension lockfile, overbroad callback documentation, and four tautological AgentMouse assertions. The generated artifacts were removed, the docs were narrowed to the real node-aware/legacy split, and each retained test now proves an observable scroll or focus transition. Targeted rechecks confirmed the behavior, accounting, and final artifact state.
 - **Final reviewer verdict:** The broad reviewer initially returned `BLOCKED` only because the final cache-state evidence was stale after cleanup. The sentence was corrected; the targeted recheck returned `RESOLVED/PASS` with 1.0 confidence and confirmed all five named artifact paths were absent.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3126
+- **Implementation commit SHA:** `05be7e05f`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
