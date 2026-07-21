@@ -1260,6 +1260,7 @@ Remove the unreachable Diagnostics-owned `:lsp_info` branch and its unused alias
 - **Freshness SHA:** `38451d7cf696987d86a5d100ad20c0e308693f7e`
 - **Freshness basis:** Freshly rebased `HEAD` and `origin/main` include W010. The footer placement list still contains Tool Manager behind a private predicate that always returns false. SurfaceRegistry identity, numeric ID 21, GUI action handling, frontend decoder state, service ownership, and picker behavior remain live and must be preserved.
 - **Implementer questions:** None.
+- **Current-main supersession:** W011's original compatibility boundary preserved Tool Manager surface identity because D03/W043 had not landed yet. W043/D03 later retired the native Tool Manager panel protocol/frontend/surface identity; current main now expects `MingaEditor.Layout.SurfaceRegistry.surface_id(:tool_manager) == nil` while preserving the live service, command, keymap, and picker workflow.
 
 #### Observable outcome
 
@@ -3412,3 +3413,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `d04b4416f70a8fda63909d279b10b6b726f47171`.
 - **Merge evidence:** PR #3132 merged after CI run `29849247607` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W074/D36: Align Tool Manager footer placement documentation with current main
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** D36
+- **Planning profile:** `D36PlacementPlanner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `D36PlacementWorker`, `editor-lifecycle-worker`, no delegation.
+- **Ready provenance:** Locked by `agent://D36PlacementPlanner` for current SHA `c562d68c8d78d2b5440c412aeb565eaef5b3f674`; the plan constrained this slice to documentation-only cleanup because runtime footer placement for Tool Manager is already absent.
+- **Freshness commit SHA:** `c562d68c8d78d2b5440c412aeb565eaef5b3f674`.
+- **Observable result:** Footer placement documentation now names exactly the seven active footer-band overlay producers and no longer describes Tool Manager as a footer-band surface, z-band member, or preserved `SurfaceRegistry` identity. Live Tool Manager service, command, keymap, and picker paths remain documented as retained outside footer placement, and protocol v14 retirement remains the current compatibility boundary.
+- **Failure reproduction / source trace:** Before this cleanup, `FooterOverlays.visible/1` already returned only `:extension_overlay`, `:notifications`, `:edit_timeline`, `:observatory`, `:extension_panel`, `:agent_context`, and `:float_popup`, while the `FooterOverlays` moduledoc still claimed Tool Manager registry identity was preserved elsewhere. `SurfaceRegistry` already had no `surface_id(:tool_manager)`, ID 21, z, or hit mapping, while its footer-band moduledoc still listed Tool Manager and z 240. W011 roadmap text still described the earlier retained-ID boundary even though W043/D03 later retired the native Tool Manager panel protocol/frontend/surface identity.
+- **Implementation result:** Removed the stale Tool Manager compatibility sentence from `FooterOverlays`, removed Tool Manager and z 240 from the `SurfaceRegistry` footer-band documentation, and added a W011 current-main supersession note pointing to W043/D03 retirement while preserving historical W011 completion evidence.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/layout/footer_overlays.ex`; `lib/minga_editor/layout/surface_registry.ex`.
+- **Focused validation:** `mix format --check-formatted lib/minga_editor/layout/footer_overlays.ex lib/minga_editor/layout/surface_registry.ex docs/workstreams/editor-lifecycle-roadmap.md` passed. `mix test.debug test/minga_editor/layout/footer_band_overlays_test.exs test/minga_editor/frontend/protocol/gui_protocol_unit_test.exs` passed 53 tests.
+- **Formatting, reference, and diff validation:** `git diff --check` passed. Focused forbidden-token search across `lib`, `test`, and `docs/workstreams/editor-lifecycle-roadmap.md` found no live `gui_tool_manager`, `encode_gui_tool_manager`, `tool_manager_visible?`, `def surface_id(:tool_manager)`, `surface_id_u16(:tool_manager)`, or `tool_dismiss`; remaining hits are the current negative retirement tests and historical roadmap evidence. Case-insensitive Tool Manager references in touched paths classify as live service/picker references, protocol v14 retirement evidence, current negative tests, or historical roadmap trace.
+- **Broad validation:** `make lint` passed with 0 errors; Credo still reported the two existing refactoring opportunities in `lib/minga_editor/commands/buffer_management.ex`, and the lint target exited successfully. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,722 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Current non-roadmap numstat:** Production `4 added / 5 removed`; tests `0 added / 0 removed`.
+- **Production lines added/removed:** `4 added / 5 removed` (net `-1`, within production net `<= 0`).
+- **Test lines added/removed:** `0 added / 0 removed` (no test changes; existing contract tests already covered retired surface identity and rejected old GUI action slots).
+- **Concepts removed:** Removed stale documentation claims that Tool Manager remains a footer-band overlay surface, has footer-band z 240, or has preserved `SurfaceRegistry` identity on current main.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, data representation, runtime path, or test contract was added.
+- **Retained contracts:** The seven footer overlay producers, `FooterOverlays.visible/1`, `FocusTree.add_footer_band_overlays/3`, `OverlayBand` geometry, all `SurfaceRegistry` mappings, protocol v14 retired native Tool Manager slots, `Minga.Tool.Manager`, Tool commands, keymaps, picker sources, tool prompts, and tool event handling remain unchanged.
+- **Findings resolved:** D36's remaining current-main defect was stale footer-placement documentation, not runtime placement code.
+- **Discoveries affecting later work:** W011 historical text should be read with the new current-main supersession note; W043/D03 is the controlling evidence for retired native Tool Manager panel protocol/frontend/surface identity.
+- **Pre-acceptance reviews:** Correctness and Ponytail both returned `PASS/Lean` with no findings; Ponytail confirmed this is the smallest current-truth correction at production net `-1` with no test or runtime change.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked D36 scope, accurate seven-producer and protocol-retirement documentation, preserved historical evidence, exact budgets, corroborated validation, freshness, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.

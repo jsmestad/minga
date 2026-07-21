@@ -66,8 +66,8 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
     from `shell_state`; they occupy the `@z_floating_overlay` region (hover 290
     > signature help 280).
 
-  * **Footer-band secondary overlays (#2281): float popup, agent context, tool
-    manager, extension panel, observatory, edit timeline, notifications, extension
+  * **Footer-band secondary overlays (#2281): float popup, agent context,
+    extension panel, observatory, edit timeline, notifications, and extension
     overlay.** The owner ruled these mouse-driven (#2330), so the BEAM owns their
     semantic footer-band z and conservative cell containment. Native GUI
     frontends can still measure rich content inside those bands.
@@ -75,7 +75,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
     adds each visible one (per `MingaEditor.Layout.FooterOverlays`) as an overlay
     node with a bottom-anchored full-width rect from `MingaEditor.Layout.OverlayBand`
     (porting the Go `maxOverlayHeight` clamp). They carry the exact historical
-    stacking z (270/260/240/190/180/170/160/150), so Go composites the single
+    stacking z (270/260/190/180/170/160/150), so Go composites the single
     highest-z winner by its placement rect instead of footer-appending. The
     single-active model still holds (#2268 AC-4): the tree may express several
     placements, but Go renders one. Their click events route to
