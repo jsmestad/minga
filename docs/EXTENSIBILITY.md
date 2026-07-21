@@ -436,6 +436,8 @@ Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Popup.Rule` has bee
 
 Compatibility note: concrete theme override sections `:picker` and `:minibuffer` have been removed. They were accepted by the theme parser but did not affect runtime rendering; configure picker and minibuffer chrome through `:popup` colors instead.
 
+Compatibility note: concrete theme fields `editor.tilde_fg`, `tree.modified_fg`, and `tree.git_conflict_fg` have been removed. Valid overrides for those deprecated keys are still parsed and ignored, invalid values still fail color validation, and visible colors should use live popup, tree, git, or gutter fields instead.
+
 ---
 
 ## Runtime grammar loading for extensions

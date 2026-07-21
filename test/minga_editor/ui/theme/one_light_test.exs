@@ -35,7 +35,6 @@ defmodule MingaEditor.UI.Theme.OneLightTest do
     assert theme.git.added_fg == p.hue_4
     assert theme.git.modified_fg == p.syntax_color_modified
     assert theme.git.deleted_fg == p.hue_5
-    assert theme.tree.modified_fg == p.syntax_color_modified
     assert theme.tree.git_modified_fg == p.syntax_color_modified
     assert theme.popup.title_fg == p.hue_2
     assert theme.agent.link_fg == p.hue_1

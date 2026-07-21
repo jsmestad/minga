@@ -134,7 +134,6 @@ defmodule Minga.ThemeTest do
         # Editor colors
         assert is_integer(theme.editor.bg)
         assert is_integer(theme.editor.fg)
-        assert is_integer(theme.editor.tilde_fg)
         assert is_integer(theme.editor.split_border_fg)
 
         # Gutter colors

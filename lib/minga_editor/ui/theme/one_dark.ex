@@ -106,7 +106,6 @@ defmodule MingaEditor.UI.Theme.OneDark do
         cursor_bg: @syntax_guide,
         header_bg: @ui_bg,
         separator_fg: @syntax_gutter,
-        modified_fg: @syntax_color_modified,
         git_untracked_fg: @mono_3
       },
       syntax: syntax_overrides()
