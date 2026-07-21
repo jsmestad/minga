@@ -321,3 +321,100 @@ struct RenderPerformanceGateTests {
         )
     }
 }
+
+@Suite("Native render performance gate")
+struct NativeRenderPerformanceGateTests {
+    @Test("ticket budgets pass at their exact boundaries")
+    func exactBoundariesPass() {
+        #expect(NativeRenderPerformanceGate.absoluteFailures(measurement()).isEmpty)
+    }
+
+    @Test("each native stage fails above its ticket budget")
+    func stageBudgetsFailClosed() {
+        let freeze = measurement(freezeP95: 1.01)
+        let drawP95 = measurement(drawP95: 2.51)
+        let drawP99 = measurement(drawP99: 4.01)
+        let gpu = measurement(gpuP95: 8.34)
+        let completionWall = measurement(completionWallP95: 8.34)
+
+        #expect(NativeRenderPerformanceGate.absoluteFailures(freeze).contains { $0.contains("freeze_publication") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(drawP95).contains { $0.contains("draw_cpu p95") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(drawP99).contains { $0.contains("draw_cpu p99") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(gpu).contains { $0.contains("gpu_active_time p95") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(completionWall).contains { $0.contains("handoff_to_copy_completion p95") })
+    }
+
+    @Test("warm allocations, failed frames, and excess generations fail")
+    func boundedResourcePoliciesFailClosed() {
+        let failures = NativeRenderPerformanceGate.absoluteFailures(measurement(
+            allocatedBytes: 4_096,
+            allocations: 1,
+            dropped: 1,
+            generations: 4
+        ))
+
+        #expect(failures.contains { $0.contains("4096 bytes") })
+        #expect(failures.contains { $0.contains("1 native allocations") })
+        #expect(failures.contains { $0.contains("failed or discarded 1 frames") })
+        #expect(failures.contains { $0.contains("retained 4 generations") })
+    }
+
+    @Test("paired end-to-end p50 regression above ten percent fails")
+    func pairedRegressionFails() {
+        let base = measurement(completionWallP50: 2.0)
+        let head = measurement(completionWallP50: 2.21)
+        #expect(NativeRenderPerformanceGate.pairedFailures(base: base, head: head)
+            .contains { $0.contains("handoff-to-copy-completion p50 paired median ratio 1.10x exceeds 1.10x") })
+    }
+
+    @Test("native frame accounting fails closed when results are truncated")
+    func frameAccountingFailsClosed() {
+        #expect(NativeRenderPerformanceGate.absoluteFailures(measurement(attempted: 999))
+            .contains { $0.contains("invalid or incomplete") })
+    }
+
+    @Test("paired native comparison requires equal odd sample counts")
+    func pairedSampleShapeFailsClosed() {
+        let sample = measurement()
+        #expect(NativeRenderPerformanceGate.pairedFailures(
+            baseMeasurements: [sample, sample],
+            headMeasurements: [sample, sample]
+        ).contains { $0.contains("odd count") })
+        #expect(NativeRenderPerformanceGate.pairedFailures(
+            baseMeasurements: [sample, sample, sample],
+            headMeasurements: [sample]
+        ).contains { $0.contains("unequal counts") })
+    }
+
+    private func measurement(
+        freezeP95: Double = 1.0,
+        drawP95: Double = 2.5,
+        drawP99: Double = 4.0,
+        gpuP95: Double = 8.33,
+        completionWallP50: Double = 2.0,
+        completionWallP95: Double = 8.33,
+        allocatedBytes: Int = 0,
+        allocations: Int = 0,
+        dropped: Int = 0,
+        generations: Int = 3,
+        attempted: Int? = nil
+    ) -> NativeRenderPerformanceMeasurement {
+        NativeRenderPerformanceMeasurement(
+            freezePublicationP50Ms: 0.5,
+            freezePublicationP95Ms: freezeP95,
+            drawCPUP50Ms: 1.0,
+            drawCPUP95Ms: drawP95,
+            drawCPUP99Ms: drawP99,
+            gpuP50Ms: 4.0,
+            gpuP95Ms: gpuP95,
+            completionWallP50Ms: completionWallP50,
+            completionWallP95Ms: completionWallP95,
+            maximumAllocatedBytesPerFrame: allocatedBytes,
+            allocationCountAfterWarmup: allocations,
+            attemptedFrameCount: attempted ?? 1_000 + dropped,
+            copyCompletedFrameCount: 1_000,
+            failedOrDiscardedFrameCount: dropped,
+            maximumInFlightGenerations: generations
+        )
+    }
+}

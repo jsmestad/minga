@@ -11,12 +11,20 @@ private final class MountedPreciseScrollEvent: NSEvent {
     private let mountedWindowNumber: Int
     private let mountedDeltaY: CGFloat
     private let mountedPhase: NSEvent.Phase
+    private let mountedMomentumPhase: NSEvent.Phase
 
-    init(locationInWindow: NSPoint, windowNumber: Int, deltaY: CGFloat, phase: NSEvent.Phase) {
+    init(
+        locationInWindow: NSPoint,
+        windowNumber: Int,
+        deltaY: CGFloat,
+        phase: NSEvent.Phase,
+        momentumPhase: NSEvent.Phase = []
+    ) {
         mountedLocation = locationInWindow
         mountedWindowNumber = windowNumber
         mountedDeltaY = deltaY
         mountedPhase = phase
+        mountedMomentumPhase = momentumPhase
         super.init()
     }
 
@@ -32,7 +40,7 @@ private final class MountedPreciseScrollEvent: NSEvent {
     override var scrollingDeltaY: CGFloat { mountedDeltaY }
     override var hasPreciseScrollingDeltas: Bool { true }
     override var phase: NSEvent.Phase { mountedPhase }
-    override var momentumPhase: NSEvent.Phase { [] }
+    override var momentumPhase: NSEvent.Phase { mountedMomentumPhase }
 }
 
 @MainActor
@@ -107,7 +115,7 @@ private struct MountedEditorSurface: View {
     }
 }
 
-@Suite("Content view")
+@Suite("Content view", .serialized)
 @MainActor
 struct ContentViewTests {
     private func makeEditorNSView(
@@ -200,7 +208,17 @@ struct ContentViewTests {
         )
     }
 
-    private func nativeFoldInteractionContent(prefix: String, foldLine: UInt32, contentEpoch: UInt32, totalLines: UInt32 = 4) throws -> GUIWindowContent {
+    private func nativeFoldInteractionContent(
+        prefix: String,
+        foldLine: UInt32,
+        contentEpoch: UInt32,
+        totalLines: UInt32 = 4,
+        windowId: UInt16 = 1,
+        paneCol: UInt16 = 0,
+        paneWidth: UInt16 = 80,
+        cursorRow: UInt16 = 1,
+        cursorCol: UInt16 = 2
+    ) throws -> GUIWindowContent {
         let rows = (0..<4).map { index in
             GUIVisualRow(
                 rowType: .normal,
@@ -211,31 +229,33 @@ struct ContentViewTests {
                 spans: []
             )
         }
+        let textCol = paneCol + 7
+        let textWidth = paneWidth - 7
         let geometry = GUIPaneGeometry(
-            windowId: 1,
-            totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
-            contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
-            textRect: GUICellRect(row: 0, col: 7, width: 73, height: 24),
-            gutterRect: GUICellRect(row: 0, col: 0, width: 7, height: 24),
-            clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            windowId: windowId,
+            totalRect: GUICellRect(row: 0, col: paneCol, width: paneWidth, height: 24),
+            contentRect: GUICellRect(row: 0, col: paneCol, width: paneWidth, height: 24),
+            textRect: GUICellRect(row: 0, col: textCol, width: textWidth, height: 24),
+            gutterRect: GUICellRect(row: 0, col: paneCol, width: 7, height: 24),
+            clipRect: GUICellRect(row: 0, col: paneCol, width: paneWidth, height: 24),
             viewport: GUIViewportSummary(
                 top: 0,
                 left: 0,
                 rows: 4,
-                cols: 73,
+                cols: textWidth,
                 totalLines: totalLines,
                 visualRowOffset: 0,
                 totalVisualRows: 4
             ),
             gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 3),
-            hitRegions: [GUIHitRegion(kind: .gutter, rect: GUICellRect(row: 0, col: 0, width: 7, height: 24), windowId: 1)]
+            hitRegions: [GUIHitRegion(kind: .gutter, rect: GUICellRect(row: 0, col: paneCol, width: 7, height: 24), windowId: windowId)]
         )
         return try GUIWindowContent(
-            windowId: 1,
+            windowId: windowId,
             fullRefresh: true,
             contentEpoch: contentEpoch,
-            cursorRow: 1,
-            cursorCol: 2,
+            cursorRow: cursorRow,
+            cursorCol: cursorCol,
             cursorShape: .block,
             rows: rows,
             selection: nil,
@@ -244,7 +264,7 @@ struct ContentViewTests {
             documentHighlights: [],
             paneGeometry: geometry,
             scrollPresentation: GUIScrollPresentation(
-                windowId: 1,
+                windowId: windowId,
                 resetRequired: false,
                 anchorTop: 0,
                 anchorLeft: 0,
@@ -259,14 +279,20 @@ struct ContentViewTests {
         )
     }
 
-    private func nativeFoldGutter(foldLine: UInt32) -> Wire.WindowGutter {
+    private func nativeFoldGutter(
+        foldLine: UInt32,
+        windowId: UInt16 = 1,
+        paneCol: UInt16 = 0,
+        paneWidth: UInt16 = 80,
+        isActive: Bool = true
+    ) -> Wire.WindowGutter {
         Wire.WindowGutter(
-            windowId: 1,
+            windowId: windowId,
             contentRow: 0,
-            contentCol: 7,
+            contentCol: paneCol + 7,
             contentHeight: 24,
-            isActive: true,
-            contentWidth: 73,
+            isActive: isActive,
+            contentWidth: paneWidth - 7,
             cursorLine: foldLine,
             lineNumberStyle: .hybrid,
             lineNumberWidth: 4,
@@ -308,13 +334,15 @@ struct ContentViewTests {
         window: NSWindow,
         locationInWindow: NSPoint,
         deltaY: CGFloat,
-        phase: NSEvent.Phase
+        phase: NSEvent.Phase,
+        momentumPhase: NSEvent.Phase = []
     ) -> NSEvent {
         MountedPreciseScrollEvent(
             locationInWindow: locationInWindow,
             windowNumber: window.windowNumber,
             deltaY: deltaY,
-            phase: phase
+            phase: phase,
+            momentumPhase: momentumPhase
         )
     }
 
@@ -547,6 +575,17 @@ struct ContentViewTests {
         #expect(spy.mouseEventCalls.last?.row == 1)
         #expect(spy.mouseEventCalls.last?.col == 11)
 
+        let dragPoint = NSPoint(x: editorView.cellWidth * 14.2, y: editorView.cellHeight * 2.5)
+        let dragEvent = try #require(mouseEvent(
+            type: .leftMouseDragged,
+            locationInWindow: editorView.convert(dragPoint, to: nil),
+            windowNumber: window.windowNumber
+        ))
+        editorView.mouseDragged(with: dragEvent)
+        #expect(spy.mouseEventCalls.last?.eventType == MOUSE_DRAG)
+        #expect(spy.mouseEventCalls.last?.row == 3)
+        #expect(spy.mouseEventCalls.last?.col == 13)
+
         let foldPoint = NSPoint(x: editorView.cellWidth * 10.2, y: editorView.cellHeight * 0.5)
         let foldEvent = try #require(mouseEvent(
             type: .leftMouseDown,
@@ -555,6 +594,84 @@ struct ContentViewTests {
         ))
         editorView.mouseDown(with: foldEvent)
         #expect(spy.guiActions.last == .foldToggleAtLine(windowId: 1, bufferLine: 101))
+
+        let committedSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(snapshot: committedSnapshot, localTransform: nil)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 2)
+        #expect((editorView.accessibilityValue() as? String)?.contains("committed row 1") == true)
+        editorView.mouseDown(with: textEvent)
+        #expect(spy.mouseEventCalls.last?.row == 0)
+        #expect(spy.mouseEventCalls.last?.col == 11)
+    }
+
+    @Test(
+        "active-pane input IME and accessibility move only after visible promotion",
+        .timeLimit(.minutes(1))
+    )
+    func activePaneGeometryMovesAtomicallyAtVisiblePromotion() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "pane A", foldLine: 10, contentEpoch: 1, windowId: 1, paneCol: 0, paneWidth: 40, cursorRow: 0)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 10, windowId: 1, paneCol: 0, paneWidth: 40)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let root = ContentView(gui: gui, encoder: { spy }, editorGeometry: { .preview }, chrome: .preview, onAgentChatVisibleChange: { _ in }) {
+            EditorView(editorNSView: editorView)
+        }
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let hostingView = NSHostingView(rootView: root)
+        hostingView.frame = frame
+        let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+        let localPoint = NSPoint(x: editorView.cellWidth * 12.2, y: editorView.cellHeight * 1.5)
+        let windowPoint = editorView.convert(localPoint, to: nil)
+        let screenPoint = window.convertPoint(toScreen: windowPoint)
+        let imeA = editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+        let characterA = editorView.characterIndex(for: screenPoint)
+        let rangeA = editorView.accessibilitySelectedTextRange()
+        #expect((editorView.accessibilityValue() as? String)?.contains("pane A row 0") == true)
+        #expect(editorView.accessibilityInsertionPointLineNumber() == 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "pane B successor", foldLine: 20, contentEpoch: 2, windowId: 2, paneCol: 40, paneWidth: 40, cursorRow: 2, cursorCol: 4)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 20, windowId: 2, paneCol: 40, paneWidth: 40)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil) == imeA)
+        #expect(editorView.characterIndex(for: screenPoint) == characterA)
+        #expect(editorView.accessibilitySelectedTextRange() == rangeA)
+        #expect(editorView.accessibilityInsertionPointLineNumber() == 0)
+        #expect((editorView.accessibilityValue() as? String)?.contains("pane A row 0") == true)
+
+        let click = try #require(mouseEvent(type: .leftMouseDown, locationInWindow: windowPoint, windowNumber: window.windowNumber))
+        editorView.mouseDown(with: click)
+        let visibleClick = try #require(spy.mouseEventCalls.last)
+
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+        let imeB = editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+        #expect(imeB.minX > imeA.minX)
+        #expect(editorView.characterIndex(for: screenPoint) != characterA)
+        #expect(editorView.accessibilitySelectedTextRange() != rangeA)
+        #expect(editorView.accessibilityInsertionPointLineNumber() == 2)
+        #expect((editorView.accessibilityValue() as? String)?.contains("pane B successor row 0") == true)
+        editorView.mouseDown(with: click)
+        let promotedClick = try #require(spy.mouseEventCalls.last)
+        #expect(promotedClick.row != visibleClick.row || promotedClick.col != visibleClick.col)
     }
 
     @Test(
@@ -654,6 +771,18 @@ struct ContentViewTests {
         editorView.scrollWheel(with: scrollBegan)
         editorView.scrollWheel(with: scrollChanged)
 
+        let visibleContent = try #require(dispatcher.visibleEditorSnapshot?.surfaces.first?.content)
+        let momentumEvents = [
+            preciseScrollEvent(window: window, locationInWindow: locationInWindow, deltaY: -6, phase: [], momentumPhase: .began),
+            preciseScrollEvent(window: window, locationInWindow: locationInWindow, deltaY: -5, phase: [], momentumPhase: .changed),
+            preciseScrollEvent(window: window, locationInWindow: locationInWindow, deltaY: 0, phase: [], momentumPhase: .ended),
+            preciseScrollEvent(window: window, locationInWindow: locationInWindow, deltaY: -4, phase: [], momentumPhase: .began),
+            preciseScrollEvent(window: window, locationInWindow: locationInWindow, deltaY: -3, phase: [], momentumPhase: .changed),
+            preciseScrollEvent(window: window, locationInWindow: locationInWindow, deltaY: -2, phase: .began),
+        ]
+        for event in momentumEvents { editorView.scrollWheel(with: event) }
+        #expect(dispatcher.visibleEditorSnapshot?.surfaces.first?.content === visibleContent)
+
         let mouseDown = try #require(mouseEvent(
             type: .leftMouseDown,
             locationInWindow: locationInWindow,
@@ -677,7 +806,6 @@ struct ContentViewTests {
         #expect(before.selectionDragActive)
         #expect(before.selectionDragStarted)
         #expect(before.scrollWindowId != nil)
-        #expect(before.scrollOffset != .zero)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(

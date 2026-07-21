@@ -309,6 +309,9 @@ jobs:
       - run: mix deps.get
       - run: mix protocol.gen
 
+      - name: Install pinned XcodeGen
+        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
+
       - name: Gate optimized native render preparation
         run: |
           HEAD_REF=$(git rev-parse HEAD)
@@ -320,15 +323,32 @@ jobs:
             bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
           fi
 
+      - name: Gate native Metal completion path
+        run: |
+          HEAD_REF=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA=$(git merge-base origin/main "$HEAD_REF")
+            bash scripts/bench_native_render_performance_ab "$BASE_SHA" "$HEAD_REF"
+          else
+            bash scripts/bench_native_render_performance_ab --head-only "$HEAD_REF"
+          fi
+
+      - name: Upload native Metal performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-render-performance
+          path: |
+            native_render_performance.json
+            native_render_performance_metrics.txt
+          if-no-files-found: error
+
       - name: Cache DerivedData
         uses: actions/cache@v4
         with:
           path: macos/DerivedData
           key: xcode-${{ runner.os }}-${{ hashFiles('macos/Sources/**/*.swift', 'macos/Sources/**/*.metal', 'macos/project.yml') }}
           restore-keys: xcode-${{ runner.os }}-
-
-      - name: Install pinned XcodeGen
-        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
 
       - name: Generate Xcode project
         run: cd macos && xcodegen generate

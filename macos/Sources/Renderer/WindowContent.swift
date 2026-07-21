@@ -507,6 +507,8 @@ public struct GUIRetainedRowKey: Hashable, Sendable {
 /// this is stored but not yet used for rendering (draw_text still active).
 /// Phase 3 will switch rendering to use this data directly.
 public final class GUIWindowContent: Sendable {
+    /// Stable value identity for this immutable content instance without retaining it elsewhere.
+    public let renderIdentity: UUID
     public let windowId: UInt16
     public let fullRefresh: Bool
     public let contentEpoch: UInt32
@@ -565,6 +567,7 @@ public final class GUIWindowContent: Sendable {
         let store = try ResidentRowStore(
             decodedRows: rows, resourceWeight: rowWeight, limit: residentLimit
         )
+        self.renderIdentity = UUID()
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -586,7 +589,7 @@ public final class GUIWindowContent: Sendable {
         self.resourceWeight = completeWeight
     }
 
-    private init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32,
+    private init(renderIdentity: UUID = UUID(), windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32,
          cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16, rowStore: ResidentRowStore,
          rowStoreOperationCounters: ResidentRowStoreCounters,
@@ -595,6 +598,7 @@ public final class GUIWindowContent: Sendable {
          lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?,
          cursorline: GUICursorline?, scrollPresentation: GUIScrollPresentation?,
          resourceWeight: FrameResourceWeight) {
+        self.renderIdentity = renderIdentity
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -619,6 +623,7 @@ public final class GUIWindowContent: Sendable {
     /// Returns the same immutable content while replacing per-frame operation counters.
     public func reportingOperationCounters(_ counters: ResidentRowStoreCounters) -> GUIWindowContent {
         GUIWindowContent(
+            renderIdentity: renderIdentity,
             windowId: windowId, fullRefresh: fullRefresh, contentEpoch: contentEpoch,
             cursorVisible: cursorVisible, cursorRow: cursorRow, cursorCol: cursorCol,
             cursorShape: cursorShape, scrollLeft: scrollLeft, rowStore: rowStore,

@@ -778,6 +778,54 @@ struct NativeRenderResourcesTests {
         #expect(renderer.lastCompletedPresentationGeneration == 4)
     }
 
+    @Test("a fourth native generation is rejected while three are in flight")
+    @MainActor func fourthInFlightGenerationIsRejected() {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("Metal device is required for native generation coverage")
+            return
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            Issue.record("Metal texture is required for native generation coverage")
+            return
+        }
+
+        typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+        var completions: [Completion] = []
+        var reports: [NativePresentationFailure] = []
+        var factories = nativeTestFactories()
+        factories.observeCompletion = { _, completion in completions.append(completion) }
+        factories.reportFailure = { reports.append($0) }
+        guard let renderer = CoreTextMetalRenderer(factories: factories) else {
+            Issue.record("Native renderer is required for generation coverage")
+            return
+        }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+        let drawable = NativeTestDrawable(texture: texture)
+
+        for sequence in 1...4 {
+            renderer.render(
+                frameState: FrameState(cols: 4, rows: 4),
+                fontManager: fontManager,
+                drawableProvider: { drawable },
+                viewportSize: CGSize(width: 64, height: 64),
+                contentScale: 1,
+                presentationInputSeq: UInt32(sequence)
+            )
+        }
+
+        #expect(completions.count == 3)
+        #expect(reports.count == 1)
+        #expect(reports.first?.phase == .command)
+        #expect(reports.first?.dimension == .submission)
+        #expect(reports.first?.frameSequence == 4)
+        #expect(renderer.lastCompletedPresentationGeneration == 0)
+    }
+
     @Test("failed frame preserves a populated completed frame")
     @MainActor func failedFramePreservesPopulatedFrame() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }

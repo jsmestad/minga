@@ -151,6 +151,38 @@ struct WindowContentFrameMetricsTests {
         return (renderer, atlas)
     }
 
+    private func surface(
+        content: GUIWindowContent,
+        gutter: Wire.WindowGutter,
+        totalLines: UInt32
+    ) -> PresentedWindowSurface {
+        let gutterWidth = UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth)
+        let gutterCol = gutter.contentCol >= gutterWidth ? gutter.contentCol - gutterWidth : 0
+        let geometry = content.paneGeometry ?? GUIPaneGeometry(
+            windowId: content.windowId,
+            totalRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutter.contentWidth + gutterWidth, height: gutter.contentHeight),
+            contentRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutter.contentWidth + gutterWidth, height: gutter.contentHeight),
+            textRect: GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutter.contentWidth, height: gutter.contentHeight),
+            gutterRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutterWidth, height: gutter.contentHeight),
+            clipRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutter.contentWidth + gutterWidth, height: gutter.contentHeight),
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: gutter.contentHeight, cols: gutter.contentWidth, totalLines: totalLines, visualRowOffset: 0, totalVisualRows: totalLines),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: UInt16(gutter.lineNumberWidth), signColWidth: UInt16(gutter.signColWidth)),
+            hitRegions: []
+        )
+        return PresentedWindowSurface(content: content, gutter: .present(gutter), paneGeometry: geometry, indentGuides: nil)
+    }
+
+    private func preparedSurface(_ surface: PresentedWindowSurface) -> PreparedPresentedSurface {
+        let prepared = ResidentRenderPreparation.prepare(
+            content: surface.content,
+            fallbackVisibleRows: Int(surface.paneGeometry.textRect.height),
+            overscanRows: RendererSignposts.configuredOverscanRows,
+            scrollLeft: Int(surface.content.scrollLeft),
+            viewportCols: Int(surface.paneGeometry.textRect.width)
+        )
+        return PreparedPresentedSurface(surface: surface, prepared: prepared)
+    }
+
     @Test("Buffer row metrics distinguish rasterized rows from reused rows")
     @MainActor func bufferRowMetrics() throws {
         guard let (renderer, atlas) = makeRendererAndAtlas() else { return }
@@ -277,14 +309,33 @@ struct WindowContentFrameMetricsTests {
         #expect(metrics.bufferRowsRasterized == 1)
 
         let content = try GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+        let gutter = Wire.WindowGutter(windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 1, isActive: true, contentWidth: 80, cursorLine: 0, lineNumberStyle: .none, lineNumberWidth: 0, signColWidth: 0, entries: [])
+        let presentedSurface = surface(content: content, gutter: gutter, totalLines: 1)
+        var lastIdentities: [UInt16: UUID] = [:]
         atlas.beginFrame()
-        CoreTextMetalRenderer.invalidateFullRefreshWindows(in: atlas, windowContents: [1: content])
+        CoreTextMetalRenderer.invalidateFullRefreshWindows(
+            in: atlas,
+            surfaces: [presentedSurface],
+            lastIdentities: &lastIdentities
+        )
         metrics.reset()
         let second = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
         #expect(second != nil)
         #expect(metrics.bufferRowsRasterized == 1)
         #expect(metrics.bufferRowsReused == 0)
         #expect(metrics.atlasNewKeys == 1)
+
+        atlas.beginFrame()
+        CoreTextMetalRenderer.invalidateFullRefreshWindows(
+            in: atlas,
+            surfaces: [presentedSurface],
+            lastIdentities: &lastIdentities
+        )
+        metrics.reset()
+        let third = renderer.renderRowToAtlas(displayRow: 0, row: row, windowId: 1, atlas: atlas, metrics: &metrics)
+        #expect(third != nil)
+        #expect(metrics.bufferRowsRasterized == 0)
+        #expect(metrics.bufferRowsReused == 1)
     }
 
     @Test("Horizontal scroll keeps row identity but changes the atlas hash")
@@ -326,9 +377,14 @@ struct WindowContentFrameMetricsTests {
         ]
         frameState.horizontalSeparators = [Wire.HorizontalSeparator(row: 1, col: 0, width: 80, filename: "split.ex")]
 
-        let leftSlice = RendererSignposts.visibleSlice(for: left, fallbackVisibleRows: 2)
-        let rightSlice = RendererSignposts.visibleSlice(for: right, fallbackVisibleRows: 2)
-        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: left, 2: right], gutters: frameState.windowGutters, visibleSlices: [1: leftSlice, 2: rightSlice])
+        let leftGutter = try #require(frameState.windowGutters[1])
+        let rightGutter = try #require(frameState.windowGutters[2])
+        let leftSurface = surface(content: left, gutter: leftGutter, totalLines: 1)
+        let rightSurface = surface(content: right, gutter: rightGutter, totalLines: 1)
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(
+            frameState: frameState,
+            preparedSurfaces: [preparedSurface(leftSurface), preparedSurface(rightSurface)]
+        )
 
         #expect(demand >= 2 + 1 + 4 + 1 + 32)
     }
@@ -357,8 +413,13 @@ struct WindowContentFrameMetricsTests {
             documentHighlights: [], paneGeometry: geometry
         )
         let frameState = FrameState(cols: 80, rows: 40)
+        let gutter = Wire.WindowGutter(windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 40, isActive: true, contentWidth: 80, cursorLine: 0, lineNumberStyle: .none, lineNumberWidth: 0, signColWidth: 0, entries: [])
+        let presentedSurface = surface(content: content, gutter: gutter, totalLines: 5_000)
 
-        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: content], gutters: [:], visibleSlices: [1: RendererSignposts.visibleSlice(for: content, fallbackVisibleRows: 40)])
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(
+            frameState: frameState,
+            preparedSurfaces: [preparedSurface(presentedSurface)]
+        )
 
         #expect(demand < 5_000)
         #expect(demand >= 40)

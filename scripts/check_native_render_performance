@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${MINGA_NATIVE_RENDER_ROOT:-$SCRIPT_ROOT}"
+ROOT="$(cd "$ROOT" && pwd)"
+DEFAULT_BUILD_DIR="${ROOT}/_build/native-render-performance"
+
+usage() {
+  echo "usage: $0 [--build BUILD_DIR | --measure BUILD_DIR OUTPUT.json | --compare BUILD_DIR --base BASE.json... --head HEAD.json...]" >&2
+  exit 2
+}
+
+require_macos() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "error: native Metal render gate requires macOS" >&2
+    exit 2
+  fi
+  command -v xcodegen >/dev/null || {
+    echo "error: native Metal render gate requires xcodegen" >&2
+    exit 2
+  }
+}
+
+build_harness() {
+  local build_dir=$1
+  local conditions=${MINGA_NATIVE_RENDER_SWIFT_CONDITIONS:-MINGA_SNAPSHOT_RENDERER}
+
+  rm -rf "$build_dir"
+  if [[ "${MINGA_NATIVE_RENDER_SKIP_PROTOCOL_GEN:-0}" != "1" ]]; then
+    (cd "$ROOT" && mix protocol.gen >/dev/null)
+  fi
+  (cd "$ROOT/macos" && xcodegen generate >/dev/null)
+  xcodebuild build \
+    -project "$ROOT/macos/Minga.xcodeproj" \
+    -scheme NativeRenderPerformance \
+    -configuration Release \
+    -derivedDataPath "$build_dir" \
+    CODE_SIGNING_ALLOWED=NO \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS="$conditions"
+  swiftc -O \
+    "$ROOT/macos/Sources/Protocol/RenderPerformanceGate.swift" \
+    "$ROOT/macos/Tests/Performance/NativeCompare/main.swift" \
+    -o "$build_dir/native-render-compare"
+}
+
+measure_harness() {
+  local build_dir=$1
+  local output=$2
+  local products="$build_dir/Build/Products/Release"
+  local binary="$products/minga-native-render-performance"
+  if [[ ! -x "$binary" ]]; then
+    echo "error: native render benchmark binary not found: $binary" >&2
+    exit 2
+  fi
+  mkdir -p "$(dirname "$output")"
+  DYLD_FRAMEWORK_PATH="$products${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}" \
+    "$binary" --measurement-output "$output"
+}
+
+require_macos
+case "${1:-}" in
+  --build)
+    [[ $# -eq 2 ]] || usage
+    build_harness "$2"
+    ;;
+  --measure)
+    [[ $# -eq 3 ]] || usage
+    measure_harness "$2" "$3"
+    ;;
+  --compare)
+    [[ $# -ge 8 ]] || usage
+    build_dir=$2
+    shift 2
+    "$build_dir/native-render-compare" "$@"
+    ;;
+  "")
+    build_harness "$DEFAULT_BUILD_DIR"
+    measure_harness "$DEFAULT_BUILD_DIR" "$ROOT/native_render_performance.json"
+    ;;
+  *) usage ;;
+esac

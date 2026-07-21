@@ -255,6 +255,7 @@ targets:
           - "Snapshots/**"
           # Standalone optimized executable; unit tests cover its comparator separately.
           - "Performance/**"
+          - "NativePerformance/**"
       - path: Sources
         type: group
         excludes:
@@ -312,6 +313,7 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         # Compiles Renderer/ Metal sources; needs the Metal toolchain pin.
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MINGA_SNAPSHOT_RENDERER"
     dependencies:
       - target: MingaProtocol
       - target: MingaUI
@@ -328,6 +330,80 @@ targets:
             echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
             exit 1
           fi
+          mix protocol.gen
+        basedOnDependencyAnalysis: false
+
+  NativeRenderPerformance:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tests/NativePerformance/NativeRenderPerformanceMain.swift
+        type: file
+      - path: Sources
+        type: group
+        excludes:
+          - "MingaApp.swift"
+          - "PreviewHostApp.swift"
+          - "PreviewRegistry.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
+          - "Protocol/FrameResourcePolicy.swift"
+          - "Renderer/WindowContent.swift"
+          - "Renderer/ResidentRowStore.swift"
+          - "Renderer/ResidentRenderPreparation.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/RenderPerformanceGate.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "ContentView.swift"
+          - "Views/Shared/EditorGeometry.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIFramePresentationMetrics.swift"
+          - "Views/Shared/GUIFrameCorrelation.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
+      - path: .generated/protocol/ProtocolOpcodes.generated.swift
+        name: ProtocolOpcodes.generated.swift
+        type: file
+      - path: .generated/protocol/ProtocolCommandSize.generated.swift
+        name: ProtocolCommandSize.generated.swift
+        type: file
+      - path: .generated/protocol/ProtocolSemanticDecode.generated.swift
+        name: ProtocolSemanticDecode.generated.swift
+        type: file
+    settings:
+      base:
+        PRODUCT_NAME: minga-native-render-performance
+        GENERATE_INFOPLIST_FILE: "YES"
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MINGA_SNAPSHOT_RENDERER"
+    dependencies:
+      - target: MingaProtocol
+      - target: MingaUI
+    preBuildScripts:
+      - name: Generate protocol opcodes
+        script: |
+          if [[ "${MINGA_NATIVE_RENDER_SKIP_PROTOCOL_GEN:-0}" == "1" ]]; then
+            exit 0
+          fi
+          cd "${SRCROOT}/.."
           mix protocol.gen
         basedOnDependencyAnalysis: false
 

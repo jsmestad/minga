@@ -358,3 +358,221 @@ public enum RenderPerformanceGate {
 
     private static func format(_ value: Double) -> String { String(format: "%.2f", value) }
 }
+
+/// End-to-end Release measurement for one native editor rendering batch.
+public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
+    /// Median transaction-freeze plus publication duration.
+    public let freezePublicationP50Ms: Double
+    /// P95 transaction-freeze plus publication duration.
+    public let freezePublicationP95Ms: Double
+    /// Median CPU time spent preparing and encoding a warm native draw.
+    public let drawCPUP50Ms: Double
+    /// P95 CPU time spent preparing and encoding a warm native draw.
+    public let drawCPUP95Ms: Double
+    /// P99 CPU time spent preparing and encoding a warm native draw.
+    public let drawCPUP99Ms: Double
+    /// Median GPU time across render and drawable-copy command buffers.
+    public let gpuP50Ms: Double
+    /// P95 GPU time across render and drawable-copy command buffers.
+    public let gpuP95Ms: Double
+    /// Median wall time from committed snapshot handoff through completion of the drawable-copy command.
+    public let completionWallP50Ms: Double
+    /// P95 wall time from committed snapshot handoff through completion of the drawable-copy command.
+    public let completionWallP95Ms: Double
+    /// Largest number of bytes allocated by native draw resources in any measured warm frame.
+    public let maximumAllocatedBytesPerFrame: Int
+    /// Native buffer or texture allocation calls observed after warm-up.
+    public let allocationCountAfterWarmup: Int
+    /// Frames submitted to the measured native path.
+    public let attemptedFrameCount: Int
+    /// Frames that completed the drawable-copy command and requested presentation.
+    public let copyCompletedFrameCount: Int
+    /// Frames failed or discarded before drawable-copy completion.
+    public let failedOrDiscardedFrameCount: Int
+    /// Largest number of native presentation generations simultaneously in flight.
+    public let maximumInFlightGenerations: Int
+
+    /// Creates one complete native render measurement.
+    public init(
+        freezePublicationP50Ms: Double,
+        freezePublicationP95Ms: Double,
+        drawCPUP50Ms: Double,
+        drawCPUP95Ms: Double,
+        drawCPUP99Ms: Double,
+        gpuP50Ms: Double,
+        gpuP95Ms: Double,
+        completionWallP50Ms: Double,
+        completionWallP95Ms: Double,
+        maximumAllocatedBytesPerFrame: Int,
+        allocationCountAfterWarmup: Int,
+        attemptedFrameCount: Int,
+        copyCompletedFrameCount: Int,
+        failedOrDiscardedFrameCount: Int,
+        maximumInFlightGenerations: Int
+    ) {
+        self.freezePublicationP50Ms = freezePublicationP50Ms
+        self.freezePublicationP95Ms = freezePublicationP95Ms
+        self.drawCPUP50Ms = drawCPUP50Ms
+        self.drawCPUP95Ms = drawCPUP95Ms
+        self.drawCPUP99Ms = drawCPUP99Ms
+        self.gpuP50Ms = gpuP50Ms
+        self.gpuP95Ms = gpuP95Ms
+        self.completionWallP50Ms = completionWallP50Ms
+        self.completionWallP95Ms = completionWallP95Ms
+        self.maximumAllocatedBytesPerFrame = maximumAllocatedBytesPerFrame
+        self.allocationCountAfterWarmup = allocationCountAfterWarmup
+        self.attemptedFrameCount = attemptedFrameCount
+        self.copyCompletedFrameCount = copyCompletedFrameCount
+        self.failedOrDiscardedFrameCount = failedOrDiscardedFrameCount
+        self.maximumInFlightGenerations = maximumInFlightGenerations
+    }
+}
+
+/// Fail-closed budgets for the complete native editor presentation path.
+public enum NativeRenderPerformanceGate {
+    /// Ordinary snapshot freeze and publication p95 budget.
+    public static let freezePublicationP95BudgetMs = 1.0
+    /// Warm cursor and local-scroll draw CPU p95 budget.
+    public static let drawCPUP95BudgetMs = 2.5
+    /// Warm cursor and local-scroll draw CPU p99 budget.
+    public static let drawCPUP99BudgetMs = 4.0
+    /// GPU render plus drawable-copy active-time p95 budget for a 120 Hz refresh interval.
+    public static let gpuP95BudgetMs = 8.33
+    /// End-to-end handoff through drawable-copy completion p95 budget for a 120 Hz refresh interval.
+    public static let completionWallP95BudgetMs = 8.33
+    /// Largest supported number of native presentation generations in flight.
+    public static let maximumInFlightGenerations = 3
+    /// Largest permitted paired median regression for end-to-end presentation p50.
+    public static let maximumPairedRegressionRatio = 1.10
+
+    /// Returns every absolute native-render budget violation.
+    public static func absoluteFailures(_ measurement: NativeRenderPerformanceMeasurement) -> [String] {
+        var failures = validationFailures(measurement)
+        guard failures.isEmpty else { return failures }
+
+        check("freeze_publication p95", measurement.freezePublicationP95Ms,
+              freezePublicationP95BudgetMs, &failures)
+        check("draw_cpu p95", measurement.drawCPUP95Ms, drawCPUP95BudgetMs, &failures)
+        check("draw_cpu p99", measurement.drawCPUP99Ms, drawCPUP99BudgetMs, &failures)
+        check("gpu_active_time p95", measurement.gpuP95Ms, gpuP95BudgetMs, &failures)
+        check("handoff_to_copy_completion p95", measurement.completionWallP95Ms,
+              completionWallP95BudgetMs, &failures)
+        if measurement.maximumAllocatedBytesPerFrame != 0 {
+            failures.append("warm frames allocated up to \(measurement.maximumAllocatedBytesPerFrame) bytes")
+        }
+        if measurement.allocationCountAfterWarmup != 0 {
+            failures.append("warm frames performed \(measurement.allocationCountAfterWarmup) native allocations")
+        }
+        if measurement.failedOrDiscardedFrameCount != 0 {
+            failures.append("native rendering failed or discarded \(measurement.failedOrDiscardedFrameCount) frames")
+        }
+        if measurement.maximumInFlightGenerations > maximumInFlightGenerations {
+            failures.append("native presentation retained \(measurement.maximumInFlightGenerations) generations; limit is \(maximumInFlightGenerations)")
+        }
+        return failures
+    }
+
+    /// Returns absolute HEAD failures plus the paired end-to-end p50 regression failure.
+    public static func pairedFailures(
+        base: NativeRenderPerformanceMeasurement,
+        head: NativeRenderPerformanceMeasurement
+    ) -> [String] {
+        pairedFailures(
+            baseMeasurements: [base, base, base],
+            headMeasurements: [head, head, head]
+        )
+    }
+
+    /// Returns failures for an odd set of at least three adjacent same-runner base/HEAD pairs.
+    public static func pairedFailures(
+        baseMeasurements: [NativeRenderPerformanceMeasurement],
+        headMeasurements: [NativeRenderPerformanceMeasurement]
+    ) -> [String] {
+        guard baseMeasurements.count == headMeasurements.count else {
+            return ["native paired measurements have unequal counts"]
+        }
+        guard baseMeasurements.count >= 3, baseMeasurements.count.isMultiple(of: 2) == false else {
+            return ["native paired comparison requires an odd count of at least three"]
+        }
+        for measurement in baseMeasurements where !validationFailures(measurement).isEmpty {
+            return ["invalid native base measurement"]
+        }
+        for measurement in headMeasurements where !validationFailures(measurement).isEmpty {
+            return ["invalid native HEAD measurement"]
+        }
+
+        var failures = absoluteFailures(aggregate(headMeasurements))
+        let ratios = zip(baseMeasurements, headMeasurements).map { base, head in
+            head.completionWallP50Ms / base.completionWallP50Ms
+        }
+        let ratio = median(ratios)
+        if ratio > maximumPairedRegressionRatio {
+            failures.append(
+                "native handoff-to-copy-completion p50 paired median ratio \(format(ratio))x exceeds \(format(maximumPairedRegressionRatio))x"
+            )
+        }
+        return failures
+    }
+
+    private static func validationFailures(_ measurement: NativeRenderPerformanceMeasurement) -> [String] {
+        var failures: [String] = []
+        let durations = [
+            ("freeze_publication p50", measurement.freezePublicationP50Ms),
+            ("freeze_publication p95", measurement.freezePublicationP95Ms),
+            ("draw_cpu p50", measurement.drawCPUP50Ms),
+            ("draw_cpu p95", measurement.drawCPUP95Ms),
+            ("draw_cpu p99", measurement.drawCPUP99Ms),
+            ("gpu p50", measurement.gpuP50Ms),
+            ("gpu_active_time p95", measurement.gpuP95Ms),
+            ("handoff_to_copy_completion p50", measurement.completionWallP50Ms),
+            ("handoff_to_copy_completion p95", measurement.completionWallP95Ms)
+        ]
+        for (name, value) in durations where !value.isFinite || value <= 0 {
+            failures.append("\(name) must be finite and greater than zero")
+        }
+        if measurement.maximumAllocatedBytesPerFrame < 0 || measurement.allocationCountAfterWarmup < 0
+            || measurement.attemptedFrameCount <= 0 || measurement.copyCompletedFrameCount <= 0
+            || measurement.failedOrDiscardedFrameCount < 0 || measurement.maximumInFlightGenerations <= 0
+            || measurement.copyCompletedFrameCount + measurement.failedOrDiscardedFrameCount != measurement.attemptedFrameCount {
+            failures.append("native render counters are invalid or incomplete")
+        }
+        return failures
+    }
+
+    private static func aggregate(
+        _ measurements: [NativeRenderPerformanceMeasurement]
+    ) -> NativeRenderPerformanceMeasurement {
+        NativeRenderPerformanceMeasurement(
+            freezePublicationP50Ms: median(measurements.map(\.freezePublicationP50Ms)),
+            freezePublicationP95Ms: median(measurements.map(\.freezePublicationP95Ms)),
+            drawCPUP50Ms: median(measurements.map(\.drawCPUP50Ms)),
+            drawCPUP95Ms: median(measurements.map(\.drawCPUP95Ms)),
+            drawCPUP99Ms: median(measurements.map(\.drawCPUP99Ms)),
+            gpuP50Ms: median(measurements.map(\.gpuP50Ms)),
+            gpuP95Ms: median(measurements.map(\.gpuP95Ms)),
+            completionWallP50Ms: median(measurements.map(\.completionWallP50Ms)),
+            completionWallP95Ms: median(measurements.map(\.completionWallP95Ms)),
+            maximumAllocatedBytesPerFrame: measurements.map(\.maximumAllocatedBytesPerFrame).max() ?? 0,
+            allocationCountAfterWarmup: measurements.map(\.allocationCountAfterWarmup).max() ?? 0,
+            attemptedFrameCount: Int(median(measurements.map { Double($0.attemptedFrameCount) })),
+            copyCompletedFrameCount: Int(median(measurements.map { Double($0.copyCompletedFrameCount) })),
+            failedOrDiscardedFrameCount: measurements.map(\.failedOrDiscardedFrameCount).max() ?? 0,
+            maximumInFlightGenerations: measurements.map(\.maximumInFlightGenerations).max() ?? 0
+        )
+    }
+
+    private static func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
+
+    private static func check(
+        _ name: String,
+        _ measured: Double,
+        _ limit: Double,
+        _ failures: inout [String]
+    ) {
+        if measured > limit {
+            failures.append("\(name) \(format(measured))ms exceeds \(format(limit))ms")
+        }
+    }
+
+    private static func format(_ value: Double) -> String { String(format: "%.2f", value) }
+}

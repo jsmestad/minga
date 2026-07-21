@@ -508,6 +508,18 @@ struct GUIFrameSwiftUIInvalidationTests {
             recorder: recorder
         )
 
+        let countsBeforeEditorOnlyCommits = updateCounts(recorder)
+        var baseFrameSeq: UInt32 = 5
+        for frameSeq: UInt32 in 6...8 {
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: 1))
+            dispatcher.dispatch(.setCursorShape(frameSeq.isMultiple(of: 2) ? .beam : .block))
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+            baseFrameSeq = frameSeq
+        }
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+        expectUnchangedCounts(countsBeforeEditorOnlyCommits, recorder: recorder)
+
         #expect(gui.shellInput === shellInput)
         #expect(gui.editorInput === editorInput)
         #expect(gui.editorOverlayInput === editorOverlayInput)
