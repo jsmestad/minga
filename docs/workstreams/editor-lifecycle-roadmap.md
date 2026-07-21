@@ -3044,3 +3044,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `1c6e06b60b4b50666fb44ee4b14a7c6e0b4f0e0c`.
 - **Merge evidence:** PR #3108 merged after CI run `29804315423` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W062/D20.2: Delete Popup.Registry compatibility facade
+
+- **Status:** ACTIVE
+- **Audit ID:** D20.2 split slice
+- **Planning profile:** `D20NextFacadePlanner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `D20PopupRegistryWorker`, `editor-lifecycle-worker`, no delegation.
+- **Freshness commit SHA:** `2dcbd5390c04ee6ec87b69c0193e8af1a44bbf1e`.
+- **Observable result:** The old Layer 2 popup registry delegate is removed from production and test source. The canonical `Minga.Popup.Registry` remains the only popup registry owner, while popup config registration, default rules, registry matching, private-table test isolation, priority ordering, unregister, clear, list, and idempotent init behavior remain unchanged.
+- **Failure reproduction / source trace:** Before deletion, focused source search found the obsolete facade module only in `lib/minga_editor/ui/popup/registry.ex`, the stale facade-named test module, and prior roadmap prose. The production file delegated every call directly to `Minga.Popup.Registry`, and the existing test already aliased the canonical owner.
+- **Implementation result:** Deleted only `lib/minga_editor/ui/popup/registry.ex`; moved `test/minga_editor/ui/popup/registry_test.exs` to `test/minga/popup/registry_test.exs`; renamed the test module to `Minga.Popup.RegistryTest` without changing registry assertions; added the compatibility notice in `docs/EXTENSIBILITY.md`.
+- **Changed files:** `docs/EXTENSIBILITY.md`; `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/ui/popup/registry.ex`; `test/minga/popup/registry_test.exs`; `test/minga_editor/ui/popup/registry_test.exs`.
+- **Focused validation:** `mix test test/minga/popup/registry_test.exs test/minga/config_test.exs test/minga_editor/ui/popup/lifecycle_test.exs` passed with 87 tests.
+- **Formatting, reference, and diff validation:** `mix format --check-formatted test/minga/popup/registry_test.exs docs/EXTENSIBILITY.md docs/workstreams/editor-lifecycle-roadmap.md` passed before roadmap evidence. Focused forbidden-reference search across `lib`, `test`, `extensions`, `docs`, `README.md`, and `CHANGELOG.md` returned matches only in the new compatibility notice and roadmap evidence. `git diff --check` passed.
+- **Numstat before roadmap evidence:** `docs/EXTENSIBILITY.md 2 0; lib/minga_editor/ui/popup/registry.ex 0 33; test/{minga_editor/ui => minga}/popup/registry_test.exs 1 1`.
+- **Production lines added/removed:** `0 added / 33 removed` (net `-33`, within production net `<= 0`).
+- **Test lines added/removed:** `1 added / 1 removed` (net `0`, within test net `<= +5`).
+- **Docs lines before roadmap evidence:** `2 added / 0 removed` in `docs/EXTENSIBILITY.md`.
+- **Concepts removed:** Removed one obsolete Layer 2 popup registry compatibility facade concept and its stale test namespace.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, popup path, state path, protocol path, handler path, or consumer path was added.
+- **Retained contracts:** `Minga.Popup.Registry.init/0`, `init/1`, `register/1`, `register/2`, `unregister/1`, `unregister/2`, `clear/0`, `clear/1`, `match/1`, `match/2`, `list/0`, `list/1`, `%Minga.Popup.Rule{}` data, `Minga.Config.popup/2` producer behavior, `Minga.Config.Loader` default popup registration and reload clearing, and `MingaEditor.UI.Popup.Lifecycle.open_popup/4` registry consumption remain unchanged. `MingaEditor.UI.Popup.Rule` and `MingaEditor.UI.Highlight.Grammar` remain CANDIDATE follow-ups.
+- **Findings resolved:** D20.2 implementation slice removes only the stale Popup.Registry facade while preserving the canonical Layer 0 owner and live config/lifecycle consumers.
+- **Discoveries affecting later work:** No replan trigger, production caller, test caller of the facade API, docs/extensions reference outside compatibility notice and roadmap evidence, popup lifecycle dependency, config dependency, protocol dependency, or replacement API need was found. The remaining D20 facades still require separately locked slices: `Popup.Rule` has test aliases and `Highlight.Grammar` has a production caller plus the `highlight_query_path/1` compatibility name.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,730 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact registry-facade deletion, unchanged canonical API and ETS semantics, direct config producers and lifecycle consumer, identical moved test assertions, truthful compatibility notice, preserved remaining D20 facades, negative production budget, neutral test budget, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact registry-facade cut, canonical API and ETS/config/lifecycle paths, unchanged canonical test assertions, required notice and evidence, truthful budgets and validation, freshness, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3110
+- **Implementation commit SHA:** `ba4366471`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.

@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Popup.RegistryTest do
+defmodule Minga.Popup.RegistryTest do
   use ExUnit.Case, async: true
 
   alias Minga.Popup.Registry

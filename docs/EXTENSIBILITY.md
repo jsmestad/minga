@@ -430,6 +430,8 @@ That rule matters for GUI-first features. A rich sidebar or status surface shoul
 
 The DSL is syntactic sugar over these APIs, not a replacement. Use whichever fits your extension's needs.
 
+Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Popup.Registry` has been removed. Use `Minga.Config.popup/2` for normal popup declarations, or `Minga.Popup.Registry` for direct registry operations. Popup rule data and registry behavior are unchanged.
+
 ---
 
 ## Runtime grammar loading for extensions
