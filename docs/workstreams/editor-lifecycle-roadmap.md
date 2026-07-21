@@ -3354,7 +3354,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W072/D34: Delete identity session invalidation APIs
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D34
 - **Planning profile:** `D34InvalidationPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D34InvalidationWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3378,5 +3378,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact identity-only deletion, retained live owners, complete extension coverage, zero-reference searches, exact budgets, validation evidence, current-main freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3130
 - **Implementation commit SHA:** `5cd31a921`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `227b6414d85951b0828540c0a4134aea79d31afd`.
+- **Merge evidence:** PR #3130 merged after CI run `29843867066` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
