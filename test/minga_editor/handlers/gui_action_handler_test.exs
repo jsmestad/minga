@@ -17,8 +17,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Test.SidebarActionProbe
@@ -300,6 +302,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert opened.workspace.file_tree.tree != nil
     assert opened.workspace.file_tree.focused
     assert SidebarWorkflow.active_id(opened) == "file_tree"
+    assert %{visible?: true, focused?: true} = Sidebar.get(table, "file_tree")
+
+    assert %{active_id: "file_tree", sidebars: [%{visible?: true, focused?: true}]} =
+             SidebarsBuilder.build(Context.from_editor_state(opened))
 
     focused =
       GuiActionHandler.dispatch(
@@ -322,6 +328,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute FileTreeState.visible?(hidden_state)
     refute hidden_state.focused
     assert SidebarWorkflow.active_id(hidden) == nil
+    assert %{visible?: false, focused?: false} = Sidebar.get(table, "file_tree")
+
+    assert %{active_id: "", sidebars: [%{visible?: false, focused?: false}]} =
+             SidebarsBuilder.build(Context.from_editor_state(hidden))
   end
 
   test "optional GUI commands report scheduling failures instead of no-op", %{
