@@ -43,16 +43,6 @@ defmodule MingaEditor.DisplayMapTest do
       refute 7 in visible_lines
       refute 10 in visible_lines
     end
-
-    test "buffer_range returns correct range" do
-      fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(5, 10))
-      decs = Decorations.new()
-      dm = DisplayMap.compute(fm, decs, 0, 15, 20)
-
-      {first, last} = DisplayMap.buffer_range(dm)
-      assert first == 0
-      assert last >= 11
-    end
   end
 
   # ── Decoration folds only ───────────────────────────────────────────────
@@ -300,83 +290,16 @@ defmodule MingaEditor.DisplayMapTest do
     end
   end
 
-  describe "buf_line_for_display_row/2" do
-    test "returns correct line with folds" do
+  describe "to_visible_line_map/1 row ordering" do
+    test "preserves display-row order with folds" do
       fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(3, 6))
       decs = Decorations.new()
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
+      entries = DisplayMap.to_visible_line_map(dm)
 
-      assert DisplayMap.buf_line_for_display_row(dm, 0) == 0
-      assert DisplayMap.buf_line_for_display_row(dm, 3) == 3
-      assert DisplayMap.buf_line_for_display_row(dm, 4) == 7
-    end
-  end
-
-  # ── next/prev visible line ────────────────────────────────────────────────
-
-  describe "next_visible_line/2 and prev_visible_line/2" do
-    test "skips over window fold" do
-      fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(5, 10))
-      decs = Decorations.new()
-      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
-
-      assert DisplayMap.next_visible_line(dm, 4) == 5
-      # Line 5 is fold start; next visible after it should be 11
-      assert DisplayMap.next_visible_line(dm, 5) == 11
-      assert DisplayMap.prev_visible_line(dm, 11) == 5
-    end
-
-    test "skips over decoration fold" do
-      fm = FoldMap.new()
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_fold_region(decs, 5, 10, closed: true)
-
-      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
-
-      assert DisplayMap.next_visible_line(dm, 5) == 11
-      assert DisplayMap.prev_visible_line(dm, 11) == 5
-    end
-
-    test "skips over virtual lines" do
-      fm = FoldMap.new()
-      decs = Decorations.new()
-
-      {_, decs} =
-        Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header", Minga.Core.Face.new()}],
-          placement: :above
-        )
-
-      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
-
-      # next_visible_line after line 4 should be 5 (the virtual line is
-      # not a buffer line, so it's skipped)
-      assert DisplayMap.next_visible_line(dm, 4) == 5
-    end
-  end
-
-  # ── total_display_lines ─────────────────────────────────────────────────
-
-  describe "total_display_lines/3" do
-    test "subtracts hidden fold lines and adds virtual lines" do
-      fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(5, 10))
-
-      decs = Decorations.new()
-
-      {_, decs} =
-        Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"header", Minga.Core.Face.new()}],
-          placement: :above
-        )
-
-      # 100 buffer lines - 5 hidden (fold 5-10) + 1 virtual line = 96
-      assert DisplayMap.total_display_lines(fm, decs, 100) == 96
-    end
-
-    test "no folds or virtual lines returns buffer line count" do
-      fm = FoldMap.new()
-      decs = Decorations.new()
-      assert DisplayMap.total_display_lines(fm, decs, 100) == 100
+      assert Enum.at(entries, 0) == {0, :normal}
+      assert Enum.at(entries, 3) == {3, {:fold_start, 3}}
+      assert Enum.at(entries, 4) == {7, :normal}
     end
   end
 

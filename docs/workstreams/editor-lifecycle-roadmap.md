@@ -2864,3 +2864,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `14a14055e042552e36a5ee0ea1cc4668d90d61d9`.
 - **Merge evidence:** PR #3096 merged after CI run `29784304166` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-20.
+
+### W056: Delete D40 DisplayMap query helpers
+
+- **Status:** ACTIVE
+- **Audit ID:** W056/D40
+- **Planning profile:** `D40DisplayMapPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
+- **Implementation profile:** `D40DisplayMapWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
+- **Freshness commit SHA:** `d63a4cf52b133241caf13f2474896e2f14640769`.
+- **Observable result:** `MingaEditor.DisplayMap` no longer exports the test-only query helpers `buffer_range/1`, `buf_line_for_display_row/2`, `next_visible_line/2`, `prev_visible_line/2`, or `total_display_lines/3,4`. The retained live DisplayMap contracts are unchanged: `compute/5,6`, `required?/2`, `to_visible_line_map/1`, `display_row_for_buf_line/2`, the entry type, and the `%DisplayMap{entries: ..., total_display_lines: ...}` struct shape.
+- **Failure reproduction / source trace:** Before deletion, focused tests still exercised the stale helpers: `mix test.debug test/minga_editor/display_map_test.exs test/minga/buffer/block_decoration_test.exs` passed 51 tests while relying on the query-only helper assertions. Focused trace found `DisplayMap.buffer_range/1`, `DisplayMap.buf_line_for_display_row/2`, `DisplayMap.next_visible_line/2`, `DisplayMap.prev_visible_line/2`, and `DisplayMap.total_display_lines/3` callsites only in `test/minga_editor/display_map_test.exs` and `test/minga/buffer/block_decoration_test.exs`; no `lib`, `extensions`, `macos`, `go`, or production caller existed. The deleted definitions lived only in `lib/minga_editor/display_map.ex`, and private `line_inside_fold?/2` was orphaned by the `total_display_lines/3,4` removal.
+- **Implementation result:** Deleted only the locked DisplayMap query-helper docs, specs, functions, and orphan private fold-line predicate. Deleted the query-only `buffer_range/1`, navigation-helper, total-display-line, and block-decoration navigation tests. Replaced the deleted `buf_line_for_display_row/2` block with the required `to_visible_line_map/1` row-order assertion for rows 0, 3, and 4.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/display_map.ex`; `test/minga_editor/display_map_test.exs`; `test/minga/buffer/block_decoration_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/display_map_test.exs test/minga/buffer/block_decoration_test.exs` passed 43 tests. `mix test.debug test/minga_editor/mouse/hit_test_test.exs test/minga_editor/mouse_test.exs` passed 51 tests. `mix test.debug test/minga_editor/render_pipeline/content_test.exs test/minga_editor/render_pipeline/scroll_test.exs test/minga_editor/render_model/window/builder_test.exs` passed 53 tests.
+- **Formatting, reference, and diff validation:** `mix format lib/minga_editor/display_map.ex test/minga_editor/display_map_test.exs test/minga/buffer/block_decoration_test.exs` ran. `mix format --check-formatted lib/minga_editor/display_map.ex test/minga_editor/display_map_test.exs test/minga/buffer/block_decoration_test.exs` passed. Focused post-delete source/test trace searches for deleted DisplayMap calls across `lib`, `test`, `extensions`, `macos`, and `go` returned no matches, and deleted definitions plus `line_inside_fold?/2` returned no matches in `lib/minga_editor/display_map.ex`. Retained export search confirmed `compute/5,6`, `required?/2`, `to_visible_line_map/1`, and `display_row_for_buf_line/2` remain defined. `git diff --check` passed.
+- **Numstat before roadmap evidence:** `lib/minga_editor/display_map.ex 1 94; test/minga_editor/display_map_test.exs 6 83; test/minga/buffer/block_decoration_test.exs 0 34`.
+- **Production lines added/removed:** `1 added / 94 removed` (net `-93`, within production net `<= 0`).
+- **Test lines added/removed:** `6 added / 117 removed` (net `-111`, within test net `<= 0`).
+- **Concepts removed:** Removed the obsolete test-only DisplayMap query-helper surface.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, helper, telemetry path, frontend path, mouse path, render path, or movement path was added.
+- **Retained contracts:** `DisplayMap.compute/5,6`, `required?/2`, `to_visible_line_map/1`, `display_row_for_buf_line/2`, `entry/0`, `%DisplayMap{entries: ..., total_display_lines: ...}`, buffer prefetch cursor visibility, render content visible-line-map handoff, mouse hit testing, fold-target hit testing, movement wrap gating, block decoration ordering, virtual-line ordering, and fold row construction remain unchanged.
+- **Findings resolved:** W056 implements only the D40 DisplayMap query-helper deletion slice while preserving live DisplayMap producers and consumers.
+- **Discoveries affecting later work:** No replan trigger, production caller, extension caller, frontend caller, telemetry dependency, replacement API need, or D40 completed-surface dependency was found. The `total_display_lines` struct field remains intentionally retained for a separately evidenced data-shape slice.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,744 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact query-helper and orphan predicate deletion, zero remaining traces, retained live DisplayMap contracts, meaningful renderer-facing row-order coverage, truthful negative budgets, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-helper and orphan predicate deletion, retained live APIs and struct shape, specified test cuts and behavioral retarget, clean traces, truthful budgets, complete validation evidence, zero added concepts, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3098
+- **Implementation commit SHA:** `e70be1c80`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
