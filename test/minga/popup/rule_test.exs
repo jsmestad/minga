@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Popup.RuleTest do
+defmodule Minga.Popup.RuleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Popup.Rule

@@ -432,6 +432,8 @@ The DSL is syntactic sugar over these APIs, not a replacement. Use whichever fit
 
 Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Popup.Registry` has been removed. Use `Minga.Config.popup/2` for normal popup declarations, or `Minga.Popup.Registry` for direct registry operations. Popup rule data and registry behavior are unchanged.
 
+Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Popup.Rule` has been removed. Use `Minga.Popup.Rule.new/2`, `%Minga.Popup.Rule{}`, or `Minga.Config.popup/2` for normal declarations. Popup rule data and behavior are unchanged.
+
 ---
 
 ## Runtime grammar loading for extensions
