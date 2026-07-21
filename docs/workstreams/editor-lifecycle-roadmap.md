@@ -3526,7 +3526,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked owner boundary, local trigger eligibility, unchanged-state fallbacks, post-fix coverage, exact budgets, evidence, and merge safety.
 - **Findings resolved:** S04's duplicated workspace auto-name installation path is removed; future install/persistence behavior now has one workspace workflow owner.
 - **Discoveries affecting later work:** None. The locked owner, contract, scope, test layer, dependencies, and production-line budget remained valid.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3142
+- **Implementation commit SHA:** `782504475`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
