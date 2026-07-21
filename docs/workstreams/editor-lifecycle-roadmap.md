@@ -3407,7 +3407,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** None.
 - **Pre-acceptance reviews:** Elixir craftsmanship returned `PASS/Lean`. Correctness initially blocked on equal-ref retargeting no longer guaranteeing file membership, and Ponytail required deleting an unused duplicate workspace membership API and its two direct tests. The equal-ref path now always adds the retained membership, its regression starts without membership and proves restoration, and the duplicate API/tests plus obsolete nil serializer branch are deleted. Targeted rechecks returned `RESOLVED/PASS` for both blockers and confirmed exact final budgets.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed schema-v1 compatibility, legacy-key tolerance, separate session restore ownership, equal-ref membership correctness, complete deleted-API coverage, exact budgets, corroborated validation, current-main freshness, and merge safety.
-- **PR URL:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3132
 - **Implementation commit SHA:** `e433ba80e`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
