@@ -3347,6 +3347,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or mandatory cuts. They independently confirmed the exact five-concept local deletion, behavior-preserving catch-all paths, retained identity-rich hover contract, retained AgentMouse node routing, complete protocol/frontend/parser compatibility boundary, proportional tests, exact budgets, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-concept deletion, complete retained compatibility boundary, exact accounting, corroborated validation, current-main freshness, and merge safety.
 - **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **Implementation commit SHA:** `4c082369f`.
 - **Merge SHA:** Pending.
 - **Completion date:** 2026-07-21.
