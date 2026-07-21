@@ -3555,7 +3555,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked tuple shrink, cold-start/reset/no-refresh contracts, source cleanup, tests, exact budgets, warning rationale, evidence, and merge safety.
 - **Findings resolved:** S05's registry over-shaped tuple and hot-path built-in metadata rebuild are removed; explicit reset remains the owner-controlled reseed transition.
 - **Discoveries affecting later work:** The extension subproject's local exqlite precompiled artifact can be invalid on this workstation after a fresh `mix deps.get`; the root worktree NIF was valid and unblocked the focused extension lifecycle validation. No owner, contract, scope, dependency, or production-line budget assumption failed.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3144
+- **Implementation commit SHA:** `7c441800f`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
