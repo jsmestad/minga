@@ -386,7 +386,7 @@ final class CoreTextMetalRenderer {
                 presentationInputSeq: UInt32 = 0,
                 latencyRecorder: LatencyRecorder? = nil,
                 onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) {
-        guard presentationGeneration.next &- presentationGeneration.completed < UInt64(Self.nativeFrameSlotCount) else {
+        guard let reservation = presentationGeneration.issue(slotCount: Self.nativeFrameSlotCount) else {
             let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
             recordNativeFailure(NativePresentationFailure(
                 phase: .command, dimension: .submission,
@@ -395,7 +395,12 @@ final class CoreTextMetalRenderer {
             latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
             return
         }
-        let nativeFrameSlot = Int(presentationGeneration.next % UInt64(Self.nativeFrameSlotCount))
+        let generation = reservation.generation
+        let nativeFrameSlot = reservation.slot
+        var submitted = false
+        defer {
+            if !submitted { presentationGeneration.retire(generation) }
+        }
 
         let frameState = snapshot.frameState
         let themeColors = snapshot.themeColors
@@ -1566,11 +1571,14 @@ final class CoreTextMetalRenderer {
         }
 
         let commitTime = CACurrentMediaTime()
-        let generation = presentationGeneration.issue()
         let candidateInstanceSlots = lineInstances.count
         let candidateQuadCapacity = bufferDemand.quadBytesPerBuffer / MemoryLayout<QuadGPU>.stride
         factories.observeCompletion(cmdBuf) { [weak self] completed, status in
             guard let self else { return }
+            var presentationSubmitted = false
+            defer {
+                if !presentationSubmitted { self.presentationGeneration.retire(generation) }
+            }
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
             os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID,
                         "commit_to_complete_ms=%{public}.3f", completionLatencyMs)
@@ -1658,6 +1666,7 @@ final class CoreTextMetalRenderer {
 
             self.factories.observeCompletion(presentationBuffer) { [weak self] copied, _ in
                 guard let self else { return }
+                defer { self.presentationGeneration.retire(generation) }
                 guard copied else {
                     self.recordNativeFailure(NativePresentationFailure(
                         phase: .completion, dimension: .presentationCopy,
@@ -1707,12 +1716,14 @@ final class CoreTextMetalRenderer {
                             signpostID: renderSignpostID,
                             "input=%{public}u", presentationInputSeq)
             }
+            presentationSubmitted = true
             presentationBuffer.commit()
             self.presentationMetrics?.recordMetalSubmission(presentationFrame: presentationFrame)
             os_signpost(.event, log: renderLog, name: "MetalPresentationSubmit", signpostID: renderSignpostID,
                         "input=%{public}u frame=%{public}u", presentationInputSeq,
                         presentationFrame.frameSeq)
         }
+        submitted = true
         cmdBuf.commit()
         latencyRecorder?.markSubmitted(seq: presentationInputSeq)
         os_signpost(.event, log: renderLog, name: "MetalSubmit", signpostID: renderSignpostID,

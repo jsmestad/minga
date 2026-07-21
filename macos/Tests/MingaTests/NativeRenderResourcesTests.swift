@@ -348,15 +348,36 @@ struct NativeRenderResourcesTests {
     }
 
     @Test("late older completion cannot replace a newer completed generation")
-    func completionOrdering() {
+    func completionOrdering() throws {
         var ordering = NativePresentationGeneration()
-        let older = ordering.issue()
-        let newer = ordering.issue()
-        let promotedNewer = ordering.complete(newer)
-        let promotedOlder = ordering.complete(older)
+        let olderReservation = ordering.issue(slotCount: 3)
+        let newerReservation = ordering.issue(slotCount: 3)
+        let older = try #require(olderReservation)
+        let newer = try #require(newerReservation)
+        let promotedNewer = ordering.complete(newer.generation)
+        let promotedOlder = ordering.complete(older.generation)
         #expect(promotedNewer)
         #expect(!promotedOlder)
-        #expect(ordering.completed == newer)
+        #expect(ordering.completed == newer.generation)
+        #expect(ordering.inFlightCount == 0)
+    }
+
+    @Test("retired generation releases its native frame slot")
+    func retirementReleasesSlot() throws {
+        var ordering = NativePresentationGeneration()
+        let firstReservation = ordering.issue(slotCount: 2)
+        let secondReservation = ordering.issue(slotCount: 2)
+        let first = try #require(firstReservation)
+        let second = try #require(secondReservation)
+        #expect(ordering.issue(slotCount: 2) == nil)
+
+        ordering.retire(first.generation)
+        let replacementReservation = ordering.issue(slotCount: 2)
+        let replacement = try #require(replacementReservation)
+
+        #expect(replacement.slot == first.slot)
+        #expect(replacement.slot != second.slot)
+        #expect(ordering.inFlightCount == 2)
     }
 
     @Test("production raster allocator refusal is a typed local failure")
@@ -658,6 +679,44 @@ struct NativeRenderResourcesTests {
         #expect(reports.first?.phase == .completion)
         #expect(renderer.activeResourceSnapshot() == before)
         #expect(renderer.lastCompletedPresentationGeneration == 0)
+    }
+
+    @Test("renderer recovers after three consecutive completion failures")
+    @MainActor func completionFailuresReleaseNativeSlots() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return }
+
+        var completionCalls = 0
+        var presentCalls = 0
+        var reports: [NativePresentationFailure] = []
+        var factories = nativeTestFactories()
+        factories.observeCompletion = { _, completion in
+            completionCalls += 1
+            let succeeds = completionCalls > 3
+            completion(succeeds, Int((succeeds ? MTLCommandBufferStatus.completed : .error).rawValue))
+        }
+        factories.present = { _ in presentCalls += 1 }
+        factories.reportFailure = { reports.append($0) }
+        guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+
+        for sequence in 1...4 {
+            renderer.render(
+                frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
+                drawableProvider: { NativeTestDrawable(texture: texture) },
+                viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+                presentationInputSeq: UInt32(sequence)
+            )
+        }
+
+        #expect(reports.count == 3)
+        #expect(presentCalls == 1)
+        #expect(renderer.lastCompletedPresentationGeneration == 4)
     }
 
     @Test("candidate presents and promotes only after both commands complete")

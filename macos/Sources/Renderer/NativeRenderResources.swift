@@ -352,17 +352,33 @@ struct NativeRenderFactories {
 /// Orders asynchronous resource promotion. A completion from an older frame
 /// may never replace a generation that already completed later.
 struct NativePresentationGeneration: Sendable, Equatable {
+    struct Reservation: Sendable, Equatable {
+        let generation: UInt64
+        let slot: Int
+    }
+
     private(set) var next: UInt64 = 0
     private(set) var completed: UInt64 = 0
+    private var inFlightSlots: [UInt64: Int] = [:]
 
-    mutating func issue() -> UInt64 {
+    var inFlightCount: Int { inFlightSlots.count }
+
+    mutating func issue(slotCount: Int) -> Reservation? {
+        guard slotCount > 0 else { return nil }
+        guard let slot = (0..<slotCount).first(where: { !inFlightSlots.values.contains($0) }) else { return nil }
         next &+= 1
-        return next
+        inFlightSlots[next] = slot
+        return Reservation(generation: next, slot: slot)
     }
 
     mutating func complete(_ generation: UInt64) -> Bool {
-        guard generation > completed, generation <= next else { return false }
+        guard inFlightSlots.removeValue(forKey: generation) != nil,
+              generation > completed else { return false }
         completed = generation
         return true
+    }
+
+    mutating func retire(_ generation: UInt64) {
+        inFlightSlots.removeValue(forKey: generation)
     }
 }
