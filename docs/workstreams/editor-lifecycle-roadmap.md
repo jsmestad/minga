@@ -3377,6 +3377,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or mandatory cuts. They confirmed every removed function was identity-only, every caller retains its preceding live transition, the frontend reset sequence and renderer cache owners remain intact, explicit scroll/pin behavior is unchanged, the single test assertion is proportional, budgets are exact, and no concept was added.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact identity-only deletion, retained live owners, complete extension coverage, zero-reference searches, exact budgets, validation evidence, current-main freshness, and merge safety.
 - **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **Implementation commit SHA:** `5cd31a921`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
