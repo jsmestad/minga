@@ -1770,7 +1770,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         open_tab_buffer_in_active_window(state, tab, abs_path)
 
       nil ->
-        case Commands.start_buffer(abs_path, state.interaction.options_server) do
+        case Commands.start_buffer(abs_path, state.interaction.options_server,
+               events_registry: state.extension_surfaces.events_registry
+             ) do
           {:ok, pid} ->
             register_buffer_in_active_window(state, pid, abs_path)
 
@@ -1829,12 +1831,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buffer_pid)
 
     Minga.Log.info(:editor, "Opened: #{file_path}")
-
-    Minga.Events.broadcast(
-      :buffer_opened,
-      %Minga.Events.BufferEvent{buffer: buffer_pid, path: file_path},
-      state.extension_surfaces.events_registry
-    )
 
     state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
 

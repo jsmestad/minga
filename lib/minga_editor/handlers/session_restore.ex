@@ -71,7 +71,9 @@ defmodule MingaEditor.Handlers.SessionRestore do
   @spec restore_session_buffer(Session.buffer_entry(), state()) :: state()
   defp restore_session_buffer(%{file: file} = entry, state) do
     if File.exists?(file) do
-      case Commands.start_buffer(file, state.interaction.options_server) do
+      case Commands.start_buffer(file, state.interaction.options_server,
+             events_registry: state.extension_surfaces.events_registry
+           ) do
         {:ok, pid} ->
           :ok = Buffer.move_to(pid, {entry.cursor_line, entry.cursor_col})
           BufferRegistry.register_buffer(state, pid, file)
@@ -120,7 +122,9 @@ defmodule MingaEditor.Handlers.SessionRestore do
   # The buffer is marked dirty since the recovered content hasn't been saved.
   @spec recover_buffer(state(), String.t(), String.t()) :: state()
   defp recover_buffer(state, file_path, content) do
-    case Commands.start_buffer(file_path, state.interaction.options_server) do
+    case Commands.start_buffer(file_path, state.interaction.options_server,
+           events_registry: state.extension_surfaces.events_registry
+         ) do
       {:ok, pid} ->
         # Replace buffer content with the recovered swap data.
         # This marks the buffer dirty (unsaved changes from the crash).
