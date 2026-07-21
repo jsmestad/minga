@@ -3132,7 +3132,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors after the safety cut. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,731 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded before the test-only safety cut.
 - **Pre-acceptance reviews:** Correctness and Ponytail initially blocked the unsafe real-HOME test setup and disproportionate new regression; the exact cut removed both. Targeted correctness and Ponytail rechecks returned `RESOLVED/PASS`, and Elixir craftsmanship returned `PASS / Lean`. They confirmed direct canonical ownership, move-equivalent tests, no unsafe HOME mutation, negative production and neutral test budgets, and zero added concepts.
 - **Final reviewer verdict:** The initial reviewer blocked because the moved grammar test destination was untracked. After adding it to the index, targeted re-review returned `RESOLVED/PASS` with 0.99 confidence and confirmed the R098 move, truthful test accounting, patch integrity, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3114
+- **Implementation commit SHA:** `1d648bbb1`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
