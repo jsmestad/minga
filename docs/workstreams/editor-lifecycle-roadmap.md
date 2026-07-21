@@ -3202,7 +3202,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W067/D26: Remove duplicate agent replay catch-up parser
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D26
 - **Planning profile:** `D26ReplayPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D26ReplayWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3226,5 +3226,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact duplicate-parser deletion, canonical replay callers and ordering, complete taxonomy parity, live dispatch and batch behavior, truthful validation and budgets, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3120
 - **Implementation commit SHA:** `bfb13fad7`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `11ae5336100a3d28ec2c8052b375fa5ac386b942`.
+- **Merge evidence:** PR #3120 merged after CI run `29822988251` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
