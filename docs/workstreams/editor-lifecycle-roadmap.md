@@ -3592,7 +3592,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W080/S07: Make GUI action handler state-only for locked render paths
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S07
 - **Planning profile:** `S07Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S07Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3615,5 +3615,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** None. The locked owner, contract, scope, test layer, dependencies, and production-line budget remained valid.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3148
 - **Implementation commit SHA:** `968cd658d`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `545c839a5800f79cd850e4b45cf3771bbb17f6c1`.
+- **Merge evidence:** PR #3148 merged after CI run `29877756606` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
