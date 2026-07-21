@@ -3008,7 +3008,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors before and after the final rect-reuse cut. `mix test.llm --seed 611741 --max-cases 4` passed 9,730 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded before the behavior-preserving rect-reuse cut.
 - **Pre-acceptance reviews:** Correctness and Ponytail returned `PASS / Lean` with no blockers or cuts, confirming the exact zero-state deletion, preserved geometry/row-fit/global-status contracts, negative production/test budgets, and zero added concepts. Elixir craftsmanship required reusing the retained rect tuple in `subdivide_window/1` rather than reconstructing it twice; the cut was applied and the targeted recheck returned `RESOLVED/PASS`.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact per-window modeline deletion, preserved geometry, separators, row-fit ownership, global status-bar/modeline encoding, hit-kind numbering, remaining surface IDs, truthful budgets and evidence, freshness, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3106
+- **Implementation commit SHA:** `5b1d7a33b`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
