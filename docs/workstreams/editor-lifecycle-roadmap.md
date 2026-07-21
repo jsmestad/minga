@@ -3470,7 +3470,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** The first S03 implementation exposed a required follow-up invariant: any future review resolution that changes materialized file content must reproject `EditTimeline.cumulative_hunks` after persistence succeeds, not just mutate `DiffReview.resolutions`. No owner, test-layer, dependency, or production-budget assumption failed after the blocker correction.
 - **Pre-acceptance reviews:** Correctness initially blocked on stale timeline authority after reject actions, Elixir craftsmanship required retained-binary detachment, split-once construction, and snapshot cleanup, and Ponytail required the same cleanup. The owner correction and test cuts were applied; correctness and Ponytail returned `RESOLVED/PASS`, and Elixir craftsmanship returned `RESOLVED/PASS` after mutation-backed binary tests covered both retention boundaries. The final reviewer then blocked on stale numeric cursor preservation after hunk reprojection; the cursor now follows the surviving hunk signature, and the targeted recheck returned `RESOLVED/PASS` with 0.99 confidence.
 - **Final reviewer verdict:** `PASS` after one targeted blocker correction. The final recheck confirmed repeated rejection preserves next-unresolved hunk order and found no remaining merge blocker.
-- **PR URL:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3138
 - **Implementation commit SHA:** `1a59affde`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
