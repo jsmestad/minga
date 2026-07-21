@@ -2,7 +2,7 @@ defmodule MingaEditor.WindowTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.UI.Popup.Active, as: PopupActive
-  alias MingaEditor.UI.Popup.Rule, as: PopupRule
+  alias Minga.Popup.Rule, as: PopupRule
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.Window.RenderCache

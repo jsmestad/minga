@@ -3075,3 +3075,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `85cf228a650af182a85157a98fd89d24cfa656d3`.
 - **Merge evidence:** PR #3110 merged after CI run `29806152783` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W063/D20.3: Delete Popup.Rule compatibility facade
+
+- **Status:** ACTIVE
+- **Audit ID:** D20.3 Popup.Rule compatibility facade deletion
+- **Planning profile:** `D20ThirdFacadePlanner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `D20PopupRuleWorker`, `editor-lifecycle-worker`, no delegation.
+- **Freshness commit SHA:** `08f7cfedbccac2e11805fc6f149545feae672811`.
+- **Observable result:** The old Layer 2 popup rule delegate is removed from production and test source. The canonical `Minga.Popup.Rule` remains the only popup rule owner, while rule construction, validation, matching, registry storage, config declarations, default popup registration, popup lifecycle/open/close behavior, active-popup metadata, input dismissal, and float-popup rendering continue to use the unchanged `%Minga.Popup.Rule{}` data shape.
+- **Failure reproduction / source trace:** Before deletion, focused source search found the obsolete facade module in `lib/minga_editor/ui/popup/rule.ex`, two stale test aliases in `test/minga_editor/window_test.exs` and `test/minga_editor/state/windows_test.exs`, the stale facade-named test module, and roadmap prose. The production file delegated `new/2` and `matches?/2` directly to `Minga.Popup.Rule`; the existing rule test already aliased the canonical owner.
+- **Implementation result:** Deleted only `lib/minga_editor/ui/popup/rule.ex`; moved `test/minga_editor/ui/popup/rule_test.exs` to `test/minga/popup/rule_test.exs`; renamed the test module to `Minga.Popup.RuleTest` without changing rule assertions; redirected the two test aliases to `Minga.Popup.Rule`; added the compatibility notice in `docs/EXTENSIBILITY.md`.
+- **Changed files:** `docs/EXTENSIBILITY.md`; `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/ui/popup/rule.ex`; `test/minga/popup/rule_test.exs`; `test/minga_editor/state/windows_test.exs`; `test/minga_editor/ui/popup/rule_test.exs`; `test/minga_editor/window_test.exs`.
+- **Focused validation:** `mix test test/minga/popup/rule_test.exs test/minga/popup/registry_test.exs test/minga/config_test.exs test/minga_editor/ui/popup/lifecycle_test.exs test/minga_editor/input/popup_test.exs test/minga_editor/window_test.exs test/minga_editor/state/windows_test.exs test/minga_editor/render_model/ui/float_popup_builder_test.exs` passed with 150 tests.
+- **Formatting, reference, and diff validation:** `mix format --check-formatted docs/EXTENSIBILITY.md docs/workstreams/editor-lifecycle-roadmap.md test/minga/popup/rule_test.exs test/minga_editor/window_test.exs test/minga_editor/state/windows_test.exs` passed after roadmap evidence. Focused forbidden-reference search across `lib`, `test`, `extensions`, `sdk`, `examples`, `docs`, `README.md`, `EXTENSION_API.md`, and `CHANGELOG.md` returned matches only in compatibility/roadmap prose. `git diff --check` passed after roadmap evidence.
+- **Numstat before roadmap evidence:** `docs/EXTENSIBILITY.md 2 0; lib/minga_editor/ui/popup/rule.ex 0 13; test/minga_editor/state/windows_test.exs 1 1; test/minga_editor/window_test.exs 1 1; moved test file 186 lines with 1 module-line replacement`.
+- **Production lines added/removed:** `0 added / 13 removed` (net `-13`, within production net `<= 0`).
+- **Test lines added/removed:** `3 added / 3 removed` plus one unchanged 186-line test move (net `0`, within test net `<= +5`).
+- **Docs lines before roadmap evidence:** `2 added / 0 removed` in `docs/EXTENSIBILITY.md`.
+- **Concepts removed:** Removed one obsolete Layer 2 popup rule compatibility facade concept and its stale test namespace.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, popup path, state path, protocol path, handler path, consumer path, or grammar path was added.
+- **Retained contracts:** `Minga.Popup.Rule.new/2`, `matches?/2`, the `%Minga.Popup.Rule{pattern, display, side, size, width, height, position, border, focus, auto_close, quit_key, modeline, priority}` struct, option validation and errors, exact string matching, regex matching, `Minga.Popup.Registry` storage and priority matching, `Minga.Config.popup/2` producer behavior, `Minga.Config.Loader` default popup registration, `MingaEditor.UI.Popup.Active.new/3`, `MingaEditor.UI.Popup.Lifecycle.open_popup/4`, popup input dismissal, window/state popup detection, and float popup render-model sizing remain unchanged. `MingaEditor.UI.Highlight.Grammar` remains CANDIDATE for a later slice.
+- **Findings resolved:** D20.3 implementation slice removes only the stale Popup.Rule facade while preserving the canonical Layer 0 owner and live config/registry/lifecycle/window/state/render consumers.
+- **Discoveries affecting later work:** No replan trigger, production caller of the old popup rule facade, docs/extensions reference outside prose, popup lifecycle dependency, config dependency, protocol dependency, grammar dependency, or replacement API need was found. `MingaEditor.UI.Highlight.Grammar` remains intentionally untouched because it still has a production caller and a compatibility-named function.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,730 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact rule-facade deletion, unchanged canonical 13-field shape and construction/matching behavior, direct producers and consumers, byte-equivalent moved test assertions, exact alias migration, truthful compatibility notice, preserved Grammar facade, negative production budget, neutral test budget, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact rule-facade cut, canonical 13-field owner and API across traced producers and consumers, unchanged tests in the canonical namespace, both alias redirects, accurate notice, budgets, freshness, validation, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.

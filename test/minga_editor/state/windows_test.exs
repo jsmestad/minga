@@ -5,7 +5,7 @@ defmodule MingaEditor.State.WindowsTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.UI.Popup.Active, as: PopupActive
-  alias MingaEditor.UI.Popup.Rule
+  alias Minga.Popup.Rule
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
