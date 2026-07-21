@@ -2867,7 +2867,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W056: Delete D40 DisplayMap query helpers
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** W056/D40
 - **Planning profile:** `D40DisplayMapPlanner`, `editor-lifecycle-planner`, `openai-codex/gpt-5.5`, read-only.
 - **Implementation profile:** `D40DisplayMapWorker`, `editor-lifecycle-worker`, `openai-codex/gpt-5.5`, no delegation.
@@ -2891,5 +2891,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-helper and orphan predicate deletion, retained live APIs and struct shape, specified test cuts and behavioral retarget, clean traces, truthful budgets, complete validation evidence, zero added concepts, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3098
 - **Implementation commit SHA:** `e70be1c80`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `79956797cafe66e146019c04b02930cd3eab1003`.
+- **Merge evidence:** PR #3098 merged after CI run `29788478208` passed Elixir on the failed-job rerun plus Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The first Elixir attempt failed in unrelated `DirtyFlagPropertyTest`; its exact location passed locally with CI seed `530854` before the full failed-job rerun passed.
+- **Completion date:** 2026-07-21.
