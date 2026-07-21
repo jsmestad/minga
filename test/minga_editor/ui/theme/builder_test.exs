@@ -19,6 +19,9 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert %Theme.Search{} = theme.search
       assert %Theme.Popup{} = theme.popup
       assert %Theme.Tree{} = theme.tree
+      refute Map.has_key?(Map.from_struct(theme.editor), :tilde_fg)
+      refute Map.has_key?(Map.from_struct(theme.tree), :modified_fg)
+      refute Map.has_key?(Map.from_struct(theme.tree), :git_conflict_fg)
       assert %Theme.Agent{} = theme.agent
       assert %Theme.TabBar{} = theme.tab_bar
       assert %Theme.Dashboard{} = theme.dashboard
@@ -48,6 +51,18 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert theme.syntax["string"] == [fg: 0xA6E3A1]
     end
 
+    test "accepts deprecated nested concrete field overrides and ignores them" do
+      theme =
+        Builder.from_palette(:palette_test, sample_palette(), %{
+          editor: %{tilde_fg: 0x000000},
+          tree: %{modified_fg: 0x222222, git_conflict_fg: 0x333333}
+        })
+
+      refute Map.has_key?(Map.from_struct(theme.editor), :tilde_fg)
+      refute Map.has_key?(Map.from_struct(theme.tree), :modified_fg)
+      refute Map.has_key?(Map.from_struct(theme.tree), :git_conflict_fg)
+    end
+
     test "rejects unknown modeline mode keys" do
       assert_raise ArgumentError,
                    ~r/unknown theme override modeline\.mode_colors key: norml/,
@@ -69,6 +84,20 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
 
       assert_raise ArgumentError, ~r/theme override gutter\.advisory_fg must be a color/, fn ->
         Builder.from_palette(:palette_test, sample_palette(), %{gutter: %{advisory_fg: :oops}})
+      end
+
+      for {section, field} <- [
+            {:editor, :tilde_fg},
+            {:tree, :modified_fg},
+            {:tree, :git_conflict_fg}
+          ] do
+        assert_raise ArgumentError,
+                     ~r/theme override #{section}\.#{field} must be a color/,
+                     fn ->
+                       Builder.from_palette(:palette_test, sample_palette(), %{
+                         section => %{field => :oops}
+                       })
+                     end
       end
 
       assert_raise ArgumentError,

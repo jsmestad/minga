@@ -43,7 +43,6 @@ defmodule MingaEditor.UI.Theme.Builder do
     editor: [
       :bg,
       :fg,
-      :tilde_fg,
       :split_border_fg,
       :cursorline_bg,
       :nav_flash_bg,
@@ -100,11 +99,9 @@ defmodule MingaEditor.UI.Theme.Builder do
       :header_fg,
       :header_bg,
       :separator_fg,
-      :modified_fg,
       :git_modified_fg,
       :git_staged_fg,
-      :git_untracked_fg,
-      :git_conflict_fg
+      :git_untracked_fg
     ],
     agent: [
       :panel_bg,
@@ -197,7 +194,6 @@ defmodule MingaEditor.UI.Theme.Builder do
     %Theme.Editor{
       bg: p.base.bg,
       fg: p.base.fg,
-      tilde_fg: p.base.subtle,
       split_border_fg: p.semantic.border,
       cursorline_bg: p.base.surface,
       nav_flash_bg: p.base.subtle,
@@ -301,11 +297,9 @@ defmodule MingaEditor.UI.Theme.Builder do
       header_fg: p.semantic.highlight,
       header_bg: p.base.surface,
       separator_fg: p.semantic.border,
-      modified_fg: p.semantic.warning,
       git_modified_fg: p.semantic.warning,
       git_staged_fg: p.semantic.success,
-      git_untracked_fg: p.base.muted,
-      git_conflict_fg: p.semantic.error
+      git_untracked_fg: p.base.muted
     }
   end
 
@@ -603,10 +597,24 @@ defmodule MingaEditor.UI.Theme.Builder do
       if MapSet.member?(fields, key) do
         %{acc | key => validate_override_value(section, key, Map.get(acc, key), value)}
       else
-        raise ArgumentError,
-              "unknown theme override field #{inspect(section)}.#{inspect(key)}"
+        accept_deprecated_override(section, key, value)
+        acc
       end
     end)
+  end
+
+  @spec accept_deprecated_override(atom(), atom(), term()) :: Theme.color()
+  defp accept_deprecated_override(section, field, value)
+       when {section, field} in [
+              {:editor, :tilde_fg},
+              {:tree, :modified_fg},
+              {:tree, :git_conflict_fg}
+            ],
+       do: validate_color_override(section, field, value)
+
+  defp accept_deprecated_override(section, key, _value) do
+    raise ArgumentError,
+          "unknown theme override field #{inspect(section)}.#{inspect(key)}"
   end
 
   @spec validate_override_value(atom(), atom(), term(), term()) :: term()

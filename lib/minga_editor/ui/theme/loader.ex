@@ -33,8 +33,7 @@ defmodule MingaEditor.UI.Theme.Loader do
   - `:overrides` (optional) — map of concrete theme section overrides applied after palette derivation, such as `%{popup: %{title_fg: 0x89B4FA}}`. Invalid sections or fields fail the theme load instead of being ignored.
   - `:faces` (optional) — map of face name strings to style keyword
     lists. Merged via `Face.Registry.with_overrides/2`.
-  - `:editor` (optional) — map of editor chrome color overrides
-    (`:bg`, `:fg`, `:tilde_fg`, `:split_border_fg`, etc.)
+  - `:editor` (optional) — map of editor chrome color overrides (`:bg`, `:fg`, `:split_border_fg`, etc.). Deprecated `:tilde_fg` values are validated and ignored.
 
   ## Discovery
 
@@ -234,42 +233,10 @@ defmodule MingaEditor.UI.Theme.Loader do
   @spec rename_theme(Theme.t(), atom()) :: Theme.t()
   defp rename_theme(theme, name), do: %{theme | name: name}
 
-  @editor_fields MapSet.new(
-                   Map.keys(%Theme.Editor{bg: 0, fg: 0, tilde_fg: 0, split_border_fg: 0}) --
-                     [:__struct__]
-                 )
-
-  @spec valid_color?(term()) :: boolean()
-  defp valid_color?(value), do: is_integer(value) and value >= 0
-
   @spec apply_editor_overrides(Theme.t(), map()) :: Theme.t()
   defp apply_editor_overrides(theme, %{editor: overrides}) when is_map(overrides) do
-    editor =
-      Enum.reduce(overrides, theme.editor, fn {key, value}, ed ->
-        apply_editor_override(ed, key, value)
-      end)
-
-    %{theme | editor: editor}
+    Builder.apply_overrides(theme, %{editor: overrides})
   end
 
   defp apply_editor_overrides(theme, _data), do: theme
-
-  @spec apply_editor_override(Theme.Editor.t(), atom(), term()) :: Theme.Editor.t()
-  defp apply_editor_override(ed, key, value) do
-    if MapSet.member?(@editor_fields, key) do
-      validate_editor_override(ed, key, value)
-    else
-      raise ArgumentError, "unknown theme editor override field: #{inspect(key)}"
-    end
-  end
-
-  @spec validate_editor_override(Theme.Editor.t(), atom(), term()) :: Theme.Editor.t()
-  defp validate_editor_override(ed, key, value) do
-    if valid_color?(value) do
-      %{ed | key => value}
-    else
-      raise ArgumentError,
-            "theme editor override #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
-    end
-  end
 end

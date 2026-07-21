@@ -51,13 +51,14 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       %{
         name: :dark_test,
         inherits: :doom_one,
-        editor: %{bg: 0x111111, fg: 0xEEEEEE}
+        editor: %{bg: 0x111111, fg: 0xEEEEEE, tilde_fg: 0x000000}
       }
       """)
 
       {:ok, loaded} = Loader.load_file(path)
       assert loaded.theme.editor.bg == 0x111111
       assert loaded.theme.editor.fg == 0xEEEEEE
+      refute Map.has_key?(Map.from_struct(loaded.theme.editor), :tilde_fg)
     end
 
     test "non-map palettes return load errors", %{tmp_dir: dir} do
@@ -137,7 +138,7 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       """)
 
       assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
-      assert error =~ "unknown theme editor override field: :backround"
+      assert error == "unknown theme override field :editor.:backround"
     end
 
     test "invalid editor override values return load errors", %{tmp_dir: dir} do
@@ -152,7 +153,22 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       """)
 
       assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
-      assert error =~ "theme editor override bg must be a color"
+      assert error == "theme override editor.bg must be a color, got: :oops"
+
+      deprecated_path = Path.join(dir, "bad_deprecated_editor_value.exs")
+
+      File.write!(deprecated_path, """
+      %{
+        name: :bad_deprecated_editor_value_test,
+        inherits: :doom_one,
+        editor: %{tilde_fg: :oops}
+      }
+      """)
+
+      assert {:error, %{path: ^deprecated_path, error: deprecated_error}} =
+               Loader.load_file(deprecated_path)
+
+      assert deprecated_error == "theme override editor.tilde_fg must be a color, got: :oops"
     end
 
     test "palette themes build the full cascade and apply overrides", %{tmp_dir: dir} do
@@ -247,7 +263,8 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
         inherits: :doom_one,
         overrides: %{
           popup: %{title_fg: 0x123456},
-          editor: %{bg: 0x111111}
+          editor: %{bg: 0x111111, tilde_fg: 0x000000},
+          tree: %{modified_fg: 0x222222, git_conflict_fg: 0x333333}
         }
       }
       """)
@@ -255,6 +272,9 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       {:ok, loaded} = Loader.load_file(path)
       assert loaded.theme.editor.bg == 0x111111
       assert loaded.theme.popup.title_fg == 0x123456
+      refute Map.has_key?(Map.from_struct(loaded.theme.editor), :tilde_fg)
+      refute Map.has_key?(Map.from_struct(loaded.theme.tree), :modified_fg)
+      refute Map.has_key?(Map.from_struct(loaded.theme.tree), :git_conflict_fg)
     end
 
     test "invalid palette overrides return load errors", %{tmp_dir: dir} do

@@ -108,7 +108,6 @@ defmodule MingaEditor.UI.Theme.OneLight do
         cursor_bg: @syntax_selection,
         header_bg: @ui_bg,
         separator_fg: @mono_3,
-        modified_fg: @syntax_color_modified,
         git_untracked_fg: @mono_3
       },
       syntax: syntax_overrides()

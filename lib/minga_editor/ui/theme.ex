@@ -88,12 +88,11 @@ defmodule MingaEditor.UI.Theme do
   # ── Color group structs ─────────────────────────────────────────────────────
 
   defmodule Editor do
-    @moduledoc "Editor chrome colors: background, foreground, tilde lines, split borders, cursorline, nav-flash, highlight/selection."
-    @enforce_keys [:bg, :fg, :tilde_fg, :split_border_fg]
+    @moduledoc "Editor chrome colors: background, foreground, split borders, cursorline, nav-flash, highlight/selection."
+    @enforce_keys [:bg, :fg, :split_border_fg]
     defstruct [
       :bg,
       :fg,
-      :tilde_fg,
       :split_border_fg,
       :cursorline_bg,
       :nav_flash_bg,
@@ -110,7 +109,6 @@ defmodule MingaEditor.UI.Theme do
     @type t :: %__MODULE__{
             bg: MingaEditor.UI.Theme.color(),
             fg: MingaEditor.UI.Theme.color(),
-            tilde_fg: MingaEditor.UI.Theme.color(),
             split_border_fg: MingaEditor.UI.Theme.color(),
             cursorline_bg: MingaEditor.UI.Theme.color() | nil,
             nav_flash_bg: MingaEditor.UI.Theme.color() | nil,
@@ -441,11 +439,9 @@ defmodule MingaEditor.UI.Theme do
       :header_fg,
       :header_bg,
       :separator_fg,
-      :modified_fg,
       :git_modified_fg,
       :git_staged_fg,
-      :git_untracked_fg,
-      :git_conflict_fg
+      :git_untracked_fg
     ]
 
     @type t :: %__MODULE__{
@@ -457,11 +453,9 @@ defmodule MingaEditor.UI.Theme do
             header_fg: MingaEditor.UI.Theme.color(),
             header_bg: MingaEditor.UI.Theme.color(),
             separator_fg: MingaEditor.UI.Theme.color(),
-            modified_fg: MingaEditor.UI.Theme.color() | nil,
             git_modified_fg: MingaEditor.UI.Theme.color() | nil,
             git_staged_fg: MingaEditor.UI.Theme.color() | nil,
-            git_untracked_fg: MingaEditor.UI.Theme.color() | nil,
-            git_conflict_fg: MingaEditor.UI.Theme.color() | nil
+            git_untracked_fg: MingaEditor.UI.Theme.color() | nil
           }
   end
 

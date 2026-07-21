@@ -47,7 +47,6 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       editor: %MingaEditor.UI.Theme.Editor{
         bg: @bg,
         fg: @fg,
-        tilde_fg: @base5,
         split_border_fg: @base5,
         cursorline_bg: 0x2C323C,
         nav_flash_bg: 0x3E4451,
@@ -120,11 +119,9 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         header_fg: @blue,
         header_bg: @base3,
         separator_fg: @base5,
-        modified_fg: @orange,
         git_modified_fg: @violet,
         git_staged_fg: @green,
-        git_untracked_fg: @grey,
-        git_conflict_fg: @red
+        git_untracked_fg: @grey
       },
       agent: %MingaEditor.UI.Theme.Agent{
         panel_bg: @bg,
