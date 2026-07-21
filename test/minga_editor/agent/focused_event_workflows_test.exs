@@ -24,6 +24,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
   alias MingaAgent.Session
@@ -97,7 +98,49 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       |> TraditionalState.tab_bar()
       |> TabBar.find_workspace_by_session(session)
 
-    assert %Workspace{label: "Summarize focused workflows"} = workspace
+    assert %Workspace{label: "Summarize focused workflows", custom_name: nil} = workspace
+  end
+
+  test "session workflow auto-names the active session workspace from queued prompts" do
+    {:ok, session} = start_supervised({Session, provider_opts: []})
+    state = event_state(session)
+
+    updated =
+      SessionEventWorkflow.prompt_queued(
+        state,
+        "Investigate workspace drift\nMore detail",
+        :steering
+      )
+
+    workspace =
+      updated.shell_runtime.state
+      |> TraditionalState.tab_bar()
+      |> TabBar.find_workspace_by_session(session)
+
+    assert %Workspace{label: "Investigate workspace drift", custom_name: nil} = workspace
+    assert RenderCorrelation.scheduled?(updated.render.render_correlation)
+  end
+
+  test "workspace auto-name transition no-ops when its target is unavailable" do
+    missing_tab_bar =
+      %{event_state() | shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{})}
+
+    missing_workspace = event_state()
+    fake_entry = Entry.builtin!(:fake, FakeShell, "Fake", "Fake shell", false)
+
+    non_traditional = %{
+      event_state()
+      | shell_runtime: Runtime.new(fake_entry, FakeShell.init([]))
+    }
+
+    assert WorkspaceWorkflow.install_auto_named_workspace(missing_tab_bar, 1, "Name") ===
+             missing_tab_bar
+
+    assert WorkspaceWorkflow.install_auto_named_workspace(missing_workspace, 999, "Name") ===
+             missing_workspace
+
+    assert WorkspaceWorkflow.install_auto_named_workspace(non_traditional, 1, "Name") ===
+             non_traditional
   end
 
   test "tool workflow follows the session snapshot and clears completed activity" do

@@ -3502,3 +3502,31 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `498d5cc84050bde730fcf480ed01a7ca4f02c014`.
 - **Merge evidence:** PR #3140 merged after CI run `29865904012` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W077/S04: Share workspace auto-name installation in WorkspaceWorkflow
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S04
+- **Planning profile:** `S04Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S04Worker`, `editor-lifecycle-worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S04Planner` for current SHA `6c6d83ec561e931098285e72efa83ce8744b77d6`; the plan constrained this slice to sharing only the workspace mutation/install operation while leaving queued-prompt and first-assistant trigger eligibility local to their existing workflows.
+- **Freshness commit SHA:** `6c6d83ec561e931098285e72efa83ce8744b77d6`.
+- **Observable result:** `MingaEditor.WorkspaceWorkflow.install_auto_named_workspace/3` is now the single owner-local workflow transition that reads the active Traditional tab bar, finds the already-selected workspace id, applies `Workspace.auto_name/2`, no-ops when the label is unchanged or the workspace/shell is unavailable, and installs the accepted workspace through `WorkspaceWorkflow.install_tab_bar/2`. `SessionEventWorkflow.prompt_queued/3` and `StreamEventWorkflow.messages_changed/1` now call that shared transition while retaining their distinct eligibility gates.
+- **Failure reproduction / source trace:** Before the correction, `SessionEventWorkflow` and `StreamEventWorkflow` each carried the same local `maybe_apply_auto_name/3`, `install_auto_name/3`, and `install_tab_bar/2` helper chain: derive `Workspace.auto_name/2`, replace through `TabBar.accept_workspace/2`, and delegate to `WorkspaceWorkflow.install_tab_bar/2`. Focused source search after the correction found no remaining `maybe_apply_auto_name`, `install_auto_name(`, or local `install_tab_bar(` references in either agent workflow.
+- **Implementation result:** Added `MingaEditor.WorkspaceWorkflow.install_auto_named_workspace/3`; migrated queued-prompt and first-assistant callers to pass the selected workspace id and prompt/text; deleted the duplicated local install helpers from both agent workflows; added queued-prompt workflow coverage; strengthened the stream workflow assertion to prove auto-named workspaces leave `custom_name` unset; made nil tab bars, missing workspace ids, and non-Traditional runtimes explicit unchanged-state transitions.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/workspace_workflow.ex`; `lib/minga_editor/agent/session_event_workflow.ex`; `lib/minga_editor/agent/stream_event_workflow.ex`; `test/minga_editor/agent/focused_event_workflows_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/agent/focused_event_workflows_test.exs test/minga_editor/state/workspace_test.exs` passed with 45 tests. The broader focused command covering `test/minga_editor/agent`, `state/workspace_test.exs`, and `state/tab_bar_test.exs` passed with 509 tests before the nil-tab-bar regression was added.
+- **Production lines added/removed before roadmap evidence:** `34 added / 57 removed` across the three production files, net `-23`, within the locked production net `<= 0`.
+- **Test lines added/removed before roadmap evidence:** `44 added / 1 removed` in `test/minga_editor/agent/focused_event_workflows_test.exs`, net `+43`, limited to the two locked workflow assertions, three public-transition fallback assertions, and formatter-required layout.
+- **Concepts added:** None. The new public function is the locked owner-local workflow transition in the existing `WorkspaceWorkflow`, not a new module, process, dependency, behaviour, protocol, registry, configuration, compatibility shim, data representation, or helper abstraction.
+- **Concepts removed:** Removed six duplicated local helper functions from the two agent workflows: `maybe_apply_auto_name/3`, `install_auto_name/3`, and `install_tab_bar/2` in both `SessionEventWorkflow` and `StreamEventWorkflow`.
+- **Retained contracts:** `Workspace.auto_name/2` still owns name derivation, truncation, blank no-op, and manual-name protection; `TabBar.find_workspace_by_session/2`, `TabBar.get_workspace/2`, and `TabBar.accept_workspace/2` remain the workspace lookup/replacement APIs; render scheduling, transcript synchronization, tab-label refresh, active-session selection, assistant-message extraction, and queued-prompt eligibility remain unchanged.
+- **Broad validation:** `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,740 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Pre-acceptance reviews:** Ponytail returned `PASS/Lean` and confirmed the consolidation is the smallest correct slice. Elixir craftsmanship returned `PASS/Lean` and confirmed the owner boundary, patterns, specs, and zero-concept shape. Correctness initially blocked a nil-tab-bar crash and stale line counts; the transition now pattern-matches `%TabBar{}` inside the no-op `with`, direct regressions cover nil tab bar, missing workspace id, and non-Traditional runtime, and final counts are corrected. Targeted correctness and Ponytail rechecks returned `RESOLVED/PASS` with no remaining blocker or cut.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked owner boundary, local trigger eligibility, unchanged-state fallbacks, post-fix coverage, exact budgets, evidence, and merge safety.
+- **Findings resolved:** S04's duplicated workspace auto-name installation path is removed; future install/persistence behavior now has one workspace workflow owner.
+- **Discoveries affecting later work:** None. The locked owner, contract, scope, test layer, dependencies, and production-line budget remained valid.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
