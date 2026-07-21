@@ -197,50 +197,38 @@ defmodule MingaEditor.HoverPopupTest do
     end
   end
 
-  describe "box/3" do
+  describe "box/2" do
     # The cell-grid `render/3` painter was removed in #2311; the hover popup
-    # renders natively via the 0x81 GUI opcode. `box/3` is the live surface that
+    # renders natively via the 0x81 GUI opcode. `box/2` is the live surface that
     # resolves the popup's placement rect for the FocusTree/SurfaceRegistry.
     test "returns nil for empty content" do
       popup = %HoverPopup{content_lines: [], anchor_row: 5, anchor_col: 10}
-      assert Presenter.box(popup, @viewport, @theme) == nil
+      assert Presenter.box(popup, @viewport) == nil
     end
 
-    test "returns a placement rect within the viewport for non-empty content" do
-      popup = Builder.new("Hello world\n\nSome documentation", 10, 20)
-      {row, col, w, h} = Presenter.box(popup, @viewport, @theme)
+    test "returns the exact conservative rect for simple markdown" do
+      popup = Builder.new("Returns the **value**.", 2, 6)
 
-      assert row >= 0 and row + h <= 24
-      assert col >= 0 and col + w <= 80
-    end
-
-    test "positions above the cursor when there is room" do
-      popup = Builder.new("text", 15, 10)
-      {row, _col, _w, h} = Presenter.box(popup, @viewport, @theme)
-
-      assert row + h <= 15, "Expected hover above cursor row 15, got #{row}+#{h}"
-    end
-
-    test "stays on screen when anchored near the top" do
-      popup = Builder.new("text", 1, 10)
-      {row, _col, _w, _h} = Presenter.box(popup, @viewport, @theme)
-
-      assert row >= 0
+      assert Presenter.box(popup, @viewport) == {3, 6, 32, 3}
     end
 
     test "places tall content below near the upper viewport without covering anchor row" do
       popup = Builder.new(tall_hover_text(), 7, 10)
-      {row, _col, _w, h} = Presenter.box(popup, @viewport, @theme)
 
-      assert row > 7
-      assert row + h <= 24
+      assert Presenter.box(popup, @viewport) == {8, 10, 32, 16}
     end
 
     test "places tall content above near the lower viewport without covering anchor row" do
       popup = Builder.new(tall_hover_text(), 18, 10)
-      {row, _col, _w, h} = Presenter.box(popup, @viewport, @theme)
 
-      assert row + h <= 18
+      assert Presenter.box(popup, @viewport) == {0, 10, 32, 18}
+    end
+
+    test "focused and unfocused popups have identical geometry" do
+      popup = Builder.new("Returns the **value**.", 2, 6)
+
+      assert Presenter.box(popup, @viewport) ==
+               Presenter.box(HoverPopup.focus(popup), @viewport)
     end
   end
 

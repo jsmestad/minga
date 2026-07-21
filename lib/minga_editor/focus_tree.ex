@@ -413,26 +413,23 @@ defmodule MingaEditor.FocusTree do
   @spec maybe_add_hover_overlay(t(), map()) :: t()
   defp maybe_add_hover_overlay(%TreeNode{} = root, %{
          shell_runtime: %{state: shell_state},
-         frontend: %{terminal_viewport: vp},
-         appearance: %{theme: theme}
+         frontend: %{terminal_viewport: vp}
        }) do
-    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp, theme: theme})
+    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp})
   end
 
   defp maybe_add_hover_overlay(%TreeNode{} = root, %{
          shell_runtime: %{state: shell_state},
-         terminal_viewport: vp,
-         theme: theme
+         terminal_viewport: vp
        }) do
-    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp, theme: theme})
+    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp})
   end
 
   defp maybe_add_hover_overlay(%TreeNode{} = root, %{
          shell_state: %{hover_popup: %HoverPopup{} = popup},
-         terminal_viewport: vp,
-         theme: theme
+         terminal_viewport: vp
        }) do
-    case HoverPresenter.box(popup, {vp.rows, vp.cols}, theme) do
+    case HoverPresenter.box(popup, {vp.rows, vp.cols}) do
       nil ->
         root
 
@@ -453,34 +450,29 @@ defmodule MingaEditor.FocusTree do
   @spec maybe_add_signature_overlay(t(), map()) :: t()
   defp maybe_add_signature_overlay(%TreeNode{} = root, %{
          shell_runtime: %{state: shell_state},
-         frontend: %{terminal_viewport: vp},
-         appearance: %{theme: theme}
+         frontend: %{terminal_viewport: vp}
        }) do
     maybe_add_signature_overlay(root, %{
       shell_state: shell_state,
-      terminal_viewport: vp,
-      theme: theme
+      terminal_viewport: vp
     })
   end
 
   defp maybe_add_signature_overlay(%TreeNode{} = root, %{
          shell_runtime: %{state: shell_state},
-         terminal_viewport: vp,
-         theme: theme
+         terminal_viewport: vp
        }) do
     maybe_add_signature_overlay(root, %{
       shell_state: shell_state,
-      terminal_viewport: vp,
-      theme: theme
+      terminal_viewport: vp
     })
   end
 
   defp maybe_add_signature_overlay(%TreeNode{} = root, %{
          shell_state: %{signature_help: %SignatureHelp{} = sh},
-         terminal_viewport: vp,
-         theme: theme
+         terminal_viewport: vp
        }) do
-    case SignatureHelpPresenter.box(sh, {vp.rows, vp.cols}, theme) do
+    case SignatureHelpPresenter.box(sh, {vp.rows, vp.cols}) do
       nil ->
         root
 

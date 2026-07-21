@@ -4,16 +4,12 @@ defmodule MingaEditor.FloatingWindowTest do
   alias MingaEditor.FloatingWindow
   alias MingaEditor.FloatingWindow.Spec
 
-  # The cell-grid painter (`render/1`, `interior_size/1`, and the
-  # border/title/footer/content/backdrop draw helpers) was removed in #2311. The
-  # live surface is `box/1`, which resolves the popup's outer rect for the
-  # `SurfaceRegistry`/`FocusTree`. These tests assert on that geometry.
-
-  @theme %{fg: 0xFFFFFF, bg: 0x333333, border_fg: 0x888888}
+  # The cell-grid painter was removed in #2311. The live surface is `box/1`,
+  # which resolves the popup's outer rect for the `SurfaceRegistry`/`FocusTree`.
+  # These tests assert on that geometry.
 
   defp spec(overrides) do
     defaults = %{
-      theme: @theme,
       viewport: {24, 80}
     }
 

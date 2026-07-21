@@ -2,7 +2,7 @@ defmodule MingaEditor.SignatureHelp do
   @moduledoc """
   Immutable lifecycle value for LSP signature help.
 
-  The value owns response parsing, replacement, dismissal, and overload selection. `MingaEditor.SignatureHelp.Presenter` owns geometry and display-list construction.
+  The value owns response parsing, replacement, dismissal, and overload selection. `MingaEditor.SignatureHelp.Presenter` owns geometry.
   """
 
   @enforce_keys [:signatures, :active_signature, :active_parameter, :anchor_row, :anchor_col]

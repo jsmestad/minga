@@ -1,6 +1,6 @@
 defmodule MingaEditor.FloatingWindow do
   @moduledoc """
-  Cell-grid geometry for bordered, titled floating panels.
+  Cell-grid geometry for floating panels.
 
   Takes a `Spec` struct describing a floating window's size and position and
   resolves its outer rect via `box/1`. The cursor-anchored popups
@@ -14,30 +14,20 @@ defmodule MingaEditor.FloatingWindow do
   placement.
   """
 
-  # ── Border styles ────────────────────────────────────────────────────────
-
-  @type border_style :: :single | :double | :rounded | :none
-
   # ── Spec ─────────────────────────────────────────────────────────────────
 
   defmodule Spec do
     @moduledoc """
-    Specification for a floating window.
+    Geometry specification for a floating window.
 
-    All fields except `theme` and `viewport` have sensible defaults.
+    Only `viewport` is required; size and position default to a centered 60% x 50% rect.
     """
 
-    @enforce_keys [:theme, :viewport]
-    defstruct title: nil,
-              footer: nil,
-              content: [],
-              width: {:percent, 60},
+    @enforce_keys [:viewport]
+    defstruct width: {:percent, 60},
               height: {:percent, 50},
               position: :center,
-              border: :rounded,
-              theme: nil,
-              viewport: nil,
-              backdrop: false
+              viewport: nil
 
     @type size :: {:cols, pos_integer()} | {:rows, pos_integer()} | {:percent, 1..100}
 
@@ -56,16 +46,10 @@ defmodule MingaEditor.FloatingWindow do
                preferred :: :above | :below}
 
     @type t :: %__MODULE__{
-            title: String.t() | nil,
-            footer: String.t() | nil,
-            content: [MingaEditor.DisplayList.draw()],
             width: size(),
             height: size(),
             position: position(),
-            border: MingaEditor.FloatingWindow.border_style(),
-            theme: map(),
-            viewport: {rows :: pos_integer(), cols :: pos_integer()},
-            backdrop: boolean()
+            viewport: {rows :: pos_integer(), cols :: pos_integer()}
           }
   end
 

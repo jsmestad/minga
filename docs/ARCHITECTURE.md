@@ -436,7 +436,7 @@ Because the model carries character offsets, not pixel positions, the same model
 
 #### What survives of the DisplayList
 
-`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of `draw/4` + `Overlay` primitives for renderers that still produce raw draw tuples or popup geometry: extension block decorations (`Core.Decorations.BlockDecoration`), the popup-geometry `:content` draw list used to size floating windows, the `Overlay` carrier whose `cursor` field still resolves the picker cursor in Compose, and the Git Porcelain extension shell renderer. It is a leftover for extension and popup geometry paths, not the pipeline's spine.
+`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
 
 ---
 
