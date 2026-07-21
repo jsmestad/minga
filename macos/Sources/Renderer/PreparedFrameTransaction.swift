@@ -625,10 +625,10 @@ struct PreparedFrameTransactionBuilder {
             }
 
             if let gutter = workingGutters[content.windowId] {
-                guard gutter.contentRow == paneGeometry.textRect.row,
-                      gutter.contentCol == paneGeometry.textRect.col,
-                      gutter.contentHeight == paneGeometry.textRect.height,
-                      gutter.contentWidth == paneGeometry.textRect.width,
+                guard gutter.contentRow == paneGeometry.contentRect.row,
+                      gutter.contentCol == paneGeometry.contentRect.col,
+                      gutter.contentHeight == paneGeometry.contentRect.height,
+                      gutter.contentWidth == paneGeometry.contentRect.width,
                       gutter.lineNumberWidth == paneGeometry.gutterMetrics.lineNumberWidth,
                       gutter.signColWidth == paneGeometry.gutterMetrics.signColWidth else {
                     return .incompatibleWindowGeometry(windowId: content.windowId)

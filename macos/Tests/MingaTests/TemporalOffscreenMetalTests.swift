@@ -79,9 +79,8 @@ struct TemporalOffscreenMetalTests {
             Wire.GutterEntry(bufLine: UInt32(i), displayType: .normal, signType: .none)
         }
         return Wire.WindowGutter(
-            windowId: windowId, contentRow: 0, contentCol: UInt16(lineNumberWidth) + 1,
-            contentHeight: rows, isActive: true,
-            contentWidth: cols - (UInt16(lineNumberWidth) + 1),
+            windowId: windowId, contentRow: 0, contentCol: 0,
+            contentHeight: rows, isActive: true, contentWidth: cols,
             cursorLine: 0, lineNumberStyle: .absolute,
             lineNumberWidth: lineNumberWidth, signColWidth: 1, entries: entries
         )

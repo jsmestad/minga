@@ -156,16 +156,17 @@ struct WindowContentFrameMetricsTests {
         gutter: Wire.WindowGutter,
         totalLines: UInt32
     ) -> PresentedWindowSurface {
-        let gutterWidth = UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth)
-        let gutterCol = gutter.contentCol >= gutterWidth ? gutter.contentCol - gutterWidth : 0
+        let gutterWidth = min(UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth), gutter.contentWidth)
+        let textCol = gutter.contentCol + gutterWidth
+        let textWidth = gutter.contentWidth - gutterWidth
         let geometry = content.paneGeometry ?? GUIPaneGeometry(
             windowId: content.windowId,
-            totalRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutter.contentWidth + gutterWidth, height: gutter.contentHeight),
-            contentRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutter.contentWidth + gutterWidth, height: gutter.contentHeight),
-            textRect: GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutter.contentWidth, height: gutter.contentHeight),
-            gutterRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutterWidth, height: gutter.contentHeight),
-            clipRect: GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutter.contentWidth + gutterWidth, height: gutter.contentHeight),
-            viewport: GUIViewportSummary(top: 0, left: 0, rows: gutter.contentHeight, cols: gutter.contentWidth, totalLines: totalLines, visualRowOffset: 0, totalVisualRows: totalLines),
+            totalRect: GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutter.contentWidth, height: gutter.contentHeight),
+            contentRect: GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutter.contentWidth, height: gutter.contentHeight),
+            textRect: GUICellRect(row: gutter.contentRow, col: textCol, width: textWidth, height: gutter.contentHeight),
+            gutterRect: GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutterWidth, height: gutter.contentHeight),
+            clipRect: GUICellRect(row: gutter.contentRow, col: textCol, width: textWidth, height: gutter.contentHeight),
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: gutter.contentHeight, cols: textWidth, totalLines: totalLines, visualRowOffset: 0, totalVisualRows: totalLines),
             gutterMetrics: GUIGutterMetrics(lineNumberWidth: UInt16(gutter.lineNumberWidth), signColWidth: UInt16(gutter.signColWidth)),
             hitRegions: []
         )
@@ -376,11 +377,26 @@ struct WindowContentFrameMetricsTests {
             2: Wire.WindowGutter(windowId: 2, contentRow: 0, contentCol: 40, contentHeight: 2, isActive: false, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 2, signColWidth: 2, entries: [Wire.GutterEntry(bufLine: 0, displayType: .normal, signType: .annotation, signFg: 0xFFFFFF, signText: "●")])
         ]
         frameState.horizontalSeparators = [Wire.HorizontalSeparator(row: 1, col: 0, width: 80, filename: "split.ex")]
+        frameState.gutterSeparatorColor = 0x334455
 
         let leftGutter = try #require(frameState.windowGutters[1])
         let rightGutter = try #require(frameState.windowGutters[2])
         let leftSurface = surface(content: left, gutter: leftGutter, totalLines: 1)
         let rightSurface = surface(content: right, gutter: rightGutter, totalLines: 1)
+        let chrome = CoreTextMetalRenderer.gutterChromeRects(
+            frameState: frameState,
+            surfaces: [leftSurface, rightSurface],
+            cellW: 8,
+            cellH: 16,
+            scale: 2,
+            gutterLeftMarginPx: 12,
+            gutterPaddingPx: 16,
+            viewportHeight: 100
+        )
+        #expect(chrome.leftFills.map(\.x) == [0, 640])
+        #expect(chrome.rightFills.map(\.x) == [76, 716])
+        #expect(chrome.separators.map(\.x) == [84, 724])
+
         let demand = CoreTextMetalRenderer.atlasSlotDemand(
             frameState: frameState,
             preparedSurfaces: [preparedSurface(leftSurface), preparedSurface(rightSurface)]

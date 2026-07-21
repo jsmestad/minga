@@ -1802,9 +1802,7 @@ final class CoreTextMetalRenderer {
             let rowY = (Float(baseRow) + Float(presentationRow)) * cellH * scale - scrollOffsetY
             guard CoreTextMetalRenderer.clipVerticalQuad(y: rowY, height: cellH * scale, top: clipTop, bottom: clipBottom) != nil else { continue }
             let yPos = rowY
-            let gutterWidth = signColWidth + Int(gutter.lineNumberWidth)
-            let gutterCol = max(Int(baseCol) - gutterWidth, 0)
-            let xOffset = Float(gutterCol) * cellW * scale + gutterLeftMarginPx
+            let xOffset = Float(baseCol) * cellW * scale + gutterLeftMarginPx
 
             // Sign column (leftmost in gutter)
             if signColWidth > 0 {
@@ -2593,25 +2591,32 @@ final class CoreTextMetalRenderer {
         var rightFills: [(x: Float, y: Float, width: Float, height: Float)] = []
         var separators: [(x: Float, y: Float, width: Float, height: Float)] = []
 
-        for surface in surfaces.sorted(by: { $0.windowId < $1.windowId }) {
-            let gutter = surface.renderGutter
-            let gutterWidthCols = Int(gutter.lineNumberWidth) + Int(gutter.signColWidth)
-            guard gutterWidthCols > 0 else { continue }
-            let top = Float(gutter.contentRow) * cellH * scale
-            let height = Float(gutter.contentHeight) * cellH * scale
-            guard let vertical = clipVerticalQuad(y: top, height: height, top: 0, bottom: viewportHeight) else { continue }
-            let gutterLeftX = Float(gutter.contentCol) * cellW * scale
-            if gutterLeftMarginPx > 0 {
-                leftFills.append((x: gutterLeftX, y: vertical.y, width: gutterLeftMarginPx, height: vertical.height))
+        if !surfaces.isEmpty {
+            for surface in surfaces.sorted(by: { $0.windowId < $1.windowId }) {
+                let gutter = surface.renderGutter
+                let gutterWidthCols = Int(gutter.lineNumberWidth) + Int(gutter.signColWidth)
+                guard gutterWidthCols > 0 else { continue }
+                let top = Float(gutter.contentRow) * cellH * scale
+                let height = Float(gutter.contentHeight) * cellH * scale
+                guard let vertical = clipVerticalQuad(y: top, height: height, top: 0, bottom: viewportHeight) else { continue }
+                let gutterLeftX = Float(gutter.contentCol) * cellW * scale
+                if gutterLeftMarginPx > 0 {
+                    leftFills.append((x: gutterLeftX, y: vertical.y, width: gutterLeftMarginPx, height: vertical.height))
+                }
+                let gutterRightX = Float(Int(gutter.contentCol) + gutterWidthCols) * cellW * scale + gutterLeftMarginPx
+                if gutterPaddingPx > 0 {
+                    rightFills.append((x: gutterRightX, y: vertical.y, width: gutterPaddingPx, height: vertical.height))
+                }
+                if frameState.gutterSeparatorColor != 0 {
+                    separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: vertical.y, width: 1.0, height: vertical.height))
+                }
             }
-            let gutterRightX = Float(Int(gutter.contentCol) + gutterWidthCols) * cellW * scale + gutterLeftMarginPx
-            if gutterPaddingPx > 0 {
-                rightFills.append((x: gutterRightX, y: vertical.y, width: gutterPaddingPx, height: vertical.height))
-            }
+            return (leftFills, rightFills, separators)
         }
 
+        guard frameState.gutterCol > 0 else { return ([], [], []) }
         if gutterLeftMarginPx > 0 {
-            leftFills.append((x: Float(frameState.gutterCol) * cellW * scale, y: 0, width: gutterLeftMarginPx, height: viewportHeight))
+            leftFills.append((x: 0, y: 0, width: gutterLeftMarginPx, height: viewportHeight))
         }
         if gutterPaddingPx > 0 {
             rightFills.append((x: Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))

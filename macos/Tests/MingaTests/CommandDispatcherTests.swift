@@ -1610,8 +1610,8 @@ fileprivate func editorContent(windowId: UInt16 = 1, geometry: GUIPaneGeometry? 
 
 fileprivate func editorGutter(windowId: UInt16 = 1, geometry: GUIPaneGeometry = editorGeometry()) -> Wire.WindowGutter {
     Wire.WindowGutter(
-        windowId: windowId, contentRow: geometry.textRect.row, contentCol: geometry.textRect.col, contentHeight: geometry.textRect.height,
-        isActive: true, contentWidth: geometry.textRect.width, cursorLine: 0, lineNumberStyle: .hybrid,
+        windowId: windowId, contentRow: geometry.contentRect.row, contentCol: geometry.contentRect.col, contentHeight: geometry.contentRect.height,
+        isActive: true, contentWidth: geometry.contentRect.width, cursorLine: 0, lineNumberStyle: .hybrid,
         lineNumberWidth: UInt8(geometry.gutterMetrics.lineNumberWidth), signColWidth: UInt8(geometry.gutterMetrics.signColWidth), entries: []
     )
 }
@@ -1750,8 +1750,8 @@ struct CommandDispatcherStagingTests {
         dispatcher.onTransactionResult = { results.append($0) }
         let geometry = editorGeometry(lineNumberWidth: 4, signColWidth: 1)
         let gutter = Wire.WindowGutter(
-            windowId: 1, contentRow: geometry.textRect.row, contentCol: geometry.textRect.col, contentHeight: geometry.textRect.height,
-            isActive: true, contentWidth: geometry.textRect.width + 1, cursorLine: 0, lineNumberStyle: .hybrid,
+            windowId: 1, contentRow: geometry.contentRect.row, contentCol: geometry.contentRect.col, contentHeight: geometry.contentRect.height,
+            isActive: true, contentWidth: geometry.contentRect.width + 1, cursorLine: 0, lineNumberStyle: .hybrid,
             lineNumberWidth: 3, signColWidth: UInt8(geometry.gutterMetrics.signColWidth), entries: []
         )
 

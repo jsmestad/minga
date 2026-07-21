@@ -62,12 +62,10 @@ private func normalizedRendererContent(_ content: GUIWindowContent, frameState: 
 }
 
 private func rendererPaneGeometry(windowId: UInt16, gutter: Wire.WindowGutter, frameState: FrameState) -> GUIPaneGeometry {
-    let gutterWidth = UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth)
-    let gutterCol = gutter.contentCol >= gutterWidth ? gutter.contentCol - gutterWidth : 0
-    let totalWidth = max(UInt16(gutter.contentWidth) + gutterWidth, 1)
-    let totalRect = GUICellRect(row: gutter.contentRow, col: gutterCol, width: totalWidth, height: gutter.contentHeight)
-    let textRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: UInt16(gutter.contentWidth), height: gutter.contentHeight)
-    let gutterRect = GUICellRect(row: gutter.contentRow, col: gutterCol, width: gutterWidth, height: gutter.contentHeight)
+    let gutterWidth = min(UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth), gutter.contentWidth)
+    let totalRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: max(gutter.contentWidth, 1), height: gutter.contentHeight)
+    let textRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol + gutterWidth, width: gutter.contentWidth - gutterWidth, height: gutter.contentHeight)
+    let gutterRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutterWidth, height: gutter.contentHeight)
     let viewportRows = gutter.contentHeight == 0 ? frameState.rows : gutter.contentHeight
     let totalLines = max(frameState.totalLineCount, UInt32(viewportRows))
     let hitRegions = gutterWidth == 0 ? [] : [GUIHitRegion(kind: .gutter, rect: gutterRect, windowId: windowId)]
@@ -79,7 +77,7 @@ private func rendererPaneGeometry(windowId: UInt16, gutter: Wire.WindowGutter, f
         textRect: textRect,
         gutterRect: gutterRect,
         clipRect: totalRect,
-        viewport: GUIViewportSummary(top: 0, left: 0, rows: viewportRows, cols: UInt16(gutter.contentWidth), totalLines: totalLines, visualRowOffset: 0, totalVisualRows: totalLines),
+        viewport: GUIViewportSummary(top: 0, left: 0, rows: viewportRows, cols: textRect.width, totalLines: totalLines, visualRowOffset: 0, totalVisualRows: totalLines),
         gutterMetrics: GUIGutterMetrics(lineNumberWidth: UInt16(gutter.lineNumberWidth), signColWidth: UInt16(gutter.signColWidth)),
         hitRegions: hitRegions
     )

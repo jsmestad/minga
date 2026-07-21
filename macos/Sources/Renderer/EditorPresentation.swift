@@ -52,11 +52,11 @@ struct PresentedWindowSurface: Sendable {
         case .none:
             Wire.WindowGutter(
                 windowId: windowId,
-                contentRow: paneGeometry.textRect.row,
-                contentCol: paneGeometry.textRect.col,
-                contentHeight: paneGeometry.textRect.height,
+                contentRow: paneGeometry.contentRect.row,
+                contentCol: paneGeometry.contentRect.col,
+                contentHeight: paneGeometry.contentRect.height,
                 isActive: false,
-                contentWidth: paneGeometry.textRect.width,
+                contentWidth: paneGeometry.contentRect.width,
                 cursorLine: UInt32(content.cursorRow),
                 lineNumberStyle: .absolute,
                 lineNumberWidth: 0,
@@ -140,10 +140,10 @@ struct CommittedEditorSnapshot {
 
             let gutterPresentation: GutterPresentation
             if let gutter = windowGutters[content.windowId] {
-                guard gutter.contentRow == paneGeometry.textRect.row,
-                      gutter.contentCol == paneGeometry.textRect.col,
-                      gutter.contentHeight == paneGeometry.textRect.height,
-                      gutter.contentWidth == paneGeometry.textRect.width,
+                guard gutter.contentRow == paneGeometry.contentRect.row,
+                      gutter.contentCol == paneGeometry.contentRect.col,
+                      gutter.contentHeight == paneGeometry.contentRect.height,
+                      gutter.contentWidth == paneGeometry.contentRect.width,
                       gutter.lineNumberWidth == paneGeometry.gutterMetrics.lineNumberWidth,
                       gutter.signColWidth == paneGeometry.gutterMetrics.signColWidth else {
                     return .failure(.incompatibleWindowGeometry(windowId: content.windowId))

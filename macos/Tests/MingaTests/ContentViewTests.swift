@@ -237,7 +237,7 @@ struct ContentViewTests {
             contentRect: GUICellRect(row: 0, col: paneCol, width: paneWidth, height: 24),
             textRect: GUICellRect(row: 0, col: textCol, width: textWidth, height: 24),
             gutterRect: GUICellRect(row: 0, col: paneCol, width: 7, height: 24),
-            clipRect: GUICellRect(row: 0, col: paneCol, width: paneWidth, height: 24),
+            clipRect: GUICellRect(row: 0, col: textCol, width: textWidth, height: 24),
             viewport: GUIViewportSummary(
                 top: 0,
                 left: 0,
@@ -289,10 +289,10 @@ struct ContentViewTests {
         Wire.WindowGutter(
             windowId: windowId,
             contentRow: 0,
-            contentCol: paneCol + 7,
+            contentCol: paneCol,
             contentHeight: 24,
             isActive: isActive,
-            contentWidth: paneWidth - 7,
+            contentWidth: paneWidth,
             cursorLine: foldLine,
             lineNumberStyle: .hybrid,
             lineNumberWidth: 4,
@@ -573,7 +573,7 @@ struct ContentViewTests {
         ))
         editorView.mouseDown(with: textEvent)
         #expect(spy.mouseEventCalls.last?.row == 1)
-        #expect(spy.mouseEventCalls.last?.col == 11)
+        #expect(spy.mouseEventCalls.last?.col == 9)
 
         let dragPoint = NSPoint(x: editorView.cellWidth * 14.2, y: editorView.cellHeight * 2.5)
         let dragEvent = try #require(mouseEvent(
@@ -584,9 +584,10 @@ struct ContentViewTests {
         editorView.mouseDragged(with: dragEvent)
         #expect(spy.mouseEventCalls.last?.eventType == MOUSE_DRAG)
         #expect(spy.mouseEventCalls.last?.row == 3)
-        #expect(spy.mouseEventCalls.last?.col == 13)
+        #expect(spy.mouseEventCalls.last?.col == 11)
 
-        let foldPoint = NSPoint(x: editorView.cellWidth * 10.2, y: editorView.cellHeight * 0.5)
+        dispatcher.promoteVisibleEditorPresentation(snapshot: visibleSnapshot, localTransform: nil)
+        let foldPoint = NSPoint(x: editorView.cellWidth * 3.2, y: editorView.cellHeight * 0.5)
         let foldEvent = try #require(mouseEvent(
             type: .leftMouseDown,
             locationInWindow: editorView.convert(foldPoint, to: nil),
@@ -601,7 +602,7 @@ struct ContentViewTests {
         #expect((editorView.accessibilityValue() as? String)?.contains("committed row 1") == true)
         editorView.mouseDown(with: textEvent)
         #expect(spy.mouseEventCalls.last?.row == 0)
-        #expect(spy.mouseEventCalls.last?.col == 11)
+        #expect(spy.mouseEventCalls.last?.col == 9)
     }
 
     @Test(
@@ -637,7 +638,7 @@ struct ContentViewTests {
         await Task.yield()
 
         dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
-        let localPoint = NSPoint(x: editorView.cellWidth * 12.2, y: editorView.cellHeight * 1.5)
+        let localPoint = NSPoint(x: editorView.cellWidth * 45.2, y: editorView.cellHeight * 1.5)
         let windowPoint = editorView.convert(localPoint, to: nil)
         let screenPoint = window.convertPoint(toScreen: windowPoint)
         let imeA = editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)

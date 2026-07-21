@@ -212,11 +212,11 @@ private func residentContent(geometry: GUIPaneGeometry) throws -> GUIWindowConte
 private func gutter(geometry: GUIPaneGeometry) -> Wire.WindowGutter {
     Wire.WindowGutter(
         windowId: 1,
-        contentRow: geometry.textRect.row,
-        contentCol: geometry.textRect.col,
-        contentHeight: geometry.textRect.height,
+        contentRow: geometry.contentRect.row,
+        contentCol: geometry.contentRect.col,
+        contentHeight: geometry.contentRect.height,
         isActive: true,
-        contentWidth: geometry.textRect.width,
+        contentWidth: geometry.contentRect.width,
         cursorLine: 20,
         lineNumberStyle: .hybrid,
         lineNumberWidth: 5,
