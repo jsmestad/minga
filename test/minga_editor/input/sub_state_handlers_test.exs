@@ -73,7 +73,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
         agent_ui: agentic
       },
-      interaction: %MingaEditor.State.Interaction{focus_stack: []},
+      interaction: %MingaEditor.State.Interaction{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

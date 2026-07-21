@@ -17,7 +17,6 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
-  alias MingaEditor.Input
   alias Minga.Test.StubServer
 
   defp fake_session do
@@ -75,7 +74,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
           next_id: 2
         }
       },
-      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()},
+      interaction: %MingaEditor.State.Interaction{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

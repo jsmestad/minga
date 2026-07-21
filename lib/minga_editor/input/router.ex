@@ -1,12 +1,12 @@
 defmodule MingaEditor.Input.Router do
   @moduledoc """
-  Walks the focus stack to dispatch a key press, then runs centralized
-  post-action housekeeping.
+  Dispatches key presses through the active shell's overlay and surface
+  handler lists, then runs centralized post-action housekeeping.
 
-  The focus stack is an ordered list of `MingaEditor.Input.Handler` modules.
-  `dispatch/3` calls each handler's `handle_key/3` in order via
-  `Enum.reduce_while/3`. The first handler that returns `{:handled, state}`
-  stops the walk. If all handlers pass through, the key is silently dropped.
+  `dispatch/3` asks the active shell for ordered `overlay` handlers first.
+  The first handler that returns `{:handled, state}` stops dispatch; if all
+  overlays pass through, the router repeats the same walk for the shell's
+  `surface` handlers.
 
   After dispatch, `post_key_housekeeping/6` runs keyboard-specific steps
   (completion triggering) then delegates to `post_action_housekeeping/2`
@@ -62,7 +62,7 @@ defmodule MingaEditor.Input.Router do
   end
 
   @doc """
-  Dispatches a key press through the focus stack and runs post-key housekeeping.
+  Dispatches a key press through shell-provided handlers and runs post-key housekeeping.
 
   Captures the buffer version, active buffer, and mode before dispatch so
   housekeeping can detect what changed.
@@ -153,9 +153,9 @@ defmodule MingaEditor.Input.Router do
 
   # Delegates a key press to surface handlers.
   #
-  # Editor handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
-  # directly. This preserves all side effects (notice, focus-stack changes,
-  # mode transitions) that handlers produce.
+  # Surface handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
+  # directly. This preserves all side effects, including notice updates and
+  # mode transitions, that handlers produce.
   @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp dispatch_to_surface(

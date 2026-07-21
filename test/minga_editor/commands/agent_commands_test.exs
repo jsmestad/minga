@@ -38,7 +38,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Input
   alias Minga.Test.SessionSlowMockProvider
   alias Minga.Test.StubServer
 
@@ -121,7 +120,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             tb
           )
         ),
-      interaction: %Interaction{focus_stack: Input.default_stack()}
+      interaction: %Interaction{}
     }
   end
 

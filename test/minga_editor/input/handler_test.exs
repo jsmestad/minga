@@ -12,7 +12,6 @@ defmodule MingaEditor.Input.HandlerTest do
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.Input
   alias MingaEditor.Input.ConflictPrompt
   alias MingaEditor.Input.GlobalBindings
   alias MingaEditor.Input.ModeFSM
@@ -34,7 +33,7 @@ defmodule MingaEditor.Input.HandlerTest do
           active_index: 0
         }
       },
-      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()}
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 

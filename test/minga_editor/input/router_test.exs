@@ -13,7 +13,6 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.State.Render
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Input
   alias MingaEditor.Input.Router
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State.Mouse, as: MouseState
@@ -54,10 +53,7 @@ defmodule MingaEditor.Input.RouterTest do
         }
       },
       interaction:
-        MingaEditor.State.Interaction.new(
-          editing_model: Keyword.get(opts, :editing_model, :vim),
-          focus_stack: Input.default_stack()
-        )
+        MingaEditor.State.Interaction.new(editing_model: Keyword.get(opts, :editing_model, :vim))
     }
   end
 
@@ -166,7 +162,7 @@ defmodule MingaEditor.Input.RouterTest do
   end
 
   describe "dispatch/3" do
-    test "dispatches a normal mode key through the focus stack" do
+    test "dispatches a normal mode key through shell handlers" do
       state = base_state()
       # 'j' in normal mode moves cursor down
       new_state = Router.dispatch(state, ?j, 0)
@@ -357,7 +353,7 @@ defmodule MingaEditor.Input.RouterTest do
             next_id: 2
           }
         },
-        interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()}
+        interaction: %MingaEditor.State.Interaction{}
       }
     end
 

@@ -282,7 +282,7 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 |-----------|------------|------------------|
 | (root) | `MingaEditor` | Editor GenServer, commands, rendering, layout, viewport, windows |
 | `shell/` | `MingaEditor.Shell` | Shell behaviour + implementation (Traditional) |
-| `input/` | `MingaEditor.Input` | Input handler behaviour, focus stack, all handler modules |
+| `input/` | `MingaEditor.Input` | Input handler behaviour, shell overlay/surface handler producers, and all handler modules |
 | `frontend/` | `MingaEditor.Frontend` | Frontend communication, protocol encoding, capabilities |
 | `ui/` | `MingaEditor.UI` | Themes, faces, highlighting, picker, prompts, which-key |
 | `session/` | `MingaEditor.Session.State` | Shared editing state across shells |
@@ -865,15 +865,15 @@ See [#217](https://github.com/jsmestad/minga/issues/217) for the full tracker.
 
 ### Architecture
 
-Mouse events flow through the same protocol as keyboard events. All frontends encode mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM side decodes them in `Minga.Port.Protocol` and dispatches them to `Minga.Editor.Mouse`.
+Mouse events flow through the same protocol as keyboard events. All frontends encode mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM side decodes them in `Minga.Port.Protocol` and dispatches them through `MingaEditor.Input.Router.dispatch_mouse/7`, which either preserves active drag/resize direct ownership in `MingaEditor.Mouse.handle/7` or routes ordinary events through FocusTree node bubbling.
 
 Key rules for mouse work:
 
-1. **Mouse events must flow through the Input.Router focus stack** (once #217 lands), not bypass it. The file tree, picker, completion menu, and agent panel all need to intercept clicks in their regions. Add `handle_mouse` callbacks to `Input.Handler` implementations when building mouse-interactive UI components.
+1. **Mouse events must flow through `Input.Router.dispatch_mouse/7` and the `FocusTree` hit path for initial clicks, wheels, and ordinary routed events.** Active editor drag/release and resize drag/release keep their direct `MingaEditor.Mouse.handle/7` ownership so an in-progress drag is not retargeted. The file tree, picker, completion menu, and agent panel all need to intercept clicks in their regions. Add `handle_mouse_at_node/8` or legacy `handle_mouse/7` callbacks to `Input.Handler` implementations when building mouse-interactive UI components.
 
 2. **Always pass modifiers through.** The `Editor.handle_info` clause for mouse events must pass modifiers to the mouse handler. Modifier+click combinations (Shift+click, Cmd+click, Ctrl+click) are meaningful interactions, not noise to discard.
 
-3. **Hit-test against `Layout.get(state)` rects.** Every UI region has a computed rect from `Minga.Editor.Layout`. Mouse handlers determine which region a click landed in by checking these rects. Never hardcode pixel/cell offsets.
+3. **Use FocusTree node context for routed surface hits and `Layout.get(state)` rects for surface-local geometry.** Every UI region has a computed rect from `Minga.Editor.Layout`. Node-aware mouse handlers receive the hit node from `Input.Router`; once inside a surface, handlers may interpret local regions such as gutters, prompt bands, or modeline segments from the current layout. Never hardcode pixel/cell offsets.
 
 4. **GUI and TUI may diverge on capture, but the BEAM handler is shared.** The Swift GUI captures `NSEvent.clickCount` natively; the Zig TUI infers multi-click from timing. Both send the same protocol message. The BEAM handler doesn't care which frontend produced the event.
 

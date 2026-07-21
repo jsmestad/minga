@@ -1,11 +1,11 @@
 defmodule MingaEditor.Input.Handler do
   @moduledoc """
-  Behaviour for key input handlers in the focus stack.
+  Behaviour for ordered shell input handlers.
 
   Each handler module decides whether to consume a key press or pass it
-  through to the next handler in the stack. Handlers self-gate: they
-  return `{:passthrough, state}` when their feature is inactive (e.g.,
-  the picker handler passes through when no picker is open).
+  through to the next handler in the shell-provided overlay or surface list.
+  Handlers self-gate: they return `{:passthrough, state}` when their feature
+  is inactive (e.g., the picker handler passes through when no picker is open).
 
   ## State contract
 
@@ -51,7 +51,7 @@ defmodule MingaEditor.Input.Handler do
 
   Returns `{:handled, state}` if this handler consumed the key, or
   `{:passthrough, state}` if the key should be forwarded to the next
-  handler in the stack. The handler may modify state even when passing
+  handler in the ordered list. The handler may modify state even when passing
   through (e.g., clearing a transient flag).
   """
   @callback handle_key(

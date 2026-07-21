@@ -6,7 +6,6 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
   alias Minga.Keymap.Active, as: KeymapActive
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Input.AgentPanel
-  alias MingaEditor.Input.Scoped
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -56,9 +55,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
             %AgentState{}
           )
         ),
-      interaction: %MingaEditor.State.Interaction{
-        focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
-      }
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 

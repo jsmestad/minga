@@ -2,20 +2,16 @@ defmodule MingaEditor.Input do
   @moduledoc """
   Key input dispatch infrastructure.
 
-  The input pipeline has two layers:
+  The active shell supplies two ordered handler lists:
 
   1. **Overlay handlers** — modal UI overlays (picker, completion,
-     conflict prompt) that take priority over everything. These live
-     in the Editor's focus stack and are checked first.
+     conflict prompt) that take priority over everything and run before
+     the active surface.
 
-  2. **Editor handlers** — scope-specific dispatch (Scoped), global
+  2. **Surface handlers** — scope-specific dispatch (Scoped), global
      bindings (Ctrl+S, Ctrl+Q), and the mode FSM (vim normal/insert/
      visual). These live inside the active surface and are called
      after overlays pass through.
-
-  The `default_stack/0` returns the combined stack for backward
-  compatibility. New code should use `overlay_handlers/0` and
-  `surface_handlers/0` to build the split dispatch.
   """
 
   alias MingaEditor.Input.AgentMouse
@@ -32,7 +28,6 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.InlineEdit
   alias MingaEditor.Input.Interrupt
   alias MingaEditor.Input.MentionCompletion
-  alias MingaEditor.Input.ModeFSM
   alias MingaEditor.Input.OperationCancellation
   alias MingaEditor.Input.Picker
   alias MingaEditor.Input.Popup
@@ -73,44 +68,6 @@ defmodule MingaEditor.Input do
     {BottomPanel, 125},
     {AgentMouse, 130}
   ]
-
-  @doc """
-  Returns the full default focus stack.
-
-  Priority order (first handler wins):
-  0. Interrupt — Ctrl-G escape hatch, always active, resets to known-good state
-  1. ConflictPrompt and Picker — exclusive modal surfaces
-  2. Completion — insert-mode popup navigation
-  3. WhichKey — active prefix Escape ownership
-  4. Focused Hover — popup scrolling and dismissal
-  5. SignatureHelp — overload cycling and dismissal
-  6. OperationCancellation — Escape for the selected cancelable operation
-  7. Scoped and GlobalBindings — contextual and global commands
-  8. ModeFSM — the normal vim mode system (fallback)
-
-  UI overlays (Picker, Completion) sit above Scoped so they intercept
-  keys when active regardless of keymap scope. Without this ordering,
-  Scoped's agent handler swallows keys (Enter, Escape, typed chars)
-  before the Picker ever sees them, making the picker unusable from
-  agentic view.
-  """
-  @spec default_stack() :: [module()]
-  def default_stack do
-    [
-      Interrupt,
-      ConflictPrompt,
-      Picker,
-      Completion,
-      WhichKey,
-      Hover,
-      SignatureHelp,
-      OperationCancellation,
-      Scoped,
-      GlobalBindings,
-      BottomPanel,
-      ModeFSM
-    ]
-  end
 
   @doc """
   Returns interactive transient handlers in precedence order above the active surface.

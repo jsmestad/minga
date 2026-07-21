@@ -60,7 +60,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       workspace:
         %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
         |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf}),
-      interaction: Interaction.new(focus_stack: [Scoped, MingaEditor.Input.ModeFSM])
+      interaction: Interaction.new()
     }
   end
 

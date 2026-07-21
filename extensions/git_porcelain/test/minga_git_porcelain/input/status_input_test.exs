@@ -48,9 +48,7 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },
-      interaction: %MingaEditor.State.Interaction{
-        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
-      }
+      interaction: %MingaEditor.State.Interaction{}
     }
     |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
     |> SidebarWorkflow.replace_git_status_tui(TuiState.new())

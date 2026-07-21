@@ -270,9 +270,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
             FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
           ),
         shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar}),
-        interaction: %MingaEditor.State.Interaction{
-          focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
-        }
+        interaction: %MingaEditor.State.Interaction{}
       }
 
       state =
@@ -463,9 +461,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
       workspace: workspace,
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state),
-      interaction: %MingaEditor.State.Interaction{
-        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
-      }
+      interaction: %MingaEditor.State.Interaction{}
     }
   end
 
