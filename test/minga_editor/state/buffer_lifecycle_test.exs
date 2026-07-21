@@ -419,10 +419,8 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       tab_bar =
         tab_bar
         |> TabBar.add_workspace_file(0, file_ref)
-        |> TabBar.set_workspace_active_file(0, file_ref)
         |> TabBar.set_workspace_agent_ui(0, prompt_ui)
         |> TabBar.add_workspace_file(agent_workspace.id, file_ref)
-        |> TabBar.set_workspace_active_file(agent_workspace.id, file_ref)
         |> TabBar.set_workspace_agent_ui(agent_workspace.id, prompt_ui)
 
       shell_state =
@@ -474,7 +472,6 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       Enum.each(tab_bar.workspaces, fn %Workspace{} = owner ->
         refute Enum.any?(owner.files, &FileRef.equal?(&1, file_ref))
-        assert owner.active_file == nil
         assert is_nil(owner.agent_ui) or owner.agent_ui.panel.prompt_buffer == nil
       end)
     end

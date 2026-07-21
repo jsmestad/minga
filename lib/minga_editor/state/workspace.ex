@@ -44,7 +44,6 @@ defmodule MingaEditor.State.Workspace do
           remote_session: RemoteSession.t() | nil,
           custom_name: String.t() | nil,
           files: [FileRef.t()],
-          active_file: FileRef.t() | nil,
           agent_ui: UIState.t() | nil,
           project_view: ProjectView.t() | nil,
           review: WorkspaceReview.t(),
@@ -63,7 +62,6 @@ defmodule MingaEditor.State.Workspace do
             remote_session: nil,
             custom_name: nil,
             files: [],
-            active_file: nil,
             agent_ui: nil,
             project_view: nil,
             review: WorkspaceReview.new(),
@@ -291,52 +289,25 @@ defmodule MingaEditor.State.Workspace do
   @spec remove_file(t(), FileRef.t()) :: t()
   def remove_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
     files = Enum.reject(workspace.files, &FileRef.equal?(&1, file_ref))
-    active_file = remove_active_file(workspace.active_file, file_ref)
-    %{workspace | files: files, active_file: active_file}
+    %{workspace | files: files}
   end
 
-  @doc "Rebinds the active file membership from one logical file ref to another."
-  @spec rebind_file(t(), FileRef.t() | nil, FileRef.t()) :: t()
-  def rebind_file(%__MODULE__{} = workspace, old_file_ref, %FileRef{} = new_file_ref) do
-    workspace =
-      case old_file_ref do
-        %FileRef{} = old ->
-          if FileRef.equal?(old, new_file_ref), do: workspace, else: remove_file(workspace, old)
-
-        nil ->
-          workspace
-      end
-
-    set_active_file(workspace, new_file_ref)
-  end
-
-  @doc "Retargets a file membership for a tab, preserving unrelated active file state."
-  @spec retarget_file(t(), FileRef.t() | nil, FileRef.t(), boolean()) :: t()
-  def retarget_file(
-        %__MODULE__{} = workspace,
-        old_file_ref,
-        %FileRef{} = new_file_ref,
-        is_active_tab
-      )
-      when is_boolean(is_active_tab) do
-    was_active_file = active_file_matches?(workspace.active_file, old_file_ref)
-
-    workspace =
-      case old_file_ref do
-        %FileRef{} = old ->
-          if FileRef.equal?(old, new_file_ref) do
-            workspace
-          else
-            workspace
-            |> remove_file(old)
-            |> add_file(new_file_ref)
-          end
-
-        nil ->
+  @doc "Retargets a file membership for a tab."
+  @spec retarget_file(t(), FileRef.t() | nil, FileRef.t()) :: t()
+  def retarget_file(%__MODULE__{} = workspace, old_file_ref, %FileRef{} = new_file_ref) do
+    case old_file_ref do
+      %FileRef{} = old ->
+        if FileRef.equal?(old, new_file_ref) do
           add_file(workspace, new_file_ref)
-      end
+        else
+          workspace
+          |> remove_file(old)
+          |> add_file(new_file_ref)
+        end
 
-    maybe_rebind_active_file(workspace, new_file_ref, is_active_tab or was_active_file)
+      nil ->
+        add_file(workspace, new_file_ref)
+    end
   end
 
   @doc "Retires every workspace-owned reference to a dead buffer process."
@@ -344,16 +315,13 @@ defmodule MingaEditor.State.Workspace do
   def retire_buffer(%__MODULE__{} = workspace, buffer_pid) when is_pid(buffer_pid) do
     files = Enum.reject(workspace.files, &buffer_ref?(&1, buffer_pid))
 
-    active_file =
-      if buffer_ref?(workspace.active_file, buffer_pid), do: nil, else: workspace.active_file
-
     agent_ui =
       case workspace.agent_ui do
         %UIState{} = agent_ui -> UIState.retire_prompt_buffer(agent_ui, buffer_pid)
         nil -> nil
       end
 
-    workspace = %__MODULE__{workspace | files: files, active_file: active_file}
+    workspace = %__MODULE__{workspace | files: files}
     set_agent_ui(workspace, agent_ui)
   end
 
@@ -361,15 +329,6 @@ defmodule MingaEditor.State.Workspace do
   @spec has_file?(t(), FileRef.t()) :: boolean()
   def has_file?(%__MODULE__{files: files}, %FileRef{} = file_ref) do
     Enum.any?(files, &FileRef.equal?(&1, file_ref))
-  end
-
-  @doc "Sets the active file membership for the workspace."
-  @spec set_active_file(t(), FileRef.t() | nil) :: t()
-  def set_active_file(%__MODULE__{} = workspace, nil), do: %{workspace | active_file: nil}
-
-  def set_active_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
-    workspace = add_file(workspace, file_ref)
-    %{workspace | active_file: file_ref}
   end
 
   @doc "Serializes the persisted workspace fields to a JSON-ready map."
@@ -384,7 +343,6 @@ defmodule MingaEditor.State.Workspace do
       "icon" => workspace.icon,
       "color" => workspace.color,
       "files" => Enum.map(workspace.files, &file_ref_to_map/1),
-      "active_file" => file_ref_to_map(workspace.active_file),
       "review" => review_to_map(workspace.review)
     }
   end
@@ -404,7 +362,6 @@ defmodule MingaEditor.State.Workspace do
          icon: persisted_string(Map.get(data, "icon"), workspace.icon),
          color: persisted_color(Map.get(data, "color"), workspace.color),
          files: persisted_file_refs(Map.get(data, "files"), root),
-         active_file: persisted_file_ref(Map.get(data, "active_file"), root),
          review: persisted_review(Map.get(data, "review"), root),
          session: nil,
          agent_status: :stopped,
@@ -453,8 +410,7 @@ defmodule MingaEditor.State.Workspace do
   defp default_persisted_workspace(:agent, id, project_root),
     do: new_agent(max(id, 1), "Agent #{id}", nil, project_root)
 
-  @spec file_ref_to_map(FileRef.t() | nil) :: map() | nil
-  defp file_ref_to_map(nil), do: nil
+  @spec file_ref_to_map(FileRef.t()) :: map()
 
   defp file_ref_to_map(%FileRef{kind: :path} = file_ref) do
     %{
@@ -571,31 +527,9 @@ defmodule MingaEditor.State.Workspace do
 
   defp normalize_project_root(_project_root), do: nil
 
-  @spec maybe_rebind_active_file(t(), FileRef.t(), boolean()) :: t()
-  defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = new_file_ref, true) do
-    set_active_file(workspace, new_file_ref)
-  end
-
-  defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = _new_file_ref, false),
-    do: workspace
-
-  @spec active_file_matches?(FileRef.t() | nil, FileRef.t() | nil) :: boolean()
-  defp active_file_matches?(%FileRef{} = active_file, %FileRef{} = old_file_ref) do
-    FileRef.equal?(active_file, old_file_ref)
-  end
-
-  defp active_file_matches?(_active_file, _old_file_ref), do: false
-
-  @spec buffer_ref?(FileRef.t() | nil, pid()) :: boolean()
+  @spec buffer_ref?(FileRef.t(), pid()) :: boolean()
   defp buffer_ref?(%FileRef{kind: :buffer, buffer_pid: buffer_pid}, buffer_pid), do: true
   defp buffer_ref?(_file_ref, _buffer_pid), do: false
-
-  @spec remove_active_file(FileRef.t() | nil, FileRef.t()) :: FileRef.t() | nil
-  defp remove_active_file(%FileRef{} = active_file, %FileRef{} = removed_file) do
-    if FileRef.equal?(active_file, removed_file), do: nil, else: active_file
-  end
-
-  defp remove_active_file(nil, %FileRef{}), do: nil
 
   @spec manual_label(String.t() | nil) :: String.t()
   defp manual_label(nil), do: "Files"

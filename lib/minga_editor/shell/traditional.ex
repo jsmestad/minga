@@ -337,7 +337,7 @@ defmodule MingaEditor.Shell.Traditional do
     tb =
       tb
       |> TabBar.switch_to(tab.id)
-      |> TabBar.retarget_tab_file(tab.id, metadata.file_ref, true)
+      |> TabBar.retarget_tab_file(tab.id, metadata.file_ref)
 
     workspace = SessionState.activate_buffer(workspace, workspace.buffers)
     {ShellState.install_tab_bar(shell_state, tb), workspace}
@@ -759,7 +759,7 @@ defmodule MingaEditor.Shell.Traditional do
 
     tb =
       tb
-      |> TabBar.retarget_tab_file(new_tab.id, metadata.file_ref, true)
+      |> TabBar.retarget_tab_file(new_tab.id, metadata.file_ref)
       |> TabBar.update_context(new_tab.id, new_context)
 
     shell_state =
@@ -805,7 +805,7 @@ defmodule MingaEditor.Shell.Traditional do
 
     tb =
       tb
-      |> TabBar.retarget_tab_file(new_tab.id, metadata.file_ref, true)
+      |> TabBar.retarget_tab_file(new_tab.id, metadata.file_ref)
       |> TabBar.update_context(new_tab.id, new_context)
 
     {ShellState.install_tab_bar(shell_state, tb), workspace}
@@ -815,7 +815,7 @@ defmodule MingaEditor.Shell.Traditional do
   defp sync_file_tab_ref(%TabBar{} = tb, tab_id, buffer_pid, %SessionState{} = workspace) do
     case {TabBar.get(tb, tab_id), file_ref_for_buffer(buffer_pid, workspace)} do
       {%Tab{}, %FileRef{} = file_ref} ->
-        TabBar.retarget_tab_file(tb, tab_id, file_ref, true)
+        TabBar.retarget_tab_file(tb, tab_id, file_ref)
 
       _ ->
         tb

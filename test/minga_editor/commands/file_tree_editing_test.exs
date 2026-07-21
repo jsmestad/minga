@@ -190,7 +190,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert File.read!(renamed) == "content"
       refute File.exists?(file)
       assert TabBar.active(state.shell_runtime.state.tab_bar).file_ref == new_ref
-      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0).active_file == new_ref
 
       assert WorkspaceModel.has_file?(
                TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
@@ -256,7 +255,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         tab_bar
         |> TabBar.accept_tab(active_tab)
         |> TabBar.add_workspace_file(0, active_ref)
-        |> TabBar.set_workspace_active_file(0, active_ref)
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -285,7 +283,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert Buffer.file_path(target_buffer) == renamed
       assert TabBar.active(state.shell_runtime.state.tab_bar).id == active_tab.id
       assert TabBar.get(state.shell_runtime.state.tab_bar, inactive_tab.id).file_ref == new_ref
-      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0).active_file == active_ref
 
       assert WorkspaceModel.has_file?(
                TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
@@ -451,7 +448,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
           tab_bar =
             TabBar.new(tab, dir)
-            |> TabBar.set_workspace_active_file(0, file_ref)
 
           {workspace, %ShellState{tab_bar: tab_bar}}
       end
