@@ -3471,6 +3471,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness initially blocked on stale timeline authority after reject actions, Elixir craftsmanship required retained-binary detachment, split-once construction, and snapshot cleanup, and Ponytail required the same cleanup. The owner correction and test cuts were applied; correctness and Ponytail returned `RESOLVED/PASS`, and Elixir craftsmanship returned `RESOLVED/PASS` after mutation-backed binary tests covered both retention boundaries. The final reviewer then blocked on stale numeric cursor preservation after hunk reprojection; the cursor now follows the surviving hunk signature, and the targeted recheck returned `RESOLVED/PASS` with 0.99 confidence.
 - **Final reviewer verdict:** `PASS` after one targeted blocker correction. The final recheck confirmed repeated rejection preserves next-unresolved hunk order and found no remaining merge blocker.
 - **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **Implementation commit SHA:** `1a59affde`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
