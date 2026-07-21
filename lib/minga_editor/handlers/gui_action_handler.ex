@@ -484,28 +484,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Commands.BufferManagement.execute(state, :new_buffer)
   end
 
-  defp dispatch_action(state, {:panel_switch_tab, tab_index}) do
-    shell_state =
-      MingaEditor.Shell.Traditional.State.install_bottom_panel(
-        MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        MingaEditor.BottomPanel.switch_tab(
-          state.shell_runtime.state.bottom_panel,
-          tab_index
-        )
-      )
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
+  defp dispatch_action(state, {:panel_switch_tab, _tab_index}) do
+    state
   end
 
   defp dispatch_action(state, :panel_dismiss) do
     shell_state =
       MingaEditor.Shell.Traditional.State.install_bottom_panel(
         MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        MingaEditor.BottomPanel.dismiss(state.shell_runtime.state.bottom_panel)
+        MingaEditor.BottomPanel.hide(state.shell_runtime.state.bottom_panel)
       )
 
     %{

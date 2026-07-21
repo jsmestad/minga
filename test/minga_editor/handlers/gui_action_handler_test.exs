@@ -10,6 +10,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias Minga.Events
   alias Minga.Extension.CodeLease
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
+  alias MingaEditor.BottomPanel
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Commands
   alias MingaEditor.Editing
@@ -89,6 +90,69 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert NotificationCenter.find(state.feedback.notifications, "build:test") == nil
     assert [%{id: "other"}] = NotificationCenter.list(state.feedback.notifications)
+  end
+
+  test "panel_switch_tab is an explicit no-op", %{sidebar_registry: table} do
+    panel = %BottomPanel{visible: true, focused: true, filter: :warnings, height_percent: 45}
+
+    state =
+      base_state(table)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
+    assert GuiActionHandler.dispatch(state, {:panel_switch_tab, 255}).shell_runtime.state.bottom_panel ==
+             panel
+  end
+
+  test "panel_dismiss hides the panel through the owner", %{sidebar_registry: table} do
+    panel = %BottomPanel{visible: true, focused: true, filter: :warnings, height_percent: 45}
+
+    state =
+      base_state(table)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
+    new_panel = GuiActionHandler.dispatch(state, :panel_dismiss).shell_runtime.state.bottom_panel
+
+    assert new_panel.visible == false
+    assert new_panel.focused == false
+    assert new_panel.filter == :warnings
+    assert new_panel.height_percent == 45
+  end
+
+  test "panel_resize clamps through the owner", %{sidebar_registry: table} do
+    state = base_state(table)
+
+    low_panel =
+      GuiActionHandler.dispatch(state, {:panel_resize, 5}).shell_runtime.state.bottom_panel
+
+    high_panel =
+      GuiActionHandler.dispatch(state, {:panel_resize, 80}).shell_runtime.state.bottom_panel
+
+    assert low_panel.height_percent == 10
+    assert high_panel.height_percent == 60
   end
 
   test "tab context actions target the requested tab without selecting it", %{

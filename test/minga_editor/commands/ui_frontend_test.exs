@@ -77,52 +77,6 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         state = Commands.execute(state, :toggle_bottom_panel)
         assert state.shell_runtime.state.bottom_panel.visible == false
       end
-
-      test "#{label} bottom_panel_next_tab cycles to next tab" do
-        state =
-          then(base_state(unquote(Macro.escape(caps))), fn root ->
-            shell_state =
-              MingaEditor.Shell.Traditional.State.install_bottom_panel(
-                MingaEditor.Shell.Runtime.state(root.shell_runtime),
-                %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
-              )
-
-            %{
-              root
-              | shell_runtime:
-                  MingaEditor.Shell.Runtime.install_traditional_state(
-                    root.shell_runtime,
-                    shell_state
-                  )
-            }
-          end)
-
-        state = Commands.execute(state, :bottom_panel_next_tab)
-        assert state.shell_runtime.state.bottom_panel.active_tab == :diagnostics
-      end
-
-      test "#{label} bottom_panel_prev_tab cycles to previous tab" do
-        state =
-          then(base_state(unquote(Macro.escape(caps))), fn root ->
-            shell_state =
-              MingaEditor.Shell.Traditional.State.install_bottom_panel(
-                MingaEditor.Shell.Runtime.state(root.shell_runtime),
-                %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
-              )
-
-            %{
-              root
-              | shell_runtime:
-                  MingaEditor.Shell.Runtime.install_traditional_state(
-                    root.shell_runtime,
-                    shell_state
-                  )
-            }
-          end)
-
-        state = Commands.execute(state, :bottom_panel_prev_tab)
-        assert state.shell_runtime.state.bottom_panel.active_tab == :messages
-      end
     end
   end
 
