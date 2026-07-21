@@ -3376,7 +3376,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** `mix test.llm` exposed two Git Porcelain extension callers outside the planner's core `lib`/`test` search; those callers were exact identity wrappers and were deleted in the same slice. The retained renderer `mark_frontend_reset_pending/1` symbol is live and intentionally remains outside the deleted session API.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or mandatory cuts. They confirmed every removed function was identity-only, every caller retains its preceding live transition, the frontend reset sequence and renderer cache owners remain intact, explicit scroll/pin behavior is unchanged, the single test assertion is proportional, budgets are exact, and no concept was added.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact identity-only deletion, retained live owners, complete extension coverage, zero-reference searches, exact budgets, validation evidence, current-main freshness, and merge safety.
-- **PR URL:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3130
 - **Implementation commit SHA:** `5cd31a921`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
