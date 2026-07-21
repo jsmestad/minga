@@ -460,6 +460,8 @@ This single call handles the full pipeline:
 
 `Minga.Language.register/3` reports compile/setup failures synchronously. The parser-side load response is asynchronous, so a successful return means the grammar was accepted for loading, not that every parser process has finished applying it yet. Extensions that add new languages should call `Minga.Language.register/3` from their `init/1` callback and decide whether to fail the extension or continue without highlighting when it returns `{:error, reason}`.
 
+Compatibility note: the old Layer 2 delegate `MingaEditor.UI.Highlight.InjectionRange` has been removed. Extension and config code that constructs injection ranges should use `Minga.Language.Highlight.InjectionRange.new/3` or `%Minga.Language.Highlight.InjectionRange{}` directly. Parser `injection_ranges` events and editor parser state keep the same `start_byte`/`end_byte`/`language` fields.
+
 The dynamic grammar registry is an ETS table (`read_concurrency: true`) initialized at application startup. Dynamic mappings take precedence over the registered language definitions, so extensions can override bundled grammars if needed.
 
 ---
