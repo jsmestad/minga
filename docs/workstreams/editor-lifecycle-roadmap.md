@@ -3109,7 +3109,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W064/D20.4: Delete Highlight.Grammar compatibility facade
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D20.4 Highlight.Grammar compatibility facade deletion
 - **Planning profile:** `D20GrammarPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D20GrammarWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3134,5 +3134,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** The initial reviewer blocked because the moved grammar test destination was untracked. After adding it to the index, targeted re-review returned `RESOLVED/PASS` with 0.99 confidence and confirmed the R098 move, truthful test accounting, patch integrity, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3114
 - **Implementation commit SHA:** `1d648bbb1`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `caebdfc73e7e40e6f730d92b3599af20c1f0660a`.
+- **Merge evidence:** PR #3114 merged after CI run `29812086620` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
