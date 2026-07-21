@@ -3171,7 +3171,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W066/D22: Remove construction-only theme fields
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D22
 - **Planning profile:** `D22ThemeFieldPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D22ThemeFieldWorker`, `editor-lifecycle-worker`, no delegation; mandatory safety cut by `D22FieldSafetyCut`.
@@ -3196,5 +3196,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three-field and duplicate-parser deletion, valid deprecated parse-and-ignore behavior, canonical Builder errors, retained live consumers, truthful budgets and validation, freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3118
 - **Implementation commit SHA:** `9658a6625`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `0d38e05ded99947742c2010a9c6c5ecde9a135df`.
+- **Merge evidence:** PR #3118 merged after CI run `29819374972` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
