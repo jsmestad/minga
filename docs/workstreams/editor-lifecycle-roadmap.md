@@ -3384,7 +3384,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W073/D35: Delete workspace active-file persistence
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** D35
 - **Planning profile:** `D35PersistencePlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D35PersistenceWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3409,5 +3409,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed schema-v1 compatibility, legacy-key tolerance, separate session restore ownership, equal-ref membership correctness, complete deleted-API coverage, exact budgets, corroborated validation, current-main freshness, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3132
 - **Implementation commit SHA:** `e433ba80e`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `d04b4416f70a8fda63909d279b10b6b726f47171`.
+- **Merge evidence:** PR #3132 merged after CI run `29849247607` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
