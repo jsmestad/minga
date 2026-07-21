@@ -7,6 +7,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
   """
 
   alias Minga.Log
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Shell.Runtime
@@ -27,6 +28,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
   @doc "Selects a native sidebar and synchronizes registry focus."
   @spec select(state(), String.t() | nil) :: state()
   def select(%EditorState{} = state, id) when is_binary(id) or is_nil(id) do
+    sync_file_tree_sidebar(state)
     sync_active_sidebar(state, id)
     update(state, &TraditionalState.select_sidebar(&1, id))
   end
@@ -197,6 +199,20 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
       _extension_state ->
         {:stale, state}
+    end
+  end
+
+  @spec sync_file_tree_sidebar(state()) :: :ok
+  defp sync_file_tree_sidebar(state) do
+    case FileTreeFeature.sync_sidebar(
+           state.workspace.file_tree,
+           state.extension_surfaces.sidebar_registry
+         ) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Log.warning(:editor, "File Tree sidebar sync failed: #{inspect(reason)}")
     end
   end
 
