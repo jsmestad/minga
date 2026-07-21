@@ -58,11 +58,6 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
 
-  @impl true
-  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _click_count) do
-    {:passthrough, state}
-  end
-
   # ── Command execution ──────────────────────────────────────────────────
 
   @spec execute_command(EditorState.t(), atom()) :: EditorState.t()

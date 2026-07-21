@@ -15,7 +15,6 @@ defmodule MingaEditor.Input.FileTreeHandler do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
-  alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -70,27 +69,6 @@ defmodule MingaEditor.Input.FileTreeHandler do
   end
 
   @impl true
-  @spec handle_mouse(
-          state(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: MingaEditor.Input.Handler.result()
-
-  def handle_mouse(state, row, col, button, mods, event_type, click_count) do
-    case routed_file_tree_node(state, row, col, button) do
-      %FocusNode{} = node ->
-        handle_mouse_at_node(state, node, row, col, button, mods, event_type, click_count)
-
-      nil ->
-        {:passthrough, state}
-    end
-  end
-
-  @impl true
   @spec handle_mouse_at_node(
           state(),
           FocusNode.t(),
@@ -127,19 +105,6 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   def handle_mouse_at_node(state, _node, _row, _col, _button, _mods, _event_type, _cc) do
     {:passthrough, state}
-  end
-
-  @spec routed_file_tree_node(EditorState.t(), integer(), integer(), atom()) ::
-          FocusNode.t() | nil
-  defp routed_file_tree_node(state, row, col, button) do
-    tree = FocusTree.from_state(state)
-
-    path =
-      if button in [:wheel_down, :wheel_up],
-        do: FocusTree.scroll_path(tree, row, col),
-        else: FocusTree.hit_path(tree, row, col)
-
-    Enum.find(path, &(&1.handler == __MODULE__))
   end
 
   @spec focus_file_tree_for_mouse(EditorState.t(), atom()) :: EditorState.t()

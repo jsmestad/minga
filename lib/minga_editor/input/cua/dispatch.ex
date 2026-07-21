@@ -54,21 +54,6 @@ defmodule MingaEditor.Input.CUA.Dispatch do
   end
 
   @impl true
-  @spec handle_mouse(
-          EditorState.t(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) :: MingaEditor.Input.Handler.result()
-  def handle_mouse(state, row, col, button, mods, event_type, click_count) do
-    new_state = Mouse.handle(state, row, col, button, mods, event_type, click_count)
-    {:handled, new_state}
-  end
-
-  @impl true
   @spec handle_mouse_at_node(
           EditorState.t(),
           FocusNode.t(),

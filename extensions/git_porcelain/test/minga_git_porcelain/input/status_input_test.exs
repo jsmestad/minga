@@ -66,11 +66,6 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
     assert tui.discard_confirmation == nil
   end
 
-  test "mouse events passthrough" do
-    state = make_state_with_git_panel()
-    {:passthrough, _state} = GitStatus.handle_mouse(state, 0, 0, :left, @none, :down, 1)
-  end
-
   test "passthrough for non-git-status scope" do
     state = make_state_with_git_panel()
 
