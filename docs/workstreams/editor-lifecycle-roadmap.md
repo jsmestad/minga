@@ -3224,7 +3224,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** No parser replacement, protocol migration, storage change, event taxonomy change, frontend change, extension migration, or duplicate suppression fix was needed. Canonical production replay intentionally continues without the deleted duplicate parser's file-event duplicate suppression, matching the locked residual.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or cuts. They confirmed the exact duplicate-parser/workflow deletion, complete 24-family canonical parity table, retained malformed-payload and ordered-replay behavior, live tool-update replay, truthful negative production and test budgets, zero stale symbols, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact duplicate-parser deletion, canonical replay callers and ordering, complete taxonomy parity, live dispatch and batch behavior, truthful validation and budgets, freshness, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3120
+- **Implementation commit SHA:** `bfb13fad7`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
