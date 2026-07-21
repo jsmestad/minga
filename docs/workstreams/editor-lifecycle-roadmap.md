@@ -3584,7 +3584,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed sole initial event ownership, private-registry isolation, explicit LSP reattachment preservation, complete foreground caller threading, focused contract coverage, exact budgets, roadmap truth, and merge safety.
 - **Findings resolved:** S06's duplicate foreground registration broadcasts are removed; downstream event consumers now receive one creation event instead of a creation event plus a registration event for the same foreground open.
 - **Discoveries affecting later work:** The locked owner, contract, scope, test layer, dependencies, LSP reattachment constraint, and production-line budget remained valid.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3146
+- **Implementation commit SHA:** `271d1ed5b`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
