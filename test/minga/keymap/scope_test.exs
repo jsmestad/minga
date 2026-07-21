@@ -75,25 +75,44 @@ defmodule Minga.Keymap.ScopeTest do
       assert {:prefix, _node} = Scope.resolve_key(:agent, :normal, {?z, 0})
     end
 
-    test "za resolves to agent_toggle_collapse" do
+    test "zA resolves to agent_toggle_all_collapse and stale fold keys are absent" do
       {:prefix, z_node} = Scope.resolve_key(:agent, :normal, {?z, 0})
-      assert {:command, :agent_toggle_collapse} = Scope.resolve_key_in_node(z_node, {?a, 0})
+
+      assert {:command, :agent_toggle_all_collapse} = Scope.resolve_key_in_node(z_node, {?A, 0})
+
+      for key <- [?a, ?o, ?c, ?M, ?R] do
+        assert :not_found = Scope.resolve_key_in_node(z_node, {key, 0})
+      end
     end
 
-    test "zM resolves to agent_collapse_all" do
-      {:prefix, z_node} = Scope.resolve_key(:agent, :normal, {?z, 0})
-      assert {:command, :agent_collapse_all} = Scope.resolve_key_in_node(z_node, {?M, 0})
+    test "o is not a built-in agent collapse alias" do
+      assert :not_found = Scope.resolve_key(:agent, :normal, {?o, 0})
     end
 
     test "] is a prefix in normal mode" do
       assert {:prefix, _node} = Scope.resolve_key(:agent, :normal, {?], 0})
     end
 
-    test "]c resolves to agent_next_code_block" do
+    test "]c resolves to agent_next_code_block and stale bracket commands are absent" do
       {:prefix, bracket_node} = Scope.resolve_key(:agent, :normal, {?], 0})
 
       assert {:command, :agent_next_code_block} =
                Scope.resolve_key_in_node(bracket_node, {?c, 0})
+
+      for key <- [?m, ?t] do
+        assert :not_found = Scope.resolve_key_in_node(bracket_node, {key, 0})
+      end
+    end
+
+    test "[c resolves to agent_prev_code_block and stale bracket commands are absent" do
+      {:prefix, bracket_node} = Scope.resolve_key(:agent, :normal, {?[, 0})
+
+      assert {:command, :agent_prev_code_block} =
+               Scope.resolve_key_in_node(bracket_node, {?c, 0})
+
+      for key <- [?m, ?t] do
+        assert :not_found = Scope.resolve_key_in_node(bracket_node, {key, 0})
+      end
     end
 
     test "y resolves to agent_copy_code_block in normal mode" do
@@ -207,6 +226,30 @@ defmodule Minga.Keymap.ScopeTest do
       assert {"Navigation", bindings} = List.first(groups)
       assert is_list(bindings)
       assert Enum.any?(bindings, fn {key, _desc} -> String.contains?(key, "j") end)
+    end
+
+    test "agent chat help advertises only the all-toggle collapse binding" do
+      groups = Scope.help_groups(:agent, :chat)
+
+      {"Fold / Collapse", fold_bindings} =
+        Enum.find(groups, fn {category, _} -> category == "Fold / Collapse" end)
+
+      all_bindings = Enum.flat_map(groups, fn {_category, bindings} -> bindings end)
+
+      assert [{"zA", "Toggle all collapsible blocks"}] = fold_bindings
+
+      removed_descriptions = [
+        "Toggle collapse " <> "at cursor",
+        "Collapse " <> "all",
+        "Expand " <> "all",
+        "Next / prev " <> "message",
+        "Next / prev " <> "tool call"
+      ]
+
+      refute Enum.any?(all_bindings, fn {key, desc} ->
+               key in ["o / za", "zM", "zR", "]m / [m", "]t / [t"] or
+                 desc in removed_descriptions
+             end)
     end
 
     test "agent scope returns viewer help for :file_viewer" do

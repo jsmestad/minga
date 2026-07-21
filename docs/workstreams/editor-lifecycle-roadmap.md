@@ -3229,3 +3229,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `11ae5336100a3d28ec2c8052b375fa5ac386b942`.
 - **Merge evidence:** PR #3120 merged after CI run `29822988251` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W068/D28: Clean cutover agent collapse command surface
+
+- **Status:** ACTIVE
+- **Audit ID:** D28
+- **Planning profile:** `D28CommandPlannerRetry`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `D28CommandWorker`, `editor-lifecycle-worker`, no delegation.
+- **Freshness commit SHA:** `13e8df02234a96c4cf0cca13b33d731954d0fb5a`.
+- **Observable result:** The built-in agent command registry and scope trie retain exactly one collapse/fold command, `:agent_toggle_all_collapse` on `zA`, with an honest all-block description. The stale at-cursor, directional collapse/expand, message navigation, and tool-call navigation built-in commands and keys are removed without aliases or shims. User and extension command/keymap mechanics remain unchanged because the registry, scoped keymap resolver, and leader path were not replaced.
+- **Failure reproduction / source trace:** Before implementation, focused source trace found stale no-op or misleading command functions and registry entries in `MingaEditor.Commands.Agent`, stale built-in `za`, `zo`, `zc`, `zM`, `zR`, `o`, `]m`, `]t`, `[m`, and `[t` bindings plus help text in `Minga.Keymap.Scope.Agent`, and stale public docs in `docs/AGENTIC-KEYMAP.md`. The session owner already had the real all-toggle transition in `MingaAgent.Session.toggle_all_tool_collapses/1`.
+- **Implementation result:** Deleted the stale scoped command functions, registry entries, built-in key bindings, and help rows; inlined the surviving `scope_toggle_all_collapse/1` call to the existing session owner transition; kept `]c`/`[c` code-block and diff-hunk navigation; updated the agent keymap docs with the no-alias migration notice; added focused registry and keymap/help assertions.
+- **Changed files:** `docs/AGENTIC-KEYMAP.md`; `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga/keymap/scope/agent.ex`; `lib/minga_editor/commands/agent.ex`; `test/minga/command/registry_test.exs`; `test/minga/keymap/scope_test.exs`.
+- **Focused validation:** `mix test.debug test/minga/keymap/scope_test.exs test/minga/command/registry_test.exs test/minga_agent/session_transcript_test.exs test/minga_editor/input/scoped_editor_agent_test.exs` passed 129 tests. The focused regression includes registry absence for removed built-ins, `zA` resolution to `:agent_toggle_all_collapse`, absence of removed fold/bracket built-in keys, retained `]c`/`[c`, help text cutover, and the existing session owner all-toggle test for thinking/tool blocks.
+- **Formatting, reference, and diff validation:** `mix format --check-formatted lib/minga_editor/commands/agent.ex lib/minga/keymap/scope/agent.ex test/minga/keymap/scope_test.exs test/minga/command/registry_test.exs docs/AGENTIC-KEYMAP.md docs/workstreams/editor-lifecycle-roadmap.md` passed before this evidence update. Focused forbidden-reference searches for removed command atoms across `lib`, `test`, `docs`, and `extensions`, and stale help/docs prose across the touched docs/keymap/test surfaces, returned no matches after the cutover. `git diff --check` passed.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors; Credo still reported the two existing refactoring opportunities in `lib/minga_editor/commands/buffer_management.ex`, and the lint target exited successfully. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,732 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
+- **Current non-roadmap numstat:** `docs/AGENTIC-KEYMAP.md 5 11; lib/minga/keymap/scope/agent.ex 2 18; lib/minga_editor/commands/agent.ex 9 56; test/minga/command/registry_test.exs 32 0; test/minga/keymap/scope_test.exs 49 6`.
+- **Production lines added/removed:** `11 added / 74 removed` (net `-63`, within production net `<= 0`).
+- **Test lines added/removed:** `81 added / 6 removed` (net `+75`, limited to registry and keymap/help contract tests for the clean cutover).
+- **Docs lines before roadmap evidence:** `5 added / 11 removed` in `docs/AGENTIC-KEYMAP.md`.
+- **Concepts removed:** Removed stale no-op scoped command surface, dishonest at-cursor and directional collapse surface, misleading collapse-all/expand-all aliases, stale built-in navigation keys, and stale help/docs entries.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement command, key alias, guard, data representation, frontend path, or migration layer was added.
+- **Retained contracts:** `:agent_toggle_all_collapse`, built-in `zA`, command `scope: :agent`, existing `Minga.Command.Registry` provider seeding, user/extension command registration and keymap override mechanics, leader pass-through, `MingaAgent.Session.toggle_all_tool_collapses/1`, thinking/tool collapse transition shape, render-model projection, `]c`/`[c` code-block/diff-hunk behavior, agent close/help/input/session/panel/copy bindings, and all frontend/protocol surfaces remain unchanged.
+- **Findings resolved:** D28 removes the misleading built-in command/key/help/docs surface while preserving the only real all-toggle behavior and its session owner.
+- **Discoveries affecting later work:** No replan trigger, extension caller, protocol/frontend dependency, replacement API need, compatibility shim need, custom binding regression, or leader/which-key ownership change was found.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with no blockers or cuts. They confirmed the exact nine-command and ten-binding cut, the single direct `zA` all-toggle path, canonical session ownership, retained custom override/leader and `]c`/`[c` behavior, cheapest-layer registry/keymap tests, truthful budgets, and zero added concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact one-command clean cutover, command/keymap and session transition ownership, complete stale trace deletion without aliases, truthful validation and budgets, freshness, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
