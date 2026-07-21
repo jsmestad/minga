@@ -100,7 +100,6 @@ defmodule MingaEditor.UI.Theme.OneDark do
           search: {0x000000, @hue_1}
         }
       },
-      minibuffer: %{bg: 0x000000},
       popup: %{bg: @syntax_guide, border_fg: @mono_2, sel_bg: @hue_2, separator_fg: @mono_3},
       tree: %{
         bg: @ui_bg,

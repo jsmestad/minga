@@ -207,12 +207,12 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       %{
         name: :bad_section_test,
         inherits: :doom_one,
-        overrides: %{popop: %{title_fg: 0x123456}}
+        overrides: %{picker: %{title_fg: 0x123456}}
       }
       """)
 
       assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
-      assert error =~ "unknown theme override section: :popop"
+      assert error =~ "unknown theme override section: :picker"
     end
 
     test "palette and inherits cannot both be specified", %{tmp_dir: dir} do

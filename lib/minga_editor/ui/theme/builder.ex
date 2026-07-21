@@ -18,8 +18,6 @@ defmodule MingaEditor.UI.Theme.Builder do
           optional(:gutter) => section_overrides(),
           optional(:git) => section_overrides(),
           optional(:modeline) => section_overrides(),
-          optional(:picker) => section_overrides(),
-          optional(:minibuffer) => section_overrides(),
           optional(:search) => section_overrides(),
           optional(:popup) => section_overrides(),
           optional(:tree) => section_overrides(),
@@ -33,8 +31,6 @@ defmodule MingaEditor.UI.Theme.Builder do
     gutter: Theme.Gutter,
     git: Theme.Git,
     modeline: Theme.Modeline,
-    picker: Theme.Picker,
-    minibuffer: Theme.Minibuffer,
     search: Theme.Search,
     popup: Theme.Popup,
     tree: Theme.Tree,
@@ -83,21 +79,6 @@ defmodule MingaEditor.UI.Theme.Builder do
       :lsp_starting,
       :lsp_error
     ],
-    picker: [
-      :bg,
-      :sel_bg,
-      :prompt_bg,
-      :dim_fg,
-      :text_fg,
-      :highlight_fg,
-      :match_fg,
-      :border_fg,
-      :menu_bg,
-      :menu_fg,
-      :menu_sel_bg,
-      :menu_sel_fg
-    ],
-    minibuffer: [:fg, :bg, :warning_fg, :dim_fg],
     search: [:highlight_fg, :highlight_bg, :current_bg],
     popup: [
       :fg,
@@ -201,8 +182,6 @@ defmodule MingaEditor.UI.Theme.Builder do
       gutter: gutter(palette),
       git: git(palette),
       modeline: modeline(palette),
-      picker: picker(palette),
-      minibuffer: minibuffer(palette),
       search: search(palette),
       popup: popup(palette),
       tree: tree(palette),
@@ -284,34 +263,6 @@ defmodule MingaEditor.UI.Theme.Builder do
       command: {p.semantic.contrast_fg, p.semantic.warning},
       replace: {p.semantic.contrast_fg, p.semantic.error},
       search: {p.semantic.contrast_fg, p.semantic.info}
-    }
-  end
-
-  @spec picker(Palette.t()) :: Theme.Picker.t()
-  defp picker(%Palette{} = p) do
-    %Theme.Picker{
-      bg: p.base.surface,
-      sel_bg: p.semantic.selection_bg,
-      prompt_bg: p.base.surface,
-      dim_fg: p.base.muted,
-      text_fg: p.base.fg,
-      highlight_fg: p.semantic.highlight,
-      match_fg: p.semantic.match,
-      border_fg: p.semantic.border,
-      menu_bg: p.base.bg,
-      menu_fg: p.base.fg,
-      menu_sel_bg: p.semantic.selection_bg,
-      menu_sel_fg: p.semantic.highlight
-    }
-  end
-
-  @spec minibuffer(Palette.t()) :: Theme.Minibuffer.t()
-  defp minibuffer(%Palette{} = p) do
-    %Theme.Minibuffer{
-      fg: p.base.fg,
-      bg: p.base.overlay,
-      warning_fg: p.semantic.warning,
-      dim_fg: p.base.muted
     }
   end
 

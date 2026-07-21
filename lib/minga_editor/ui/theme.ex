@@ -3,8 +3,7 @@ defmodule MingaEditor.UI.Theme do
   Unified color theme for the entire editor.
 
   A theme holds every color the UI needs, organized into semantic groups:
-  syntax highlighting, editor chrome, modeline, gutter, picker, minibuffer,
-  search highlights, and popups.
+  syntax highlighting, editor chrome, modeline, gutter, search highlights, and popups.
 
   Built-in themes are shipped as bundled theme pack extensions under `Minga.Extensions.ThemePacks`. The core retains a single minimal theme (`:minga_default`) for tests and explicit use, but startup does not silently fall back to it when the configured theme is unavailable.
 
@@ -24,8 +23,6 @@ defmodule MingaEditor.UI.Theme do
     :editor,
     :gutter,
     :modeline,
-    :picker,
-    :minibuffer,
     :search,
     :popup,
     :tree
@@ -38,8 +35,6 @@ defmodule MingaEditor.UI.Theme do
     :gutter,
     :git,
     :modeline,
-    :picker,
-    :minibuffer,
     :search,
     :popup,
     :tree,
@@ -80,8 +75,6 @@ defmodule MingaEditor.UI.Theme do
           gutter: MingaEditor.UI.Theme.Gutter.t(),
           git: MingaEditor.UI.Theme.Git.t(),
           modeline: MingaEditor.UI.Theme.Modeline.t(),
-          picker: MingaEditor.UI.Theme.Picker.t(),
-          minibuffer: MingaEditor.UI.Theme.Minibuffer.t(),
           search: MingaEditor.UI.Theme.Search.t(),
           popup: MingaEditor.UI.Theme.Popup.t(),
           tree: MingaEditor.UI.Theme.Tree.t(),
@@ -204,68 +197,6 @@ defmodule MingaEditor.UI.Theme do
             lsp_initializing: MingaEditor.UI.Theme.color() | nil,
             lsp_starting: MingaEditor.UI.Theme.color() | nil,
             lsp_error: MingaEditor.UI.Theme.color() | nil
-          }
-  end
-
-  defmodule Picker do
-    @moduledoc "Picker (fuzzy finder) colors."
-
-    @enforce_keys [
-      :bg,
-      :sel_bg,
-      :prompt_bg,
-      :dim_fg,
-      :text_fg,
-      :highlight_fg,
-      :match_fg,
-      :border_fg,
-      :menu_bg,
-      :menu_fg,
-      :menu_sel_bg,
-      :menu_sel_fg
-    ]
-
-    defstruct [
-      :bg,
-      :sel_bg,
-      :prompt_bg,
-      :dim_fg,
-      :text_fg,
-      :highlight_fg,
-      :match_fg,
-      :border_fg,
-      :menu_bg,
-      :menu_fg,
-      :menu_sel_bg,
-      :menu_sel_fg
-    ]
-
-    @type t :: %__MODULE__{
-            bg: MingaEditor.UI.Theme.color(),
-            sel_bg: MingaEditor.UI.Theme.color(),
-            prompt_bg: MingaEditor.UI.Theme.color(),
-            dim_fg: MingaEditor.UI.Theme.color(),
-            text_fg: MingaEditor.UI.Theme.color(),
-            highlight_fg: MingaEditor.UI.Theme.color(),
-            match_fg: MingaEditor.UI.Theme.color(),
-            border_fg: MingaEditor.UI.Theme.color(),
-            menu_bg: MingaEditor.UI.Theme.color(),
-            menu_fg: MingaEditor.UI.Theme.color(),
-            menu_sel_bg: MingaEditor.UI.Theme.color(),
-            menu_sel_fg: MingaEditor.UI.Theme.color()
-          }
-  end
-
-  defmodule Minibuffer do
-    @moduledoc "Minibuffer (command line) colors."
-    @enforce_keys [:fg, :bg, :warning_fg, :dim_fg]
-    defstruct [:fg, :bg, :warning_fg, :dim_fg]
-
-    @type t :: %__MODULE__{
-            fg: MingaEditor.UI.Theme.color(),
-            bg: MingaEditor.UI.Theme.color(),
-            warning_fg: MingaEditor.UI.Theme.color(),
-            dim_fg: MingaEditor.UI.Theme.color()
           }
   end
 

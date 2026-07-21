@@ -14,8 +14,8 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert %Theme.Gutter{} = theme.gutter
       assert %Theme.Git{} = theme.git
       assert %Theme.Modeline{} = theme.modeline
-      assert %Theme.Picker{} = theme.picker
-      assert %Theme.Minibuffer{} = theme.minibuffer
+      refute Map.has_key?(Map.from_struct(theme), :picker)
+      refute Map.has_key?(Map.from_struct(theme), :minibuffer)
       assert %Theme.Search{} = theme.search
       assert %Theme.Popup{} = theme.popup
       assert %Theme.Tree{} = theme.tree
@@ -83,6 +83,14 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
     test "rejects unknown override sections and fields" do
       assert_raise ArgumentError, ~r/unknown theme override section: :popop/, fn ->
         Builder.from_palette(:palette_test, sample_palette(), %{popop: %{title_fg: 0x123456}})
+      end
+
+      assert_raise ArgumentError, ~r/unknown theme override section: :picker/, fn ->
+        Builder.from_palette(:palette_test, sample_palette(), %{picker: %{bg: 0x123456}})
+      end
+
+      assert_raise ArgumentError, ~r/unknown theme override section: :minibuffer/, fn ->
+        Builder.from_palette(:palette_test, sample_palette(), %{minibuffer: %{bg: 0x123456}})
       end
 
       assert_raise ArgumentError, ~r/unknown theme override field :popup.:titel_fg/, fn ->
