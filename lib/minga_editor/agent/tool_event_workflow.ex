@@ -2,7 +2,7 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
   @moduledoc """
   Applies tool-family agent events to the foreground agent surface.
 
-  Session snapshots remain authoritative for the active tool name. Each live workflow applies owner transitions first, then schedules its render directly. Replay uses the same transitions without producing another render request.
+  Session snapshots remain authoritative for the active tool name. Each live workflow applies owner transitions first, then schedules its render directly. Stream batches reuse the tool-update transition without producing another render request.
   """
 
   alias MingaEditor.Agent.Activity
@@ -65,28 +65,10 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
 
   @doc false
   @spec replay(EditorState.t(), term()) :: EditorState.t()
-  def replay(%EditorState{} = state, {:tool_started, _tool_call_id, name, args}),
-    do: transition_started(state, name, args)
-
-  def replay(%EditorState{} = state, {:tool_started, name, args}),
-    do: transition_started(state, name, args)
-
   def replay(%EditorState{} = state, {:tool_update, _tool_call_id, "shell", partial}),
     do: update_preview(state, &Preview.update_shell_output(&1, partial))
 
   def replay(%EditorState{} = state, {:tool_update, _tool_call_id, _name, _partial}), do: state
-
-  def replay(%EditorState{} = state, {:tool_ended, _tool_call_id, name, result, status}),
-    do: state |> transition_ended(name, result, status) |> transition_state()
-
-  def replay(%EditorState{} = state, {:tool_ended, name, result, status}),
-    do: state |> transition_ended(name, result, status) |> transition_state()
-
-  def replay(%EditorState{} = state, {:tool_interrupted, _tool_call_id}),
-    do: transition_interrupted(state)
-
-  def replay(%EditorState{} = state, {:todo_plan_updated, todos}) when is_list(todos),
-    do: update_activity(state, &Activity.set_todos(&1, todos))
 
   @spec transition_started(EditorState.t(), String.t(), map()) :: EditorState.t()
   defp transition_started(state, "shell", args) do
@@ -194,9 +176,6 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
     |> sync_active_tool_name(nil)
     |> update_preview(&Preview.clear/1)
   end
-
-  @spec transition_state({:render | :no_render, EditorState.t()}) :: EditorState.t()
-  defp transition_state({_render, state}), do: state
 
   @spec sync_active_tool_name(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp sync_active_tool_name(state, fallback_name) do

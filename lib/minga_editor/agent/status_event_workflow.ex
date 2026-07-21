@@ -49,10 +49,6 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     |> apply_compaction_action(compaction_action)
   end
 
-  @doc false
-  @spec replay_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  def replay_status(%EditorState{} = state, status), do: transition_status(state, status)
-
   @spec transition_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
   defp transition_status(state, status) do
     state = TraditionalWorkflow.install_agent_status(state, status)

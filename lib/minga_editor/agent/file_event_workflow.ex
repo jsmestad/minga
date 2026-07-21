@@ -57,36 +57,6 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
     |> log_reload_notices(notices)
   end
 
-  @doc false
-  @spec replay_changed(
-          EditorState.t(),
-          String.t(),
-          String.t(),
-          String.t(),
-          String.t(),
-          String.t()
-        ) :: EditorState.t()
-  def replay_changed(
-        %EditorState{} = state,
-        path,
-        before_content,
-        after_content,
-        tool_call_id,
-        tool_name
-      ) do
-    {state, _notices} =
-      transition_changed(
-        state,
-        path,
-        before_content,
-        after_content,
-        tool_call_id,
-        tool_name
-      )
-
-    state
-  end
-
   @spec transition_changed(
           EditorState.t(),
           String.t(),

@@ -2,8 +2,6 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   use Minga.Test.SessionCase, async: true
 
   alias MingaEditor.Agent.Compaction
-  alias MingaEditor.Agent.EditTimeline
-  alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.FileEventWorkflow
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.SessionEventWorkflow
@@ -24,7 +22,6 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.Session
   alias MingaEditor.Test.FakeShell
 
@@ -142,25 +139,6 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert entry.tool_call_id == "tc1"
     assert state.workspace.agent_ui.view.presentation.focus == :file_viewer
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
-  end
-
-  test "file catch-up replay preserves order and suppresses an already-applied identity" do
-    records = [
-      file_record("tc1", "before", "first"),
-      file_record("tc1", "ignored", "duplicate"),
-      file_record("tc2", "first", "second")
-    ]
-
-    state = Events.replay_catchup(event_state(), records)
-    entries = EditTimeline.entries_for(state.workspace.agent_ui.view.edit_timeline, "/tmp/a.ex")
-
-    assert Enum.map(entries, & &1.tool_call_id) == ["tc1", "tc2"]
-
-    assert {:ok, "first"} =
-             EditTimeline.content_at(state.workspace.agent_ui.view.edit_timeline, "/tmp/a.ex", 0)
-
-    assert {:ok, "second"} =
-             EditTimeline.content_at(state.workspace.agent_ui.view.edit_timeline, "/tmp/a.ex", 1)
   end
 
   test "spinner ticks advance only while the foreground agent is busy" do
@@ -297,17 +275,6 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     after
       remaining -> flunk("Agent: error was not routed to the messages log")
     end
-  end
-
-  @spec file_record(String.t(), String.t(), String.t()) :: EventRecord.t()
-  defp file_record(tool_call_id, before_content, after_content) do
-    EventRecord.new("session", :file_edit_proposed, %{
-      "path" => "/tmp/a.ex",
-      "before_content" => before_content,
-      "after_content" => after_content,
-      "tool_call_id" => tool_call_id,
-      "tool_name" => "edit"
-    })
   end
 
   @spec event_state(pid() | nil, EffectScheduler.server() | nil) :: EditorState.t()
