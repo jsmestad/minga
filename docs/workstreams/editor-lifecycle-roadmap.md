@@ -3475,3 +3475,29 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `48db371100737d425bbd4fb3c28b10030ccc7386`.
 - **Merge evidence:** PR #3138 merged after CI run `29862946649` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W076/D06: Verify Protocol.GUI parity-oracle cleanup is exhausted
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** D06
+- **Planning profile:** `D06NextPlanner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** None; current-main verification found no remaining D06 implementation slice.
+- **Ready provenance:** `agent://D06NextPlanner` classified D06 terminal against current SHA `42f128a993b51e147eba7a8c1a3461f8605e4ae2`. W028-W040 already removed every Protocol.GUI outbound parity oracle with a canonical adapter owner and independent coverage.
+- **Freshness commit SHA:** `42f128a993b51e147eba7a8c1a3461f8605e4ae2`.
+- **Observable result:** `lib/minga_editor/frontend/protocol/gui.ex` is 1,163 lines and contains no semantic GUI chrome parity encoder. Its remaining public surfaces are `encode_gui_extension_runtime/3`, `encode_clipboard_write/2`, `config_state/2`, `settings_option?/1`, `decode_search_flags/1`, and `decode_gui_action/2`.
+- **Current source trace:** The only byte-producing outbound functions left in Protocol.GUI are the D04-preserved extension runtime envelope and the live out-of-band clipboard command. `config_state/2` is a live settings projection consumed through `ConfigStateBuilder.from_wire/1`; `settings_option?/1`, `decode_search_flags/1`, and `decode_gui_action/2` own live inbound settings and action behavior. Semantic UI bytes are owned by `Minga.Frontend.Adapter.GUI` and its focused encoders.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`.
+- **Production lines added/removed:** `0 added / 0 removed`.
+- **Test lines added/removed:** `0 added / 0 removed`.
+- **Concepts added:** None.
+- **Retained contracts:** `encode_gui_extension_runtime/3` remains the D04-preserved opaque extension envelope; clipboard write retains its live producer and `:general`/`:find` targets; settings projection, settings allowlisting, search flags, outer GUI action decoding, malformed-payload rejection, and old Tool Manager action-slot rejection remain unchanged.
+- **Non-goals:** No protocol version bump, no new module or owner, no movement of settings projection into render-model builders, no Change Summary work owned by D02, and no Tool Manager service or picker changes.
+- **Findings resolved:** D06 is terminal. W028-W040 removed all adapter-duplicating outbound Protocol.GUI parity oracles, and current main has no remaining D06 implementation candidate.
+- **Discoveries affecting later work:** Change Summary remains governed by D02; native Tool Manager panel identity is already retired under W043/D03 and W074/D36; extension runtime remains preserved under D04. These are not residual D06 work.
+- **Pre-acceptance reviews:** Correctness returned `PASS` after independently tracing every remaining public surface and confirming no private wire encoder or removed W028-W040 caller remains. Ponytail returned `PASS/Lean` with no mandatory deletion and confirmed stopping is the smallest correct action.
+- **Validation:** Read-only source and reference verification completed; `git diff --check` and `mix format --check-formatted docs/workstreams/editor-lifecycle-roadmap.md` passed. Markdown LSP diagnostics were unavailable because no Markdown language server is configured.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed current Protocol.GUI ownership, W028-W040 exhaustion, preserved D04 runtime and live clipboard/settings/actions, separate Tool Manager retirement, roadmap truth, and merge safety.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
