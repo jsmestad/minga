@@ -3447,7 +3447,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W075/S03: Make EditTimeline the cumulative diff authority
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S03
 - **Planning profile:** `S03FreshnessRelock`, `editor-lifecycle-planner`, read-only; `S03Architecture`, `archie`, read-only.
 - **Implementation profile:** `S03BaselineWorker`, `editor-lifecycle-worker`, no delegation; blocker correction by `S03BlockerWorker`, no delegation.
@@ -3472,5 +3472,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` after one targeted blocker correction. The final recheck confirmed repeated rejection preserves next-unresolved hunk order and found no remaining merge blocker.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3138
 - **Implementation commit SHA:** `1a59affde`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `48db371100737d425bbd4fb3c28b10030ccc7386`.
+- **Merge evidence:** PR #3138 merged after CI run `29862946649` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
