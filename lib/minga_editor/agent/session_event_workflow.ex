@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
+  alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
@@ -148,8 +149,11 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     session = Runtime.active_session(state.shell_runtime)
 
     case workspace_for_session(traditional_tab_bar(state), session) do
-      %Workspace{} = workspace -> maybe_apply_auto_name(state, workspace, prompt)
-      nil -> state
+      %Workspace{id: workspace_id} ->
+        WorkspaceWorkflow.install_auto_named_workspace(state, workspace_id, prompt)
+
+      nil ->
+        state
     end
   end
 
@@ -160,28 +164,6 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   defp workspace_for_session(tab_bar, session),
     do: TabBar.find_workspace_by_session(tab_bar, session)
 
-  @spec maybe_apply_auto_name(EditorState.t(), Workspace.t(), String.t()) :: EditorState.t()
-  defp maybe_apply_auto_name(state, workspace, prompt) do
-    updated_workspace = Workspace.auto_name(workspace, prompt)
-    install_auto_name(state, workspace, updated_workspace)
-  end
-
-  @spec install_auto_name(EditorState.t(), Workspace.t(), Workspace.t()) :: EditorState.t()
-  defp install_auto_name(state, %Workspace{label: label}, %Workspace{label: label}), do: state
-
-  defp install_auto_name(state, _workspace, updated_workspace) do
-    case traditional_tab_bar(state) do
-      %TabBar{} = tab_bar ->
-        tab_bar =
-          TabBar.accept_workspace(tab_bar, updated_workspace)
-
-        install_tab_bar(state, tab_bar)
-
-      nil ->
-        state
-    end
-  end
-
   @spec traditional_tab_bar(EditorState.t()) :: TabBar.t() | nil
   defp traditional_tab_bar(%EditorState{
          shell_runtime: %Runtime{state: %TraditionalState{} = state}
@@ -189,11 +171,6 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
        do: TraditionalState.tab_bar(state)
 
   defp traditional_tab_bar(%EditorState{}), do: nil
-
-  @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
-  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
-    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
-  end
 
   @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
   defp update_activity(state, fun) when is_function(fun, 1) do

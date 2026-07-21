@@ -71,6 +71,32 @@ defmodule MingaEditor.WorkspaceWorkflow do
 
   def persist_tab_bar_changes(_previous, _current), do: :ok
 
+  @doc "Auto-names and installs an already-selected Traditional workspace."
+  @spec install_auto_named_workspace(EditorState.t(), non_neg_integer(), String.t()) ::
+          EditorState.t()
+  def install_auto_named_workspace(
+        %EditorState{
+          shell_runtime: %Runtime{
+            entry: %{module: MingaEditor.Shell.Traditional},
+            state: %TraditionalState{} = traditional
+          }
+        } = state,
+        workspace_id,
+        prompt
+      )
+      when is_integer(workspace_id) and workspace_id >= 0 and is_binary(prompt) do
+    with %TabBar{} = tab_bar <- TraditionalState.tab_bar(traditional),
+         %Workspace{} = workspace <- TabBar.get_workspace(tab_bar, workspace_id),
+         %Workspace{} = updated_workspace <- Workspace.auto_name(workspace, prompt),
+         false <- updated_workspace.label == workspace.label do
+      install_tab_bar(state, TabBar.accept_workspace(tab_bar, updated_workspace))
+    else
+      _unchanged_or_missing -> state
+    end
+  end
+
+  def install_auto_named_workspace(%EditorState{} = state, _workspace_id, _prompt), do: state
+
   @doc "Persists and installs an already-calculated Traditional tab bar."
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
   def install_tab_bar(

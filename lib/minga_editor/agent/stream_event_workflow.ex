@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
+  alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -86,7 +87,7 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
          text when is_binary(text) <- first_assistant_opening(safe_messages(pid)),
          candidate = text |> String.slice(0, 30) |> String.trim(),
          true <- candidate != "" and candidate != workspace.label do
-      maybe_apply_auto_name(state, workspace, text)
+      WorkspaceWorkflow.install_auto_named_workspace(state, workspace.id, text)
     else
       _unavailable -> state
     end
@@ -112,28 +113,6 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
     :exit, _reason -> []
   end
 
-  @spec maybe_apply_auto_name(EditorState.t(), Workspace.t(), String.t()) :: EditorState.t()
-  defp maybe_apply_auto_name(state, workspace, prompt) do
-    updated_workspace = Workspace.auto_name(workspace, prompt)
-    install_auto_name(state, workspace, updated_workspace)
-  end
-
-  @spec install_auto_name(EditorState.t(), Workspace.t(), Workspace.t()) :: EditorState.t()
-  defp install_auto_name(state, %Workspace{label: label}, %Workspace{label: label}), do: state
-
-  defp install_auto_name(state, _workspace, updated_workspace) do
-    case traditional_tab_bar(state) do
-      %TabBar{} = tab_bar ->
-        tab_bar =
-          TabBar.accept_workspace(tab_bar, updated_workspace)
-
-        install_tab_bar(state, tab_bar)
-
-      nil ->
-        state
-    end
-  end
-
   @spec traditional_tab_bar(EditorState.t()) :: TabBar.t() | nil
   defp traditional_tab_bar(%EditorState{
          shell_runtime: %Runtime{state: %TraditionalState{} = state}
@@ -141,9 +120,4 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
        do: TraditionalState.tab_bar(state)
 
   defp traditional_tab_bar(%EditorState{}), do: nil
-
-  @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
-  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
-    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tab_bar)
-  end
 end
