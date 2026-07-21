@@ -2979,7 +2979,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with 0 errors. `ERL_FLAGS='+S 2:2' mix test.llm` passed 9,730 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded.
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS / Lean` with no blockers or cuts. They confirmed the exact four-field Messages-only owner, direct owner transitions, explicit stale-tab no-op, retained wire/action contracts, single Messages projection, MessageStore cursor/stream semantics, negative production/test budgets, and zero added concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact four-field Messages-only owner cut, preserved transition and dispatch behavior, retained wire compatibility, complete focused and broad validation, truthful budgets, owner-rule compliance, freshness, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3104
+- **Implementation commit SHA:** `76d4f5e74`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
