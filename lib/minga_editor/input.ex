@@ -40,10 +40,7 @@ defmodule MingaEditor.Input do
   @typedoc "Source that contributed registry entries."
   @type contribution_source :: :builtin | :config | {:extension, atom()}
 
-  @typedoc "Input handler ordering metadata."
-  @type handler_meta :: %{phase: atom(), priority: integer()}
-
-  @type handler_entry :: {module(), contribution_source(), handler_meta()}
+  @type handler_entry :: {module(), contribution_source(), integer()}
 
   @typedoc "Input handler paired with its authoritative contribution source."
   @type sourced_handler :: {module(), contribution_source()}
@@ -66,6 +63,10 @@ defmodule MingaEditor.Input do
     {GlobalBindings, 120},
     {BottomPanel, 125}
   ]
+
+  @builtin_handler_entries (for {module, priority} <- @builtin_surface_handlers do
+                              {module, :builtin, priority}
+                            end)
 
   @doc """
   Returns interactive transient handlers in precedence order above the active surface.
@@ -94,14 +95,13 @@ defmodule MingaEditor.Input do
   def register_handler(source, module, opts \\ []) when is_atom(module) and is_list(opts) do
     Minga.Extension.ContributionCleanup.register(:input_handlers, &__MODULE__.unregister_source/1)
     ensure_handler_registry!()
-    phase = Keyword.get(opts, :phase, :surface)
     priority = Keyword.get(opts, :priority, 100)
-    entry = {module, source, %{phase: phase, priority: priority}}
+    entry = {module, source, priority}
 
     entries =
       @handler_registry_key
       |> :persistent_term.get([])
-      |> Enum.reject(fn {entry_module, entry_source, _meta} ->
+      |> Enum.reject(fn {entry_module, entry_source, _priority} ->
         entry_module == module and entry_source == source
       end)
 
@@ -122,7 +122,7 @@ defmodule MingaEditor.Input do
     entries =
       @handler_registry_key
       |> :persistent_term.get([])
-      |> Enum.reject(fn {_module, entry_source, _meta} -> entry_source == source end)
+      |> Enum.reject(fn {_module, entry_source, _priority} -> entry_source == source end)
 
     :persistent_term.put(@handler_registry_key, entries)
     :ok
@@ -199,61 +199,25 @@ defmodule MingaEditor.Input do
 
     @handler_registry_key
     |> :persistent_term.get([])
-    |> Enum.sort_by(fn {module, _source, %{phase: phase, priority: priority}} ->
-      {phase_order(phase), priority, Atom.to_string(module)}
+    |> Enum.sort_by(fn {module, _source, priority} ->
+      {priority, Atom.to_string(module)}
     end)
-    |> Enum.map(fn {module, source, _meta} -> {module, source} end)
+    |> Enum.map(fn {module, source, _priority} -> {module, source} end)
   end
 
   @spec ensure_handler_registry!() :: :ok
   defp ensure_handler_registry! do
     case :persistent_term.get(@handler_registry_key, :missing) do
-      :missing ->
-        seed_builtin_handlers!()
-
-      entries ->
-        refresh_builtin_handlers!(entries)
+      :missing -> seed_builtin_handlers!()
+      _entries -> :ok
     end
-  end
-
-  @spec refresh_builtin_handlers!([handler_entry()]) :: :ok
-  defp refresh_builtin_handlers!(entries) do
-    builtin_modules =
-      MapSet.new(Enum.map(@builtin_surface_handlers, fn {module, _priority} -> module end))
-
-    preserved_entries =
-      Enum.reject(entries, fn {module, source, _meta} ->
-        source == :builtin and MapSet.member?(builtin_modules, module)
-      end)
-
-    builtin_entries =
-      Enum.map(@builtin_surface_handlers, fn {module, priority} ->
-        {module, :builtin, %{phase: :surface, priority: priority}}
-      end)
-
-    refreshed = builtin_entries ++ preserved_entries
-
-    if refreshed != entries do
-      :persistent_term.put(@handler_registry_key, refreshed)
-    end
-
-    :ok
   end
 
   @spec seed_builtin_handlers!() :: :ok
   defp seed_builtin_handlers! do
-    entries =
-      Enum.map(@builtin_surface_handlers, fn {module, priority} ->
-        {module, :builtin, %{phase: :surface, priority: priority}}
-      end)
-
-    :persistent_term.put(@handler_registry_key, entries)
+    :persistent_term.put(@handler_registry_key, @builtin_handler_entries)
     :ok
   end
-
-  @spec phase_order(atom()) :: integer()
-  defp phase_order(:surface), do: 0
-  defp phase_order(_phase), do: 100
 
   # ── Modifier constants ───────────────────────────────────────────────────
 
