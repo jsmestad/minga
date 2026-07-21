@@ -1384,7 +1384,7 @@ A GUI frontend must satisfy these requirements:
 
 1. **Send `ready` with `frontend_type = 0x01`** (native_gui) in the capabilities payload. This tells the BEAM to send GUI chrome opcodes.
 
-2. **Render cell-grid commands to a pixel surface** (Metal, OpenGL, Vulkan). The BEAM sends editor content (buffer text, gutter, modeline for splits, minibuffer) as cell-grid commands. The GUI frontend must maintain a cell grid and render it to a texture/surface.
+2. **Render cell-grid commands to a pixel surface** (Metal, OpenGL, Vulkan). The BEAM sends editor window content as cell-grid commands. The GUI frontend must maintain a cell grid and render it to a texture/surface.
 
 3. **Render GUI chrome natively.** Tab bar, file tree, status bar, breadcrumb, which-key, completion, picker, agent chat, hover popup, and signature help should be rendered using native UI frameworks (SwiftUI, GTK4, Qt). Do not render them from the cell grid.
 

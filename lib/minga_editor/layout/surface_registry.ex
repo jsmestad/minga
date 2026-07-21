@@ -130,11 +130,10 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
     sub-division stays in `AgentMouse` (it is interaction semantics, not a
     placed surface). Forcing it into the registry would mean inventing
     sub-surfaces that nothing else places.
-  * Tab-bar and modeline *segment* click regions
+  * Tab-bar and status-bar *segment* click regions
     (`tab_bar_click_regions`, `modeline_click_regions`) are authored at render
     time as text-property spans, not rects. The registry places the tab_bar and
-    status_bar/modeline surfaces; the per-segment command lookup stays where it
-    is.
+    status_bar surfaces; the per-segment command lookup stays where it is.
   * Intra-window buffer geometry (gutter width, fold column, scroll position to
     buffer line) stays in `MingaEditor.Mouse.HitTest`. The registry places the
     window content rect; translating a cell to a buffer position is window
@@ -157,7 +156,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
           | :buffer_content
           | :agent_chat_window
           | :agent_chat_content
-          | :modeline
           | :file_tree
           | :sidebar
           | :custom_sidebar
@@ -298,8 +296,8 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   This is the read site hit-testers use to ask the registry "where is surface
   X?" instead of re-deriving the rect from `Layout` fields. Because placements
   are projected from the focus tree, this rect is the same one mouse routing
-  hit-tests against. When several surfaces share an id (e.g. `:modeline` per
-  window), the frontmost (highest `z`, last in paint order) is returned.
+  hit-tests against. When several surfaces share an id, the frontmost (highest
+  `z`, last in paint order) is returned.
   """
   @spec rect_for(map(), surface_id()) :: MingaEditor.Layout.rect() | nil
   def rect_for(state, surface_id) do
@@ -359,10 +357,10 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
 
   # Depth-first, back-to-front. Each placed node contributes one entry; the
   # viewport root itself is not a placed surface. Surface ids repeat
-  # deliberately in split layouts: each window's buffer_content (and modeline)
-  # is a real, independently placed surface with its own rect, and the future
-  # emitter ships one placement per window. Consumers that want a single rect
-  # for an id (rect_for_in/2) take the topmost by z.
+  # deliberately in split layouts: each window's buffer_content is a real,
+  # independently placed surface with its own rect, and the future emitter ships
+  # one placement per window. Consumers that want a single rect for an id
+  # (rect_for_in/2) take the topmost by z.
   @spec collect(TreeNode.t()) :: [Placement.t()]
   defp collect(%TreeNode{content_type: :viewport, children: children}) do
     Enum.reduce(children, [], fn child, acc ->
@@ -414,7 +412,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id(:tab_bar), do: :tab_bar
   def surface_id(:buffer_content), do: :buffer_content
   def surface_id(:agent_chat_content), do: :agent_chat_content
-  def surface_id(:modeline), do: :modeline
   def surface_id(:file_tree), do: :file_tree
   def surface_id(:sidebar), do: :sidebar
   def surface_id(:agent_panel), do: :agent_panel
@@ -451,7 +448,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:tab_bar), do: 2
   def surface_id_u16(:buffer_content), do: 3
   def surface_id_u16(:agent_chat_content), do: 4
-  def surface_id_u16(:modeline), do: 5
   def surface_id_u16(:file_tree), do: 6
   def surface_id_u16(:sidebar), do: 7
   def surface_id_u16(:custom_sidebar), do: 8
@@ -498,7 +494,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp z_for(:editor_area), do: @z_editor_area
   defp z_for(:buffer_content), do: @z_editor_area + 1
   defp z_for(:agent_chat_content), do: @z_editor_area + 1
-  defp z_for(:modeline), do: @z_editor_area + 2
   defp z_for(:bottom_panel), do: @z_floating_chrome
   # Cursor-anchored floating popups, above floating chrome and below the modal
   # overlay band. hover (z=290) paints in front of signature help (z=280),
@@ -523,7 +518,6 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   @spec hit_kind_for(surface_id()) :: hit_kind()
   defp hit_kind_for(:buffer_content), do: :text
   defp hit_kind_for(:agent_chat_content), do: :text
-  defp hit_kind_for(:modeline), do: :modeline
   defp hit_kind_for(:status_bar), do: :status_bar
   defp hit_kind_for(id) when id in [:picker, :completion_menu], do: :overlay
   defp hit_kind_for(id) when id in [:picker_backdrop, :completion_backdrop], do: :overlay

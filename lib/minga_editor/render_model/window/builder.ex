@@ -2001,7 +2001,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp hit_regions(state, window_id, text_rect, gutter_rect, %GutterMetrics{} = metrics) do
     [text_hit_region(window_id, text_rect)] ++
       gutter_hit_regions(window_id, gutter_rect, metrics) ++
-      modeline_hit_regions(state, window_id) ++
       status_bar_hit_regions(state, window_id) ++
       divider_hit_regions(state, window_id)
   end
@@ -2041,30 +2040,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> Enum.reject(fn %HitRegion{rect: {_row, _col, region_width, region_height}} ->
       region_width == 0 or region_height == 0
     end)
-  end
-
-  @spec modeline_hit_regions(state(), non_neg_integer()) :: [HitRegion.t()]
-  defp modeline_hit_regions(state, window_id) do
-    state
-    |> Layout.get()
-    |> Map.get(:window_layouts, %{})
-    |> Map.get(window_id)
-    |> modeline_hit_region(window_id)
-  end
-
-  @spec modeline_hit_region(map() | nil, non_neg_integer()) :: [HitRegion.t()]
-  defp modeline_hit_region(%{modeline: {_row, _col, _width, 0}}, _window_id), do: []
-  defp modeline_hit_region(nil, _window_id), do: []
-
-  defp modeline_hit_region(%{modeline: rect}, window_id) do
-    [
-      %HitRegion{
-        kind: :modeline,
-        rect: rect,
-        window_id: window_id,
-        target: %{window_id: window_id}
-      }
-    ]
   end
 
   @spec status_bar_hit_regions(state(), non_neg_integer()) :: [HitRegion.t()]

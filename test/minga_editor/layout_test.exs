@@ -200,16 +200,14 @@ defmodule MingaEditor.LayoutTest do
       assert layout.editor_area == {0, 0, 80, 24}
     end
 
-    test "single window fills the editor area with a zero-height modeline" do
+    test "single window fills the editor area without a per-window modeline" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
       assert %{1 => wl} = layout.window_layouts
       assert wl.total == {0, 0, 80, 24}
-      assert wl.content == {0, 0, 80, 24}
-      # Per-window modelines are gone; the global status bar (0x76) handles display.
-      {_, _, _, ml_h} = wl.modeline
-      assert ml_h == 0
+      assert wl.content == wl.total
+      refute Map.has_key?(wl, :modeline)
     end
 
     test "file tree open does not reserve BEAM columns" do
@@ -234,17 +232,15 @@ defmodule MingaEditor.LayoutTest do
   # ── Splits (shared window-subdivision math) ──────────────────────────────────
 
   describe "compute/1 with vertical split" do
-    test "two windows side by side with zero-height modelines" do
+    test "two windows side by side without per-window modelines" do
       state = new_state(24, 80) |> with_vsplit()
       layout = Layout.compute(state)
 
       assert map_size(layout.window_layouts) == 2
       %{1 => left, 2 => right} = layout.window_layouts
 
-      {_, _, _, lmh} = left.modeline
-      {_, _, _, rmh} = right.modeline
-      assert lmh == 0
-      assert rmh == 0
+      refute Map.has_key?(left, :modeline)
+      refute Map.has_key?(right, :modeline)
 
       {_, _, _, left_h} = left.total
       {_, _, _, left_ch} = left.content
@@ -264,8 +260,7 @@ defmodule MingaEditor.LayoutTest do
       assert map_size(layout.window_layouts) == 2
       %{1 => top, 2 => bottom} = layout.window_layouts
 
-      {_, _, _, tmh} = top.modeline
-      assert tmh == 0
+      refute Map.has_key?(top, :modeline)
 
       assert [sep | _] = layout.horizontal_separators
       {sep_row, _sep_col, _sep_w, _sep_name} = sep
@@ -428,8 +423,7 @@ defmodule MingaEditor.LayoutTest do
     test "returns nil sidebar when window is too narrow" do
       layout = %{
         content: {0, 0, 80, 40},
-        modeline: {40, 0, 80, 1},
-        total: {0, 0, 80, 41},
+        total: {0, 0, 80, 40},
         sidebar: nil
       }
 
@@ -442,8 +436,7 @@ defmodule MingaEditor.LayoutTest do
     test "carves out sidebar when window exceeds threshold" do
       layout = %{
         content: {0, 0, 120, 40},
-        modeline: {40, 0, 120, 1},
-        total: {0, 0, 120, 41},
+        total: {0, 0, 120, 40},
         sidebar: nil
       }
 
@@ -459,8 +452,7 @@ defmodule MingaEditor.LayoutTest do
     test "caps sidebar at one-third of window width" do
       layout = %{
         content: {0, 0, 90, 40},
-        modeline: {40, 0, 90, 1},
-        total: {0, 0, 90, 41},
+        total: {0, 0, 90, 40},
         sidebar: nil
       }
 
@@ -473,8 +465,7 @@ defmodule MingaEditor.LayoutTest do
     test "sidebar preserves row offset and height from content" do
       layout = %{
         content: {5, 10, 120, 30},
-        modeline: {35, 10, 120, 1},
-        total: {5, 10, 120, 31},
+        total: {5, 10, 120, 30},
         sidebar: nil
       }
 
@@ -533,26 +524,25 @@ defmodule MingaEditor.LayoutTest do
       assert layout.agent_panel == nil
     end
 
-    test "single-window mode hides the modeline (status bar handles it)" do
+    test "single-window mode has no per-window modeline (status bar handles it)" do
       state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
       win_layout = layout.window_layouts[1]
-      {_ml_row, _col, _w, ml_h} = win_layout.modeline
-      assert ml_h == 0
+      refute Map.has_key?(win_layout, :modeline)
+      assert win_layout.content == win_layout.total
 
       {_content_row, _c, _cw, content_h} = win_layout.content
       {_ea_row, _ea_c, _ea_w, ea_h} = layout.editor_area
       assert content_h == ea_h
     end
 
-    test "split-window mode has zero-height per-window modelines" do
+    test "split-window mode has no per-window modelines" do
       state = new_state(40, 120) |> with_vsplit()
       layout = Layout.compute(state)
 
       Enum.each(layout.window_layouts, fn {_id, wl} ->
-        {_r, _c, _w, h} = wl.modeline
-        assert h == 0
+        refute Map.has_key?(wl, :modeline)
       end)
 
       assert layout.status_bar == nil

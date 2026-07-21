@@ -15,7 +15,7 @@ defmodule MingaEditor.Layout do
   ## Regions vs Overlays
 
   **Regions** are non-overlapping areas that tile the screen: file tree,
-  editor area, agent panel, modeline, minibuffer. They participate in
+  editor area, agent panel, status bar, minibuffer. They participate in
   the non-overlap invariant.
 
   **Overlays** float over regions: picker, which-key popup, completion
@@ -43,15 +43,12 @@ defmodule MingaEditor.Layout do
   Layout for a single editor window, with sub-rects for each chrome element.
 
   - `total` — the full window rect (from WindowTree.layout)
-  - `content` — the text area within the window (full window; no per-window modeline)
-  - `modeline` — always zero-height; kept for backward compatibility. The global status bar
-    at `Layout.t().status_bar` replaces per-window modelines.
+  - `content` — the text area within the window
   - `sidebar` — optional info panel (agent chat dashboard)
   """
   @type window_layout :: %{
           total: rect(),
           content: rect(),
-          modeline: {non_neg_integer(), non_neg_integer(), pos_integer(), 0},
           sidebar: rect() | nil
         }
 
@@ -245,13 +242,8 @@ defmodule MingaEditor.Layout do
 
   @doc false
   @spec subdivide_window(rect()) :: window_layout()
-  def subdivide_window({row, col, width, height}) do
-    %{
-      total: {row, col, width, height},
-      content: {row, col, width, height},
-      modeline: {row + height, col, width, 0},
-      sidebar: nil
-    }
+  def subdivide_window({_, _, _, _} = rect) do
+    %{total: rect, content: rect, sidebar: nil}
   end
 
   @doc """

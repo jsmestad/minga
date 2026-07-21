@@ -61,13 +61,12 @@ defmodule MingaEditor.Layout.GUITest do
       assert editor_h == state.workspace.viewport.rows
     end
 
-    test "single window has no modeline row" do
+    test "single window has no per-window modeline field" do
       state = gui_state()
       layout = LayoutGUI.compute(state)
 
       win_layout = layout.window_layouts |> Map.values() |> hd()
-      {_row, _col, _w, modeline_h} = win_layout.modeline
-      assert modeline_h == 0
+      refute Map.has_key?(win_layout, :modeline)
     end
 
     test "content fills the full editor area height" do

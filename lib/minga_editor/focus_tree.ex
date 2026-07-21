@@ -315,16 +315,14 @@ defmodule MingaEditor.FocusTree do
     content_type = if agent_chat?, do: :agent_chat_content, else: :buffer_content
     content_handler = if agent_chat?, do: Input.AgentMouse, else: bottom_handler
 
-    children =
-      [
-        TreeNode.new(content_type, win_layout.content,
-          handler: content_handler,
-          scrollable?: true,
-          focusable?: true,
-          ref: win_id
-        )
-      ]
-      |> maybe_modeline(win_layout, win_id)
+    children = [
+      TreeNode.new(content_type, win_layout.content,
+        handler: content_handler,
+        scrollable?: true,
+        focusable?: true,
+        ref: win_id
+      )
+    ]
 
     TreeNode.new(window_type, win_layout.total,
       ref: win_id,
@@ -337,13 +335,6 @@ defmodule MingaEditor.FocusTree do
   @spec agent_chat_window?(term()) :: boolean()
   defp agent_chat_window?(%{content: content}), do: Content.agent_chat?(content)
   defp agent_chat_window?(_window), do: false
-
-  @spec maybe_modeline([TreeNode.t()], Layout.window_layout(), term()) :: [TreeNode.t()]
-  defp maybe_modeline(children, %{modeline: {_, _, _, 0}}, _win_id), do: children
-
-  defp maybe_modeline(children, %{modeline: rect}, win_id) do
-    Enum.concat(children, [TreeNode.new(:modeline, rect, handler: Input.ModeFSM, ref: win_id)])
-  end
 
   @spec maybe_add([TreeNode.t()], Layout.rect() | nil, (Layout.rect() -> TreeNode.t())) ::
           [TreeNode.t()]
