@@ -414,7 +414,9 @@ defmodule MingaEditor.Commands.FileTree do
 
     state = clear_editing_and_refresh(state)
 
-    case Commands.start_buffer(full_path, state.interaction.options_server) do
+    case Commands.start_buffer(full_path, state.interaction.options_server,
+           events_registry: state.extension_surfaces.events_registry
+         ) do
       {:ok, pid} ->
         BufferRegistry.do_file_tree_open(state, pid, full_path, file_tree_state(state).tree)
 
@@ -886,7 +888,9 @@ defmodule MingaEditor.Commands.FileTree do
   defp open_file_from_tree(state, path, tree) do
     case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, path) do
       nil ->
-        case Commands.start_buffer(path, state.interaction.options_server) do
+        case Commands.start_buffer(path, state.interaction.options_server,
+               events_registry: state.extension_surfaces.events_registry
+             ) do
           {:ok, pid} ->
             BufferRegistry.do_file_tree_open(state, pid, path, tree)
 

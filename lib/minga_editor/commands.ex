@@ -771,10 +771,11 @@ defmodule MingaEditor.Commands do
           {:ok, pid()} | {:error, term()}
   def start_buffer(file_path, options_server, opts) do
     options_server = normalize_options_server(options_server)
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
     history_attribution = Keyword.get(opts, :history_attribution, :active_workspace)
 
     MingaEditor.HugeFile.guard(file_path, options_server, fn ->
-      Buffer.ensure_for_path(file_path, Minga.Events.default_registry(),
+      Buffer.ensure_for_path(file_path, events_registry,
         options_server: options_server,
         history_attribution: history_attribution
       )

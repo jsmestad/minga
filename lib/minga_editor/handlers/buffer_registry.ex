@@ -6,7 +6,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   """
 
   alias Minga.Buffer
-  alias Minga.Events
   alias Minga.Project.FileRef
 
   alias MingaEditor.AgentLifecycle
@@ -112,7 +111,9 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   @spec start_and_register_file(state(), String.t()) :: {:ok, state()} | {:error, term()}
   def start_and_register_file(state, abs_path) do
-    case Commands.start_buffer(abs_path, state.interaction.options_server) do
+    case Commands.start_buffer(abs_path, state.interaction.options_server,
+           events_registry: state.extension_surfaces.events_registry
+         ) do
       {:ok, pid} ->
         new_state = register_buffer(state, pid, abs_path)
         {:ok, AgentLifecycle.maybe_set_auto_context(new_state, abs_path, pid)}
@@ -194,22 +195,13 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     state
   end
 
-  # Shared buffer registration: adds buffer to the list, logs, refreshes
-  # LSP status, and broadcasts :buffer_opened so event bus subscribers
-  # (Git.Tracker, FileWatcher, Project, SyncServer, Config.Hooks) react.
+  # Shared foreground buffer registration: updates the workspace, logs, highlights,
+  # and schedules foreground editor follow-up work. Buffer creation owns
+  # :buffer_opened broadcasts.
   @spec register_buffer(state(), pid(), String.t()) :: state()
   def register_buffer(state, buffer_pid, file_path) do
     state = Commands.add_buffer(state, buffer_pid)
     Minga.Log.info(:editor, "Opened: #{file_path}")
-
-    Events.broadcast(
-      :buffer_opened,
-      %Events.BufferEvent{
-        buffer: buffer_pid,
-        path: file_path
-      },
-      state.extension_surfaces.events_registry
-    )
 
     # Eagerly set up syntax highlighting for this specific buffer.
     # Uses the PID-targeted variant so each restored buffer gets its
