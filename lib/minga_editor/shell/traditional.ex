@@ -716,7 +716,6 @@ defmodule MingaEditor.Shell.Traditional do
       # Clear attention flag on the tab we're switching to
       tb = TabBar.clear_attention(tb, target_id)
 
-      workspace = SessionState.invalidate_all_windows(workspace)
       {ShellState.install_tab_bar(shell_state, tb), workspace}
     end
   end

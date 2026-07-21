@@ -208,20 +208,6 @@ defmodule MingaEditor.Session.State do
     end
   end
 
-  @doc """
-  Invalidates render caches for all windows.
-
-  Call when the screen layout changes (file tree toggle, agent panel toggle)
-  because cached draws contain baked-in absolute coordinates that become
-  wrong when column offsets shift.
-  """
-  @spec invalidate_all_windows(t()) :: t()
-  def invalidate_all_windows(%__MODULE__{} = wspace), do: wspace
-
-  @doc "Marks all window retained-GUI render caches reset-pending after frontend state loss."
-  @spec mark_frontend_reset_pending(t()) :: t()
-  def mark_frontend_reset_pending(%__MODULE__{} = wspace), do: wspace
-
   @typedoc "A leaf-owned buffer selection to activate in this session."
   @type buffer_activation :: integer() | Buffers.t()
 

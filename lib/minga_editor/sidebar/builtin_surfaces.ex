@@ -139,12 +139,9 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   defp focus_git_status(state) do
     state = %{state | workspace: State.set_keymap_scope(state.workspace, :git_status)}
 
-    state =
-      state
-      |> SidebarWorkflow.select(@git_status_id)
-      |> Layout.invalidate()
-
-    %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    state
+    |> SidebarWorkflow.select(@git_status_id)
+    |> Layout.invalidate()
   end
 
   @spec focus_observatory(EditorState.t()) :: EditorState.t()
@@ -153,12 +150,9 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
     workspace = State.set_file_tree(state.workspace, file_tree)
     state = %{state | workspace: State.set_keymap_scope(workspace, :editor)}
 
-    state =
-      state
-      |> SidebarWorkflow.select(@observatory_id)
-      |> Layout.invalidate()
-
-    %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    state
+    |> SidebarWorkflow.select(@observatory_id)
+    |> Layout.invalidate()
   end
 
   @spec normalize_command_result(EditorState.t() | {EditorState.t(), term()}) :: EditorState.t()

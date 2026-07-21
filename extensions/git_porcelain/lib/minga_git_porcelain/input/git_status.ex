@@ -13,7 +13,6 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
@@ -227,12 +226,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
     state
     |> SidebarWorkflow.close_git_status()
     |> Layout.invalidate()
-    |> invalidate_all_windows()
   end
-
-  @spec invalidate_all_windows(EditorState.t()) :: EditorState.t()
-  defp invalidate_all_windows(%EditorState{} = state),
-    do: %{state | workspace: SessionState.invalidate_all_windows(state.workspace)}
 
   @spec open_diff_for_entry(EditorState.t(), String.t(), Git.StatusEntry.t()) :: EditorState.t()
   defp open_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do

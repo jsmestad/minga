@@ -216,15 +216,14 @@ defmodule MingaEditor.State do
     {keyframe?, %{state | render: render}}
   end
 
-  @doc "Clears workspace and render observations after frontend state loss."
+  @doc "Clears render observations after frontend state loss."
   @spec reset_frontend_render_state(t()) :: t()
   def reset_frontend_render_state(%__MODULE__{} = state) do
-    workspace = SessionState.mark_frontend_reset_pending(state.workspace)
     message_store = MessageStore.reset_sent_cursor(state.render.message_store)
     render = RenderState.accept_message_store(state.render, message_store)
     correlation = RenderCorrelation.frontend_ready(render.render_correlation)
     render = RenderState.accept_correlation(render, correlation)
-    %{state | workspace: workspace, render: render}
+    %{state | render: render}
   end
 
   @doc "Purely adds or activates a buffer across workspace and lifecycle owners."
@@ -407,9 +406,8 @@ defmodule MingaEditor.State do
     runtime = install_tab_bar(state.shell_runtime, tab_bar)
     state = %{state | shell_runtime: runtime}
     state = restore_tab_context(state, target.context)
-    workspace = SessionState.invalidate_all_windows(state.workspace)
     render = RenderState.invalidate_layout(state.render)
-    {%{state | workspace: workspace, render: render}, {:switched, target}}
+    {%{state | render: render}, {:switched, target}}
   end
 
   @spec resolve_tab_context(t(), Tab.context() | Tab.legacy_context()) ::
