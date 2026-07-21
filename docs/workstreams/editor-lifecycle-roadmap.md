@@ -3439,7 +3439,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** W011 historical text should be read with the new current-main supersession note; W043/D03 is the controlling evidence for retired native Tool Manager panel protocol/frontend/surface identity.
 - **Pre-acceptance reviews:** Correctness and Ponytail both returned `PASS/Lean` with no findings; Ponytail confirmed this is the smallest current-truth correction at production net `-1` with no test or runtime change.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked D36 scope, accurate seven-producer and protocol-retirement documentation, preserved historical evidence, exact budgets, corroborated validation, freshness, and merge safety.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3134
+- **Implementation commit SHA:** `f8ed217b7`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
