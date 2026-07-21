@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Highlight.GrammarTest do
+defmodule Minga.Language.GrammarTest do
   use ExUnit.Case, async: true
 
   alias Minga.Language.Grammar

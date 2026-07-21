@@ -12,7 +12,7 @@ defmodule MingaEditor.HighlightSync do
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.UI.Highlight
-  alias MingaEditor.UI.Highlight.Grammar
+  alias Minga.Language.Grammar
 
   @doc """
   Sets up highlighting for the current buffer.
