@@ -3589,3 +3589,31 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `b567439c10d8336b5d67a015115e30ad9f8c4146`.
 - **Merge evidence:** PR #3146 merged after CI run `29875173753` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W080/S07: Make GUI action handler state-only for locked render paths
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S07
+- **Planning profile:** `S07Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S07Worker`, `editor-lifecycle-worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S07Planner` for current SHA `a420f57041bdc08f2764b4f8aa08c5e89ed7a14d`; the locked owner is `MingaEditor.Handlers.GuiActionHandler` for action-specific state transitions, with `MingaEditor.handle_info/2` and `MingaEditor.Input.Router.post_action_housekeeping/2` retaining the single outer GUI render owner.
+- **Freshness commit SHA:** `a420f57041bdc08f2764b4f8aa08c5e89ed7a14d`.
+- **Observable result:** The four locked GUI actions now return mutated or invalidated state without submitting an internal render intent. `:system_did_wake` still logs and refreshes file, git, LSP, and buffer sync state before invalidating layout; `:config_query` still refreshes GUI config and resets frontend render state for the next keyframe; successful `{:config_update, name, value}` still persists, marks explicit, applies runtime config, and refreshes GUI config state; successful `{:scroll_to_line, line}` still commits viewport top, `scroll_echo_top`, and cursor detach state. Outer input housekeeping remains the sole render submission for the GUI action envelope.
+- **Failure reproduction / source trace:** Before the correction, the locked reproduction command printed `0,1,2`: `GuiActionHandler.dispatch/2` for `{:scroll_to_line, 1}` advanced `latest_intent_revision` from 0 to 1 through an internal `Renderer.render_or_async/1`, then `Input.Router.post_action_housekeeping/2` advanced it again to 2. After the correction, the same command prints `0,0,1`, proving the handler is state-only and outer housekeeping submits exactly one authoritative render.
+- **Implementation result:** Deleted the four internal `Renderer.render_or_async/1` submissions from `:system_did_wake`, `:config_query`, successful `:config_update`, and successful `:scroll_to_line`; removed the now-unused `MingaEditor.Renderer` alias; updated the handler moduledoc so it no longer claims GUI actions render inline.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/handlers/gui_action_handler.ex`; `test/minga_editor/handlers/gui_action_handler_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/handlers/gui_action_handler_test.exs` passed 27 tests. `mix test.debug test/minga_editor/mouse_test.exs:162` passed 3 tests, preserving scrollbar echo/detach semantics. `mix test.debug test/minga_editor/render_pipeline/input_test.exs:162` passed 1 test, preserving frontend keyframe reset ordering. The reproduction command first printed `0,1,2` before the fix and `0,0,1` after the fix.
+- **Broad validation:** `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo reported one intentional global-state test warning and two unrelated pre-existing refactoring opportunities. The first default-concurrency `mix test.quick` run exposed a `:sys.get_state/1` timeout in the unrelated session-manager restart-window test under 64-way load; that exact test passed in isolation, then `ERL_FLAGS='+S 2:2' mix test.quick --max-cases 4` and `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` each passed 9,748 tests with 58 doctests, 98 properties, 1 skipped, 572 excluded, and zero failures.
+- **Production lines added/removed before roadmap evidence:** `4 added / 7 removed` in `lib/minga_editor/handlers/gui_action_handler.ex`, net `-3`, within the locked production net `<= 0`.
+- **Test lines added/removed before roadmap evidence:** `28 added / 0 removed` in `test/minga_editor/handlers/gui_action_handler_test.exs`, limited to the locked render revision/cast contract for `{:scroll_to_line, 1}`.
+- **Concepts added:** None. No new module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, parallel data shape, data representation, or render owner was added.
+- **Concepts removed:** Removed the duplicate internal render submissions from the four locked GUI action paths and the obsolete renderer alias/doc wording.
+- **Retained contracts:** Universal GUI post-action housekeeping, layout invalidation, keyframe reset, config persistence, runtime config refresh, scrollbar echo/detach, wake-side file/git/LSP refreshes, renderer correlation, protocol decoding, and frontend behavior remain unchanged.
+- **Pre-acceptance reviews:** Correctness traced all four action paths, direct callers, protocol producers, outer housekeeping, and retained state effects; it found only the stale test-line count, which was corrected to 28. Elixir craftsmanship returned `PASS/Lean` with no mandatory cut. Ponytail returned `PASS/Lean` with 0.99 confidence and confirmed the net-negative four-call deletion is the smallest correct ownership cut.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed all four state transitions and effects, singular outer render ownership, deterministic regression coverage, exact budgets, diagnosed validation evidence, zero concepts, and merge safety.
+- **Findings resolved:** S07's duplicate GUI action render submissions are removed; the outer GUI action path now owns exactly one render intent for the locked actions.
+- **Discoveries affecting later work:** None. The locked owner, contract, scope, test layer, dependencies, and production-line budget remained valid.
+- **PR URL:** Pending.
+- **Implementation commit SHA:** Pending.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.

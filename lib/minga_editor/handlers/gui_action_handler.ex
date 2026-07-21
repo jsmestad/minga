@@ -7,8 +7,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   GenServer, converting SwiftUI chrome events into state transitions.
 
   Unlike the other handler modules that return `{state, [effect]}`, this
-  handler returns `state` directly because GUI actions apply their side
-  effects inline (renders, status updates, etc.).
+  handler returns `state` directly because GUI actions apply their action-specific
+  side effects inline while outer input housekeeping owns rendering.
   """
 
   alias Minga.Buffer
@@ -40,7 +40,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.MinibufferData
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
   alias MingaEditor.PickerUI
-  alias MingaEditor.Renderer
   alias MingaEditor.Session.State
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -118,7 +117,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     LspSupervisor.restart_all_clients()
     LspSyncServer.resync_buffers(buffers_for_lsp_resync(state))
 
-    state |> Layout.invalidate() |> Renderer.render_or_async()
+    Layout.invalidate(state)
   end
 
   defp dispatch_action(state, {:system_will_unmount, volume_path}) do
@@ -163,7 +162,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
     |> MingaEditor.refresh_gui_config_state()
     |> EditorState.reset_frontend_render_state()
-    |> Renderer.render_or_async()
   end
 
   defp dispatch_action(state, {:config_update, name, value}) do
@@ -176,7 +174,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
           state
           |> MingaEditor.apply_runtime_config_option(name, persisted_value)
           |> MingaEditor.refresh_gui_config_state()
-          |> Renderer.render_or_async()
 
         {:error, reason} ->
           Minga.Log.warning(:config, "Ignored GUI config update for #{inspect(name)}: #{reason}")
@@ -718,7 +715,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
                 )
           }
 
-        Renderer.render_or_async(new_state)
+        new_state
     end
   end
 

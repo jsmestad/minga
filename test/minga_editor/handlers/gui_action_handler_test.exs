@@ -53,6 +53,34 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     %{sidebar_registry: table, semantic_registry: semantic_table}
   end
 
+  test "scroll_to_line is state-only and outer housekeeping submits exactly one render", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table, backend: :gui)
+    state = %{state | render: MingaEditor.State.Render.connect_renderer(state.render, self())}
+    snapshot = MingaEditor.Input.Router.capture_snapshot(state)
+    revision = state.render.render_correlation.latest_intent_revision
+
+    handled = GuiActionHandler.dispatch(state, {:scroll_to_line, 1})
+
+    assert handled.render.render_correlation.latest_intent_revision == revision
+
+    window = Map.fetch!(handled.workspace.windows.map, handled.workspace.windows.active)
+    assert window.viewport.top == 1
+    assert window.scroll_echo_top == 1
+    assert window.scroll_detach_cursor == {0, 0}
+    refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+
+    rendered = MingaEditor.Input.Router.post_action_housekeeping(handled, snapshot)
+
+    assert rendered.render.render_correlation.latest_intent_revision == revision + 1
+
+    assert_receive {:"$gen_cast",
+                    {:render, %MingaEditor.RenderPipeline.Intent{}, _seq, _pushed_at}}
+
+    refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+  end
+
   test "notification dismiss removes only the selected notification", %{sidebar_registry: table} do
     state =
       table
