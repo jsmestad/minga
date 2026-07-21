@@ -1,6 +1,6 @@
 defmodule MingaEditor.DisplayList do
   @moduledoc """
-  Cell-grid draw primitives for chrome surfaces.
+  Raw cell-grid draw tuple types retained for extension shell renderers.
 
   The buffer/window render path is fully semantic: editor windows build
   `Minga.RenderModel.Window` models that frontend adapters encode directly
@@ -10,16 +10,10 @@ defmodule MingaEditor.DisplayList do
 
   The per-surface chrome painters (completion menu, dashboard, hover/signature
   popups, modeline, tab bar, float popups, etc.) were deleted in #2311; the
-  semantic frontends render those surfaces natively. `draw/4` and the `Overlay`
-  carrier are retained for the remaining legitimate consumers:
-
-    * `Minga.Core.Decorations.BlockDecoration` — raw draw tuples for extension
-      block decorations.
-    * `FloatingWindow.Spec` / `HoverPopup` / `SignatureHelp` — the `:content`
-      draw list type used to compute popup geometry for `box/3`.
-    * `RenderPipeline.Chrome` / `ComposeHelpers` — the `Overlay` carrier, whose
-      `cursor` field still resolves the picker cursor in Compose.
-    * The Git Porcelain extension shell renderer.
+  semantic frontends render those surfaces natively. `draw/4` remains for the
+  Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy
+  carrier with no live producer; the semantic chrome path supplies an empty
+  overlay list.
 
   ## Types
 
@@ -40,9 +34,7 @@ defmodule MingaEditor.DisplayList do
   @type style :: Face.t()
 
   @typedoc """
-  A pending draw command: `{row, col, text, Face.t()}`.
-
-  This is the intermediate representation that chrome-surface painters produce.
+  A pending raw draw command: `{row, col, text, Face.t()}`.
   """
   @type draw :: {non_neg_integer(), non_neg_integer(), String.t(), Face.t()}
 
@@ -59,8 +51,7 @@ defmodule MingaEditor.DisplayList do
 
   defmodule Overlay do
     @moduledoc """
-    An overlay popup (picker, which-key, completion menu, hover, signature help)
-    with absolute screen coordinates and an optional cursor override.
+    A legacy composed-draw carrier with no live producer.
     """
 
     alias MingaEditor.DisplayList

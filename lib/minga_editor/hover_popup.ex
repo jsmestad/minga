@@ -2,7 +2,7 @@ defmodule MingaEditor.HoverPopup do
   @moduledoc """
   Immutable lifecycle value for hover content.
 
-  The value owns replacement, dismissal, focus, scrolling, expansion, and the optional open action. `MingaEditor.HoverPopup.Presenter` owns geometry and display-list construction.
+  The value owns replacement, dismissal, focus, scrolling, expansion, and the optional open action. `MingaEditor.HoverPopup.Presenter` owns geometry.
   """
 
   alias MingaAgent.Markdown

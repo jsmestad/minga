@@ -60,7 +60,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
 
   * **Cursor-anchored popups: hover popup, signature help.** Both are semantic
     popups whose BEAM rect is a conservative cell-grid containment/fallback rect
-    (`HoverPopup.Presenter.box/3`/`SignatureHelp.Presenter.box/3`, driven by `FloatingWindow`).
+    (`HoverPopup.Presenter.box/2`/`SignatureHelp.Presenter.box/2`, driven by `FloatingWindow`).
     Native GUI frontends receive dedicated semantic opcodes and own final pixel
     placement. `FocusTree.add_floating_overlays/2` adds them as overlay nodes
     from `shell_state`; they occupy the `@z_floating_overlay` region (hover 290

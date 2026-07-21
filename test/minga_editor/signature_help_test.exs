@@ -3,9 +3,6 @@ defmodule MingaEditor.SignatureHelpTest do
 
   alias MingaEditor.SignatureHelp
   alias MingaEditor.SignatureHelp.Presenter
-  alias MingaEditor.UI.Theme
-
-  @theme Theme.get!(:doom_one)
   @viewport {24, 80}
 
   @sample_response %{
@@ -119,9 +116,9 @@ defmodule MingaEditor.SignatureHelpTest do
     end
   end
 
-  describe "box/3" do
+  describe "box/2" do
     # The cell-grid `render/3` painter was removed in #2311; signature help
-    # renders natively via the 0x82 GUI opcode. `box/3` is the live surface that
+    # renders natively via the 0x82 GUI opcode. `box/2` is the live surface that
     # resolves the tooltip's placement rect for the FocusTree/SurfaceRegistry.
     test "returns nil for no signatures" do
       sh = %SignatureHelp{
@@ -132,22 +129,32 @@ defmodule MingaEditor.SignatureHelpTest do
         anchor_col: 20
       }
 
-      assert Presenter.box(sh, @viewport, @theme) == nil
+      assert Presenter.box(sh, @viewport) == nil
     end
 
-    test "returns a placement rect within the viewport for a valid signature" do
+    test "returns the exact conservative rect for active parameter documentation" do
       sh = SignatureHelp.from_response(@sample_response, 10, 20)
-      {row, col, w, h} = Presenter.box(sh, @viewport, @theme)
 
-      assert row >= 0 and row + h <= 24
-      assert col >= 0 and col + w <= 80
+      assert Presenter.box(sh, @viewport) == {5, 20, 32, 5}
     end
 
-    test "positions above the cursor" do
-      sh = SignatureHelp.from_response(@sample_response, 15, 20)
-      {row, _col, _w, h} = Presenter.box(sh, @viewport, @theme)
+    test "uses minimal height when the active parameter has no documentation" do
+      response = %{
+        "signatures" => [
+          %{
+            "label" => "foo(bar)",
+            "parameters" => [
+              %{"label" => "bar", "documentation" => ""}
+            ]
+          }
+        ],
+        "activeSignature" => 0,
+        "activeParameter" => 0
+      }
 
-      assert row + h <= 15
+      sh = SignatureHelp.from_response(response, 4, 3)
+
+      assert Presenter.box(sh, @viewport) == {1, 3, 32, 3}
     end
   end
 

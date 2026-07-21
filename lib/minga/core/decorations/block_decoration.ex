@@ -13,14 +13,13 @@ defmodule Minga.Core.Decorations.BlockDecoration do
   ## Render callback
 
   The render callback receives the available width and returns styled content
-  in one of three forms:
+  in one of two forms:
 
   - `[{text, style}]` — single-line block (most common: headers, separators)
   - `[[{text, style}]]` — multi-line block (list of segment lists, one per row)
-  - `[DisplayList.draw()]` — raw draw tuples for maximum control
 
-  The content renderer normalizes the first two forms into draw tuples
-  positioned at the correct screen rows.
+  The content renderer normalizes either form into a list of styled segment
+  lists, one per display line.
 
   ## Height
 
