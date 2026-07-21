@@ -179,10 +179,17 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert effects == [:render_now]
     end
 
-    test "tuple-keyed hover_mouse response returns render_now without crashing" do
+    test "identity-keyed hover_mouse response returns render_now without crashing" do
       state = base_state()
+      buffer = state.workspace.buffers.active
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:hover_mouse, 12, 34})
+
+      state =
+        put_lsp_pending(
+          state,
+          ref,
+          {:hover_mouse, 12, 34, buffer, 0, 0, Minga.Buffer.version(buffer)}
+        )
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 

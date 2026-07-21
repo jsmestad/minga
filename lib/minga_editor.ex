@@ -676,17 +676,6 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
-  # Backward compat: 6-element mouse_event (no click_count)
-  def handle_info(
-        {:minga_input, {:mouse_event, row, col, button, mods, event_type}},
-        state
-      ) do
-    snapshot = Input.Router.capture_snapshot(state)
-    new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
-    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
-    {:noreply, new_state}
-  end
-
   def handle_info({:minga_input, {:scroll_batch, window_id, delta_lines, direction}}, state) do
     snapshot = Input.Router.capture_snapshot(state)
     new_state = MingaEditor.Mouse.handle_scroll_batch(state, window_id, delta_lines, direction)

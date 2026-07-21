@@ -833,21 +833,9 @@ defmodule MingaEditor.LspActions do
   @doc """
   Handles a hover response for a mouse-position hover request.
 
-  Creates a floating hover popup anchored at the mouse screen position
-  (row, col) rather than the keyboard cursor position.
+  Creates a floating hover popup anchored at the mouse screen position when the
+  response still matches the buffer position observed when the request was sent.
   """
-  @spec handle_hover_mouse_response(
-          state(),
-          {:ok, term()} | {:error, term()},
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: state()
-  def handle_hover_mouse_response(state, response, row, col) do
-    case state.workspace.mouse.hover_pos do
-      {^row, ^col} -> handle_current_hover_mouse_response(state, response, row, col)
-      _ -> state
-    end
-  end
 
   @spec handle_hover_mouse_response(
           state(),

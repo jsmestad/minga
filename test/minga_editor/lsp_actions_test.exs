@@ -11,10 +11,13 @@ defmodule MingaEditor.LspActionsTest do
   alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
+  alias MingaEditor.State.Windows
   alias MingaEditor.UI.Picker.CodeActionSource
   alias MingaEditor.UI.Picker.Context, as: PickerContext
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
 
   describe "parse_location/1" do
@@ -142,12 +145,18 @@ defmodule MingaEditor.LspActionsTest do
       }
 
       for hover <- [plaintext, markdown] do
+        {state, target} = fake_state_with_hover_buffer(5, 20)
+
         result =
           LspActions.handle_hover_mouse_response(
-            fake_state_with_hover(5, 20),
+            state,
             {:ok, hover},
             5,
-            20
+            20,
+            target.buffer,
+            target.line,
+            target.col,
+            Minga.Buffer.version(target.buffer)
           )
 
         assert %HoverPopup{} = MingaEditor.Shell.Runtime.state(result.shell_runtime).hover_popup
@@ -161,16 +170,43 @@ defmodule MingaEditor.LspActionsTest do
             {:ok, nil},
             {:ok, %{"contents" => %{"kind" => "plaintext", "value" => ""}}}
           ] do
-        state = fake_state_with_hover(5, 20)
-        assert LspActions.handle_hover_mouse_response(state, response, 5, 20) == state
+        {state, target} = fake_state_with_hover_buffer(5, 20)
+
+        assert LspActions.handle_hover_mouse_response(
+                 state,
+                 response,
+                 5,
+                 20,
+                 target.buffer,
+                 target.line,
+                 target.col,
+                 Minga.Buffer.version(target.buffer)
+               ) == state
       end
     end
 
     test "mouse hover ignores stale async responses after pointer moves" do
       hover = %{"contents" => %{"kind" => "plaintext", "value" => "Old symbol docs"}}
-      state = fake_state_with_hover(6, 21)
+      {state, target} = fake_state_with_hover_buffer(5, 20)
 
-      assert LspActions.handle_hover_mouse_response(state, {:ok, hover}, 5, 20) == state
+      state = %{
+        state
+        | workspace: %{
+            state.workspace
+            | mouse: Mouse.set_hover(state.workspace.mouse, 6, 21, backend: :headless)
+          }
+      }
+
+      assert LspActions.handle_hover_mouse_response(
+               state,
+               {:ok, hover},
+               5,
+               20,
+               target.buffer,
+               target.line,
+               target.col,
+               Minga.Buffer.version(target.buffer)
+             ) == state
     end
   end
 
@@ -400,6 +436,34 @@ defmodule MingaEditor.LspActionsTest do
       )
 
     %{state | frontend: frontend}
+  end
+
+  defp fake_state_with_hover_buffer(row, col) do
+    state = fake_state_with_hover(row, col)
+    buffer = start_buffer!("line one\nline two\nline three\nline four\nline five\nline six")
+    window = Window.new(1, buffer, 24, 80)
+
+    state =
+      %{
+        state
+        | workspace: %{
+            state.workspace
+            | buffers: %Buffers{active: buffer, list: [buffer]},
+              windows: %Windows{
+                tree: WindowTree.new(1),
+                map: %{1 => window},
+                active: 1,
+                next_id: 2
+              }
+          }
+      }
+
+    {state, buffer_target_at(state, row, col)}
+  end
+
+  defp buffer_target_at(state, row, col) do
+    assert {:buffer, target} = MingaEditor.Mouse.HitTest.resolve_buffer(state, row, col)
+    target
   end
 
   defp picker_context(actions) do

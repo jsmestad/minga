@@ -95,13 +95,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     handle_injection_ranges(state, buffer_pid, ranges)
   end
 
-  # ── language_at_response (no-op) ─────────────────────────────────────────
-
-  def handle(state, {tag, {:language_at_response, _request_id, _language}})
-      when tag in [:minga_highlight, :minga_input] do
-    {state, []}
-  end
-
   # ── highlight_spans ──────────────────────────────────────────────────────
 
   def handle(state, {:minga_highlight, {:highlight_spans, buffer_pid, spans}})
