@@ -3498,6 +3498,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Validation:** Read-only source and reference verification completed; `git diff --check` and `mix format --check-formatted docs/workstreams/editor-lifecycle-roadmap.md` passed. Markdown LSP diagnostics were unavailable because no Markdown language server is configured.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed current Protocol.GUI ownership, W028-W040 exhaustion, preserved D04 runtime and live clipboard/settings/actions, separate Tool Manager retirement, roadmap truth, and merge safety.
 - **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **Implementation commit SHA:** `acddf4721`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
