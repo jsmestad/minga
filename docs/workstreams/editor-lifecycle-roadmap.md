@@ -3263,7 +3263,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W069/D30: Remove dead interaction focus routing state
 
-- **Status:** ACTIVE
+- **Status:** VERIFIED
 - **Audit ID:** D30
 - **Planning profile:** `D30FocusPlanner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `D30FocusWorker`, `editor-lifecycle-worker`, no delegation.
@@ -3288,5 +3288,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** The broad reviewer initially returned `BLOCKED` on stale docs accounting and a false search-handler claim. Both were corrected; the targeted final recheck returned `RESOLVED/PASS` with 1.0 confidence and confirmed exact numstat plus the registered pre-Scoped handler set.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3124
 - **Implementation commit SHA:** `552a5321e`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `3fc181ba1ee9e21d03846a635e9f3e320b1351e5`.
+- **Merge evidence:** PR #3124 merged after CI run `29830297079` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-21.
