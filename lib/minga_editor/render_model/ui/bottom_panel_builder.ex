@@ -33,41 +33,31 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
 
   defp build_panel(%{visible: true} = panel, %MessageStore{} = store) do
     store = MessageStore.ensure_stream_instance(store)
-    active_index = Enum.find_index(panel.tabs, &(&1 == panel.active_tab)) || 0
-
-    tabs =
-      Enum.map(panel.tabs, fn tab ->
-        {EditorPanel.tab_type_byte(tab), EditorPanel.tab_name(tab)}
-      end)
 
     base = %BottomPanel{
       visible?: true,
-      active_tab_index: active_index,
+      active_tab_index: 0,
       height_percent: panel.height_percent,
       filter_byte: EditorPanel.filter_byte(panel.filter),
       stream_instance: message_stream_instance(store),
-      tabs: tabs
+      tabs: [{0x01, "Messages"}]
     }
 
-    resolve_content(panel.active_tab, base, store)
+    resolve_content(base, store)
   end
 
   @spec message_stream_instance(MessageStore.t()) :: MessageStore.stream_instance()
   defp message_stream_instance(%MessageStore{stream_instance: stream_instance}),
     do: stream_instance
 
-  @spec resolve_content(atom(), BottomPanel.t(), term()) :: {BottomPanel.t(), term()}
-  defp resolve_content(:messages, base, store) do
+  @spec resolve_content(BottomPanel.t(), MessageStore.t()) :: {BottomPanel.t(), MessageStore.t()}
+  defp resolve_content(base, store) do
     new_entries = MessageStore.entries_since(store, store.last_sent_id)
     messages = Enum.map(new_entries, &to_message_entry/1)
 
     last_id = if new_entries == [], do: store.last_sent_id, else: Enum.at(new_entries, -1).id
 
     {%{base | messages: messages}, MessageStore.mark_sent(store, last_id)}
-  end
-
-  defp resolve_content(_other_tab, base, store) do
-    {base, store}
   end
 
   @spec to_message_entry(MessageStore.Entry.t()) :: BottomPanel.MessageEntry.t()

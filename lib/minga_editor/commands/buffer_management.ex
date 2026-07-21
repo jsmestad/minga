@@ -2797,7 +2797,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec view_messages(state()) :: state()
   defp view_messages(state) do
-    new_panel = state.shell_runtime.state.bottom_panel |> BottomPanel.show(:messages)
+    new_panel = state.shell_runtime.state.bottom_panel |> BottomPanel.show()
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_bottom_panel(
@@ -2814,7 +2814,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec view_warnings(state()) :: state()
   defp view_warnings(state) do
-    new_panel = state.shell_runtime.state.bottom_panel |> BottomPanel.show(:messages, :warnings)
+    new_panel = state.shell_runtime.state.bottom_panel |> BottomPanel.show(:warnings)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_bottom_panel(

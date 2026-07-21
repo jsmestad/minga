@@ -65,16 +65,6 @@ defmodule MingaEditor.Commands.UI do
     execute: &toggle_bottom_panel/1
   )
 
-  command(:bottom_panel_next_tab, "Bottom panel: next tab",
-    requires_buffer: false,
-    execute: &bottom_panel_next_tab/1
-  )
-
-  command(:bottom_panel_prev_tab, "Bottom panel: previous tab",
-    requires_buffer: false,
-    execute: &bottom_panel_prev_tab/1
-  )
-
   command(:toggle_beam_observatory, "BEAM observatory",
     requires_buffer: false,
     execute: &toggle_beam_observatory/1
@@ -84,32 +74,6 @@ defmodule MingaEditor.Commands.UI do
   defp toggle_bottom_panel(state) do
     shell_state = MingaEditor.Shell.Runtime.state(state.shell_runtime)
     panel = MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
-    shell_state = MingaEditor.Shell.Traditional.State.install_bottom_panel(shell_state, panel)
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
-  end
-
-  @spec bottom_panel_next_tab(EditorState.t()) :: EditorState.t()
-  defp bottom_panel_next_tab(state) do
-    shell_state = MingaEditor.Shell.Runtime.state(state.shell_runtime)
-    panel = MingaEditor.BottomPanel.next_tab(state.shell_runtime.state.bottom_panel)
-    shell_state = MingaEditor.Shell.Traditional.State.install_bottom_panel(shell_state, panel)
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
-  end
-
-  @spec bottom_panel_prev_tab(EditorState.t()) :: EditorState.t()
-  defp bottom_panel_prev_tab(state) do
-    shell_state = MingaEditor.Shell.Runtime.state(state.shell_runtime)
-    panel = MingaEditor.BottomPanel.prev_tab(state.shell_runtime.state.bottom_panel)
     shell_state = MingaEditor.Shell.Traditional.State.install_bottom_panel(shell_state, panel)
 
     %{

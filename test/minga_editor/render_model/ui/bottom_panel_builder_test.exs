@@ -25,34 +25,16 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
       assert out_store == store
     end
 
-    test "resolves tabs, active index, height, and filter for a visible panel" do
-      panel = %EditorPanel{
-        visible: true,
-        active_tab: :diagnostics,
-        tabs: [:messages, :diagnostics, :terminal],
-        height_percent: 45,
-        filter: :warnings
-      }
+    test "projects a visible panel as the Messages tab with height and filter" do
+      panel = %EditorPanel{visible: true, height_percent: 45, filter: :warnings}
 
       {model, _store} = BottomPanelBuilder.build(ctx(panel, %MessageStore{}))
 
       assert model.visible?
-      assert model.active_tab_index == 1
+      assert model.active_tab_index == 0
       assert model.height_percent == 45
       assert model.filter_byte == 0x01
-      assert model.tabs == [{0x01, "Messages"}, {0x02, "Diagnostics"}, {0x03, "Terminal"}]
-    end
-
-    test "non-messages tab carries no message entries and leaves the store untouched" do
-      store =
-        %MessageStore{}
-        |> MessageStore.append("hi", :info, :editor)
-
-      panel = %EditorPanel{visible: true, active_tab: :diagnostics, tabs: [:diagnostics]}
-      {model, out_store} = BottomPanelBuilder.build(ctx(panel, store))
-
-      assert model.messages == []
-      assert out_store == store
+      assert model.tabs == [{0x01, "Messages"}]
     end
 
     test "messages tab resolves new entries and advances the store cursor" do
@@ -61,7 +43,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
         |> MessageStore.append("Editor started", :info, :editor)
         |> MessageStore.append("[LSP] connected", :info, :lsp)
 
-      panel = %EditorPanel{visible: true, active_tab: :messages, tabs: [:messages]}
+      panel = %EditorPanel{visible: true}
       {model, out_store} = BottomPanelBuilder.build(ctx(panel, store))
 
       assert model.stream_instance == store.stream_instance
@@ -77,7 +59,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
 
     test "sends only incremental entries after a prior send" do
       store = %MessageStore{} |> MessageStore.append("First", :info, :editor)
-      panel = %EditorPanel{visible: true, active_tab: :messages, tabs: [:messages]}
+      panel = %EditorPanel{visible: true}
 
       {model1, store2} = BottomPanelBuilder.build(ctx(panel, store))
       assert Enum.count(model1.messages) == 1
@@ -94,7 +76,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilderTest do
     test "fresh producers can reuse ids without reusing stream identity" do
       first_store = MessageStore.new() |> MessageStore.append("First", :info, :editor)
       second_store = MessageStore.new() |> MessageStore.append("Second", :info, :editor)
-      panel = %EditorPanel{visible: true, active_tab: :messages, tabs: [:messages]}
+      panel = %EditorPanel{visible: true}
 
       {first_model, _first_store} = BottomPanelBuilder.build(ctx(panel, first_store))
       {second_model, _second_store} = BottomPanelBuilder.build(ctx(panel, second_store))
