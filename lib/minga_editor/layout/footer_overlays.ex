@@ -56,8 +56,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
   Seven surfaces have a live BEAM content source in the render-model path and so
   can actually become visible here: float popup, extension panel, observatory,
   edit timeline, notifications, extension overlay, and agent context. The Tool
-  Manager registry identity is preserved elsewhere for compatibility, but it has
-  no footer-overlay producer here because it is not in the render-model UI.
+  Manager UI remains picker-owned and is not a footer-overlay producer.
   """
 
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
