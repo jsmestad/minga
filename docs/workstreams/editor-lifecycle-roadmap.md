@@ -3913,7 +3913,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W091/S25: Reduce RenderWindow to materialized carrier/cache operations
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S25
 - **Planning profile:** `S25Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S25Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3937,7 +3937,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness and Elixir craftsmanship both found that the migrated test helper used a raw `%WindowCache{}` rather than canonical `WindowCache.reset/0`, and that the retained moduledoc still described a second authoritative editor window. Both corrections were applied; the roadmap deletion inventory was also expanded to name `show_empty_state/1` and `show_buffer/2`. Targeted rechecks returned `RESOLVED/PASS/Lean` with 0.99 confidence. Ponytail returned `PASS/Lean` with 0.99 confidence, confirming the net-negative production diff, zero new concepts, and absence of compatibility or API-absence tests.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed exhaustive live-consumer safety, exact cache/materialization retention, complete roadmap evidence, locked budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3171
-- **Implementation commit SHA:** `748ce91d3`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Implementation commit SHA:** `2de39fc0d`.
+- **Merge SHA:** `29e400b791f7fd5e40d325c9cca7d89abe7912b1`.
+- **Merge evidence:** PR #3171 merged after CI run `29912763851` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
