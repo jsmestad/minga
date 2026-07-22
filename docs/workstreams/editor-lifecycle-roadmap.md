@@ -3795,3 +3795,34 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `9285a25a8bb1133c5d738998f67e472c5ef865e0`.
 - **Merge evidence:** PR #3160 merged after CI run `29894910502` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W087/S20: Clear completion pending refs on dismiss
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S20
+- **Planning profile:** `S20Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S20Worker`, `editor-lifecycle-worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S20Planner` for current SHA `a30b358deed6a8e5abea78f49abc5da053d698cf`; the locked owner is `MingaEditor.CompletionTrigger` for completion request ref bookkeeping.
+- **Freshness commit SHA:** `a30b358deed6a8e5abea78f49abc5da053d698cf`.
+- **Observable result:** `CompletionTrigger.dismiss/1` now cancels the debounce timer and clears `pending_ref`, `pending_refs`, and `trigger_position` while preserving `gen`. The non-identifier `classify_char/6` abandonment branch now reuses `dismiss/1`, so late primary and secondary `textDocument/completion` responses after dismissal classify as `:ignore` and keep the pending-ref set empty.
+- **Failure reproduction:** Before the correction, a seeded dismissed trigger with primary and secondary refs retained `pending_refs`; both late refs classified as `{:merge, {0, 0}, "", 7}` in a focused `mix run -e` owner reproduction.
+- **Implementation result:** Added the `pending_refs: MapSet.new()` empty transition to `CompletionTrigger.dismiss/1` and replaced the non-identifier branch's duplicate partial reset with `{dismiss(bridge), nil}`. No resolve, signature-help, workspace pending, modal, protocol, frontend, generation, or data-shape behavior was changed.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/completion_trigger.ex`; `test/minga_editor/completion_trigger_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/completion_trigger_test.exs` passed 9 tests.
+- **Broad validation:** `mix test test/minga_editor/completion_trigger_test.exs test/minga_editor/completion_async_test.exs test/minga_editor/handlers/lsp_event_handler_test.exs test/minga_editor/input/completion_key_test.exs` passed 53 tests.
+- **Formatting validation:** `mix format lib/minga_editor/completion_trigger.ex test/minga_editor/completion_trigger_test.exs` ran. `mix format --check-formatted lib/minga_editor/completion_trigger.ex test/minga_editor/completion_trigger_test.exs` passed.
+- **Project validation:** `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo retained one unrelated global-state test warning and two pre-existing refactoring suggestions. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,758 tests with 58 doctests, 98 properties, 1 skipped, 572 excluded, and zero failures.
+- **Production lines added/removed before roadmap evidence:** `2 added / 3 removed`, net `-1`, within the locked production net `<= 0`; per-file numstat before this roadmap update: `lib/minga_editor/completion_trigger.ex 2 3`.
+- **Test lines added/removed before roadmap evidence:** `25 added / 11 removed`, net `+14`, within the locked test net `<= 14`; per-file numstat before this roadmap update: `test/minga_editor/completion_trigger_test.exs 25 11`.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, alternate pending-request data shape, modal owner, workspace pending owner, resolve path, signature-help path, or frontend surface was added.
+- **Concepts removed:** Removed only the duplicate non-identifier partial-dismissal transition; all dismissal paths now use the existing `CompletionTrigger.dismiss/1` owner transition.
+- **Retained contracts:** `gen` remains unchanged on dismissal; primary completion response classification, secondary merge classification before dismissal, error classification, debounce scheduling, trigger-character request fan-out, `completionItem/resolve` tracking, signature-help tracking, workspace `lsp_pending`, modal lifecycle, protocol, and frontend behavior remain unchanged.
+- **Findings resolved:** S20's stale completion request refs are cleared by the completion trigger owner on dismiss and internal non-identifier abandonment.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence after tracing request production, response classification, every dismissal path, async generation gates, and resolve/signature tracking. Elixir craftsmanship approved the production owner transition but required removal of an unnecessary Buffer GenServer fixture from the owner-value test; the corrected test passes `self()` to the stale branch and pins the full unchanged dismissed trigger for both refs, and targeted recheck returned `RESOLVED/PASS`. Ponytail returned `PASS/Lean` with 0.99 confidence, confirming net-negative production, zero concepts, exact scope, and proportional tests.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete owner transition, stale primary and secondary `:ignore` dispatch, no processing or modal side effects, corrected process-free unit test, exact three-file scope, locked budgets, validation evidence, and merge safety.
+- **Discoveries affecting later work:** No replan trigger, production budget issue, test budget issue, new dependency, owner drift, resolve/signature/workspace pending impact, modal/protocol/frontend impact, or compatibility need was found.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3162
+- **Implementation commit SHA:** `1f2e85d83`.
+- **Merge SHA:** Pending delivery.
+- **Merge evidence:** Pending delivery.
+- **Completion date:** 2026-07-22.

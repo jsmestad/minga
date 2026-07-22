@@ -170,7 +170,7 @@ defmodule MingaEditor.CompletionTrigger do
   @spec dismiss(t()) :: t()
   def dismiss(bridge) do
     bridge = cancel_debounce(bridge)
-    %{bridge | pending_ref: nil, trigger_position: nil}
+    %{bridge | pending_ref: nil, pending_refs: MapSet.new(), trigger_position: nil}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -190,8 +190,7 @@ defmodule MingaEditor.CompletionTrigger do
     if identifier_char?(char) do
       schedule_debounced_trigger(bridge, clients, buffer_pid)
     else
-      bridge = cancel_debounce(bridge)
-      {%{bridge | pending_ref: nil, trigger_position: nil}, nil}
+      {dismiss(bridge), nil}
     end
   end
 
