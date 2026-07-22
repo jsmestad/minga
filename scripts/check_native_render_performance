@@ -54,7 +54,8 @@ measure_harness() {
     exit 2
   fi
   mkdir -p "$(dirname "$output")"
-  DYLD_FRAMEWORK_PATH="$products${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}" \
+  SWIFT_BACKTRACE=enable=yes \
+    DYLD_FRAMEWORK_PATH="$products${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}" \
     "$binary" --measurement-output "$output"
 }
 

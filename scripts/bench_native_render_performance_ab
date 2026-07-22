@@ -67,6 +67,9 @@ measure_revision() {
   local output="$work_dir/$side-$pair.json" status=0
   echo "::group::Measure native Metal benchmark $side pair $pair"
   MINGA_NATIVE_RENDER_ROOT="$source_root" "$runner" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
+  if (( status != 0 )); then
+    find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'minga-native-render-performance*.ips' -mmin -10 -print -exec cp {} "$artifact_dir/" \; -exec cat {} \; 2>/dev/null || true
+  fi
   echo "::endgroup::"
   [[ -s "$output" ]] || return 1
   if [[ "$side" == base ]]; then

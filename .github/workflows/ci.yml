@@ -337,6 +337,7 @@ jobs:
           path: |
             native_render_performance.json
             native_render_performance_metrics.txt
+            minga-native-render-performance*.ips
           if-no-files-found: error
 
       - name: Cache DerivedData
