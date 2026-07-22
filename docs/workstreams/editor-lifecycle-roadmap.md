@@ -3642,7 +3642,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed schedule-once ownership, live-buffer detection, headless/partial/all-missing boundaries, retained foreground/recovery/GUI behavior, active-buffer consumption, exact budgets, validation evidence, and merge safety.
 - **Findings resolved:** S09 implementation slice removes per-restored-buffer timers and replaces them with one post-batch active-buffer refresh for non-headless live restores.
 - **Discoveries affecting later work:** No contract drift, dependency change, owner invalidation, or budget issue required replanning. The LSP handler regression locks the current active-buffer consumer semantics, leaving buffer-correlated code-lens/inlay storage to the separately routed L06/L08 work.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3150
+- **Implementation commit SHA:** `793e1bffa`.
 - **Merge SHA:** Pending.
 - **Completion date:** Pending.
