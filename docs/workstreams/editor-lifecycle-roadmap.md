@@ -26,9 +26,10 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
+- **IMPLEMENTED:** S34
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
-- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S34, S35
+- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S35
 - **CANDIDATE, craftsmanship:** E02, E03, E05, E08
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
@@ -38,7 +39,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 
 - **STILL_REPRODUCIBLE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
-- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S34, S35
+- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S35
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E05, E08
 - **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES08, ES21
@@ -4063,3 +4064,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `023ad5a7b92d4d60eb4203d46f443df4ef95713d`.
 - **Merge evidence:** PR #3179 merged after CI run `29931696179` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W096/S34: Rename resident-store ceiling policy wording
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S34
+- **Planning profile:** `S34Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S34Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S34Planner` for current SHA `1d24f8b3923a403bf62a5ab26cde6463bde2bd0d`; scope was exactly `lib/minga_editor/render_pipeline/buffer_prefetch.ex`, `docs/workstreams/resident-scroll.md`, the stale comment in `test/minga_editor/render_pipeline/scroll_test.exs`, and this roadmap evidence.
+- **Observable result:** Full-document residence behavior is unchanged at the reviewed `65_536` row residence/performance ceiling, while the stale private wire-limit name and old 16-bit/65,535 wording are gone. GUI window-content row counts and row-delta count/index fields remain u32 on the wire.
+- **Failure reproduction / source trace:** Before the correction, focused search found a private wire-limit constant name and old 16-bit/65,535 residence wording in `BufferPrefetch`, the resident-scroll workstream status, and the default-residence test comment, even though `BufferPrefetch.full_residence?/3` already allowed `line_count <= 65_536` and the existing GUI owners encode window-content row counts plus row-delta count/index fields as u32.
+- **Implementation result:** Renamed the private policy constant to `@resident_store_max_lines`, updated the surrounding `full_residence?/3` comments to describe a reviewed residence ceiling rather than a wire limit, corrected the resident-scroll status sentence to `65_536` plus u32 wire wording, and corrected the stale test comment from the old 65,535 wording to `65_536`. Logic and assertions were left unchanged.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `docs/workstreams/resident-scroll.md`; `lib/minga_editor/render_pipeline/buffer_prefetch.ex`; `test/minga_editor/render_pipeline/scroll_test.exs`.
+- **Focused validation:** `mix test test/minga/frontend/adapter/gui/window_encoder_test.exs:184 test/minga/frontend/adapter/gui/window_encoder_test.exs:215 test/minga_editor/render_pipeline/scroll_test.exs:118 test/conformance/production_render_corpus_test.exs:11` passed 3 tests with 33 excluded because the production corpus test moved to line 13; `mix test test/conformance/production_render_corpus_test.exs:13` passed 1 test. `mix test --include perf test/minga_editor/render_pipeline/resident_incremental_test.exs:285` passed 1 test with 11 excluded. `cd go/tui && go test ./internal/protocol -run 'TestDecodeWindowDeltaSupportsMoreThanUint16Rows|TestDecodeWindow(Content|Delta)RejectsRowCountBeyondSectionBytes'` passed 1 package.
+- **Formatting, reference, and diff validation:** `mix format --check-formatted lib/minga_editor/render_pipeline/buffer_prefetch.ex test/minga_editor/render_pipeline/scroll_test.exs docs/workstreams/resident-scroll.md` passed before roadmap evidence. Focused stale-phrase search over `lib`, `test`, and `docs` found no live matches after the code, doc, and test-comment correction. `git diff --check` passed before roadmap evidence.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with total Dialyzer errors `0`; Credo retained the two pre-existing refactoring opportunities in `lib/minga_editor/commands/buffer_management.ex` and one pre-existing registry-test warning. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,746 tests with 58 doctests, 98 properties, 1 skipped, 572 excluded, and zero failures. `cd go/tui && go test ./...` passed 7 packages with 1 package reporting no tests.
+- **Production lines added/removed before roadmap evidence:** `9 added / 9 removed`, net `0`, satisfying the locked production net `<= 0`; production numstat before this roadmap update: `lib/minga_editor/render_pipeline/buffer_prefetch.ex 9 9`.
+- **Test lines added/removed before roadmap evidence:** `1 added / 1 removed`, net `0`; test numstat before this roadmap update: `test/minga_editor/render_pipeline/scroll_test.exs 1 1`.
+- **Docs lines added/removed before roadmap evidence:** `1 added / 1 removed`, net `0`; docs numstat before this roadmap update: `docs/workstreams/resident-scroll.md 1 1`.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, data representation, executable concept, frontend path, schema edit, generated codec, fallback, wrapper, or replacement abstraction was added.
+- **Concepts removed:** Removed the stale private wire-limit naming concept and stale 16-bit/65,535 residence-policy wording.
+- **Retained contracts:** `MingaEditor.RenderPipeline.BufferPrefetch.full_residence?/3` eligibility logic, `:resident_store_max_lines` option name and default, the `65_536` residence ceiling, disabled `0`/nil threshold behavior, wrapped/folded windowed behavior, byte/file-size caps, GUI window-content row-count encoding, GUI row-delta count/index-field encoding, Swift and Go u32 row-count decoding, and all tests/assertions remain unchanged.
+- **Findings resolved:** S34's documentation/policy naming residual is resolved by documenting the threshold as the reviewed residence/performance ceiling instead of a wire-width ceiling.
+- **Discoveries affecting later work:** The locked production-corpus test reference is now at line 13 rather than line 11. No replan trigger, owner drift, protocol/schema/frontend dependency, production budget miss, test budget issue, compatibility need, or new concept was found.
+- **Pre-acceptance reviews:** Elixir craftsmanship and Ponytail returned `PASS/Lean` with 0.99 confidence. Correctness found one wording defect: the first correction described structured row deltas as u32 rather than the row-delta count/index fields. Source and workstream text were corrected to say GUI window-content row counts and row-delta count/index fields are u32; targeted correctness recheck returned `RESOLVED/PASS` with 0.99 confidence.
+- **Final reviewer verdict:** Initial review found the same structured-delta wording imprecision in the failure trace; after correction to `row counts and row-delta count/index fields`, targeted recheck returned `RESOLVED/PASS` with 0.99 confidence and no residual blocker.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3181
+- **Implementation commit SHA:** `ded9ba16b`.
+- **Merge SHA:** Pending delivery.
+- **Merge evidence:** Pending delivery.
+- **Completion date:** Pending merge.

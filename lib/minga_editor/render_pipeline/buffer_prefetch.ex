@@ -545,25 +545,25 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     end
   end
 
-  # Wire-format ceiling: gui_window_content and its row/viewport deltas encode the
-  # row count as a u16, so a resident store may not exceed 65_535 rows regardless
-  # of the configured line threshold. Above this, fall back to windowed emit.
-  @wire_max_rows 65_536
+  # Reviewed residence ceiling: cap full-document residence at 65_536 rows for
+  # resident-store memory and first-build performance. GUI window-content row counts
+  # and row-delta count/index fields are u32 on the wire; this policy does not widen residence.
+  @resident_store_max_lines 65_536
   @default_resident_store_max_bytes 10_485_760
 
   # A buffer qualifies for full-document residence when it is not wrapped, not
   # folded/decorated (caller passes the nil-visible_line_map case only), and both
-  # its line count and byte size sit under the configured thresholds and the wire
-  # row ceiling. The byte check runs last so an over-line file skips the extra call.
-  # Residence is on by default (:resident_store_max_lines defaults to the u16 wire
-  # ceiling); a line threshold of 0 (or nil) disables it and forces the windowed path.
+  # its line count and byte size sit under the configured thresholds and the reviewed
+  # residence ceiling. The byte check runs last so an over-line file skips the extra
+  # call. Residence is on by default; a line threshold of 0 (or nil) disables it and
+  # forces the windowed path.
   @spec full_residence?(pid(), boolean(), non_neg_integer()) :: boolean()
   defp full_residence?(_buf, true = _wrap_on, _line_count), do: false
 
   defp full_residence?(buf, false = _wrap_on, line_count) do
     case resident_store_max_lines() do
       max_lines when is_integer(max_lines) and max_lines > 0 ->
-        line_count <= @wire_max_rows and
+        line_count <= @resident_store_max_lines and
           line_count <= max_lines and
           buffer_bytes_within_limit?(buf)
 
