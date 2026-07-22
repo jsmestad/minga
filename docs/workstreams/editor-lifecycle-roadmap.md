@@ -4059,7 +4059,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Swift, Go, and Ponytail returned `PASS/Lean` with 0.99 confidence. Correctness found one documentation blocker: canonical `docs/PROTOCOL.md` still named protocol version 14. The blocker was corrected by updating both current-version statements and the version history to describe the protocol v15 retirement; targeted recheck returned `RESOLVED/PASS` with 0.99 confidence. After the final review, CI exposed only the two stale Swift inventory counts described above; a targeted Swift recheck confirmed the corrected 29-owner and 37-type inventories with `RESOLVED/PASS` at 0.99 confidence.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence before the mechanical Swift inventory-count correction. The reviewer confirmed synchronized protocol v15 retirement across schema, BEAM, Swift, Go, generated/golden surfaces, tests, and canonical docs; retained breadcrumb display and legacy compatibility; exact budgets; and merge safety. The subsequent targeted Swift recheck found no residual blocker.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3179
-- **Implementation commit SHA:** `9c714abc0`.
+- **Implementation commit SHA:** `263b6b4c2`; Swift CI correction commit `e6263afd1`.
 - **Merge SHA:** Pending delivery.
 - **Merge evidence:** Pending delivery.
 - **Completion date:** Pending merge.
