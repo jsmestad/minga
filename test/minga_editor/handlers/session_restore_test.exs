@@ -66,6 +66,74 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert switched.parser.injection_ranges == with_spans.parser.injection_ranges
   end
 
+  test "non-headless session restore schedules one post-batch LSP refresh", %{tmp_dir: dir} do
+    first_path = Path.join(dir, "first.ex")
+    second_path = Path.join(dir, "second.ex")
+    File.write!(first_path, "defmodule First do\nend\n")
+    File.write!(second_path, "defmodule Second do\nend\n")
+
+    snapshot = %Snapshot{
+      version: 1,
+      buffers: [%BufferEntry{file: first_path}, %BufferEntry{file: second_path}],
+      active_file: first_path
+    }
+
+    assert :ok = Session.save(snapshot, session_dir: dir)
+
+    %EditorState{} = state = initial_state(dir)
+
+    restored =
+      SessionRestore.restore_session(%{state | frontend: %{state.frontend | backend: :tui}})
+
+    assert [_, _] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
+    assert Minga.Buffer.file_path(restored.workspace.buffers.active) == first_path
+    assert_receive :request_code_lens_and_inlay_hints, 1_000
+    refute_receive :request_code_lens_and_inlay_hints, 900
+  end
+
+  test "partial non-headless restore schedules one refresh for the live buffer", %{tmp_dir: dir} do
+    existing_path = Path.join(dir, "existing.ex")
+    missing_path = Path.join(dir, "missing.ex")
+    File.write!(existing_path, "defmodule Existing do\nend\n")
+
+    snapshot = %Snapshot{
+      version: 1,
+      buffers: [%BufferEntry{file: existing_path}, %BufferEntry{file: missing_path}],
+      active_file: missing_path
+    }
+
+    assert :ok = Session.save(snapshot, session_dir: dir)
+    %EditorState{} = state = initial_state(dir)
+
+    restored =
+      SessionRestore.restore_session(%{state | frontend: %{state.frontend | backend: :tui}})
+
+    assert [_] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
+    assert Minga.Buffer.file_path(restored.workspace.buffers.active) == existing_path
+    assert_receive :request_code_lens_and_inlay_hints, 1_000
+    refute_receive :request_code_lens_and_inlay_hints, 900
+  end
+
+  test "all-missing non-headless restore schedules no refresh", %{tmp_dir: dir} do
+    first_path = Path.join(dir, "first-missing.ex")
+    second_path = Path.join(dir, "second-missing.ex")
+
+    snapshot = %Snapshot{
+      version: 1,
+      buffers: [%BufferEntry{file: first_path}, %BufferEntry{file: second_path}],
+      active_file: first_path
+    }
+
+    assert :ok = Session.save(snapshot, session_dir: dir)
+    %EditorState{} = state = initial_state(dir)
+
+    restored =
+      SessionRestore.restore_session(%{state | frontend: %{state.frontend | backend: :tui}})
+
+    assert [] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
+    refute_receive :request_code_lens_and_inlay_hints, 900
+  end
+
   test "restoring loose files under a marker-bearing home keeps the workspace unset", %{
     tmp_dir: dir
   } do
@@ -132,6 +200,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert [_] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == existing_path
     refute File.exists?(missing_path)
+    refute_receive :request_code_lens_and_inlay_hints, 20
   end
 
   @spec initial_state(String.t(), keyword()) :: EditorState.t()

@@ -56,6 +56,32 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   end
 
   describe "handle/2" do
+    test "scheduled code lens and inlay hint refresh uses the active buffer" do
+      {state, inactive_path, active_path} = two_file_buffer_state()
+      inactive_client = start_fake_lsp_client()
+      active_client = start_fake_lsp_client()
+      [inactive_buffer, active_buffer] = state.workspace.buffers.list
+      register_lsp_client(inactive_buffer, inactive_client)
+      register_lsp_client(active_buffer, active_client)
+
+      {new_state, effects} = LspEventHandler.handle(state, :request_code_lens_and_inlay_hints)
+
+      active_uri = Minga.LSP.SyncServer.path_to_uri(active_path)
+      inactive_uri = Minga.LSP.SyncServer.path_to_uri(inactive_path)
+      assert effects == []
+      assert new_state.workspace.lsp_pending != %{}
+
+      assert_receive {:lsp_request, "textDocument/codeLens",
+                      %{"textDocument" => %{"uri" => ^active_uri}}, code_lens_caller, _}
+
+      assert_receive {:lsp_request, "textDocument/inlayHint",
+                      %{"textDocument" => %{"uri" => ^active_uri}}, inlay_hint_caller, _}
+
+      assert code_lens_caller == self()
+      assert inlay_hint_caller == self()
+      refute_receive {:lsp_request, _, %{"textDocument" => %{"uri" => ^inactive_uri}}, _, _}
+    end
+
     test "references uses one structured identity from request through no-result response" do
       state = file_buffer_state("hello\n")
       client = start_fake_lsp_client()
@@ -922,6 +948,48 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     }
   end
 
+  defp two_file_buffer_state do
+    inactive_path = tmp_lsp_path("inactive")
+    active_path = tmp_lsp_path("active")
+    File.write!(inactive_path, "inactive\n")
+    File.write!(active_path, "active\n")
+    on_exit(fn -> File.rm(inactive_path) end)
+    on_exit(fn -> File.rm(active_path) end)
+
+    inactive_buffer =
+      start_supervised!(
+        {BufferProcess, file_path: inactive_path, content: "inactive\n"},
+        id: {:buffer, make_ref()}
+      )
+
+    active_buffer =
+      start_supervised!(
+        {BufferProcess, file_path: active_path, content: "active\n"},
+        id: {:buffer, make_ref()}
+      )
+
+    workspace = %{
+      workspace_for(active_buffer)
+      | buffers: %Buffers{
+          active: active_buffer,
+          list: [inactive_buffer, active_buffer],
+          active_index: 1
+        }
+    }
+
+    {%EditorState{
+       frontend: %MingaEditor.State.Frontend{port_manager: self()},
+       workspace: workspace
+     }, inactive_path, active_path}
+  end
+
+  defp tmp_lsp_path(name) do
+    Path.join(
+      System.tmp_dir!(),
+      "lsp-event-handler-#{name}-#{System.unique_integer([:positive])}.ex"
+    )
+  end
+
   defp workspace_for(buffer) do
     %MingaEditor.Session.State{
       viewport: Viewport.new(24, 80),
@@ -947,6 +1015,10 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
   defp fake_lsp_client_loop(parent) do
     receive do
+      {:"$gen_call", from, :capabilities} ->
+        GenServer.reply(from, %{"codeLensProvider" => true, "inlayHintProvider" => true})
+        fake_lsp_client_loop(parent)
+
       {:"$gen_call", from, :semantic_token_legend} ->
         GenServer.reply(from, {["variable"], []})
         fake_lsp_client_loop(parent)

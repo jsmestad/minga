@@ -31,9 +31,18 @@ defmodule MingaEditor.Handlers.SessionRestore do
   def apply_session_snapshot(state, session) do
     Minga.Log.info(:editor, "Restored from previous session")
 
-    session.buffers
-    |> Enum.reduce(state, &restore_session_buffer/2)
-    |> restore_active_file(session.active_file)
+    pre_restore_buffers = state.workspace.buffers.list
+
+    state =
+      session.buffers
+      |> Enum.reduce(state, &restore_session_buffer/2)
+      |> restore_active_file(session.active_file)
+
+    if state.frontend.backend != :headless and state.workspace.buffers.list != pre_restore_buffers do
+      Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
+    end
+
+    state
   end
 
   @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
@@ -76,7 +85,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
            ) do
         {:ok, pid} ->
           :ok = Buffer.move_to(pid, {entry.cursor_line, entry.cursor_col})
-          BufferRegistry.register_buffer(state, pid, file)
+          BufferRegistry.register_buffer(state, pid, file, schedule_lsp_refresh?: false)
 
         {:error, _} ->
           state

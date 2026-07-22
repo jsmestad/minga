@@ -3618,3 +3618,31 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `545c839a5800f79cd850e4b45cf3771bbb17f6c1`.
 - **Merge evidence:** PR #3148 merged after CI run `29877756606` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-21.
+
+### W081/S09: Schedule one LSP refresh after session restore batch
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S09
+- **Planning profile:** `S09Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S09Worker`, `editor-lifecycle-worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S09Planner` for current SHA `4fdb9d3a97cd8469d6eb4b1d6ec948a6fe3d012e`; the locked owner is `MingaEditor.Handlers.SessionRestore` for the restore batch refresh, with `MingaEditor.Handlers.BufferRegistry` retaining ordinary foreground registration scheduling by default.
+- **Freshness commit SHA:** `4fdb9d3a97cd8469d6eb4b1d6ec948a6fe3d012e`.
+- **Observable result:** Session restore now suppresses per-restored-buffer code-lens/inlay timers during saved-buffer registration, restores the persisted active tab, then enqueues one existing `:request_code_lens_and_inlay_hints` atom after the batch only when at least one live buffer was restored and the frontend backend is non-headless. Ordinary foreground registration, swap recovery, GUI active-window registration, the 800 ms delay, and active-buffer LSP consumption remain unchanged.
+- **Failure reproduction / source trace:** Before the correction, `mix test.debug test/minga_editor/handlers/session_restore_test.exs` failed the new non-headless restore regression because two restored buffers queued two delayed `:request_code_lens_and_inlay_hints` messages; the first `assert_receive` consumed one message and the following `refute_receive` unexpectedly received the duplicate within 900 ms.
+- **Implementation result:** Added the internal `schedule_lsp_refresh?: false` opt-out to `BufferRegistry.register_buffer/4`, used it only from `SessionRestore.restore_session_buffer/2`, and moved restore scheduling to `SessionRestore.apply_session_snapshot/2` after `restore_active_file/2`. The delayed atom, 800 ms delay, `LspEventHandler`, `LspActions`, decoration state, request kind, and active-buffer semantics were not changed.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/handlers/session_restore.ex`; `lib/minga_editor/handlers/buffer_registry.ex`; `test/minga_editor/handlers/session_restore_test.exs`; `test/minga_editor/handlers/lsp_event_handler_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/handlers/session_restore_test.exs` first reproduced the duplicate-timer failure, then passed 7 tests after the correction and boundary additions. `mix test.debug test/minga_editor/handlers/lsp_event_handler_test.exs` passed 34 tests. Final `mix test.llm test/minga_editor/handlers/session_restore_test.exs test/minga_editor/handlers/lsp_event_handler_test.exs test/minga_editor/lsp_actions_test.exs` passed 59 tests across 3 modules.
+- **Broad validation:** `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo reported one intentional global-state test warning and two unrelated pre-existing refactoring opportunities. `ERL_FLAGS='+S 2:2' mix test.quick --max-cases 4` and `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` each passed 9,752 tests with 58 doctests, 98 properties, 1 skipped, 572 excluded, and zero failures.
+- **Production lines added/removed before roadmap evidence:** `16 added / 16 removed`, net `0`, within the locked production net `<= 0`; per-file numstat: `lib/minga_editor/handlers/buffer_registry.ex 3 12`; `lib/minga_editor/handlers/session_restore.ex 13 4`.
+- **Test lines added/removed before roadmap evidence:** `141 added / 0 removed`; per-file numstat: `test/minga_editor/handlers/lsp_event_handler_test.exs 72 0`; `test/minga_editor/handlers/session_restore_test.exs 69 0`.
+- **Concepts added:** None. No new module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, per-buffer correlation state, mailbox tag, data representation, or LSP request shape was added.
+- **Concepts removed:** Removed duplicate restore-time LSP refresh scheduling for inactive restored buffers.
+- **Retained contracts:** Foreground buffer registration still schedules by default, swap recovery still uses foreground registration scheduling, GUI active-window registration remains unchanged, the delayed message remains the existing atom, the delay remains 800 ms, and code-lens/inlay request handling still targets the active buffer at consumption time.
+- **Pre-acceptance reviews:** Correctness confirmed the production schedule-once behavior and required explicit partial/all-missing non-headless boundaries plus corrected line evidence; the targeted recheck returned `RESOLVED/PASS`. Elixir craftsmanship returned `PASS/Lean` with no mandatory cut and confirmed the option, list comparison, timer clauses, and ownership are proportionate. Ponytail returned `PASS/Lean` with 0.99 confidence and confirmed the net-zero cut adds no concept or architecture creep.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed schedule-once ownership, live-buffer detection, headless/partial/all-missing boundaries, retained foreground/recovery/GUI behavior, active-buffer consumption, exact budgets, validation evidence, and merge safety.
+- **Findings resolved:** S09 implementation slice removes per-restored-buffer timers and replaces them with one post-batch active-buffer refresh for non-headless live restores.
+- **Discoveries affecting later work:** No contract drift, dependency change, owner invalidation, or budget issue required replanning. The LSP handler regression locks the current active-buffer consumer semantics, leaving buffer-correlated code-lens/inlay storage to the separately routed L06/L08 work.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3150
+- **Implementation commit SHA:** `793e1bffa`.
+- **Merge SHA:** Pending.
+- **Completion date:** Pending.
