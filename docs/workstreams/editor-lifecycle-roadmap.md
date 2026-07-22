@@ -4067,7 +4067,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W096/S34: Rename resident-store ceiling policy wording
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S34
 - **Planning profile:** `S34Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S34Worker`, no delegation.
@@ -4086,11 +4086,11 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed the stale private wire-limit naming concept and stale 16-bit/65,535 residence-policy wording.
 - **Retained contracts:** `MingaEditor.RenderPipeline.BufferPrefetch.full_residence?/3` eligibility logic, `:resident_store_max_lines` option name and default, the `65_536` residence ceiling, disabled `0`/nil threshold behavior, wrapped/folded windowed behavior, byte/file-size caps, GUI window-content row-count encoding, GUI row-delta count/index-field encoding, Swift and Go u32 row-count decoding, and all tests/assertions remain unchanged.
 - **Findings resolved:** S34's documentation/policy naming residual is resolved by documenting the threshold as the reviewed residence/performance ceiling instead of a wire-width ceiling.
-- **Discoveries affecting later work:** The locked production-corpus test reference is now at line 13 rather than line 11. No replan trigger, owner drift, protocol/schema/frontend dependency, production budget miss, test budget issue, compatibility need, or new concept was found.
+- **Discoveries affecting later work:** The locked production-corpus test reference is now at line 13 rather than line 11. CI's first Elixir attempt timed out after five seconds waiting for `AgentEnd` in the unchanged `NativeMCPTest` while 10,108 other tests passed; the exact failing test then passed locally in 240 ms, and the failed CI job passed on its next attempt. No replan trigger, owner drift, protocol/schema/frontend dependency, production budget miss, test budget issue in the S34 surface, compatibility need, or new concept was found.
 - **Pre-acceptance reviews:** Elixir craftsmanship and Ponytail returned `PASS/Lean` with 0.99 confidence. Correctness found one wording defect: the first correction described structured row deltas as u32 rather than the row-delta count/index fields. Source and workstream text were corrected to say GUI window-content row counts and row-delta count/index fields are u32; targeted correctness recheck returned `RESOLVED/PASS` with 0.99 confidence.
 - **Final reviewer verdict:** Initial review found the same structured-delta wording imprecision in the failure trace; after correction to `row counts and row-delta count/index fields`, targeted recheck returned `RESOLVED/PASS` with 0.99 confidence and no residual blocker.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3181
 - **Implementation commit SHA:** `ded9ba16b`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Merge SHA:** `16d70068f8f9b0e8ae6807cf1af4d9088bdfbe41`.
+- **Merge evidence:** PR #3181 merged after CI run `29935132182` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The Elixir job's first attempt had the unrelated Native MCP timeout recorded above; only that failed job was rerun after the exact test passed locally, and its second attempt passed.
+- **Completion date:** 2026-07-22.
