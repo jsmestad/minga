@@ -20,8 +20,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert ui.theme.name == ctx.theme.name
       assert is_list(ui.theme.color_slots)
       assert %Minga.RenderModel.UI.Breadcrumb{} = ui.breadcrumb
-      assert ui.breadcrumb.file_path == nil
-      assert ui.breadcrumb.root == ""
+      assert ui.breadcrumb.segments == []
       assert %Minga.RenderModel.UI.Notifications{} = ui.notifications
       assert ui.notifications.items == []
       assert %Minga.RenderModel.UI.SearchState{} = ui.search_state

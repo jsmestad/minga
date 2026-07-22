@@ -506,7 +506,7 @@ defmodule Minga.Test.ProtocolGolden do
 
   @spec breadcrumb_model([String.t()]) :: Breadcrumb.t()
   defp breadcrumb_model(segments) do
-    %Breadcrumb{file_path: "fixture", root: "/", segments: segments}
+    %Breadcrumb{segments: segments}
   end
 
   @spec breadcrumb_fixtures() :: [fixture()]

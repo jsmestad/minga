@@ -28,7 +28,7 @@ Current accepted inventory:
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
-- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35
+- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S34, S35
 - **CANDIDATE, craftsmanship:** E02, E03, E05, E08
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
@@ -38,7 +38,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 
 - **STILL_REPRODUCIBLE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
-- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35
+- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S34, S35
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E05, E08
 - **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES08, ES21
@@ -3973,3 +3973,34 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `c85c7f08a841424db6e7394203f61c7f739d855c`.
 - **Merge evidence:** PR #3173 merged after CI run `29918803043` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W093/S28: Shrink Breadcrumb semantic model and fingerprint to segments
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S28
+- **Planning profile:** `S28Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S28Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S28Planner` for current SHA `cc45149b42c828d619cb661ef2c31bfe0372cc49`; scope was the exact three production files for the Breadcrumb segments-only model, builder construction, and adapter fingerprint, plus only required Elixir tests/golden/roadmap evidence.
+- **Freshness commit SHA:** `cc45149b42c828d619cb661ef2c31bfe0372cc49`.
+- **Observable result:** `Minga.RenderModel.UI.Breadcrumb` now stores only the wire-visible `segments` list. `MingaEditor.RenderModel.UI.BreadcrumbBuilder.build/2` still derives the same segments from `{file_path, root}` through the existing `Path.relative_to/2 |> Path.split/1` logic, and `Minga.Frontend.Adapter.GUI.BreadcrumbEncoder` now fingerprints only `model.segments`, matching the only state Swift and Go can observe from `gui_breadcrumb`.
+- **Failure reproduction / source trace:** Before the correction, `mix run -e 'alias Minga.Frontend.Adapter.GUI.{BreadcrumbEncoder,Caches}; alias MingaEditor.RenderModel.UI.BreadcrumbBuilder; caches=Caches.new(); {_cmd1,caches}=BreadcrumbEncoder.encode(BreadcrumbBuilder.build("/repo_a/lib/foo.ex","/repo_a"), caches); {cmd2,_}=BreadcrumbEncoder.encode(BreadcrumbBuilder.build("/repo_b/lib/foo.ex","/repo_b"), caches); if cmd2 == nil, do: System.halt(0), else: (IO.inspect(cmd2, label: "unexpected second emit"); System.halt(1))'` exited 1 and printed `unexpected second emit: <<117, 2, 0, 3, 108, 105, 98, 0, 6, 102, 111, 111, 46, 101, 120>>`, proving equal visible segments from different source path/root pairs re-emitted identical wire bytes.
+- **Implementation result:** Removed `file_path` and `root` from the Breadcrumb typedoc, type, enforce keys, and struct; migrated the builder to construct `%Breadcrumb{segments: ...}`; changed the adapter dedupe fingerprint from `{model.file_path, model.root, model.segments}` to `model.segments`; migrated all in-repo `%Breadcrumb{}` fixtures to segments-only; deleted the struct-storage-only Breadcrumb test file; and added the required equal-visible-segments cache regression.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga/render_model/ui/breadcrumb.ex`; `lib/minga_editor/render_model/ui/breadcrumb_builder.ex`; `lib/minga/frontend/adapter/gui/breadcrumb_encoder.ex`; `test/minga/frontend/adapter/gui/breadcrumb_encoder_test.exs`; `test/minga_editor/render_model/ui/breadcrumb_builder_test.exs`; `test/minga_editor/render_model/ui/builder_test.exs`; `test/support/protocol_golden.ex`; deleted `test/minga/render_model/ui/breadcrumb_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/render_model/ui/breadcrumb_builder_test.exs test/minga/frontend/adapter/gui/breadcrumb_encoder_test.exs test/minga_editor/render_model/ui/builder_test.exs test/minga_editor/integration/gui_protocol_test.exs` passed 14 tests with 21 excluded; the included coverage contains the new equal-visible-segments suppression regression, nil/nested/unicode/boundary segment encoding, builder segment derivation, and UI builder Breadcrumb carrier assertion. `mix test test/minga_editor/integration/gui_protocol_test.exs:149 --include swift_harness` could not run because the Swift harness binary was absent, and `mix swift.harness` reported `swiftc not found; skipping Swift test harness build`.
+- **Protocol and frontend validation:** `MIX_ENV=test mix protocol.golden` rewrote the Go golden manifest from the production Elixir encoders. `cd go/tui && go test ./internal/protocol ./internal/ui` passed 2 packages. `mix protocol.gen --check` passed. `cd go/tui && go test ./...` passed 7 packages with 1 package reporting no tests. `xcodebuild -version` failed with `command not found`, so macOS validation is unavailable on this Linux workstation.
+- **Formatting/static validation:** `mix format --check-formatted lib/minga/render_model/ui/breadcrumb.ex lib/minga_editor/render_model/ui/breadcrumb_builder.ex lib/minga/frontend/adapter/gui/breadcrumb_encoder.ex test/minga/frontend/adapter/gui/breadcrumb_encoder_test.exs test/minga_editor/render_model/ui/breadcrumb_builder_test.exs test/minga_editor/render_model/ui/builder_test.exs test/support/protocol_golden.ex` passed. `git diff --check` passed. Focused stale field search over the touched Breadcrumb model, builder, encoder, tests, and golden helper found no stale stored `file_path`/`root` reads outside the retained builder inputs and path-derivation test names/comments.
+- **Broad validation:** `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo retained one unrelated global-state warning in `test/minga_editor/input/registry_test.exs` and two pre-existing refactoring opportunities in `lib/minga_editor/commands/buffer_management.ex`. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,759 tests with 58 doctests, 98 properties, 1 skipped, 572 excluded, and zero failures.
+- **Production lines added/removed before roadmap evidence:** `8 added / 13 removed`, net `-5`, satisfying the locked production net `<= 0`; production numstat before this roadmap update: `lib/minga/frontend/adapter/gui/breadcrumb_encoder.ex 1 1`; `lib/minga/render_model/ui/breadcrumb.ex 6 11`; `lib/minga_editor/render_model/ui/breadcrumb_builder.ex 1 1`.
+- **Test lines added/removed before roadmap evidence:** `14 added / 53 removed`, net `-39`, limited to segments-only constructor migrations, the equal-visible-segments cache regression, and deletion of the struct-storage-only test file; test/support numstat before this roadmap update: `test/minga/frontend/adapter/gui/breadcrumb_encoder_test.exs 8 11`; `test/minga/render_model/ui/breadcrumb_test.exs 0 27`; `test/minga_editor/render_model/ui/breadcrumb_builder_test.exs 4 12`; `test/minga_editor/render_model/ui/builder_test.exs 1 2`; `test/support/protocol_golden.ex 1 1`.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, frontend path, schema edit, generated codec, alternate data shape, fallback, or replacement abstraction was added.
+- **Concepts removed:** Removed Breadcrumb source-path/root storage from the semantic carrier, removed source-path/root participation from the adapter fingerprint, and removed the struct-storage-only tests for those fields.
+- **Retained contracts:** `gui_breadcrumb` opcode `0x75`, the schema-generated `segments` payload, wire byte layout, builder `Path.relative_to/2 |> Path.split/1` derivation, nil-path empty breadcrumb behavior, segment count and string16 validation, Swift and Go segment-only consumers, Go semantic breadcrumb click routing by segment index, and `breadcrumb_click` compatibility handling remain unchanged.
+- **Findings resolved:** S28 aligns the Breadcrumb semantic model and cache key with the already segments-only wire/frontend contract, so equal visible breadcrumbs no longer produce redundant frontend emits.
+- **Discoveries affecting later work:** The Swift harness and macOS protocol/UI validation cannot run on this Linux workstation because `swiftc` and `xcodebuild` are not installed. No replan trigger, owner drift, protocol/schema/frontend dependency, production budget miss, test budget issue, compatibility need, or new concept was found.
+- **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with 0.99 confidence. They confirmed builder ownership, segments-only carrier and fingerprint parity, unchanged wire bytes and frontend consumers, behavior-boundary test coverage, safe deletion of the storage-only test, production net `-5`, test/support net `-39`, and zero new concepts.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact segments-only cutover, unchanged builder derivation and cross-frontend wire contract, behavior regression and test deletion safety, exact budgets, validation evidence, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3175
+- **Implementation commit SHA:** `c89d6ffd1`.
+- **Merge SHA:** Pending delivery.
+- **Merge evidence:** Pending delivery.
+- **Completion date:** Pending merge.
