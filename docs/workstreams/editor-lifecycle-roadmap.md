@@ -4229,7 +4229,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W102/ES03: Own renderer frame credit as one tagged phase
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES03
 - **Planning profile:** `ES03Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES03Worker`, no delegation.
@@ -4249,3 +4249,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,723 tests, 58 doctests, and 98 properties with zero failures.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.98 confidence and Ponytail returned `PASS/Lean` with 0.99 confidence. Elixir craftsmanship required moving `nil` from the `frame_successor` alias to its use sites, replacing a generic map update with a checked struct update, restoring State-first recovery flow, and making the idle `latest_successor/2` clause explicit; the reviewer confirmed its broader phase-fallback concern was over-applied and required no widened tests.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete eight-path artifact, exact tagged phase shape, sole State ownership, clean six-field and `queue_frame/2` cutover, preserved Server/frontend protocol contracts, exact budgets, grounded validation evidence, and merge safety.
+- **Final reviewer and delivery:** `PASS` with 0.99 confidence. PR: https://github.com/jsmestad/minga/pull/3196. Implementation commit: `883513999`.
+- **Merge evidence:** PR #3196 merged at `e2441093efaa8d9405897098b15e4abda51d8b19` after CI run `29961161754` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
