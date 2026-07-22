@@ -6,7 +6,6 @@ defmodule MingaEditor.State.Tab.Context do
   """
 
   alias Minga.Keymap.Scope
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -34,22 +33,19 @@ defmodule MingaEditor.State.Tab.Context do
     :document_highlights
   ]
 
-  @shared_fields [:agent_ui]
-
-  @workspace_fields @snapshot_fields ++ @shared_fields
-
-  # Transient pointer state that is deliberately NOT carried per tab. The
+  # Session workspace fields intentionally excluded from per-tab snapshots. The
   # Cmd/Ctrl-hover go-to-definition link preview (#2630) tracks the symbol under
   # the mouse for the current frame only; snapshotting it would restore a stale
   # underline (and GUI hand cursor) against the wrong buffer on tab switch, which
-  # is exactly what the clear-on-transition design avoids. Listed here so the
-  # "tab context carries every session workspace field" guard stays meaningful:
-  # a new NON-transient workspace field still fails that test until it is added
-  # to @snapshot_fields/@shared_fields above.
-  # :launchpad (#2689) is also transient: it exists only while the workspace
-  # has zero buffers, and entering the empty state removes all file tabs, so
-  # no tab snapshot could meaningfully carry it.
-  @transient_fields [:hover_observation, :launchpad]
+  # is exactly what the clear-on-transition design avoids. :launchpad (#2689)
+  # exists only while the workspace has zero buffers, and entering the empty state
+  # removes all file tabs, so no tab snapshot could meaningfully carry it.
+  # :agent_ui is excluded because Workspace owns durable/inactive agent UI and
+  # Session owns the live active projection. Listed here so the "tab context
+  # carries every session workspace field" guard stays meaningful: a new
+  # workspace field still fails that test until it is added to @snapshot_fields or
+  # documented here with its owner.
+  @transient_fields [:hover_observation, :launchpad, :agent_ui]
 
   @typedoc "Workspace fields carried by a tab context."
   @type field_name ::
@@ -63,7 +59,6 @@ defmodule MingaEditor.State.Tab.Context do
           | :editing
           | :feature_state
           | :document_highlights
-          | :agent_ui
 
   @typedoc "Legacy map persisted or built before tab contexts became typed structs."
   @type legacy :: map()
@@ -83,8 +78,7 @@ defmodule MingaEditor.State.Tab.Context do
           search: Search.t() | nil,
           editing: VimState.t() | nil,
           feature_state: FeatureState.t() | nil,
-          document_highlights: [document_highlight()] | nil,
-          agent_ui: UIState.t() | nil
+          document_highlights: [document_highlight()] | nil
         }
 
   defstruct version: @version,
@@ -98,18 +92,16 @@ defmodule MingaEditor.State.Tab.Context do
             search: nil,
             editing: nil,
             feature_state: nil,
-            document_highlights: nil,
-            agent_ui: nil
+            document_highlights: nil
 
   @doc "Returns the workspace field names represented by this context."
   @spec field_names() :: [field_name()]
-  def field_names, do: @workspace_fields
+  def field_names, do: @snapshot_fields
 
   @doc """
   Returns workspace fields intentionally excluded from per-tab snapshotting.
 
-  These are transient pointer/frame state (#2630), never persisted or restored.
-  Together with `field_names/0` they must account for every `Session.State`
+  Together with `field_names/0` these fields account for every `Session.State`
   field; the `feature_state_test` guard enforces that.
   """
   @spec transient_fields() :: [atom()]
@@ -151,17 +143,9 @@ defmodule MingaEditor.State.Tab.Context do
     }
   end
 
-  @doc "Captures a complete tab snapshot, including a non-default shared agent projection."
+  @doc "Captures a complete tab snapshot."
   @spec snapshot(SessionState.t()) :: t()
-  def snapshot(%SessionState{} = workspace) do
-    context = from_workspace(workspace)
-
-    if workspace.agent_ui == UIState.new() do
-      context
-    else
-      put_field(context, :agent_ui, workspace.agent_ui)
-    end
-  end
+  def snapshot(%SessionState{} = workspace), do: from_workspace(workspace)
 
   @doc "Builds the initial context for a new file tab from the current workspace and viewport."
   @spec new_file(SessionState.t(), Viewport.t()) :: t()
@@ -253,7 +237,7 @@ defmodule MingaEditor.State.Tab.Context do
   end
 
   def put_fields(%__MODULE__{} = context, attrs) when is_map(attrs) do
-    Enum.reduce(@workspace_fields, context, fn field, acc ->
+    Enum.reduce(@snapshot_fields, context, fn field, acc ->
       case fetch_field(attrs, field) do
         {:ok, value} -> put_valid_field(acc, field, value)
         :error -> acc
@@ -281,7 +265,6 @@ defmodule MingaEditor.State.Tab.Context do
     context
     |> from_map()
     |> scrub_context_buffer(pid)
-    |> scrub_context_prompt_buffer(pid)
   end
 
   @spec file_windows(pos_integer(), pid() | nil, Viewport.t()) :: Windows.t()
@@ -327,13 +310,6 @@ defmodule MingaEditor.State.Tab.Context do
   end
 
   defp scrub_context_buffer(%__MODULE__{} = context, _pid), do: context
-
-  @spec scrub_context_prompt_buffer(t(), pid()) :: t()
-  defp scrub_context_prompt_buffer(%__MODULE__{agent_ui: %UIState{} = agent_ui} = context, pid) do
-    put_field(context, :agent_ui, UIState.retire_prompt_buffer(agent_ui, pid))
-  end
-
-  defp scrub_context_prompt_buffer(%__MODULE__{} = context, _pid), do: context
 
   @spec migrate_legacy_file_tree(t(), map()) :: t()
   defp migrate_legacy_file_tree(%__MODULE__{} = context, map) do
@@ -415,7 +391,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:feature_state, %FeatureState{}), do: true
   defp valid_field?(:document_highlights, nil), do: true
   defp valid_field?(:document_highlights, value) when is_list(value), do: true
-  defp valid_field?(:agent_ui, %UIState{}), do: true
   defp valid_field?(_field, _value), do: false
 
   @spec fetch_version(map()) :: pos_integer()
@@ -446,13 +421,13 @@ defmodule MingaEditor.State.Tab.Context do
 
   @spec normalize_present_field(term()) :: [field_name()]
   defp normalize_present_field(field) when is_atom(field) do
-    if field in @workspace_fields, do: [field], else: []
+    if field in @snapshot_fields, do: [field], else: []
   end
 
   defp normalize_present_field(field) when is_binary(field) do
-    case Enum.find(@workspace_fields, &(Atom.to_string(&1) == field)) do
+    case Enum.find(@snapshot_fields, &(Atom.to_string(&1) == field)) do
       nil -> []
-      workspace_field -> [workspace_field]
+      snapshot_field -> [snapshot_field]
     end
   end
 

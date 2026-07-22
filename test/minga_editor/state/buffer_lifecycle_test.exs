@@ -464,7 +464,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       Enum.each(tab_bar.tabs, fn tab ->
         refute retired in tab.context.buffers.list
-        assert tab.context.agent_ui.panel.prompt_buffer == nil
+        refute Map.has_key?(Map.from_struct(tab.context), :agent_ui)
         assert tab.file_ref == nil
       end)
 

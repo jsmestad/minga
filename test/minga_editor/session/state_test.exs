@@ -205,8 +205,8 @@ defmodule MingaEditor.Session.StateTest do
       assert ctx.buffers == ws.buffers
       assert ctx.windows == ws.windows
       refute Map.has_key?(ctx, :viewport)
-      snapshot_fields = SessionState.field_names() -- [:agent_ui]
-      assert Enum.sort(snapshot_fields) == Enum.sort(ctx.present_fields)
+      refute Map.has_key?(Map.from_struct(ctx), :agent_ui)
+      assert Enum.sort(SessionState.field_names()) == Enum.sort(ctx.present_fields)
     end
 
     test "normalises an in-flight CommandState back to %Mode.State{} when mode is :normal" do
