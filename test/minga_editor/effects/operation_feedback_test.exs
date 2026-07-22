@@ -10,62 +10,101 @@ defmodule MingaEditor.Effects.OperationFeedbackTest do
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
 
-  test "GitMutation translates queued, running, canceled, and stale outcomes" do
+  test "GitMutation translates queued and running lifecycle feedback" do
     {state, operation} = start_operation(:git_stage, "Stage")
-
-    request =
-      GitMutation.request("/tmp/repo", :stage, operation.id,
-        pending_message: "Staging...",
-        success_message: "Staged",
-        path: "file.ex"
-      )
+    request = git_mutation_request(operation)
 
     {state, _outcome} = GitMutation.apply(state, Outcome.queued(request, 1, 2))
-    assert feedback(state, operation.id).status == :queued
-    assert feedback(state, operation.id).queue.position == 1
+    operation = feedback(state, operation.id)
+    assert operation.status == :queued
+    assert operation.message == "Queued: Staging..."
+    assert operation.queue.position == 1
+    assert operation.queue.total == 2
 
     {state, _outcome} = GitMutation.apply(state, Outcome.running(request))
-    assert feedback(state, operation.id).status == :running
-    assert feedback(state, operation.id).queue == nil
-
-    {canceled_state, _outcome} = GitMutation.apply(state, Outcome.canceled(request, :requested))
-    assert feedback(canceled_state, operation.id).status == :canceled
-    refute feedback(canceled_state, operation.id).cancelable?
-
-    {stale_state, stale_operation} = start_operation(:git_stage, "Stage")
-
-    stale_request =
-      GitMutation.request("/tmp/repo", :stage, stale_operation.id,
-        pending_message: "Staging...",
-        success_message: "Staged",
-        path: "file.ex"
-      )
-
-    {stale_state, _outcome} =
-      GitMutation.apply(stale_state, Outcome.stale(Outcome.completed(stale_request, nil), :late))
-
-    assert feedback(stale_state, stale_operation.id).status == :stale
+    operation = feedback(state, operation.id)
+    assert operation.status == :running
+    assert operation.message == "Staging..."
+    assert operation.queue == nil
   end
 
-  test "GitMutationAdmission translates lifecycle and resolution failures" do
-    {state, operation} = start_operation(:git_commit, "Commit")
+  test "GitMutation translates terminal feedback without changing domain messages" do
+    terminal_outcomes = [
+      {fn request -> Outcome.canceled(request, :requested) end, :canceled, "Git action canceled"},
+      {fn request -> Outcome.canceled(request, :superseded) end, :stale, "Git action skipped"},
+      {fn request -> Outcome.canceled(request, :coalesced) end, :stale, "Git action skipped"},
+      {fn request -> Outcome.stale(Outcome.completed(request, nil), :late) end, :stale,
+       "Git action skipped"},
+      {fn request -> Outcome.failed(request, :timeout) end, :timeout, "Git action timed out"}
+    ]
 
-    request =
-      GitMutationAdmission.request(self(), :commit, operation.id,
-        pending_message: "Committing...",
-        success_message: "Committed"
-      )
+    for {outcome, status, message} <- terminal_outcomes do
+      {state, operation} = start_operation(:git_stage, "Stage")
+      request = git_mutation_request(operation)
+
+      {state, _outcome} = GitMutation.apply(state, outcome.(request))
+      operation = feedback(state, operation.id)
+      assert operation.status == status
+      assert operation.message == message
+      refute operation.cancelable?
+    end
+  end
+
+  test "GitMutationAdmission translates queued and running lifecycle feedback" do
+    {state, operation} = start_operation(:git_commit, "Commit")
+    request = admission_request(operation)
 
     {state, _outcome} = GitMutationAdmission.apply(state, Outcome.queued(request, 2, 3))
-    assert feedback(state, operation.id).status == :queued
-    assert feedback(state, operation.id).queue.total == 3
+    operation = feedback(state, operation.id)
+    assert operation.status == :queued
+    assert operation.message == "Queued: Committing..."
+    assert operation.queue.position == 2
+    assert operation.queue.total == 3
 
     {state, _outcome} = GitMutationAdmission.apply(state, Outcome.running(request))
-    assert feedback(state, operation.id).status == :running
+    operation = feedback(state, operation.id)
+    assert operation.status == :running
+    assert operation.message == "Committing..."
+    assert operation.queue == nil
+  end
 
-    {state, _outcome} = GitMutationAdmission.apply(state, Outcome.failed(request, :not_git))
-    assert feedback(state, operation.id).status == :error
-    assert feedback(state, operation.id).message == "Not in a git repository"
+  test "GitMutationAdmission translates resolution terminal feedback" do
+    terminal_outcomes = [
+      {fn request -> Outcome.failed(request, :not_git) end, :error, "Not in a git repository"},
+      {fn request -> Outcome.failed(request, :timeout) end, :timeout,
+       "Git repository resolution timed out"},
+      {fn request -> Outcome.failed(request, {:resolution_failed, :enoent}) end, :error,
+       "Git repository resolution failed: {:resolution_failed, :enoent}"},
+      {fn request -> Outcome.canceled(request, :requested) end, :canceled, "Git action canceled"},
+      {fn request -> Outcome.stale(Outcome.completed(request, nil), :late) end, :stale,
+       "Git action skipped"}
+    ]
+
+    for {outcome, status, message} <- terminal_outcomes do
+      {state, operation} = start_operation(:git_commit, "Commit")
+      request = admission_request(operation)
+
+      {state, _outcome} = GitMutationAdmission.apply(state, outcome.(request))
+      operation = feedback(state, operation.id)
+      assert operation.status == status
+      assert operation.message == message
+      refute operation.cancelable?
+    end
+  end
+
+  defp git_mutation_request(operation) do
+    GitMutation.request("/tmp/repo", :stage, operation.id,
+      pending_message: "Staging...",
+      success_message: "Staged",
+      path: "file.ex"
+    )
+  end
+
+  defp admission_request(operation) do
+    GitMutationAdmission.request(self(), :commit, operation.id,
+      pending_message: "Committing...",
+      success_message: "Committed"
+    )
   end
 
   @spec start_operation(MingaEditor.State.Operation.kind(), String.t()) ::
