@@ -24,6 +24,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
+  alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.WindowContent
   alias MingaEditor.Viewport
@@ -79,7 +80,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   # ── Private ──────────────────────────────────────────────────────────────
 
   @spec build_window_model_with_slot_reset(state(), WindowScroll.t(), Window.t(), Context.t()) ::
-          {Minga.RenderModel.Window.t(), WindowModelBuilder.build_stats(), Window.t()}
+          {Minga.RenderModel.Window.t(), BuildResult.t(), Window.t()}
   defp build_window_model_with_slot_reset(state, scroll, window, render_ctx) do
     result =
       Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.window.id}, fn ->
@@ -94,8 +95,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         )
       end)
 
-    {window_model, build_stats} = result
-    {window_model, build_stats, window}
+    {window_model, build_result} = result
+    {window_model, build_result, window}
   rescue
     RowSlotExhaustedError ->
       reset_window = Window.reset_content_identity(window, scroll.snapshot)
@@ -219,17 +220,17 @@ defmodule MingaEditor.RenderPipeline.Content do
     # Build the canonical window model; TUI adapts it to cells at the frontend boundary.
     # Carry the previous frame's retained rows so unchanged rows are reused
     # without recomposing, and capture how many rows were freshly rasterized (#2287).
-    {window_model, build_stats, window} =
+    {window_model, build_result, window} =
       build_window_model_with_slot_reset(state, scroll, window, render_ctx)
 
     window =
       window
-      |> Window.put_retained_rows(build_stats.retained_rows)
-      |> Window.put_retained_wrap_lines(build_stats.retained_wrap_lines)
-      |> Window.put_resident_build(build_stats.resident_build)
-      |> Window.put_row_slot_allocator(build_stats.row_slot_allocator)
+      |> Window.put_retained_rows(build_result.retained_rows)
+      |> Window.put_retained_wrap_lines(build_result.retained_wrap_lines)
+      |> Window.put_resident_build(build_result.resident_build)
+      |> Window.put_row_slot_allocator(build_result.row_slot_allocator)
 
-    state = add_rows_rasterized(state, build_stats.rasterized)
+    state = add_rows_rasterized(state, build_result.rasterized)
 
     window_content = WindowContent.new(window_model, [], buf_cursor)
 

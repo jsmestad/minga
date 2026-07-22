@@ -10,7 +10,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
   """
 
   alias Minga.RenderModel.Window.ContentDigest
-  alias Minga.RenderModel.Window.Row
+  alias MingaEditor.RenderModel.Window.VisualRow
 
   @chunk_size 64
   @type entry :: %{
@@ -169,9 +169,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     |> Enum.reduce(store, fn index, acc -> replace_at(acc, index, fun.(index)) end)
   end
 
-  defp project_payload(%{row: %Row{} = row} = payload, index) do
-    payload |> Map.put(:buf_line, index) |> Map.put(:row, Row.reposition(row, index))
-  end
+  defp project_payload(%VisualRow{} = payload, index), do: VisualRow.reposition(payload, index)
 
   defp project_payload(payload, _index), do: payload
 

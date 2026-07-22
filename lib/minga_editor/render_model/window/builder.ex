@@ -35,7 +35,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.Renderer.Context
   alias Minga.RenderModel.Window, as: RenderWindow
   alias Minga.RenderModel.Window.ContentDigest
+  alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderModel.Window.ResidentBuild
+  alias MingaEditor.RenderModel.Window.VisualRow
   alias Minga.RenderModel.Window.Annotation
   alias Minga.RenderModel.Window.Cursorline
   alias Minga.RenderModel.Window.DiagnosticRange
@@ -63,44 +65,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.UI.FontRegistry
 
   @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
-  @typep visual_row_entry :: %{
-           :row => Row.t(),
-           :buf_line => non_neg_integer(),
-           :visual_index => non_neg_integer(),
-           :display_row => non_neg_integer(),
-           :source_text => String.t(),
-           :source_start_byte => non_neg_integer(),
-           :source_end_byte => non_neg_integer(),
-           :source_start_col => non_neg_integer(),
-           :source_end_col => non_neg_integer(),
-           :indent_width => non_neg_integer(),
-           :row_width => non_neg_integer(),
-           # Upstream row-retention metadata (#2287); absent on entries built
-           # through the public click hit-testing path. `wrap_line_hash` is set
-           # only on wrapped entries to key the per-logical-line reuse cache.
-           optional(:input_hash) => non_neg_integer(),
-           optional(:reused?) => boolean(),
-           optional(:wrap_line_hash) => non_neg_integer()
-         }
-
-  @typedoc """
-  Per-build retained-row statistics (#2287).
-
-  * `rasterized` — rows whose text and spans were freshly composed this frame.
-  * `retained_rows` — the `{row_id => {input_hash, Row.t()}}` map to carry into
-    the next frame so unchanged rows can be reused without recomposing.
-  * `retained_wrap_lines` — the `{buf_line => {input_hash, [entry]}}` map to
-    carry into the next frame so unchanged wrapped logical lines can be reused
-    without recomposing or re-wrapping.
-  """
-  @type build_stats :: %{
-          rasterized: non_neg_integer(),
-          retained_rows: %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
-          retained_wrap_lines: %{optional(non_neg_integer()) => {non_neg_integer(), [map()]}},
-          resident_build: ResidentBuild.t() | nil,
-          resident_rows_spliced: non_neg_integer(),
-          row_slot_allocator: RowSlotAllocator.t()
-        }
+  @typep visual_row_entry :: VisualRow.t()
+  @type build_stats :: BuildResult.t()
 
   # Threaded through the visual-entry builders to drive upstream row reuse
   # (#2287). `prev` is the previous frame's per-visual-row retained-row map;
@@ -421,7 +387,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     }
 
     {render_window,
-     %{
+     %BuildResult{
        rasterized: rasterized,
        retained_rows: new_retained,
        retained_wrap_lines: new_retained_wrap,
@@ -766,11 +732,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           {%{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}}, non_neg_integer()}
   defp retained_stats(visual_entries, _retain_ctx) do
     Enum.reduce(visual_entries, {%{}, 0}, fn entry, {map, rasterized} ->
-      row = entry.row
-      input_hash = Map.get(entry, :input_hash, row.content_hash)
-      map = Map.put(map, row.row_id, {input_hash, row})
-      rasterized = if Map.get(entry, :reused?, false), do: rasterized, else: rasterized + 1
-      {map, rasterized}
+      {row_id, retained} = VisualRow.retained_row(entry)
+      rasterized = if VisualRow.reused?(entry), do: rasterized, else: rasterized + 1
+      {Map.put(map, row_id, retained), rasterized}
     end)
   end
 
@@ -802,13 +766,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # (first row is visual_index 0) and every row shares one wrap-line fingerprint.
   @spec wrap_line_cache_entry([visual_row_entry()]) ::
           {non_neg_integer(), {non_neg_integer(), [visual_row_entry()]}} | nil
-  defp wrap_line_cache_entry([%{visual_index: 0} = first | _] = entries) do
-    case Map.get(first, :wrap_line_hash) do
+  defp wrap_line_cache_entry([%VisualRow{visual_index: 0} = first | _] = entries) do
+    case first.wrap_line_hash do
       nil ->
         nil
 
       hash ->
-        normalized = Enum.map(entries, fn entry -> %{entry | display_row: 0} end)
+        normalized = Enum.map(entries, &VisualRow.with_display_row(&1, 0))
         {first.row.row_id, {hash, normalized}}
     end
   end
@@ -1005,7 +969,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     row
     |> Row.reposition(buf_line)
     |> visual_entry(0, Unicode.display_width(row.text), 0)
-    |> with_retain_meta(input_hash, reused?)
+    |> VisualRow.with_retention(input_hash, reused?)
   end
 
   @spec build_visual_entries_wrapped(
@@ -1101,8 +1065,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec stamp_wrapped_entry(visual_row_entry(), non_neg_integer()) :: visual_row_entry()
   defp stamp_wrapped_entry(entry, wrap_line_hash) do
     entry
-    |> with_retain_meta(wrap_line_hash, false)
-    |> Map.put(:wrap_line_hash, wrap_line_hash)
+    |> VisualRow.with_retention(wrap_line_hash, false)
+    |> VisualRow.with_wrap_line_hash(wrap_line_hash)
   end
 
   # Replays a cached wrapped logical line when its fingerprint is unchanged. The
@@ -1126,21 +1090,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end
   end
 
-  @spec mark_wrapped_reused(map(), non_neg_integer(), non_neg_integer()) ::
+  @spec mark_wrapped_reused(visual_row_entry(), non_neg_integer(), non_neg_integer()) ::
           visual_row_entry()
   defp mark_wrapped_reused(entry, buf_line, wrap_line_hash) do
     entry
-    |> Map.put(:buf_line, buf_line)
-    |> Map.update!(:row, &Row.reposition(&1, buf_line))
-    |> with_retain_meta(wrap_line_hash, true)
-    |> Map.put(:wrap_line_hash, wrap_line_hash)
-  end
-
-  @spec with_retain_meta(visual_row_entry(), non_neg_integer(), boolean()) :: visual_row_entry()
-  defp with_retain_meta(entry, input_hash, reused?) do
-    entry
-    |> Map.put(:input_hash, input_hash)
-    |> Map.put(:reused?, reused?)
+    |> VisualRow.reposition(buf_line)
+    |> VisualRow.with_retention(wrap_line_hash, true)
+    |> VisualRow.with_wrap_line_hash(wrap_line_hash)
   end
 
   @spec wrap_composed_entries(
@@ -1179,7 +1135,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         content_hash: Row.compute_hash(text, row_spans)
       }
 
-      visual_entry(
+      VisualRow.new(
         row,
         composed_text,
         source_start,
@@ -1210,7 +1166,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> drop_visual_entry_offset(offset)
     |> Enum.take(row_count)
     |> Enum.with_index()
-    |> Enum.map(fn {entry, display_row} -> %{entry | display_row: display_row} end)
+    |> Enum.map(fn {entry, display_row} -> VisualRow.with_display_row(entry, display_row) end)
   end
 
   @spec drop_visual_entry_offset([visual_row_entry()], non_neg_integer()) :: [visual_row_entry()]
@@ -1226,7 +1182,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec visual_entry(Row.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           visual_row_entry()
   defp visual_entry(%Row{} = row, source_start_col, source_end_col, indent_width) do
-    visual_entry(
+    VisualRow.new(
       row,
       row.text,
       source_start_col,
@@ -1235,39 +1191,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       byte_size(row.text),
       indent_width
     )
-  end
-
-  @spec visual_entry(
-          Row.t(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: visual_row_entry()
-  defp visual_entry(
-         %Row{} = row,
-         source_text,
-         source_start_col,
-         source_end_col,
-         source_start_byte,
-         source_end_byte,
-         indent_width
-       ) do
-    %{
-      row: row,
-      buf_line: row.buf_line,
-      visual_index: row.visual_index,
-      display_row: 0,
-      source_text: source_text,
-      source_start_byte: source_start_byte,
-      source_end_byte: source_end_byte,
-      source_start_col: source_start_col,
-      source_end_col: source_end_col,
-      indent_width: indent_width,
-      row_width: Unicode.display_width(row.text)
-    }
   end
 
   @spec spans_for_visual_row([Span.t()], String.t(), WrapMap.visual_row()) :: [Span.t()]
@@ -1339,7 +1262,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         entry =
           row
           |> visual_entry(0, Unicode.display_width(row.text), 0)
-          |> with_retain_meta(input_hash, reused?)
+          |> VisualRow.with_retention(input_hash, reused?)
 
         {entry, counters}
       end)

@@ -50,7 +50,9 @@ defmodule MingaEditor.Renderer.WindowCache do
   entire visual-row set verbatim instead of recomposing the line and recomputing
   its wrap points. See `MingaEditor.RenderModel.Window.Builder` (#2287).
   """
-  @type retained_wrap_line :: {input_hash :: non_neg_integer(), entries :: [map()]}
+  @type retained_wrap_line ::
+          {input_hash :: non_neg_integer(),
+           entries :: [MingaEditor.RenderModel.Window.VisualRow.t()]}
 
   @typedoc """
   Context fingerprint: a term derived from the render context that
