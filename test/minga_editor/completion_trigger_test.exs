@@ -60,20 +60,34 @@ defmodule MingaEditor.CompletionTriggerTest do
   # ── dismiss/1 ─────────────────────────────────────────────────────────────
 
   describe "dismiss/1" do
-    test "clears pending ref and trigger position" do
-      bridge = %{CompletionTrigger.new() | pending_ref: make_ref(), trigger_position: {5, 10}}
+    test "clears pending refs, trigger position, and keeps gen" do
+      primary_ref = make_ref()
+      secondary_ref = make_ref()
+      refs = [primary_ref, secondary_ref]
+
+      bridge = %{
+        CompletionTrigger.new()
+        | pending_ref: primary_ref,
+          pending_refs: MapSet.new(refs),
+          trigger_position: {5, 10},
+          gen: 4
+      }
+
       result = CompletionTrigger.dismiss(bridge)
-      assert result.pending_ref == nil
-      assert result.trigger_position == nil
+
+      assert result == %{
+               bridge
+               | pending_ref: nil,
+                 pending_refs: MapSet.new(),
+                 trigger_position: nil
+             }
+
+      for ref <- refs do
+        assert {^result, :ignore} =
+                 CompletionTrigger.classify_response(result, ref, {:ok, %{"items" => []}}, self())
+      end
     end
   end
-
-  # ── classify_response/4 ──────────────────────────────────────────────────
-  #
-  # classify_response does the cheap, on-the-Editor half of completion handling:
-  # it matches the response ref against the pending request and reports what to
-  # do, without parsing the (potentially huge) item list. The parse/sort/filter
-  # is performed by CompletionHandling in a Task.
 
   describe "classify_response/4" do
     test "stale response (ref doesn't match) is ignored" do
