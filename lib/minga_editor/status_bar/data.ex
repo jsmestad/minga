@@ -171,11 +171,14 @@ defmodule MingaEditor.StatusBar.Data do
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
   @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()
-  defp build_buffer_data(state) do
+  defp build_buffer_data(state), do: build_buffer_status_data(state, no_buffer_file_name(state))
+
+  @spec build_buffer_status_data(EditorState.t() | map(), String.t()) :: buffer_data()
+  defp build_buffer_status_data(state, no_buffer_file_name) do
     buf = state.workspace.buffers.active
     {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
     line_count = if buf, do: Buffer.line_count(buf), else: 1
-    file_name = if buf, do: buf_display_name(buf), else: no_buffer_file_name(state)
+    file_name = if buf, do: buf_display_name(buf), else: no_buffer_file_name
     dirty = buf != nil and Buffer.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
     file_path = if buf, do: buffer_file_path(buf), else: nil
@@ -401,71 +404,14 @@ defmodule MingaEditor.StatusBar.Data do
     panel = state.workspace.agent_ui.panel
     session = agent_session(state)
 
-    message_count = agent_message_count(session)
-
-    model_name = if panel.model_name != "", do: panel.model_name, else: "Agent"
-
-    # Pull background buffer context so the status bar stays stable
-    buf = state.workspace.buffers.active
-    {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
-    line_count = if buf, do: Buffer.line_count(buf), else: 1
-    file_name = if buf, do: buf_display_name(buf), else: "[no file]"
-    dirty = buf != nil and Buffer.dirty?(buf)
-    filetype = if buf, do: buffer_filetype(buf), else: :text
-    file_path = if buf, do: buffer_file_path(buf), else: nil
-
-    {git_branch, git_diff_summary} = git_modeline_data(buf)
-    git_degraded = git_degraded?(file_path)
-    diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
-    diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
-    mode = Minga.Editing.mode(state)
-    mode_state = Editing.mode_state(state)
-    {indent_type, indent_size} = indent_info(state, buf, filetype)
-    selection_info = selection_info(mode, mode_state, buf, {line, col})
-    background = background_subagent_summary(state)
-    workspace = workspace_modeline_summary(state)
-
-    %{
-      mode: mode,
-      mode_state: mode_state,
-      safe_mode: Minga.SafeMode.active?(),
-      model_name: model_name,
+    state
+    |> build_buffer_status_data("[no file]")
+    |> Map.merge(%{
+      model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
       session_status: agent.runtime.status,
-      message_count: message_count,
-      macro_recording: Minga.Editing.macro_recording_status(state),
-      agent_status: agent.runtime.status,
-      active_tool_name: agent.runtime.active_tool_name,
-      agent_status_command: agent_status_command_content(state, agent),
-      agent_theme_colors: Theme.agent_theme(theme(state)),
-      # Background buffer context
-      cursor_line: line,
-      cursor_col: col,
-      line_count: line_count,
-      file_name: file_name,
-      filetype: filetype,
-      dirty: dirty,
-      git_branch: git_branch,
-      git_diff_summary: git_diff_summary,
-      git_degraded: git_degraded,
-      diagnostic_counts: diagnostic_counts,
-      diagnostic_hint: diagnostic_hint,
-      indent_type: indent_type,
-      indent_size: indent_size,
-      selection_info: selection_info,
-      lsp_status: state.lsp.status,
-      parser_status: parser_status(state),
-      buf_index: state.workspace.buffers.active_index + 1,
-      buf_count: Enum.count(state.workspace.buffers.list),
-      background_subagent_count: background.count,
-      active_background_subagent_label: background.label,
-      notice: notice_message(state),
-      selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
-      pending_keys: pending_keys(state, mode, mode_state),
-      workspace_label: workspace.label,
-      workspace_draft_count: workspace.draft_count,
-      workspace_conflict_count: workspace.conflict_count,
-      merge_conflict_count: merge_conflict_count(buf)
-    }
+      message_count: agent_message_count(session),
+      agent_theme_colors: Theme.agent_theme(theme(state))
+    })
   end
 
   @spec agent_message_count(pid() | nil) :: non_neg_integer()

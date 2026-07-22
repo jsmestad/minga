@@ -289,6 +289,43 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert data.message_count == 1
   end
 
+  test "agent status data reuses the same background buffer semantics as buffer status data" do
+    {state, _buf} = state_with_buffer("héllo\nworld", nil, :elixir)
+
+    state =
+      state
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:thinking)
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_tool("read_file")
+
+    assert {:buffer, buffer_data} = Data.from_state(state)
+    assert {:agent, agent_data} = Data.from_state(with_agent_chat_window(state))
+
+    common_keys =
+      ~w(active_background_subagent_label active_tool_name agent_status agent_status_command agent_theme_colors background_subagent_count buf_count buf_index cursor_col cursor_line diagnostic_counts diagnostic_hint dirty file_name filetype git_branch git_degraded git_diff_summary indent_size indent_type line_count lsp_status macro_recording merge_conflict_count mode mode_state notice parser_status pending_keys safe_mode selected_operation selection_info workspace_conflict_count workspace_draft_count workspace_label)a
+
+    assert buffer_data |> Map.keys() |> Enum.sort() == common_keys
+
+    assert Map.drop(agent_data, [:model_name, :session_status, :message_count]) == buffer_data
+
+    assert {agent_data.model_name, agent_data.session_status, agent_data.message_count} ==
+             {"unknown", :thinking, 0}
+  end
+
+  test "agent no-buffer fallback stays explicit while launchpad buffer fallback stays empty" do
+    buffer_state =
+      put_in(
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex"))).workspace.launchpad,
+        MingaEditor.State.Launchpad.new(session_file_count: 0, recents: [])
+      )
+
+    assert {:buffer, %{file_name: ""}} = Data.from_state(buffer_state)
+
+    assert {:agent, agent_data} = Data.from_state(with_agent_chat_window(buffer_state))
+
+    assert {agent_data.file_name, agent_data.cursor_line, agent_data.cursor_col,
+            agent_data.line_count, agent_data.filetype} == {"[no file]", 0, 0, 1, :text}
+  end
+
   test "threads active_tool_name from state into modeline data and clears it on status changes" do
     {state, _buf} = state_with_buffer("hello", nil, :elixir)
 
@@ -478,6 +515,14 @@ defmodule MingaEditor.StatusBar.DataTest do
         next_id: 2
       }
     }
+  end
+
+  defp with_agent_chat_window(state) do
+    put_in(state.workspace.windows, %{
+      state.workspace.windows
+      | map: %{1 => Window.new_agent_chat(1, 24, 80)},
+        active: 1
+    })
   end
 
   defp start_buffer(content, filetype) do
