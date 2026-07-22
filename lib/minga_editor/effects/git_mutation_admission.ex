@@ -21,7 +21,6 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
-  alias MingaEditor.State.OperationFeedback
 
   @max_queued 16
 
@@ -119,13 +118,9 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
       ) do
     message = "Queued: #{effect.pending_message}"
 
-    {:ok, operation_feedback} =
-      OperationFeedback.queued(state.feedback.operation_feedback, id, message, position, total)
+    {:ok, feedback} = Feedback.queue_operation(state.feedback, id, message, position, total)
 
-    state = %{
-      state
-      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
-    }
+    state = %{state | feedback: feedback}
 
     {state, outcome}
   end
@@ -134,12 +129,9 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
         state,
         %Outcome{status: :running, request: %{operation_id: id, effect: effect}} = outcome
       ) do
-    operation_feedback =
-      OperationFeedback.running(state.feedback.operation_feedback, id, effect.pending_message)
-
     state = %{
       state
-      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+      | feedback: Feedback.run_operation(state.feedback, id, effect.pending_message)
     }
 
     {state, outcome}
@@ -160,14 +152,11 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
           %{
             state
             | feedback:
-                Feedback.accept_operation_feedback(
+                Feedback.finish_operation(
                   state.feedback,
-                  OperationFeedback.finish(
-                    state.feedback.operation_feedback,
-                    outcome.request.operation_id,
-                    :error,
-                    message
-                  )
+                  outcome.request.operation_id,
+                  :error,
+                  message
                 )
           }
 
@@ -182,15 +171,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
     {%{
        state
        | feedback:
-           Feedback.accept_operation_feedback(
-             state.feedback,
-             OperationFeedback.finish(
-               state.feedback.operation_feedback,
-               id,
-               :error,
-               "Not in a git repository"
-             )
-           )
+           Feedback.finish_operation(state.feedback, id, :error, "Not in a git repository")
      }, outcome}
   end
 
@@ -201,14 +182,11 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
     {%{
        state
        | feedback:
-           Feedback.accept_operation_feedback(
+           Feedback.finish_operation(
              state.feedback,
-             OperationFeedback.finish(
-               state.feedback.operation_feedback,
-               id,
-               :timeout,
-               "Git repository resolution timed out"
-             )
+             id,
+             :timeout,
+             "Git repository resolution timed out"
            )
      }, outcome}
   end
@@ -220,45 +198,20 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
     message = "Git repository resolution failed: #{inspect(reason)}"
     Minga.Log.error(:editor, message)
 
-    {%{
-       state
-       | feedback:
-           Feedback.accept_operation_feedback(
-             state.feedback,
-             OperationFeedback.finish(state.feedback.operation_feedback, id, :error, message)
-           )
-     }, outcome}
+    {%{state | feedback: Feedback.finish_operation(state.feedback, id, :error, message)}, outcome}
   end
 
   def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
     {%{
        state
-       | feedback:
-           Feedback.accept_operation_feedback(
-             state.feedback,
-             OperationFeedback.finish(
-               state.feedback.operation_feedback,
-               id,
-               :canceled,
-               "Git action canceled"
-             )
-           )
+       | feedback: Feedback.finish_operation(state.feedback, id, :canceled, "Git action canceled")
      }, outcome}
   end
 
   def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
     {%{
        state
-       | feedback:
-           Feedback.accept_operation_feedback(
-             state.feedback,
-             OperationFeedback.finish(
-               state.feedback.operation_feedback,
-               id,
-               :stale,
-               "Git action skipped"
-             )
-           )
+       | feedback: Feedback.finish_operation(state.feedback, id, :stale, "Git action skipped")
      }, outcome}
   end
 
