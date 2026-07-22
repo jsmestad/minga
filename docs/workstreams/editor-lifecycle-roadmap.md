@@ -4007,7 +4007,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W094/S29: Remove dead Capabilities helper APIs
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S29
 - **Planning profile:** `S29Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S29Worker`, no delegation.
@@ -4029,7 +4029,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with 0.99 confidence. They confirmed exhaustive helper/caller tracing, behaviorally identical direct Monospace selection, unchanged decoder/handshake/frontend contracts, safe helper-test deletion, exact production and test budgets, and zero replacement concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact five-helper deletion, behaviorally identical retained oracle, untouched capability/wire/frontend surfaces, byte-2 decoder regression coverage, validation evidence, exact budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3177
-- **Implementation commit SHA:** `9bf680fe1`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Implementation commit SHA:** `457697dc6`.
+- **Merge SHA:** `1ffb701a4184a110d759d52abc18d7d7be5a9543`.
+- **Merge evidence:** PR #3177 merged after CI run `29925355745` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
