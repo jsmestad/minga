@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.FrameAttempt
+  alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
@@ -149,13 +150,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     token = make_ref()
 
     :sys.replace_state(renderer, fn state ->
-      %{
-        state
-        | rendering?: true,
-          render_token: token,
-          in_flight: FrameAttempt.new(in_flight, 11, 0),
-          pending: FrameAttempt.new(pending, 12, 0)
-      }
+      state
+      |> RendererState.schedule_frame(FrameAttempt.new(in_flight, 11, 0), token)
+      |> elem_from_coalesce(FrameAttempt.new(pending, 12, 0))
     end)
 
     send(renderer, {:do_render, token})
@@ -225,13 +222,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     token = make_ref()
 
     :sys.replace_state(renderer, fn renderer_state ->
-      %{
-        renderer_state
-        | rendering?: true,
-          render_token: token,
-          in_flight: FrameAttempt.new(Intent.from_input(snapshot), 90, 0),
-          pending: FrameAttempt.new(Intent.from_input(snapshot), 91, 0)
-      }
+      renderer_state
+      |> RendererState.schedule_frame(FrameAttempt.new(Intent.from_input(snapshot), 90, 0), token)
+      |> elem_from_coalesce(FrameAttempt.new(Intent.from_input(snapshot), 91, 0))
     end)
 
     send(renderer, {:do_render, token})
@@ -276,6 +269,36 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     assert_receive {:render_done, %RenderReceipt{frame_seq: 12}},
                    @async_render_timeout
+  end
+
+  test "frame credit phase serializes scheduled, awaiting ack, successor, and idle" do
+    renderer = start_ack_renderer(self())
+    assert :sys.get_state(renderer).frame_credit == :idle
+
+    RendererServer.cast_snapshot(renderer, stub_intent(), 10)
+    assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
+
+    assert {:awaiting_ack, lease10, nil} = :sys.get_state(renderer).frame_credit
+    assert lease10.attempt.seq == 10
+
+    RendererServer.cast_snapshot(renderer, stub_intent(), 11)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 12)
+
+    assert {:awaiting_ack, ^lease10, %FrameAttempt{seq: 12}} =
+             :sys.get_state(renderer).frame_credit
+
+    refute_receive {:ack_pipeline, 11, _, _, _}, 50
+    refute_receive {:ack_pipeline, 12, _, _, _}, 50
+
+    RendererServer.frame_status(renderer, {:frame_applied, 1, 10})
+    assert_receive {:render_done, %RenderReceipt{frame_seq: 10}}, @async_render_timeout
+    assert_receive {:ack_pipeline, 12, 1, 10, false}, @async_render_timeout
+
+    RendererServer.frame_status(renderer, {:frame_applied, 1, 12})
+    assert_receive {:render_done, %RenderReceipt{frame_seq: 12}}, @async_render_timeout
+
+    assert :sys.get_state(renderer).frame_credit == :idle
+    refute RendererServer.rendering?(renderer)
   end
 
   describe "frame acknowledgement credit" do
@@ -588,7 +611,14 @@ defmodule MingaEditor.Renderer.ServerTest do
       end
 
       renderer = start_renderer(self(), pipeline: pipeline)
-      :sys.replace_state(renderer, &%{&1 | stale_retry_count: 3})
+
+      :sys.replace_state(
+        renderer,
+        &%{
+          &1
+          | frame_credit: {:scheduled, make_ref(), FrameAttempt.new(stub_intent(), 59, 0), 3, nil}
+        }
+      )
 
       :ok = RendererServer.reset_connection(renderer, stub_intent(), 60)
 
@@ -1309,8 +1339,13 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp park_in_flight(renderer) do
     :sys.replace_state(renderer, fn state ->
-      %{state | rendering?: true, in_flight: FrameAttempt.new(stub_intent(), 0, 0)}
+      RendererState.schedule_frame(state, FrameAttempt.new(stub_intent(), 0, 0), make_ref())
     end)
+  end
+
+  defp elem_from_coalesce(state, attempt) do
+    {:coalesced, coalesced, _dropped} = RendererState.coalesce_frame(state, attempt)
+    coalesced
   end
 
   defp renderer_busy?(renderer, attempts \\ 8)

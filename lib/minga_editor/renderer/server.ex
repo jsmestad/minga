@@ -117,7 +117,7 @@ defmodule MingaEditor.Renderer.Server do
   def init(opts), do: {:ok, State.new(opts)}
 
   @impl true
-  def handle_call(:rendering?, _from, state), do: {:reply, state.rendering?, state}
+  def handle_call(:rendering?, _from, state), do: {:reply, State.rendering?(state), state}
 
   def handle_call(:acknowledgement_state, _from, state),
     do:
