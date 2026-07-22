@@ -1,7 +1,7 @@
-defmodule MingaEditor.Renderer.ProductionGateTest do
+defmodule Minga.Perf.ProductionGateTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Renderer.ProductionGate
+  alias Minga.Perf.ProductionGate
 
   defp passing(overrides \\ %{}) do
     Map.merge(

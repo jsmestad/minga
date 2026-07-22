@@ -26,10 +26,10 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34
+- **IMPLEMENTED:** S34, S35
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
-- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S35
+- **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **CANDIDATE, craftsmanship:** E02, E03, E05, E08
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
@@ -39,7 +39,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 
 - **STILL_REPRODUCIBLE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
-- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33, S35
+- **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E05, E08
 - **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES08, ES21
@@ -4094,3 +4094,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `16d70068f8f9b0e8ae6807cf1af4d9088bdfbe41`.
 - **Merge evidence:** PR #3181 merged after CI run `29935132182` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. The Elixir job's first attempt had the unrelated Native MCP timeout recorded above; only that failed job was rerun after the exact test passed locally, and its second attempt passed.
 - **Completion date:** 2026-07-22.
+
+### W097/S35: Move ProductionGate to test performance support
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S35
+- **Planning profile:** `S35Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S35Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S35Planner` for current SHA `4679cc801fd6ab9ed11cd596e7a0dbf02e97343a`; scope was exactly the comparator relocation into `test/perf`, the matching unit-test relocation, the resident-test alias cutover, CI and performance-doc path updates, and this roadmap evidence.
+- **Observable result:** Production no longer compiles the deterministic render budget comparator under the runtime renderer namespace. The comparator now loads only through the existing test compile path as `Minga.Perf.ProductionGate`, and the resident incremental performance test, CI production render gate, and local performance documentation call the moved test/perf surface with unchanged gate semantics.
+- **Failure reproduction / source trace:** Before implementation, focused reference search found the comparator definition in the production compile path, one resident incremental test alias, the unit test module and alias, the CI BEAM production render gate path, and the local performance-doc validation path. Runtime, frontend, benchmark, extension, native, and parser paths had no caller. `mix.exs` already compiles `test/perf` only in `:test`, so no loading change or production shim was needed.
+- **Implementation result:** Moved the comparator into `test/perf/production_gate.ex` and renamed only the module to `Minga.Perf.ProductionGate`. Moved the unit test into `test/perf/production_gate_test.exs` and renamed only the test module and alias. Updated the resident incremental alias, the CI gate test path, and the local performance validation path; budgets, types, measurement keys, public gate functions, private helper behavior, assertions, and command semantics are unchanged.
+- **Changed files:** `.github/workflows/ci.yml`; `docs/PERFORMANCE.md`; `docs/workstreams/editor-lifecycle-roadmap.md`; deleted the former production comparator file; `test/minga_editor/render_pipeline/resident_incremental_test.exs`; deleted the former renderer unit-test file; `test/perf/production_gate.ex`; `test/perf/production_gate_test.exs`.
+- **Focused validation:** `mix format --check-formatted test/perf/production_gate.ex test/perf/production_gate_test.exs test/minga_editor/render_pipeline/resident_incremental_test.exs` passed. `mix test --include perf test/conformance/production_render_corpus_test.exs test/minga_editor/render_pipeline/resident_incremental_test.exs test/perf/production_gate_test.exs` passed with 15 tests. `mix test test/perf/production_gate_test.exs` passed with 2 tests.
+- **Reference and diff validation:** Focused search for the moved old module/path across `lib`, `test`, `bench`, `extensions`, `macos`, `go`, `zig`, `docs`, and `.github` found no live caller outside prior roadmap history. Focused search for `Minga.Perf.ProductionGate` and `test/perf/production_gate_test.exs` found only the moved comparator/test, resident alias, CI path, performance docs, and this evidence. `git diff --check` passed before roadmap evidence.
+- **Broad validation:** `mix native.build.support` passed and copied `minga-parser` plus `minga-hook-runner` into `priv`. `make lint` passed Credo, compile, format, and incremental Dialyzer with total Dialyzer errors `0`; Credo retained the two pre-existing refactoring opportunities in `lib/minga_editor/commands/buffer_management.ex` and one pre-existing registry-test warning. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4 --warnings-as-errors --exclude system_clipboard --exclude conformance` passed 9,746 tests with 58 doctests, 98 properties, 1 skipped, and 572 excluded. The exact unconstrained full command exposed existing suite-load timing failures in `NativeMCPTest` and `SessionManagerTest`; both exact failing locations passed with their original seeds.
+- **Production lines added/removed before roadmap evidence:** `0 added / 78 removed`, net `-78`, within the locked production net `<= 0`.
+- **Test lines added/removed before roadmap evidence:** Comparator relocation added `78` test/perf lines, unit-test relocation removed `43` old-path lines and added `43` test/perf lines, and the resident alias changed `1 added / 1 removed`; the test move is behaviorally neutral.
+- **Docs/CI lines added/removed before roadmap evidence:** `.github/workflows/ci.yml 1 added / 1 removed`; `docs/PERFORMANCE.md 2 added / 2 removed`.
+- **Concepts added:** None. No process, dependency, behaviour, protocol, registry, public runtime API, configuration, compatibility shim, data representation, fallback, wrapper, benchmark harness, test framework, source-shape test, or loading path was added.
+- **Concepts removed:** Removed one production-compiled comparator surface from the runtime renderer namespace.
+- **Retained contracts:** `failures/1`, `beam_failures/1`, `swift_failures/1`, `boundary_failures/1`, comparator return shape, measurement keys, full reset, ChangeLog consume, logical-line, row-composition, Swift chunk, editor-row, and boundary byte thresholds, decoration reporting, resident incremental measurements, CI `mix test --include perf` semantics, and local performance validation semantics remain unchanged.
+- **Findings resolved:** S35's shrink finding is implemented by moving the deterministic comparator cleanly to test performance support with no production shim or behavior change.
+- **Discoveries affecting later work:** The exact unconstrained full test command remains sensitive to existing async suite-load timing around Native MCP and session manager tests on this workstation; the constrained full `test.llm` gate passed and each exact failed location passed with its original seed. No replan trigger, owner drift, production caller, frontend caller, extension caller, benchmark consumer, native dependency, CI semantic change, budget drift, compatibility need, or new concept was found.
+- **Pre-acceptance reviews:** Ponytail returned `PASS/Lean` with 0.99 confidence. Correctness and Elixir craftsmanship found one scope-drift blocker in `docs/PERFORMANCE.md`: the initial edit had shortened unrelated cache-identity and Swift-counter policy prose. The full origin/main prose was restored with only the locked module-token and test-path replacements; both targeted rechecks returned `RESOLVED/PASS` with no residual blocker.
+- **Final reviewer verdict:** Initial review found the untracked relocation destinations missing from the merge artifact. Both files were added to the patch, `git diff --find-renames origin/main` recognized the comparator and unit-test moves, and targeted recheck returned `RESOLVED/PASS` with 1.0 confidence and no residual blocker.
+- **PR URL:** Pending delivery.
+- **Implementation commit SHA:** Pending delivery.
+- **Merge SHA:** Pending delivery.
+- **Merge evidence:** Pending delivery.
+- **Completion date:** Pending merge.

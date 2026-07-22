@@ -53,7 +53,7 @@ At both 5,000 and 65,536 resident rows, CI enforces an ordinary one-line edit us
 | Editor rows visited | ≤ visible + total configured overscan | `FrameMetrics.editorRowsVisited` |
 | Decorations visited | separately reported, not folded into editor rows | BEAM `[:minga, :render, :decorations]` and `FrameMetrics.decorationsVisited` |
 
-`ProductionGate`, `RendererComplexityGate`, and the Go render comparator have failure-seam tests that perturb the production counter collector with an extra reset/update, touched chunk, fetched/composed row, fifth Swift chunk, or full-document editor scan and prove the gate fails. Go's window-row authority is a persistent balanced rope of immutable row chunks plus a path-copied radix ID locator. Transaction validation and apply splice that value-semantic store; split leaves share backing rows, and normal count/index/range/ref operations never materialize or scan the resident document. `WindowContent.Rows` is only a compatibility view for small fixtures. Shipping mutation/cache/compose operations record reset, splice update, touched chunks, fetched rows, composed-cache misses, visible traversal, and decorations independently. Position-independent cached lines follow durable row IDs across structural shifts; positional decorations retain the row index in the cache key. Swift keeps visible traversal, semantic update validation, and decoration traversal in distinct counters; they are not summed into a misleading aggregate.
+`Minga.Perf.ProductionGate`, `RendererComplexityGate`, and the Go render comparator have failure-seam tests that perturb the production counter collector with an extra reset/update, touched chunk, fetched/composed row, fifth Swift chunk, or full-document editor scan and prove the gate fails. Go's window-row authority is a persistent balanced rope of immutable row chunks plus a path-copied radix ID locator. Transaction validation and apply splice that value-semantic store; split leaves share backing rows, and normal count/index/range/ref operations never materialize or scan the resident document. `WindowContent.Rows` is only a compatibility view for small fixtures. Shipping mutation/cache/compose operations record reset, splice update, touched chunks, fetched rows, composed-cache misses, visible traversal, and decorations independently. Position-independent cached lines follow durable row IDs across structural shifts; positional decorations retain the row index in the cache key. Swift keeps visible traversal, semantic update validation, and decoration traversal in distinct counters; they are not summed into a misleading aggregate.
 
 `RenderIntent` and `RenderReceipt` are measured with `:erlang.external_size/1` at the actual Editor↔Renderer process boundary. Each must be ≤256 KiB for the real 65,536-row ordinary edit, and the same gate runs at 5,000 rows to prove resident document content does not cross that boundary. The payload failure seam uses 256 KiB + 1 byte.
 
@@ -98,7 +98,7 @@ mix conformance.gen
 git diff --exit-code -- test/conformance/corpus
 mix test test/conformance/production_render_corpus_test.exs \
   test/minga_editor/render_pipeline/resident_incremental_test.exs \
-  test/minga_editor/renderer/production_gate_test.exs
+  test/perf/production_gate_test.exs
 mix test
 mix swift.build -- -project macos/Minga.xcodeproj -scheme Minga test
 (cd go/tui && go test ./...)
