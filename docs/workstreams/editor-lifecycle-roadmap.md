@@ -4127,7 +4127,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W098/E02: Own renderer frame attempts and acknowledgement leases
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** E02
 - **Planning profile:** `E02Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `E02Worker`, no delegation.
@@ -4146,3 +4146,5 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** No replan trigger, owner drift, protocol/frontend dependency, ES03 phase-design dependency, third production concept, compatibility shim need, or budget miss was found.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence. Elixir craftsmanship and Ponytail required deleting two redundant public State type aliases and correcting absolute line counts; targeted rechecks returned `RESOLVED/PASS`. Correctness also required a timer-cancellation test whose wait exceeds its scheduled timeout; the corrected 25 ms timer and 100 ms refutation passed.
 - **Final reviewer and delivery:** `PASS` with 0.99 confidence. The reviewer confirmed the complete ten-file merge artifact, clean two-struct cutover, exact timer and correlation invariants, preserved cache/adaptation behavior, valid tests, exact budgets, and merge safety. PR: https://github.com/jsmestad/minga/pull/3186. Implementation commit: `8828cdefd`.
+- **Merge evidence:** PR #3186 merged at `d2d676c827aa41246a61d84b9bb8cfdc08c3c710` after CI run `29945417307` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
