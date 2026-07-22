@@ -195,23 +195,14 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     state
   end
 
-  # Shared foreground buffer registration: updates the workspace, logs, highlights,
-  # and schedules foreground editor follow-up work. Buffer creation owns
-  # :buffer_opened broadcasts.
-  @spec register_buffer(state(), pid(), String.t()) :: state()
-  def register_buffer(state, buffer_pid, file_path) do
+  @spec register_buffer(state(), pid(), String.t(), keyword()) :: state()
+  def register_buffer(state, buffer_pid, file_path, opts \\ []) do
     state = Commands.add_buffer(state, buffer_pid)
     Minga.Log.info(:editor, "Opened: #{file_path}")
 
-    # Eagerly set up syntax highlighting for this specific buffer.
-    # Uses the PID-targeted variant so each restored buffer gets its
-    # own parse request, not just whoever is active last.
     state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
 
-    # Schedule code lens and inlay hint requests after LSP clients connect.
-    # The SyncServer handles didOpen via the event bus; by the time 800ms
-    # elapses the LSP client should be ready to serve requests.
-    if state.frontend.backend != :headless do
+    if state.frontend.backend != :headless and Keyword.get(opts, :schedule_lsp_refresh?, true) do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
     end
 
