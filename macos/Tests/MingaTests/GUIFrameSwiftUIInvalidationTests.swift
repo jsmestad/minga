@@ -979,7 +979,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
         ]
         let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder"]
-        #expect(owners.count == 30)
+        #expect(owners.count == 29)
         #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
         #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))
 
