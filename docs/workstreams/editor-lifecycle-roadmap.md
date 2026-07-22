@@ -4036,7 +4036,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W095/S33: Retire Change Summary and breadcrumb click producers
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S33 / D02 residual
 - **Planning profile:** `S33Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S33Worker`, no delegation.
@@ -4060,6 +4060,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence before the mechanical Swift inventory-count correction. The reviewer confirmed synchronized protocol v15 retirement across schema, BEAM, Swift, Go, generated/golden surfaces, tests, and canonical docs; retained breadcrumb display and legacy compatibility; exact budgets; and merge safety. The subsequent targeted Swift recheck found no residual blocker.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3179
 - **Implementation commit SHA:** `263b6b4c2`; Swift CI correction commit `e6263afd1`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Merge SHA:** `023ad5a7b92d4d60eb4203d46f443df4ef95713d`.
+- **Merge evidence:** PR #3179 merged after CI run `29931696179` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
