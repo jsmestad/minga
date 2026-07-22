@@ -4202,7 +4202,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W101/E08: Own renderer observed buffer lifecycle
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** E08
 - **Planning profile:** `E08Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `E08Worker`, no delegation.
@@ -4222,7 +4222,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `mix test.quick` returned a session-manager cleanup timeout and a subagent credential-state failure outside the renderer paths; the exact two tests passed with the original seed and one-case concurrency. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` then passed 9,715 tests, 58 doctests, and 98 properties with zero failures.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence, Elixir craftsmanship returned `PASS/Lean` with 0.99 confidence, and Ponytail returned `PASS/Lean`; all three confirmed the single owner, monitor/version subset invariant, exact DOWN handling, consume-before-fanout ordering, clean cutover, exact budgets, and no mandatory correction.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete eight-file artifact, sole monitor/version owner, subset invariant, `[:flush]` demonitoring, exact PID plus ref cleanup, State-owned resident retirement, preserved consume-before-fanout behavior, clean cutover, exact budgets, grounded validation evidence, and merge safety.
-- **Final reviewer and delivery:** Pending PR.
+- **Final reviewer and delivery:** `PASS` with 0.99 confidence. PR: https://github.com/jsmestad/minga/pull/3193. Implementation commit: `15fe60d63`.
 - **Discoveries affecting later work:** `mix test.debug test/minga_editor/renderer/server_test.exs:898` selected the preceding test after line shifts; rerunning current line `:899` exercised the intended headless cache/delta test. No replan trigger, owner drift, protocol/frontend dependency, compatibility need, second lifecycle concept, production budget miss, or test budget miss was found.
-- **Merge evidence:** Pending.
+- **Merge evidence:** PR #3193 merged at `9489324504b16810202d8e5a08684493f9e4b698` after CI run `29955788733` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
