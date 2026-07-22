@@ -1,4 +1,4 @@
-defmodule MingaEditor.Renderer.ProductionGate do
+defmodule Minga.Perf.ProductionGate do
   @moduledoc """
   Deterministic production-render budget comparator.
 

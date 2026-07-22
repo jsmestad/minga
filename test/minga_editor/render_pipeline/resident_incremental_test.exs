@@ -11,7 +11,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.BufferChanges
-  alias MingaEditor.Renderer.ProductionGate
+  alias Minga.Perf.ProductionGate
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState

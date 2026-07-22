@@ -89,7 +89,7 @@ jobs:
         run: |
           mix test --include perf test/conformance/production_render_corpus_test.exs \
             test/minga_editor/render_pipeline/resident_incremental_test.exs \
-            test/minga_editor/renderer/production_gate_test.exs
+            test/perf/production_gate_test.exs
       - name: Check cross-language golden manifest is committed
         run: MIX_ENV=test mix protocol.golden --check
       - run: mix native.build.support
