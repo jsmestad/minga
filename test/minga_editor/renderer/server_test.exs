@@ -16,6 +16,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State.Render
@@ -151,8 +152,8 @@ defmodule MingaEditor.Renderer.ServerTest do
         state
         | rendering?: true,
           render_token: token,
-          in_flight: {in_flight, 11, 0},
-          pending: {pending, 12, 0}
+          in_flight: FrameAttempt.new(in_flight, 11, 0),
+          pending: FrameAttempt.new(pending, 12, 0)
       }
     end)
 
@@ -227,8 +228,8 @@ defmodule MingaEditor.Renderer.ServerTest do
         renderer_state
         | rendering?: true,
           render_token: token,
-          in_flight: {Intent.from_input(snapshot), 90, 0},
-          pending: {Intent.from_input(snapshot), 91, 0}
+          in_flight: FrameAttempt.new(Intent.from_input(snapshot), 90, 0),
+          pending: FrameAttempt.new(Intent.from_input(snapshot), 91, 0)
       }
     end)
 
@@ -403,6 +404,15 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       RendererServer.cast_snapshot(renderer, stub_intent(), 11)
       assert_receive {:ack_pipeline, 11, 1, 10, false}, @async_render_timeout
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 1, 12, 10, :resource_policy, :terminal_frontend_failure}
+      )
+
+      assert RendererServer.acknowledgement_state(renderer) == {1, 10}
+      assert RendererServer.rendering?(renderer)
+      assert RendererServer.terminal_failure(renderer) == nil
 
       terminal = {:frame_rejected, 1, 11, 10, :resource_policy, :terminal_frontend_failure}
       RendererServer.frame_status(renderer, terminal)
@@ -1298,7 +1308,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp park_in_flight(renderer) do
     :sys.replace_state(renderer, fn state ->
-      %{state | rendering?: true, in_flight: {stub_intent(), 0, 0}}
+      %{state | rendering?: true, in_flight: FrameAttempt.new(stub_intent(), 0, 0)}
     end)
   end
 
