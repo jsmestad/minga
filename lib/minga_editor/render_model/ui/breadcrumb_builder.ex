@@ -5,7 +5,7 @@ defmodule MingaEditor.RenderModel.UI.BreadcrumbBuilder do
 
   @spec build(String.t() | nil, String.t()) :: Breadcrumb.t()
   def build(file_path, root) do
-    %Breadcrumb{file_path: file_path, root: root, segments: segments(file_path, root)}
+    %Breadcrumb{segments: segments(file_path, root)}
   end
 
   # Derive the wire-ready path segment list (ruling 4). A nil file_path means no

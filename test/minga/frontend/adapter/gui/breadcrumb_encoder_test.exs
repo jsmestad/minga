@@ -32,7 +32,7 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
 
     test "encodes a model with explicit segments straight through" do
       # The shell consumes the builder-derived segment list directly.
-      model = %Breadcrumb{file_path: "ignored", root: "/", segments: ["a", "bb"]}
+      model = %Breadcrumb{segments: ["a", "bb"]}
 
       {cmd, _caches} = BreadcrumbEncoder.encode(model, Caches.new())
 
@@ -40,7 +40,7 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
     end
 
     test "rejects a segment count beyond the uint8 carrier" do
-      model = %Breadcrumb{file_path: "ignored", root: "/", segments: List.duplicate("a", 256)}
+      model = %Breadcrumb{segments: List.duplicate("a", 256)}
 
       assert %{
                command: :gui_breadcrumb,
@@ -54,11 +54,7 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
     end
 
     test "rejects a segment beyond the string16 carrier" do
-      model = %Breadcrumb{
-        file_path: "ignored",
-        root: "/",
-        segments: [String.duplicate("a", 65_536)]
-      }
+      model = %Breadcrumb{segments: [String.duplicate("a", 65_536)]}
 
       assert %{
                command: :gui_breadcrumb,
@@ -71,14 +67,15 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
                assert_raise(EncodingError, fn -> BreadcrumbEncoder.encode(model, Caches.new()) end)
     end
 
-    test "returns nil on second call with same model (fingerprint skip)" do
-      model = BreadcrumbBuilder.build("/home/user/project/lib/foo.ex", "/home/user/project")
+    test "suppresses equal visible segments from different source path and root inputs" do
+      model1 = BreadcrumbBuilder.build("/repo_a/lib/foo.ex", "/repo_a")
+      model2 = BreadcrumbBuilder.build("/repo_b/lib/foo.ex", "/repo_b")
 
       caches = Caches.new()
-      {cmd1, caches} = BreadcrumbEncoder.encode(model, caches)
+      {cmd1, caches} = BreadcrumbEncoder.encode(model1, caches)
       assert cmd1 != nil
 
-      {cmd2, _caches} = BreadcrumbEncoder.encode(model, caches)
+      {cmd2, _caches} = BreadcrumbEncoder.encode(model2, caches)
       assert cmd2 == nil
     end
 

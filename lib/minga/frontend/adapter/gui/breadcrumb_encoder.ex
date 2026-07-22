@@ -11,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoder do
 
   @spec encode(Breadcrumb.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%Breadcrumb{} = model, %Caches{} = caches) do
-    fp = :erlang.phash2({model.file_path, model.root, model.segments})
+    fp = :erlang.phash2(model.segments)
 
     if fp != caches.last_breadcrumb_fp do
       {encode_command(model), %{caches | last_breadcrumb_fp: fp}}
