@@ -136,6 +136,13 @@ final class CommandDispatcher {
     /// Tracks the last mode to detect changes.
     private var lastMode: UInt8 = 0
 
+    /// Tracks the last emitted line spacing so the `lineSpacingChanged` effect is
+    /// detected against prior committed state. Publication installs the snapshot's
+    /// `frameState` (which already carries the staged line spacing) before the
+    /// prepared `gui_line_spacing` command replays, so a `frameState`-local delta
+    /// check would always miss the change (#2999 AC6 staging).
+    private var lastLineSpacing: Float = 1.0
+
     /// All GUI chrome sub-states. Injected at init from AppDelegate.
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
@@ -148,6 +155,18 @@ final class CommandDispatcher {
     /// Input sequence attached to the newest applied frame awaiting a draw.
     private var pendingPresentationInputSeq: UInt32 = 0
 
+    /// The newest complete committed editor snapshot available for Metal submission.
+    private(set) var committedEditorSnapshot: CommittedEditorSnapshot?
+
+    /// The exact editor presentation associated with the last successful Metal presentation.
+    private(set) var visibleEditorPresentation: VisibleEditorPresentation?
+
+    /// Backward-compatible view of the visible semantic snapshot.
+    var visibleEditorSnapshot: CommittedEditorSnapshot? { visibleEditorPresentation?.snapshot }
+
+    /// The committed editor frame identity awaiting Metal presentation, owned by the editor lifecycle rather than telemetry.
+    private var pendingEditorPresentationFrame: GUICommittedFrame?
+
     /// Claims the newest applied input sequence for one Metal submission.
     func takePresentationInputSeq() -> UInt32 {
         let seq = pendingPresentationInputSeq
@@ -157,7 +176,35 @@ final class CommandDispatcher {
 
     /// Returns the committed editor frame waiting for native Metal presentation.
     func pendingPresentationFrame() -> GUICommittedFrame? {
-        guiState.presentationMetrics.pendingEditorFrame()
+        pendingEditorPresentationFrame
+    }
+
+    /// Promotes the exact captured presentation after its drawable presents successfully.
+    func promoteVisibleEditorPresentation(snapshot: CommittedEditorSnapshot, localTransform: EditorLocalPresentationTransform?) {
+        let presentedFrame = editorFrame(for: snapshot)
+        if let visibleFrame = visibleEditorSnapshot.map(editorFrame(for:)),
+           Self.isPresentedFrame(presentedFrame, olderThan: visibleFrame) {
+            return
+        }
+
+        visibleEditorPresentation = VisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform)
+        if pendingEditorPresentationFrame == presentedFrame {
+            pendingEditorPresentationFrame = nil
+        }
+    }
+
+    /// Test and compatibility seam for callers that have no frontend-local transform.
+    func promoteVisibleEditorSnapshot(_ snapshot: CommittedEditorSnapshot) {
+        promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: nil)
+    }
+
+    private func editorFrame(for snapshot: CommittedEditorSnapshot) -> GUICommittedFrame {
+        GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+    }
+
+    private static func isPresentedFrame(_ lhs: GUICommittedFrame, olderThan rhs: GUICommittedFrame) -> Bool {
+        if lhs.generation != rhs.generation { return lhs.generation < rhs.generation }
+        return lhs.frameSeq < rhs.frameSeq
     }
 
     /// Discards an applied frame that cannot acquire a drawable/presentation path.
@@ -167,15 +214,9 @@ final class CommandDispatcher {
             pendingPresentationInputSeq = 0
         }
         let outcome: GUIFramePresentationMetrics.Outcome = reason == .hidden ? .hidden : .unavailable
-        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome)
+        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome, frame: pendingEditorPresentationFrame)
+        pendingEditorPresentationFrame = nil
     }
-
-    /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
-    /// retained pane geometry can still render without being clickable.
-    // TODO(#2241-adjacent): no reset path since the cell-era clear opcode was
-    // retired; grows by distinct window ids seen this session (bounded, ids are
-    // reused). Reset at semantic frame start when frame lifecycle is reworked.
-    private(set) var currentFrameWindowIds: Set<UInt16> = []
 
     // MARK: - Frame transaction staging (#2219 child D)
 
@@ -350,11 +391,18 @@ final class CommandDispatcher {
         openBaseFrameSeq = baseFrameSeq
         openGeneration = generation
         openGenerationIsStale = hasCommitted && generation < lastCommittedGeneration
+        // Seed the builder from the prior committed editor snapshot — the single
+        // semantic authority — never from the resident-window backing or mutable
+        // FrameState mirrors (#2999 AC6). Base-0 keyframes start empty regardless.
+        let priorSnapshot = committedEditorSnapshot
         transactionBuilder = PreparedFrameTransactionBuilder(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
             generation: generation,
-            committedWindows: guiState.windowContents,
+            committedWindows: priorSnapshot?.windowContents ?? [:],
+            committedGutters: priorSnapshot?.windowGutters ?? [:],
+            committedIndentGuides: priorSnapshot?.windowIndentGuides ?? [:],
+            committedMetadata: priorSnapshot?.metadata ?? .empty,
             registeredFontIds: registeredFontIds,
             committedTranscript: guiState.agentChatState.transcriptSnapshot,
             stagingLimit: resourcePolicy.staging.weight,
@@ -414,7 +462,7 @@ final class CommandDispatcher {
             return
         }
 
-        switch transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots) {
+        switch transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots, frameState: frameState, themeColors: guiState.themeColors) {
         case .failure(let rejection):
             reject(rejection, frameSeq: frameSeq, logReason: rejection.logDescription)
             return
@@ -456,6 +504,7 @@ final class CommandDispatcher {
             generation: transaction.generation,
             frameSeq: transaction.frameSeq
         )
+        let priorSnapshot = committedEditorSnapshot
         var effects: [CommitEffect] = []
         if let theme = transaction.theme {
             apply(.guiTheme(slots: theme.slots), effects: &effects)
@@ -463,7 +512,26 @@ final class CommandDispatcher {
         if let resources = transaction.resources {
             for command in resources.commands { apply(command, effects: &effects) }
         }
-        if let windows = transaction.windows { apply(windows, effects: &effects) }
+        // Install the committed editor snapshot — the sole editor authority — before
+        // any derived projection. Editor window content/gutter/geometry/cursor/
+        // split/active-window state is never mirrored back into FrameState; the
+        // snapshot's own frameState carries only chrome/theme render metadata.
+        if let snapshot = transaction.editorSnapshot {
+            frameState = snapshot.frameState
+            committedEditorSnapshot = snapshot
+            if finalImpact.contains(.editor) {
+                pendingEditorPresentationFrame = committed
+            }
+            // The resident-window backing is a read-only projection of the snapshot consumed by extension overlays (chrome-only GUI state); it is never the seed for the next transaction. Metadata-only snapshots do not rewrite an identical observable projection.
+            if let changedWindowIds = transaction.residentProjectionWindowIds {
+                projectResidentWindows(
+                    from: snapshot,
+                    priorSnapshot: priorSnapshot,
+                    changedWindowIds: changedWindowIds,
+                    effects: &effects
+                )
+            }
+        }
         if let metadata = transaction.metadata {
             for command in metadata.commands { apply(command, effects: &effects) }
         }
@@ -496,41 +564,26 @@ final class CommandDispatcher {
         replay(effects)
     }
 
-    private func apply(_ updates: PreparedWindowUpdates, effects: inout [CommitEffect]) {
-        for (windowId, content) in updates.replacements {
-            let previousScroll = guiState.windowContents[windowId]?.scrollPresentation
-            guiState.windowContents[windowId] = content
-            if shouldResetScrollPresentation(previous: previousScroll, next: content.scrollPresentation) {
-                effects.append(.scrollPresentationReset(windowID: windowId))
+    /// Projects the committed snapshot's window content into the resident-window
+    /// backing so extension overlays (chrome-only GUI state) observe it. This is
+    /// a one-way projection from the authority; the next transaction seeds from
+    /// the snapshot, never from this backing (#2999 AC6). Stale windows absent
+    /// from the snapshot are pruned, preserving keyframe prune behavior. Scroll
+    /// presentation resets are detected against the prior committed snapshot so
+    /// frontend-local scroll ownership is preserved.
+    private func projectResidentWindows(
+        from snapshot: CommittedEditorSnapshot,
+        priorSnapshot: CommittedEditorSnapshot?,
+        changedWindowIds: Set<UInt16>,
+        effects: inout [CommitEffect]
+    ) {
+        for surface in snapshot.surfaces where changedWindowIds.contains(surface.windowId) {
+            let previousScroll = priorSnapshot?.content(for: surface.windowId)?.scrollPresentation
+            if shouldResetScrollPresentation(previous: previousScroll, next: surface.content.scrollPresentation) {
+                effects.append(.scrollPresentationReset(windowID: surface.windowId))
             }
-            frameState.cursorVisible = content.cursorVisible
-            frameState.dirty = true
         }
-        for command in updates.commands { apply(command, effects: &effects) }
-        if let authoritativeWindowIds = updates.authoritativeWindowIds {
-            pruneAuthoritativeFrameState(liveWindowIds: authoritativeWindowIds)
-        } else {
-            currentFrameWindowIds.formUnion(updates.touchedWindowIds)
-        }
-    }
-
-    private func pruneAuthoritativeFrameState(liveWindowIds: Set<UInt16>) {
-        guiState.windowContents = Dictionary(uniqueKeysWithValues: guiState.windowContents.filter { liveWindowIds.contains($0.key) })
-        frameState.windowGutters = Dictionary(uniqueKeysWithValues: frameState.windowGutters.filter { liveWindowIds.contains($0.key) })
-        frameState.windowIndentGuides = Dictionary(uniqueKeysWithValues: frameState.windowIndentGuides.filter { liveWindowIds.contains($0.key) })
-        currentFrameWindowIds = liveWindowIds
-        refreshDerivedGutterStateAfterPrune()
-    }
-
-    private func refreshDerivedGutterStateAfterPrune() {
-        guard let activeGutter = frameState.windowGutters.values.filter(\.isActive).sorted(by: { $0.windowId < $1.windowId }).first else {
-            frameState.gutterCol = 0
-            frameState.viewportTopLine = 0xFFFF_FFFF
-            return
-        }
-
-        frameState.gutterCol = UInt16(activeGutter.lineNumberWidth) + UInt16(activeGutter.signColWidth)
-        frameState.viewportTopLine = activeGutter.entries.first?.bufLine ?? 0xFFFF_FFFF
+        guiState.windowContents = snapshot.windowContents
     }
 
     /// Rejects one frame, leaves the last-good publication untouched, and emits
@@ -689,13 +742,6 @@ final class CommandDispatcher {
         frameState.resize(newCols: newCols, newRows: newRows)
     }
 
-    /// Clears the dirty flag after the view has consumed the current
-    /// `FrameState` for a render. The view drives the render but does not own the
-    /// state, so it calls this instead of writing `frameState.dirty` directly.
-    func markRendered() {
-        frameState.dirty = false
-    }
-
     /// Applies a zero-latency local file-tree navigation preview when the BEAM marks the current tree model as eligible.
     /// The key still goes to the BEAM; this only moves the transient selection highlight until the next authoritative file-tree payload reconciles it.
     @discardableResult
@@ -763,8 +809,11 @@ final class CommandDispatcher {
     /// in `dispatch`/`commitTransaction`, not the presented state.
     private func apply(_ command: RenderCommand, effects: inout [CommitEffect]) {
         switch command {
-        case .setCursorShape(let shape):
-            frameState.cursorShape = shape
+        case .setCursorShape:
+            // The editor-global cursor shape is frozen into the committed
+            // snapshot's metadata during freeze; publication does not mirror it
+            // back into FrameState (#2999 AC6).
+            break
 
         case .beginFrame, .commitFrame:
             // Frame markers drive the transaction state machine in `dispatch`,
@@ -848,17 +897,18 @@ final class CommandDispatcher {
             guiState.agentContextBarState.update(visible: visible, task: task, dispatchTimestamp: dispatchTimestamp,
                                                   status: status, canApprove: canApprove, progress: progress, todos: todos)
 
-        case .guiIndentGuides(let data):
-            frameState.windowIndentGuides[data.windowId] = data
-            currentFrameWindowIds.insert(data.windowId)
-            frameState.dirty = true
+        case .guiIndentGuides:
+            // Indent guides are owned by the committed snapshot's surfaces; the
+            // freeze builds them from staged state and publication never mirrors
+            // them into FrameState (#2999 AC6).
+            break
 
         case .guiLineSpacing(let spacing):
-            let oldSpacing = frameState.lineSpacing
-            frameState.lineSpacing = max(spacing, 1.0)
-            frameState.dirty = true
-            if oldSpacing != frameState.lineSpacing {
-                effects.append(.lineSpacingChanged(frameState.lineSpacing))
+            let newSpacing = max(spacing, 1.0)
+            frameState.lineSpacing = newSpacing
+            if lastLineSpacing != newSpacing {
+                lastLineSpacing = newSpacing
+                effects.append(.lineSpacingChanged(newSpacing))
             }
 
         case .guiCursorAnimation(let enabled):
@@ -945,49 +995,35 @@ final class CommandDispatcher {
             // Reaching this path would bypass all-or-nothing transcript validation.
             assertionFailure("guiAgentTranscript must be prepared before publication")
 
-        case .guiGutterSeparator(let col, let r, let g, let b):
+        case .guiGutterSeparator(_, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-            // Use the gutter fg color for the scroll indicator.
+            // Use the gutter fg color for the scroll indicator. The active gutter
+            // column now lives on the committed snapshot's metadata (#2999 AC6).
             frameState.scrollIndicatorColor = rgb
-            frameState.gutterCol = col
             frameState.gutterSeparatorColor = rgb
-            frameState.dirty = true
 
         case .guiCursorline(let row, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             frameState.cursorlineRow = row
             frameState.cursorlineBg = rgb
-            frameState.dirty = true
 
-        case .guiGutter(let data):
-            frameState.windowGutters[data.windowId] = data
-            currentFrameWindowIds.insert(data.windowId)
-            if data.isActive {
-                frameState.activeWindowId = data.windowId
-                frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
-                // Derive viewport top from the first gutter entry's buffer line.
-                if let firstEntry = data.entries.first {
-                    frameState.viewportTopLine = firstEntry.bufLine
-                }
-            }
-            frameState.dirty = true
+        case .guiGutter:
+            // Gutter geometry and the active window are owned by the committed
+            // snapshot's surfaces and metadata; publication never mirrors them
+            // back into FrameState (#2999 AC6).
+            break
 
         case .guiWindowContent(let data):
             let previousScroll = guiState.windowContents[data.windowId]?.scrollPresentation
             guiState.windowContents[data.windowId] = data
-            currentFrameWindowIds.insert(data.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
                 effects.append(.scrollPresentationReset(windowID: data.windowId))
             }
-            frameState.cursorVisible = data.cursorVisible
 
         case .guiWindowOverlayDelta(let delta):
             guard let current = guiState.windowContents[delta.windowId] else { break }
             guard let updated = current.applyingOverlayDelta(delta) else { break }
             guiState.windowContents[delta.windowId] = updated
-            currentFrameWindowIds.insert(delta.windowId)
-            frameState.cursorVisible = delta.cursorVisible
-            frameState.dirty = true
 
         case .guiWindowViewportDelta(let delta), .guiWindowRowsDelta(let delta):
             guard let current = guiState.windowContents[delta.windowId] else { break }
@@ -998,12 +1034,9 @@ final class CommandDispatcher {
             }
             let previousScroll = current.scrollPresentation
             guiState.windowContents[delta.windowId] = updated
-            currentFrameWindowIds.insert(delta.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
                 effects.append(.scrollPresentationReset(windowID: delta.windowId))
             }
-            frameState.cursorVisible = delta.cursorVisible
-            frameState.dirty = true
 
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {
@@ -1069,11 +1102,11 @@ final class CommandDispatcher {
                 guiState.signatureHelpState.hide()
             }
 
-        case .guiSplitSeparators(let borderColor, let verticals, let horizontals):
-            frameState.splitBorderColor = borderColor
-            frameState.verticalSeparators = verticals
-            frameState.horizontalSeparators = horizontals
-            frameState.dirty = true
+        case .guiSplitSeparators:
+            // Split separator geometry is frozen into the committed snapshot's
+            // metadata during freeze; publication does not mirror it back into
+            // FrameState (#2999 AC6).
+            break
 
         case .guiFloatPopup(let visible, let width, let height, let title, let lines):
             if visible {

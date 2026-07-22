@@ -68,6 +68,10 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
     case missingTheme
     case incompleteTheme(missingSlots: [UInt8])
     case missingWindowReference(windowId: UInt16)
+    case missingWindowGeometry(windowId: UInt16)
+    case missingWindowGutter(windowId: UInt16)
+    case incompatibleWindowGeometry(windowId: UInt16)
+    case invalidActiveWindow(windowId: UInt16)
     case windowEpochMismatch(windowId: UInt16, expected: UInt32, actual: UInt32)
     case invalidRetainedRows(windowId: UInt16, contentEpoch: UInt32)
     case invalidRowSplice(windowId: UInt16, contentEpoch: UInt32)
@@ -88,7 +92,9 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
         case .baseSequenceMismatch: return GeneratedProtocol.FrameRejectionReason.baseSequenceMismatch.rawValue
         case .missingTheme: return GeneratedProtocol.FrameRejectionReason.missingTheme.rawValue
         case .incompleteTheme: return GeneratedProtocol.FrameRejectionReason.incompleteTheme.rawValue
-        case .missingWindowReference: return GeneratedProtocol.FrameRejectionReason.missingWindowReference.rawValue
+        case .missingWindowReference, .missingWindowGeometry, .missingWindowGutter,
+             .incompatibleWindowGeometry, .invalidActiveWindow:
+            return GeneratedProtocol.FrameRejectionReason.missingWindowReference.rawValue
         case .windowEpochMismatch: return GeneratedProtocol.FrameRejectionReason.windowEpochMismatch.rawValue
         case .invalidRetainedRows: return GeneratedProtocol.FrameRejectionReason.invalidRetainedRows.rawValue
         case .missingFontResource: return GeneratedProtocol.FrameRejectionReason.missingFontResource.rawValue
@@ -127,6 +133,14 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
             return "missing gui_theme slots: \(formatted)"
         case .missingWindowReference(let windowId):
             return "missing live window reference \(windowId)"
+        case .missingWindowGeometry(let windowId):
+            return "window \(windowId) is missing pane geometry"
+        case .missingWindowGutter(let windowId):
+            return "window \(windowId) is missing required gutter"
+        case .incompatibleWindowGeometry(let windowId):
+            return "window \(windowId) has incompatible gutter and pane geometry"
+        case .invalidActiveWindow(let windowId):
+            return "active window \(windowId) is not present in the committed editor snapshot"
         case .windowEpochMismatch(let windowId, let expected, let actual):
             return "window \(windowId) epoch \(actual) != \(expected)"
         case .invalidRetainedRows(let windowId, let epoch):
@@ -168,13 +182,6 @@ struct PreparedThemeUpdate: Sendable {
     let slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)]
 }
 
-struct PreparedWindowUpdates: Sendable {
-    let replacements: [UInt16: GUIWindowContent]
-    let touchedWindowIds: Set<UInt16>
-    let authoritativeWindowIds: Set<UInt16>?
-    let commands: [RenderCommand]
-}
-
 struct PreparedChromeUpdates {
     let commands: [RenderCommand]
     let transcript: AgentTranscriptSnapshot?
@@ -193,12 +200,14 @@ struct PreparedFrameTransaction {
     /// Final consumer impact, including effects introduced while freezing the transaction.
     let impact: GUIFrameImpact
     let theme: PreparedThemeUpdate?
-    let windows: PreparedWindowUpdates?
     let chrome: PreparedChromeUpdates?
     let overlays: PreparedOverlayUpdates?
     let resources: PreparedResourceUpdates?
     let focus: PreparedFocusUpdates?
     let metadata: PreparedMetadataUpdates?
+    let editorSnapshot: CommittedEditorSnapshot?
+    /// Non-nil only when resident window content changed or a keyframe authoritatively pruned it. The IDs scope scroll-reset reconciliation to content that actually changed.
+    let residentProjectionWindowIds: Set<UInt16>?
     let operationCounts: PreparedFrameOperationCounts
 }
 
@@ -267,6 +276,8 @@ struct PreparedFrameTransactionBuilder {
     private var theme: PreparedThemeUpdate?
     private var semanticImpact: GUIFrameImpact = []
     private var workingWindows: [UInt16: GUIWindowContent]
+    private var workingGutters: [UInt16: Wire.WindowGutter]
+    private var workingIndentGuides: [UInt16: IndentGuideData]
     private var changedWindows: [UInt16: GUIWindowContent] = [:]
     private var referencedWindowIds: Set<UInt16> = []
     private var touchedWindowIds: Set<UInt16> = []
@@ -278,6 +289,9 @@ struct PreparedFrameTransactionBuilder {
     private var metadataCommands = PreparedDomainBuffer()
     private var registeredFontIds: Set<UInt8>
     private var requiredFontIds: Set<UInt8> = []
+    /// Editor render metadata carried by the prior committed snapshot. Delta
+    /// frames build on this; base-0 keyframes reset the geometry parts.
+    private let committedMetadata: EditorSnapshotMetadata
     private var workingTranscript: AgentTranscriptSnapshot
     private var changedTranscript: AgentTranscriptSnapshot?
     private var themeWeight = FrameResourceWeight()
@@ -292,6 +306,9 @@ struct PreparedFrameTransactionBuilder {
         baseFrameSeq: UInt32,
         generation: UInt32,
         committedWindows: [UInt16: GUIWindowContent],
+        committedGutters: [UInt16: Wire.WindowGutter],
+        committedIndentGuides: [UInt16: IndentGuideData],
+        committedMetadata: EditorSnapshotMetadata = .empty,
         registeredFontIds: Set<UInt8>,
         committedTranscript: AgentTranscriptSnapshot,
         stagingLimit: FrameResourceWeight = FrameResourcePolicy.default.staging.weight,
@@ -301,6 +318,9 @@ struct PreparedFrameTransactionBuilder {
         self.baseFrameSeq = baseFrameSeq
         self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
+        self.workingGutters = baseFrameSeq == 0 ? [:] : committedGutters
+        self.workingIndentGuides = baseFrameSeq == 0 ? [:] : committedIndentGuides
+        self.committedMetadata = committedMetadata
         self.registeredFontIds = registeredFontIds
         self.registeredFontIds.insert(0)
         self.workingTranscript = committedTranscript
@@ -355,6 +375,7 @@ struct PreparedFrameTransactionBuilder {
         case .guiGutter(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
+            workingGutters[data.windowId] = data
             stageReplacing(
                 command, key: .window(kind: .gutter, id: data.windowId),
                 weight: resourceWeight, domain: .window
@@ -363,6 +384,7 @@ struct PreparedFrameTransactionBuilder {
         case .guiIndentGuides(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
+            workingIndentGuides[data.windowId] = data
             stageReplacing(
                 command, key: .window(kind: .indentGuides, id: data.windowId),
                 weight: resourceWeight, domain: .window
@@ -424,7 +446,7 @@ struct PreparedFrameTransactionBuilder {
         }
     }
 
-    func freeze(requiredThemeSlots: [UInt8]) -> Result<PreparedFrameTransaction, PreparedFrameRejection> {
+    func freeze(requiredThemeSlots: [UInt8], frameState: FrameState, themeColors: ThemeColors?) -> Result<PreparedFrameTransaction, PreparedFrameRejection> {
         if let rejection { return .failure(rejection) }
 
         if baseFrameSeq == 0, theme == nil { return .failure(.missingTheme) }
@@ -449,18 +471,38 @@ struct PreparedFrameTransactionBuilder {
             // local AppKit scroll-presentation discard performed during promotion.
             finalImpact.formUnion([.editor, .editorOverlay])
         }
+        let preparedThemeColors = preparedThemeColors(from: themeColors)
+        let editorSnapshot: CommittedEditorSnapshot?
+        if finalImpact.contains(.editor) || baseFrameSeq == 0 {
+            let snapshotFrameState = preparedFrameState(
+                from: frameState,
+                themeColors: preparedThemeColors
+            )
+            switch CommittedEditorSnapshot.make(
+                generation: generation,
+                frameSeq: frameSeq,
+                frameState: snapshotFrameState,
+                themeColors: preparedThemeColors,
+                windowContents: workingWindows,
+                windowGutters: workingGutters,
+                windowIndentGuides: workingIndentGuides,
+                metadata: preparedMetadata()
+            ) {
+            case .success(let snapshot):
+                editorSnapshot = snapshot
+            case .failure(let rejection):
+                return .failure(rejection)
+            }
+        } else {
+            editorSnapshot = nil
+        }
+
         let transaction = PreparedFrameTransaction(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
             generation: generation,
             impact: finalImpact,
             theme: theme,
-            windows: windowsChanged ? PreparedWindowUpdates(
-                replacements: changedWindows,
-                touchedWindowIds: touchedWindowIds,
-                authoritativeWindowIds: baseFrameSeq == 0 ? liveWindowIds : nil,
-                commands: windowCommands.commands
-            ) : nil,
             chrome: chromeCommands.isEmpty && changedTranscript == nil ? nil : PreparedChromeUpdates(
                 commands: chromeCommands.commands,
                 transcript: changedTranscript
@@ -469,6 +511,10 @@ struct PreparedFrameTransactionBuilder {
             resources: resourceCommands.isEmpty ? nil : PreparedResourceUpdates(commands: resourceCommands.commands),
             focus: focusCommands.isEmpty ? nil : PreparedFocusUpdates(commands: focusCommands.commands),
             metadata: metadataCommands.isEmpty ? nil : PreparedMetadataUpdates(commands: metadataCommands.commands),
+            editorSnapshot: editorSnapshot,
+            residentProjectionWindowIds: baseFrameSeq == 0
+                ? liveWindowIds
+                : (changedWindows.isEmpty ? nil : Set(changedWindows.keys)),
             operationCounts: PreparedFrameOperationCounts(
                 theme: theme == nil ? 0 : 1,
                 windows: windowsChanged ? 1 : 0,
@@ -480,6 +526,98 @@ struct PreparedFrameTransactionBuilder {
             )
         )
         return .success(transaction)
+    }
+
+    private func preparedThemeColors(from themeColors: ThemeColors?) -> ThemeColors? {
+        guard let theme else { return themeColors }
+        let replacement = ThemeColors()
+        replacement.applySlots(theme.slots)
+        return replacement
+    }
+
+    /// Freezes the chrome/theme render metadata that persists inside the
+    /// snapshot's `frameState`. Editor semantic authority (cursor, gutter
+    /// geometry, active window, split separators) is no longer written here; it
+    /// lives on the snapshot's surfaces, `activeWindowId`, and metadata.
+    private func preparedFrameState(
+        from frameState: FrameState,
+        themeColors: ThemeColors?
+    ) -> FrameState {
+        var prepared = frameState
+        if let themeColors {
+            prepared.gutterColors = GutterThemeColors(
+                fg: themeColors.gutterFgRGB,
+                currentFg: themeColors.gutterCurrentFgRGB,
+                errorFg: themeColors.gutterErrorFgRGB,
+                warningFg: themeColors.gutterWarningFgRGB,
+                infoFg: themeColors.gutterInfoFgRGB,
+                hintFg: themeColors.gutterHintFgRGB,
+                foldFg: themeColors.gutterFoldFgRGB,
+                gitAddedFg: themeColors.gitAddedFgRGB,
+                gitModifiedFg: themeColors.gitModifiedFgRGB,
+                gitDeletedFg: themeColors.gitDeletedFgRGB
+            )
+        }
+        if baseFrameSeq == 0 {
+            prepared.viewportTopLine = 0xFFFF_FFFF
+        }
+        for command in metadataCommands.commands + windowCommands.commands + focusCommands.commands {
+            switch command {
+            case .guiLineSpacing(let spacing):
+                prepared.lineSpacing = max(spacing, 1.0)
+            case .setWindowBg(let r, let g, let b):
+                prepared.defaultBg = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            case .guiGutterSeparator(_, let r, let g, let b):
+                let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+                prepared.scrollIndicatorColor = rgb
+                prepared.gutterSeparatorColor = rgb
+            case .guiCursorline(let row, let r, let g, let b):
+                prepared.cursorlineRow = row
+                prepared.cursorlineBg = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            case .guiGutter(let data):
+                if data.isActive, let firstEntry = data.entries.first {
+                    prepared.viewportTopLine = firstEntry.bufLine
+                }
+            case .guiStatusBar(let update):
+                prepared.totalLineCount = update.lineCount
+            default:
+                break
+            }
+        }
+        return prepared
+    }
+
+    /// Freezes the editor render metadata (cursor shape, active gutter column,
+    /// split separators) that no window surface owns. Delta frames build on the
+    /// prior committed metadata; a base-0 keyframe resets the geometry parts
+    /// while the cursor shape persists, matching the removed `FrameState` seeding.
+    private func preparedMetadata() -> EditorSnapshotMetadata {
+        var metadata = committedMetadata
+        if baseFrameSeq == 0 {
+            metadata.gutterCol = 0
+            metadata.splitBorderColor = 0
+            metadata.verticalSeparators = []
+            metadata.horizontalSeparators = []
+        }
+        for command in metadataCommands.commands + windowCommands.commands + focusCommands.commands {
+            switch command {
+            case .setCursorShape(let shape):
+                metadata.cursorShape = shape
+            case .guiGutterSeparator(let col, _, _, _):
+                metadata.gutterCol = col
+            case .guiGutter(let data):
+                if data.isActive {
+                    metadata.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
+                }
+            case .guiSplitSeparators(let borderColor, let verticals, let horizontals):
+                metadata.splitBorderColor = borderColor
+                metadata.verticalSeparators = verticals
+                metadata.horizontalSeparators = horizontals
+            default:
+                break
+            }
+        }
+        return metadata
     }
 
     private mutating func resolveOverlayDelta(_ delta: GUIWindowOverlayDelta) {

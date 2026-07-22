@@ -60,6 +60,32 @@ func jsonUInt64(_ value: UInt64) -> Any {
     return String(value)
 }
 
+func highlightSpanJSON(_ span: GUIHighlightSpan) -> [String: Any] {
+    var result: [String: Any] = [:]
+    result["start_col"] = Int(span.startCol)
+    result["end_col"] = Int(span.endCol)
+    result["fg"] = Int(span.fg)
+    result["bg"] = Int(span.bg)
+    result["attrs"] = Int(span.attrs)
+    result["font_weight"] = Int(span.fontWeight)
+    result["font_id"] = Int(span.fontId)
+    return result
+}
+
+func visualRowJSON(_ row: GUIVisualRow) -> [String: Any] {
+    let spans: [[String: Any]] = row.spans.map { span in
+        highlightSpanJSON(span)
+    }
+    var result: [String: Any] = [:]
+    result["row_type"] = Int(row.rowType.rawValue)
+    result["row_id"] = jsonUInt64(row.rowId)
+    result["buf_line"] = Int(row.bufLine)
+    result["content_hash"] = Int(row.contentHash)
+    result["text"] = row.text
+    result["spans"] = spans
+    return result
+}
+
 func windowRowsDeltaResult(type: String, delta: GUIWindowRowsDelta) -> [String: Any] {
     func entryJSON(_ entry: GUIWindowRowDeltaEntry) -> [String: Any] {
         switch entry {
@@ -275,14 +301,9 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
                 "entries": entries]
 
     case .guiWindowContent(let data):
-        let rows = data.rows.map { row -> [String: Any] in
-            let spans = row.spans.map { s -> [String: Any] in
-                ["start_col": Int(s.startCol), "end_col": Int(s.endCol),
-                 "fg": Int(s.fg), "bg": Int(s.bg), "attrs": Int(s.attrs),
-                 "font_weight": Int(s.fontWeight), "font_id": Int(s.fontId)]
-            }
-            return ["row_type": Int(row.rowType.rawValue), "row_id": jsonUInt64(row.rowId), "buf_line": Int(row.bufLine),
-                    "content_hash": Int(row.contentHash), "text": row.text, "spans": spans]
+        let decodedRows = data.rowStore.rows(in: 0..<data.rowStore.count).rows
+        let rows: [[String: Any]] = decodedRows.map { row in
+            visualRowJSON(row)
         }
         var result: [String: Any] = [
             "type": "gui_window_content", "window_id": Int(data.windowId),

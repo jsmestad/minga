@@ -299,30 +299,7 @@ enum PreviewRegistry {
     }
 
     private static func populateEditorFrame(dispatcher: CommandDispatcher, guiState: GUIState) {
-        dispatcher.frameState.defaultBg = 0x282C34
-        dispatcher.frameState.gutterCol = 4
-        dispatcher.frameState.gutterSeparatorColor = 0x3E4452
-        dispatcher.frameState.cursorRow = 5
-        dispatcher.frameState.cursorCol = 12
-        dispatcher.frameState.cursorShape = .beam
-        dispatcher.frameState.cursorlineRow = 5
-        dispatcher.frameState.cursorlineBg = 0x2C323C
-        dispatcher.frameState.totalLineCount = 1250
-        dispatcher.frameState.viewportTopLine = 38
-        dispatcher.frameState.scrollIndicatorColor = 0x5C6370
-        // Indent guides for the visible window, matching previewEditorRows()
-        // (2-space Elixir indent). The cursor's enclosing level (col 2) is the
-        // active guide. Exercises the same render path the BEAM drives via the
-        // gui_indent_guides (0x91) opcode so the snapshot reflects the real
-        // editor surface rather than underselling it.
-        dispatcher.frameState.windowIndentGuides[1] = IndentGuideData(
-            windowId: 1,
-            tabWidth: 2,
-            activeGuideCol: 2,
-            guideCols: [0, 2],
-            lineIndentLevels: [0, 1, 1, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        )
-        dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
+        let gutter = Wire.WindowGutter(
             windowId: 1,
             contentRow: 1,
             contentCol: 0,
@@ -335,7 +312,19 @@ enum PreviewRegistry {
             signColWidth: 1,
             entries: previewGutterEntries()
         )
-        guiState.windowContents[1] = try GUIWindowContent(
+        // Indent guides for the visible window, matching previewEditorRows()
+        // (2-space Elixir indent). The cursor's enclosing level (col 2) is the
+        // active guide. Exercises the same render path the BEAM drives via the
+        // gui_indent_guides (0x91) opcode so the committed snapshot reflects the
+        // real editor surface rather than underselling it.
+        let indentGuides = IndentGuideData(
+            windowId: 1,
+            tabWidth: 2,
+            activeGuideCol: 2,
+            guideCols: [0, 2],
+            lineIndentLevels: [0, 1, 1, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        )
+        let content = try GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorVisible: true,
@@ -348,11 +337,93 @@ enum PreviewRegistry {
             diagnosticUnderlines: [GUIDiagnosticUnderline(startRow: 4, startCol: 20, endRow: 4, endCol: 31, severity: .warning)],
             documentHighlights: [GUIDocumentHighlight(startRow: 5, startCol: 4, endRow: 5, endCol: 10, kind: .read)],
             lineAnnotations: [],
+            paneGeometry: previewPaneGeometry(for: gutter, totalLineCount: 1250),
             // Current-line band on the cursor row. The renderer reads the
             // per-window cursorline (CoreTextMetalRenderer drawWindowedContent),
             // not frameState, so it must be set here to render.
             cursorline: GUICursorline(row: 5, bg: 0x2C323C)
         )
+        commitPreviewEditorFrame(
+            dispatcher: dispatcher,
+            defaultBg: 0x282C34,
+            gutterSeparatorColor: 0x3E4452,
+            cursorlineRow: 5,
+            cursorlineBg: 0x2C323C,
+            totalLineCount: 1250,
+            scrollIndicatorColor: 0x5C6370,
+            cursorShape: .beam,
+            content: content,
+            gutter: gutter,
+            indentGuides: indentGuides
+        )
+    }
+
+    /// Derives a committed pane geometry from a preview gutter so the snapshot
+    /// freeze accepts the surface. The editor authority (window content, gutter,
+    /// cursor shape, indent guides) now lives only on `CommittedEditorSnapshot`
+    /// (#2999 AC6), so previews must drive a real keyframe rather than mutating
+    /// removed `FrameState` fields.
+    private static func previewPaneGeometry(for gutter: Wire.WindowGutter, totalLineCount: UInt32) -> GUIPaneGeometry {
+        let gutterWidth = UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth)
+        let totalRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutter.contentWidth, height: gutter.contentHeight)
+        let textRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol + gutterWidth, width: gutter.contentWidth - gutterWidth, height: gutter.contentHeight)
+        let gutterRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutterWidth, height: gutter.contentHeight)
+        let totalLines = max(totalLineCount, UInt32(gutter.contentHeight))
+        return GUIPaneGeometry(
+            windowId: gutter.windowId,
+            totalRect: totalRect,
+            contentRect: totalRect,
+            textRect: textRect,
+            gutterRect: gutterRect,
+            clipRect: totalRect,
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: gutter.contentHeight, cols: textRect.width, totalLines: totalLines, visualRowOffset: 0, totalVisualRows: totalLines),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: UInt16(gutter.lineNumberWidth), signColWidth: UInt16(gutter.signColWidth)),
+            hitRegions: gutterWidth == 0 ? [] : [GUIHitRegion(kind: .gutter, rect: gutterRect, windowId: gutter.windowId)]
+        )
+    }
+
+    /// Required theme slots painted a neutral grey. The snapshot freeze validates
+    /// only that every required slot is present; the committed `themeColors` are
+    /// frozen from the pre-apply defaults, so these values do not change preview
+    /// fidelity — they exist to satisfy the keyframe theme-completeness gate.
+    private static func previewThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {
+        CommandDispatcher.requiredThemeSlots.map { ($0, 0x99, 0x99, 0x99) }
+    }
+
+    /// Publishes a preview editor keyframe through the real begin/commit path so
+    /// `dispatcher.committedEditorSnapshot` is populated for `draw`. Chrome-only
+    /// `FrameState` fields (background, cursorline band, totals, scroll indicator)
+    /// are seeded directly because they still live on `FrameState`; editor
+    /// authority is carried by the dispatched commands (#2999 AC6).
+    private static func commitPreviewEditorFrame(
+        dispatcher: CommandDispatcher,
+        defaultBg: UInt32,
+        gutterSeparatorColor: UInt32,
+        cursorlineRow: UInt16,
+        cursorlineBg: UInt32,
+        totalLineCount: UInt32,
+        scrollIndicatorColor: UInt32,
+        cursorShape: CursorShape,
+        content: GUIWindowContent,
+        gutter: Wire.WindowGutter,
+        indentGuides: IndentGuideData?
+    ) {
+        dispatcher.frameState.defaultBg = defaultBg
+        dispatcher.frameState.gutterSeparatorColor = gutterSeparatorColor
+        dispatcher.frameState.cursorlineRow = cursorlineRow
+        dispatcher.frameState.cursorlineBg = cursorlineBg
+        dispatcher.frameState.totalLineCount = totalLineCount
+        dispatcher.frameState.scrollIndicatorColor = scrollIndicatorColor
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: previewThemeSlots()))
+        dispatcher.dispatch(.setCursorShape(cursorShape))
+        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.dispatch(.guiGutter(data: gutter))
+        if let indentGuides {
+            dispatcher.dispatch(.guiIndentGuides(data: indentGuides))
+        }
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
     }
 
     private static func previewGutterEntries() -> [Wire.GutterEntry] {
@@ -455,18 +526,7 @@ enum PreviewRegistry {
     }
 
     private static func populateDiagnosticsEditorFrame(dispatcher: CommandDispatcher, guiState: GUIState) {
-        dispatcher.frameState.defaultBg = 0x282C34
-        dispatcher.frameState.gutterCol = 4
-        dispatcher.frameState.gutterSeparatorColor = 0x3E4452
-        dispatcher.frameState.cursorRow = 5
-        dispatcher.frameState.cursorCol = 12
-        dispatcher.frameState.cursorShape = .beam
-        dispatcher.frameState.cursorlineRow = 5
-        dispatcher.frameState.cursorlineBg = 0x2C323C
-        dispatcher.frameState.totalLineCount = 1250
-        dispatcher.frameState.viewportTopLine = 38
-        dispatcher.frameState.scrollIndicatorColor = 0x5C6370
-        dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
+        let gutter = Wire.WindowGutter(
             windowId: 1,
             contentRow: 1,
             contentCol: 0,
@@ -479,7 +539,7 @@ enum PreviewRegistry {
             signColWidth: 1,
             entries: previewDiagnosticsGutterEntries()
         )
-        guiState.windowContents[1] = try GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorVisible: true,
@@ -495,7 +555,21 @@ enum PreviewRegistry {
                 GUIDiagnosticUnderline(startRow: 1, startCol: 8, endRow: 1, endCol: 20, severity: .info),
             ],
             documentHighlights: [],
-            lineAnnotations: []
+            lineAnnotations: [],
+            paneGeometry: previewPaneGeometry(for: gutter, totalLineCount: 1250)
+        )
+        commitPreviewEditorFrame(
+            dispatcher: dispatcher,
+            defaultBg: 0x282C34,
+            gutterSeparatorColor: 0x3E4452,
+            cursorlineRow: 5,
+            cursorlineBg: 0x2C323C,
+            totalLineCount: 1250,
+            scrollIndicatorColor: 0x5C6370,
+            cursorShape: .beam,
+            content: content,
+            gutter: gutter,
+            indentGuides: nil
         )
     }
 

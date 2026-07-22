@@ -507,6 +507,8 @@ public struct GUIRetainedRowKey: Hashable, Sendable {
 /// this is stored but not yet used for rendering (draw_text still active).
 /// Phase 3 will switch rendering to use this data directly.
 public final class GUIWindowContent: Sendable {
+    /// Stable value identity for this immutable content instance without retaining it elsewhere.
+    public let renderIdentity: UUID
     public let windowId: UInt16
     public let fullRefresh: Bool
     public let contentEpoch: UInt32
@@ -526,9 +528,11 @@ public final class GUIWindowContent: Sendable {
     /// totals remain available from `rowStore.counters`.
     public let rowStoreOperationCounters: ResidentRowStoreCounters
 
+    #if DEBUG
     /// Compatibility view for protocol tests and non-rendering diagnostics.
-    /// Renderer hot paths must request a bounded slice from `rowStore`.
+    /// Renderer hot paths must request a bounded slice from `rowStore`; Release builds do not expose full resident-document materialization.
     public var rows: [GUIVisualRow] { rowStore.rows(in: 0..<rowStore.count).rows }
+    #endif
     public let selection: GUISelectionOverlay?
     public let searchMatches: [GUISearchMatch]
     public let diagnosticUnderlines: [GUIDiagnosticUnderline]
@@ -563,6 +567,7 @@ public final class GUIWindowContent: Sendable {
         let store = try ResidentRowStore(
             decodedRows: rows, resourceWeight: rowWeight, limit: residentLimit
         )
+        self.renderIdentity = UUID()
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -584,7 +589,7 @@ public final class GUIWindowContent: Sendable {
         self.resourceWeight = completeWeight
     }
 
-    private init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32,
+    private init(renderIdentity: UUID = UUID(), windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32,
          cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16, rowStore: ResidentRowStore,
          rowStoreOperationCounters: ResidentRowStoreCounters,
@@ -593,6 +598,7 @@ public final class GUIWindowContent: Sendable {
          lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?,
          cursorline: GUICursorline?, scrollPresentation: GUIScrollPresentation?,
          resourceWeight: FrameResourceWeight) {
+        self.renderIdentity = renderIdentity
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -617,6 +623,7 @@ public final class GUIWindowContent: Sendable {
     /// Returns the same immutable content while replacing per-frame operation counters.
     public func reportingOperationCounters(_ counters: ResidentRowStoreCounters) -> GUIWindowContent {
         GUIWindowContent(
+            renderIdentity: renderIdentity,
             windowId: windowId, fullRefresh: fullRefresh, contentEpoch: contentEpoch,
             cursorVisible: cursorVisible, cursorRow: cursorRow, cursorCol: cursorCol,
             cursorShape: cursorShape, scrollLeft: scrollLeft, rowStore: rowStore,
@@ -860,12 +867,13 @@ public final class GUIWindowContent: Sendable {
         afterApplying delta: GUIWindowRowsDelta, store: ResidentRowStore,
         scrollPresentation: GUIScrollPresentation?, residentLimit: FrameResourceWeight
     ) throws -> GUIWindowContent {
+        let nextPaneGeometry = delta.paneGeometry ?? paneGeometry
         let resultingWeight = try Self.resourceWeight(
             rowWeight: store.resourceWeight, selection: delta.selection,
             searchMatches: delta.searchMatches,
             diagnosticUnderlines: delta.diagnosticUnderlines,
             documentHighlights: delta.documentHighlights,
-            lineAnnotations: delta.lineAnnotations, paneGeometry: delta.paneGeometry
+            lineAnnotations: delta.lineAnnotations, paneGeometry: nextPaneGeometry
         )
         try Self.validate(resultingWeight, limit: residentLimit)
         return GUIWindowContent(
@@ -884,7 +892,7 @@ public final class GUIWindowContent: Sendable {
             diagnosticUnderlines: delta.diagnosticUnderlines,
             documentHighlights: delta.documentHighlights,
             lineAnnotations: delta.lineAnnotations,
-            paneGeometry: delta.paneGeometry,
+            paneGeometry: nextPaneGeometry,
             cursorline: delta.cursorline,
             scrollPresentation: scrollPresentation,
             resourceWeight: resultingWeight

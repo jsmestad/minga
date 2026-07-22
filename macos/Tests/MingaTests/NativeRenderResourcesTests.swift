@@ -20,6 +20,22 @@ private final class NativeTestDrawable: NSObject, CAMetalDrawable {
 
 private enum InjectedSubmissionFailure: Error { case failed }
 
+/// Zero-gutter pane geometry so `render(frameState:windowContents:)` fixtures can
+/// build a committed snapshot without seeding removed `FrameState` gutter fields
+/// (#2999 AC6). The gutter authority now lives on the snapshot's surfaces.
+private func nativeContentGeometry(windowId: UInt16 = 1, cols: UInt16, rows: UInt16) -> GUIPaneGeometry {
+    let rect = GUICellRect(row: 0, col: 0, width: cols, height: rows)
+    return GUIPaneGeometry(
+        windowId: windowId,
+        totalRect: rect, contentRect: rect, textRect: rect,
+        gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: rows),
+        clipRect: rect,
+        viewport: GUIViewportSummary(top: 0, left: 0, rows: rows, cols: cols, totalLines: UInt32(rows), visualRowOffset: 0, totalVisualRows: UInt32(rows)),
+        gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+        hitRegions: []
+    )
+}
+
 @Suite("Failure-atomic native render demand")
 struct NativeRenderResourcesTests {
     private let policy = FrameResourcePolicy.NativeRendererLimits(
@@ -348,15 +364,36 @@ struct NativeRenderResourcesTests {
     }
 
     @Test("late older completion cannot replace a newer completed generation")
-    func completionOrdering() {
+    func completionOrdering() throws {
         var ordering = NativePresentationGeneration()
-        let older = ordering.issue()
-        let newer = ordering.issue()
-        let promotedNewer = ordering.complete(newer)
-        let promotedOlder = ordering.complete(older)
+        let olderReservation = ordering.issue(slotCount: 3)
+        let newerReservation = ordering.issue(slotCount: 3)
+        let older = try #require(olderReservation)
+        let newer = try #require(newerReservation)
+        let promotedNewer = ordering.complete(newer.generation)
+        let promotedOlder = ordering.complete(older.generation)
         #expect(promotedNewer)
         #expect(!promotedOlder)
-        #expect(ordering.completed == newer)
+        #expect(ordering.completed == newer.generation)
+        #expect(ordering.inFlightCount == 0)
+    }
+
+    @Test("retired generation releases its native frame slot")
+    func retirementReleasesSlot() throws {
+        var ordering = NativePresentationGeneration()
+        let firstReservation = ordering.issue(slotCount: 2)
+        let secondReservation = ordering.issue(slotCount: 2)
+        let first = try #require(firstReservation)
+        let second = try #require(secondReservation)
+        #expect(ordering.issue(slotCount: 2) == nil)
+
+        ordering.retire(first.generation)
+        let replacementReservation = ordering.issue(slotCount: 2)
+        let replacement = try #require(replacementReservation)
+
+        #expect(replacement.slot == first.slot)
+        #expect(replacement.slot != second.slot)
+        #expect(ordering.inFlightCount == 2)
     }
 
     @Test("production raster allocator refusal is a typed local failure")
@@ -468,15 +505,10 @@ struct NativeRenderResourcesTests {
         let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0,
             cursorShape: .block, rows: [row], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: nativeContentGeometry(cols: 40, rows: 2)
         )
-        var frame = FrameState(cols: 40, rows: 2)
-        frame.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 2,
-            isActive: true, contentWidth: 40, cursorLine: 0,
-            lineNumberStyle: .absolute, lineNumberWidth: 2, signColWidth: 1,
-            entries: [.init(bufLine: 0, displayType: .normal, signType: .none)]
-        )
+        let frame = FrameState(cols: 40, rows: 2)
         let expected: [NativeRenderResourceDimension] = [
             .lineBuffer, .quadBuffer0, .quadBuffer1, .quadBuffer2
         ]
@@ -531,15 +563,10 @@ struct NativeRenderResourcesTests {
         let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0,
             cursorShape: .block, rows: [row], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: nativeContentGeometry(cols: 40, rows: 2)
         )
-        var frame = FrameState(cols: 40, rows: 2)
-        frame.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 2,
-            isActive: true, contentWidth: 40, cursorLine: 0,
-            lineNumberStyle: .none, lineNumberWidth: 0, signColWidth: 0,
-            entries: [.init(bufLine: 0, displayType: .normal, signType: .none)]
-        )
+        let frame = FrameState(cols: 40, rows: 2)
         let cases: [(NativePresentationFailure.Phase, (inout NativeRenderFactories) -> Void)] = [
             (.atlas, { factories in factories.makeTexture = { _, _ in nil } }),
             (.raster, { factories in
@@ -660,6 +687,44 @@ struct NativeRenderResourcesTests {
         #expect(renderer.lastCompletedPresentationGeneration == 0)
     }
 
+    @Test("renderer recovers after three consecutive completion failures")
+    @MainActor func completionFailuresReleaseNativeSlots() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return }
+
+        var completionCalls = 0
+        var presentCalls = 0
+        var reports: [NativePresentationFailure] = []
+        var factories = nativeTestFactories()
+        factories.observeCompletion = { _, completion in
+            completionCalls += 1
+            let succeeds = completionCalls > 3
+            completion(succeeds, Int((succeeds ? MTLCommandBufferStatus.completed : .error).rawValue))
+        }
+        factories.present = { _ in presentCalls += 1 }
+        factories.reportFailure = { reports.append($0) }
+        guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+
+        for sequence in 1...4 {
+            renderer.render(
+                frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
+                drawableProvider: { NativeTestDrawable(texture: texture) },
+                viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+                presentationInputSeq: UInt32(sequence)
+            )
+        }
+
+        #expect(reports.count == 3)
+        #expect(presentCalls == 1)
+        #expect(renderer.lastCompletedPresentationGeneration == 4)
+    }
+
     @Test("candidate presents and promotes only after both commands complete")
     @MainActor func twoStagePresentationOrdering() {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
@@ -713,6 +778,114 @@ struct NativeRenderResourcesTests {
         #expect(renderer.activeResourceSnapshot() != before)
     }
 
+    @Test("warm native slots reuse draw buffers and render targets after three in-flight generations")
+    @MainActor func warmNativeSlotsReuseResources() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return }
+        let row = GUIVisualRow(rowType: .normal, rowId: 51, bufLine: 0,
+                               contentHash: 51, text: "warm", spans: [])
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0,
+            cursorShape: .block, rows: [row], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: nativeContentGeometry(cols: 4, rows: 4)
+        )
+        let frame = FrameState(cols: 4, rows: 4)
+
+        var bufferAllocations = 0
+        var textureAllocations = 0
+        var factories = nativeTestFactories()
+        factories.makeBuffer = { device, length, options in
+            bufferAllocations += 1
+            return device.makeBuffer(length: length, options: options)
+        }
+        factories.makeTexture = { device, descriptor in
+            textureAllocations += 1
+            return device.makeTexture(descriptor: descriptor)
+        }
+        factories.observeCompletion = { _, completion in
+            completion(true, Int(MTLCommandBufferStatus.completed.rawValue))
+        }
+        factories.present = { _ in }
+        guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+
+        for seq in 1...3 {
+            renderer.render(
+                frameState: frame, fontManager: fontManager,
+                windowContents: [1: content], drawableProvider: { NativeTestDrawable(texture: texture) },
+                viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+                presentationInputSeq: UInt32(seq)
+            )
+        }
+        let warmBufferAllocations = bufferAllocations
+        let warmTextureAllocations = textureAllocations
+
+        renderer.render(
+            frameState: frame, fontManager: fontManager,
+            windowContents: [1: content], drawableProvider: { NativeTestDrawable(texture: texture) },
+            viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+            presentationInputSeq: 4
+        )
+
+        #expect(bufferAllocations == warmBufferAllocations)
+        #expect(textureAllocations == warmTextureAllocations)
+        #expect(renderer.lastCompletedPresentationGeneration == 4)
+    }
+
+    @Test("a fourth native generation is rejected while three are in flight")
+    @MainActor func fourthInFlightGenerationIsRejected() {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("Metal device is required for native generation coverage")
+            return
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            Issue.record("Metal texture is required for native generation coverage")
+            return
+        }
+
+        typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+        var completions: [Completion] = []
+        var reports: [NativePresentationFailure] = []
+        var factories = nativeTestFactories()
+        factories.observeCompletion = { _, completion in completions.append(completion) }
+        factories.reportFailure = { reports.append($0) }
+        guard let renderer = CoreTextMetalRenderer(factories: factories) else {
+            Issue.record("Native renderer is required for generation coverage")
+            return
+        }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+        let drawable = NativeTestDrawable(texture: texture)
+
+        for sequence in 1...4 {
+            renderer.render(
+                frameState: FrameState(cols: 4, rows: 4),
+                fontManager: fontManager,
+                drawableProvider: { drawable },
+                viewportSize: CGSize(width: 64, height: 64),
+                contentScale: 1,
+                presentationInputSeq: UInt32(sequence)
+            )
+        }
+
+        #expect(completions.count == 3)
+        #expect(reports.count == 1)
+        #expect(reports.first?.phase == .command)
+        #expect(reports.first?.dimension == .submission)
+        #expect(reports.first?.frameSequence == 4)
+        #expect(renderer.lastCompletedPresentationGeneration == 0)
+    }
+
     @Test("failed frame preserves a populated completed frame")
     @MainActor func failedFramePreservesPopulatedFrame() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
@@ -726,15 +899,10 @@ struct NativeRenderResourcesTests {
         let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0,
             cursorShape: .block, rows: [row], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: nativeContentGeometry(cols: 4, rows: 4)
         )
-        var frame = FrameState(cols: 4, rows: 4)
-        frame.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 4,
-            isActive: true, contentWidth: 4, cursorLine: 0,
-            lineNumberStyle: .none, lineNumberWidth: 0, signColWidth: 0,
-            entries: [.init(bufLine: 0, displayType: .normal, signType: .none)]
-        )
+        let frame = FrameState(cols: 4, rows: 4)
 
         var refuseSubmission = false
         var reports: [NativePresentationFailure] = []

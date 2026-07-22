@@ -508,6 +508,18 @@ struct GUIFrameSwiftUIInvalidationTests {
             recorder: recorder
         )
 
+        let countsBeforeEditorOnlyCommits = updateCounts(recorder)
+        var baseFrameSeq: UInt32 = 5
+        for frameSeq: UInt32 in 6...8 {
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: 1))
+            dispatcher.dispatch(.setCursorShape(frameSeq.isMultiple(of: 2) ? .beam : .block))
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+            baseFrameSeq = frameSeq
+        }
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+        expectUnchangedCounts(countsBeforeEditorOnlyCommits, recorder: recorder)
+
         #expect(gui.shellInput === shellInput)
         #expect(gui.editorInput === editorInput)
         #expect(gui.editorOverlayInput === editorOverlayInput)
@@ -1518,7 +1530,18 @@ struct GUIFrameSwiftUIInvalidationTests {
             selection: nil,
             searchMatches: [],
             diagnosticUnderlines: [],
-            documentHighlights: []
+            documentHighlights: [],
+            paneGeometry: GUIPaneGeometry(
+                windowId: 1,
+                totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                textRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+                clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 80, totalLines: 1, visualRowOffset: 0, totalVisualRows: 1),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+                hitRegions: []
+            )
         )
     }
 

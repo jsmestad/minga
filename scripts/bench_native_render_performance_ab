@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Run the complete native Metal renderer on alternating same-runner base/HEAD pairs.
+set -uo pipefail
+
+repo_root=$(git rev-parse --show-toplevel) || exit 2
+cd "$repo_root" || exit 2
+
+if [[ $# -eq 2 && $1 == "--head-only" ]]; then
+  head_only=1
+  base_sha=""
+  head_sha=$(git rev-parse "$2") || exit 2
+elif [[ $# -eq 2 ]]; then
+  head_only=0
+  base_sha=$(git rev-parse "$1") || exit 2
+  head_sha=$(git rev-parse "$2") || exit 2
+else
+  echo "usage: $0 BASE_SHA HEAD_SHA | --head-only HEAD_SHA" >&2
+  exit 2
+fi
+
+artifact_dir="${GITHUB_WORKSPACE:-$repo_root}"
+metrics_file="$artifact_dir/native_render_performance_metrics.txt"
+head_output="$artifact_dir/native_render_performance.json"
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-native-render-performance.XXXXXX")
+runner="$work_dir/check_native_render_performance"
+base_source="$work_dir/base-source"
+head_source="$work_dir/head-source"
+base_build="$work_dir/base-build"
+head_build="$work_dir/head-build"
+base_runs=()
+head_runs=()
+
+cleanup() { rm -rf "$work_dir"; }
+trap cleanup EXIT
+
+ruler_paths=(
+  macos/project.yml
+  macos/Sources/Protocol/RenderPerformanceGate.swift
+  macos/Tests/NativePerformance/NativeRenderPerformanceMain.swift
+  macos/Tests/Performance/NativeCompare/main.swift
+)
+
+git show "$head_sha:scripts/check_native_render_performance" > "$runner" || exit 2
+chmod +x "$runner"
+: > "$metrics_file"
+rm -f "$head_output"
+
+build_revision() {
+  local revision=$1 side=$2 source_root=$3 build_dir=$4 conditions=$5 path
+  echo "::group::Build native Metal benchmark $side ($revision)"
+  mkdir -p "$source_root"
+  git archive "$revision" | tar -x -C "$source_root" || return 1
+  for path in "${ruler_paths[@]}"; do
+    mkdir -p "$source_root/$(dirname "$path")"
+    git show "$head_sha:$path" > "$source_root/$path" || return 1
+  done
+  (cd "$source_root" && MIX_DEPS_PATH="$repo_root/deps" MIX_BUILD_PATH="$repo_root/_build/test" MIX_ENV=test mix protocol.gen >/dev/null) || return 1
+  MINGA_NATIVE_RENDER_ROOT="$source_root" \
+    MINGA_NATIVE_RENDER_SKIP_PROTOCOL_GEN=1 \
+    MINGA_NATIVE_RENDER_SWIFT_CONDITIONS="$conditions" \
+    "$runner" --build "$build_dir" || return 1
+  echo "::endgroup::"
+}
+
+measure_revision() {
+  local side=$1 pair=$2 source_root=$3 build_dir=$4
+  local output="$work_dir/$side-$pair.json" status=0
+  echo "::group::Measure native Metal benchmark $side pair $pair"
+  MINGA_NATIVE_RENDER_ROOT="$source_root" "$runner" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
+  if (( status != 0 )); then
+    find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'minga-native-render-performance*.ips' -mmin -10 -print -exec cp {} "$artifact_dir/" \; -exec cat {} \; 2>/dev/null || true
+    if command -v lldb >/dev/null; then
+      echo "Native benchmark trapped; rerunning once under LLDB for a symbolic backtrace" | tee -a "$metrics_file"
+      lldb --batch -o run -k "thread backtrace all" -- "$build_dir/Build/Products/Release/minga-native-render-performance" --measurement-output "$work_dir/$side-$pair-lldb.json" 2>&1 | tee -a "$metrics_file" || true
+    fi
+  fi
+  echo "::endgroup::"
+  [[ -s "$output" ]] || return 1
+  if [[ "$side" == base ]]; then
+    base_runs+=("$output")
+  else
+    head_runs+=("$output")
+    cp "$output" "$head_output"
+  fi
+  if [[ "$side" == head && $status -ne 0 ]]; then
+    echo "HEAD native measurement breached an absolute budget" >&2
+    return "$status"
+  fi
+}
+
+run_pairs() {
+  local pair
+  for pair in 1 2 3; do
+    if (( pair % 2 == 1 )); then
+      measure_revision base "$pair" "$base_source" "$base_build" || return 1
+      measure_revision head "$pair" "$head_source" "$head_build" || return 1
+    else
+      measure_revision head "$pair" "$head_source" "$head_build" || return 1
+      measure_revision base "$pair" "$base_source" "$base_build" || return 1
+    fi
+  done
+}
+
+compare_pairs() {
+  local args=() path
+  for path in "${base_runs[@]}"; do args+=(--base "$path"); done
+  for path in "${head_runs[@]}"; do args+=(--head "$path"); done
+  MINGA_NATIVE_RENDER_ROOT="$head_source" "$runner" --compare "$head_build" "${args[@]}" 2>&1 | tee -a "$metrics_file"
+}
+
+if ! build_revision "$head_sha" head "$head_source" "$head_build" MINGA_SNAPSHOT_RENDERER; then
+  echo "HEAD native Metal benchmark could not be built" >&2
+  exit 1
+fi
+
+if (( head_only )); then
+  measure_revision head 1 "$head_source" "$head_build" || exit 1
+  exit 0
+fi
+
+git cat-file -e "$base_sha^{commit}" 2>/dev/null || {
+  echo "error: merge-base $base_sha is unavailable for required native paired gate" >&2
+  exit 1
+}
+if ! build_revision "$base_sha" base "$base_source" "$base_build" MINGA_LEGACY_FRAGMENTED_RENDERER; then
+  echo "merge-base native Metal benchmark could not be built" >&2
+  exit 1
+fi
+run_pairs || exit 1
+compare_pairs

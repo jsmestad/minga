@@ -16,7 +16,7 @@ extension EditorGeometry {
                 cellWidth: v.cellWidth,
                 cellHeight: v.cellHeight,
                 viewportWidth: v.bounds.width,
-                gutterCol: Int(v.dispatcher.frameState.gutterCol),
+                gutterCol: Int(v.dispatcher.committedEditorSnapshot?.gutterCol ?? 0),
                 gutterLeftMargin: CoreTextMetalRenderer.gutterLeftMarginPt,
                 gutterRightGap: CoreTextMetalRenderer.gutterRightGapPt
             )

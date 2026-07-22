@@ -65,6 +65,32 @@ struct RenderCursor: Equatable {
     }
 }
 
+/// One presented editor surface bundled with the bounded row preparation the
+/// renderer computed for it in this frame.
+///
+/// This keeps the complete `PresentedWindowSurface` (content, gutter,
+/// pane geometry, indent guides) travelling with its `prepared`/`slice`
+/// products through metrics, atlas demand, content, gutter, indent-guide,
+/// cursor, and scroll-indicator passes. No pass rejoins per-window state from
+/// separate keyed collections after the transaction freeze.
+struct PreparedPresentedSurface {
+    let surface: PresentedWindowSurface
+    let prepared: ResidentRenderPreparationResult
+    let slice: RendererRowSlice
+
+    init(surface: PresentedWindowSurface, prepared: ResidentRenderPreparationResult) {
+        self.surface = surface
+        self.prepared = prepared
+        self.slice = RendererSignposts.rowSlice(for: prepared)
+    }
+
+    var content: GUIWindowContent { surface.content }
+    var renderGutter: Wire.WindowGutter { surface.renderGutter }
+    var paneGeometry: GUIPaneGeometry { surface.paneGeometry }
+    var indentGuides: IndentGuideData? { surface.indentGuides }
+    var windowId: UInt16 { surface.windowId }
+}
+
 /// Default background clear color (dark gray matching the default bg).
 /// Linear equivalents of sRGB (0.12, 0.12, 0.14).
 private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
@@ -292,13 +318,24 @@ final class CoreTextMetalRenderer {
     private var frameMetrics = FrameMetrics()
     /// Last immutable content value whose staging counters were reported.
     private var residentMetricContentIdentities: [UInt16: ObjectIdentifier] = [:]
+    /// Last successfully presented full-refresh value invalidated in each window's atlas namespace.
+    private var atlasFullRefreshIdentities: [UInt16: UUID] = [:]
 
-    /// Metal buffer for line GPU instances (one instanced draw call).
+    /// Metal buffer most recently promoted for line GPU instances (one instanced draw call).
     private var instanceBuffer: MTLBuffer?
     private var maxInstanceSlots: Int = 0
 
-    /// Number of in-flight frames for triple-buffered quad uploads.
-    private static let quadBufferFrameCount = 3
+    /// Number of renderer-owned reusable slots, matching the maximum allowed native generations in flight.
+    private static let nativeFrameSlotCount = 3
+    private static let quadBufferFrameCount = nativeFrameSlotCount
+
+    /// Reusable line-instance buffers, one per native frame slot. Slots grow on demand and are reused after warm-up.
+    private var lineBufferSlots: [MTLBuffer?] = Array(repeating: nil, count: CoreTextMetalRenderer.nativeFrameSlotCount)
+    private var lineBufferSlotBytes: [Int] = Array(repeating: 0, count: CoreTextMetalRenderer.nativeFrameSlotCount)
+
+    /// Reusable offscreen render targets, one per native frame slot. Slots grow on size changes and are reused after warm-up.
+    private var renderTargetSlots: [MTLTexture?] = Array(repeating: nil, count: CoreTextMetalRenderer.nativeFrameSlotCount)
+    private var renderTargetSlotSizes: [(width: Int, height: Int)] = Array(repeating: (0, 0), count: CoreTextMetalRenderer.nativeFrameSlotCount)
 
     /// Triple-buffered quad instance buffers for bg/overlay/diagnostic passes.
     ///
@@ -308,6 +345,10 @@ final class CoreTextMetalRenderer {
     /// in-flight frame (rotated each frame) avoids CPU/GPU contention: the CPU
     /// writes the next frame's buffer while the GPU reads the previous one.
     private var quadBuffers: [MTLBuffer] = []
+
+    /// Reusable quad buffer sets, one set per native frame slot. Each slot owns the buffers needed for all in-flight-safe uploads for that generation.
+    private var quadBufferSlots: [[MTLBuffer]] = Array(repeating: [], count: CoreTextMetalRenderer.nativeFrameSlotCount)
+    private var quadBufferSlotBytes: [Int] = Array(repeating: 0, count: CoreTextMetalRenderer.nativeFrameSlotCount)
 
     /// Capacity (in quads) of each entry in `quadBuffers`. Grows on demand.
     private var quadBufferCapacity: Int = 0
@@ -331,16 +372,11 @@ final class CoreTextMetalRenderer {
                                       policy: resourcePolicy, makeTexture: factories.makeTexture)
     }
 
-    /// Render the editor from FrameState metadata + semantic window content.
+    /// Render the editor from one complete committed snapshot.
     ///
-    /// Buffer windows with semantic content (from 0x80 opcode) are rendered
-    /// via `WindowContentRenderer`. Frame metadata (cursor, gutter, cursorline,
-    /// default bg) comes from FrameState. Content comes from WindowContentRenderer
-    /// via the gui_window_content (0x80) semantic rendering pipeline.
-    func render(frameState: FrameState, fontManager: FontManager,
+    /// Buffer windows with semantic content are rendered via their already-paired snapshot surfaces. The renderer must not accept independently read `FrameState` and window-content dictionaries from production call sites.
+    func render(snapshot: CommittedEditorSnapshot, fontManager: FontManager,
                 cursorBlinkVisible: Bool = true,
-                windowContents: [UInt16: GUIWindowContent] = [:],
-                themeColors: ThemeColors? = nil,
                 isMouseInGutter: Bool = false,
                 gutterHoverWindowId: UInt16? = nil,
                 gutterHoverRow: UInt16? = nil,
@@ -348,8 +384,30 @@ final class CoreTextMetalRenderer {
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
                 presentationWindowId: UInt16? = nil,
                 presentationInputSeq: UInt32 = 0,
-                presentationFrame: GUICommittedFrame? = nil,
-                latencyRecorder: LatencyRecorder? = nil) {
+                latencyRecorder: LatencyRecorder? = nil,
+                onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) {
+        guard let reservation = presentationGeneration.issue(slotCount: Self.nativeFrameSlotCount) else {
+            let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+            recordNativeFailure(NativePresentationFailure(
+                phase: .command, dimension: .submission,
+                frameSequence: presentationInputSeq, reason: .unavailable
+            ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+            latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
+            return
+        }
+        let generation = reservation.generation
+        let nativeFrameSlot = reservation.slot
+        var submitted = false
+        defer {
+            if !submitted { presentationGeneration.retire(generation) }
+        }
+
+        let frameState = snapshot.frameState
+        let metadata = snapshot.metadata
+        let themeColors = snapshot.themeColors
+        let surfaces = snapshot.surfaces
+        let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+        let presentedSnapshot = snapshot
         let renderSignpostID = OSSignpostID(log: renderLog)
         os_signpost(.begin, log: renderLog, name: "Frame", signpostID: renderSignpostID)
         defer {
@@ -387,32 +445,34 @@ final class CoreTextMetalRenderer {
         // Gutter spacing is also needed to derive the exact clipped command
         // viewport. Prepare each resident window once, then reuse that result
         // for metrics, atlas demand, gutters, and CoreText rendering.
-        let hasGutterChrome = frameState.gutterCol > 0 || !frameState.windowGutters.isEmpty
+        let hasGutterChrome = metadata.gutterCol > 0 || surfaces.contains { surface in
+            let gutter = surface.renderGutter
+            return gutter.lineNumberWidth > 0 || gutter.signColWidth > 0 || !gutter.entries.isEmpty
+        }
         let gutterLeftMarginPt: Float = hasGutterChrome ? round(Float(Self.gutterLeftMarginPt) * scale) / scale : 0
         let gutterLeftMarginPx = gutterLeftMarginPt * scale
         let gutterPaddingPt: Float = hasGutterChrome ? round(Float(Self.gutterRightGapPt) * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
 
-        var preparedRowsByWindow: [UInt16: ResidentRenderPreparationResult] = [:]
-        var visibleSlices: [UInt16: RendererRowSlice] = [:]
-        preparedRowsByWindow.reserveCapacity(windowContents.count)
-        visibleSlices.reserveCapacity(windowContents.count)
-        for content in windowContents.values {
-            let fallbackRows = Int(content.paneGeometry?.textRect.height
-                ?? frameState.windowGutters[content.windowId]?.contentHeight
-                ?? frameState.rows)
-            let gutter = frameState.windowGutters[content.windowId]
-            let contentCols = gutter.map {
-                CoreTextMetalRenderer.visibleTextCols(
-                    geometry: content.paneGeometry,
-                    gutter: $0,
-                    frameCols: frameState.cols,
-                    cellW: cellW,
-                    scale: scale,
-                    gutterLeftMarginPx: gutterLeftMarginPx,
-                    gutterPaddingPx: gutterPaddingPx
-                )
-            } ?? Int(frameState.cols)
+        // Each surface stays whole: its content, gutter, pane geometry, and
+        // indent guides ride alongside the bounded preparation/slice this frame
+        // computed for it. Every downstream pass reads this ordered array; no
+        // per-window state is rejoined from a separate keyed collection.
+        var preparedSurfaces: [PreparedPresentedSurface] = []
+        preparedSurfaces.reserveCapacity(surfaces.count)
+        for surface in surfaces {
+            let content = surface.content
+            let gutter = surface.renderGutter
+            let fallbackRows = Int(surface.paneGeometry.textRect.height)
+            let contentCols = CoreTextMetalRenderer.visibleTextCols(
+                geometry: surface.paneGeometry,
+                gutter: gutter,
+                frameCols: frameState.cols,
+                cellW: cellW,
+                scale: scale,
+                gutterLeftMarginPx: gutterLeftMarginPx,
+                gutterPaddingPx: gutterPaddingPx
+            )
             let scrollLeftInt = Int(content.scrollLeft)
             let localScrollInsetCols = scrollLeftInt > 0 ? 1 : 0
             let prepared = ResidentRenderPreparation.prepare(
@@ -422,11 +482,10 @@ final class CoreTextMetalRenderer {
                 scrollLeft: max(scrollLeftInt - localScrollInsetCols, 0),
                 viewportCols: contentCols + 2
             )
-            preparedRowsByWindow[content.windowId] = prepared
-            let slice = RendererSignposts.rowSlice(for: prepared)
-            visibleSlices[content.windowId] = slice
+            let preparedSurface = PreparedPresentedSurface(surface: surface, prepared: prepared)
+            preparedSurfaces.append(preparedSurface)
             // This is the sole production resident traversal counter update.
-            RendererSignposts.recordVisibleSlice(slice, in: &frameMetrics)
+            RendererSignposts.recordVisibleSlice(preparedSurface.slice, in: &frameMetrics)
             frameMetrics.decorationsVisited += prepared.decorationsVisited
             RendererSignposts.recordOperation(
                 RendererSignposts.operationCounters(
@@ -453,8 +512,7 @@ final class CoreTextMetalRenderer {
         let candidateWindowRenderer = activeWindowRenderer.makeCandidate(rasterizer: candidateRasterizer)
         let candidateAtlas = activeAtlas.makeCandidate()
         let neededSlots = CoreTextMetalRenderer.atlasSlotDemand(
-            frameState: frameState, windowContents: windowContents,
-            preparedRows: preparedRowsByWindow
+            frameState: frameState, metadata: metadata, preparedSurfaces: preparedSurfaces
         )
         let atlasPixelWidth = Int(ceil(CGFloat(frameState.cols) * CGFloat(cellW) * CGFloat(scale)))
         switch candidateAtlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth,
@@ -473,7 +531,15 @@ final class CoreTextMetalRenderer {
         candidateWindowRenderer.updateViewportWidth(cols: frameState.cols)
         if let tc = themeColors { candidateWindowRenderer.defaultFgRGB = tc.editorFgRGB }
         candidateAtlas.beginFrame()
-        Self.invalidateFullRefreshWindows(in: candidateAtlas, windowContents: windowContents)
+        let presentedWindowIDs = Set(surfaces.map(\.windowId))
+        var candidateFullRefreshIdentities = atlasFullRefreshIdentities.filter {
+            presentedWindowIDs.contains($0.key)
+        }
+        Self.invalidateFullRefreshWindows(
+            in: candidateAtlas,
+            surfaces: surfaces,
+            lastIdentities: &candidateFullRefreshIdentities
+        )
 
         // Default background color.
         let defaultBg = frameState.defaultBg != 0
@@ -498,8 +564,8 @@ final class CoreTextMetalRenderer {
         }
 
         let resolvedCursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
-            windowContents: windowContents,
+            surfaces: surfaces,
+            activeWindowId: snapshot.activeSurface?.windowId,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -507,6 +573,12 @@ final class CoreTextMetalRenderer {
             gutterPaddingPx: gutterPaddingPx
         )
         let renderCursor = animatedCursor(for: resolvedCursor, teleportLineThresholdPx: displayCellH * scale * 50.0)
+        // The cursor names exactly one window; select its complete surface once.
+        // This is a single-window lookup, not fragmented per-window joining.
+        let cursorSurface: PresentedWindowSurface? = renderCursor?.windowId
+            .flatMap { id in surfaces.first { $0.windowId == id } }
+        let activeSurface: PresentedWindowSurface? = snapshot.activeWindowId
+            .flatMap { id in surfaces.first { $0.windowId == id } }
 
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
@@ -520,27 +592,24 @@ final class CoreTextMetalRenderer {
         var diagnosticQuads: [QuadGPU] = []
 
         if let wcr = windowContentRenderer {
-            for (_, content) in windowContents {
-                // Match gutter data to semantic window content by windowId.
-                guard let gutter = frameState.windowGutters[content.windowId] else {
-                    continue
-                }
-
-                let paneGeometry = content.paneGeometry
+            for preparedSurface in preparedSurfaces {
+                let surface = preparedSurface.surface
+                let content = surface.content
+                let gutter = surface.renderGutter
+                let paneGeometry = surface.paneGeometry
                 let windowScrollOffsetPx = CoreTextMetalRenderer.smoothScrollOffset(
                     for: content.windowId,
                     targetWindowId: scrollTargetWindowId,
                     scrollOffsetPx: smoothScrollOffsetPx
                 )
-                let windowRowOffset = Float(paneGeometry?.textRect.row ?? gutter.contentRow) * displayCellH * scale
+                let windowRowOffset = Float(paneGeometry.textRect.row) * displayCellH * scale
                 let presentationScrollOffsetPx = CoreTextMetalRenderer.presentationScrollOffset(
                     scrollLeft: content.scrollLeft,
                     scrollOffsetPx: windowScrollOffsetPx
                 )
                 let scrollableWindowRowOffset = windowRowOffset - presentationScrollOffsetPx.y
                 let scrollableWindowColOffset = presentationScrollOffsetPx.x
-                let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
-                let textCol = Float(paneGeometry?.textRect.col ?? fallbackTextCol)
+                let textCol = Float(paneGeometry.textRect.col)
                 let contentColOffset = textCol * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
                 let windowBounds = CoreTextMetalRenderer.windowHorizontalBounds(
                     geometry: paneGeometry,
@@ -551,8 +620,8 @@ final class CoreTextMetalRenderer {
                     viewportWidth: Float(viewportSize.width)
                 )
                 let contentRightPx = windowBounds.x + windowBounds.width
-                let contentTopPx = Float(paneGeometry?.textRect.row ?? gutter.contentRow) * displayCellH * scale
-                guard let visibleSlice = visibleSlices[content.windowId] else { continue }
+                let contentTopPx = Float(paneGeometry.textRect.row) * displayCellH * scale
+                let visibleSlice = preparedSurface.slice
                 let overscanBeforeRows = visibleSlice.overscanBeforeRows
                 let committedVisibleRows = CoreTextMetalRenderer.committedVisibleRows(
                     paneGeometry: paneGeometry,
@@ -577,7 +646,7 @@ final class CoreTextMetalRenderer {
                 // panes (including the agent panel edge) have no band above them.
                 if windowBounds.width > 0,
                    let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(
-                       paneTopRow: Int(paneGeometry?.textRect.row ?? gutter.contentRow),
+                       paneTopRow: Int(paneGeometry.textRect.row),
                        paneRows: committedVisibleRows,
                        totalRows: Int(frameState.rows),
                        displayCellH: displayCellH,
@@ -700,7 +769,7 @@ final class CoreTextMetalRenderer {
 
                 // Reuse the shared Metal-free CoreText commands prepared once
                 // at the start of this frame.
-                guard let preparedRows = preparedRowsByWindow[content.windowId] else { continue }
+                let preparedRows = preparedSurface.prepared
                 var visibleRowWidths: [UInt16: Int] = [:]
                 for command in preparedRows.commands {
                     let displayRow = command.displayRow
@@ -817,12 +886,16 @@ final class CoreTextMetalRenderer {
         }
 
         // Native gutter rendering from structured data.
-        // One Wire.WindowGutter per editor window (split pane).
-        for (_, windowGutter) in frameState.windowGutters {
+        // One presented surface per editor window (split pane); its gutter and
+        // slice travel together, so no per-window state is rejoined here.
+        for preparedSurface in preparedSurfaces {
+            let windowGutter = preparedSurface.renderGutter
+            guard windowGutter.lineNumberWidth > 0 || windowGutter.signColWidth > 0 || !windowGutter.entries.isEmpty else { continue }
+            let slice = preparedSurface.slice
             renderGutterEntries(
                 gutter: windowGutter,
-                frameState: frameState,
                 cellW: cellW, cellH: displayCellH, scale: scale,
+                frameState: frameState,
                 gutterLeftMarginPx: gutterLeftMarginPx,
                 gutterPaddingPx: gutterPaddingPx,
                 viewportWidthPx: Float(viewportSize.width),
@@ -834,12 +907,8 @@ final class CoreTextMetalRenderer {
                     targetWindowId: scrollTargetWindowId,
                     scrollOffsetPx: smoothScrollOffsetPx
                 ).y,
-                entryRange: visibleSlices[windowGutter.windowId].map {
-                    RendererSignposts.gutterRange(for: windowGutter, slice: $0)
-                } ?? 0..<min(Int(windowGutter.contentHeight), windowGutter.entries.count),
-                overscanBeforeRows: visibleSlices[windowGutter.windowId]?.overscanBeforeRows
-                    ?? windowContents[windowGutter.windowId].map(CoreTextMetalRenderer.presentationOverscanBeforeRows)
-                    ?? CoreTextMetalRenderer.scrollOverscanBefore(windowContents[windowGutter.windowId]?.scrollPresentation),
+                entryRange: RendererSignposts.gutterRange(for: windowGutter, slice: slice),
+                overscanBeforeRows: slice.overscanBeforeRows,
                 atlas: candidateAtlas,
                 windowRenderer: candidateWindowRenderer,
                 bgQuads: &bgQuads,
@@ -856,14 +925,15 @@ final class CoreTextMetalRenderer {
         // Derive one exact aggregate buffer request before command creation. No
         // buffer is replaced or grown while a pass is being encoded.
         let gutterChromeQuads = CoreTextMetalRenderer.gutterChromeQuads(
-            frameState: frameState, cellW: cellW, cellH: displayCellH, scale: scale,
+            frameState: frameState, metadata: metadata, surfaces: surfaces,
+            cellW: cellW, cellH: displayCellH, scale: scale,
             gutterLeftMarginPx: gutterLeftMarginPx, gutterPaddingPx: gutterPaddingPx,
             viewportHeight: Float(viewportSize.height), defaultBg: defaultBg,
             separatorColor: colorFromU24(frameState.gutterSeparatorColor,
                                          default: SIMD3<Float>(0.3, 0.3, 0.3))
         )
         let guidePassCounts = indentGuideQuadCounts(
-            frameState: frameState, windowContents: windowContents,
+            frameState: frameState, surfaces: surfaces,
             cellW: cellW, displayCellH: displayCellH, scale: scale,
             gutterLeftMarginPx: gutterLeftMarginPx, gutterPaddingPx: gutterPaddingPx,
             viewportSize: viewportSize, scrollTargetWindowId: scrollTargetWindowId,
@@ -894,33 +964,43 @@ final class CoreTextMetalRenderer {
         }
         let candidateInstanceBuffer: MTLBuffer?
         if bufferDemand.lineBytes > 0 {
-            guard let buffer = factories.makeBuffer(device, bufferDemand.lineBytes, .storageModeShared) else {
-                recordNativeFailure(NativePresentationFailure(
-                    phase: .buffers, dimension: .lineBuffer,
-                    requested: bufferDemand.lineBytes,
-                    frameSequence: presentationInputSeq, reason: .allocation
-                ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                return
+            if lineBufferSlotBytes[nativeFrameSlot] < bufferDemand.lineBytes || lineBufferSlots[nativeFrameSlot] == nil {
+                guard let buffer = factories.makeBuffer(device, bufferDemand.lineBytes, .storageModeShared) else {
+                    recordNativeFailure(NativePresentationFailure(
+                        phase: .buffers, dimension: .lineBuffer,
+                        requested: bufferDemand.lineBytes,
+                        frameSequence: presentationInputSeq, reason: .allocation
+                    ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+                    return
+                }
+                lineBufferSlots[nativeFrameSlot] = buffer
+                lineBufferSlotBytes[nativeFrameSlot] = bufferDemand.lineBytes
             }
-            candidateInstanceBuffer = buffer
+            candidateInstanceBuffer = lineBufferSlots[nativeFrameSlot]
         } else {
             candidateInstanceBuffer = nil
         }
         var candidateQuadBuffers: [MTLBuffer] = []
         if bufferDemand.quadBytesPerBuffer > 0 {
-            let dimensions: [NativeRenderResourceDimension] = [.quadBuffer0, .quadBuffer1, .quadBuffer2]
-            for index in 0..<Self.quadBufferFrameCount {
-                guard let buffer = factories.makeBuffer(device, bufferDemand.quadBytesPerBuffer,
-                                                        .storageModeShared) else {
-                    recordNativeFailure(NativePresentationFailure(
-                        phase: .buffers, dimension: dimensions[index],
-                        requested: bufferDemand.quadBytesPerBuffer,
-                        frameSequence: presentationInputSeq, reason: .allocation
-                    ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                    return
+            if quadBufferSlotBytes[nativeFrameSlot] < bufferDemand.quadBytesPerBuffer || quadBufferSlots[nativeFrameSlot].count != Self.quadBufferFrameCount {
+                var allocatedBuffers: [MTLBuffer] = []
+                let dimensions: [NativeRenderResourceDimension] = [.quadBuffer0, .quadBuffer1, .quadBuffer2]
+                for index in 0..<Self.quadBufferFrameCount {
+                    guard let buffer = factories.makeBuffer(device, bufferDemand.quadBytesPerBuffer,
+                                                            .storageModeShared) else {
+                        recordNativeFailure(NativePresentationFailure(
+                            phase: .buffers, dimension: dimensions[index],
+                            requested: bufferDemand.quadBytesPerBuffer,
+                            frameSequence: presentationInputSeq, reason: .allocation
+                        ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+                        return
+                    }
+                    allocatedBuffers.append(buffer)
                 }
-                candidateQuadBuffers.append(buffer)
+                quadBufferSlots[nativeFrameSlot] = allocatedBuffers
+                quadBufferSlotBytes[nativeFrameSlot] = bufferDemand.quadBytesPerBuffer
             }
+            candidateQuadBuffers = quadBufferSlots[nativeFrameSlot]
         }
 
         // Render into a private candidate image. The drawable remains untouched
@@ -976,15 +1056,27 @@ final class CoreTextMetalRenderer {
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
             return
         }
-        let targetDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm_srgb,
-            width: targetDemand.width,
-            height: targetDemand.height,
-            mipmapped: false
-        )
-        targetDescriptor.usage = .renderTarget
-        targetDescriptor.storageMode = .private
-        guard let candidateRenderTarget = factories.makeTexture(device, targetDescriptor) else {
+        if renderTargetSlots[nativeFrameSlot] == nil || renderTargetSlotSizes[nativeFrameSlot].width != targetDemand.width || renderTargetSlotSizes[nativeFrameSlot].height != targetDemand.height {
+            let targetDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .bgra8Unorm_srgb,
+                width: targetDemand.width,
+                height: targetDemand.height,
+                mipmapped: false
+            )
+            targetDescriptor.usage = .renderTarget
+            targetDescriptor.storageMode = .private
+            guard let renderTarget = factories.makeTexture(device, targetDescriptor) else {
+                recordNativeFailure(NativePresentationFailure(
+                    phase: .drawable, dimension: .renderTarget,
+                    requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
+                    frameSequence: presentationInputSeq, reason: .allocation
+                ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
+                return
+            }
+            renderTargetSlots[nativeFrameSlot] = renderTarget
+            renderTargetSlotSizes[nativeFrameSlot] = (targetDemand.width, targetDemand.height)
+        }
+        guard let candidateRenderTarget = renderTargetSlots[nativeFrameSlot] else {
             recordNativeFailure(NativePresentationFailure(
                 phase: .drawable, dimension: .renderTarget,
                 requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
@@ -1046,13 +1138,12 @@ final class CoreTextMetalRenderer {
         // Drawn after bg fills but before text, cursor, and selection overlays.
         // When per-line indent levels are available, draw segments only in
         // leading whitespace so guides don't bleed through text content.
-        for (_, guideData) in frameState.windowIndentGuides {
-            guard !guideData.guideCols.isEmpty else { continue }
+        for surface in surfaces {
+            guard let guideData = surface.indentGuides, !guideData.guideCols.isEmpty else { continue }
 
-            guard let gutter = frameState.windowGutters[guideData.windowId] else { continue }
-            let paneGeometry = windowContents[guideData.windowId]?.paneGeometry
-            let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
-            let windowContentColOffset = Float(paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let gutter = surface.renderGutter
+            let paneGeometry = surface.paneGeometry
+            let windowContentColOffset = Float(paneGeometry.textRect.col) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let windowBounds = CoreTextMetalRenderer.windowHorizontalBounds(
                 geometry: paneGeometry,
                 gutter: gutter,
@@ -1065,7 +1156,7 @@ final class CoreTextMetalRenderer {
             let lineCellH = displayCellH * scale
             let inactiveFg = colorFromU24(frameState.gutterColors.fg, default: SIMD3<Float>(0.33, 0.33, 0.33))
             let tabW = max(UInt16(guideData.tabWidth), 1)
-            let guideScrollLeft = windowContents[guideData.windowId]?.scrollLeft ?? 0
+            let guideScrollLeft = surface.content.scrollLeft
             let guideScrollOffset = CoreTextMetalRenderer.presentationScrollOffset(
                 scrollLeft: guideScrollLeft,
                 scrollOffsetPx: CoreTextMetalRenderer.smoothScrollOffset(
@@ -1076,8 +1167,8 @@ final class CoreTextMetalRenderer {
             )
             let guideScrollOffsetY = guideScrollOffset.y
             let guideScrollOffsetX = guideScrollOffset.x
-            let guideTopY = Float(paneGeometry?.textRect.row ?? gutter.contentRow) * displayCellH * scale
-            let guideHeightPx = Float(max(Int(paneGeometry?.textRect.height ?? gutter.contentHeight), 0)) * lineCellH
+            let guideTopY = Float(paneGeometry.textRect.row) * displayCellH * scale
+            let guideHeightPx = Float(max(Int(paneGeometry.textRect.height), 0)) * lineCellH
             let guideBottomY = min(guideTopY + guideHeightPx, Float(viewportSize.height))
             let textRightPx = contentRightPx
 
@@ -1143,7 +1234,7 @@ final class CoreTextMetalRenderer {
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
         if let renderCursor, cursorBlinkVisible, renderCursor.shape == .block {
-            let cursorScrollLeft = renderCursor.windowId.flatMap { windowContents[$0]?.scrollLeft } ?? 0
+            let cursorScrollLeft = cursorSurface?.content.scrollLeft ?? 0
             let cursorScrollOffsetPx = CoreTextMetalRenderer.presentationScrollOffset(
                 scrollLeft: cursorScrollLeft,
                 scrollOffsetPx: CoreTextMetalRenderer.smoothScrollOffset(
@@ -1157,11 +1248,10 @@ final class CoreTextMetalRenderer {
             var cursorQuad = QuadGPU()
             let cursorWidth = CoreTextMetalRenderer.snapToPixel(cellW * scale)
             let cursorHeight = CoreTextMetalRenderer.snapToPixel(displayCellH * scale)
-            let cursorWindowBounds = renderCursor.windowId.flatMap { windowId -> (x: Float, width: Float)? in
-                guard let gutter = frameState.windowGutters[windowId] else { return nil }
-                return CoreTextMetalRenderer.cursorHorizontalBounds(
-                    geometry: windowContents[windowId]?.paneGeometry,
-                    gutter: gutter,
+            let cursorWindowBounds = cursorSurface.map { surface in
+                CoreTextMetalRenderer.cursorHorizontalBounds(
+                    geometry: surface.paneGeometry,
+                    gutter: surface.renderGutter,
                     frameCols: frameState.cols,
                     cellW: cellW,
                     scale: scale,
@@ -1170,14 +1260,14 @@ final class CoreTextMetalRenderer {
                     viewportWidth: Float(viewportSize.width)
                 )
             }
-            let cursorBounds = CoreTextMetalRenderer.paneVerticalBounds(
-                for: renderCursor.windowId,
-                windowContents: windowContents,
-                gutters: frameState.windowGutters,
-                displayCellH: displayCellH,
-                scale: scale,
-                viewportHeight: Float(viewportSize.height)
-            )
+            let cursorBounds = cursorSurface.flatMap { surface in
+                CoreTextMetalRenderer.paneVerticalBounds(
+                    geometry: surface.paneGeometry,
+                    displayCellH: displayCellH,
+                    scale: scale,
+                    viewportHeight: Float(viewportSize.height)
+                )
+            }
             var shouldDrawCursor = true
             if let cursorWindowBounds, let cursorBounds {
                 if let horizontal = CoreTextMetalRenderer.clipHorizontalRect(x: cursorX, width: cursorWidth, left: cursorWindowBounds.x, right: cursorWindowBounds.x + cursorWindowBounds.width), let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: cursorY, height: cursorHeight, top: cursorBounds.top, bottom: cursorBounds.bottom) {
@@ -1241,11 +1331,11 @@ final class CoreTextMetalRenderer {
 
         // Pass 5.5: Split separators (vertical lines between split panes,
         // horizontal bars with centered filenames for horizontal splits).
-        if frameState.splitBorderColor != 0 {
-            let sepColor = colorFromU24(frameState.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
+        if metadata.splitBorderColor != 0 {
+            let sepColor = colorFromU24(metadata.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
 
             // Vertical separators: 1px-wide lines spanning startRow..endRow
-            for vert in frameState.verticalSeparators {
+            for vert in metadata.verticalSeparators {
                 let sepX = Float(vert.col) * cellW * scale
                 let sepY = Float(vert.startRow) * displayCellH * scale
                 let sepH = Float(vert.endRow &- vert.startRow &+ 1) * displayCellH * scale
@@ -1263,7 +1353,7 @@ final class CoreTextMetalRenderer {
             }
 
             // Horizontal separators: 1px-high line + centered filename label
-            for (separatorIndex, horiz) in frameState.horizontalSeparators.enumerated() {
+            for (separatorIndex, horiz) in metadata.horizontalSeparators.enumerated() {
                 let hY = Float(horiz.row) * displayCellH * scale + (displayCellH * scale * 0.5) - 0.5
                 let hX = Float(horiz.col) * cellW * scale
                 let hW = Float(horiz.width) * cellW * scale
@@ -1282,9 +1372,9 @@ final class CoreTextMetalRenderer {
 
                 // Centered filename label rendered as a CoreText texture
                 if !horiz.filename.isEmpty, let atlas = atlas, let wcr = windowContentRenderer {
-                    let labelHash = horiz.filename.hashValue ^ Int(frameState.splitBorderColor)
+                    let labelHash = horiz.filename.hashValue ^ Int(metadata.splitBorderColor)
                     let labelKey = AtlasKey.splitLabel(row: horiz.row, subIndex: UInt16(min(separatorIndex, Int(UInt16.max))))
-                    if let entry = wcr.renderSimpleText(horiz.filename, fg: frameState.splitBorderColor,
+                    if let entry = wcr.renderSimpleText(horiz.filename, fg: metadata.splitBorderColor,
                                                          key: labelKey, contentHash: labelHash, atlas: atlas, metrics: &frameMetrics) {
                         // Center the label text within the separator width
                         let labelW = Float(entry.pixelWidth)
@@ -1324,7 +1414,7 @@ final class CoreTextMetalRenderer {
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.
         if let renderCursor, cursorBlinkVisible, renderCursor.shape != .block {
-            let cursorScrollLeft = renderCursor.windowId.flatMap { windowContents[$0]?.scrollLeft } ?? 0
+            let cursorScrollLeft = cursorSurface?.content.scrollLeft ?? 0
             let cursorScrollOffsetPx = CoreTextMetalRenderer.presentationScrollOffset(
                 scrollLeft: cursorScrollLeft,
                 scrollOffsetPx: CoreTextMetalRenderer.smoothScrollOffset(
@@ -1335,11 +1425,10 @@ final class CoreTextMetalRenderer {
             )
             let cursorX = renderCursor.x - cursorScrollOffsetPx.x
             let cursorY = renderCursor.y - cursorScrollOffsetPx.y
-            let cursorWindowBounds = renderCursor.windowId.flatMap { windowId -> (x: Float, width: Float)? in
-                guard let gutter = frameState.windowGutters[windowId] else { return nil }
-                return CoreTextMetalRenderer.cursorHorizontalBounds(
-                    geometry: windowContents[windowId]?.paneGeometry,
-                    gutter: gutter,
+            let cursorWindowBounds = cursorSurface.map { surface in
+                CoreTextMetalRenderer.cursorHorizontalBounds(
+                    geometry: surface.paneGeometry,
+                    gutter: surface.renderGutter,
                     frameCols: frameState.cols,
                     cellW: cellW,
                     scale: scale,
@@ -1353,14 +1442,14 @@ final class CoreTextMetalRenderer {
             cursorQuad.alpha = 1.0
             var shouldDrawCursor = true
 
-            let cursorBounds = CoreTextMetalRenderer.paneVerticalBounds(
-                for: renderCursor.windowId,
-                windowContents: windowContents,
-                gutters: frameState.windowGutters,
-                displayCellH: displayCellH,
-                scale: scale,
-                viewportHeight: Float(viewportSize.height)
-            )
+            let cursorBounds = cursorSurface.flatMap { surface in
+                CoreTextMetalRenderer.paneVerticalBounds(
+                    geometry: surface.paneGeometry,
+                    displayCellH: displayCellH,
+                    scale: scale,
+                    viewportHeight: Float(viewportSize.height)
+                )
+            }
 
             switch renderCursor.shape {
             case .block:
@@ -1413,11 +1502,10 @@ final class CoreTextMetalRenderer {
         let viewportTop = frameState.viewportTopLine
 
         let scrollIndicatorResident: Bool = {
-            guard let wid = frameState.activeWindowId,
-                  let content = windowContents[wid],
-                  let sp = content.scrollPresentation else { return false }
-            let perWindowTotal = content.paneGeometry?.viewport.totalLines ?? totalLines
-            return perWindowTotal > 0 && sp.overscanStartLine == 0 && sp.overscanEndLine >= perWindowTotal
+            guard let activeSurface,
+                  let scrollPresentation = activeSurface.content.scrollPresentation else { return false }
+            let perWindowTotal = activeSurface.paneGeometry.viewport.totalLines
+            return perWindowTotal > 0 && scrollPresentation.overscanStartLine == 0 && scrollPresentation.overscanEndLine >= perWindowTotal
         }()
 
         if totalLines > visibleRows && viewportTop != 0xFFFF_FFFF && scrollIndicatorAlpha > 0 {
@@ -1435,6 +1523,17 @@ final class CoreTextMetalRenderer {
 
             let thumbX = Float(viewportSize.width) - indicatorWidth - indicatorMargin
 
+            var trackQuad = QuadGPU()
+            trackQuad.position = SIMD2<Float>(thumbX - indicatorMargin, 0)
+            trackQuad.size = SIMD2<Float>(indicatorWidth + indicatorMargin * 2, trackHeight)
+            trackQuad.color = defaultBg
+            trackQuad.alpha = scrollIndicatorAlpha
+
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBytes(&trackQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+
             var scrollQuad = QuadGPU()
             scrollQuad.position = SIMD2<Float>(thumbX, thumbY)
             scrollQuad.size = SIMD2<Float>(indicatorWidth, thumbHeight)
@@ -1442,7 +1541,6 @@ final class CoreTextMetalRenderer {
             scrollQuad.color = colorFromU24(frameState.scrollIndicatorColor, default: SIMD3<Float>(0.4, 0.4, 0.4))
             scrollQuad.alpha = 0.4 * scrollIndicatorAlpha
 
-            encoder.setRenderPipelineState(bgPipeline)
             encoder.setVertexBytes(&scrollQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
@@ -1474,11 +1572,14 @@ final class CoreTextMetalRenderer {
         }
 
         let commitTime = CACurrentMediaTime()
-        let generation = presentationGeneration.issue()
         let candidateInstanceSlots = lineInstances.count
         let candidateQuadCapacity = bufferDemand.quadBytesPerBuffer / MemoryLayout<QuadGPU>.stride
         factories.observeCompletion(cmdBuf) { [weak self] completed, status in
             guard let self else { return }
+            var presentationSubmitted = false
+            defer {
+                if !presentationSubmitted { self.presentationGeneration.retire(generation) }
+            }
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
             os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID,
                         "commit_to_complete_ms=%{public}.3f", completionLatencyMs)
@@ -1494,11 +1595,9 @@ final class CoreTextMetalRenderer {
             }
             guard self.configurationEpoch == candidateConfigurationEpoch else {
                 latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
-                if let presentationFrame {
-                    self.presentationMetrics?.discard(
-                        domain: .editor, outcome: .superseded, frame: presentationFrame
-                    )
-                }
+                self.presentationMetrics?.discard(
+                    domain: .editor, outcome: .superseded, frame: presentationFrame
+                )
                 return
             }
             guard let drawable = drawableProvider() else {
@@ -1568,6 +1667,7 @@ final class CoreTextMetalRenderer {
 
             self.factories.observeCompletion(presentationBuffer) { [weak self] copied, _ in
                 guard let self else { return }
+                defer { self.presentationGeneration.retire(generation) }
                 guard copied else {
                     self.recordNativeFailure(NativePresentationFailure(
                         phase: .completion, dimension: .presentationCopy,
@@ -1579,11 +1679,9 @@ final class CoreTextMetalRenderer {
                 guard self.configurationEpoch == candidateConfigurationEpoch,
                       generation > self.presentationGeneration.completed else {
                     latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
-                    if let presentationFrame {
-                        self.presentationMetrics?.discard(
-                            domain: .editor, outcome: .superseded, frame: presentationFrame
-                        )
-                    }
+                    self.presentationMetrics?.discard(
+                        domain: .editor, outcome: .superseded, frame: presentationFrame
+                    )
                     return
                 }
                 do {
@@ -1597,38 +1695,36 @@ final class CoreTextMetalRenderer {
                 }
                 guard self.presentationGeneration.complete(generation) else {
                     latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
-                    if let presentationFrame {
-                        self.presentationMetrics?.discard(
-                            domain: .editor, outcome: .superseded, frame: presentationFrame
-                        )
-                    }
+                    self.presentationMetrics?.discard(
+                        domain: .editor, outcome: .superseded, frame: presentationFrame
+                    )
                     return
                 }
 
                 self.atlas = candidateAtlas
                 self.bitmapRasterizer = candidateRasterizer
                 self.windowContentRenderer = candidateWindowRenderer
+                self.atlasFullRefreshIdentities = candidateFullRefreshIdentities
                 self.instanceBuffer = candidateInstanceBuffer
                 self.maxInstanceSlots = candidateInstanceSlots
                 self.quadBuffers = candidateQuadBuffers
                 self.quadBufferCapacity = candidateQuadCapacity
                 self.lastCompletedPresentationGeneration = generation
                 latencyRecorder?.markPresented(seq: presentationInputSeq)
-                if let presentationFrame {
-                    self.presentationMetrics?.recordMetalPresented(presentationFrame: presentationFrame)
-                }
+                self.presentationMetrics?.recordMetalPresented(presentationFrame: presentationFrame)
+                onPresented(presentedSnapshot)
                 os_signpost(.event, log: renderLog, name: "PresentationComplete",
                             signpostID: renderSignpostID,
                             "input=%{public}u", presentationInputSeq)
             }
+            presentationSubmitted = true
             presentationBuffer.commit()
-            if let presentationFrame {
-                self.presentationMetrics?.recordMetalSubmission(presentationFrame: presentationFrame)
-            }
+            self.presentationMetrics?.recordMetalSubmission(presentationFrame: presentationFrame)
             os_signpost(.event, log: renderLog, name: "MetalPresentationSubmit", signpostID: renderSignpostID,
                         "input=%{public}u frame=%{public}u", presentationInputSeq,
-                        presentationFrame?.frameSeq ?? 0)
+                        presentationFrame.frameSeq)
         }
+        submitted = true
         cmdBuf.commit()
         latencyRecorder?.markSubmitted(seq: presentationInputSeq)
         os_signpost(.event, log: renderLog, name: "MetalSubmit", signpostID: renderSignpostID,
@@ -1686,8 +1782,8 @@ final class CoreTextMetalRenderer {
     /// Diagnostic signs are rendered as CTLine textures.
     private func renderGutterEntries(
         gutter: Wire.WindowGutter,
-        frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
+        frameState: FrameState,
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float,
         viewportWidthPx: Float,
@@ -1728,7 +1824,7 @@ final class CoreTextMetalRenderer {
                     frameState: frameState,
                     clipTop: clipTop, clipBottom: clipBottom,
                     atlas: atlas, windowRenderer: windowRenderer,
-                    bgQuads: &bgQuads, lineInstances: &lineInstances,
+                    bgQuads: &bgQuads, lineInstances: &lineInstances
                 )
             }
 
@@ -1739,12 +1835,12 @@ final class CoreTextMetalRenderer {
                     gutter: gutter, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
+                    frameState: frameState,
                     gutterPaddingPx: gutterPaddingPx,
                     viewportWidthPx: viewportWidthPx,
                     gutterHoverWindowId: gutterHoverWindowId,
                     gutterHoverRow: gutterHoverRow,
-                    frameState: frameState,
-                    clipTop: clipTop, clipBottom: clipBottom,
+                            clipTop: clipTop, clipBottom: clipBottom,
                     bgQuads: &bgQuads,
                 )
 
@@ -1752,11 +1848,11 @@ final class CoreTextMetalRenderer {
                     entry: entry, yPos: yPos, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
+                    frameState: frameState,
                     isMouseInGutter: isMouseInGutter,
                     gutterHoverWindowId: gutterHoverWindowId,
                     gutter: gutter,
-                    frameState: frameState,
-                    clipTop: clipTop, clipBottom: clipBottom,
+                            clipTop: clipTop, clipBottom: clipBottom,
                     bgQuads: &bgQuads,
                 )
             }
@@ -1767,9 +1863,9 @@ final class CoreTextMetalRenderer {
                     entry: entry, gutter: gutter,
                     atlasRow: atlasRow, yPos: yPos, xOffset: xOffset,
                     signColWidth: signColWidth,
-                    cellW: cellW, cellH: cellH, scale: scale,
-                    frameState: frameState,
-                    clipTop: clipTop, clipBottom: clipBottom,
+                            cellW: cellW, cellH: cellH, scale: scale,
+                            frameState: frameState,
+                            clipTop: clipTop, clipBottom: clipBottom,
                     atlas: atlas, windowRenderer: windowRenderer,
                     lineInstances: &lineInstances,
                 )
@@ -1822,7 +1918,7 @@ final class CoreTextMetalRenderer {
         atlas: LineTextureAtlas,
         windowRenderer: WindowContentRenderer,
         bgQuads: inout [QuadGPU],
-        lineInstances: inout [LineGPU],
+        lineInstances: inout [LineGPU]
     ) {
         switch entry.signType {
         case .gitAdded:
@@ -1870,11 +1966,11 @@ final class CoreTextMetalRenderer {
         gutter: Wire.WindowGutter, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
+        frameState: FrameState,
         gutterPaddingPx: Float,
         viewportWidthPx: Float,
         gutterHoverWindowId: UInt16?,
         gutterHoverRow: UInt16?,
-        frameState: FrameState,
         clipTop: Float, clipBottom: Float,
         bgQuads: inout [QuadGPU],
     ) {
@@ -1901,10 +1997,10 @@ final class CoreTextMetalRenderer {
         entry: Wire.GutterEntry, yPos: Float, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
+        frameState: FrameState,
         isMouseInGutter: Bool,
         gutterHoverWindowId: UInt16?,
         gutter: Wire.WindowGutter,
-        frameState: FrameState,
         clipTop: Float, clipBottom: Float,
         bgQuads: inout [QuadGPU],
     ) {
@@ -1954,20 +2050,19 @@ final class CoreTextMetalRenderer {
     }
 
     private func indentGuideQuadCounts(
-        frameState: FrameState, windowContents: [UInt16: GUIWindowContent],
+        frameState: FrameState, surfaces: [PresentedWindowSurface],
         cellW: Float, displayCellH: Float, scale: Float,
         gutterLeftMarginPx: Float, gutterPaddingPx: Float,
         viewportSize: CGSize, scrollTargetWindowId: UInt16?,
         smoothScrollOffsetPx: SIMD2<Float>
     ) -> [Int] {
         var counts: [Int] = []
-        for (_, guideData) in frameState.windowIndentGuides {
-            guard !guideData.guideCols.isEmpty,
-                  let gutter = frameState.windowGutters[guideData.windowId] else { continue }
-            let paneGeometry = windowContents[guideData.windowId]?.paneGeometry
-            let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth)
-                                         + Int(gutter.signColWidth))
-            let contentLeft = Float(paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale
+        for surface in surfaces {
+            guard let guideData = surface.indentGuides,
+                  !guideData.guideCols.isEmpty else { continue }
+            let gutter = surface.renderGutter
+            let paneGeometry = surface.paneGeometry
+            let contentLeft = Float(paneGeometry.textRect.col) * cellW * scale
                 + gutterLeftMarginPx + gutterPaddingPx
             let bounds = Self.windowHorizontalBounds(
                 geometry: paneGeometry, gutter: gutter, frameCols: frameState.cols,
@@ -1975,16 +2070,15 @@ final class CoreTextMetalRenderer {
             )
             let contentRight = bounds.x + bounds.width
             let lineCellH = displayCellH * scale
-            let scrollLeft = windowContents[guideData.windowId]?.scrollLeft ?? 0
             let scroll = Self.presentationScrollOffset(
-                scrollLeft: scrollLeft,
+                scrollLeft: surface.content.scrollLeft,
                 scrollOffsetPx: Self.smoothScrollOffset(
-                    for: guideData.windowId, targetWindowId: scrollTargetWindowId,
+                    for: surface.windowId, targetWindowId: scrollTargetWindowId,
                     scrollOffsetPx: smoothScrollOffsetPx
                 )
             )
-            let top = Float(paneGeometry?.textRect.row ?? gutter.contentRow) * displayCellH * scale
-            let height = Float(max(Int(paneGeometry?.textRect.height ?? gutter.contentHeight), 0)) * lineCellH
+            let top = Float(paneGeometry.textRect.row) * displayCellH * scale
+            let height = Float(max(Int(paneGeometry.textRect.height), 0)) * lineCellH
             let bottom = min(top + height, Float(viewportSize.height))
             let tabWidth = max(UInt16(guideData.tabWidth), 1)
             var count = 0
@@ -2161,38 +2255,75 @@ final class CoreTextMetalRenderer {
         return hasher.finalize()
     }
 
-    /// Computes a conservative atlas slot count for all text textures that may be touched by the current frame.
+    /// Invalidates one newly presented full-refresh value once, not on every local redraw of the same immutable content.
     @MainActor
-    static func invalidateFullRefreshWindows(in atlas: LineTextureAtlas, windowContents: [UInt16: GUIWindowContent]) {
-        for content in windowContents.values where content.fullRefresh {
-            atlas.invalidateWindow(content.windowId)
+    static func invalidateFullRefreshWindows(
+        in atlas: LineTextureAtlas,
+        surfaces: [PresentedWindowSurface],
+        lastIdentities: inout [UInt16: UUID]
+    ) {
+        for surface in surfaces where surface.content.fullRefresh {
+            let identity = surface.content.renderIdentity
+            guard lastIdentities[surface.windowId] != identity else { continue }
+            atlas.invalidateWindow(surface.windowId)
+            lastIdentities[surface.windowId] = identity
         }
-    }
-
-    nonisolated static func atlasSlotDemand(frameState: FrameState, windowContents: [UInt16: GUIWindowContent]) -> Int {
-        let slices = Dictionary(uniqueKeysWithValues: windowContents.values.map { content in
-            let fallback = Int(content.paneGeometry?.textRect.height
-                ?? frameState.windowGutters[content.windowId]?.contentHeight
-                ?? frameState.rows)
-            return (content.windowId, RendererSignposts.visibleSlice(for: content, fallbackVisibleRows: fallback))
-        })
-        return atlasSlotDemand(frameState: frameState, windowContents: windowContents, visibleSlices: slices)
     }
 
     nonisolated static func atlasSlotDemand(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
+        preparedSurfaces: [PreparedPresentedSurface]
+    ) -> Int {
+        let bufferRows = preparedSurfaces.reduce(0) { $0 + $1.slice.rows.count }
+
+        let lineAnnotations = preparedSurfaces.reduce(0) { total, preparedSurface in
+            let content = preparedSurface.surface.content
+            let slice = preparedSurface.slice
+            let fallback = max(slice.rows.count - slice.overscanBeforeRows, 0)
+            let paneRows = Int(preparedSurface.surface.paneGeometry.textRect.height)
+            let visibleRows = paneRows > 0 ? paneRows : fallback
+            return total + content.lineAnnotations.filter {
+                $0.kind != .gutterIcon && Int($0.row) < visibleRows
+            }.count
+        }
+
+        let gutterTextures = preparedSurfaces.reduce(0) { total, preparedSurface in
+            let gutter = preparedSurface.surface.renderGutter
+            return total + gutterTextureDemand(
+                gutter,
+                range: RendererSignposts.gutterRange(for: gutter, slice: preparedSurface.slice)
+            )
+        }
+
+        let splitLabels = metadata.horizontalSeparators.reduce(0) { total, separator in
+            total + (separator.filename.isEmpty ? 0 : 1)
+        }
+
+        let demand = bufferRows + lineAnnotations + gutterTextures + splitLabels
+        let slack = max(Int(frameState.rows), 32)
+        return max(demand + slack, 1)
+    }
+
+    #if MINGA_SNAPSHOT_RENDERER
+    nonisolated static func atlasSlotDemand(
+        frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         windowContents: [UInt16: GUIWindowContent],
+        gutters: [UInt16: Wire.WindowGutter],
         preparedRows: [UInt16: ResidentRenderPreparationResult]
     ) -> Int {
         let slices = Dictionary(uniqueKeysWithValues: preparedRows.map { windowID, prepared in
             (windowID, RendererSignposts.rowSlice(for: prepared))
         })
-        return atlasSlotDemand(frameState: frameState, windowContents: windowContents, visibleSlices: slices)
+        return atlasSlotDemand(frameState: frameState, metadata: metadata, windowContents: windowContents, gutters: gutters, visibleSlices: slices)
     }
 
     nonisolated static func atlasSlotDemand(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         windowContents: [UInt16: GUIWindowContent],
+        gutters: [UInt16: Wire.WindowGutter],
         visibleSlices: [UInt16: RendererRowSlice]
     ) -> Int {
         let bufferRows = visibleSlices.values.reduce(0) { $0 + $1.rows.count }
@@ -2201,14 +2332,13 @@ final class CoreTextMetalRenderer {
             guard let slice = visibleSlices[content.windowId] else { return total }
             let fallback = max(slice.rows.count - slice.overscanBeforeRows, 0)
             let paneRows = Int(content.paneGeometry?.textRect.height ?? 0)
-            let gutterRows = Int(frameState.windowGutters[content.windowId]?.contentHeight ?? 0)
-            let visibleRows = paneRows > 0 ? paneRows : (gutterRows > 0 ? gutterRows : fallback)
+            let visibleRows = paneRows > 0 ? paneRows : fallback
             return total + content.lineAnnotations.filter {
                 $0.kind != .gutterIcon && Int($0.row) < visibleRows
             }.count
         }
 
-        let gutterTextures = frameState.windowGutters.values.reduce(0 as Int) { total, gutter in
+        let gutterTextures = gutters.values.reduce(0 as Int) { total, gutter in
             guard let slice = visibleSlices[gutter.windowId] else { return total }
             return total + gutterTextureDemand(
                 gutter,
@@ -2216,7 +2346,7 @@ final class CoreTextMetalRenderer {
             )
         }
 
-        let splitLabels = frameState.horizontalSeparators.reduce(0 as Int) { total, separator in
+        let splitLabels = metadata.horizontalSeparators.reduce(0 as Int) { total, separator in
             total + (separator.filename.isEmpty ? 0 : 1)
         }
 
@@ -2224,6 +2354,8 @@ final class CoreTextMetalRenderer {
         let slack = max(Int(frameState.rows), 32)
         return max(demand + slack, 1)
     }
+
+    #endif
 
     private nonisolated static func gutterTextureDemand(
         _ gutter: Wire.WindowGutter,
@@ -2405,8 +2537,11 @@ final class CoreTextMetalRenderer {
         return low
     }
 
+    #if MINGA_SNAPSHOT_RENDERER
     nonisolated static func gutterChromeRects(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
+        gutters: [UInt16: Wire.WindowGutter],
         cellW: Float,
         cellH: Float,
         scale: Float,
@@ -2419,8 +2554,8 @@ final class CoreTextMetalRenderer {
         var rightFills: [(x: Float, y: Float, width: Float, height: Float)] = []
         var separators: [(x: Float, y: Float, width: Float, height: Float)] = []
 
-        if !frameState.windowGutters.isEmpty {
-            for gutter in frameState.windowGutters.values.sorted(by: { $0.windowId < $1.windowId }) {
+        if !gutters.isEmpty {
+            for gutter in gutters.values.sorted(by: { $0.windowId < $1.windowId }) {
                 let gutterWidthCols = Int(gutter.lineNumberWidth) + Int(gutter.signColWidth)
                 guard gutterWidthCols > 0 else { continue }
                 let top = Float(gutter.contentRow) * cellH * scale
@@ -2441,15 +2576,70 @@ final class CoreTextMetalRenderer {
             return (leftFills, rightFills, separators)
         }
 
-        guard frameState.gutterCol > 0 else { return ([], [], []) }
+        guard metadata.gutterCol > 0 else { return ([], [], []) }
         if gutterLeftMarginPx > 0 {
             leftFills.append((x: 0, y: 0, width: gutterLeftMarginPx, height: viewportHeight))
         }
         if gutterPaddingPx > 0 {
-            rightFills.append((x: Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
+            rightFills.append((x: Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
         }
         if frameState.gutterSeparatorColor != 0 {
-            let gutterRightX = Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx
+            let gutterRightX = Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx
+            separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: 0, width: 1.0, height: viewportHeight))
+        }
+        return (leftFills, rightFills, separators)
+    }
+
+    #endif
+
+    nonisolated static func gutterChromeRects(
+        frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
+        surfaces: [PresentedWindowSurface],
+        cellW: Float,
+        cellH: Float,
+        scale: Float,
+        gutterLeftMarginPx: Float,
+        gutterPaddingPx: Float,
+        viewportHeight: Float
+    ) -> (leftFills: [(x: Float, y: Float, width: Float, height: Float)], rightFills: [(x: Float, y: Float, width: Float, height: Float)], separators: [(x: Float, y: Float, width: Float, height: Float)]) {
+        guard gutterLeftMarginPx > 0 || gutterPaddingPx > 0 || frameState.gutterSeparatorColor != 0 else { return ([], [], []) }
+        var leftFills: [(x: Float, y: Float, width: Float, height: Float)] = []
+        var rightFills: [(x: Float, y: Float, width: Float, height: Float)] = []
+        var separators: [(x: Float, y: Float, width: Float, height: Float)] = []
+
+        if !surfaces.isEmpty {
+            for surface in surfaces.sorted(by: { $0.windowId < $1.windowId }) {
+                let gutter = surface.renderGutter
+                let gutterWidthCols = Int(gutter.lineNumberWidth) + Int(gutter.signColWidth)
+                guard gutterWidthCols > 0 else { continue }
+                let top = Float(gutter.contentRow) * cellH * scale
+                let height = Float(gutter.contentHeight) * cellH * scale
+                guard let vertical = clipVerticalQuad(y: top, height: height, top: 0, bottom: viewportHeight) else { continue }
+                let gutterLeftX = Float(gutter.contentCol) * cellW * scale
+                if gutterLeftMarginPx > 0 {
+                    leftFills.append((x: gutterLeftX, y: vertical.y, width: gutterLeftMarginPx, height: vertical.height))
+                }
+                let gutterRightX = Float(Int(gutter.contentCol) + gutterWidthCols) * cellW * scale + gutterLeftMarginPx
+                if gutterPaddingPx > 0 {
+                    rightFills.append((x: gutterRightX, y: vertical.y, width: gutterPaddingPx, height: vertical.height))
+                }
+                if frameState.gutterSeparatorColor != 0 {
+                    separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: vertical.y, width: 1.0, height: vertical.height))
+                }
+            }
+            return (leftFills, rightFills, separators)
+        }
+
+        guard metadata.gutterCol > 0 else { return ([], [], []) }
+        if gutterLeftMarginPx > 0 {
+            leftFills.append((x: 0, y: 0, width: gutterLeftMarginPx, height: viewportHeight))
+        }
+        if gutterPaddingPx > 0 {
+            rightFills.append((x: Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
+        }
+        if frameState.gutterSeparatorColor != 0 {
+            let gutterRightX = Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx
             separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: 0, width: 1.0, height: viewportHeight))
         }
         return (leftFills, rightFills, separators)
@@ -2457,6 +2647,8 @@ final class CoreTextMetalRenderer {
 
     nonisolated static func gutterChromeQuads(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
+        surfaces: [PresentedWindowSurface],
         cellW: Float,
         cellH: Float,
         scale: Float,
@@ -2468,6 +2660,8 @@ final class CoreTextMetalRenderer {
     ) -> [QuadGPU] {
         let rects = gutterChromeRects(
             frameState: frameState,
+            metadata: metadata,
+            surfaces: surfaces,
             cellW: cellW,
             cellH: cellH,
             scale: scale,
@@ -2517,6 +2711,19 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func paneVerticalBounds(
+        geometry: GUIPaneGeometry,
+        displayCellH: Float,
+        scale: Float,
+        viewportHeight: Float
+    ) -> (top: Float, bottom: Float)? {
+        let top = Float(geometry.textRect.row) * displayCellH * scale
+        let rows = max(Int(geometry.textRect.height), 0)
+        let bottom = min(top + Float(rows) * displayCellH * scale, viewportHeight)
+        return bottom > top ? (top, bottom) : nil
+    }
+
+    #if MINGA_SNAPSHOT_RENDERER
+    nonisolated static func paneVerticalBounds(
         for windowId: UInt16?,
         windowContents: [UInt16: GUIWindowContent],
         gutters: [UInt16: Wire.WindowGutter],
@@ -2526,10 +2733,12 @@ final class CoreTextMetalRenderer {
     ) -> (top: Float, bottom: Float)? {
         guard let windowId else { return nil }
         if let geometry = windowContents[windowId]?.paneGeometry {
-            let top = Float(geometry.textRect.row) * displayCellH * scale
-            let rows = max(Int(geometry.textRect.height), 0)
-            let bottom = min(top + Float(rows) * displayCellH * scale, viewportHeight)
-            return bottom > top ? (top, bottom) : nil
+            return paneVerticalBounds(
+                geometry: geometry,
+                displayCellH: displayCellH,
+                scale: scale,
+                viewportHeight: viewportHeight
+            )
         }
         if let gutter = gutters[windowId] {
             let top = Float(gutter.contentRow) * displayCellH * scale
@@ -2539,6 +2748,8 @@ final class CoreTextMetalRenderer {
         }
         return nil
     }
+
+    #endif
 
     /// Vertical span (in device pixels) of a window's editor-background fill.
     ///
@@ -2749,28 +2960,69 @@ final class CoreTextMetalRenderer {
     }
 
     /// Resolve the cursor position in the same coordinate system as the text renderer.
-    /// Semantic GUI window content is preferred because it carries window-relative cursor coordinates and horizontal scroll. Legacy frameState cursor data remains the fallback for transition frames and non-semantic surfaces.
+    /// Cursor authority lives in the active presented window surface. There is no legacy `FrameState` fallback because drawing a cursor from a different semantic source would recreate the #2999 split-brain presentation bug.
     nonisolated static func resolveCursor(
-        frameState: FrameState,
-        windowContents: [UInt16: GUIWindowContent],
+        surfaces: [PresentedWindowSurface],
+        activeWindowId: UInt16? = nil,
         cellW: Float,
         displayCellH: Float,
         scale: Float,
         gutterLeftMarginPx: Float,
         gutterPaddingPx: Float
     ) -> RenderCursor? {
-        var sawActiveSemanticCursorOwner = false
-        for windowId in semanticCursorWindowIds(frameState.windowGutters) {
-            guard let gutter = frameState.windowGutters[windowId], let content = windowContents[windowId] else { continue }
-            sawActiveSemanticCursorOwner = true
-            guard content.cursorVisible else { continue }
+        let orderedSurfaces: [PresentedWindowSurface]
+        if let activeWindowId,
+           let activeSurface = surfaces.first(where: { $0.windowId == activeWindowId }) {
+            orderedSurfaces = [activeSurface]
+        } else {
+            let activeSurfaces = surfaces.filter(\.renderGutter.isActive).sorted {
+                let leftPriority = semanticCursorPriority(windowId: $0.windowId)
+                let rightPriority = semanticCursorPriority(windowId: $1.windowId)
+                return leftPriority == rightPriority ? $0.windowId < $1.windowId : leftPriority < rightPriority
+            }
+            orderedSurfaces = activeSurfaces.isEmpty ? surfaces.sorted { $0.windowId < $1.windowId } : activeSurfaces
+        }
 
-            let fallbackTextCol = UInt16(Int(gutter.contentCol) + Int(gutter.lineNumberWidth) + Int(gutter.signColWidth))
-            let contentColOffset = Float(content.paneGeometry?.textRect.col ?? fallbackTextCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+        for surface in orderedSurfaces where surface.content.cursorVisible {
+            let content = surface.content
+            let textCol = surface.paneGeometry.textRect.col
+            let contentColOffset = Float(textCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let hScrollPx = Float(content.scrollLeft) * cellW * scale
             let cursorCol = resolvedSemanticCursorCol(content)
             let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
-            let textRow = content.paneGeometry?.textRect.row ?? gutter.contentRow
+            let y = viewportLocalRowY(
+                localRow: Int(content.cursorRow),
+                origin: Float(surface.paneGeometry.textRect.row) * displayCellH * scale,
+                cellHeight: displayCellH,
+                scale: scale
+            )
+            return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: surface.windowId)
+        }
+        return nil
+    }
+
+    #if MINGA_SNAPSHOT_RENDERER
+    nonisolated static func resolveCursor(
+        windowContents: [UInt16: GUIWindowContent],
+        gutters: [UInt16: Wire.WindowGutter],
+        activeWindowId: UInt16? = nil,
+        cellW: Float,
+        displayCellH: Float,
+        scale: Float,
+        gutterLeftMarginPx: Float,
+        gutterPaddingPx: Float
+    ) -> RenderCursor? {
+        for windowId in semanticCursorWindowIds(gutters, windowContents: windowContents, activeWindowId: activeWindowId) {
+            guard let content = windowContents[windowId] else { continue }
+            guard content.cursorVisible else { continue }
+
+            let gutter = gutters[windowId]
+            let textCol = content.paneGeometry?.textRect.col ?? gutter.map { UInt16(Int($0.contentCol) + Int($0.lineNumberWidth) + Int($0.signColWidth)) } ?? 0
+            let contentColOffset = Float(textCol) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let hScrollPx = Float(content.scrollLeft) * cellW * scale
+            let cursorCol = resolvedSemanticCursorCol(content)
+            let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
+            let textRow = content.paneGeometry?.textRect.row ?? gutter?.contentRow ?? 0
             let y = viewportLocalRowY(
                 localRow: Int(content.cursorRow),
                 origin: Float(textRow) * displayCellH * scale,
@@ -2779,20 +3031,20 @@ final class CoreTextMetalRenderer {
             )
             return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: windowId)
         }
-
-        if sawActiveSemanticCursorOwner { return nil }
-        guard frameState.cursorVisible else { return nil }
-
-        let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
-            ? gutterLeftMarginPx + gutterPaddingPx : 0
-        let x = Float(frameState.cursorCol) * cellW * scale + cursorPadding
-        let y = Float(frameState.cursorRow) * displayCellH * scale
-        return RenderCursor(x: x, y: y, shape: frameState.cursorShape)
+        return nil
     }
 
     /// Returns active semantic cursor owners in deterministic priority order. The agent prompt uses a reserved window id and must win over the retained chat content when both are active during focus transitions.
-    nonisolated static func semanticCursorWindowIds(_ gutters: [UInt16: Wire.WindowGutter]) -> [UInt16] {
-        gutters.values
+    nonisolated static func semanticCursorWindowIds(
+        _ gutters: [UInt16: Wire.WindowGutter],
+        windowContents: [UInt16: GUIWindowContent] = [:],
+        activeWindowId: UInt16? = nil
+    ) -> [UInt16] {
+        if let activeWindowId, windowContents[activeWindowId] != nil {
+            return [activeWindowId]
+        }
+
+        let activeGutterWindowIds = gutters.values
             .filter(\.isActive)
             .map(\.windowId)
             .sorted { lhs, rhs in
@@ -2801,7 +3053,13 @@ final class CoreTextMetalRenderer {
                 if leftPriority == rightPriority { return lhs < rhs }
                 return leftPriority < rightPriority
             }
+
+        if !activeGutterWindowIds.isEmpty { return activeGutterWindowIds }
+
+        return windowContents.keys.sorted()
     }
+
+    #endif
 
     nonisolated static func semanticCursorPriority(windowId: UInt16) -> Int {
         windowId == 65_534 ? 0 : 1

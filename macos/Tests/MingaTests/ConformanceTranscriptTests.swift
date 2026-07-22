@@ -277,10 +277,12 @@ struct ConformanceTranscriptTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
         let theme = CommandDispatcher.requiredThemeSlots.map { ($0, $0, $0, $0) }
+        let paneGeometry = productionPaneGeometry(rowCount: rowCount)
         let epochContent = try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: epoch,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: originalRows,
-            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: paneGeometry
         )
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: generation))
         dispatcher.dispatch(.guiTheme(slots: theme))
@@ -360,7 +362,8 @@ struct ConformanceTranscriptTests {
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [GUIVisualRow(rowType: .normal, rowId: 999, bufLine: 0,
                                 contentHash: 999, text: "must-not-publish", spans: [])],
-            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: paneGeometry
         )))
         dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
         let staleGenerationStatus: ProductionCorpusStatus =
@@ -387,6 +390,20 @@ struct ConformanceTranscriptTests {
     static func expectedCount(_ operation: String, _ field: String,
                               _ operations: [[String: Any]]) -> Int {
         operations.first { $0["name"] as? String == operation }?[field] as? Int ?? 0
+    }
+
+    private static func productionPaneGeometry(rowCount: Int) -> GUIPaneGeometry {
+        GUIPaneGeometry(
+            windowId: 1,
+            totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            textRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+            clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 80, totalLines: UInt32(rowCount), visualRowOffset: 0, totalVisualRows: UInt32(rowCount)),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+            hitRegions: []
+        )
     }
 
     private static func productionStatus(_ result: FrameTransactionResult) -> ProductionCorpusStatus {

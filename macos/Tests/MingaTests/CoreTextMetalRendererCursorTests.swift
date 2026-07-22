@@ -8,7 +8,7 @@ import MingaProtocol
 
 @Suite("CoreTextMetalRenderer cursor geometry")
 struct CoreTextMetalRendererCursorTests {
-    @Test("semantic window cursor overrides legacy frameState cursor")
+    @Test("semantic window cursor drives resolved cursor geometry")
     func semanticCursorOverridesLegacyCursor() throws {
         let cellW: Float = 7.5
         let displayCellH: Float = 16.0
@@ -16,15 +16,11 @@ struct CoreTextMetalRendererCursorTests {
         let gutterLeft: Float = 3.0
         let gutterPadding: Float = 5.0
 
-        var frameState = FrameState(cols: 80, rows: 24)
-        frameState.cursorRow = 20
-        frameState.cursorCol = 70
-        frameState.cursorShape = .block
-        frameState.windowGutters[2] = Wire.WindowGutter(
+        let windowGutters: [UInt16: Wire.WindowGutter] = [2: Wire.WindowGutter(
             windowId: 2, contentRow: 4, contentCol: 1, contentHeight: 20,
             isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
+        )]
 
         let content = try GUIWindowContent(
             windowId: 2, fullRefresh: true,
@@ -36,8 +32,8 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [2: content],
+            gutters: windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -53,6 +49,44 @@ struct CoreTextMetalRendererCursorTests {
         #expect(cursor?.windowId == 2)
         #expect(abs((cursor?.x ?? 0) - expectedX) < 0.001)
         #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
+    }
+
+    @Test("gutterless snapshot active window still resolves cursor")
+    func gutterlessSnapshotActiveWindowStillResolvesCursor() throws {
+        let content = try GUIWindowContent(
+            windowId: 4, fullRefresh: true,
+            cursorRow: 3, cursorCol: 8, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            paneGeometry: GUIPaneGeometry(
+                windowId: 4,
+                totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                textRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+                clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+                viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 80, totalLines: 24, visualRowOffset: 0, totalVisualRows: 24),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+                hitRegions: []
+            )
+        )
+
+        let cursor = CoreTextMetalRenderer.resolveCursor(
+            windowContents: [4: content],
+            gutters: [:],
+            activeWindowId: 4,
+            cellW: 7,
+            displayCellH: 13,
+            scale: 2,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        )
+
+        #expect(cursor?.windowId == 4)
+        #expect(cursor?.shape == .beam)
+        #expect(cursor?.x == Float(8 * 7 * 2))
+        #expect(cursor?.y == Float(3 * 13 * 2))
     }
 
     @Test("smooth scroll offset applies only to its target window")
@@ -213,14 +247,15 @@ struct CoreTextMetalRendererCursorTests {
     func rightSplitGutterSeparatorUsesPerWindowScreenCoordinates() {
         var frameState = FrameState(cols: 100, rows: 40)
         frameState.gutterSeparatorColor = 0x334455
-        frameState.windowGutters[2] = Wire.WindowGutter(
+        let windowGutters: [UInt16: Wire.WindowGutter] = [2: Wire.WindowGutter(
             windowId: 2, contentRow: 3, contentCol: 40, contentHeight: 10,
             isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
+        )]
 
         let rects = CoreTextMetalRenderer.gutterChromeRects(
             frameState: frameState,
+            gutters: windowGutters,
             cellW: 8,
             cellH: 16,
             scale: 2,
@@ -638,56 +673,45 @@ struct CoreTextMetalRendererCursorTests {
         #expect(CoreTextMetalRenderer.clipVerticalQuad(y: 0, height: 5, top: 10, bottom: 20) == nil)
     }
 
-    @Test("legacy cursor is used when semantic content is unavailable")
+    @Test("no cursor resolves when semantic content is unavailable")
     func legacyCursorFallback() {
-        let cellW: Float = 7.5
-        let displayCellH: Float = 16.0
-        let scale: Float = 2.0
-        let gutterLeft: Float = 3.0
-        let gutterPadding: Float = 5.0
-
-        var frameState = FrameState(cols: 80, rows: 24)
-        frameState.cursorRow = 3
-        frameState.cursorCol = 10
-        frameState.cursorShape = .underline
-        frameState.gutterCol = 5
-
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [:],
-            cellW: cellW,
-            displayCellH: displayCellH,
-            scale: scale,
-            gutterLeftMarginPx: gutterLeft,
-            gutterPaddingPx: gutterPadding
+            gutters: [:],
+            cellW: 7.5,
+            displayCellH: 16,
+            scale: 2,
+            gutterLeftMarginPx: 3,
+            gutterPaddingPx: 5
         )
 
-        let expectedX = Float(10) * cellW * scale + gutterLeft + gutterPadding
-        let expectedY = Float(3) * displayCellH * scale
-
-        #expect(cursor?.shape == .underline)
-        #expect(abs((cursor?.x ?? 0) - expectedX) < 0.001)
-        #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
+        #expect(cursor == nil)
     }
 
-    @Test("cursor row Y uses spaced cell height at line spacing 1.2")
-    func cursorRowYUsesSpacedCellHeightAtSpacing1_2() {
+    @Test("semantic cursor row Y uses spaced cell height at line spacing 1.2")
+    func cursorRowYUsesSpacedCellHeightAtSpacing1_2() throws {
         let cellW: Float = 7.5
         let baseCellH: Float = 16.0
         let lineSpacing: Float = 1.2
         let displayCellH = baseCellH * lineSpacing
         let scale: Float = 2.0
 
-        var frameState = FrameState(cols: 80, rows: 24)
-        frameState.lineSpacing = lineSpacing
-        frameState.cursorRow = 10
-        frameState.cursorCol = 4
-        frameState.cursorShape = .block
-        frameState.gutterCol = 0
+        let windowGutters: [UInt16: Wire.WindowGutter] = [1: Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )]
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 10, cursorCol: 4, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
-            windowContents: [:],
+            windowContents: [1: content],
+            gutters: windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -695,31 +719,36 @@ struct CoreTextMetalRendererCursorTests {
             gutterPaddingPx: 0
         )
 
-        // Row Y must land on the spaced row position, not the unspaced one.
         let spacedY = Float(10) * displayCellH * scale
         let unspacedY = Float(10) * baseCellH * scale
         #expect(abs((cursor?.y ?? 0) - spacedY) < 0.001)
         #expect(abs((cursor?.y ?? 0) - unspacedY) > 0.001)
     }
 
-    @Test("cursor row Y at line spacing 1.0 matches the unspaced baseline")
-    func cursorRowYAtSpacing1_0MatchesUnspacedBaseline() {
+    @Test("semantic cursor row Y at line spacing 1.0 matches the unspaced baseline")
+    func cursorRowYAtSpacing1_0MatchesUnspacedBaseline() throws {
         let cellW: Float = 7.5
         let baseCellH: Float = 16.0
         let lineSpacing: Float = 1.0
         let displayCellH = baseCellH * lineSpacing
         let scale: Float = 2.0
 
-        var frameState = FrameState(cols: 80, rows: 24)
-        frameState.lineSpacing = lineSpacing
-        frameState.cursorRow = 10
-        frameState.cursorCol = 4
-        frameState.cursorShape = .block
-        frameState.gutterCol = 0
+        let windowGutters: [UInt16: Wire.WindowGutter] = [1: Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )]
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 10, cursorCol: 4, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
-            windowContents: [:],
+            windowContents: [1: content],
+            gutters: windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -727,8 +756,6 @@ struct CoreTextMetalRendererCursorTests {
             gutterPaddingPx: 0
         )
 
-        // At 1.0 the spaced and unspaced positions are identical (byte-for-byte
-        // parity with pre-1.2-default behavior).
         let expectedY = Float(10) * baseCellH * scale
         #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
     }
@@ -745,16 +772,11 @@ struct CoreTextMetalRendererCursorTests {
         let displayCellH = baseCellH * lineSpacing
         let scale: Float = 2.0
 
-        var frameState = FrameState(cols: 80, rows: 24)
-        frameState.lineSpacing = lineSpacing
-        frameState.cursorRow = 0
-        frameState.cursorCol = 0
-        frameState.cursorShape = .block
-        frameState.windowGutters[1] = Wire.WindowGutter(
+        let windowGutters: [UInt16: Wire.WindowGutter] = [1: Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
             isActive: true, contentWidth: 80, cursorLine: 5, lineNumberStyle: .none,
             lineNumberWidth: 0, signColWidth: 0, entries: []
-        )
+        )]
 
         // Cursor is on the 6th visible row of the window content.
         let content = try GUIWindowContent(
@@ -766,8 +788,8 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [1: content],
+            gutters: windowGutters,
             cellW: cellW,
             displayCellH: displayCellH,
             scale: scale,
@@ -882,17 +904,18 @@ struct CoreTextMetalRendererCursorTests {
 
     @Test("hidden active semantic cursor is skipped so visible prompt cursor wins")
     func hiddenActiveSemanticCursorIsSkippedSoPromptWins() throws {
-        var frameState = FrameState(cols: 80, rows: 24)
-        frameState.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
-            isActive: true, contentWidth: 80, cursorLine: 1, lineNumberStyle: .none,
-            lineNumberWidth: 0, signColWidth: 0, entries: []
-        )
-        frameState.windowGutters[65_534] = Wire.WindowGutter(
-            windowId: 65_534, contentRow: 21, contentCol: 2, contentHeight: 2,
-            isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .none,
-            lineNumberWidth: 0, signColWidth: 0, entries: []
-        )
+        let windowGutters: [UInt16: Wire.WindowGutter] = [
+            1: Wire.WindowGutter(
+                windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+                isActive: true, contentWidth: 80, cursorLine: 1, lineNumberStyle: .none,
+                lineNumberWidth: 0, signColWidth: 0, entries: []
+            ),
+            65_534: Wire.WindowGutter(
+                windowId: 65_534, contentRow: 21, contentCol: 2, contentHeight: 2,
+                isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .none,
+                lineNumberWidth: 0, signColWidth: 0, entries: []
+            )
+        ]
 
         let hiddenChat = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorVisible: false,
@@ -910,8 +933,8 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: frameState,
             windowContents: [1: hiddenChat, 65_534: visiblePrompt],
+            gutters: windowGutters,
             cellW: 8,
             displayCellH: 16,
             scale: 1,
@@ -925,31 +948,46 @@ struct CoreTextMetalRendererCursorTests {
         #expect(cursor?.y == 336)
     }
 
-    @Test("hidden semantic cursor suppresses legacy fallback after dispatcher sync")
+    @Test("hidden semantic cursor suppresses cursor resolution after dispatcher sync")
     @MainActor func hiddenSemanticCursorSuppressesFallback() throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
-        dispatcher.frameState.cursorRow = 3
-        dispatcher.frameState.cursorCol = 10
-        dispatcher.frameState.cursorShape = .block
-        dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
-            isActive: true, contentWidth: 80, cursorLine: 1, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
 
+        let geometry = GUIPaneGeometry(
+            windowId: 1,
+            totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            textRect: GUICellRect(row: 0, col: 5, width: 75, height: 24),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 5, height: 24),
+            clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 75, totalLines: 24, visualRowOffset: 0, totalVisualRows: 24),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 1),
+            hitRegions: [GUIHitRegion(kind: .gutter, rect: GUICellRect(row: 0, col: 0, width: 5, height: 24), windowId: 1)]
+        )
         let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorVisible: false,
             cursorRow: 0, cursorCol: 0, cursorShape: .beam,
             rows: [], selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
+            documentHighlights: [], paneGeometry: geometry
         )
-        dispatcher.applyForTesting(.guiWindowContent(data: content))
+        let gutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: 1, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 1, entries: []
+        )
 
+        // Editor authority lives on the committed snapshot; resolve from it.
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: CommandDispatcher.requiredThemeSlots.map { ($0, $0, $0, $0) }))
+        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
         let cursor = CoreTextMetalRenderer.resolveCursor(
-            frameState: dispatcher.frameState,
-            windowContents: gui.windowContents,
+            windowContents: snapshot.windowContents,
+            gutters: snapshot.windowGutters,
             cellW: 7.5,
             displayCellH: 16.0,
             scale: 2.0,
@@ -957,7 +995,7 @@ struct CoreTextMetalRendererCursorTests {
             gutterPaddingPx: 0
         )
 
-        #expect(dispatcher.frameState.cursorVisible == false)
+        #expect(snapshot.content(for: 1)?.cursorVisible == false)
         #expect(cursor == nil)
     }
 }

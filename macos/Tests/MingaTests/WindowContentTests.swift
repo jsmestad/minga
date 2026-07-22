@@ -566,7 +566,9 @@ struct WindowContentDecoderTests {
         #expect(content.resourceWeight == expected)
         #expect(content.exactResourceWeight() == expected)
         #expect(content.exactResourceWeight() == content.resourceWeight)
-        #expect(content.reportingOperationCounters(.init()).exactResourceWeight() == expected)
+        let reported = content.reportingOperationCounters(.init())
+        #expect(reported.exactResourceWeight() == expected)
+        #expect(reported.renderIdentity == content.renderIdentity)
     }
 
     @Test("Full content rejects complete weight before row-store construction")

@@ -35,73 +35,100 @@ struct CommandDispatcherRoutingTests {
     @Test("empty keyframe prunes retained windows and stale gutter globals")
     @MainActor func emptyKeyframePrunesRetainedWindowState() throws {
         let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[1] = try GUIWindowContent(
-            windowId: 1, fullRefresh: false,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )
-        dispatcher.applyForTesting(.guiGutter(data: Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
+
+        // Establish retained editor state through a committed keyframe: the prior
+        // committed snapshot is the sole authority the next transaction seeds from.
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
             isActive: true, contentWidth: 80, cursorLine: 9, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 3,
             entries: [Wire.GutterEntry(bufLine: 9, displayType: .normal, signType: .none, foldEndLine: 0xFFFF_FFFF, signFg: 0, signText: "")]
         )))
-        dispatcher.applyForTesting(.guiIndentGuides(data: IndentGuideData(
+        dispatcher.dispatch(.guiIndentGuides(data: IndentGuideData(
             windowId: 1, tabWidth: 4, activeGuideCol: 0xFFFF,
             guideCols: [2], lineIndentLevels: [1]
         )))
-        #expect(dispatcher.currentFrameWindowIds == [1])
-        #expect(dispatcher.frameState.gutterCol == 7)
-        #expect(dispatcher.frameState.viewportTopLine == 9)
-
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
-        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
+        let seeded = try #require(dispatcher.committedEditorSnapshot)
+        #expect(seeded.windowGutters[1] != nil)
+        #expect(seeded.gutterCol == 7)
+        #expect(seeded.windowIndentGuides[1] != nil)
+        #expect(dispatcher.frameState.viewportTopLine == 9)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
         #expect(gui.windowContents.isEmpty)
-        #expect(dispatcher.frameState.windowGutters.isEmpty)
-        #expect(dispatcher.frameState.windowIndentGuides.isEmpty)
-        #expect(dispatcher.currentFrameWindowIds.isEmpty)
-        #expect(dispatcher.frameState.gutterCol == 0)
+        let pruned = try #require(dispatcher.committedEditorSnapshot)
+        #expect(pruned.windowGutters.isEmpty)
+        #expect(pruned.windowIndentGuides.isEmpty)
+        #expect(pruned.windowIds.isEmpty)
+        #expect(pruned.gutterCol == 0)
         #expect(dispatcher.frameState.viewportTopLine == 0xFFFF_FFFF)
+    }
+
+    @Test("keyframe commit prunes stale split separator metadata")
+    @MainActor func keyframeCommitPrunesStaleSplitMetadata() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+
+        // Establish split separator metadata through a committed keyframe.
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiSplitSeparators(
+            borderColor: 0xAABBCC,
+            verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
+            horizontals: [Wire.HorizontalSeparator(row: 12, col: 0, width: 80, filename: "stale.ex")]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let seeded = try #require(dispatcher.committedEditorSnapshot)
+        #expect(seeded.metadata.splitBorderColor == 0xAABBCC)
+        #expect(!seeded.metadata.verticalSeparators.isEmpty)
+        #expect(!seeded.metadata.horizontalSeparators.isEmpty)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.metadata.splitBorderColor == 0)
+        #expect(snapshot.metadata.verticalSeparators.isEmpty)
+        #expect(snapshot.metadata.horizontalSeparators.isEmpty)
     }
 
     @Test("keyframe commit prunes stale window content, gutters, and indent guides")
     @MainActor func keyframeCommitPrunesStaleWindowState() throws {
         let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[2] = try GUIWindowContent(
-            windowId: 2, fullRefresh: false,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )
-        dispatcher.applyForTesting(.guiGutter(data: Wire.WindowGutter(
-            windowId: 2, contentRow: 0, contentCol: 5, contentHeight: 24,
-            isActive: false, contentWidth: 80, cursorLine: 0, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 3, entries: []
-        )))
-        dispatcher.applyForTesting(.guiIndentGuides(data: IndentGuideData(
+        let staleGeometry = editorGeometry(windowId: 2, lineNumberWidth: 4, signColWidth: 3)
+
+        // Establish stale window 2 through a committed keyframe.
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 2, geometry: staleGeometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 2, geometry: staleGeometry)))
+        dispatcher.dispatch(.guiIndentGuides(data: IndentGuideData(
             windowId: 2, tabWidth: 4, activeGuideCol: 0xFFFF,
             guideCols: [], lineIndentLevels: []
         )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.windowIds == [2])
 
         dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: try GUIWindowContent(
-            windowId: 1, fullRefresh: false,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: []
-        )))
-        dispatcher.dispatch(.guiGutter(data: Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
-            isActive: true, contentWidth: 80, cursorLine: 0, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 3, entries: []
-        )))
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
         dispatcher.dispatch(.guiIndentGuides(data: IndentGuideData(
             windowId: 1, tabWidth: 4, activeGuideCol: 0xFFFF,
             guideCols: [], lineIndentLevels: []
@@ -110,18 +137,25 @@ struct CommandDispatcherRoutingTests {
 
         #expect(gui.windowContents[1] != nil)
         #expect(gui.windowContents[2] == nil)
-        #expect(dispatcher.frameState.windowGutters[1] != nil)
-        #expect(dispatcher.frameState.windowGutters[2] == nil)
-        #expect(dispatcher.frameState.windowIndentGuides[1] != nil)
-        #expect(dispatcher.frameState.windowIndentGuides[2] == nil)
-        #expect(dispatcher.currentFrameWindowIds == [1])
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.windowGutters[1] != nil)
+        #expect(snapshot.windowGutters[2] == nil)
+        #expect(snapshot.windowIndentGuides[1] != nil)
+        #expect(snapshot.windowIndentGuides[2] == nil)
+        #expect(snapshot.windowIds == [1])
     }
 
-    @Test("setCursorShape updates frameState cursor shape")
+    @Test("setCursorShape updates committed metadata cursor shape")
     @MainActor func setCursorShapeCommand() throws {
         let (dispatcher, _) = makeDispatcher()
-        dispatcher.applyForTesting(.setCursorShape(.beam))
-        #expect(dispatcher.frameState.cursorShape == .beam)
+        let geometry = editorGeometry()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(geometry: geometry)))
+        dispatcher.dispatch(.setCursorShape(.beam))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.metadata.cursorShape == .beam)
     }
 
     @Test("protocolError latches a blocking message on protocolErrorState")
@@ -145,44 +179,25 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - View-driven FrameState mutations
 
-    @Test("applyViewportResize writes grid dimensions and marks dirty")
+    @Test("applyViewportResize writes grid dimensions")
     @MainActor func applyViewportResizeUpdatesGrid() throws {
         let (dispatcher, _) = makeDispatcher()
-        // Clear the dirty flag set at init so we can assert the resize sets it.
-        dispatcher.markRendered()
-        #expect(dispatcher.frameState.dirty == false)
 
         // A view-driven resize (e.g. font change) funnels through the dispatcher.
         dispatcher.applyViewportResize(newCols: 120, newRows: 40)
 
         #expect(dispatcher.frameState.cols == 120)
         #expect(dispatcher.frameState.rows == 40)
-        #expect(dispatcher.frameState.dirty == true)
     }
 
     @Test("applyViewportResize is a no-op when dimensions are unchanged")
     @MainActor func applyViewportResizeNoOp() throws {
         let (dispatcher, _) = makeDispatcher()
-        // Dispatcher starts at 80x24 (see makeDispatcher).
-        dispatcher.markRendered()
-        #expect(dispatcher.frameState.dirty == false)
 
         dispatcher.applyViewportResize(newCols: 80, newRows: 24)
 
         #expect(dispatcher.frameState.cols == 80)
         #expect(dispatcher.frameState.rows == 24)
-        #expect(dispatcher.frameState.dirty == false)
-    }
-
-    @Test("markRendered clears the dirty flag the view consumed")
-    @MainActor func markRenderedClearsDirty() throws {
-        let (dispatcher, _) = makeDispatcher()
-        dispatcher.applyViewportResize(newCols: 100, newRows: 30)
-        #expect(dispatcher.frameState.dirty == true)
-
-        dispatcher.markRendered()
-
-        #expect(dispatcher.frameState.dirty == false)
     }
 
     // MARK: - GUI chrome routing
@@ -1160,8 +1175,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[7]?.cursorCol == 11)
         #expect(gui.windowContents[7]?.cursorShape == .beam)
         #expect(gui.windowContents[7]?.cursorline == GUICursorline(row: 6, bg: 0x112233))
-        #expect(dispatcher.currentFrameWindowIds.contains(7))
-        #expect(dispatcher.frameState.cursorVisible == false)
+        #expect(gui.windowContents[7] != nil)
     }
 
     @Test("guiWindowOverlayDelta clears retained cursorline when cursorline is omitted")
@@ -1186,7 +1200,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[7]?.cursorRow == 6)
         #expect(gui.windowContents[7]?.cursorCol == 11)
         #expect(gui.windowContents[7]?.cursorShape == .beam)
-        #expect(dispatcher.currentFrameWindowIds.contains(7))
+        #expect(gui.windowContents[7] != nil)
     }
 
     @Test("stale guiWindowOverlayDelta is ignored without marking the window live")
@@ -1200,7 +1214,6 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
         gui.windowContents[7] = content
-        dispatcher.frameState.cursorVisible = true
 
         dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
             windowId: 7, contentEpoch: 41, cursorVisible: false,
@@ -1209,14 +1222,11 @@ struct CommandDispatcherRoutingTests {
         )))
 
         #expect(gui.windowContents[7] === content)
-        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
-        #expect(dispatcher.frameState.cursorVisible == true)
     }
 
     @Test("guiWindowOverlayDelta without retained content is ignored")
     @MainActor func missingGuiWindowOverlayDeltaIgnored() throws {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.frameState.cursorVisible = true
 
         dispatcher.applyForTesting(.guiWindowOverlayDelta(data: GUIWindowOverlayDelta(
             windowId: 7, contentEpoch: 42, cursorVisible: false,
@@ -1225,8 +1235,6 @@ struct CommandDispatcherRoutingTests {
         )))
 
         #expect(gui.windowContents[7] == nil)
-        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
-        #expect(dispatcher.frameState.cursorVisible == true)
     }
 
     @Test("guiWindowRowsDelta updates retained rows and marks window live")
@@ -1263,7 +1271,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[7]?.rows.map(\.text) == ["old", "new"])
         #expect(gui.windowContents[7]?.scrollLeft == 2)
         #expect(gui.windowContents[7]?.cursorShape == .beam)
-        #expect(dispatcher.currentFrameWindowIds.contains(7))
+        #expect(gui.windowContents[7] != nil)
     }
 
     @Test("guiWindowViewportDelta updates retained rows and marks window live")
@@ -1299,7 +1307,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[7]?.rows.map(\.text) == ["old"])
         #expect(gui.windowContents[7]?.scrollLeft == 2)
         #expect(gui.windowContents[7]?.cursorShape == .beam)
-        #expect(dispatcher.currentFrameWindowIds.contains(7))
+        #expect(gui.windowContents[7] != nil)
     }
 
     @Test("stale guiWindowRowsDelta is ignored without clearing current content")
@@ -1334,7 +1342,6 @@ struct CommandDispatcherRoutingTests {
         )))
 
         #expect(gui.windowContents[7] === content)
-        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
     }
 
     @Test("guiWindowRowsDelta missing retained ref clears content for full-refresh recovery")
@@ -1368,17 +1375,21 @@ struct CommandDispatcherRoutingTests {
         )))
 
         #expect(gui.windowContents[7] == nil)
-        #expect(dispatcher.currentFrameWindowIds.contains(7) == false)
     }
 
-    @Test("guiGutterSeparator updates frameState gutter state")
+    @Test("guiGutterSeparator updates gutter chrome and committed gutter column")
     @MainActor func guiGutterSepRouting() throws {
         let (dispatcher, _) = makeDispatcher()
-        dispatcher.applyForTesting(.guiGutterSeparator(col: 4, r: 0x3F, g: 0x44, b: 0x4A))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiGutterSeparator(col: 4, r: 0x3F, g: 0x44, b: 0x4A))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(dispatcher.frameState.gutterCol == 4)
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.metadata.gutterCol == 4)
         let expected: UInt32 = (0x3F << 16) | (0x44 << 8) | 0x4A
         #expect(dispatcher.frameState.gutterSeparatorColor == expected)
+        #expect(snapshot.frameState.gutterSeparatorColor == expected)
     }
 
     @Test("guiCursorline updates frameState cursorline state")
@@ -1391,20 +1402,20 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.cursorlineBg == expected)
     }
 
-    @Test("guiGutter stores gutter data in frameState")
+    @Test("guiGutter stores gutter data in the committed snapshot")
     @MainActor func guiGutterRouting() throws {
         let (dispatcher, _) = makeDispatcher()
-        let gutter = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
-            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
-            lineNumberWidth: 4, signColWidth: 1, entries: []
-        )
-        dispatcher.applyForTesting(.guiGutter(data: gutter))
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 1)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(dispatcher.frameState.windowGutters[1] != nil)
-        #expect(dispatcher.currentFrameWindowIds.contains(1))
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.windowGutters[1] != nil)
         // Active window gutter syncs gutterCol
-        #expect(dispatcher.frameState.gutterCol == 5) // 4 + 1
+        #expect(snapshot.gutterCol == 5) // 4 + 1
     }
 
     @Test("guiHoverPopup exposes lines after scroll offset")
@@ -1459,6 +1470,67 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.gutterColors.fg == expected)
         #expect(gui.themeColors.gutterFgRGB == expected)
         #expect(gui.themeColors.hasAppliedTheme)
+    }
+
+    @Test("staged theme colors are frozen into the committed editor snapshot")
+    @MainActor func stagedThemeColorsFreezeIntoCommittedEditorSnapshot() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let expected: UInt32 = (0x12 << 16) | (0x34 << 8) | 0x56
+        let slots = completeThemeSlots().map { slot, r, g, b in
+            slot == GUI_COLOR_GUTTER_FG ? (slot, 0x12, 0x34, 0x56) : (slot, r, g, b)
+        }
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: slots))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiIndentGuides(data: IndentGuideData(
+            windowId: 1, tabWidth: 4, activeGuideCol: 0xFFFF,
+            guideCols: [], lineIndentLevels: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+
+        #expect(dispatcher.committedEditorSnapshot?.frameState.gutterColors.fg == expected)
+        #expect(dispatcher.frameState.gutterColors.fg == expected)
+    }
+
+    @Test("staged window background is frozen into the committed editor snapshot")
+    @MainActor func stagedWindowBackgroundFreezeIntoCommittedEditorSnapshot() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 4, signColWidth: 3)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+
+        #expect(dispatcher.committedEditorSnapshot?.frameState.defaultBg == expected)
+        #expect(dispatcher.frameState.defaultBg == expected)
+    }
+
+    @Test("gutterless committed snapshot remains active for cursor and resident scroll ownership")
+    @MainActor func gutterlessCommittedSnapshotRemainsActive() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let inactiveGeometry = editorGeometry(windowId: 1, lineNumberWidth: 0, signColWidth: 0)
+        let activeGeometry = editorGeometry(windowId: 2, lineNumberWidth: 0, signColWidth: 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: inactiveGeometry, cursorVisible: false)))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 2, geometry: activeGeometry, cursorVisible: true)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.activeSurface?.windowId == 2)
+        #expect(snapshot.windowGutters.isEmpty)
+        guard case .none = try #require(snapshot.activeSurface).gutter else {
+            Issue.record("expected gutterless active surface")
+            return
+        }
     }
 
     @Test("keyframe with content but no guiTheme returns a typed rejection")
@@ -1526,6 +1598,39 @@ struct CommandDispatcherRoutingTests {
 /// begin and commit, commit promotes atomically, invalidation requests a
 /// keyframe with no partial promotion, and out-of-band commands apply without a
 /// transaction.
+fileprivate func editorGeometry(windowId: UInt16 = 1, lineNumberWidth: UInt16 = 4, signColWidth: UInt16 = 1) -> GUIPaneGeometry {
+    GUIPaneGeometry(
+        windowId: windowId,
+        totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        textRect: GUICellRect(row: 0, col: UInt16(lineNumberWidth + signColWidth), width: UInt16(80 - lineNumberWidth - signColWidth), height: 24),
+        gutterRect: GUICellRect(row: 0, col: 0, width: UInt16(lineNumberWidth + signColWidth), height: 24),
+        clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        viewport: GUIViewportSummary(top: 0, left: 0, rows: 24, cols: 80, totalLines: 24, visualRowOffset: 0, totalVisualRows: 24),
+        gutterMetrics: GUIGutterMetrics(lineNumberWidth: lineNumberWidth, signColWidth: signColWidth),
+        hitRegions: lineNumberWidth + signColWidth == 0 ? [] : [GUIHitRegion(kind: .gutter, rect: GUICellRect(row: 0, col: 0, width: UInt16(lineNumberWidth + signColWidth), height: 24), windowId: windowId)]
+    )
+}
+
+fileprivate func editorContent(windowId: UInt16 = 1, geometry: GUIPaneGeometry? = editorGeometry(), cursorVisible: Bool = true) throws -> GUIWindowContent {
+    try GUIWindowContent(
+        windowId: windowId, fullRefresh: true,
+        cursorVisible: cursorVisible,
+        cursorRow: 0, cursorCol: 0, cursorShape: .block,
+        rows: [], selection: nil,
+        searchMatches: [], diagnosticUnderlines: [],
+        documentHighlights: [], paneGeometry: geometry
+    )
+}
+
+fileprivate func editorGutter(windowId: UInt16 = 1, geometry: GUIPaneGeometry = editorGeometry()) -> Wire.WindowGutter {
+    Wire.WindowGutter(
+        windowId: windowId, contentRow: geometry.contentRect.row, contentCol: geometry.contentRect.col, contentHeight: geometry.contentRect.height,
+        isActive: true, contentWidth: geometry.contentRect.width, cursorLine: 0, lineNumberStyle: .hybrid,
+        lineNumberWidth: UInt8(geometry.gutterMetrics.lineNumberWidth), signColWidth: UInt8(geometry.gutterMetrics.signColWidth), entries: []
+    )
+}
+
 @Suite("CommandDispatcher Frame Staging")
 struct CommandDispatcherStagingTests {
 
@@ -1561,6 +1666,7 @@ struct CommandDispatcherStagingTests {
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [row], selection: nil, searchMatches: [],
             diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: editorGeometry(windowId: windowId, lineNumberWidth: 0, signColWidth: 0),
             scrollPresentation: scrollPresentation
         )
     }
@@ -1595,6 +1701,283 @@ struct CommandDispatcherStagingTests {
         )
     }
 
+    @Test("committed editor snapshot contains complete surfaces after freeze")
+    @MainActor func committedEditorSnapshotContainsCompleteSurfaces() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.frameSeq == 1)
+        #expect(snapshot.surfaces.count == 1)
+        #expect(snapshot.windowContents[1] != nil)
+        #expect(snapshot.windowGutters[1] != nil)
+        #expect(snapshot.surfaces.first?.paneGeometry == geometry)
+    }
+
+    @Test("snapshot factory rejects orphan gutter and indent-guide state")
+    func snapshotFactoryRejectsOrphanSurfaceState() throws {
+        let geometry = editorGeometry(windowId: 1, lineNumberWidth: 0, signColWidth: 0)
+        let content = try editorContent(windowId: 1, geometry: geometry)
+        let orphanGeometry = editorGeometry(windowId: 2)
+        let orphanGutter = editorGutter(windowId: 2, geometry: orphanGeometry)
+        let orphanGuides = IndentGuideData(windowId: 2, tabWidth: 4, activeGuideCol: 0xFFFF, guideCols: [2], lineIndentLevels: [1])
+
+        let gutterResult = CommittedEditorSnapshot.make(
+            generation: 1,
+            frameSeq: 1,
+            frameState: FrameState(cols: 80, rows: 24),
+            themeColors: nil,
+            windowContents: [1: content],
+            windowGutters: [2: orphanGutter],
+            windowIndentGuides: [:]
+        )
+        guard case .failure(.missingWindowReference(windowId: 2)) = gutterResult else {
+            Issue.record("expected orphan gutter rejection")
+            return
+        }
+
+        let guidesResult = CommittedEditorSnapshot.make(
+            generation: 1,
+            frameSeq: 1,
+            frameState: FrameState(cols: 80, rows: 24),
+            themeColors: nil,
+            windowContents: [1: content],
+            windowGutters: [:],
+            windowIndentGuides: [2: orphanGuides]
+        )
+        guard case .failure(.missingWindowReference(windowId: 2)) = guidesResult else {
+            Issue.record("expected orphan indent-guide rejection")
+            return
+        }
+    }
+
+    @Test("metadata and unrelated-window commits preserve resident projection and scroll state")
+    @MainActor func unrelatedEditorCommitsPreserveResidentProjection() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var resetCount = 0
+        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+        let observationCount = Mutex(0)
+        let resetPresentation = GUIScrollPresentation(
+            windowId: 7,
+            resetRequired: true,
+            anchorTop: 5,
+            anchorLeft: 0,
+            anchorVisualRowOffset: 0,
+            visibleStartLine: 5,
+            visibleEndLine: 20,
+            overscanStartLine: 4,
+            overscanEndLine: 21,
+            contentEpoch: 42,
+            layoutGeneration: 1
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(scrollPresentation: resetPresentation)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(resetCount == 1)
+
+        withObservationTracking {
+            _ = gui.windowContents
+        } onChange: {
+            observationCount.withLock { $0 += 1 }
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 2))
+        dispatcher.dispatch(.setCursorShape(.beam))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(observationCount.withLock { $0 } == 0)
+        #expect(resetCount == 1)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 3))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(windowId: 8)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(observationCount.withLock { $0 } == 1)
+        #expect(resetCount == 1)
+        #expect(gui.windowContents.keys.sorted() == [7, 8])
+    }
+
+    @Test("freeze rejects content that requires a missing gutter")
+    @MainActor func freezeRejectsMissingRequiredGutter() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let geometry = editorGeometry()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.windowContents.isEmpty)
+        #expect(dispatcher.committedEditorSnapshot == nil)
+        guard case .rejected(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 0, reason: .missingWindowGutter(windowId: 1)) = results.first else {
+            Issue.record("expected missing gutter rejection")
+            return
+        }
+    }
+
+    @Test("freeze accepts explicitly gutterless zero-width geometry")
+    @MainActor func freezeAcceptsExplicitGutterlessGeometry() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(lineNumberWidth: 0, signColWidth: 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.windowGutters.isEmpty)
+        guard case .none = try #require(snapshot.surfaces.first).gutter else {
+            Issue.record("expected explicit gutterless surface")
+            return
+        }
+    }
+
+    @Test("freeze rejects gutter widths that differ from pane geometry")
+    @MainActor func freezeRejectsIncompatibleGutterWidths() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let geometry = editorGeometry(lineNumberWidth: 4, signColWidth: 1)
+        let gutter = Wire.WindowGutter(
+            windowId: 1, contentRow: geometry.contentRect.row, contentCol: geometry.contentRect.col, contentHeight: geometry.contentRect.height,
+            isActive: true, contentWidth: geometry.contentRect.width + 1, cursorLine: 0, lineNumberStyle: .hybrid,
+            lineNumberWidth: 3, signColWidth: UInt8(geometry.gutterMetrics.signColWidth), entries: []
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+
+        #expect(gui.windowContents.isEmpty)
+        #expect(dispatcher.committedEditorSnapshot == nil)
+        guard case .rejected(generation: 1, frameSeq: 4, lastAppliedFrameSeq: 0, reason: .incompatibleWindowGeometry(windowId: 1)) = results.first else {
+            Issue.record("expected incompatible geometry rejection")
+            return
+        }
+    }
+
+    @Test("freeze rejects multiple active gutter owners before publication")
+    @MainActor func freezeRejectsMultipleActiveGutters() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let firstGeometry = editorGeometry(windowId: 1)
+        let secondGeometry = editorGeometry(windowId: 2)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1, geometry: firstGeometry)))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 2, geometry: secondGeometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 1, geometry: firstGeometry)))
+        dispatcher.dispatch(.guiGutter(data: editorGutter(windowId: 2, geometry: secondGeometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+
+        #expect(gui.windowContents.isEmpty)
+        #expect(dispatcher.committedEditorSnapshot == nil)
+        guard case .rejected(generation: 1, frameSeq: 5, lastAppliedFrameSeq: 0, reason: .invalidActiveWindow(windowId: 2)) = results.first else {
+            Issue.record("expected multiple-active-window rejection")
+            return
+        }
+    }
+
+    @Test("visible editor snapshot advances only after matching presentation")
+    @MainActor func visibleSnapshotAdvancesOnlyAfterMatchingPresentation() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(lineNumberWidth: 0, signColWidth: 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let firstSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(dispatcher.visibleEditorSnapshot == nil)
+        #expect(dispatcher.pendingPresentationFrame() == GUICommittedFrame(generation: 1, frameSeq: 1))
+
+        dispatcher.promoteVisibleEditorSnapshot(firstSnapshot)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(dispatcher.pendingPresentationFrame() == nil)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("shell-only")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.frameSeq == 1)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(dispatcher.pendingPresentationFrame() == nil)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        let thirdSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(thirdSnapshot.frameSeq == 3)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(dispatcher.pendingPresentationFrame() == GUICommittedFrame(generation: 1, frameSeq: 3))
+
+        dispatcher.promoteVisibleEditorSnapshot(firstSnapshot)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(dispatcher.pendingPresentationFrame() == GUICommittedFrame(generation: 1, frameSeq: 3))
+
+        dispatcher.promoteVisibleEditorSnapshot(thirdSnapshot)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 3)
+        #expect(dispatcher.pendingPresentationFrame() == nil)
+    }
+
+    @Test("older in-flight presentation promotes when a newer commit is pending")
+    @MainActor func olderInFlightPresentationPromotesWhileNewerCommitIsPending() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(lineNumberWidth: 0, signColWidth: 0)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let visibleBase = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorSnapshot(visibleBase)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let inFlightA = try #require(dispatcher.committedEditorSnapshot)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        let inFlightB = try #require(dispatcher.committedEditorSnapshot)
+        let inFlightBFrame = GUICommittedFrame(generation: inFlightB.generation, frameSeq: inFlightB.frameSeq)
+        #expect(dispatcher.pendingPresentationFrame() == inFlightBFrame)
+
+        dispatcher.promoteVisibleEditorSnapshot(inFlightA)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 2)
+        #expect(dispatcher.pendingPresentationFrame() == inFlightBFrame)
+    }
+
+    @Test("visible presentation retains captured local transform")
+    @MainActor func visiblePresentationRetainsCapturedLocalTransform() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let geometry = editorGeometry(lineNumberWidth: 0, signColWidth: 0)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(geometry: geometry)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        let transform = EditorLocalPresentationTransform(windowId: 1, offset: CGPoint(x: 7, y: 11))
+
+        dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: transform)
+
+        #expect(dispatcher.visibleEditorPresentation?.snapshot.frameSeq == 1)
+        #expect(dispatcher.visibleEditorPresentation?.localTransform == transform)
+    }
+
     // MARK: - Nothing paints between begin and commit
 
     @Test("observable GUIState is unchanged between begin and a partial frame")
@@ -1616,7 +1999,7 @@ struct CommandDispatcherStagingTests {
         #expect(gui.tabBarState.tabs.first?.label == "old.ex")
     }
 
-    @Test("observable FrameState is unchanged between begin and a partial frame")
+    @Test("committed cursor shape is unchanged between begin and a partial frame")
     @MainActor func frameStateUnchangedMidTransaction() throws {
         let (dispatcher, _) = makeDispatcher()
 
@@ -1624,12 +2007,12 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.setCursorShape(.block))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-        #expect(dispatcher.frameState.cursorShape == .block)
+        #expect(dispatcher.committedEditorSnapshot?.metadata.cursorShape == .block)
 
         // Stage a shape change without committing; the presented shape holds.
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.setCursorShape(.beam))
-        #expect(dispatcher.frameState.cursorShape == .block)
+        #expect(dispatcher.committedEditorSnapshot?.metadata.cursorShape == .block)
     }
 
     // MARK: - Commit promotes atomically
@@ -1644,13 +2027,13 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.setCursorShape(.beam))
         // Nothing promoted yet.
         #expect(gui.tabBarState.tabs.isEmpty)
-        #expect(dispatcher.frameState.cursorShape == .block)
+        #expect(dispatcher.committedEditorSnapshot == nil)
 
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         // Both staged mutations land together at commit.
         #expect(gui.tabBarState.tabs.first?.label == "a.ex")
-        #expect(dispatcher.frameState.cursorShape == .beam)
+        #expect(dispatcher.committedEditorSnapshot?.metadata.cursorShape == .beam)
         #expect(dispatcher.lastCommittedFrameSeq == 1)
     }
 
@@ -1966,7 +2349,9 @@ struct CommandDispatcherStagingTests {
         #expect(preparedGUI.themeColors.editorBg == directGUI.themeColors.editorBg)
         #expect(preparedGUI.windowContents[7]?.rows.map(\.text) == directGUI.windowContents[7]?.rows.map(\.text))
         #expect(preparedGUI.tabBarState.tabs.map(\.label) == directGUI.tabBarState.tabs.map(\.label))
-        #expect(prepared.frameState.cursorShape == direct.frameState.cursorShape)
+        // The editor-global cursor shape is authoritative only on the committed
+        // snapshot's metadata after the prepared publication (#2999 AC6).
+        #expect(prepared.committedEditorSnapshot?.metadata.cursorShape == .beam)
     }
 
     @Test("one valid frame enters the publication boundary exactly once")
@@ -2046,7 +2431,7 @@ struct CommandDispatcherStagingTests {
                 gui.themeColors.hasAppliedTheme,
                 gui.windowContents[7]?.rows.first?.text,
                 gui.statusBarState.modeName,
-                dispatcher.currentFrameWindowIds,
+                dispatcher.committedEditorSnapshot?.windowIds ?? [],
                 gui.completionState.visible
             )
         }
@@ -2134,11 +2519,8 @@ struct CommandDispatcherStagingTests {
     @Test("gutter and indent guide keys cannot collide across window ids")
     @MainActor func typedWindowCoalescingKeysDoNotCollide() throws {
         let (dispatcher, _) = makeDispatcher()
-        let gutter = Wire.WindowGutter(
-            windowId: 1001, contentRow: 0, contentCol: 4, contentHeight: 1,
-            isActive: false, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute,
-            lineNumberWidth: 3, signColWidth: 1, entries: []
-        )
+        let gutterGeometry = editorGeometry(windowId: 1001, lineNumberWidth: 3, signColWidth: 1)
+        let gutter = editorGutter(windowId: 1001, geometry: gutterGeometry)
         let guides = IndentGuideData(
             windowId: 1, tabWidth: 4, activeGuideCol: 4,
             guideCols: [4, 8], lineIndentLevels: [2]
@@ -2146,14 +2528,15 @@ struct CommandDispatcherStagingTests {
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: try windowContent(windowId: 1001)))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContent(windowId: 1001, geometry: gutterGeometry)))
         dispatcher.dispatch(.guiWindowContent(data: try windowContent(windowId: 1)))
         dispatcher.dispatch(.guiGutter(data: gutter))
         dispatcher.dispatch(.guiIndentGuides(data: guides))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(dispatcher.frameState.windowGutters[1001]?.lineNumberWidth == 3)
-        #expect(dispatcher.frameState.windowIndentGuides[1]?.guideCols == [4, 8])
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.windowGutters[1001]?.lineNumberWidth == 3)
+        #expect(snapshot.windowIndentGuides[1]?.guideCols == [4, 8])
     }
 
     @Test("terminal resource-policy rejection preserves committed state and emits once")
