@@ -333,7 +333,7 @@ struct NativeRenderFactories {
         preSubmit: { _ in },
         prePresentationSubmit: { _ in },
         observeCompletion: { commandBuffer, completion in
-            commandBuffer.addCompletedHandler { completed in
+            commandBuffer.addCompletedHandler { @Sendable completed in
                 let succeeded = completed.status == .completed
                 let status = Int(completed.status.rawValue)
                 Task { @MainActor in completion(succeeded, status) }

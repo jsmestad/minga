@@ -272,7 +272,7 @@ private func makeFactories(probe: NativeBenchmarkProbe) -> NativeRenderFactories
         return device.makeTexture(descriptor: descriptor)
     }
     factories.observeCompletion = { commandBuffer, completion in
-        commandBuffer.addCompletedHandler { completed in
+        commandBuffer.addCompletedHandler { @Sendable completed in
             let succeeded = completed.status == .completed
             let status = Int(completed.status.rawValue)
             let gpuMs = max(completed.gpuEndTime - completed.gpuStartTime, 0) * 1_000
