@@ -38,6 +38,10 @@ build_harness() {
     -derivedDataPath "$build_dir" \
     CODE_SIGNING_ALLOWED=NO \
     SWIFT_ACTIVE_COMPILATION_CONDITIONS="$conditions"
+  local framework_dir="$build_dir/Build/Products/Frameworks"
+  mkdir -p "$framework_dir"
+  ln -sfn ../Release/MingaProtocol.framework "$framework_dir/MingaProtocol.framework"
+  ln -sfn ../Release/MingaUI.framework "$framework_dir/MingaUI.framework"
   swiftc -O \
     "$ROOT/macos/Sources/Protocol/RenderPerformanceGate.swift" \
     "$ROOT/macos/Tests/Performance/NativeCompare/main.swift" \
@@ -55,7 +59,6 @@ measure_harness() {
   fi
   mkdir -p "$(dirname "$output")"
   SWIFT_BACKTRACE=enable=yes \
-    DYLD_FRAMEWORK_PATH="$products${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}" \
     "$binary" --measurement-output "$output"
 }
 
