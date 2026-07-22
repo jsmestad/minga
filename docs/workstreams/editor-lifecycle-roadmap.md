@@ -3707,7 +3707,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W084/S14: Make prompt cancel optional
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S14
 - **Planning profile:** `S14Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S14Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3730,8 +3730,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness returned `PASS` with 0.99 confidence after tracing the complete prompt producer/consumer inventory, handler loading, Escape ordering, exact four identity deletions, retained custom callback, tests, docs, and budgets. Elixir craftsmanship returned `PASS/Lean`, confirming standard optional behaviour dispatch in the existing owner is the smallest idiomatic shape. Ponytail returned `PASS/Lean` with 0.99 confidence, confirming zero concepts, exact scope, and all production, test, and documentation budgets.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed handler loading, exported callback ordering, exact identity fallback plus existing close, input routing, exact four identity deletions, retained custom callbacks, behavioral tests, untouched non-goals, budgets, validation evidence, zero concepts, and merge safety.
 - **Discoveries affecting later work:** The locked root command that names a Git Porcelain extension test path is not executable as written because extension test support and extension modules are not in the root test compile path. Later roadmap plans should either keep extension validation inside an executable root test target or specify the support/module loading needed for extension-local effect tests.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
-- **Merge SHA:** Pending.
-- **Merge evidence:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3156
+- **Implementation commit SHA:** `f7ac5bf11`.
+- **Merge SHA:** `53ab6b8afd0dac49cc936b143e9f8f56a4cec817`.
+- **Merge evidence:** PR #3156 merged after CI run `29890128925` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
