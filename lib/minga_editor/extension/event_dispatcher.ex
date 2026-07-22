@@ -12,18 +12,9 @@ defmodule MingaEditor.Extension.EventDispatcher do
   alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.CallbackRegistry
   alias Minga.Extension.CodeLease
+  alias MingaEditor.Extension.EventDispatchResult
   alias MingaEditor.Extension.EventHandler
   alias MingaEditor.State, as: EditorState
-
-  @type unload_result ::
-          {:ok, EditorState.t()}
-          | {:error, [CallbackInvoker.failure()], EditorState.t()}
-
-  @typep fanout_acc :: %{
-           status: :handled | :not_matched,
-           state: EditorState.t(),
-           failures: [CallbackInvoker.failure()]
-         }
 
   @doc "Dispatches an ordinary recognized event with its family policy."
   @spec dispatch(
@@ -31,7 +22,7 @@ defmodule MingaEditor.Extension.EventDispatcher do
           term(),
           CallbackRegistry.registry(),
           GenServer.server()
-        ) :: EventHandler.result()
+        ) :: EventDispatchResult.t()
   def dispatch(
         state,
         event,
@@ -56,7 +47,8 @@ defmodule MingaEditor.Extension.EventDispatcher do
     dispatch_first(callbacks, state, event, admission)
   end
 
-  def dispatch(%EditorState{}, _event, _registry, _admission), do: :not_matched
+  def dispatch(%EditorState{} = state, _event, _registry, _admission),
+    do: EventDispatchResult.not_matched(state)
 
   @doc "Dispatches a parameterized action to extension callbacks in priority order."
   @spec dispatch_editor_action(
@@ -65,7 +57,7 @@ defmodule MingaEditor.Extension.EventDispatcher do
           term(),
           CallbackRegistry.registry(),
           GenServer.server()
-        ) :: EventHandler.result()
+        ) :: EventDispatchResult.t()
   def dispatch_editor_action(
         %EditorState{} = state,
         action,
@@ -100,7 +92,7 @@ defmodule MingaEditor.Extension.EventDispatcher do
           CodeLease.unload_token(),
           CallbackRegistry.registry(),
           GenServer.server()
-        ) :: unload_result()
+        ) :: EventDispatchResult.t()
   def dispatch_source_unload(
         %EditorState{} = state,
         source,
@@ -111,10 +103,13 @@ defmodule MingaEditor.Extension.EventDispatcher do
       when is_reference(token) do
     callbacks = CallbackRegistry.callbacks_for_source(:source_unload, source, registry)
 
-    case dispatch_unload_callbacks(callbacks, state, source, token, admission, []) do
-      {updated_state, []} -> {:ok, updated_state}
-      {updated_state, failures} -> {:error, Enum.reverse(failures), updated_state}
-    end
+    dispatch_unload_callbacks(
+      callbacks,
+      EventDispatchResult.not_matched(state),
+      source,
+      token,
+      admission
+    )
   end
 
   @spec dispatch_fanout(
@@ -122,81 +117,102 @@ defmodule MingaEditor.Extension.EventDispatcher do
           EditorState.t(),
           EventHandler.event(),
           GenServer.server()
-        ) :: EventHandler.result()
+        ) :: EventDispatchResult.t()
   defp dispatch_fanout(callbacks, state, event, admission) do
     callbacks
-    |> Enum.reduce(%{status: :not_matched, state: state, failures: []}, fn callback, acc ->
-      dispatch_fanout_callback(callback, acc, event, admission)
+    |> Enum.reduce(EventDispatchResult.not_matched(state), fn callback, result ->
+      dispatch_fanout_callback(callback, result, event, admission)
     end)
-    |> fanout_result()
+    |> order_failures()
   end
 
   @spec dispatch_fanout_callback(
           CallbackRegistry.callback(),
-          fanout_acc(),
+          EventDispatchResult.t(),
           EventHandler.event(),
           GenServer.server()
-        ) :: fanout_acc()
-  defp dispatch_fanout_callback(callback, acc, event, admission) do
-    case invoke(callback, acc.state, event, admission) do
-      {:handled, state} -> %{acc | status: :handled, state: state}
-      :not_matched -> acc
-      {:callback_failed, failure} -> %{acc | failures: [failure | acc.failures]}
-    end
+        ) :: EventDispatchResult.t()
+  defp dispatch_fanout_callback(callback, result, event, admission) do
+    callback
+    |> invoke(result.state, event, admission)
+    |> accumulate_fanout_result(result)
   end
 
-  @spec fanout_result(fanout_acc()) :: EventHandler.result()
-  defp fanout_result(%{failures: [], status: :handled, state: state}), do: {:handled, state}
-  defp fanout_result(%{failures: [], status: :not_matched}), do: :not_matched
+  @spec accumulate_fanout_result(EventDispatchResult.t(), EventDispatchResult.t()) ::
+          EventDispatchResult.t()
+  defp accumulate_fanout_result(
+         %EventDispatchResult{status: :handled, state: state},
+         %EventDispatchResult{failures: []}
+       ),
+       do: EventDispatchResult.handled(state)
 
-  defp fanout_result(%{failures: failures, state: state}),
-    do: {:callback_failed, Enum.reverse(failures), state}
+  defp accumulate_fanout_result(
+         %EventDispatchResult{status: :handled, state: state},
+         %EventDispatchResult{failures: failures}
+       ),
+       do: EventDispatchResult.callback_failed(state, failures)
+
+  defp accumulate_fanout_result(
+         %EventDispatchResult{status: :not_matched},
+         %EventDispatchResult{} = result
+       ),
+       do: result
+
+  defp accumulate_fanout_result(
+         %EventDispatchResult{status: :callback_failed, failures: [failure]},
+         %EventDispatchResult{} = result
+       ) do
+    EventDispatchResult.callback_failed(result.state, [failure | result.failures])
+  end
+
+  @spec order_failures(EventDispatchResult.t()) :: EventDispatchResult.t()
+  defp order_failures(%EventDispatchResult{
+         status: :callback_failed,
+         state: state,
+         failures: failures
+       }),
+       do: EventDispatchResult.callback_failed(state, Enum.reverse(failures))
+
+  defp order_failures(%EventDispatchResult{} = result), do: result
 
   @spec dispatch_first(
           [CallbackRegistry.callback()],
           EditorState.t(),
           EventHandler.event(),
           GenServer.server()
-        ) :: EventHandler.result()
-  defp dispatch_first([], _state, _event, _admission), do: :not_matched
+        ) :: EventDispatchResult.t()
+  defp dispatch_first([], state, _event, _admission), do: EventDispatchResult.not_matched(state)
 
   defp dispatch_first([callback | rest], state, event, admission) do
     case invoke(callback, state, event, admission) do
-      {:handled, updated_state} -> {:handled, updated_state}
-      :not_matched -> dispatch_first(rest, state, event, admission)
-      {:callback_failed, _failure} = failure -> failure
+      %EventDispatchResult{status: :not_matched} -> dispatch_first(rest, state, event, admission)
+      %EventDispatchResult{} = result -> result
     end
   end
 
   @spec dispatch_unload_callbacks(
           [CallbackRegistry.callback()],
-          EditorState.t(),
+          EventDispatchResult.t(),
           CallbackRegistry.source(),
           CodeLease.unload_token(),
-          GenServer.server(),
-          [CallbackInvoker.failure()]
-        ) :: {EditorState.t(), [CallbackInvoker.failure()]}
-  defp dispatch_unload_callbacks([], state, _source, _token, _admission, failures),
-    do: {state, failures}
+          GenServer.server()
+        ) :: EventDispatchResult.t()
+  defp dispatch_unload_callbacks([], result, _source, _token, _admission),
+    do: order_failures(result)
 
   defp dispatch_unload_callbacks(
          [callback | rest],
-         state,
+         result,
          source,
          token,
-         admission,
-         failures
+         admission
        ) do
-    case invoke_unload(callback, state, source, token, admission) do
-      {:handled, updated_state} ->
-        dispatch_unload_callbacks(rest, updated_state, source, token, admission, failures)
+    next_result =
+      callback
+      |> invoke_unload(result.state, source, token, admission)
+      |> accumulate_fanout_result(result)
 
-      :not_matched ->
-        dispatch_unload_callbacks(rest, state, source, token, admission, failures)
-
-      {:callback_failed, failure} ->
-        dispatch_unload_callbacks(rest, state, source, token, admission, [failure | failures])
-    end
+    dispatch_unload_callbacks(rest, next_result, source, token, admission)
   end
 
   @spec invoke(
@@ -204,7 +220,7 @@ defmodule MingaEditor.Extension.EventDispatcher do
           EditorState.t(),
           EventHandler.event(),
           GenServer.server()
-        ) :: EventHandler.callback_result() | {:callback_failed, CallbackInvoker.failure()}
+        ) :: EventDispatchResult.t()
   defp invoke({source, callback}, state, event, admission) do
     case CallbackInvoker.invoke(
            source,
@@ -214,8 +230,8 @@ defmodule MingaEditor.Extension.EventDispatcher do
            event_kind(event),
            admission
          ) do
-      {:ok, result} -> validate_result(source, callback, result)
-      {:error, failure} -> {:callback_failed, failure}
+      {:ok, result} -> validate_result(source, callback, state, result)
+      {:error, failure} -> EventDispatchResult.callback_failed(state, [failure])
     end
   end
 
@@ -225,7 +241,7 @@ defmodule MingaEditor.Extension.EventDispatcher do
           CallbackRegistry.source(),
           CodeLease.unload_token(),
           GenServer.server()
-        ) :: EventHandler.callback_result() | {:callback_failed, CallbackInvoker.failure()}
+        ) :: EventDispatchResult.t()
   defp invoke_unload({source, callback}, state, source, token, admission) do
     case CallbackInvoker.invoke_unload(
            source,
@@ -236,21 +252,22 @@ defmodule MingaEditor.Extension.EventDispatcher do
            :source_unload,
            admission
          ) do
-      {:ok, result} -> validate_result(source, callback, result)
-      {:error, failure} -> {:callback_failed, failure}
+      {:ok, result} -> validate_result(source, callback, state, result)
+      {:error, failure} -> EventDispatchResult.callback_failed(state, [failure])
     end
   end
 
-  @spec validate_result(CallbackRegistry.source(), module(), term()) ::
-          EventHandler.callback_result() | {:callback_failed, CallbackInvoker.failure()}
-  defp validate_result(_source, _callback, {:handled, %EditorState{} = state}),
-    do: {:handled, state}
+  @spec validate_result(CallbackRegistry.source(), module(), EditorState.t(), term()) ::
+          EventDispatchResult.t()
+  defp validate_result(_source, _callback, _state, {:handled, %EditorState{} = state}),
+    do: EventDispatchResult.handled(state)
 
-  defp validate_result(_source, _callback, :not_matched), do: :not_matched
+  defp validate_result(_source, _callback, state, :not_matched),
+    do: EventDispatchResult.not_matched(state)
 
-  defp validate_result(source, callback, returned) do
+  defp validate_result(source, callback, state, returned) do
     failure = CallbackInvoker.invalid_return(source, callback, :handle_editor_event, returned)
-    {:callback_failed, failure}
+    EventDispatchResult.callback_failed(state, [failure])
   end
 
   @spec updated_state_result(EditorState.t()) :: {:handled, EditorState.t()}

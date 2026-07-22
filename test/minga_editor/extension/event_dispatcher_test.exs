@@ -5,6 +5,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
   alias Minga.Extension.ArtifactGenerationState
   alias Minga.Extension.CallbackRegistry
   alias Minga.Extension.CodeLease
+  alias MingaEditor.Extension.EventDispatchResult
   alias MingaEditor.Extension.EventDispatcher
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
@@ -59,7 +60,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
 
     event = {:buffer_saved, self()}
 
-    assert {:handled, updated_state} =
+    assert %EventDispatchResult{status: :handled, state: updated_state, failures: []} =
              EventDispatcher.dispatch(ctx.state, event, ctx.registry, ctx.code_lease)
 
     assert_receive {:extension_handler_called, HandlerTwo, ^event}
@@ -88,7 +89,11 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
 
     event = {:buffer_saved, self()}
 
-    assert {:callback_failed, [failure], updated_state} =
+    assert %EventDispatchResult{
+             status: :callback_failed,
+             state: updated_state,
+             failures: [failure]
+           } =
              EventDispatcher.dispatch(ctx.state, event, ctx.registry, ctx.code_lease)
 
     assert {:callback_failed, ^source, HandlerOne, :handle_editor_event, :exception, _} = failure
@@ -109,7 +114,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
     event = {:editor_action, :open, %{}}
     state = ctx.state
 
-    assert {:handled, ^state} =
+    assert %EventDispatchResult{status: :handled, state: ^state, failures: []} =
              EventDispatcher.dispatch(ctx.state, event, ctx.registry, ctx.code_lease)
 
     assert_receive {:extension_handler_called, HandlerOne, ^event}
@@ -127,9 +132,13 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
 
     event = {:editor_action, :open, %{}}
 
-    assert {:callback_failed,
-            {:callback_failed, ^source, HandlerOne, :handle_editor_event, :throw, :action_failed}} =
+    assert %EventDispatchResult{status: :callback_failed, state: state, failures: [failure]} =
              EventDispatcher.dispatch(ctx.state, event, ctx.registry, ctx.code_lease)
+
+    assert state == ctx.state
+
+    assert {:callback_failed, ^source, HandlerOne, :handle_editor_event, :throw, :action_failed} =
+             failure
 
     assert_receive {:extension_handler_called, HandlerOne, ^event}
     refute_receive {:extension_handler_called, HandlerTwo, ^event}
@@ -144,9 +153,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
         {HandlerTwo, [:editor_action], [priority: 10]}
       ])
 
-    assert {:callback_failed,
-            {:invalid_return, ^source, HandlerOne, :handle_editor_event,
-             %{kind: :tuple, size: 2, tag: :handled}}} =
+    assert %EventDispatchResult{status: :callback_failed, state: state, failures: [failure]} =
              EventDispatcher.dispatch_editor_action(
                ctx.state,
                :invalid,
@@ -154,6 +161,11 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
                ctx.registry,
                ctx.code_lease
              )
+
+    assert state == ctx.state
+
+    assert {:invalid_return, ^source, HandlerOne, :handle_editor_event,
+            %{kind: :tuple, size: 2, tag: :handled}} = failure
 
     refute_receive {:extension_handler_called, HandlerTwo, _event}
   end
@@ -176,7 +188,11 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
 
     {:ok, token} = CodeLease.quiesce_source(source, server: ctx.code_lease)
 
-    assert {:error, [failure], updated_state} =
+    assert %EventDispatchResult{
+             status: :callback_failed,
+             state: updated_state,
+             failures: [failure]
+           } =
              EventDispatcher.dispatch_source_unload(
                ctx.state,
                source,
@@ -198,7 +214,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
     source = register_handlers(ctx, [{HandlerOne, [:editor_action], []}])
     {:ok, _token} = CodeLease.quiesce_source(source, server: ctx.code_lease)
 
-    assert {:callback_failed, {:source_unavailable, ^source, HandlerOne, _, _}} =
+    assert %EventDispatchResult{status: :callback_failed, state: state, failures: [failure]} =
              EventDispatcher.dispatch_editor_action(
                ctx.state,
                :blocked,
@@ -207,8 +223,23 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
                ctx.code_lease
              )
 
+    assert state == ctx.state
+    assert {:source_unavailable, ^source, HandlerOne, _, _} = failure
+
     refute_receive {:extension_handler_called, HandlerOne, _event}
     assert CodeLease.active_leases(server: ctx.code_lease, source: source) == []
+  end
+
+  test "unrecognized ordinary events normalize to not matched", ctx do
+    assert %EventDispatchResult{status: :not_matched, state: state, failures: []} =
+             EventDispatcher.dispatch(
+               ctx.state,
+               {:unrecognized, :event},
+               ctx.registry,
+               ctx.code_lease
+             )
+
+    assert state == ctx.state
   end
 
   test "core callback failures and invalid returns propagate directly", ctx do
