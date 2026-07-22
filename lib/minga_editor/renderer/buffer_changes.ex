@@ -15,6 +15,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.State.Windows
+  alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.ResidentWindowState
   alias MingaEditor.Renderer.State
 
@@ -23,7 +24,8 @@ defmodule MingaEditor.Renderer.BufferChanges do
 
   def prepare(%State{} = state, %Intent{} = intent) do
     state = State.reconcile_windows(state, intent)
-    state = consume_changed_buffers(state, intent.buffer_versions)
+    versions = ObservedBuffers.monitored_versions(state.observed_buffers, intent.buffer_versions)
+    state = consume_changed_buffers(state, versions)
     {state, materialize(state, intent)}
   end
 
@@ -34,7 +36,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
       Enum.reduce(output.workspace.windows.map, state.resident_windows, fn {id, window}, acc ->
         case Map.get(acc, id) do
           %ResidentWindowState{} = resident ->
-            version = Map.get(state.buffer_versions, resident.buffer)
+            version = ObservedBuffers.recorded_version(state.observed_buffers, resident.buffer)
             Map.put(acc, id, ResidentWindowState.commit_window(resident, window, version))
 
           nil ->
@@ -59,13 +61,6 @@ defmodule MingaEditor.Renderer.BufferChanges do
       |> Map.reject(fn {_id, value} -> is_nil(value) end)
 
     %{state | resident_windows: residents}
-  end
-
-  @doc "Handles an exact monitored buffer death."
-  @spec handle_down(State.t(), reference(), pid()) :: State.t()
-  def handle_down(%State{} = state, ref, buffer) do
-    {state, _matched?} = State.drop_buffer_down(state, ref, buffer)
-    state
   end
 
   @spec consume_changed_buffers(State.t(), %{optional(pid()) => non_neg_integer()}) :: State.t()
@@ -99,11 +94,10 @@ defmodule MingaEditor.Renderer.BufferChanges do
       }
     )
 
-    %{
-      state
-      | resident_windows: residents,
-        buffer_versions: Map.put(state.buffer_versions, buffer, consumed.version)
-    }
+    observed_buffers =
+      ObservedBuffers.record_version(state.observed_buffers, buffer, consumed.version)
+
+    %{state | resident_windows: residents, observed_buffers: observed_buffers}
   end
 
   @spec safe_consume(

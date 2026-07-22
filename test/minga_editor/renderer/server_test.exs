@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.FrameAttempt
+  alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State.Render
@@ -944,8 +945,8 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert LineIdentity.source_ids(identity_after) == ids_before
       assert resident_after.render_cache.content_epoch == epoch_before
 
-      assert :sys.get_state(edited.render.renderer).buffer_versions[buffer] ==
-               Minga.Buffer.version(buffer)
+      observed = :sys.get_state(edited.render.renderer).observed_buffers
+      assert ObservedBuffers.recorded_version(observed, buffer) == Minga.Buffer.version(buffer)
 
       assert resident_after.render_cache.pending_edit_deltas == []
       assert {:ok, []} = Minga.Buffer.consume_edit_deltas(buffer, :renderer)

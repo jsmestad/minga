@@ -3,7 +3,7 @@ defmodule MingaEditor.Renderer.State do
   Complete long-lived state owned by `MingaEditor.Renderer.Server`.
 
   Renderer caches, font registration, frontend acknowledgement state, resident
-  windows, buffer monitors, and coalesced frame credit live here. Public
+  windows, observed buffer monitors, and coalesced frame credit live here. Public
   transitions centralize lifecycle cleanup so window close, buffer replacement,
   reset, and exact monitor `:DOWN` all discard the same state.
   """
@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RejectionState
+  alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.ResidentWindowState
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
@@ -38,8 +39,7 @@ defmodule MingaEditor.Renderer.State do
           caches: Caches.t(),
           message_store: MessageStore.t() | nil,
           resident_windows: %{optional(Window.id()) => ResidentWindowState.t()},
-          buffer_monitors: %{optional(pid()) => reference()},
-          buffer_versions: %{optional(pid()) => non_neg_integer()},
+          observed_buffers: ObservedBuffers.t(),
           pipeline: pipeline(),
           require_ack?: boolean(),
           rejection_state: RejectionState.t()
@@ -57,8 +57,7 @@ defmodule MingaEditor.Renderer.State do
             caches: Caches.new(),
             message_store: nil,
             resident_windows: %{},
-            buffer_monitors: %{},
-            buffer_versions: %{},
+            observed_buffers: ObservedBuffers.new(),
             pipeline: &RenderPipeline.run/1,
             require_ack?: true,
             rejection_state: RejectionState.new()
@@ -232,13 +231,12 @@ defmodule MingaEditor.Renderer.State do
       end)
 
     buffers = resident_windows |> Map.values() |> MapSet.new(& &1.buffer)
-    {monitors, versions} = reconcile_monitors(state, buffers)
+    observed_buffers = ObservedBuffers.reconcile(state.observed_buffers, buffers)
 
     %{
       state
       | resident_windows: resident_windows,
-        buffer_monitors: monitors,
-        buffer_versions: versions
+        observed_buffers: observed_buffers
     }
   end
 
@@ -246,20 +244,15 @@ defmodule MingaEditor.Renderer.State do
   @spec drop_buffer_down(t(), reference(), pid()) :: {t(), boolean()}
   def drop_buffer_down(%__MODULE__{} = state, ref, buffer)
       when is_reference(ref) and is_pid(buffer) do
-    case Map.get(state.buffer_monitors, buffer) do
-      ^ref ->
-        windows =
-          Map.reject(state.resident_windows, fn {_id, resident} -> resident.buffer == buffer end)
+    {observed_buffers, matched?} = ObservedBuffers.drop_down(state.observed_buffers, ref, buffer)
 
-        {%{
-           state
-           | resident_windows: windows,
-             buffer_monitors: Map.delete(state.buffer_monitors, buffer),
-             buffer_versions: Map.delete(state.buffer_versions, buffer)
-         }, true}
+    if matched? do
+      windows =
+        Map.reject(state.resident_windows, fn {_id, resident} -> resident.buffer == buffer end)
 
-      _other ->
-        {state, false}
+      {%{state | resident_windows: windows, observed_buffers: observed_buffers}, true}
+    else
+      {state, false}
     end
   end
 
@@ -297,22 +290,6 @@ defmodule MingaEditor.Renderer.State do
        do: ResourcePolicy.advertised?(policy, dimension)
 
   defp advertised_dimension?(%Intent{}, _dimension), do: false
-
-  @spec reconcile_monitors(t(), MapSet.t(pid())) ::
-          {%{optional(pid()) => reference()}, %{optional(pid()) => non_neg_integer()}}
-  defp reconcile_monitors(state, buffers) do
-    Enum.each(state.buffer_monitors, fn {buffer, ref} ->
-      if not MapSet.member?(buffers, buffer), do: Process.demonitor(ref, [:flush])
-    end)
-
-    monitors =
-      Map.new(buffers, fn buffer ->
-        {buffer, Map.get_lazy(state.buffer_monitors, buffer, fn -> Process.monitor(buffer) end)}
-      end)
-
-    versions = Map.take(state.buffer_versions, MapSet.to_list(buffers))
-    {monitors, versions}
-  end
 
   @spec reset_message_cursor(MessageStore.t() | nil) :: MessageStore.t() | nil
   defp reset_message_cursor(%MessageStore{} = store), do: MessageStore.reset_sent_cursor(store)

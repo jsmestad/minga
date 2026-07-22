@@ -26,11 +26,11 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03, E05
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
-- **CANDIDATE, craftsmanship:** E08
+- **CANDIDATE, craftsmanship:** (none)
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
@@ -40,7 +40,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
-- **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E08
+- **STILL_REPRODUCIBLE, craftsmanship:** E02, E03
 - **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES08, ES21
 
@@ -4198,4 +4198,31 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer and delivery:** `PASS` with 0.99 confidence. PR: https://github.com/jsmestad/minga/pull/3191. Implementation commit: `cc12c99af`.
 - **Discoveries affecting later work:** `Server.identity_base/1` retains its private random-secret helper because Server still owns option/env identity inputs while Endpoint owns socket and descriptor generation; sharing it would add API without removing a concept. No replan trigger, owner drift, trust-boundary change, protocol/frontend dependency, compatibility need, second endpoint concept, production budget miss, or test budget issue was found.
 - **Merge evidence:** PR #3191 merged at `b66986d2a73c6c951fa77dcbb2c3385b161139af` after CI run `29952162881` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
+
+### W101/E08: Own renderer observed buffer lifecycle
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** E08
+- **Planning profile:** `E08Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `E08Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://E08Planner` for current SHA `6c26c791c57b74080de2e8b436782c19520ec732`; scope was exactly one renderer-private `MingaEditor.Renderer.ObservedBuffers` owner, clean-cutover `Renderer.State` aggregation, direct `:DOWN` routing from `FrameHandler`, focused owner/renderer tests, and this evidence.
+- **Observable result:** `MingaEditor.Renderer.State` now carries one `%MingaEditor.Renderer.ObservedBuffers{monitors, versions}` aggregate instead of parallel `buffer_monitors` and `buffer_versions` root maps. Window reconciliation, buffer version recording, filtered intent-version reads, demonitoring, and exact PID plus ref `:DOWN` matching flow through the owner; resident-window retirement stays in `State`.
+- **Failure reproduction / source trace:** Before implementation, source inspection at the locked SHA showed `Renderer.State` defining separate `buffer_monitors` and `buffer_versions`, private `reconcile_monitors/2`, and split `drop_buffer_down/3` map updates; `BufferChanges` directly read and wrote `state.buffer_versions` and exposed `handle_down/3`; `FrameHandler` routed `{:DOWN, ...}` through `BufferChanges.handle_down/3`.
+- **Implementation result:** Added the single observed-buffer owner with `new/0`, `reconcile/2`, `record_version/3`, `drop_down/3`, `recorded_version/2`, and `monitored_versions/2`; replaced State root maps with `observed_buffers`; deleted State's private monitor reconciliation and BufferChanges DOWN shim; kept consume-before-fanout ordering and telemetry metadata; routed renderer mailbox `:DOWN` directly to `State.drop_buffer_down/3`.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/renderer/observed_buffers.ex`; `lib/minga_editor/renderer/state.ex`; `lib/minga_editor/renderer/buffer_changes.ex`; `lib/minga_editor/renderer/frame_handler.ex`; `test/minga_editor/renderer/observed_buffers_test.exs`; `test/minga_editor/renderer/buffer_changes_test.exs`; `test/minga_editor/renderer/server_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/renderer/observed_buffers_test.exs test/minga_editor/renderer/buffer_changes_test.exs` passed 9 tests. `mix test.debug test/minga_editor/renderer/server_test.exs:899` passed 1 test with 35 excluded.
+- **Formatting and reference validation:** `mix format --check-formatted lib/minga_editor/renderer/observed_buffers.ex lib/minga_editor/renderer/state.ex lib/minga_editor/renderer/buffer_changes.ex lib/minga_editor/renderer/frame_handler.ex test/minga_editor/renderer/observed_buffers_test.exs test/minga_editor/renderer/buffer_changes_test.exs test/minga_editor/renderer/server_test.exs docs/workstreams/editor-lifecycle-roadmap.md` passed after formatting the touched source and test paths.
+- **Production lines added/removed before roadmap evidence:** New `ObservedBuffers` adds 71 lines; existing renderer production files add 27 and remove 54 lines, net production `+44`, within the locked target `<= +45` and hard stop `<= +50`.
+- **Test lines added/removed before roadmap evidence:** New owner tests add 88 lines; existing renderer tests add 17 and remove 9 lines, net test `+96`, within the locked `<= +120` budget.
+- **Concepts added:** Exactly one production concept: `MingaEditor.Renderer.ObservedBuffers`. No process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, adapter, manager, generic wrapper, or parallel observed-buffer representation was added.
+- **Concepts removed:** Removed renderer root `buffer_monitors` and `buffer_versions`, removed State's private monitor reconciliation helper, and removed `BufferChanges.handle_down/3` as a DOWN-routing shim.
+- **Retained contracts:** Resident-window construction and retirement remain State-owned; BufferChanges still consumes changed buffers before fanout and preserves telemetry metadata; Intent still produces `buffer_versions`; recovery, frame credit, acknowledgement handling, stale retry behavior, frontend protocol, and render DTO shapes remain unchanged.
+- **Findings resolved:** E08's split renderer monitor/version lifecycle is resolved by centralizing monitor refs, consumed versions, demonitoring, filtered reads, record writes, and exact DOWN matching in one renderer-private owner while keeping resident windows outside that owner.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `mix test.quick` returned a session-manager cleanup timeout and a subagent credential-state failure outside the renderer paths; the exact two tests passed with the original seed and one-case concurrency. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` then passed 9,715 tests, 58 doctests, and 98 properties with zero failures.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence, Elixir craftsmanship returned `PASS/Lean` with 0.99 confidence, and Ponytail returned `PASS/Lean`; all three confirmed the single owner, monitor/version subset invariant, exact DOWN handling, consume-before-fanout ordering, clean cutover, exact budgets, and no mandatory correction.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete eight-file artifact, sole monitor/version owner, subset invariant, `[:flush]` demonitoring, exact PID plus ref cleanup, State-owned resident retirement, preserved consume-before-fanout behavior, clean cutover, exact budgets, grounded validation evidence, and merge safety.
+- **Final reviewer and delivery:** Pending PR.
+- **Discoveries affecting later work:** `mix test.debug test/minga_editor/renderer/server_test.exs:898` selected the preceding test after line shifts; rerunning current line `:899` exercised the intended headless cache/delta test. No replan trigger, owner drift, protocol/frontend dependency, compatibility need, second lifecycle concept, production budget miss, or test budget miss was found.
+- **Merge evidence:** Pending.
 - **Completion date:** 2026-07-22.
