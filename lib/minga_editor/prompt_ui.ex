@@ -101,8 +101,7 @@ defmodule MingaEditor.PromptUI do
 
     case key do
       @escape ->
-        new_state = prompt.handler.on_cancel(state)
-        {close(new_state), nil}
+        {state |> do_cancel(prompt) |> close(), nil}
 
       @enter ->
         new_state = prompt.handler.on_submit(prompt.text, state)
@@ -167,6 +166,11 @@ defmodule MingaEditor.PromptUI do
       {:prompt, %{prompt_ui: prompt}} -> prompt
       _ -> %PromptState{}
     end
+  end
+
+  @spec do_cancel(state(), PromptState.t()) :: state()
+  defp do_cancel(state, %{handler: handler}) do
+    if function_exported?(handler, :on_cancel, 1), do: handler.on_cancel(state), else: state
   end
 
   @spec do_tab(state(), PromptState.t()) :: state()

@@ -28,10 +28,6 @@ defmodule MingaGitPorcelain.UI.Prompt.GitAmend do
     end
   end
 
-  @impl true
-  @spec on_cancel(EditorState.t()) :: EditorState.t()
-  def on_cancel(state), do: state
-
   @spec do_amend(EditorState.t(), String.t()) :: EditorState.t()
   defp do_amend(state, message) do
     case Git.root_for(Minga.Project.resolve_root()) do
