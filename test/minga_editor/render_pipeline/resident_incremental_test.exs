@@ -5,6 +5,9 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Layout
+  alias Minga.RenderModel.Window.Row
+  alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Content
@@ -90,7 +93,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       BufferProcess.move_to(buffer, {250, 0})
       BufferProcess.insert_text(buffer, "Z")
 
-      {after_model, _state} = build_frame(state)
+      {after_model, state} = build_frame(state)
 
       # The edited resident row's content changed, and the digest moved with it,
       # so the frame-emit gate fires rather than dropping a needed frame.
@@ -102,6 +105,15 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert row.buf_line == 250
       assert after_model.row_delta.base_row_count == 300
       assert after_model.row_delta.result_row_count == 300
+
+      resident =
+        Map.fetch!(state.renderer.resident_windows, state.editor.workspace.windows.active)
+
+      assert {:ok, %VisualRow{buf_line: 250, row: %Row{buf_line: 250} = payload_row}} =
+               ResidentStore.payload_at(resident.render_cache.resident_build.store, 250)
+
+      assert payload_row.row_id == row.row_id
+      assert payload_row.content_hash == row.content_hash
     end
 
     test "a warm no-edit frame never fetches the full resident document" do

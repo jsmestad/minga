@@ -18,6 +18,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
   use ExUnitProperties
 
   alias Minga.RenderModel.Window.ContentDigest
+  alias Minga.RenderModel.Window.Row
+  alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.RenderModel.Window.ResidentStore
 
   @max_rows 100
@@ -47,6 +49,24 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
 
   defp make_entry(id, content_hash) do
     ResidentStore.entry(id, content_hash, {:payload, id, content_hash})
+  end
+
+  defp visual_entry(index) do
+    row = %Row{
+      row_id: Row.stable_id(:normal, index),
+      row_type: :normal,
+      buf_line: index,
+      visual_index: 0,
+      text: "line #{index}",
+      spans: [],
+      content_hash: Row.compute_hash("line #{index}", [])
+    }
+
+    ResidentStore.entry(
+      row.row_id,
+      row.content_hash,
+      VisualRow.new(row, row.text, 0, byte_size(row.text), 0, byte_size(row.text), 0)
+    )
   end
 
   # Applies one op to the store and to the plain-list oracle, choosing an index
@@ -184,6 +204,24 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
 
       assert ResidentStore.digest(rebuilt) ==
                ContentDigest.of_pairs(Enum.map(expected_entries, &{&1.id, &1.content_hash}))
+    end
+
+    test "projects VisualRow payload positions while preserving the typed payload" do
+      entries = [visual_entry(10), visual_entry(11), visual_entry(12)]
+      store = ResidentStore.from_entries(entries)
+
+      store = ResidentStore.insert_at(store, 0, visual_entry(9))
+
+      assert {:ok, %VisualRow{buf_line: 2, row: %Row{buf_line: 2}} = payload} =
+               ResidentStore.payload_at(store, 2)
+
+      assert payload.row.row_id == Enum.at(entries, 1).id
+
+      assert [
+               %VisualRow{buf_line: 1, row: %Row{buf_line: 1}},
+               %VisualRow{buf_line: 2, row: %Row{buf_line: 2}}
+             ] =
+               ResidentStore.payload_range(store, 1, 2)
     end
 
     property "rebuild equals replacing the dirty positions from scratch" do

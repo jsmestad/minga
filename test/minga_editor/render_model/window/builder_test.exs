@@ -5,13 +5,16 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
+  alias Minga.Core.Unicode
   alias Minga.Core.Face
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editing.Search.Match
   alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
+  alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
@@ -185,6 +188,32 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       )
 
     Builder.build(input, scroll, ctx)
+  end
+
+  defp build_window_with_stats(%EditorState{} = state, ctx_overrides, opts) do
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
+    state = MingaEditor.RenderPipeline.compute_layout(state)
+    layout = Layout.get(state)
+    {scrolls, input} = run_scroll_stage(state, layout)
+    scroll = scrolls |> Map.values() |> hd()
+
+    ctx =
+      struct!(
+        Context,
+        Keyword.merge(
+          [
+            viewport: scroll.viewport,
+            gutter_w: scroll.gutter_w,
+            content_w: scroll.content_w,
+            wrap_on: scroll.wrap_on,
+            line_number_style: scroll.line_number_style,
+            width_oracle: scroll.width_oracle
+          ],
+          ctx_overrides
+        )
+      )
+
+    Builder.build_with_stats(input, scroll, ctx, opts)
   end
 
   describe "GUI content stage" do
@@ -516,6 +545,58 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(model.gutter.entries, & &1.display_type) == [:normal, :wrap_continuation]
       assert model.cursor_row == 0
       assert model.cursor_col == 12
+    end
+
+    test "wrapped build stats retain typed VisualRows and replay them on reuse" do
+      state = gui_state(cols: 20, content: "abcdefghijABCDEFGHIJ")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+
+      {first_model, %BuildResult{} = first_result} = build_window_with_stats(state, [], [])
+
+      assert %BuildResult{
+               rasterized: 2,
+               retained_rows: retained_rows,
+               retained_wrap_lines: retained_wrap_lines,
+               resident_build: nil,
+               resident_rows_spliced: 0,
+               row_slot_allocator: %RowSlotAllocator{}
+             } = first_result
+
+      assert map_size(retained_rows) == 2
+      assert [{wrap_hash, entries}] = Map.values(retained_wrap_lines)
+      assert [%VisualRow{} = first_entry, %VisualRow{} = second_entry] = entries
+      assert Enum.map(entries, & &1.row) == first_model.rows
+
+      assert first_entry.buf_line == 0
+      assert first_entry.visual_index == 0
+      assert first_entry.display_row == 0
+      assert first_entry.source_start_byte == 0
+      assert first_entry.source_start_col == 0
+      assert first_entry.source_end_byte >= first_entry.source_start_byte
+      assert first_entry.source_end_col >= first_entry.source_start_col
+      assert first_entry.row_width == Unicode.display_width(first_entry.row.text)
+      assert first_entry.input_hash == wrap_hash
+      assert first_entry.wrap_line_hash == wrap_hash
+      assert first_entry.reused? == false
+      assert second_entry.display_row == 0
+
+      {second_model, %BuildResult{} = second_result} =
+        build_window_with_stats(state, [],
+          retained_rows: first_result.retained_rows,
+          retained_wrap_lines: first_result.retained_wrap_lines,
+          row_slot_allocator: first_result.row_slot_allocator
+        )
+
+      assert Enum.map(second_model.rows, & &1.row_id) == Enum.map(first_model.rows, & &1.row_id)
+
+      assert Enum.map(second_model.rows, & &1.content_hash) ==
+               Enum.map(first_model.rows, & &1.content_hash)
+
+      assert [{^wrap_hash, reused_entries}] = Map.values(second_result.retained_wrap_lines)
+      assert Enum.all?(reused_entries, &match?(%VisualRow{reused?: true}, &1))
+      assert Enum.map(reused_entries, & &1.row) == second_model.rows
     end
 
     test "wrapped row IDs follow their durable source when a line is inserted above" do

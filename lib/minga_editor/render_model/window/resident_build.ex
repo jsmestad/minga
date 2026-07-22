@@ -6,8 +6,9 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
   alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.RowSplice
   alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderModel.Window.VisualRow
 
-  @type payload :: %{required(:row) => Row.t(), optional(atom()) => term()}
+  @type payload :: VisualRow.t()
   @type retained_rows :: %{optional(Row.row_id()) => {non_neg_integer(), Row.t()}}
   @type t :: %__MODULE__{
           store: ResidentStore.t(),
@@ -243,14 +244,11 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
   defp hydration_reason(_, %{reset?: true}), do: :reset_required
   defp hydration_reason(_, _), do: :composition_context
 
-  defp to_store_entry(%{row: %Row{} = row} = payload),
+  defp to_store_entry(%VisualRow{row: %Row{} = row} = payload),
     do: ResidentStore.entry(row.row_id, row.content_hash, payload)
 
   defp retained_of(payloads),
-    do:
-      Map.new(payloads, fn %{row: %Row{} = row} = payload ->
-        {row.row_id, {Map.get(payload, :input_hash, row.content_hash), row}}
-      end)
+    do: Map.new(payloads, &VisualRow.retained_row/1)
 
-  defp rasterized_of(payloads), do: Enum.count(payloads, &(not Map.get(&1, :reused?, false)))
+  defp rasterized_of(payloads), do: Enum.count(payloads, &(not VisualRow.reused?(&1)))
 end
