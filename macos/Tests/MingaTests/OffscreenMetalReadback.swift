@@ -161,6 +161,7 @@ enum OffscreenReadback {
 
     /// Read `texture` back into a CPU image via a test-queue blit to a
     /// `storageModeShared` buffer, awaiting GPU completion asynchronously.
+    @MainActor
     static func read(texture: MTLTexture, queue: MTLCommandQueue) async -> ReadbackImage? {
         guard texture.device.registryID == queue.device.registryID else { return nil }
         let device = texture.device
@@ -185,7 +186,7 @@ enum OffscreenReadback {
         blit.endEncoding()
 
         let completed = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            cmd.addCompletedHandler { completed in
+            cmd.addCompletedHandler { @Sendable completed in
                 continuation.resume(returning: completed.status == .completed)
             }
             cmd.commit()
@@ -260,7 +261,7 @@ final class QueuedCompletionCoordinator {
     /// deterministic draining instead of being invoked immediately.
     func observeCompletion(_ commandBuffer: MTLCommandBuffer,
                            _ completion: @escaping @MainActor @Sendable (Bool, Int) -> Void) {
-        commandBuffer.addCompletedHandler { completed in
+        commandBuffer.addCompletedHandler { @Sendable completed in
             let succeeded = completed.status == .completed
             let status = Int(completed.status.rawValue)
             Task { @MainActor in
