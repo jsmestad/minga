@@ -62,8 +62,10 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
   def dispatch(:request_recovery, state), do: MingaEditor.Renderer.RecoveryHandler.request(state)
 
-  def dispatch({:DOWN, ref, :process, buffer, _reason}, state),
-    do: {:noreply, BufferChanges.handle_down(state, ref, buffer)}
+  def dispatch({:DOWN, ref, :process, buffer, _reason}, state) do
+    {state, _matched?} = State.drop_buffer_down(state, ref, buffer)
+    {:noreply, state}
+  end
 
   def dispatch(_message, state), do: {:noreply, state}
 

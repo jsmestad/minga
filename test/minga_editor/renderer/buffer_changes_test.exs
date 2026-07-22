@@ -5,6 +5,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.BufferChanges
+  alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.State
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.State.Windows
@@ -29,6 +30,9 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
 
     assert Enum.count(calls.messages, &match?({:renderer_consume, _}, &1)) == 1
     refute Enum.any?(calls.messages, &match?(:version, &1))
+
+    assert ObservedBuffers.recorded_version(state.observed_buffers, buffer) ==
+             Minga.Buffer.version(buffer)
 
     first_pending = state.resident_windows[1].render_cache.pending_edit_deltas
     second_pending = state.resident_windows[2].render_cache.pending_edit_deltas
@@ -92,11 +96,12 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     first = start_supervised!({Minga.Buffer.Process, content: "first"}, id: :first_buffer)
     second = start_supervised!({Minga.Buffer.Process, content: "second"}, id: :second_buffer)
     {state, _} = BufferChanges.prepare(State.new([]), intent(first, 0))
-    first_ref = state.buffer_monitors[first]
+    first_ref = state.observed_buffers.monitors[first]
 
     {state, _} = BufferChanges.prepare(state, intent(second, 0))
-    refute Map.has_key?(state.buffer_monitors, first)
-    assert Map.has_key?(state.buffer_monitors, second)
+    refute Map.has_key?(state.observed_buffers.monitors, first)
+    refute Map.has_key?(state.observed_buffers.versions, first)
+    assert Map.has_key?(state.observed_buffers.monitors, second)
 
     assert Enum.all?(state.resident_windows, fn {_id, resident} ->
              resident.buffer == second and resident.hydration == :buffer_replacement and
@@ -104,12 +109,14 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
            end)
 
     # A stale DOWN for the replaced buffer cannot remove the new resident state.
-    assert BufferChanges.handle_down(state, first_ref, first) == state
+    assert {stale, false} = State.drop_buffer_down(state, first_ref, first)
+    assert stale == state
 
-    second_ref = state.buffer_monitors[second]
-    dropped = BufferChanges.handle_down(state, second_ref, second)
+    second_ref = state.observed_buffers.monitors[second]
+    assert {dropped, true} = State.drop_buffer_down(state, second_ref, second)
     assert dropped.resident_windows == %{}
-    assert dropped.buffer_monitors == %{}
+    assert dropped.observed_buffers.monitors == %{}
+    assert dropped.observed_buffers.versions == %{}
   end
 
   test "focused receipt excludes resident/cache stores and stays within a fixed small bound" do
