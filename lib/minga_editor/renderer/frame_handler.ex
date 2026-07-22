@@ -24,34 +24,29 @@ defmodule MingaEditor.Renderer.FrameHandler do
   end
 
   @spec enqueue_accepted(State.t(), Intent.t(), non_neg_integer(), integer()) :: result()
-  defp enqueue_accepted(%State{rendering?: true} = state, intent, seq, pushed_at) do
+  defp enqueue_accepted(%State{} = state, intent, seq, pushed_at) do
     attempt = FrameAttempt.new(intent, seq, pushed_at)
     Telemetry.hop_latency(:cast_snapshot, pushed_at)
-    emit_coalesced(state.pending, seq)
-    {:noreply, %{state | pending: attempt}}
-  end
 
-  defp enqueue_accepted(%State{rendering?: false} = state, intent, seq, pushed_at) do
-    attempt = FrameAttempt.new(intent, seq, pushed_at)
-    Telemetry.hop_latency(:cast_snapshot, pushed_at)
-    token = schedule_render()
+    case State.coalesce_frame(state, attempt) do
+      :idle ->
+        token = schedule_render()
+        {:noreply, State.schedule_frame(state, attempt, token)}
 
-    {:noreply,
-     %{
-       state
-       | rendering?: true,
-         render_token: token,
-         stale_retry_count: 0,
-         in_flight: attempt
-     }}
+      {:coalesced, coalesced, dropped} ->
+        emit_coalesced(dropped, seq)
+        {:noreply, coalesced}
+    end
   end
 
   @spec dispatch(term(), State.t()) :: result()
-  def dispatch({:do_render, token}, %State{render_token: token} = state)
-      when is_reference(token),
-      do: run(%{state | render_token: nil})
+  def dispatch({:do_render, token}, state) when is_reference(token) do
+    case State.consume_render_token(state, token) do
+      {:ok, render_state, attempt, retry_count} -> run(render_state, attempt, retry_count)
+      :stale -> {:noreply, state}
+    end
+  end
 
-  def dispatch({:do_render, _stale_token}, state), do: {:noreply, state}
   def dispatch(:do_render, state), do: {:noreply, state}
 
   def dispatch({:frame_status, status}, state),
@@ -97,43 +92,29 @@ defmodule MingaEditor.Renderer.FrameHandler do
     end
   end
 
-  @doc "Executes the currently in-flight asynchronous frame."
-  @spec run(State.t()) :: result()
-
-  def run(%State{in_flight: %FrameAttempt{} = attempt} = state) do
+  @doc "Executes the currently scheduled asynchronous frame."
+  @spec run(State.t(), FrameAttempt.t(), non_neg_integer()) :: result()
+  def run(%State{} = state, %FrameAttempt{} = attempt, retry_count) do
     {prepared, input} = BufferChanges.prepare(state, attempt.intent)
 
     case execute_pipeline(prepared, input, attempt.intent, attempt.seq, attempt.pushed_at) do
       {:ok, committed, output} -> await_or_commit(committed, output, attempt)
-      {:stale, error, retained} -> retry_stale(retained, attempt, error)
+      {:stale, error, retained} -> retry_stale(retained, attempt, retry_count, error)
       {:error, error, retained} -> drop_failed(retained, error, attempt.seq)
     end
   end
 
   @doc "Advances to the latest coalesced intent or returns the renderer to idle."
   @spec advance(State.t()) :: result()
-  def advance(%State{pending: nil} = state),
-    do:
-      {:noreply,
-       %{
-         state
-         | rendering?: false,
-           render_token: nil,
-           stale_retry_count: 0,
-           in_flight: nil
-       }}
+  def advance(%State{} = state) do
+    case State.advance_credit(state) do
+      {:idle, idle} ->
+        {:noreply, idle}
 
-  def advance(%State{pending: %FrameAttempt{} = attempt} = state) do
-    token = schedule_render()
-
-    {:noreply,
-     %{
-       state
-       | render_token: token,
-         stale_retry_count: 0,
-         in_flight: attempt,
-         pending: nil
-     }}
+      {:schedule, advanced, %FrameAttempt{} = attempt} ->
+        token = schedule_render()
+        {:noreply, State.schedule_frame(advanced, attempt, token)}
+    end
   end
 
   @doc "Commits pipeline-global renderer state after composition or acknowledgement."
@@ -197,8 +178,8 @@ defmodule MingaEditor.Renderer.FrameHandler do
   defp await_or_commit(%State{require_ack?: true} = state, output, %FrameAttempt{} = attempt) do
     lease = AckLease.start(attempt, output, state.ack_timeout_ms)
 
-    {:noreply,
-     %{state | font_registry: output.font_registry, in_flight: nil, awaiting_ack: lease}}
+    state = %{state | font_registry: output.font_registry}
+    {:noreply, State.await_ack(state, lease)}
   end
 
   defp await_or_commit(state, output, %FrameAttempt{} = attempt) do
@@ -207,25 +188,15 @@ defmodule MingaEditor.Renderer.FrameHandler do
     advance(state)
   end
 
-  @spec retry_stale(State.t(), FrameAttempt.t(), StaleBufferError.t()) :: result()
-  defp retry_stale(
-         %State{stale_retry_count: retry_count} = state,
-         %FrameAttempt{} = attempt,
-         _error
-       )
+  @spec retry_stale(State.t(), FrameAttempt.t(), non_neg_integer(), StaleBufferError.t()) ::
+          result()
+  defp retry_stale(%State{} = state, %FrameAttempt{}, retry_count, _error)
        when retry_count < @max_stale_retries do
     token = schedule_render()
-
-    {:noreply,
-     %{
-       state
-       | render_token: token,
-         stale_retry_count: retry_count + 1,
-         in_flight: attempt
-     }}
+    {:noreply, State.retry_scheduled_frame(state, token)}
   end
 
-  defp retry_stale(state, %FrameAttempt{} = attempt, error) do
+  defp retry_stale(state, %FrameAttempt{} = attempt, _retry_count, error) do
     Minga.Log.warning(
       :render,
       "Renderer frame #{attempt.seq} exhausted stale-buffer retries: #{Exception.message(error)}"

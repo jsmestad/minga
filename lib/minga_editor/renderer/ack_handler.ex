@@ -4,7 +4,10 @@ defmodule MingaEditor.Renderer.AckHandler do
   alias MingaEditor.Renderer.{AckLease, Caches, FrameHandler, RecoveryHandler, State}
 
   @spec handle(State.t(), term()) :: {:noreply, State.t()}
-  def handle(%State{awaiting_ack: %AckLease{} = lease} = state, {:frame_applied, generation, seq}) do
+  def handle(
+        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
+        {:frame_applied, generation, seq}
+      ) do
     if AckLease.matches?(lease, generation, seq) do
       AckLease.cancel_timer(lease)
 
@@ -14,7 +17,6 @@ defmodule MingaEditor.Renderer.AckHandler do
       FrameHandler.send_receipt(state.editor_pid, output, seq, lease.attempt.intent)
 
       state
-      |> Map.put(:awaiting_ack, nil)
       |> FrameHandler.commit_output(output)
       |> FrameHandler.advance()
     else
@@ -23,7 +25,7 @@ defmodule MingaEditor.Renderer.AckHandler do
   end
 
   def handle(
-        %State{awaiting_ack: %AckLease{} = lease} = state,
+        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
         {:frame_rejected, generation, seq, last_applied, reason, :retryable_recovery}
       )
       when reason != :resource_policy do
@@ -36,7 +38,7 @@ defmodule MingaEditor.Renderer.AckHandler do
   end
 
   def handle(
-        %State{awaiting_ack: %AckLease{} = lease} = state,
+        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
         {:frame_rejected, generation, seq, last_applied, reason, :adapted_retry}
       ) do
     if matching_base?(state, lease, generation, seq, last_applied) do
@@ -48,7 +50,7 @@ defmodule MingaEditor.Renderer.AckHandler do
   end
 
   def handle(
-        %State{awaiting_ack: %AckLease{} = lease} = state,
+        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
         {:frame_rejected, generation, seq, last_applied, reason, disposition}
       )
       when disposition in [
@@ -64,7 +66,7 @@ defmodule MingaEditor.Renderer.AckHandler do
   end
 
   def handle(
-        %State{awaiting_ack: %AckLease{} = lease} = state,
+        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
         {:window_ref_miss, generation, seq, last_applied, window_id}
       ) do
     if matching_base?(state, lease, generation, seq, last_applied) do
@@ -78,7 +80,11 @@ defmodule MingaEditor.Renderer.AckHandler do
   def handle(state, _status), do: {:noreply, state}
 
   @spec timeout(State.t(), non_neg_integer(), non_neg_integer()) :: {:noreply, State.t()}
-  def timeout(%State{awaiting_ack: %AckLease{} = lease} = state, generation, seq) do
+  def timeout(
+        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
+        generation,
+        seq
+      ) do
     if AckLease.matches?(lease, generation, seq) do
       Minga.Log.warning(:render, "Frontend acknowledgement timed out for frame #{seq}")
       RecoveryHandler.transaction(state, lease.attempt)
@@ -100,11 +106,12 @@ defmodule MingaEditor.Renderer.AckHandler do
   end
 
   defp terminal(state, last_applied, reason, disposition) do
-    AckLease.cancel_timer(state.awaiting_ack)
+    lease = State.awaiting_lease(state)
+    AckLease.cancel_timer(lease)
 
     Minga.Log.warning(
       :render,
-      "Frontend terminally rejected frame #{state.awaiting_ack.attempt.seq}: #{reason} (#{disposition})"
+      "Frontend terminally rejected frame #{lease.attempt.seq}: #{reason} (#{disposition})"
     )
 
     {:noreply, State.terminal_failure(state, last_applied, reason)}

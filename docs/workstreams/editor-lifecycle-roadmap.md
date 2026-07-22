@@ -26,12 +26,12 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **CANDIDATE, craftsmanship:** (none)
-- **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
+- **CANDIDATE, data shape:** ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
 
@@ -41,7 +41,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03
-- **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
+- **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES08, ES21
 
 Drift evidence:
@@ -4226,3 +4226,26 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** `mix test.debug test/minga_editor/renderer/server_test.exs:898` selected the preceding test after line shifts; rerunning current line `:899` exercised the intended headless cache/delta test. No replan trigger, owner drift, protocol/frontend dependency, compatibility need, second lifecycle concept, production budget miss, or test budget miss was found.
 - **Merge evidence:** PR #3193 merged at `9489324504b16810202d8e5a08684493f9e4b698` after CI run `29955788733` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W102/ES03: Own renderer frame credit as one tagged phase
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** ES03
+- **Planning profile:** `ES03Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `ES03Worker`, no delegation.
+- **Current baseline:** `dd6629ad6ea4a1b3b23599834a9b33b5de9e0878`.
+- **Ready provenance:** Locked by `agent://ES03Planner` for current SHA `dd6629ad6ea4a1b3b23599834a9b33b5de9e0878`; scope was exactly a State-owned tagged `frame_credit` field across `State`, `FrameHandler`, `AckHandler`, `RecoveryHandler`, `Server`, compact owner tests, one server integration assertion, focused renderer validation, and this evidence.
+- **Observable result:** Renderer frame credit now has one legal phase at a time: `:idle`, `{:scheduled, token, FrameAttempt, retry_count, successor}`, or `{:awaiting_ack, AckLease, successor}`. New render intents coalesce into the embedded latest successor without allocating another token or releasing acknowledgement credit; exact token, acknowledgement, base, retry, terminal failure, adapted retry, targeted recovery, and connection reset behavior is preserved.
+- **Failure reproduction / source trace:** Before implementation, source inspection at the baseline found the six independent lifecycle fields `rendering?`, `render_token`, `stale_retry_count`, `pending`, `in_flight`, and `awaiting_ack` in `State`, direct multi-field scheduling/coalescing/advance writes in `FrameHandler`, acknowledgement release via `Map.put(:awaiting_ack, nil)` in `AckHandler`, recovery requeueing through `State.queue_frame/2`, and raw test setup for invalid mixed phases in `server_test.exs`.
+- **Implementation result:** Replaced the six old renderer lifecycle fields with `frame_credit`, added the locked State transition/query APIs, routed scheduling, coalescing, token consumption, acknowledgement leasing, advancement, stale retry, latest-successor recovery, terminal failure, and adaptation evidence through State-owned transitions, updated `Renderer.Server.rendering?/1`, migrated raw server test setup, and added pure owner tests plus the required scheduled-to-awaiting-to-successor-to-idle integration assertion.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/renderer/ack_handler.ex`; `lib/minga_editor/renderer/frame_handler.ex`; `lib/minga_editor/renderer/recovery_handler.ex`; `lib/minga_editor/renderer/server.ex`; `lib/minga_editor/renderer/state.ex`; `test/minga_editor/renderer/server_test.exs`; `test/minga_editor/renderer/state_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/renderer/state_test.exs test/minga_editor/renderer/frame_attempt_test.exs test/minga_editor/renderer/ack_lease_test.exs test/minga_editor/renderer/server_test.exs` passed with 52 tests. `mix test.debug test/minga_editor/input/router_test.exs` passed with 28 tests.
+- **Formatting and reference validation:** `mix format --check-formatted lib/minga_editor/renderer/state.ex lib/minga_editor/renderer/frame_handler.ex lib/minga_editor/renderer/ack_handler.ex lib/minga_editor/renderer/recovery_handler.ex lib/minga_editor/renderer/server.ex test/minga_editor/renderer/state_test.exs test/minga_editor/renderer/server_test.exs` passed. Focused production/test searches found no old lifecycle key writes, old lifecycle field reads, or `State.queue_frame/2` references under the renderer paths.
+- **Production lines added/removed before roadmap evidence:** Existing renderer files added 214 and removed 172 lines, net `+42`, within the locked `<=45` budget.
+- **Test lines added/removed before roadmap evidence:** Existing server test added 51 and removed 16 lines; new owner tests add 105 lines, for net test `+140`, within the locked `<=140` budget.
+- **Concepts added:** Exactly one production concept: the State-owned tagged `frame_credit` field.
+- **Concepts removed:** Removed the six independent renderer credit fields `rendering?`, `render_token`, `stale_retry_count`, `pending`, `in_flight`, and `awaiting_ack`, plus obsolete `State.queue_frame/2`.
+- **Discoveries affecting later work:** No replan trigger, owner drift, protocol/frontend dependency, compatibility field need, public API change, second production concept, production budget miss, or test budget miss was found.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,723 tests, 58 doctests, and 98 properties with zero failures.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.98 confidence and Ponytail returned `PASS/Lean` with 0.99 confidence. Elixir craftsmanship required moving `nil` from the `frame_successor` alias to its use sites, replacing a generic map update with a checked struct update, restoring State-first recovery flow, and making the idle `latest_successor/2` clause explicit; the reviewer confirmed its broader phase-fallback concern was over-applied and required no widened tests.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete eight-path artifact, exact tagged phase shape, sole State ownership, clean six-field and `queue_frame/2` cutover, preserved Server/frontend protocol contracts, exact budgets, grounded validation evidence, and merge safety.
