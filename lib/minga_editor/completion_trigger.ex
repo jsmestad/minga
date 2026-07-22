@@ -27,14 +27,22 @@ defmodule MingaEditor.CompletionTrigger do
 
   @debounce_ms 100
 
+  @typedoc "Cursor position captured when completion was triggered."
+  @type position :: {non_neg_integer(), non_neg_integer()}
+
+  @typedoc "Role assigned to a completion request reference within a batch."
+  @type response_role :: :primary | :secondary
+
+  @typedoc "Exclusive completion trigger phase tracked in the Editor."
+  @type phase ::
+          :idle
+          | {:debounced, reference(), position()}
+          | {:pending, %{reference() => response_role()}, position()}
+
   @typedoc "Completion bridge state tracked in the Editor."
-  @type t :: %{
-          pending_ref: reference() | nil,
-          pending_refs: MapSet.t(reference()),
-          debounce_timer: reference() | nil,
-          trigger_position: {non_neg_integer(), non_neg_integer()} | nil,
-          gen: non_neg_integer()
-        }
+  @type t :: %__MODULE__{phase: phase(), gen: non_neg_integer()}
+
+  defstruct phase: :idle, gen: 0
 
   @typedoc """
   Result of classifying an incoming LSP completion response without parsing.
@@ -46,22 +54,21 @@ defmodule MingaEditor.CompletionTrigger do
   newer request batch has superseded it (latest-wins).
   """
   @type classification ::
-          {:primary | :merge, {non_neg_integer(), non_neg_integer()}, String.t(),
-           non_neg_integer()}
+          {:primary | :merge, position(), String.t(), non_neg_integer()}
           | :ignore
 
   @doc "Returns initial completion bridge state."
-  @dialyzer {:no_opaque, new: 0}
   @spec new() :: t()
-  def new do
-    %{
-      pending_ref: nil,
-      pending_refs: MapSet.new(),
-      debounce_timer: nil,
-      trigger_position: nil,
-      gen: 0
-    }
-  end
+  def new, do: %__MODULE__{}
+
+  @doc "Returns whether a completion trigger has debounced or pending work."
+  @spec active?(t()) :: boolean()
+  def active?(%__MODULE__{phase: :idle}), do: false
+  def active?(%__MODULE__{}), do: true
+
+  @doc "Returns the latest-wins request generation."
+  @spec generation(t()) :: non_neg_integer()
+  def generation(%__MODULE__{gen: gen}), do: gen
 
   @doc """
   Checks whether the given character should trigger completion and,
@@ -73,7 +80,7 @@ defmodule MingaEditor.CompletionTrigger do
   """
   @spec maybe_trigger(t(), String.t(), pid()) ::
           {t(), Completion.t() | nil}
-  def maybe_trigger(bridge, char, buffer_pid) do
+  def maybe_trigger(%__MODULE__{} = bridge, char, buffer_pid) do
     clients = SyncServer.clients_for_buffer(buffer_pid)
 
     case clients do
@@ -81,13 +88,11 @@ defmodule MingaEditor.CompletionTrigger do
         {bridge, nil}
 
       _ ->
-        # Collect trigger characters from all clients
         all_trigger_chars =
           clients
           |> Enum.flat_map(&get_trigger_characters/1)
           |> Enum.uniq()
 
-        # Use the first client for debounce scheduling, but send to all on fire
         [first_client | _] = clients
 
         handle_char_type(bridge, char, all_trigger_chars, clients, first_client, buffer_pid)
@@ -99,13 +104,13 @@ defmodule MingaEditor.CompletionTrigger do
   LSP servers attached to the buffer.
   """
   @spec flush_debounce(t(), [pid()], pid()) :: t()
-  def flush_debounce(bridge, clients, buffer_pid) when is_list(clients) do
+  def flush_debounce(%__MODULE__{} = bridge, clients, buffer_pid) when is_list(clients) do
     {bridge, _completion} = send_completion_requests(bridge, clients, buffer_pid)
     bridge
   end
 
   @spec flush_debounce(t(), pid(), pid()) :: t()
-  def flush_debounce(bridge, client, buffer_pid) when is_pid(client) do
+  def flush_debounce(%__MODULE__{} = bridge, client, buffer_pid) when is_pid(client) do
     {bridge, _completion} = send_completion_requests(bridge, [client], buffer_pid)
     bridge
   end
@@ -132,35 +137,47 @@ defmodule MingaEditor.CompletionTrigger do
           {t(), classification()}
   def classify_response(bridge, ref, result, buffer_pid)
 
-  def classify_response(%{pending_ref: ref} = bridge, ref, {:ok, _result}, buffer_pid) do
-    trigger_pos = bridge.trigger_position || get_cursor_position(buffer_pid)
-    prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
-    remaining = MapSet.delete(bridge.pending_refs, ref)
-    bridge = %{bridge | pending_ref: nil, pending_refs: remaining}
-    {bridge, {:primary, trigger_pos, prefix, bridge.gen}}
-  end
+  def classify_response(
+        %__MODULE__{phase: {:pending, refs_by_role, trigger_pos}, gen: gen} = bridge,
+        ref,
+        {:ok, _result},
+        buffer_pid
+      ) do
+    case Map.fetch(refs_by_role, ref) do
+      {:ok, role} ->
+        prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
+        bridge = remove_pending_ref(bridge, refs_by_role, ref, trigger_pos)
+        {bridge, {classification_role(role), trigger_pos, prefix, gen}}
 
-  # Response from a secondary server: merge into existing completion.
-  def classify_response(%{pending_refs: refs} = bridge, ref, {:ok, _result}, buffer_pid) do
-    if MapSet.member?(refs, ref) do
-      trigger_pos = bridge.trigger_position || get_cursor_position(buffer_pid)
-      prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
-      remaining = MapSet.delete(refs, ref)
-      bridge = %{bridge | pending_refs: remaining}
-      {bridge, {:merge, trigger_pos, prefix, bridge.gen}}
-    else
-      # Stale ref, ignore.
-      {bridge, :ignore}
+      :error ->
+        {bridge, :ignore}
     end
   end
 
-  def classify_response(bridge, _ref, {:error, error}, _buffer_pid) do
+  def classify_response(
+        %__MODULE__{phase: {:pending, refs_by_role, trigger_pos}} = bridge,
+        ref,
+        {:error, error},
+        _buffer_pid
+      ) do
     Minga.Log.debug(:lsp, "Completion request failed: #{inspect(error)}")
-    {%{bridge | pending_ref: nil}, :ignore}
+
+    bridge =
+      if Map.has_key?(refs_by_role, ref) do
+        remove_pending_ref(bridge, refs_by_role, ref, trigger_pos)
+      else
+        bridge
+      end
+
+    {bridge, :ignore}
   end
 
-  # Stale response (ref doesn't match any pending request).
-  def classify_response(bridge, _ref, _result, _buffer_pid) do
+  def classify_response(%__MODULE__{} = bridge, _ref, {:error, error}, _buffer_pid) do
+    Minga.Log.debug(:lsp, "Completion request failed: #{inspect(error)}")
+    {bridge, :ignore}
+  end
+
+  def classify_response(%__MODULE__{} = bridge, _ref, _result, _buffer_pid) do
     {bridge, :ignore}
   end
 
@@ -168,9 +185,9 @@ defmodule MingaEditor.CompletionTrigger do
   Dismisses any active completion state and cancels pending requests.
   """
   @spec dismiss(t()) :: t()
-  def dismiss(bridge) do
+  def dismiss(%__MODULE__{} = bridge) do
     bridge = cancel_debounce(bridge)
-    %{bridge | pending_ref: nil, pending_refs: MapSet.new(), trigger_position: nil}
+    %__MODULE__{bridge | phase: :idle}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -194,10 +211,10 @@ defmodule MingaEditor.CompletionTrigger do
     end
   end
 
-  # Sends completion requests to ALL LSP clients for the buffer.
-  # Tracks all refs so responses from any client can be merged.
   @spec send_completion_requests(t(), [pid()], pid()) :: {t(), nil}
-  defp send_completion_requests(bridge, clients, buffer_pid) do
+  defp send_completion_requests(%__MODULE__{} = bridge, [], _buffer_pid), do: {bridge, nil}
+
+  defp send_completion_requests(%__MODULE__{} = bridge, clients, buffer_pid) do
     file_path = Buffer.file_path(buffer_pid)
 
     case file_path do
@@ -218,27 +235,26 @@ defmodule MingaEditor.CompletionTrigger do
             Client.request(client, "textDocument/completion", params)
           end)
 
-        primary_ref = List.first(refs)
-        all_refs = MapSet.new(refs)
+        refs_by_role = refs_by_role(refs)
 
-        # Mint a new generation for this request batch. A processed result that
-        # carries an older generation is discarded at apply time (latest-wins),
-        # so a slow Task from a superseded request can never clobber the menu.
-        {%{
+        {%__MODULE__{
            bridge
-           | pending_ref: primary_ref,
-             pending_refs: all_refs,
-             trigger_position: {line, col},
+           | phase: {:pending, refs_by_role, {line, col}},
              gen: bridge.gen + 1
          }, nil}
     end
   end
 
+  @spec refs_by_role([reference()]) :: %{reference() => response_role()}
+  defp refs_by_role([primary_ref | secondary_refs]) do
+    secondary_roles = Map.new(secondary_refs, &{&1, :secondary})
+    Map.put(secondary_roles, primary_ref, :primary)
+  end
+
   @spec schedule_debounced_trigger(t(), [pid()], pid()) :: {t(), nil}
-  defp schedule_debounced_trigger(bridge, clients, buffer_pid) do
+  defp schedule_debounced_trigger(%__MODULE__{} = bridge, clients, buffer_pid) do
     bridge = cancel_debounce(bridge)
 
-    # Only trigger if we have 2+ identifier chars typed
     {line, col} = get_cursor_position(buffer_pid)
     prefix_len = identifier_prefix_length(buffer_pid, line, col)
 
@@ -252,19 +268,33 @@ defmodule MingaEditor.CompletionTrigger do
           @debounce_ms
         )
 
-      bridge = %{bridge | debounce_timer: timer, trigger_position: trigger_pos}
-      {bridge, nil}
+      {%__MODULE__{bridge | phase: {:debounced, timer, trigger_pos}}, nil}
     else
       {bridge, nil}
     end
   end
 
   @spec cancel_debounce(t()) :: t()
-  defp cancel_debounce(%{debounce_timer: nil} = bridge), do: bridge
-
-  defp cancel_debounce(%{debounce_timer: timer} = bridge) do
+  defp cancel_debounce(%__MODULE__{phase: {:debounced, timer, _position}} = bridge) do
     Process.cancel_timer(timer)
-    %{bridge | debounce_timer: nil}
+    %__MODULE__{bridge | phase: :idle}
+  end
+
+  defp cancel_debounce(%__MODULE__{} = bridge), do: bridge
+
+  @spec classification_role(response_role()) :: :primary | :merge
+  defp classification_role(:primary), do: :primary
+  defp classification_role(:secondary), do: :merge
+
+  @spec remove_pending_ref(t(), %{reference() => response_role()}, reference(), position()) :: t()
+  defp remove_pending_ref(%__MODULE__{} = bridge, refs_by_role, ref, trigger_pos) do
+    case Map.delete(refs_by_role, ref) do
+      remaining_refs_by_role when map_size(remaining_refs_by_role) == 0 ->
+        %__MODULE__{bridge | phase: :idle}
+
+      remaining_refs_by_role ->
+        %__MODULE__{bridge | phase: {:pending, remaining_refs_by_role, trigger_pos}}
+    end
   end
 
   @spec get_trigger_characters(pid()) :: [String.t()]
@@ -278,19 +308,17 @@ defmodule MingaEditor.CompletionTrigger do
     :exit, _ -> ["."]
   end
 
-  @spec get_cursor_position(pid()) :: {non_neg_integer(), non_neg_integer()}
+  @spec get_cursor_position(pid()) :: position()
   defp get_cursor_position(buffer_pid) do
     {_content, {line, col}} = Buffer.content_and_cursor(buffer_pid)
     {line, col}
   end
 
-  @spec get_typed_since_trigger(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t()
   @doc "Returns the text typed since the trigger position (for prefix filtering)."
-  @spec get_typed_since_trigger(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t()
+  @spec get_typed_since_trigger(pid(), position()) :: String.t()
   def get_typed_since_trigger(buffer_pid, {trigger_line, trigger_col}) do
     {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buffer_pid)
 
-    # Only makes sense on the same line
     if cursor_line == trigger_line and cursor_col > trigger_col do
       lines = String.split(content, "\n")
 
@@ -314,7 +342,6 @@ defmodule MingaEditor.CompletionTrigger do
         0
 
       line_text ->
-        # Walk backwards from col to find the start of the identifier
         prefix = String.slice(line_text, 0, col)
 
         prefix

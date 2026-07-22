@@ -144,13 +144,7 @@ defmodule MingaEditor.State.ModalOverlay do
   @spec put_completion_trigger(t(), CompletionTrigger.t(), Tab.id() | nil) :: t()
   def put_completion_trigger(
         modal,
-        %{
-          pending_ref: _pending_ref,
-          pending_refs: %MapSet{},
-          debounce_timer: _timer,
-          trigger_position: _position,
-          gen: _generation
-        } = trigger,
+        %CompletionTrigger{} = trigger,
         active_tab_id
       )
       when (is_integer(active_tab_id) and active_tab_id > 0) or is_nil(active_tab_id),
@@ -165,7 +159,7 @@ defmodule MingaEditor.State.ModalOverlay do
        do: {:completion, CompletionPayload.put_trigger(payload, trigger)}
 
   defp do_put_completion_trigger(:none, trigger, active_tab_id) do
-    if trigger_active?(trigger) do
+    if CompletionTrigger.active?(trigger) do
       {:completion, CompletionPayload.new(active_tab_id, trigger: trigger)}
     else
       :none
@@ -229,9 +223,4 @@ defmodule MingaEditor.State.ModalOverlay do
   def dismiss_if_stale({:conflict, %ConflictPayload{}} = modal, active_tab_id)
       when (is_integer(active_tab_id) and active_tab_id > 0) or is_nil(active_tab_id),
       do: modal
-
-  @spec trigger_active?(CompletionTrigger.t()) :: boolean()
-  defp trigger_active?(%{debounce_timer: timer, pending_ref: ref, pending_refs: refs}) do
-    timer != nil or ref != nil or MapSet.size(refs) > 0
-  end
 end

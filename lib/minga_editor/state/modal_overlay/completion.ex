@@ -62,9 +62,11 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   """
   @spec new(owner(), keyword()) :: t()
   def new(owner, opts \\ []) when (is_integer(owner) and owner > 0) or is_nil(owner) do
+    %CompletionTrigger{} = trigger = Keyword.get(opts, :trigger, CompletionTrigger.new())
+
     %__MODULE__{
       completion: Keyword.get(opts, :completion),
-      trigger: Keyword.get(opts, :trigger, CompletionTrigger.new()),
+      trigger: trigger,
       owner: owner,
       opened_at: Keyword.get(opts, :opened_at, 0)
     }
@@ -86,7 +88,7 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   update the trigger from outside this module.
   """
   @spec put_trigger(t(), CompletionTrigger.t()) :: t()
-  def put_trigger(%__MODULE__{} = payload, trigger) do
+  def put_trigger(%__MODULE__{} = payload, %CompletionTrigger{} = trigger) do
     %{payload | trigger: trigger}
   end
 end

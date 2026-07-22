@@ -44,7 +44,7 @@ defmodule MingaEditor.CompletionAsyncTest do
 
   defp open_completion_modal(state, completion, gen) do
     owner = state.shell_runtime.state.tab_bar.active_id
-    trigger = %{CompletionTrigger.new() | gen: gen}
+    trigger = %CompletionTrigger{gen: gen}
     payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
     ModalWorkflow.open(state, {:completion, payload})
   end
@@ -60,12 +60,9 @@ defmodule MingaEditor.CompletionAsyncTest do
       # is the test process, so the Task will send the processed menu back to us.
       ref = make_ref()
 
-      trigger = %{
-        CompletionTrigger.new()
-        | pending_ref: ref,
-          pending_refs: MapSet.new([ref]),
-          trigger_position: {0, 0},
-          gen: 1
+      trigger = %CompletionTrigger{
+        phase: {:pending, %{ref => :primary}, {0, 0}},
+        gen: 1
       }
 
       state = ModalWorkflow.put_completion_trigger(state, trigger)
@@ -194,12 +191,9 @@ defmodule MingaEditor.CompletionAsyncTest do
       :sys.replace_state(ctx.editor, fn state ->
         owner = state.shell_runtime.state.tab_bar.active_id
 
-        trigger = %{
-          CompletionTrigger.new()
-          | pending_ref: ref,
-            pending_refs: MapSet.new([ref]),
-            trigger_position: {0, 0},
-            gen: 1
+        trigger = %CompletionTrigger{
+          phase: {:pending, %{ref => :primary}, {0, 0}},
+          gen: 1
         }
 
         payload = CompletionPayload.new(owner, trigger: trigger)
