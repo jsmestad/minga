@@ -12,7 +12,6 @@ defmodule MingaEditor.Frontend.Capabilities do
   """
 
   alias Minga.Core.WidthOracle
-  alias Minga.Core.WidthOracle.Measured
   alias Minga.Core.WidthOracle.Monospace
   alias MingaEditor.Frontend.ResourcePolicy
 
@@ -147,31 +146,10 @@ defmodule MingaEditor.Frontend.Capabilities do
 
   # ── Query helpers ──
 
-  @doc "Returns true if the frontend supports inline images (kitty, sixel, or native)."
-  @spec images?(t()) :: boolean()
-  def images?(%__MODULE__{image_support: :none}), do: false
-  def images?(%__MODULE__{}), do: true
-
-  @doc "Returns true if the frontend supports native floating windows (not emulated overlays)."
-  @spec native_floats?(t()) :: boolean()
-  def native_floats?(%__MODULE__{float_support: :native}), do: true
-  def native_floats?(%__MODULE__{}), do: false
-
-  @doc "Returns true if the frontend supports full 24-bit RGB color."
-  @spec rgb?(t()) :: boolean()
-  def rgb?(%__MODULE__{color_depth: :rgb}), do: true
-  def rgb?(%__MODULE__{}), do: false
-
   @doc "Returns true if the frontend is a native GUI (not a terminal)."
   @spec gui?(t()) :: boolean()
   def gui?(%__MODULE__{frontend_type: :native_gui}), do: true
   def gui?(%__MODULE__{}), do: false
-
-  @doc "Returns true if the frontend reports proportional text rendering."
-  @spec proportional_text?(t()) :: boolean()
-  def proportional_text?(%__MODULE__{text_rendering: :proportional}), do: true
-  def proportional_text?(%__MODULE__{}), do: false
-
   @doc "Returns true if the frontend can consume semantic render-model protocol commands."
   @spec semantic_ui?(t()) :: boolean()
   def semantic_ui?(%__MODULE__{semantic_ui: true}), do: true
@@ -179,14 +157,7 @@ defmodule MingaEditor.Frontend.Capabilities do
 
   @doc "Returns the safe production width oracle, monospace for now."
   @spec width_oracle(t()) :: WidthOracle.t()
-  def width_oracle(%__MODULE__{} = caps), do: width_oracle(caps, nil)
-
-  @doc "Returns a measured oracle only when the caller passes an owned measurement cache."
-  @spec width_oracle(t(), map() | nil) :: WidthOracle.t()
-  def width_oracle(%__MODULE__{text_rendering: :proportional}, cache) when is_map(cache),
-    do: Measured.new(cache)
-
-  def width_oracle(%__MODULE__{}, _cache), do: %Monospace{}
+  def width_oracle(%__MODULE__{}), do: %Monospace{}
 
   # ── Decoders ──
 
