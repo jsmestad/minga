@@ -3,11 +3,13 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
 
   alias Minga.RenderModel.UI.EmptyState
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
-  alias MingaEditor.Renderer.RenderWindow
+  alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.Renderer.WindowCache
+  alias MingaEditor.Window
   alias MingaEditor.State.Launchpad
   alias MingaEditor.State.Windows
 
-  defp ctx(launchpad, window \\ RenderWindow.new_empty_state(1, 24, 80)) do
+  defp ctx(launchpad, window \\ render_window(Window.new_empty_state(1, 24, 80))) do
     %MingaEditor.Frontend.Emit.Context{
       port_manager: nil,
       capabilities: nil,
@@ -19,6 +21,9 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
       launchpad: launchpad
     }
   end
+
+  defp render_window(window),
+    do: window |> WindowIntent.from_window() |> WindowIntent.materialize(WindowCache.reset())
 
   defp launchpad(opts) do
     defaults = [session_file_count: 0, crashed?: false, recents: []]
@@ -32,7 +37,7 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
   end
 
   test "hidden when the active render window is agent chat" do
-    agent_window = RenderWindow.new_agent_chat(1, 24, 80)
+    agent_window = render_window(Window.new_agent_chat(1, 24, 80))
 
     assert %EmptyState{visible?: false} =
              EmptyStateBuilder.build(ctx(launchpad([]), agent_window))
