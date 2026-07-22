@@ -91,8 +91,9 @@ defmodule MingaEditor.Handlers.BufferOpenedEventFlowTest do
         receive do
           {:minga_event, :buffer_opened, event} ->
             send(parent, {:default_registry_event, event})
-        after
-          100 -> send(parent, {:default_registry_quiet, self()})
+
+          :assert_quiet ->
+            send(parent, {:default_registry_quiet, self()})
         end
       end)
 
@@ -104,8 +105,9 @@ defmodule MingaEditor.Handlers.BufferOpenedEventFlowTest do
     assert [pid] = Enum.filter(state.workspace.buffers.list, &(Buffer.file_path(&1) == path))
 
     assert_receive {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: ^pid, path: ^path}}
+    send(default_observer, :assert_quiet)
 
-    assert_receive {:default_registry_quiet, ^default_observer}, 200
+    assert_receive {:default_registry_quiet, ^default_observer}
 
     refute_receive {:default_registry_event, %Events.BufferEvent{buffer: ^pid, path: ^path}}
   end
