@@ -152,10 +152,8 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :last_input_seq,
                :layout,
                :line_spacing,
-               :lsp,
                :message_store,
                :notifications,
-               :parser_status,
                :port_manager,
                :shell,
                :shell_id,
@@ -189,8 +187,11 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     refute binary =~ "ResidentStore"
     refute binary =~ "MingaEditor.RenderPipeline.Input"
 
+    fields =
+      ~w(authoritative_scroll_seq content cursor fold_map fold_ranges popup_meta scroll_detach_cursor scroll_echo_top scroll_velocity viewport)a
+
     assert Enum.all?(bounded.windows, fn {_id, carrier} ->
-             carrier.__struct__ == MingaEditor.RenderPipeline.WindowIntent
+             Map.keys(Map.from_struct(carrier)) |> Enum.sort() == fields
            end)
   end
 

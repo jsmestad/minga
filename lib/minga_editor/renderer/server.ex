@@ -10,7 +10,6 @@ defmodule MingaEditor.Renderer.Server do
   use GenServer
 
   alias MingaEditor.Frontend.ResourcePolicy
-  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.FrameHandler
   alias MingaEditor.Renderer.RecoveryHandler
@@ -25,11 +24,8 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   @doc "Queues the latest semantic frame intent for asynchronous rendering."
-  @spec cast_snapshot(GenServer.server(), Input.t() | Intent.t(), non_neg_integer()) :: :ok
-  def cast_snapshot(server \\ __MODULE__, snapshot, frame_seq)
-
-  def cast_snapshot(server, %Input{} = input, frame_seq),
-    do: cast_snapshot(server, Intent.from_input(input), frame_seq)
+  @spec cast_snapshot(GenServer.server(), Intent.t(), non_neg_integer()) :: :ok
+  def cast_snapshot(server \\ __MODULE__, intent, frame_seq)
 
   def cast_snapshot(server, %Intent{} = intent, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
@@ -37,12 +33,9 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   @doc "Runs one frame synchronously inside this renderer process."
-  @spec render_sync(GenServer.server(), Input.t() | Intent.t(), non_neg_integer()) ::
+  @spec render_sync(GenServer.server(), Intent.t(), non_neg_integer()) ::
           {:ok, RenderReceipt.t()} | {:error, Exception.t()}
-  def render_sync(server, snapshot, frame_seq)
-
-  def render_sync(server, %Input{} = input, frame_seq),
-    do: render_sync(server, Intent.from_input(input), frame_seq)
+  def render_sync(server, intent, frame_seq)
 
   def render_sync(server, %Intent{} = intent, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
@@ -112,11 +105,8 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   @doc "Abandons the old frontend connection and renders a fresh keyframe."
-  @spec reset_connection(GenServer.server(), Input.t() | Intent.t(), non_neg_integer()) :: :ok
-  def reset_connection(server \\ __MODULE__, snapshot, frame_seq)
-
-  def reset_connection(server, %Input{} = input, frame_seq),
-    do: reset_connection(server, Intent.from_input(input), frame_seq)
+  @spec reset_connection(GenServer.server(), Intent.t(), non_neg_integer()) :: :ok
+  def reset_connection(server \\ __MODULE__, intent, frame_seq)
 
   def reset_connection(server, %Intent{} = intent, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0,

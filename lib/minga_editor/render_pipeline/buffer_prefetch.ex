@@ -95,7 +95,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
             Viewport.cache_key(scroll.viewport),
             scroll.gutter_w,
             scroll.snapshot.line_count,
-            scroll.buf_version,
+            scroll.snapshot.version,
             scroll.cursor_line
           )
 
@@ -372,7 +372,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     window = Window.set_residence_armed(window, residence_eligible?)
 
     %WindowScroll{
-      win_id: win_id,
       window: window,
       win_layout: win_layout,
       is_active: is_active,
@@ -389,7 +388,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       preview_matches: preview_matches,
       line_number_style: line_number_style,
       wrap_on: wrap_on,
-      buf_version: snapshot.version,
       width_oracle: width_oracle,
       git_signs: ContentHelpers.signs_for_window(state, window),
       visible_line_map: visible_line_map,
@@ -686,7 +684,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     options = scroll.snapshot.options
 
     {
-      scroll.win_id,
+      scroll.window.id,
       buffer_pid(scroll.window),
       scroll.win_layout.total,
       scroll.win_layout.content,

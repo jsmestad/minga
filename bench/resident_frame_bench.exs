@@ -17,7 +17,6 @@ defmodule Minga.Bench.ResidentFrame do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
-  alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -77,7 +76,7 @@ defmodule Minga.Bench.ResidentFrame do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, state} = run_scroll_stage(state, layout)
 
     start = System.monotonic_time(:microsecond)
     {_contents, _cursor, state} = Content.build_content(state, scrolls)

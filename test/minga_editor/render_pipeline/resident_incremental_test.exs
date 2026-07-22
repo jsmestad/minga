@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
@@ -16,6 +17,11 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
+
+  defp scroll_input(input, layout) do
+    {prefetched, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+    Scroll.scroll_windows(input, layout, prefetched)
+  end
 
   # Builds the active window's semantic model for one frame, returning the model
   # and the state carrying the updated resident build cache into the next frame.
@@ -35,7 +41,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     input = Content.reset_rows_rasterized(input)
     input = RenderPipeline.compute_layout(input)
     layout = Layout.get(input)
-    {scrolls, input} = Scroll.scroll_windows(input, layout)
+
+    {scrolls, input} = scroll_input(input, layout)
     {contents, _cursor, output} = Content.build_content(input, scrolls)
     renderer = BufferChanges.commit(renderer, output, intent)
     receipt = RenderReceipt.from_output(output, 0, 0, 0)
@@ -164,13 +171,15 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       # this frame can finish consistently without a second buffer fetch even
       # though another edit landed after consume. We intentionally do not
       # commit it; the retry must retain its pending range and union edit B.
-      {_stale_scrolls, _stale_input} = Scroll.scroll_windows(stale_input, stale_layout)
+      {_stale_scrolls, _stale_input} = scroll_input(stale_input, stale_layout)
 
       {renderer, input} = BufferChanges.prepare(renderer, intent)
       input = Content.reset_rows_rasterized(input)
       input = RenderPipeline.compute_layout(input)
       layout = Layout.get(input)
-      {scrolls, input} = Scroll.scroll_windows(input, layout)
+
+      {scrolls, input} = scroll_input(input, layout)
+
       {contents, _cursor, output} = Content.build_content(input, scrolls)
       _renderer = BufferChanges.commit(renderer, output, intent)
       model = contents |> List.first() |> Map.fetch!(:models) |> List.first()

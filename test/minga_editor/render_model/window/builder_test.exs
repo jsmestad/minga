@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
   alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
@@ -38,7 +39,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, input} = Scroll.scroll_windows(state, layout)
+    {scrolls, input} = run_scroll_stage(state, layout)
     finish_content(input, scrolls)
   end
 
@@ -46,13 +47,18 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     input = prepare_renderer_windows(input)
     input = MingaEditor.RenderPipeline.compute_layout(input)
     layout = Layout.get(input)
-    {scrolls, input} = Scroll.scroll_windows(input, layout)
+    {scrolls, input} = scroll_input(input, layout)
     finish_content(input, scrolls)
   end
 
   defp finish_content(input, scrolls) do
     {contents, cursor, input} = Content.build_content(input, scrolls)
     {Enum.map(contents, &to_window_view/1), cursor, input}
+  end
+
+  defp scroll_input(input, layout) do
+    {prefetched, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+    Scroll.scroll_windows(input, layout, prefetched)
   end
 
   defp prepare_renderer_windows(%Input{} = input) do
@@ -147,7 +153,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, input} = Scroll.scroll_windows(state, layout)
+    {scrolls, input} = run_scroll_stage(state, layout)
     finish_window_model(input, scrolls, ctx_overrides)
   end
 
@@ -155,7 +161,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     input = prepare_renderer_windows(input)
     input = MingaEditor.RenderPipeline.compute_layout(input)
     layout = Layout.get(input)
-    {scrolls, input} = Scroll.scroll_windows(input, layout)
+    {scrolls, input} = scroll_input(input, layout)
     finish_window_model(input, scrolls, ctx_overrides)
   end
 

@@ -15,7 +15,6 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
-  alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
@@ -25,7 +24,6 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Renderer.RenderWindow, as: Window
 
-  # Async renderer writeback can lag a bit under CI load, keep this local to the renderer assertions.
   @async_render_timeout 5_000
 
   setup do
@@ -55,9 +53,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     attach_coalesce_handler()
     park_in_flight(renderer)
 
-    RendererServer.cast_snapshot(renderer, stub_snapshot(), 1)
-    RendererServer.cast_snapshot(renderer, stub_snapshot(), 2)
-    RendererServer.cast_snapshot(renderer, stub_snapshot(), 3)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 1)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 2)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 3)
 
     assert_receive {:tel, [:minga, :render, :coalesced], %{count: 1},
                     %{dropped_seq: 1, new_seq: 2}}
@@ -69,7 +67,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   test "pipeline crashes drop frames without killing the server" do
     renderer = start_renderer(self(), pipeline: fn _input -> raise "boom" end)
 
-    RendererServer.cast_snapshot(renderer, stub_snapshot(), 42)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 42)
 
     refute renderer_busy?(renderer)
     assert Process.alive?(renderer)
@@ -86,7 +84,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     renderer = start_renderer(self(), pipeline: pipeline)
 
     assert {:error, %MingaEditor.Renderer.StaleBufferError{}} =
-             RendererServer.render_sync(renderer, stub_snapshot(), 42)
+             RendererServer.render_sync(renderer, stub_intent(), 42)
 
     assert Agent.get(attempts, & &1) == 4
     refute renderer_busy?(renderer)
@@ -109,8 +107,8 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     renderer = start_renderer(self(), pipeline: pipeline)
     :ok = :sys.suspend(renderer)
-    RendererServer.cast_snapshot(renderer, stub_snapshot(), 10)
-    RendererServer.cast_snapshot(renderer, stub_snapshot(), 11)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 10)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 11)
     :ok = :sys.resume(renderer)
 
     for _attempt <- 1..4 do
@@ -128,7 +126,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     snapshot = Input.from_editor_state(state)
     frame_ref = Minga.Test.HeadlessPort.prepare_await(state.frontend.port_manager)
 
-    RendererServer.cast_snapshot(renderer, snapshot, 123)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 123)
 
     assert {:ok, _screen} =
              Minga.Test.HeadlessPort.collect_frame(frame_ref, @async_render_timeout)
@@ -143,8 +141,8 @@ defmodule MingaEditor.Renderer.ServerTest do
     parent = self()
     renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
     initial_caches = %Caches{last_emitted_frame_seq: 10}
-    in_flight = %{stub_snapshot() | caches: initial_caches}
-    pending = %{stub_snapshot() | caches: initial_caches}
+    in_flight = stub_snapshot() |> Map.put(:caches, initial_caches) |> Intent.from_input()
+    pending = stub_snapshot() |> Map.put(:caches, initial_caches) |> Intent.from_input()
 
     token = make_ref()
 
@@ -176,12 +174,12 @@ defmodule MingaEditor.Renderer.ServerTest do
     buffer = state.workspace.buffers.active
     renderer = start_ack_renderer(self(), pipeline: lineage_probe_pipeline(self()))
 
-    RendererServer.cast_snapshot(renderer, snapshot, 70)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 70)
     assert_receive {:lineage_probe, 70, nil, 0, [0, 1, 2], 0}, @async_render_timeout
 
     :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
     :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
-    RendererServer.cast_snapshot(renderer, snapshot, 71)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 71)
     RendererServer.frame_status(renderer, {:frame_applied, 1, 70})
 
     assert_receive {:lineage_probe, 71, [3, 0, 1, 2], 1, [3, 0, 1, 2], 1},
@@ -194,12 +192,12 @@ defmodule MingaEditor.Renderer.ServerTest do
     buffer = state.workspace.buffers.active
     renderer = start_ack_renderer(self(), pipeline: lineage_probe_pipeline(self()))
 
-    RendererServer.cast_snapshot(renderer, snapshot, 80)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 80)
     assert_receive {:lineage_probe, 80, nil, 0, [0, 1], 0}, @async_render_timeout
 
     :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
     :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
-    RendererServer.cast_snapshot(renderer, snapshot, 81)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 81)
     reject_base_sequence_mismatch(renderer, 1, 80, 0)
     assert_receive {:lineage_probe, 81, nil, 0, [0, 1, 2], 1}, @async_render_timeout
     RendererServer.frame_status(renderer, {:frame_applied, 2, 81})
@@ -214,7 +212,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     renderer =
       start_renderer(self(), pipeline: failing_lineage_probe_pipeline(self(), failure_mode))
 
-    RendererServer.cast_snapshot(renderer, snapshot, 89)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 89)
     assert_receive {:lineage_probe, 89, nil, 0, [0, 1], 0}, @async_render_timeout
     assert_receive {:render_done, %RenderReceipt{frame_seq: 89}}, @async_render_timeout
 
@@ -229,8 +227,8 @@ defmodule MingaEditor.Renderer.ServerTest do
         renderer_state
         | rendering?: true,
           render_token: token,
-          in_flight: {snapshot, 90, 0},
-          pending: {snapshot, 91, 0}
+          in_flight: {Intent.from_input(snapshot), 90, 0},
+          pending: {Intent.from_input(snapshot), 91, 0}
       }
     end)
 
@@ -249,7 +247,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       %{state | caches: %Caches{last_emitted_frame_seq: 11}}
     end)
 
-    RendererServer.cast_snapshot(renderer, stale_editor_snapshot, 12)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(stale_editor_snapshot), 12)
 
     assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
 
@@ -270,7 +268,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       %{state | caches: %Caches{last_emitted_frame_seq: 11}}
     end)
 
-    RendererServer.cast_snapshot(renderer, reset_snapshot, 12)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(reset_snapshot), 12)
 
     assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
 
@@ -282,11 +280,11 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "apply advances the base while duplicate, out-of-order, stale, and wrong-generation statuses do not" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 10)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 10)
       assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 11)
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 12)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 11)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 12)
 
       RendererServer.frame_status(renderer, {:frame_applied, 2, 10})
       RendererServer.frame_status(renderer, {:frame_applied, 1, 9})
@@ -311,9 +309,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "acknowledgement timeout retries the latest pending frame as a fresh-generation keyframe" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 10)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 10)
       assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 11)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 11)
 
       send(renderer, {:frame_ack_timeout, 1, 10})
 
@@ -325,9 +323,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "late acknowledgement from a timed-out generation cannot release current credit" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 21)
       send(renderer, {:frame_ack_timeout, 1, 20})
       assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
 
@@ -343,7 +341,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "normal acknowledgement makes its queued timeout message harmless" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 30)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 30)
       assert_receive {:ack_pipeline, 30, 1, 0, true}, @async_render_timeout
       RendererServer.frame_status(renderer, {:frame_applied, 1, 30})
       assert_receive {:render_done, %RenderReceipt{frame_seq: 30}}, @async_render_timeout
@@ -353,16 +351,16 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert RendererServer.acknowledgement_state(renderer) == {1, 30}
       refute_receive {:ack_pipeline, _, _, _, _}, 50
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 31)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 31)
       assert_receive {:ack_pipeline, 31, 1, 30, false}, @async_render_timeout
     end
 
     test "retryable rejection renders only latest pending intent as a fresh-generation keyframe" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 21)
 
       RendererServer.frame_status(
         renderer,
@@ -378,9 +376,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "decoded retryable frame rejection reaches renderer recovery" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 21)
 
       assert {:ok, decoded} =
                MingaEditor.Frontend.Protocol.decode_event(<<0x0B, 1::32, 20::32, 0::32, 4, 1>>)
@@ -397,14 +395,13 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     test "terminal resource rejection cancels credit, preserves last good, and ignores stale duplicates" do
       renderer = start_ack_renderer(self())
-      snapshot = stub_snapshot()
 
-      RendererServer.cast_snapshot(renderer, snapshot, 10)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 10)
       assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
       RendererServer.frame_status(renderer, {:frame_applied, 1, 10})
       assert_receive {:render_done, %RenderReceipt{frame_seq: 10}}, @async_render_timeout
 
-      RendererServer.cast_snapshot(renderer, snapshot, 11)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 11)
       assert_receive {:ack_pipeline, 11, 1, 10, false}, @async_render_timeout
 
       terminal = {:frame_rejected, 1, 11, 10, :resource_policy, :terminal_frontend_failure}
@@ -432,8 +429,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "identical terminal intent stays blocked until capability state changes" do
       renderer = start_ack_renderer(self())
       snapshot = stub_snapshot()
+      intent = Intent.from_input(snapshot)
 
-      RendererServer.cast_snapshot(renderer, snapshot, 20)
+      RendererServer.cast_snapshot(renderer, intent, 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
 
       RendererServer.frame_status(
@@ -442,7 +440,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       )
 
       refute RendererServer.rendering?(renderer)
-      RendererServer.cast_snapshot(renderer, snapshot, 21)
+      RendererServer.cast_snapshot(renderer, intent, 21)
       refute_receive {:ack_pipeline, 21, _, _, _}, 50
 
       changed = %{
@@ -450,7 +448,7 @@ defmodule MingaEditor.Renderer.ServerTest do
         | capabilities: %{snapshot.capabilities | semantic_ui: true}
       }
 
-      RendererServer.cast_snapshot(renderer, changed, 22)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(changed), 22)
       assert_receive {:ack_pipeline, 22, 1, 0, true}, @async_render_timeout
       assert RendererServer.terminal_failure(renderer) == nil
     end
@@ -466,7 +464,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       adapted_snapshot = %{snapshot | capabilities: %{snapshot.capabilities | semantic_ui: true}}
       adapted_intent = Intent.from_input(adapted_snapshot)
 
-      RendererServer.cast_snapshot(renderer, snapshot, 30)
+      RendererServer.cast_snapshot(renderer, rejected_intent, 30)
       assert_receive {:adaptation_pipeline, 30, 1, 0, true, false}, @async_render_timeout
 
       assert RendererServer.record_adaptation(
@@ -546,7 +544,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "manual retry returns the credit and advances recovery generation every time" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 30)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 30)
       assert_receive {:ack_pipeline, 30, 1, 0, true}, @async_render_timeout
 
       RendererServer.request_recovery(renderer)
@@ -581,7 +579,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       renderer = start_renderer(self(), pipeline: pipeline)
       :sys.replace_state(renderer, &%{&1 | stale_retry_count: 3})
 
-      :ok = RendererServer.reset_connection(renderer, stub_snapshot(), 60)
+      :ok = RendererServer.reset_connection(renderer, stub_intent(), 60)
 
       assert_receive {:reset_retry_attempt, 1}, @async_render_timeout
       assert_receive {:reset_retry_attempt, 2}, @async_render_timeout
@@ -591,11 +589,11 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "connection reset abandons outstanding credit and resumes from a base-zero keyframe" do
       renderer = start_ack_renderer(self())
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 50)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 50)
       assert_receive {:ack_pipeline, 50, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 51)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 51)
 
-      :ok = RendererServer.reset_connection(renderer, stub_snapshot(), 60)
+      :ok = RendererServer.reset_connection(renderer, stub_intent(), 60)
       assert_receive {:ack_pipeline, 60, 2, 0, true}, @async_render_timeout
       refute_receive {:ack_pipeline, 51, _, _, _}, 50
 
@@ -606,7 +604,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       RendererServer.frame_status(renderer, {:frame_applied, 2, 60})
       assert_receive {:render_done, %RenderReceipt{frame_seq: 60}}, @async_render_timeout
 
-      RendererServer.cast_snapshot(renderer, stub_snapshot(), 61)
+      RendererServer.cast_snapshot(renderer, stub_intent(), 61)
       assert_receive {:ack_pipeline, 61, 2, 60, false}, @async_render_timeout
       assert RendererServer.acknowledgement_state(renderer) == {2, 60}
     end
@@ -615,9 +613,9 @@ defmodule MingaEditor.Renderer.ServerTest do
       renderer = start_ack_renderer(self())
       snapshot = stub_snapshot()
 
-      RendererServer.cast_snapshot(renderer, snapshot, 100)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 100)
       assert_receive {:ack_pipeline, 100, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, snapshot, 101)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 101)
 
       :ok = :sys.suspend(renderer)
       RendererServer.frame_status(renderer, {:frame_applied, 1, 100})
@@ -640,7 +638,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       monitor = Process.monitor(renderer)
       refute_receive {:DOWN, ^monitor, :process, ^renderer, _reason}, 50
 
-      RendererServer.cast_snapshot(renderer, snapshot, 103)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 103)
       refute_receive {:ack_pipeline, 103, _, _, _}, 50
       RendererServer.frame_status(renderer, {:frame_applied, 2, 102})
       assert_receive {:ack_pipeline, 103, 2, 102, false}, @async_render_timeout
@@ -651,7 +649,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       state = build_editor_state(:tui, nil)
       snapshot = Input.from_editor_state(state)
 
-      RendererServer.cast_snapshot(renderer, snapshot, 40)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 40)
       assert_receive {:targeted_pipeline, 40, 1, 0, true, [1]}, @async_render_timeout
       RendererServer.frame_status(renderer, {:frame_applied, 1, 40})
       assert_receive {:render_done, %RenderReceipt{frame_seq: 40}}, @async_render_timeout
@@ -661,7 +659,7 @@ defmodule MingaEditor.Renderer.ServerTest do
           %{caches | last_emitted_frame_seq: 40, last_acknowledged_frame_seq: 40}
         end)
 
-      RendererServer.cast_snapshot(renderer, clean_snapshot, 41)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(clean_snapshot), 41)
       assert_receive {:targeted_pipeline, 41, 1, 40, false, []}, @async_render_timeout
       RendererServer.frame_status(renderer, {:window_ref_miss, 1, 41, 40, 1})
 
@@ -678,7 +676,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(130)
       attach_line_fetch_handler()
 
-      :ok = RendererServer.reset_connection(renderer, snapshot, 10)
+      :ok = RendererServer.reset_connection(renderer, Intent.from_input(snapshot), 10)
 
       assert_receive {:resident_probe, 10, 2, true, 130, nil, fresh_epoch},
                      @async_render_timeout
@@ -694,7 +692,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       :ok = Minga.Buffer.Process.move_to(buffer, {64, 0})
       :ok = Minga.Buffer.Process.insert_text(buffer, "Z")
-      RendererServer.cast_snapshot(renderer, snapshot, 11)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 11)
 
       assert_receive {:resident_probe, 11, 2, false, 1, [{64, 1, 1}], ^fresh_epoch},
                      @async_render_timeout
@@ -707,7 +705,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
       :ok = Minga.Buffer.Process.insert_text(buffer, "first\n")
-      RendererServer.cast_snapshot(renderer, snapshot, 20)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 20)
 
       assert_receive {:resident_probe_paused, 20}, @async_render_timeout
       :ok = Minga.Buffer.Process.move_to(buffer, {100, 0})
@@ -725,7 +723,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(130)
       attach_line_fetch_handler()
 
-      RendererServer.cast_snapshot(renderer, snapshot, 20)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 20)
       assert_receive {:resident_probe, 20, 1, false, 0, [], ^epoch}, @async_render_timeout
       assert_receive {:line_fetch, %{lines_fetched: 24}, %{full_residence?: true}}
 
@@ -745,7 +743,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       :ok = Minga.Buffer.Process.move_to(buffer, {64, 0})
       :ok = Minga.Buffer.Process.insert_text(buffer, "Z")
-      RendererServer.cast_snapshot(renderer, snapshot, 30)
+      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 30)
 
       assert_receive {:resident_probe, 30, 2, false, 1, [{64, 1, 1}], ^fresh_epoch},
                      @async_render_timeout
@@ -1006,7 +1004,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     snapshot = Input.from_editor_state(state)
     renderer = start_ack_renderer(self(), pipeline: pipeline || resident_probe_pipeline(self()))
 
-    RendererServer.cast_snapshot(renderer, snapshot, 1)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 1)
 
     assert_receive {:resident_probe, 1, 1, true, _first_rows, nil, _first_epoch},
                    @async_render_timeout
@@ -1014,7 +1012,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     RendererServer.frame_status(renderer, {:frame_applied, 1, 1})
     assert_receive {:render_done, %RenderReceipt{frame_seq: 1}}, @async_render_timeout
 
-    RendererServer.cast_snapshot(renderer, snapshot, 2)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 2)
 
     assert_receive {:resident_probe, 2, 1, false, ^line_count, nil, epoch},
                    @async_render_timeout
@@ -1022,7 +1020,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     RendererServer.frame_status(renderer, {:frame_applied, 1, 2})
     assert_receive {:render_done, %RenderReceipt{frame_seq: 2}}, @async_render_timeout
 
-    RendererServer.cast_snapshot(renderer, snapshot, 3)
+    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 3)
     assert_receive {:resident_probe, 3, 1, false, 0, [], ^epoch}, @async_render_timeout
     RendererServer.frame_status(renderer, {:frame_applied, 1, 3})
     assert_receive {:render_done, %RenderReceipt{frame_seq: 3}}, @async_render_timeout
@@ -1068,7 +1066,13 @@ defmodule MingaEditor.Renderer.ServerTest do
     fn input ->
       input = RenderPipeline.compute_layout(input)
       layout = Layout.get(input)
-      {scrolls, input} = Scroll.scroll_windows(input, layout)
+
+      {prefetched, input} =
+        MingaEditor.RenderPipeline.BufferPrefetch.prefetch_scrolls(input, layout)
+
+      {scrolls, input} =
+        MingaEditor.RenderPipeline.Scroll.scroll_windows(input, layout, prefetched)
+
       {contents, _cursor, output} = Content.build_content(input, scrolls)
       model = contents |> List.first() |> Map.fetch!(:models) |> List.first()
       keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
@@ -1294,7 +1298,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp park_in_flight(renderer) do
     :sys.replace_state(renderer, fn state ->
-      %{state | rendering?: true, in_flight: {stub_snapshot(), 0, 0}}
+      %{state | rendering?: true, in_flight: {stub_intent(), 0, 0}}
     end)
   end
 
@@ -1316,6 +1320,8 @@ defmodule MingaEditor.Renderer.ServerTest do
        :retryable_recovery}
     )
   end
+
+  defp stub_intent, do: Intent.from_input(stub_snapshot())
 
   defp stub_snapshot do
     %Input{

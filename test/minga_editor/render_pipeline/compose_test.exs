@@ -11,7 +11,6 @@ defmodule MingaEditor.RenderPipeline.ComposeTest do
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
-  alias MingaEditor.RenderPipeline.Scroll
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -20,7 +19,7 @@ defmodule MingaEditor.RenderPipeline.ComposeTest do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, state} = run_scroll_stage(state, layout)
     {contents, cursor_info, state} = Content.build_content(state, scrolls)
     chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
     {contents, chrome, cursor_info, state}

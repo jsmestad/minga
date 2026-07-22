@@ -146,7 +146,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           {RenderWindow.t(), build_stats()}
   def build_with_stats(state, scroll, ctx, opts \\ []) do
     %WindowScroll{
-      win_id: win_id,
       is_active: is_active,
       viewport: viewport,
       cursor_line: cursor_line,
@@ -160,6 +159,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       visible_line_map: visible_line_map,
       wrap_on: wrap_on
     } = scroll
+
+    win_id = scroll.window.id
 
     visible_row_count = Viewport.content_rows(viewport)
     content_kind = Keyword.get(opts, :content_kind, :buffer)
@@ -1884,7 +1885,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, content_kind, visual_entries)
        when content_kind in [:buffer, :agent_chat] do
     %WindowScroll{
-      win_id: win_id,
       win_layout: %{content: {content_row, content_col, full_width, content_height}},
       cursor_line: cursor_line,
       snapshot: snapshot,
@@ -1892,6 +1892,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       line_number_style: line_number_style,
       is_active: is_active
     } = scroll
+
+    win_id = scroll.window.id
 
     line_count = max(snapshot.line_count, 0)
 
@@ -1929,7 +1931,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     text_rect = {row, text_col, text_width, height}
 
     %PaneGeometry{
-      window_id: scroll.win_id,
+      window_id: scroll.window.id,
       total_rect: total_rect,
       content_rect: content_rect,
       text_rect: text_rect,
@@ -1937,7 +1939,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       clip_rect: text_rect,
       viewport: viewport_summary(scroll, text_width),
       gutter_metrics: metrics,
-      hit_regions: hit_regions(state, scroll.win_id, text_rect, gutter_rect, metrics)
+      hit_regions: hit_regions(state, scroll.window.id, text_rect, gutter_rect, metrics)
     }
   end
 
@@ -2322,8 +2324,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec build_indent_guides(WindowScroll.t(), Context.t(), RenderWindow.content_kind()) ::
           IndentGuides.t()
-  defp build_indent_guides(%WindowScroll{win_id: win_id}, _ctx, content_kind)
-       when content_kind != :buffer, do: IndentGuides.empty(win_id)
+  defp build_indent_guides(%WindowScroll{} = scroll, _ctx, content_kind)
+       when content_kind != :buffer,
+       do: IndentGuides.empty(scroll.window.id)
 
   defp build_indent_guides(%WindowScroll{} = scroll, %Context{} = ctx, :buffer) do
     if indent_guides_enabled?() do
@@ -2332,9 +2335,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         |> Enum.slice(scroll.visible_row_start_index, Viewport.content_rows(scroll.viewport))
 
       {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
-      indent_guides_from_guides(scroll.win_id, ctx.tab_width, guides, levels)
+      indent_guides_from_guides(scroll.window.id, ctx.tab_width, guides, levels)
     else
-      IndentGuides.empty(scroll.win_id)
+      IndentGuides.empty(scroll.window.id)
     end
   end
 

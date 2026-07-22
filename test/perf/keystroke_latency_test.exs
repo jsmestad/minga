@@ -26,6 +26,7 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
   use ExUnit.Case, async: false
 
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias Minga.Test.HeadlessPort
 
@@ -75,7 +76,7 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
     editor = start_supervised!(EditorStub)
     renderer = start_supervised!({RendererServer, name: nil, editor_pid: editor})
     {state, port} = build_editor_state(renderer)
-    snapshot = Input.from_editor_state(state)
+    snapshot = state |> Input.from_editor_state() |> Intent.from_input()
 
     # Serialize one full frame per iteration (cast → render → emit → writeback)
     # so each keystroke produces one clean sample per hop instead of being

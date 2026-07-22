@@ -12,7 +12,11 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.BufferPrefetch
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.Renderer.BufferChanges
+  alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Runtime
@@ -143,6 +147,15 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     simulate_scroll(state, viewport_top)
   end
 
+  @spec run_scroll_stage(EditorState.t(), Layout.t()) ::
+          {map(), MingaEditor.RenderPipeline.Input.t()}
+  def run_scroll_stage(%EditorState{} = state, layout) do
+    renderer = RendererState.new(editor_pid: nil, pipeline: &MingaEditor.RenderPipeline.run/1)
+    {_renderer, input} = BufferChanges.prepare(renderer, Intent.from_editor_state(state))
+    {prefetched, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+    Scroll.scroll_windows(input, layout, prefetched)
+  end
+
   @doc """
   Builds a `ComposedFrame` with a single window's semantic model for testing
   the Emit stage. Runs the real Content stage so the frame carries a genuine
@@ -153,7 +166,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, state} = run_scroll_stage(state, layout)
     {contents, cursor_info, _state} = Content.build_content(state, scrolls)
 
     windows = Enum.flat_map(contents, fn content -> content.models end)
