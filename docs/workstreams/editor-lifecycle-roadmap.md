@@ -3738,7 +3738,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W085/S15: Share status-bar buffer semantics between buffer and agent variants
 
-- **Status:** IMPLEMENTED, pending review, commit, PR, and merge delivery.
+- **Status:** VERIFIED
 - **Audit ID:** S15
 - **Planning profile:** `S15Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S15Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3760,7 +3760,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness confirmed production and protocol parity but initially blocked the allowlist-only parity assertion because two shared outputs could omit the same required key. Elixir craftsmanship first required full-map `Map.drop/2` parity, then returned `PASS/Lean` after reconciling that with an explicit sorted 35-key contract. The final test now detects shared omissions, additions, hidden agent extras, and agent-only leakage; correctness targeted recheck returned `RESOLVED/PASS`. Ponytail returned `PASS/Lean` with 0.99 confidence, confirming one justified private helper, zero public concepts, net-negative production, proportional tests, and no abstraction creep.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact 35-key common map, both fallback names, four-field agent overlay, complete shape/value tests, unchanged semantic/protocol/Swift/Go consumers, exact three-file scope, line budgets, validation evidence, resolved blockers, and merge safety.
 - **Discoveries affecting later work:** The current default `MingaEditor.Agent.UIState.Panel` model name is `"unknown"` in this focused state setup, so the agent-only field assertion preserves that existing value rather than changing the model fallback contract. No owner, production contract, dependency, or line-budget assumption failed.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending merge.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3158
+- **Implementation commit SHA:** `50ed4d5a2`.
+- **Merge SHA:** `5efcd225cb51926337ab22211960a7aa47fa824e`.
+- **Merge evidence:** PR #3158 merged after CI run `29892708160` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
