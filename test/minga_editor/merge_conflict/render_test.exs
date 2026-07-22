@@ -4,6 +4,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias MingaEditor.BufferDecorations
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
@@ -74,6 +75,23 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert :ok = block.on_click.(0, trailing.start)
   end
 
+  test "compose/2 returns empty decorations when the base buffer is dead" do
+    buffer = dead_pid()
+    assert BufferDecorations.compose(%{}, buffer) == Decorations.new()
+  end
+
+  test "compose/3 keeps base decorations and adds no conflict block when the buffer is dead" do
+    buffer = dead_pid()
+
+    {_id, base} =
+      Decorations.add_highlight(Decorations.new(), {0, 0}, {0, 4},
+        style: Face.new(bg: 0x263A2E),
+        group: :known_base
+      )
+
+    assert BufferDecorations.compose(%{}, buffer, base) == base
+  end
+
   test "hit-testing conflict action blocks returns the accept command", %{
     events_registry: events_registry,
     options_server: options_server
@@ -136,6 +154,12 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert BufferProcess.content(buffer) == before_content
     assert BufferProcess.cursor(buffer) == before_cursor
     assert state.shell_runtime.state.notice.message == nil
+  end
+
+  defp dead_pid do
+    {pid, ref} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    pid
   end
 
   defp start_conflict_buffer(events_registry, options_server) do
