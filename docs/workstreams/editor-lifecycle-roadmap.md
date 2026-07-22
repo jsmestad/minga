@@ -3621,7 +3621,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W081/S09: Schedule one LSP refresh after session restore batch
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S09
 - **Planning profile:** `S09Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S09Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3644,5 +3644,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** No contract drift, dependency change, owner invalidation, or budget issue required replanning. The LSP handler regression locks the current active-buffer consumer semantics, leaving buffer-correlated code-lens/inlay storage to the separately routed L06/L08 work.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3150
 - **Implementation commit SHA:** `793e1bffa`.
-- **Merge SHA:** Pending.
-- **Completion date:** Pending.
+- **Merge SHA:** `ec23226d26cd7c5bb674c500ddf99a118d3fbdb9`.
+- **Merge evidence:** PR #3150 merged after CI run `29880308298` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
