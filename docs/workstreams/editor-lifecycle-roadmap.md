@@ -4119,8 +4119,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** The exact unconstrained full test command remains sensitive to existing async suite-load timing around Native MCP and session manager tests on this workstation; the constrained full `test.llm` gate passed and each exact failed location passed with its original seed. No replan trigger, owner drift, production caller, frontend caller, extension caller, benchmark consumer, native dependency, CI semantic change, budget drift, compatibility need, or new concept was found.
 - **Pre-acceptance reviews:** Ponytail returned `PASS/Lean` with 0.99 confidence. Correctness and Elixir craftsmanship found one scope-drift blocker in `docs/PERFORMANCE.md`: the initial edit had shortened unrelated cache-identity and Swift-counter policy prose. The full origin/main prose was restored with only the locked module-token and test-path replacements; both targeted rechecks returned `RESOLVED/PASS` with no residual blocker.
 - **Final reviewer verdict:** Initial review found the untracked relocation destinations missing from the merge artifact. Both files were added to the patch, `git diff --find-renames origin/main` recognized the comparator and unit-test moves, and targeted recheck returned `RESOLVED/PASS` with 1.0 confidence and no residual blocker.
-- **PR URL:** Pending delivery.
-- **Implementation commit SHA:** Pending delivery.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3183
+- **Implementation commit SHA:** `8222942d4`.
 - **Merge SHA:** Pending delivery.
 - **Merge evidence:** Pending delivery.
 - **Completion date:** Pending merge.
