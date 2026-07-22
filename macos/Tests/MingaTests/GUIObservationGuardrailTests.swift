@@ -110,19 +110,41 @@ struct GUIObservationGuardrailTests {
             "markRendered(",
             "editorInput?.currentWindowContents",
             "visibleEditorSnapshot?.windowIds ?? dispatcher.committedEditorSnapshot",
-            "dispatcher.frameState.windowGutters",
         ]
-        let allowedPaths: [String: Set<String>] = [
-            "dispatcher.frameState.windowGutters": ["Sources/PreviewRegistry.swift"],
+
+        // AC6 (#2999) moved these editor authorities off mutable `FrameState` onto
+        // the committed snapshot (its surfaces, `activeWindowId`, and
+        // `EditorSnapshotMetadata`). A new `frameState.<field>` read for any of them
+        // re-fragments that single authority. Word boundaries keep the still-valid
+        // chrome fields `frameState.gutterColors` and `frameState.gutterSeparatorColor`
+        // — and identically named snapshot/content/metadata properties — from
+        // tripping the ban.
+        let removedFrameStateFields = [
+            "cursorRow", "cursorCol", "cursorShape", "cursorVisible", "gutterCol",
+            "windowGutters", "activeWindowId", "splitBorderColor", "verticalSeparators",
+            "horizontalSeparators", "windowIndentGuides",
         ]
+        let removedFieldPatterns = try removedFrameStateFields.map { field in
+            (field: field, regex: try NSRegularExpression(pattern: #"\bframeState\s*\.\s*"# + field + #"\b"#))
+        }
+        // `PreparedWindowUpdates` was the pre-AC6 fragmented per-window update
+        // bundle; the committed editor snapshot fully replaced it.
+        let preparedWindowUpdatesPattern = try NSRegularExpression(pattern: #"\bPreparedWindowUpdates\b"#)
+
         var violations: [String] = []
 
         for source in try productionSources() {
             for fragment in bannedFragments where source.sanitized.contains(fragment) {
-                guard allowedPaths[fragment, default: []].contains(source.path) else {
-                    violations.append("\(source.path): banned editor presentation fragment `\(fragment)`")
-                    continue
-                }
+                violations.append("\(source.path): banned editor presentation fragment `\(fragment)`")
+            }
+
+            let range = NSRange(source.sanitized.startIndex..<source.sanitized.endIndex, in: source.sanitized)
+            for banned in removedFieldPatterns
+            where banned.regex.firstMatch(in: source.sanitized, range: range) != nil {
+                violations.append("\(source.path): banned removed FrameState authority `frameState.\(banned.field)`")
+            }
+            if preparedWindowUpdatesPattern.firstMatch(in: source.sanitized, range: range) != nil {
+                violations.append("\(source.path): banned fragmented authority `PreparedWindowUpdates`")
             }
         }
 

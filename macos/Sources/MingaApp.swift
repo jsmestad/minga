@@ -751,7 +751,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Re-send ready event so the new BEAM knows our dimensions.
         if let nsView = editorNSView {
-            let gutterPad: CGFloat = nsView.dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+            let gutterPad: CGFloat = (nsView.dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
             let cols = UInt16(max((nsView.bounds.width - gutterPad) / CGFloat(nsView.cellWidth), 1))
             let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
             enc.sendReady(cols: cols, rows: rows)

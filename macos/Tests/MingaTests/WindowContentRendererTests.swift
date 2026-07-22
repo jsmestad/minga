@@ -372,15 +372,16 @@ struct WindowContentFrameMetricsTests {
         let right = try GUIWindowContent(windowId: 2, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
 
         var frameState = FrameState(cols: 80, rows: 2)
-        frameState.windowGutters = [
+        let gutters: [UInt16: Wire.WindowGutter] = [
             1: Wire.WindowGutter(windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 2, isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 2, signColWidth: 2, entries: [Wire.GutterEntry(bufLine: 0, displayType: .normal, signType: .diagError)]),
             2: Wire.WindowGutter(windowId: 2, contentRow: 0, contentCol: 40, contentHeight: 2, isActive: false, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 2, signColWidth: 2, entries: [Wire.GutterEntry(bufLine: 0, displayType: .normal, signType: .annotation, signFg: 0xFFFFFF, signText: "●")])
         ]
-        frameState.horizontalSeparators = [Wire.HorizontalSeparator(row: 1, col: 0, width: 80, filename: "split.ex")]
+        var metadata = EditorSnapshotMetadata()
+        metadata.horizontalSeparators = [Wire.HorizontalSeparator(row: 1, col: 0, width: 80, filename: "split.ex")]
         frameState.gutterSeparatorColor = 0x334455
 
-        let leftGutter = try #require(frameState.windowGutters[1])
-        let rightGutter = try #require(frameState.windowGutters[2])
+        let leftGutter = try #require(gutters[1])
+        let rightGutter = try #require(gutters[2])
         let leftSurface = surface(content: left, gutter: leftGutter, totalLines: 1)
         let rightSurface = surface(content: right, gutter: rightGutter, totalLines: 1)
         let chrome = CoreTextMetalRenderer.gutterChromeRects(
@@ -399,6 +400,7 @@ struct WindowContentFrameMetricsTests {
 
         let demand = CoreTextMetalRenderer.atlasSlotDemand(
             frameState: frameState,
+            metadata: metadata,
             preparedSurfaces: [preparedSurface(leftSurface), preparedSurface(rightSurface)]
         )
 

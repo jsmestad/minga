@@ -75,14 +75,125 @@ struct MouseInputTests {
             ]
         )
 
-        view.dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: [],
             paneGeometry: geometry
-        )))
+        )
+        _ = try commitEditorFrame(view, contents: [content])
+    }
+
+    /// Required theme slots painted neutral grey so the keyframe theme-completeness
+    /// gate passes. Committed `themeColors` freeze from pre-apply defaults, so the
+    /// values do not affect hit testing.
+    @MainActor
+    private func committedThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {
+        CommandDispatcher.requiredThemeSlots.map { ($0, 0x99, 0x99, 0x99) }
+    }
+
+    /// Derives a committed pane geometry from a gutter so the snapshot freeze
+    /// accepts the surface. Mirrors the production/preview geometry derivation:
+    /// the editor authority now lives only on `CommittedEditorSnapshot` (#2999
+    /// AC6), so tests drive a real keyframe rather than mutating removed
+    /// `FrameState` fields.
+    @MainActor
+    private func paneGeometry(
+        for gutter: Wire.WindowGutter,
+        viewport: GUIViewportSummary? = nil,
+        hitRegions: [GUIHitRegion] = []
+    ) -> GUIPaneGeometry {
+        let gutterWidth = min(UInt16(gutter.lineNumberWidth) + UInt16(gutter.signColWidth), gutter.contentWidth)
+        let totalRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutter.contentWidth, height: gutter.contentHeight)
+        let textRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol + gutterWidth, width: gutter.contentWidth - gutterWidth, height: gutter.contentHeight)
+        let gutterRect = GUICellRect(row: gutter.contentRow, col: gutter.contentCol, width: gutterWidth, height: gutter.contentHeight)
+        let resolvedViewport = viewport ?? GUIViewportSummary(
+            top: 0, left: 0, rows: gutter.contentHeight, cols: textRect.width,
+            totalLines: UInt32(gutter.contentHeight), visualRowOffset: 0, totalVisualRows: UInt32(gutter.contentHeight)
+        )
+        return GUIPaneGeometry(
+            windowId: gutter.windowId,
+            totalRect: totalRect,
+            contentRect: totalRect,
+            textRect: textRect,
+            gutterRect: gutterRect,
+            clipRect: totalRect,
+            viewport: resolvedViewport,
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: UInt16(gutter.lineNumberWidth), signColWidth: UInt16(gutter.signColWidth)),
+            hitRegions: hitRegions
+        )
+    }
+
+    /// Builds a complete window surface content matching a gutter's geometry so
+    /// the committed keyframe can carry the gutter (every committed gutter needs
+    /// a referencing window content with a compatible pane geometry).
+    @MainActor
+    private func windowContent(
+        for gutter: Wire.WindowGutter,
+        rows: [GUIVisualRow] = [],
+        geometry: GUIPaneGeometry? = nil,
+        scrollPresentation: GUIScrollPresentation? = nil
+    ) throws -> GUIWindowContent {
+        try GUIWindowContent(
+            windowId: gutter.windowId, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: rows, selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            paneGeometry: geometry ?? paneGeometry(for: gutter),
+            scrollPresentation: scrollPresentation
+        )
+    }
+
+    /// Publishes an editor keyframe through the real begin/commit path so the
+    /// committed snapshot is the sole editor authority, then (by default) promotes
+    /// it to the visible presentation that production hit testing reads via
+    /// `dispatcher.visibleEditorPresentation?.snapshot`. Pass `promote: false` to
+    /// model a committed-but-unpresented frame whose gutters must stay invisible
+    /// to interaction.
+    @MainActor
+    @discardableResult
+    private func commitEditorFrame(
+        _ view: EditorNSView,
+        frameSeq: UInt32 = 1,
+        contents: [GUIWindowContent] = [],
+        gutters: [Wire.WindowGutter] = [],
+        indentGuides: [IndentGuideData] = [],
+        cursorShape: CursorShape? = nil,
+        splitSeparators: (borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])? = nil,
+        promote: Bool = true,
+        localTransform: EditorLocalPresentationTransform? = nil
+    ) throws -> CommittedEditorSnapshot {
+        let dispatcher = view.dispatcher
+        dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: committedThemeSlots()))
+        if let cursorShape {
+            dispatcher.dispatch(.setCursorShape(cursorShape))
+        }
+        for content in contents {
+            dispatcher.dispatch(.guiWindowContent(data: content))
+        }
+        for gutter in gutters {
+            dispatcher.dispatch(.guiGutter(data: gutter))
+        }
+        for guides in indentGuides {
+            dispatcher.dispatch(.guiIndentGuides(data: guides))
+        }
+        if let splitSeparators {
+            dispatcher.dispatch(.guiSplitSeparators(
+                borderColor: splitSeparators.borderColor,
+                verticals: splitSeparators.verticals,
+                horizontals: splitSeparators.horizontals
+            ))
+        }
+        dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        if promote {
+            dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform)
+        }
+        return snapshot
     }
 
     /// Creates a mouse event at the given pixel position.
@@ -153,7 +264,7 @@ struct MouseInputTests {
         let cw = view.cellWidth
         let ch = view.cellHeight
 
-        view.dispatcher.applyForTesting(.guiSplitSeparators(
+        try commitEditorFrame(view, splitSeparators: (
             borderColor: 0x555555,
             verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
             horizontals: []
@@ -174,7 +285,7 @@ struct MouseInputTests {
         let cw = view.cellWidth
         let ch = view.cellHeight
 
-        view.dispatcher.applyForTesting(.guiSplitSeparators(
+        try commitEditorFrame(view, splitSeparators: (
             borderColor: 0x555555,
             verticals: [Wire.VerticalSeparator(col: 40, startRow: 0, endRow: 23)],
             horizontals: []
@@ -225,8 +336,11 @@ struct MouseInputTests {
             isActive: true, contentWidth: 39, cursorLine: 3, lineNumberStyle: .hybrid,
             lineNumberWidth: 8, signColWidth: 1, entries: []
         )
-        view.dispatcher.applyForTesting(.guiGutter(data: clickedGutter))
-        view.dispatcher.applyForTesting(.guiGutter(data: activeWideGutter))
+        try commitEditorFrame(
+            view,
+            contents: [try windowContent(for: clickedGutter), try windowContent(for: activeWideGutter)],
+            gutters: [clickedGutter, activeWideGutter]
+        )
 
         let firstTextColX = CoreTextMetalRenderer.gutterLeftMarginPt + CGFloat(clickedGutter.lineNumberWidth + clickedGutter.signColWidth) * cw + CoreTextMetalRenderer.gutterRightGapPt + cw * 0.2
         guard let event = mouseEvent(type: .leftMouseDown, location: NSPoint(x: firstTextColX, y: ch * 2.5)) else { return }
@@ -352,20 +466,20 @@ struct MouseInputTests {
                 Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)
             ]
         )
-        view.dispatcher.applyForTesting(.guiGutter(data: activeGutter))
-        view.dispatcher.applyForTesting(.guiGutter(data: inactiveGutter))
-        view.dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
-            windowId: 7, fullRefresh: true,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block,
-            rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: [],
+        let activeContent = try windowContent(for: activeGutter)
+        let inactiveContent = try windowContent(
+            for: inactiveGutter,
             scrollPresentation: GUIScrollPresentation(
                 windowId: 7, resetRequired: false, anchorTop: 42, anchorLeft: 0, anchorVisualRowOffset: 0,
                 visibleStartLine: 42, visibleEndLine: 43, overscanStartLine: 41, overscanEndLine: 43,
                 contentEpoch: 1, layoutGeneration: 1
             )
-        )))
+        )
+        try commitEditorFrame(
+            view,
+            contents: [activeContent, inactiveContent],
+            gutters: [activeGutter, inactiveGutter]
+        )
 
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }
@@ -403,8 +517,7 @@ struct MouseInputTests {
             hitRegions: []
         )
 
-        view.dispatcher.applyForTesting(.guiGutter(data: gutter))
-        view.dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [
@@ -419,7 +532,8 @@ struct MouseInputTests {
                 visibleStartLine: 10, visibleEndLine: 12, overscanStartLine: 10, overscanEndLine: 12,
                 contentEpoch: 1, layoutGeneration: 1
             )
-        )))
+        )
+        try commitEditorFrame(view, contents: [content], gutters: [gutter])
 
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 6.2, y: ch * 0.5)) else { return }
@@ -444,18 +558,28 @@ struct MouseInputTests {
         #expect(normalized.y > 3.0)
     }
 
-    @Test("mouseDown ignores stale gutter data from a previous frame")
+    @Test("mouseDown ignores committed-but-unpresented gutter data")
     @MainActor func staleGutterIgnoredForHitTesting() throws {
         let spy = SpyEncoder()
         guard let view = makeView(spy: spy) else { return }
         let cw = view.cellWidth
         let ch = view.cellHeight
 
-        view.dispatcher.frameState.windowGutters[9] = Wire.WindowGutter(
+        // A gutter that was committed but whose frame never reached the display
+        // surface must stay invisible to interaction: production hit testing reads
+        // only the promoted `visibleEditorPresentation`, so a committed-but-unpromoted
+        // snapshot is a draw input, not an interaction authority.
+        let staleGutter = Wire.WindowGutter(
             windowId: 9, contentRow: 0, contentCol: 5, contentHeight: 24,
             isActive: true, contentWidth: 80, cursorLine: 42, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 3,
             entries: [Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)]
+        )
+        try commitEditorFrame(
+            view,
+            contents: [try windowContent(for: staleGutter)],
+            gutters: [staleGutter],
+            promote: false
         )
 
         guard let event = mouseEvent(type: .leftMouseDown,

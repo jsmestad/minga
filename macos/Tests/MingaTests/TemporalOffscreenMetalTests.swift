@@ -119,7 +119,7 @@ struct TemporalOffscreenMetalTests {
         frameState.defaultBg = Self.neutral
         frameState.gutterColors = GutterThemeColors()
         frameState.totalLineCount = UInt32(rowCount)
-        frameState.windowGutters[1] = gutter(windowId: 1, cols: cols, rows: rowCount)
+        let windowGutters: [UInt16: Wire.WindowGutter] = [1: gutter(windowId: 1, cols: cols, rows: rowCount)]
 
         let text = String(repeating: "M", count: Int(cols))
         let rows = (0..<Int(rowCount)).map { bandRow(rowId: UInt64($0), text: text, bg: Self.colorA) }
@@ -141,6 +141,7 @@ struct TemporalOffscreenMetalTests {
                 renderer.render(
                     frameState: frameState, fontManager: fontManager,
                     windowContents: [1: content],
+                    windowGutters: windowGutters,
                     drawableProvider: { drawable },
                     viewportSize: CGSize(width: width, height: height),
                     contentScale: 1, scrollOffset: offset,
@@ -202,7 +203,7 @@ struct TemporalOffscreenMetalTests {
         frameState.defaultBg = Self.neutral
         frameState.totalLineCount = 100
         frameState.viewportTopLine = 50
-        frameState.windowGutters[1] = gutter(windowId: 1, cols: cols, rows: rowCount, lineNumberWidth: 0)
+        let windowGutters: [UInt16: Wire.WindowGutter] = [1: gutter(windowId: 1, cols: cols, rows: rowCount, lineNumberWidth: 0)]
 
         let text = String(repeating: "M", count: Int(cols))
         let rows = (0..<Int(rowCount)).map { bandRow(rowId: UInt64($0), text: text, bg: Self.colorA) }
@@ -214,7 +215,7 @@ struct TemporalOffscreenMetalTests {
         let outcome = await waiter.awaitOutcome {
             renderer.render(
                 frameState: frameState, fontManager: fontManager,
-                windowContents: [1: content], drawableProvider: { drawable },
+                windowContents: [1: content], windowGutters: windowGutters, drawableProvider: { drawable },
                 viewportSize: CGSize(width: width, height: height), contentScale: 1,
                 scrollOffset: .zero, presentationWindowId: 1, presentationInputSeq: 100,
                 onPresented: { waiter.succeed($0) }
@@ -244,7 +245,7 @@ struct TemporalOffscreenMetalTests {
         let fadedOutcome = await waiter.awaitOutcome {
             renderer.render(
                 frameState: frameState, fontManager: fontManager,
-                windowContents: [1: content], drawableProvider: { fadedDrawable },
+                windowContents: [1: content], windowGutters: windowGutters, drawableProvider: { fadedDrawable },
                 viewportSize: CGSize(width: width, height: height), contentScale: 1,
                 scrollOffset: .zero, presentationWindowId: 1, presentationInputSeq: 101,
                 onPresented: { waiter.succeed($0) }
@@ -376,16 +377,18 @@ struct TemporalOffscreenMetalTests {
         frameState.totalLineCount = UInt32(rowCount)
 
         // Left pane window (id 1) at col 0; right pane window (id 2) at leftCols.
-        frameState.windowGutters[1] = Wire.WindowGutter(
-            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: rowCount,
-            isActive: true, contentWidth: leftCols, cursorLine: 0,
-            lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
-        )
-        frameState.windowGutters[2] = Wire.WindowGutter(
-            windowId: 2, contentRow: 0, contentCol: leftCols, contentHeight: rowCount,
-            isActive: false, contentWidth: rightCols, cursorLine: 0,
-            lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
-        )
+        let windowGutters: [UInt16: Wire.WindowGutter] = [
+            1: Wire.WindowGutter(
+                windowId: 1, contentRow: 0, contentCol: 0, contentHeight: rowCount,
+                isActive: true, contentWidth: leftCols, cursorLine: 0,
+                lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
+            ),
+            2: Wire.WindowGutter(
+                windowId: 2, contentRow: 0, contentCol: leftCols, contentHeight: rowCount,
+                isActive: false, contentWidth: rightCols, cursorLine: 0,
+                lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
+            )
+        ]
 
         let leftText = String(repeating: "M", count: Int(leftCols))
         let rightText = String(repeating: "M", count: Int(rightCols))
@@ -409,6 +412,7 @@ struct TemporalOffscreenMetalTests {
             renderer.render(
                 frameState: frameState, fontManager: fontManager,
                 windowContents: [1: leftContent, 2: rightContent],
+                windowGutters: windowGutters,
                 drawableProvider: { drawable },
                 viewportSize: CGSize(width: width, height: height), contentScale: 1,
                 onPresented: { waiter.succeed($0) }
@@ -471,15 +475,14 @@ struct TemporalOffscreenMetalTests {
 
         var frameState = FrameState(cols: cols, rows: rowCount)
         frameState.defaultBg = Self.neutral
-        frameState.cursorRow = 2
-        frameState.cursorCol = 3
-        frameState.cursorShape = .block
         frameState.totalLineCount = UInt32(rowCount)
-        frameState.windowGutters[1] = Wire.WindowGutter(
+        var metadata = EditorSnapshotMetadata()
+        metadata.cursorShape = .block
+        let windowGutters: [UInt16: Wire.WindowGutter] = [1: Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 0, contentHeight: rowCount,
             isActive: true, contentWidth: cols, cursorLine: 2,
             lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
-        )
+        )]
         let text = String(repeating: " ", count: Int(cols))
         let rows = (0..<Int(rowCount)).map { bandRow(rowId: UInt64($0), text: text, bg: Self.neutral) }
         let content = try GUIWindowContent(
@@ -503,6 +506,7 @@ struct TemporalOffscreenMetalTests {
                 renderer.render(
                     frameState: frameState, fontManager: fontManager,
                     cursorBlinkVisible: cursorVisible, windowContents: [1: content],
+                    windowGutters: windowGutters, metadata: metadata,
                     drawableProvider: { drawable },
                     viewportSize: CGSize(width: width, height: height), contentScale: 1,
                     presentationWindowId: 1, presentationInputSeq: seq,

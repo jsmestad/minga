@@ -34,6 +34,27 @@ enum GutterPresentation: Sendable {
     }
 }
 
+/// Focused editor render metadata that no single window surface owns.
+///
+/// After AC6 (#2999) removed the editor-global cursor shape, active gutter
+/// column, and split-separator geometry from mutable `FrameState`, this value is
+/// their committed home inside `CommittedEditorSnapshot`. Production draw and
+/// input read these only through the committed or visible snapshot; the next
+/// transaction seeds from this value rather than a live `FrameState` mirror.
+struct EditorSnapshotMetadata: Sendable {
+    /// Editor-global cursor shape from `set_cursor_shape` (0x05).
+    var cursorShape: CursorShape = .block
+    /// Active window gutter column count (line-number + sign columns) used for
+    /// gutter chrome padding and viewport-width derivation.
+    var gutterCol: UInt16 = 0
+    /// Split separator geometry from `gui_split_separators` (0x84).
+    var splitBorderColor: UInt32 = 0
+    var verticalSeparators: [Wire.VerticalSeparator] = []
+    var horizontalSeparators: [Wire.HorizontalSeparator] = []
+
+    static let empty = EditorSnapshotMetadata()
+}
+
 /// One complete editor pane surface captured at transaction publication.
 struct PresentedWindowSurface: Sendable {
     let content: GUIWindowContent
@@ -86,6 +107,12 @@ struct CommittedEditorSnapshot {
     let themeColors: ThemeColors?
     let surfaces: [PresentedWindowSurface]
     let activeWindowId: UInt16?
+    /// Editor render metadata that no single window surface owns.
+    let metadata: EditorSnapshotMetadata
+
+    /// Active gutter column count. Derived from the active window's committed
+    /// gutter, matching the value AC6 removed from mutable `FrameState`.
+    var gutterCol: UInt16 { metadata.gutterCol }
 
     var activeSurface: PresentedWindowSurface? {
         if let activeWindowId, let surface = surface(for: activeWindowId) { return surface }
@@ -128,8 +155,17 @@ struct CommittedEditorSnapshot {
         themeColors: ThemeColors?,
         windowContents: [UInt16: GUIWindowContent],
         windowGutters: [UInt16: Wire.WindowGutter],
-        windowIndentGuides: [UInt16: IndentGuideData]
+        windowIndentGuides: [UInt16: IndentGuideData],
+        metadata: EditorSnapshotMetadata = .empty
     ) -> Result<CommittedEditorSnapshot, PreparedFrameRejection> {
+        let liveWindowIds = Set(windowContents.keys)
+        if let orphanGutter = Set(windowGutters.keys).subtracting(liveWindowIds).min() {
+            return .failure(.missingWindowReference(windowId: orphanGutter))
+        }
+        if let orphanGuides = Set(windowIndentGuides.keys).subtracting(liveWindowIds).min() {
+            return .failure(.missingWindowReference(windowId: orphanGuides))
+        }
+
         var surfaces: [PresentedWindowSurface] = []
         surfaces.reserveCapacity(windowContents.count)
 
@@ -180,7 +216,8 @@ struct CommittedEditorSnapshot {
             frameState: frameState,
             themeColors: themeColors,
             surfaces: surfaces,
-            activeWindowId: activeWindowId
+            activeWindowId: activeWindowId,
+            metadata: metadata
         ))
     }
 }

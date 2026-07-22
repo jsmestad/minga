@@ -1,6 +1,13 @@
-/// Lightweight editor metadata captured inside `CommittedEditorSnapshot`.
+/// Lightweight per-frame render metadata captured inside `CommittedEditorSnapshot`.
 ///
-/// CommandDispatcher still owns this mutable value while applying a prepared transaction, but production draw and input code read it only through the committed or visible editor snapshot. Missing or incompatible gutter, geometry, cursor, active-window, and split combinations must reject before snapshot publication instead of falling back during render.
+/// CommandDispatcher still owns this mutable value while applying a prepared transaction, but production draw and input code read it only through the committed or visible editor snapshot.
+///
+/// AC6 (#2999) removed the editor's semantic authority from this type: cursor,
+/// gutter geometry (`windowGutters`/`gutterCol`), active window, split
+/// separators, and per-window indent guides. Those authorities now live only on
+/// `CommittedEditorSnapshot` (its surfaces, `activeWindowId`, and
+/// `EditorSnapshotMetadata`). What remains here is chrome/theme render metadata
+/// that persists across frames and is frozen into each snapshot's `frameState`.
 
 import MingaProtocol
 
@@ -27,33 +34,17 @@ struct FrameState {
     var cols: UInt16
     var rows: UInt16
 
-    // Cursor
-    var cursorRow: UInt16 = 0
-    var cursorCol: UInt16 = 0
-    var cursorShape: CursorShape = .block
-    // Always true: protocol has no hideCursor command yet. Reserved for future use.
-    var cursorVisible: Bool = true
-
     // Background
     var defaultBg: UInt32 = 0
 
-    // Gutter geometry
-    var gutterCol: UInt16 = 0
+    // Gutter separator chrome (color only; the active gutter column lives on
+    // `EditorSnapshotMetadata.gutterCol`).
     var gutterSeparatorColor: UInt32 = 0
 
     // Cursorline
     /// `0xFFFF` = no active cursorline (sentinel; set by gui_cursorline opcode).
     var cursorlineRow: UInt16 = 0xFFFF
     var cursorlineBg: UInt32 = 0
-
-    // Per-window gutter data from gui_gutter (0x7B). Keyframes prune this map inside the successful prepared transaction, and snapshot freeze rejects content that requires a missing or incompatible gutter.
-    var windowGutters: [UInt16: Wire.WindowGutter] = [:]
-    var activeWindowId: UInt16?
-
-    // Split separator data from gui_split_separators (0x84).
-    var splitBorderColor: UInt32 = 0
-    var verticalSeparators: [Wire.VerticalSeparator] = []
-    var horizontalSeparators: [Wire.HorizontalSeparator] = []
 
     // Gutter theme colors
     var gutterColors: GutterThemeColors = GutterThemeColors()
@@ -62,9 +53,6 @@ struct FrameState {
     var viewportTopLine: UInt32 = 0xFFFF_FFFF
     var totalLineCount: UInt32 = 0
     var scrollIndicatorColor: UInt32 = 0x555555
-
-    // Indent guides (from 0x91 opcode)
-    var windowIndentGuides: [UInt16: IndentGuideData] = [:]
 
     // Line spacing multiplier (from gui_line_spacing opcode).
     var lineSpacing: Float = 1.0

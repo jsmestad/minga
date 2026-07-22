@@ -403,6 +403,7 @@ final class CoreTextMetalRenderer {
         }
 
         let frameState = snapshot.frameState
+        let metadata = snapshot.metadata
         let themeColors = snapshot.themeColors
         let surfaces = snapshot.surfaces
         let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
@@ -444,7 +445,7 @@ final class CoreTextMetalRenderer {
         // Gutter spacing is also needed to derive the exact clipped command
         // viewport. Prepare each resident window once, then reuse that result
         // for metrics, atlas demand, gutters, and CoreText rendering.
-        let hasGutterChrome = frameState.gutterCol > 0 || surfaces.contains { surface in
+        let hasGutterChrome = metadata.gutterCol > 0 || surfaces.contains { surface in
             let gutter = surface.renderGutter
             return gutter.lineNumberWidth > 0 || gutter.signColWidth > 0 || !gutter.entries.isEmpty
         }
@@ -511,7 +512,7 @@ final class CoreTextMetalRenderer {
         let candidateWindowRenderer = activeWindowRenderer.makeCandidate(rasterizer: candidateRasterizer)
         let candidateAtlas = activeAtlas.makeCandidate()
         let neededSlots = CoreTextMetalRenderer.atlasSlotDemand(
-            frameState: frameState, preparedSurfaces: preparedSurfaces
+            frameState: frameState, metadata: metadata, preparedSurfaces: preparedSurfaces
         )
         let atlasPixelWidth = Int(ceil(CGFloat(frameState.cols) * CGFloat(cellW) * CGFloat(scale)))
         switch candidateAtlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth,
@@ -576,7 +577,7 @@ final class CoreTextMetalRenderer {
         // This is a single-window lookup, not fragmented per-window joining.
         let cursorSurface: PresentedWindowSurface? = renderCursor?.windowId
             .flatMap { id in surfaces.first { $0.windowId == id } }
-        let activeSurface: PresentedWindowSurface? = frameState.activeWindowId
+        let activeSurface: PresentedWindowSurface? = snapshot.activeWindowId
             .flatMap { id in surfaces.first { $0.windowId == id } }
 
         // Build background quads and line texture instances.
@@ -924,7 +925,7 @@ final class CoreTextMetalRenderer {
         // Derive one exact aggregate buffer request before command creation. No
         // buffer is replaced or grown while a pass is being encoded.
         let gutterChromeQuads = CoreTextMetalRenderer.gutterChromeQuads(
-            frameState: frameState, surfaces: surfaces,
+            frameState: frameState, metadata: metadata, surfaces: surfaces,
             cellW: cellW, cellH: displayCellH, scale: scale,
             gutterLeftMarginPx: gutterLeftMarginPx, gutterPaddingPx: gutterPaddingPx,
             viewportHeight: Float(viewportSize.height), defaultBg: defaultBg,
@@ -1330,11 +1331,11 @@ final class CoreTextMetalRenderer {
 
         // Pass 5.5: Split separators (vertical lines between split panes,
         // horizontal bars with centered filenames for horizontal splits).
-        if frameState.splitBorderColor != 0 {
-            let sepColor = colorFromU24(frameState.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
+        if metadata.splitBorderColor != 0 {
+            let sepColor = colorFromU24(metadata.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
 
             // Vertical separators: 1px-wide lines spanning startRow..endRow
-            for vert in frameState.verticalSeparators {
+            for vert in metadata.verticalSeparators {
                 let sepX = Float(vert.col) * cellW * scale
                 let sepY = Float(vert.startRow) * displayCellH * scale
                 let sepH = Float(vert.endRow &- vert.startRow &+ 1) * displayCellH * scale
@@ -1352,7 +1353,7 @@ final class CoreTextMetalRenderer {
             }
 
             // Horizontal separators: 1px-high line + centered filename label
-            for (separatorIndex, horiz) in frameState.horizontalSeparators.enumerated() {
+            for (separatorIndex, horiz) in metadata.horizontalSeparators.enumerated() {
                 let hY = Float(horiz.row) * displayCellH * scale + (displayCellH * scale * 0.5) - 0.5
                 let hX = Float(horiz.col) * cellW * scale
                 let hW = Float(horiz.width) * cellW * scale
@@ -1371,9 +1372,9 @@ final class CoreTextMetalRenderer {
 
                 // Centered filename label rendered as a CoreText texture
                 if !horiz.filename.isEmpty, let atlas = atlas, let wcr = windowContentRenderer {
-                    let labelHash = horiz.filename.hashValue ^ Int(frameState.splitBorderColor)
+                    let labelHash = horiz.filename.hashValue ^ Int(metadata.splitBorderColor)
                     let labelKey = AtlasKey.splitLabel(row: horiz.row, subIndex: UInt16(min(separatorIndex, Int(UInt16.max))))
-                    if let entry = wcr.renderSimpleText(horiz.filename, fg: frameState.splitBorderColor,
+                    if let entry = wcr.renderSimpleText(horiz.filename, fg: metadata.splitBorderColor,
                                                          key: labelKey, contentHash: labelHash, atlas: atlas, metrics: &frameMetrics) {
                         // Center the label text within the separator width
                         let labelW = Float(entry.pixelWidth)
@@ -2271,6 +2272,7 @@ final class CoreTextMetalRenderer {
 
     nonisolated static func atlasSlotDemand(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         preparedSurfaces: [PreparedPresentedSurface]
     ) -> Int {
         let bufferRows = preparedSurfaces.reduce(0) { $0 + $1.slice.rows.count }
@@ -2294,7 +2296,7 @@ final class CoreTextMetalRenderer {
             )
         }
 
-        let splitLabels = frameState.horizontalSeparators.reduce(0) { total, separator in
+        let splitLabels = metadata.horizontalSeparators.reduce(0) { total, separator in
             total + (separator.filename.isEmpty ? 0 : 1)
         }
 
@@ -2306,6 +2308,7 @@ final class CoreTextMetalRenderer {
     #if MINGA_SNAPSHOT_RENDERER
     nonisolated static func atlasSlotDemand(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         windowContents: [UInt16: GUIWindowContent],
         gutters: [UInt16: Wire.WindowGutter],
         preparedRows: [UInt16: ResidentRenderPreparationResult]
@@ -2313,11 +2316,12 @@ final class CoreTextMetalRenderer {
         let slices = Dictionary(uniqueKeysWithValues: preparedRows.map { windowID, prepared in
             (windowID, RendererSignposts.rowSlice(for: prepared))
         })
-        return atlasSlotDemand(frameState: frameState, windowContents: windowContents, gutters: gutters, visibleSlices: slices)
+        return atlasSlotDemand(frameState: frameState, metadata: metadata, windowContents: windowContents, gutters: gutters, visibleSlices: slices)
     }
 
     nonisolated static func atlasSlotDemand(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         windowContents: [UInt16: GUIWindowContent],
         gutters: [UInt16: Wire.WindowGutter],
         visibleSlices: [UInt16: RendererRowSlice]
@@ -2342,7 +2346,7 @@ final class CoreTextMetalRenderer {
             )
         }
 
-        let splitLabels = frameState.horizontalSeparators.reduce(0 as Int) { total, separator in
+        let splitLabels = metadata.horizontalSeparators.reduce(0 as Int) { total, separator in
             total + (separator.filename.isEmpty ? 0 : 1)
         }
 
@@ -2536,6 +2540,7 @@ final class CoreTextMetalRenderer {
     #if MINGA_SNAPSHOT_RENDERER
     nonisolated static func gutterChromeRects(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         gutters: [UInt16: Wire.WindowGutter],
         cellW: Float,
         cellH: Float,
@@ -2571,15 +2576,15 @@ final class CoreTextMetalRenderer {
             return (leftFills, rightFills, separators)
         }
 
-        guard frameState.gutterCol > 0 else { return ([], [], []) }
+        guard metadata.gutterCol > 0 else { return ([], [], []) }
         if gutterLeftMarginPx > 0 {
             leftFills.append((x: 0, y: 0, width: gutterLeftMarginPx, height: viewportHeight))
         }
         if gutterPaddingPx > 0 {
-            rightFills.append((x: Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
+            rightFills.append((x: Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
         }
         if frameState.gutterSeparatorColor != 0 {
-            let gutterRightX = Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx
+            let gutterRightX = Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx
             separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: 0, width: 1.0, height: viewportHeight))
         }
         return (leftFills, rightFills, separators)
@@ -2589,6 +2594,7 @@ final class CoreTextMetalRenderer {
 
     nonisolated static func gutterChromeRects(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         surfaces: [PresentedWindowSurface],
         cellW: Float,
         cellH: Float,
@@ -2625,15 +2631,15 @@ final class CoreTextMetalRenderer {
             return (leftFills, rightFills, separators)
         }
 
-        guard frameState.gutterCol > 0 else { return ([], [], []) }
+        guard metadata.gutterCol > 0 else { return ([], [], []) }
         if gutterLeftMarginPx > 0 {
             leftFills.append((x: 0, y: 0, width: gutterLeftMarginPx, height: viewportHeight))
         }
         if gutterPaddingPx > 0 {
-            rightFills.append((x: Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
+            rightFills.append((x: Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
         }
         if frameState.gutterSeparatorColor != 0 {
-            let gutterRightX = Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx
+            let gutterRightX = Float(metadata.gutterCol) * cellW * scale + gutterLeftMarginPx
             separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: 0, width: 1.0, height: viewportHeight))
         }
         return (leftFills, rightFills, separators)
@@ -2641,6 +2647,7 @@ final class CoreTextMetalRenderer {
 
     nonisolated static func gutterChromeQuads(
         frameState: FrameState,
+        metadata: EditorSnapshotMetadata = .empty,
         surfaces: [PresentedWindowSurface],
         cellW: Float,
         cellH: Float,
@@ -2653,6 +2660,7 @@ final class CoreTextMetalRenderer {
     ) -> [QuadGPU] {
         let rects = gutterChromeRects(
             frameState: frameState,
+            metadata: metadata,
             surfaces: surfaces,
             cellW: cellW,
             cellH: cellH,

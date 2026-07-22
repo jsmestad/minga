@@ -204,8 +204,8 @@ final class EditorNSView: MTKView {
     // MARK: - Cursor blink
 
     /// Whether the cursor is currently visible in the blink cycle.
-    /// The Metal renderer ANDs this with `frameState.cursorVisible` to
-    /// determine whether to draw the cursor.
+    /// The Metal renderer ANDs this with the committed window content's
+    /// `cursorVisible` to determine whether to draw the cursor.
     public private(set) var cursorBlinkVisible: Bool = true
 
     /// Whether Minga config allows blinking the editor cursor.
@@ -640,7 +640,7 @@ final class EditorNSView: MTKView {
             return GridDimensions(cols: 1, rows: 1)
         }
 
-        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let gutterPad: CGFloat = (dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
         let cols = UInt16(max((width - gutterPad) / resolvedCellWidth, 1))
         let rows = rowsThatFit(height: height, cellHeight: resolvedCellHeight, lineSpacing: dispatcher.frameState.lineSpacing)
         return GridDimensions(cols: cols, rows: rows)
@@ -2826,7 +2826,8 @@ final class EditorNSView: MTKView {
         guard modifiers == 0 else { return }
         let statusMode = statusBarState?.mode
         guard !Self.statusModeUsesLiteralSpace(statusMode: statusMode) else { return }
-        guard Self.shouldOptimisticallyEnterTextInputMode(codepoint: codepoint, statusMode: statusMode, cursorShape: dispatcher.frameState.cursorShape) else { return }
+        let cursorShape = dispatcher.committedEditorSnapshot?.metadata.cursorShape ?? .block
+        guard Self.shouldOptimisticallyEnterTextInputMode(codepoint: codepoint, statusMode: statusMode, cursorShape: cursorShape) else { return }
 
         markOptimisticTextInputMode()
     }
@@ -3245,7 +3246,7 @@ final class EditorNSView: MTKView {
     private func verticalSeparatorColFromFrameState(at point: NSPoint) -> UInt16? {
         let screenRow = Int(point.y / effectiveCellHeight)
         guard let snapshot = editorPresentationSnapshot else { return nil }
-        return snapshot.frameState.verticalSeparators.first { separator in
+        return snapshot.metadata.verticalSeparators.first { separator in
             let lineX = CGFloat(separator.col) * cellWidth
             return screenRow >= Int(separator.startRow) && screenRow <= Int(separator.endRow) && abs(point.x - lineX) <= dividerHitHalfTolerance
         }?.col
@@ -3254,7 +3255,7 @@ final class EditorNSView: MTKView {
     private func horizontalSeparatorRowFromFrameState(at point: NSPoint) -> UInt16? {
         let rawCol = Int(point.x / cellWidth)
         guard let snapshot = editorPresentationSnapshot else { return nil }
-        return snapshot.frameState.horizontalSeparators.first { separator in
+        return snapshot.metadata.horizontalSeparators.first { separator in
             let lineY = CGFloat(separator.row) * effectiveCellHeight + effectiveCellHeight * 0.5
             let startCol = Int(separator.col)
             let endCol = startCol + Int(separator.width)
@@ -3276,7 +3277,7 @@ final class EditorNSView: MTKView {
     }
 
     private func fallbackCellColumn(at point: NSPoint) -> Int16 {
-        let gutterCols = CGFloat((editorPresentationSnapshot)?.frameState.gutterCol ?? 0)
+        let gutterCols = CGFloat(editorPresentationSnapshot?.gutterCol ?? 0)
         guard gutterCols > 0 else {
             return max(0, Int16(point.x / cellWidth))
         }

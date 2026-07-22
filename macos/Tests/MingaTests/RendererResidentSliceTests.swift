@@ -40,10 +40,8 @@ struct RendererResidentSliceTests {
         #expect(large.selection?.startRow == 0)
         #expect(large.lineAnnotations[0].row == 0)
 
-        var smallFrame = FrameState(cols: 80, rows: 40)
-        smallFrame.windowGutters = [1: smallGutter]
-        var largeFrame = FrameState(cols: 80, rows: 40)
-        largeFrame.windowGutters = [1: largeGutter]
+        let smallFrame = FrameState(cols: 80, rows: 40)
+        let largeFrame = FrameState(cols: 80, rows: 40)
         let smallDemand = CoreTextMetalRenderer.atlasSlotDemand(frameState: smallFrame, windowContents: [1: small], gutters: [1: smallGutter], visibleSlices: [1: smallSlice])
         let largeDemand = CoreTextMetalRenderer.atlasSlotDemand(frameState: largeFrame, windowContents: [1: large], gutters: [1: largeGutter], visibleSlices: [1: largeSlice])
         #expect(smallDemand == largeDemand)
@@ -182,10 +180,10 @@ struct RendererResidentSliceTests {
         var metrics = FrameMetrics()
         RendererSignposts.recordVisibleSlice(RendererSignposts.rowSlice(for: prepared), in: &metrics)
 
-        var frame = FrameState(cols: 80, rows: 40)
-        frame.windowGutters = [1: gutter(entries: [])]
+        let frame = FrameState(cols: 80, rows: 40)
+        let gutters = [UInt16(1): gutter(entries: [])]
         let demand = CoreTextMetalRenderer.atlasSlotDemand(
-            frameState: frame, windowContents: [1: resident], gutters: frame.windowGutters, preparedRows: [1: prepared]
+            frameState: frame, windowContents: [1: resident], gutters: gutters, preparedRows: [1: prepared]
         )
 
         #expect(prepared.rows.count == 44)
@@ -218,11 +216,10 @@ struct RendererResidentSliceTests {
         let slice = RendererSignposts.visibleSlice(for: resident, fallbackVisibleRows: 40)
         #expect(slice.visibleStartIndex == 50_003)
 
-        var frame = FrameState(cols: 80, rows: 40)
-        frame.windowGutters = [1: gutter(entries: [])]
+        let gutters = [UInt16(1): gutter(entries: [])]
         let cursor = try #require(CoreTextMetalRenderer.resolveCursor(
             windowContents: [1: resident],
-            gutters: frame.windowGutters,
+            gutters: gutters,
             cellW: 8,
             displayCellH: 20,
             scale: 1,

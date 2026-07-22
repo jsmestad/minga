@@ -10,10 +10,13 @@ func rendererSnapshot(
     frameSeq: UInt32 = 1,
     frameState: FrameState,
     themeColors: ThemeColors? = nil,
-    windowContents: [UInt16: GUIWindowContent]
+    windowContents: [UInt16: GUIWindowContent],
+    windowGutters: [UInt16: Wire.WindowGutter] = [:],
+    windowIndentGuides: [UInt16: IndentGuideData] = [:],
+    metadata: EditorSnapshotMetadata = .empty
 ) -> CommittedEditorSnapshot {
     let normalizedContents = Dictionary(uniqueKeysWithValues: windowContents.map { windowId, content in
-        (windowId, normalizedRendererContent(content, frameState: frameState))
+        (windowId, normalizedRendererContent(content, gutters: windowGutters, frameState: frameState))
     })
 
     switch CommittedEditorSnapshot.make(
@@ -22,8 +25,9 @@ func rendererSnapshot(
         frameState: frameState,
         themeColors: themeColors,
         windowContents: normalizedContents,
-        windowGutters: frameState.windowGutters,
-        windowIndentGuides: frameState.windowIndentGuides
+        windowGutters: windowGutters,
+        windowIndentGuides: windowIndentGuides,
+        metadata: metadata
     ) {
     case .success(let snapshot):
         return snapshot
@@ -34,9 +38,9 @@ func rendererSnapshot(
     }
 }
 
-private func normalizedRendererContent(_ content: GUIWindowContent, frameState: FrameState) -> GUIWindowContent {
+private func normalizedRendererContent(_ content: GUIWindowContent, gutters: [UInt16: Wire.WindowGutter], frameState: FrameState) -> GUIWindowContent {
     guard content.paneGeometry == nil,
-          let gutter = frameState.windowGutters[content.windowId] else { return content }
+          let gutter = gutters[content.windowId] else { return content }
 
     let geometry = rendererPaneGeometry(windowId: content.windowId, gutter: gutter, frameState: frameState)
     let rows = content.rows.map(GUIWindowRowDeltaEntry.full)
@@ -90,6 +94,9 @@ extension CoreTextMetalRenderer {
         fontManager: FontManager,
         cursorBlinkVisible: Bool = true,
         windowContents: [UInt16: GUIWindowContent] = [:],
+        windowGutters: [UInt16: Wire.WindowGutter] = [:],
+        windowIndentGuides: [UInt16: IndentGuideData] = [:],
+        metadata: EditorSnapshotMetadata = .empty,
         themeColors: ThemeColors? = nil,
         isMouseInGutter: Bool = false,
         gutterHoverWindowId: UInt16? = nil,
@@ -109,7 +116,10 @@ extension CoreTextMetalRenderer {
             frameSeq: presentationFrame?.frameSeq ?? presentationInputSeq,
             frameState: frameState,
             themeColors: themeColors,
-            windowContents: windowContents
+            windowContents: windowContents,
+            windowGutters: windowGutters,
+            windowIndentGuides: windowIndentGuides,
+            metadata: metadata
         )
         render(
             snapshot: snapshot,
