@@ -156,7 +156,7 @@ struct GUIObservationGuardrailTests {
         let sources = try productionSources()
         let actualObservable = try Set(sources.flatMap(observableDeclarations(in:)))
         #expect(actualObservable == Set(Self.observationTypeAllowlist.keys))
-        #expect(Self.observationTypeAllowlist.count == 37)
+        #expect(Self.observationTypeAllowlist.count == 36)
 
         let actualIgnored = occurrenceCounts(sources.flatMap(ignoredDeclarations(in:)))
         let expectedIgnored = Dictionary(uniqueKeysWithValues: Self.ignoredDeclarationAllowlist.keys.map { ($0, 1) })
