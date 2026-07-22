@@ -1104,7 +1104,7 @@ opcode(1) + action_type(1) + payload...
 | 0x03 | file_tree_click | index(2) | User clicked a file tree entry |
 | 0x04 | file_tree_toggle | index(2) | User toggled a directory |
 | 0x05 | completion_select | index(2) | User selected a completion item |
-| 0x06 | breadcrumb_click | segment_index(1) | User clicked a breadcrumb segment |
+| 0x06 | breadcrumb_click | segment_index(1) | Legacy input retained for compatibility; current frontends render breadcrumbs display-only and BEAM ignores this action |
 | 0x07 | toggle_panel | panel(1) | User toggled a panel |
 | 0x08 | new_tab | (empty) | User requested a new tab |
 | 0x09 | panel_switch_tab | tab_index(1) | User clicked a bottom panel tab |
@@ -1134,7 +1134,6 @@ opcode(1) + action_type(1) + payload...
 | 0x29 | agent_approve | (empty) | Approve an agent change request |
 | 0x2A | agent_request_changes | (empty) | Request agent changes |
 | 0x2B | agent_dismiss | (empty) | Dismiss agent review UI |
-| 0x2C | change_summary_click | index(4) | Select a change summary entry |
 | 0x2D | file_tree_edit_confirm | text_len(2) + text(text_len) | Confirm file tree inline edit |
 | 0x2E | file_tree_edit_cancel | (empty) | Cancel file tree inline edit |
 | 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |

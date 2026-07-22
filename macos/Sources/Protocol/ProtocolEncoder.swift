@@ -529,14 +529,6 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: breadcrumb_click. Layout: opcode(1) + action_type(1) + index(1).
-    func sendBreadcrumbClick(index: UInt8) {
-        var buf = Data(count: 3)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_BREADCRUMB_CLICK
-        buf[2] = index
-        writeFrame(buf)
-    }
 
     /// Send a gui_action: toggle_panel. Layout: opcode(1) + action_type(1) + panel(1).
     func sendTogglePanel(panel: UInt8) {
@@ -933,14 +925,6 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: change_summary_click. Layout: opcode(1) + action_type(1) + index(4).
-    func sendChangeSummaryClick(index: UInt32) {
-        var buf = Data(count: 6)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_CHANGE_SUMMARY_CLICK
-        writeU32(&buf, 2, index)
-        writeFrame(buf)
-    }
 
     /// Send a gui_action: scroll_to_line. Layout: opcode(1) + action_type(1) + line(4).
     func sendScrollToLine(line: UInt32) {

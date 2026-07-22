@@ -22,9 +22,6 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiBreadcrumbFields":
 		v, n, err := DecodeGuiBreadcrumbFields(payload, 0, len(payload))
 		return v, n, err
-	case "GuiChangeSummaryFields":
-		v, n, err := DecodeGuiChangeSummaryFields(payload, 0, len(payload))
-		return v, n, err
 	case "GuiCompletionFields":
 		v, n, err := DecodeGuiCompletionFields(payload, 0, len(payload))
 		return v, n, err

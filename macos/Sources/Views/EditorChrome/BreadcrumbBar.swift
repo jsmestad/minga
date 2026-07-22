@@ -1,6 +1,6 @@
 /// Breadcrumb path bar between the tab bar and editor content.
 ///
-/// Shows the active buffer's file path as clickable segments separated
+/// Shows the active buffer's file path as display-only segments separated
 /// by chevrons. Search icon on the right edge.
 
 import SwiftUI
@@ -48,19 +48,13 @@ public struct BreadcrumbBar: View {
                             .padding(.horizontal, 4)
                     }
 
-                    Button {
-                        encoder?.sendBreadcrumbClick(index: UInt8(index))
-                    } label: {
-                        Text(segment)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(
-                                index == state.segments.count - 1
-                                    ? theme.breadcrumbFg
-                                    : theme.breadcrumbFg.opacity(0.6)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .pointingHandCursor()
+                    Text(segment)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(
+                            index == state.segments.count - 1
+                                ? theme.breadcrumbFg
+                                : theme.breadcrumbFg.opacity(0.6)
+                        )
                 }
 
                 Spacer()

@@ -40,8 +40,8 @@ public final class GUIState {
         statusBarState: statusBarState, feedbackState: feedbackState,
         agentChatState: agentChatState, bottomPanelState: bottomPanelState,
         minibufferState: minibufferState, agentContextBarState: agentContextBarState,
-        changeSummaryState: changeSummaryState, editTimelineState: editTimelineState,
-        extensionPanelState: extensionPanelState, searchState: searchState
+        editTimelineState: editTimelineState, extensionPanelState: extensionPanelState,
+        searchState: searchState
     )
 
     /// Stable editor-scoped input created and owned by this GUI state.
@@ -140,8 +140,6 @@ public final class GUIState {
 
     /// Agent context bar state (0x88).
     public let agentContextBarState = AgentContextBarState()
-    /// Change summary sidebar for agent card zoomed-in view.
-    public let changeSummaryState = ChangeSummaryState()
 
     /// Edit timeline scrubber state.
     public let editTimelineState = EditTimelineState()
@@ -202,7 +200,6 @@ public final class ShellHostInput {
     public let bottomPanelState: BottomPanelState
     public let minibufferState: MinibufferState
     public let agentContextBarState: AgentContextBarState
-    public let changeSummaryState: ChangeSummaryState
     public let editTimelineState: EditTimelineState
     public let extensionPanelState: ExtensionPanelState
     public let searchState: SearchState
@@ -218,8 +215,8 @@ public final class ShellHostInput {
         statusBarState: StatusBarState, feedbackState: FeedbackState,
         agentChatState: AgentChatState, bottomPanelState: BottomPanelState,
         minibufferState: MinibufferState, agentContextBarState: AgentContextBarState,
-        changeSummaryState: ChangeSummaryState, editTimelineState: EditTimelineState,
-        extensionPanelState: ExtensionPanelState, searchState: SearchState
+        editTimelineState: EditTimelineState, extensionPanelState: ExtensionPanelState,
+        searchState: SearchState
     ) {
         self.theme = theme
         self.tabBarState = tabBarState
@@ -236,7 +233,6 @@ public final class ShellHostInput {
         self.bottomPanelState = bottomPanelState
         self.minibufferState = minibufferState
         self.agentContextBarState = agentContextBarState
-        self.changeSummaryState = changeSummaryState
         self.editTimelineState = editTimelineState
         self.extensionPanelState = extensionPanelState
         self.searchState = searchState

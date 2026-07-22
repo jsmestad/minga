@@ -115,14 +115,6 @@ struct GUIActionEncoderTests {
         #expect(spy.guiActions == [.completionSelect(index: 0)])
     }
 
-    @Test("sendBreadcrumbClick records index")
-    func breadcrumbClick() {
-        let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendBreadcrumbClick(index: 2)
-
-        #expect(spy.guiActions == [.breadcrumbClick(index: 2)])
-    }
 
     @Test("sendTogglePanel records panel ID")
     func togglePanel() {

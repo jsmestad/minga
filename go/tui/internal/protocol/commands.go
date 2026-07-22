@@ -91,7 +91,6 @@ type ChromePayload struct {
 	Breadcrumb        Breadcrumb
 	Git               GitStatus
 	Search            SearchState
-	Change            ChangeSummary
 	Hover             HoverPopup
 	HoverAction       HoverAction
 	Signature         SignatureHelp

@@ -113,8 +113,6 @@ func opcodeName(opcode byte) string {
 		return "git"
 	case generated.OPGuiSearchState:
 		return "search"
-	case generated.OPGuiChangeSummary:
-		return "changes"
 	case generated.OPGuiHoverPopup:
 		return "hover"
 	case generated.OPGuiHoverAction:

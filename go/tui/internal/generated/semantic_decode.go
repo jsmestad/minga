@@ -634,35 +634,6 @@ func DecodeWhichKeyBinding(data []byte, offset int, windowEnd int) (WhichKeyBind
 	}, pos, nil
 }
 
-func DecodeChangeSummaryEntry(data []byte, offset int, windowEnd int) (ChangeSummaryEntry, int, error) {
-	pos := offset
-	path, pos, err := decodeString16Window(data, pos, windowEnd)
-	if err != nil {
-		return ChangeSummaryEntry{}, offset, err
-	}
-	if err := decodeRequireWindow(windowEnd, pos+1, "action"); err != nil {
-		return ChangeSummaryEntry{}, offset, err
-	}
-	action := data[pos]
-	pos++
-	if err := decodeRequireWindow(windowEnd, pos+4, "lines_added"); err != nil {
-		return ChangeSummaryEntry{}, offset, err
-	}
-	linesAdded := decodeU32(data, pos)
-	pos += 4
-	if err := decodeRequireWindow(windowEnd, pos+4, "lines_removed"); err != nil {
-		return ChangeSummaryEntry{}, offset, err
-	}
-	linesRemoved := decodeU32(data, pos)
-	pos += 4
-	return ChangeSummaryEntry{
-		Path:         path,
-		Action:       action,
-		LinesAdded:   linesAdded,
-		LinesRemoved: linesRemoved,
-	}, pos, nil
-}
-
 func DecodeAgentTodo(data []byte, offset int, windowEnd int) (AgentTodo, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
@@ -2352,32 +2323,6 @@ func DecodeGuiBottomPanelFields(data []byte, offset int, windowEnd int) (GuiBott
 	pos++
 	return GuiBottomPanelFields{
 		Visible: visible,
-	}, pos, nil
-}
-
-// Command field decoder for gui_change_summary
-
-func DecodeGuiChangeSummaryFields(data []byte, offset int, windowEnd int) (GuiChangeSummaryFields, int, error) {
-	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
-		return GuiChangeSummaryFields{}, offset, err
-	}
-	visible := data[pos]
-	pos++
-	if err := decodeRequireWindow(windowEnd, pos+2, "selected_index"); err != nil {
-		return GuiChangeSummaryFields{}, offset, err
-	}
-	selectedIndex := decodeU16(data, pos)
-	pos += 2
-	if err := decodeRequireWindow(windowEnd, pos+2, "entry_count"); err != nil {
-		return GuiChangeSummaryFields{}, offset, err
-	}
-	entryCount := decodeU16(data, pos)
-	pos += 2
-	return GuiChangeSummaryFields{
-		Visible:       visible,
-		SelectedIndex: selectedIndex,
-		EntryCount:    entryCount,
 	}, pos, nil
 }
 

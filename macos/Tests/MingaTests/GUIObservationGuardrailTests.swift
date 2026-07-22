@@ -57,7 +57,6 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/Shared/GUIState.swift#GUIWindowContentBacking": "observable resident-window backing",
         "Sources/Views/Shared/GUIState.swift#GUIState": "aggregate observable state",
         "Sources/Views/Shared/ThemeColors.swift#ThemeColors": "observable theme slots",
-        "Sources/Views/Sidebar/ChangeSummaryState.swift#ChangeSummaryState": "protocol presentation owner",
         "Sources/Views/Sidebar/FileTreeState.swift#FileTreeState": "protocol presentation owner",
         "Sources/Views/Sidebar/GitStatusState.swift#GitStatusState": "protocol presentation owner",
         "Sources/Views/Sidebar/ObservatoryState.swift#ObservatoryState": "protocol presentation owner",
@@ -109,7 +108,7 @@ struct GUIObservationGuardrailTests {
         let sources = try productionSources()
         let actualObservable = try Set(sources.flatMap(observableDeclarations(in:)))
         #expect(actualObservable == Set(Self.observationTypeAllowlist.keys))
-        #expect(Self.observationTypeAllowlist.count == 38)
+        #expect(Self.observationTypeAllowlist.count == 37)
 
         let actualIgnored = occurrenceCounts(sources.flatMap(ignoredDeclarations(in:)))
         let expectedIgnored = Dictionary(uniqueKeysWithValues: Self.ignoredDeclarationAllowlist.keys.map { ($0, 1) })

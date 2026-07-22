@@ -942,7 +942,6 @@ struct GUIFrameSwiftUIInvalidationTests {
                 "@ObservationIgnored private var warnedUnknownKinds: Set<String> = []",
             ]),
             ("ObservatoryState", "Sources/Views/Sidebar/ObservatoryState.swift", []),
-            ("ChangeSummaryState", "Sources/Views/Sidebar/ChangeSummaryState.swift", []),
             ("GitStatusState", "Sources/Views/Sidebar/GitStatusState.swift", []),
             ("EditTimelineState", "Sources/Views/Shared/EditTimelineState.swift", []),
             ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", []),
@@ -980,7 +979,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
         ]
         let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder"]
-        #expect(owners.count == 30)
+        #expect(owners.count == 29)
         #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
         #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))
 

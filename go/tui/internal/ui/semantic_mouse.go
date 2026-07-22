@@ -9,19 +9,18 @@ import (
 )
 
 const (
-	zonePrefixFileTreeRow       = "file-tree:row:"
-	zonePrefixModelineCommand   = "modeline:command:"
-	zonePrefixTab               = "tab:id:"
-	zonePrefixBreadcrumbSegment = "breadcrumb:segment:"
-	zonePrefixCompletionItem    = "completion:item:"
-	zonePrefixSidebarItem       = "sidebar:item:"
-	zonePrefixNotificationItem  = "notification:dismiss:"
-	zonePrefixNotificationAct   = "notification:action:"
-	zonePrefixObservatoryNode   = "observatory:node:"
-	zonePrefixTimelineEntry     = "timeline:entry:"
-	zonePrefixEmptyStateItem    = "empty-state:item:"
-	zoneIDHoverAction           = "hover:action"
-	bottomPanelWheelLines       = 3
+	zonePrefixFileTreeRow      = "file-tree:row:"
+	zonePrefixModelineCommand  = "modeline:command:"
+	zonePrefixTab              = "tab:id:"
+	zonePrefixCompletionItem   = "completion:item:"
+	zonePrefixSidebarItem      = "sidebar:item:"
+	zonePrefixNotificationItem = "notification:dismiss:"
+	zonePrefixNotificationAct  = "notification:action:"
+	zonePrefixObservatoryNode  = "observatory:node:"
+	zonePrefixTimelineEntry    = "timeline:entry:"
+	zonePrefixEmptyStateItem   = "empty-state:item:"
+	zoneIDHoverAction          = "hover:action"
+	bottomPanelWheelLines      = 3
 )
 
 // zoneIDEmptyStateItem tags one activatable launchpad row by its stable item
@@ -41,10 +40,6 @@ func zoneIDModelineCommand(command string) string {
 
 func zoneIDTab(id uint32) string {
 	return fmt.Sprintf("%s%d", zonePrefixTab, id)
-}
-
-func zoneIDBreadcrumbSegment(index int) string {
-	return fmt.Sprintf("%s%d", zonePrefixBreadcrumbSegment, index)
 }
 
 func zoneIDCompletionItem(index int) string {
@@ -296,9 +291,6 @@ func (m Model) headerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.tabMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.breadcrumbMousePacket(msg); ok {
-		return packet, true
-	}
 	return nil, false
 }
 
@@ -494,20 +486,6 @@ func (m Model) emptyStateMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 			if zoneInfo != nil && zoneInfo.InBounds(msg) {
 				return protocol.EncodeGUIEmptyStateActivate(item.ID), true
 			}
-		}
-	}
-	return nil, false
-}
-
-func (m Model) breadcrumbMousePacket(msg tea.MouseMsg) ([]byte, bool) {
-	crumb, ok := m.breadcrumb()
-	if !ok || len(crumb.Segments) == 0 {
-		return nil, false
-	}
-	for index := range crumb.Segments {
-		zoneInfo := m.zones.Get(zoneIDBreadcrumbSegment(index))
-		if zoneInfo != nil && zoneInfo.InBounds(msg) {
-			return protocol.EncodeGUIBreadcrumbClick(byte(min(index, 0xFF))), true
 		}
 	}
 	return nil, false

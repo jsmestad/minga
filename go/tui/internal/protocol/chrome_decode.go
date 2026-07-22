@@ -33,8 +33,6 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.Git, chrome.Summary, chrome.Bytes = decodeGitStatus(payload)
 	case generated.OPGuiSearchState:
 		chrome.Search, chrome.Summary, chrome.Bytes = decodeSearchState(payload)
-	case generated.OPGuiChangeSummary:
-		chrome.Change, chrome.Summary, chrome.Bytes = decodeChangeSummary(payload)
 	case generated.OPGuiHoverPopup:
 		chrome.Hover, chrome.Summary, chrome.Bytes = decodeHoverPopup(payload)
 	case generated.OPGuiHoverAction:

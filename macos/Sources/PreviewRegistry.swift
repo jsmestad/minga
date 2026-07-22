@@ -95,8 +95,6 @@ enum PreviewRegistry {
             agentChatCompletionPreview()
         case "AgentChatSummary":
             agentChatSummaryPreview()
-        case "ChangeSummaryView":
-            changeSummaryPreview()
         case "PickerOverlay":
             pickerPreview()
         case "MinibufferView":

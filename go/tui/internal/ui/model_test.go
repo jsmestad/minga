@@ -2643,26 +2643,6 @@ func TestSemanticMouseBodyClickFallsThrough(t *testing.T) {
 	}
 }
 
-func TestSemanticMouseRoutesBreadcrumbSegmentZones(t *testing.T) {
-	model := New(120, 12, nil, nil)
-	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiBreadcrumb: {Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}}},
-	}
-	model.layout = model.computeLayout()
-	model.viewport.SetHeight(model.layout.body.Height)
-	model.viewport.SetContent(model.content())
-	_ = model.View()
-
-	zone := waitForZone(t, model, zoneIDBreadcrumbSegment(1))
-	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
-	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIBreadcrumbClick(1)) {
-		t.Fatalf("breadcrumb click should route breadcrumb_click for segment 1, ok=%v packet=%v", ok, cmd)
-	}
-	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseRight, X: zone.StartX + 1, Y: zone.StartY})); ok {
-		t.Fatalf("non-left breadcrumb clicks should fall back")
-	}
-}
-
 func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 	model := New(60, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{

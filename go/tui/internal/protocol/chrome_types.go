@@ -245,19 +245,6 @@ type SearchState struct {
 	Flags        byte
 }
 
-type ChangeSummary struct {
-	Visible       bool
-	SelectedIndex uint16
-	Entries       []ChangeEntry
-}
-
-type ChangeEntry struct {
-	Path         string
-	Action       byte
-	LinesAdded   uint32
-	LinesRemoved uint32
-}
-
 type HoverPopup struct {
 	Visible      bool
 	AnchorRow    uint16

@@ -89,7 +89,6 @@ enum RenderCommand: Sendable {
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
-    case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry], files: [Wire.TimelineFile])
@@ -2435,39 +2434,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                  status: CardStatus(rawValue: statusRaw) ?? .idle, canApprove: canApprove,
                                  progress: progress, todos: todos),
                 consumed)
-    case OP_GUI_CHANGE_SUMMARY:
-        // visible(1) + selected_index(2) + entry_count(2)
-        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
-        let csVisible = data[rest] != 0
-        let csSelectedIndex = Int(try readU16(data, rest + 1))
-        let entryCount = Int(try readU16(data, rest + 3))
-        var csEntries: [ChangeSummaryEntry] = []
-        try FrameDecodeAccounting.reserve(.arrayEntries, entryCount)
-        csEntries.reserveCapacity(entryCount)
-        var csPos = rest + 5
-        for idx in 0..<entryCount {
-            // path_len(2) + path + action(1) + lines_added(4) + lines_removed(4)
-            guard data.count >= csPos + 2 else { throw ProtocolDecodeError.malformed }
-            let pathLen = Int(try readU16(data, csPos))
-            guard data.count >= csPos + 2 + pathLen + 1 + 4 + 4 else { throw ProtocolDecodeError.malformed }
-            let pathData = data[(csPos + 2)..<(csPos + 2 + pathLen)]
-            let path = try decodeUTF8(pathData) ?? ""
-            let actionByte = data[csPos + 2 + pathLen]
-            let linesAdded = try readU32(data, csPos + 2 + pathLen + 1)
-            let linesRemoved = try readU32(data, csPos + 2 + pathLen + 5)
-            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            csEntries.append(ChangeSummaryEntry(
-                id: idx,
-                path: path,
-                action: ChangeSummaryEntry.FileAction(rawValue: actionByte) ?? .modified,
-                linesAdded: linesAdded,
-                linesRemoved: linesRemoved
-            ))
-            csPos += 2 + pathLen + 1 + 4 + 4
-        }
-        return (.guiChangeSummary(visible: csVisible, entries: csEntries, selectedIndex: csSelectedIndex),
-                csPos - offset)
-
     case OP_GUI_INDENT_GUIDES:
         // Forward-compatible format: opcode(1) + payload_length(2) + payload
         // Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each)

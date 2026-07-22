@@ -160,7 +160,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_approve Opcodes.gui_action_agent_approve()
   @gui_action_agent_request_changes Opcodes.gui_action_agent_request_changes()
   @gui_action_agent_dismiss Opcodes.gui_action_agent_dismiss()
-  @gui_action_change_summary_click Opcodes.gui_action_change_summary_click()
   @gui_action_file_tree_edit_confirm Opcodes.gui_action_file_tree_edit_confirm()
   @gui_action_file_tree_edit_cancel Opcodes.gui_action_file_tree_edit_cancel()
   @gui_action_scroll_to_line Opcodes.gui_action_scroll_to_line()
@@ -288,7 +287,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :agent_approve
           | :agent_request_changes
           | :agent_dismiss
-          | {:change_summary_click, index :: non_neg_integer()}
           | {:file_tree_delete, index :: non_neg_integer()}
           | {:file_tree_rename, index :: non_neg_integer()}
           | {:file_tree_duplicate, index :: non_neg_integer()}
@@ -849,9 +847,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_dismiss, <<>>),
     do: {:ok, :agent_dismiss}
-
-  def decode_gui_action(@gui_action_change_summary_click, <<index::32>>),
-    do: {:ok, {:change_summary_click, index}}
 
   def decode_gui_action(@gui_action_scroll_to_line, <<line::32>>),
     do: {:ok, {:scroll_to_line, line}}

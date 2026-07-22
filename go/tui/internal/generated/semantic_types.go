@@ -254,13 +254,6 @@ type WhichKeyBinding struct {
 	Icon string
 }
 
-type ChangeSummaryEntry struct {
-	Path         string
-	Action       uint8
-	LinesAdded   uint32
-	LinesRemoved uint32
-}
-
 type AgentTodo struct {
 	Status      uint8
 	Description string
@@ -594,12 +587,6 @@ type GuiGitStatusFields struct {
 
 type GuiBottomPanelFields struct {
 	Visible uint8
-}
-
-type GuiChangeSummaryFields struct {
-	Visible       uint8
-	SelectedIndex uint16
-	EntryCount    uint16
 }
 
 type GuiAgentContextFields struct {

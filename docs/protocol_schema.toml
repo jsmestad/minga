@@ -33,7 +33,8 @@ version = "2.0.0"
 # protocol_version 13 changes gui_action agent_tool_toggle (0x15) from resident
 # index(2) to stable transcript message_id(4).
 # protocol_version 14 retires the native Tool Manager panel opcode (0x7E) and GUI actions 0x11-0x14. The Tool Manager service and picker command path remain live; stale frontends are rejected by the existing ready handshake.
-protocol_version = 14
+# protocol_version 15 retires the unowned gui_change_summary opcode (0x89), change_summary_entry structure, and change_summary_click action. Breadcrumb display stays on gui_breadcrumb; legacy breadcrumb_click inputs still decode and are ignored.
+protocol_version = 15
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -671,13 +672,6 @@ framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
-name = "gui_change_summary"
-value = 0x89
-direction = "beam_to_frontend"
-framing = "custom"
-
-[[opcodes]]
-category = "gui_semantic"
 name = "gui_hover_action"
 value = 0x96
 direction = "beam_to_frontend"
@@ -948,10 +942,6 @@ value = 0x2A
 [[gui_actions]]
 name = "agent_dismiss"
 value = 0x2B
-
-[[gui_actions]]
-name = "change_summary_click"
-value = 0x2C
 
 [[gui_actions]]
 name = "file_tree_edit_confirm"
@@ -1531,14 +1521,6 @@ fields = [
   { name = "icon", type = "string8" },
 ]
 
-[[structures]]
-name = "change_summary_entry"
-fields = [
-  { name = "path", type = "string16" },
-  { name = "action", type = "u8" },
-  { name = "lines_added", type = "u32" },
-  { name = "lines_removed", type = "u32" },
-]
 
 [[structures]]
 name = "agent_todo"
@@ -2179,13 +2161,6 @@ fields = [
 opcode = "gui_bottom_panel"
 fields = [{ name = "visible", type = "u8" }]
 
-[[command_fields]]
-opcode = "gui_change_summary"
-fields = [
-  { name = "visible", type = "u8" },
-  { name = "selected_index", type = "u16" },
-  { name = "entry_count", type = "u16" },
-]
 
 [[command_fields]]
 opcode = "gui_agent_context"

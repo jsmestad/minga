@@ -121,7 +121,6 @@ pub const OP_GUI_SPLIT_SEPARATORS = opcodes.OP_GUI_SPLIT_SEPARATORS;
 pub const OP_GUI_GIT_STATUS = opcodes.OP_GUI_GIT_STATUS;
 pub const OP_GUI_AGENT_TRANSCRIPT = opcodes.OP_GUI_AGENT_TRANSCRIPT;
 pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
-pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
 pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
 pub const OP_GUI_CONFIG_STATE = opcodes.OP_GUI_CONFIG_STATE;
 pub const OP_GUI_WORKSPACES = opcodes.OP_GUI_WORKSPACES;
@@ -174,7 +173,6 @@ pub const GUI_ACTION_FIND_PASTEBOARD_SEARCH = opcodes.GUI_ACTION_FIND_PASTEBOARD
 pub const GUI_ACTION_AGENT_APPROVE = opcodes.GUI_ACTION_AGENT_APPROVE;
 pub const GUI_ACTION_AGENT_REQUEST_CHANGES = opcodes.GUI_ACTION_AGENT_REQUEST_CHANGES;
 pub const GUI_ACTION_AGENT_DISMISS = opcodes.GUI_ACTION_AGENT_DISMISS;
-pub const GUI_ACTION_CHANGE_SUMMARY_CLICK = opcodes.GUI_ACTION_CHANGE_SUMMARY_CLICK;
 pub const GUI_ACTION_FILE_TREE_EDIT_CONFIRM = opcodes.GUI_ACTION_FILE_TREE_EDIT_CONFIRM;
 pub const GUI_ACTION_FILE_TREE_EDIT_CANCEL = opcodes.GUI_ACTION_FILE_TREE_EDIT_CANCEL;
 pub const GUI_ACTION_SCROLL_TO_LINE = opcodes.GUI_ACTION_SCROLL_TO_LINE;
@@ -1165,7 +1163,6 @@ fn customCommandSize(payload: []const u8) usize {
         OP_GUI_BOTTOM_PANEL => guiBottomPanelSize(payload),
         OP_GUI_SPLIT_SEPARATORS => guiSplitSeparatorsSize(payload),
         OP_GUI_SEARCH_STATE => len16CommandSize(payload),
-        OP_GUI_CHANGE_SUMMARY => guiChangeSummarySize(payload),
         OP_GUI_NOTIFICATIONS => len16CommandSize(payload),
         OP_GUI_EDIT_TIMELINE => len16CommandSize(payload),
         OP_GUI_EXTENSION_OVERLAY => len16CommandSize(payload),
@@ -1263,18 +1260,6 @@ fn guiThemeSize(payload: []const u8) usize {
     return @min(2 + @as(usize, payload[1]) * 4, payload.len);
 }
 
-fn guiChangeSummarySize(payload: []const u8) usize {
-    if (payload.len < 6) return payload.len;
-    const count = std.mem.readInt(u16, payload[4..][0..2], .big);
-    var offset: usize = 6;
-    var index: u16 = 0;
-    while (index < count) : (index += 1) {
-        _ = readString16Size(payload, &offset) orelse return payload.len;
-        if (payload.len < offset + 9) return payload.len;
-        offset += 9;
-    }
-    return offset;
-}
 
 fn guiAgentContextSize(payload: []const u8) usize {
     if (payload.len < 4) return payload.len;
@@ -2013,7 +1998,6 @@ test "all generated GUI render opcodes are accounted for by TUI semantic noops" 
         &[_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_GIT_STATUS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         &[_]u8{ OP_GUI_AGENT_CONTEXT, 0, 0 },
-        &[_]u8{ OP_GUI_CHANGE_SUMMARY, 0 },
         &[_]u8{ OP_GUI_HOVER_ACTION, 0, 1, 0 },
         &[_]u8{ OP_GUI_CONFIG_STATE, 0, 0 },
         &[_]u8{ OP_GUI_WORKSPACES, 0, 6, 2, 0, 0, 0, 0, 0 },
@@ -2861,37 +2845,6 @@ test "commandSize: gui_search_state len16 packet" {
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
-test "commandSize: gui_change_summary custom packet" {
-    const data = [_]u8{
-        OP_GUI_CHANGE_SUMMARY,
-        1,
-        0,
-        0,
-        0,
-        1,
-        0,
-        8,
-        'l',
-        'i',
-        'b',
-        '/',
-        'a',
-        '.',
-        'e',
-        'x',
-        1,
-        0,
-        0,
-        0,
-        4,
-        0,
-        0,
-        0,
-        2,
-        OP_COMMIT_FRAME,
-    };
-    try std.testing.expectEqual(data.len - 1, commandSize(&data));
-}
 
 test "commandSize: gui_notifications len16 packet" {
     const data = [_]u8{ OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 0, OP_COMMIT_FRAME };

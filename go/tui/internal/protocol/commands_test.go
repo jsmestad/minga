@@ -1047,16 +1047,6 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 		t.Fatalf("search decoded incorrectly: %+v", command.Chrome.Search)
 	}
 
-	change := []byte{generated.OPGuiChangeSummary, 1, 0, 0, 0, 1}
-	change = append(change, string16("README.md")...)
-	change = append(change, 1, 0, 0, 0, 5, 0, 0, 0, 1)
-	command, err = DecodeCommand(change)
-	if err != nil {
-		t.Fatalf("DecodeCommand change returned error: %v", err)
-	}
-	if !command.Chrome.Change.Visible || len(command.Chrome.Change.Entries) != 1 || command.Chrome.Change.Entries[0].LinesAdded != 5 {
-		t.Fatalf("change decoded incorrectly: %+v", command.Chrome.Change)
-	}
 }
 
 func TestDecodeTransientOverlayChrome(t *testing.T) {

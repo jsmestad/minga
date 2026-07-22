@@ -441,14 +441,6 @@ struct EncoderGUIActionTests {
         #expect(readU16(payload, 2) == 3)
     }
 
-    @Test("breadcrumb_click encodes index as UInt8")
-    func breadcrumbClickLayout() {
-        let payload = captureFrame { $0.sendBreadcrumbClick(index: 2) }
-
-        #expect(payload.count == 3)
-        #expect(payload[1] == GUI_ACTION_BREADCRUMB_CLICK)
-        #expect(payload[2] == 2)
-    }
 
     @Test("toggle_panel encodes panel ID")
     func togglePanelLayout() {

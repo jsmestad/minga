@@ -503,7 +503,6 @@ public struct ContentView<EditorSurface: View>: View {
     @State private var rightPaneHeight: CGFloat = 600
     @State private var workspaceWidth: CGFloat = 800
     @State private var sidebarWidth: CGFloat = SidebarSizing.defaultWidth
-    @State private var changeSummaryWidth: CGFloat = 280
     @Namespace private var frontendExtensionNamespace
 
     let frameProbe: ContentViewFrameProbe?
@@ -795,16 +794,6 @@ public struct ContentView<EditorSurface: View>: View {
         }
     }
 
-    // MARK: - Change Summary Sidebar
-
-    @ViewBuilder
-    private func changeSummarySidebar(_ input: ShellHostInput) -> some View {
-        ChangeSummarySidebarView(
-            changeSummaryState: input.changeSummaryState,
-            encoder: encoder,
-            width: $changeSummaryWidth
-        )
-    }
 
     // MARK: - Editor Body
 
@@ -843,10 +832,6 @@ public struct ContentView<EditorSurface: View>: View {
             }
 
             HStack(spacing: 0) {
-                if input.changeSummaryState.visible {
-                    changeSummarySidebar(input)
-                }
-
                 EditorSurfaceHost(input: editorInput) { focusedInput in
                     editorSurface(
                         focusedInput,
