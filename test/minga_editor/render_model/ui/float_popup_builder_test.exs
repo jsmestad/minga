@@ -63,7 +63,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
         )
 
       rule = Rule.new("*Float*", display: :float, width: {:cols, 8}, height: {:rows, 4})
-      popup_meta = Active.new(rule, 2, 1)
+      popup_meta = Active.new(rule, 1)
       popup_window = %{Window.new(2, buffer, 10, 80) | popup_meta: popup_meta}
       windows = %{ctx.windows | map: Map.put(ctx.windows.map, 2, popup_window)}
       ctx = %{ctx | windows: windows}

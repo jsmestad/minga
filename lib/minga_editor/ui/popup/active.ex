@@ -26,29 +26,24 @@ defmodule MingaEditor.UI.Popup.Active do
 
   @type t :: %__MODULE__{
           rule: Rule.t(),
-          window_id: Window.id(),
           previous_active: Window.id()
         }
 
-  @enforce_keys [:rule, :window_id, :previous_active]
+  @enforce_keys [:rule, :previous_active]
   defstruct [
     :rule,
-    :window_id,
     previous_active: 1
   ]
 
   @doc """
   Creates a new active popup record.
 
-  Captures the rule that matched, the window id of the new popup window,
-  and the previously active window id for focus restoration on close.
+  Captures the rule that matched and the previously active window id for focus restoration on close.
   """
-  @spec new(Rule.t(), Window.id(), Window.id()) :: t()
-  def new(%Rule{} = rule, window_id, previous_active)
-      when is_integer(window_id) and is_integer(previous_active) do
+  @spec new(Rule.t(), Window.id()) :: t()
+  def new(%Rule{} = rule, previous_active) when is_integer(previous_active) do
     %__MODULE__{
       rule: rule,
-      window_id: window_id,
       previous_active: previous_active
     }
   end

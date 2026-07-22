@@ -74,7 +74,7 @@ defmodule MingaEditor.WindowTest do
       window = make_window()
       refute Window.popup?(window)
 
-      popup_window = %{window | popup_meta: PopupActive.new(PopupRule.new("*test*"), 2, 1)}
+      popup_window = %{window | popup_meta: PopupActive.new(PopupRule.new("*test*"), 1)}
       assert Window.popup?(popup_window)
     end
   end
