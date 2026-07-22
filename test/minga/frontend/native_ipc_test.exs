@@ -4,6 +4,8 @@ defmodule Minga.Frontend.NativeIPCTest do
 
   import Bitwise
 
+  alias MingaEditor.NativeIPC.Endpoint
+  alias MingaEditor.NativeIPC.Identity
   alias MingaEditor.NativeIPC.Supervisor, as: IPCSupervisor
   alias Minga.Frontend.WaitRequests
 
@@ -140,7 +142,7 @@ defmodule Minga.Frontend.NativeIPCTest do
     assert inspect(reason) =~ "insecure_runtime_entry"
   end
 
-  test "rolls back listener socket and temp descriptor when descriptor publication fails after listen",
+  test "endpoint rolls back listener socket and temp descriptor when descriptor publication fails",
        ctx do
     suffix = System.unique_integer([:positive])
     parent = Path.join("/tmp", "minga-native-ipc-rollback-#{suffix}")
@@ -155,34 +157,56 @@ defmodule Minga.Frontend.NativeIPCTest do
 
     on_exit(fn -> File.rm_rf!(parent) end)
 
-    previous_trap = Process.flag(:trap_exit, true)
+    assert {:error, :eisdir} =
+             Endpoint.open(runtime_dir: runtime_dir, identity_base: endpoint_base(ctx))
 
-    result =
-      IPCSupervisor.start_link(
-        name: nil,
-        server_name: nil,
-        task_supervisor_name: Module.concat(__MODULE__, "RollbackTasks#{suffix}"),
-        runtime_parent: parent,
-        runtime_dir: runtime_dir,
-        app_instance_id: "app-instance-1234567890",
-        app_pid: ctx.app_pid,
-        euid: File.stat!(File.cwd!()).uid,
-        kill_checker: fn _pid -> true end
-      )
-
-    receive do
-      {:EXIT, _pid, _reason} -> :ok
-    after
-      0 -> :ok
-    end
-
-    Process.flag(:trap_exit, previous_trap)
-    assert {:error, {:shutdown, {:failed_to_start_child, _, :eisdir}}} = result
     assert File.dir?(blocker)
     entries = File.ls!(runtime_dir)
     refute Enum.any?(entries, &String.starts_with?(&1, "control-"))
     refute Enum.any?(entries, &String.starts_with?(&1, "current.json.tmp-"))
     assert entries == ["current.json"]
+  end
+
+  test "endpoint close is idempotent and removes only the current generation", ctx do
+    suffix = System.unique_integer([:positive])
+    runtime_dir = Path.join("/tmp", "minga-native-ipc-close-#{suffix}")
+    File.rm_rf!(runtime_dir)
+    File.mkdir!(runtime_dir)
+    File.chmod!(runtime_dir, 0o700)
+
+    on_exit(fn -> File.rm_rf!(runtime_dir) end)
+
+    assert {:ok, endpoint} =
+             Endpoint.open(runtime_dir: runtime_dir, identity_base: endpoint_base(ctx))
+
+    descriptor_path = Path.join(runtime_dir, "current.json")
+    descriptor = JSON.decode!(File.read!(descriptor_path))
+    socket = File.lstat!(endpoint.identity.socket_path)
+    descriptor_stat = File.lstat!(descriptor_path)
+    assert socket.type == :other
+    assert (socket.mode &&& 0o777) == 0o600
+    assert descriptor_stat.type == :regular
+    assert (descriptor_stat.mode &&& 0o777) == 0o600
+    assert descriptor["core_instance_id"] == endpoint.identity.core_instance_id
+
+    assert :ok = Endpoint.close(endpoint)
+    assert :ok = Endpoint.close(endpoint)
+    refute File.exists?(endpoint.identity.socket_path)
+    refute File.exists?(descriptor_path)
+
+    assert {:ok, replacement} =
+             Endpoint.open(runtime_dir: runtime_dir, identity_base: endpoint_base(ctx))
+
+    stale_descriptor =
+      replacement.identity
+      |> Identity.descriptor(1)
+      |> Map.put(:core_instance_id, "replacement-core")
+
+    File.write!(descriptor_path, JSON.encode!(stale_descriptor) <> "\n")
+    File.chmod!(descriptor_path, 0o600)
+
+    assert :ok = Endpoint.close(replacement)
+    assert JSON.decode!(File.read!(descriptor_path))["core_instance_id"] == "replacement-core"
   end
 
   test "authenticates a real AF_UNIX probe and rejects a substituted token", ctx do
@@ -323,6 +347,20 @@ defmodule Minga.Frontend.NativeIPCTest do
     assert :ok = Supervisor.stop(ctx.supervisor)
     assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
   end
+
+  defp endpoint_base(ctx) do
+    %{
+      app_instance_id: "app-instance-1234567890",
+      core_instance_id: unique_secret(16),
+      app_pid: ctx.app_pid,
+      euid: File.stat!(File.cwd!()).uid,
+      launch_nonce: "launch-nonce-123456",
+      token: unique_secret(32)
+    }
+  end
+
+  defp unique_secret(bytes),
+    do: bytes |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
 
   defp connect(descriptor) do
     {:ok, socket} =
