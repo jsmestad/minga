@@ -438,11 +438,13 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           messages: [{:user, "incoming question"}, {:assistant, "incoming answer"}]
         )
 
+      stale_context_ui = bump_ui_message_version(UIState.new(), 42)
+
       tabs = [
         Tab.new_file(1, "main.ex"),
         Tab.new_agent(2, "Incoming")
         |> Tab.set_session(incoming_session)
-        |> Tab.set_context(agent_tab_context())
+        |> Tab.set_context(agent_tab_context(stale_context_ui))
       ]
 
       state = base_state(tabs, 1)
@@ -485,6 +487,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       assert switched.workspace.agent_ui.panel.message_version > 7
       assert switched.workspace.agent_ui.panel.message_version < 100
+      assert switched.workspace.agent_ui.panel.message_version != 42
+      assert drained.agent_ui.panel.message_version != 42
+
+      assert drained.agent_ui.panel.message_version ==
+               switched.workspace.agent_ui.panel.message_version
+
       assert drained.pending_catchup_events == []
       assert TraditionalState.modal(switched.shell_runtime.state) == :none
       assert agent.spinner_timer != nil
@@ -564,5 +572,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       Enum.reduce(1..count//1, ui.panel, fn _step, panel -> Panel.bump_message_version(panel) end)
 
     UIState.replace_panel(ui, panel)
+  end
+
+  defp agent_tab_context(%UIState{} = agent_ui) do
+    agent_tab_context()
+    |> Map.put(:present_fields, [:keymap_scope, :buffers, :windows, :agent_ui])
+    |> Map.put(:agent_ui, agent_ui)
   end
 end

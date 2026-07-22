@@ -1,6 +1,8 @@
 defmodule MingaEditor.State.SnapshotTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.FeatureState
@@ -99,6 +101,19 @@ defmodule MingaEditor.State.SnapshotTest do
       refute :injection_ranges in ctx.present_fields
     end
 
+    test "does not carry agent UI projection" do
+      workspace =
+        SessionState.set_agent_ui(
+          make_state().workspace,
+          bump_ui_message_version(UIState.new(), 9)
+        )
+
+      ctx = Context.snapshot(workspace)
+
+      refute Map.has_key?(Map.from_struct(ctx), :agent_ui)
+      refute :agent_ui in ctx.present_fields
+    end
+
     test "normalises transient editing state before snapshotting" do
       state = make_state(mode: :normal)
       command_state = %Mode.CommandState{input: ""}
@@ -147,6 +162,36 @@ defmodule MingaEditor.State.SnapshotTest do
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.workspace.keymap_scope == :agent
       assert restored.workspace.buffers.active == buf_b
+    end
+
+    test "does not restore stale agent UI from tab context" do
+      stale_ui = bump_ui_message_version(UIState.new(), 9)
+      live_ui = bump_ui_message_version(UIState.new(), 3)
+      context = Context.snapshot(SessionState.set_agent_ui(make_state().workspace, stale_ui))
+      workspace = SessionState.set_agent_ui(make_state().workspace, live_ui)
+
+      restored = SessionState.restore_tab_context(workspace, context)
+
+      assert restored.agent_ui.panel.message_version == 3
+      refute restored.agent_ui.panel.message_version == 9
+    end
+
+    test "ignores legacy raw-map agent UI projection" do
+      stale_ui = bump_ui_message_version(UIState.new(), 9)
+      live_ui = bump_ui_message_version(UIState.new(), 3)
+
+      context = %{
+        present_fields: [:agent_ui],
+        agent_ui: stale_ui
+      }
+
+      restored =
+        SessionState.restore_tab_context(
+          SessionState.set_agent_ui(make_state().workspace, live_ui),
+          context
+        )
+
+      assert restored.agent_ui.panel.message_version == 3
     end
 
     test "legacy viewport contexts do not restore stale terminal dimensions" do
@@ -578,5 +623,12 @@ defmodule MingaEditor.State.SnapshotTest do
       assert MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) == nil
       assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
     end
+  end
+
+  defp bump_ui_message_version(%UIState{} = ui, count) do
+    panel =
+      Enum.reduce(1..count//1, ui.panel, fn _step, panel -> Panel.bump_message_version(panel) end)
+
+    UIState.replace_panel(ui, panel)
   end
 end

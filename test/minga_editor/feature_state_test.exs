@@ -64,9 +64,9 @@ defmodule MingaEditor.FeatureStateTest do
       |> Map.keys()
 
     # Every workspace field is either snapshotted per tab (TabContext.field_names/0)
-    # or an explicit, documented transient exclusion (TabContext.transient_fields/0,
-    # e.g. the #2630 Cmd/Ctrl-hover link). A new NON-transient field that is added
-    # to neither will fail this guard, which is the point.
+    # or an explicit, documented exclusion (TabContext.transient_fields/0): transient
+    # frame state stays live-only, and :agent_ui belongs to the Workspace/Session
+    # projection. A new unaccounted field fails this guard, which is the point.
     accounted_fields = TabContext.field_names() ++ TabContext.transient_fields()
 
     assert Enum.sort(accounted_fields) == Enum.sort(workspace_fields)
