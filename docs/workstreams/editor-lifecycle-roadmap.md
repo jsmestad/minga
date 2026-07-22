@@ -3678,7 +3678,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W083/S12: Delete duplicate Tab.Context agent UI projection
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S12
 - **Planning profile:** `S12Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S12Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3699,8 +3699,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness found no code defect and required only current roadmap test selectors, validation, and line budgets; after correction its targeted recheck returned `RESOLVED/PASS`. Elixir craftsmanship returned `PASS/Lean` with no mandatory cut and confirmed the single field constant, typed deletion, legacy normalization, owner paths, and test helpers are idiomatic. Ponytail returned `PASS/Lean` with 0.99 confidence and confirmed the net-negative one-file production deletion adds zero concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete eight-file diff, sole changed production file, net-negative budget, zero concepts, deletion completeness, unchanged Workspace/Session/TabWorkflow/TraditionalWorkflow/TabBar/persistence owners, behavioral tests, validation evidence, and merge safety.
 - **Discoveries affecting later work:** The existing buffer lifecycle prompt-retirement test and event-routing context guard assumed tab contexts carried `agent_ui`; after S12, those guards belong to Workspace/Session owner assertions and tab contexts explicitly refute the field. No contract drift, dependency change, owner invalidation, or positive production line budget issue required replanning.
-- **PR URL:** Pending.
-- **Implementation commit SHA:** Pending.
-- **Merge SHA:** Pending.
-- **Merge evidence:** Pending.
-- **Completion date:** Pending.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3154
+- **Implementation commit SHA:** `7cb15fdcb`.
+- **Merge SHA:** `6a1e565492ae732bf48888a08c8c468957a91b91`.
+- **Merge evidence:** PR #3154 merged after CI run `29888183160` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
