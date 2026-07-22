@@ -26,11 +26,11 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03
+- **IMPLEMENTED:** S34, S35, E02, E03, E05
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
-- **CANDIDATE, craftsmanship:** E05, E08
+- **CANDIDATE, craftsmanship:** E08
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
@@ -40,7 +40,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
-- **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E05, E08
+- **STILL_REPRODUCIBLE, craftsmanship:** E02, E03, E08
 - **STILL_REPRODUCIBLE, data shape:** ES03, ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES08, ES21
 
@@ -4172,3 +4172,27 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer and delivery:** `PASS` with 0.99 confidence. The reviewer confirmed the complete seven-file artifact, clean single-struct normalization, no external construction or updates, preserved dispatch/effect semantics, enforced nonempty failure invariant, valid evidence, exact budgets, and merge safety. PR: https://github.com/jsmestad/minga/pull/3188. Implementation commit: `55b61e62a`.
 - **Merge evidence:** PR #3188 merged at `bd61a3cd999ee4bf54707b0bf32e2c63a37ccfe4` after CI run `29949270064` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W100/E05: Own native IPC endpoint generations
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** E05
+- **Planning profile:** `E05Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `E05Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://E05Planner` for current SHA `356f445083a3a4ad888406392aa242e0608c6bd9`; scope was exactly one `MingaEditor.NativeIPC.Endpoint` owner, `Server.State` endpoint aggregation, server migration, focused native IPC owner tests, and this evidence.
+- **Observable result:** One internal `%MingaEditor.NativeIPC.Endpoint{}` now owns one AF_UNIX listener, identity, and `current.json` descriptor generation. Server workflow still owns option/env parsing, runtime directory admission, acceptor startup, connection task supervision, identity diagnostics, and termination.
+- **Failure reproduction / source trace:** Before implementation there was no `MingaEditor.NativeIPC.Endpoint`; `Server.State` stored flat `listener`, `descriptor_path`, and `identity`; `Server` owned endpoint listener, descriptor publication, identity construction, partial rollback, published rollback, identity-matched descriptor removal, and termination cleanup directly.
+- **Implementation result:** Added `Endpoint.open/1` and `Endpoint.close/1`, moved listener/socket/descriptor publication and idempotent identity-matched cleanup helpers into the endpoint owner, migrated `Server.init/1`, acceptor startup, `identity/1`, and `terminate/2` to consume the endpoint value, and changed `Server.State` to aggregate `%Endpoint{}` plus the acceptor pid.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/native_ipc/endpoint.ex`; `lib/minga_editor/native_ipc/server.ex`; `lib/minga_editor/native_ipc/server/state.ex`; `test/minga/frontend/native_ipc_test.exs`.
+- **Focused validation:** `mix test test/minga/frontend/native_ipc_test.exs --seed 0` passed 9 tests after formatting.
+- **Formatting and reference validation:** `mix format --check-formatted lib/minga_editor/native_ipc/endpoint.ex lib/minga_editor/native_ipc/server.ex lib/minga_editor/native_ipc/server/state.ex test/minga/frontend/native_ipc_test.exs docs/workstreams/editor-lifecycle-roadmap.md` passed after formatting the touched source and test paths.
+- **Production lines added/removed before roadmap evidence:** New `Endpoint` adds 157 lines; existing native IPC production files add 19 and remove 136 lines, net production `+40`, within the locked target `<= +40` and hard stop `<= +50`.
+- **Test lines added/removed before roadmap evidence:** `test/minga/frontend/native_ipc_test.exs` added 61 and removed 23 lines, net test `+38`, within the locked target `<= +70` and hard stop `<= +90`.
+- **Concepts added:** Exactly one production concept: `MingaEditor.NativeIPC.Endpoint`. No process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, descriptor representation, frontend path, fallback, or generic resource abstraction was added.
+- **Concepts removed:** Removed flat endpoint fields from `Server.State` and removed duplicated server-owned listener/socket/descriptor rollback helper concepts from `Server`.
+- **Retained contracts:** Native IPC descriptor JSON shape and version, max frame size, AF_UNIX listener options, socket and descriptor lstat UID/type/mode checks, atomic descriptor publication, identity-matched descriptor removal, listener closure, socket unlinking, token/authentication identity, app liveness inputs, runtime parent/directory policy, acceptor-after-acquisition ordering, connection command handling, wait/open behavior, supervisor strategy, and macOS helper descriptor consumption remain unchanged.
+- **Findings resolved:** E05's split endpoint-resource ownership is resolved by giving one internal Endpoint value the complete generation acquisition/publication/cleanup lifecycle while leaving Server as the process workflow owner.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,712 tests, 58 doctests, and 98 properties with zero failures.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence, Elixir craftsmanship returned `PASS/Lean` with 0.98 confidence, and Ponytail returned `PASS/Lean`; all three confirmed the single-owner lifecycle, original-error preservation, identity-safe idempotent cleanup, retained contracts, exact line budgets, and no mandatory correction.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete five-file artifact, sole Endpoint generation owner, no parallel representation, original-error preservation, identity-safe idempotent cleanup, retained IPC behavior, exact budgets, grounded validation evidence, and merge safety.
+- **Discoveries affecting later work:** `Server.identity_base/1` retains its private random-secret helper because Server still owns option/env identity inputs while Endpoint owns socket and descriptor generation; sharing it would add API without removing a concept. No replan trigger, owner drift, trust-boundary change, protocol/frontend dependency, compatibility need, second endpoint concept, production budget miss, or test budget issue was found.
