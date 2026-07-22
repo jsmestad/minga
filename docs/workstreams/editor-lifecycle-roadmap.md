@@ -3845,7 +3845,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Files changed:** `docs/workstreams/editor-lifecycle-roadmap.md` only.
 - **Validation:** `git diff --check` passed. Markdown diagnostics were unavailable because this Linux environment has no Markdown language server. `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo retained one unrelated global-state test warning and two pre-existing refactoring suggestions.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3164
-- **Decision commit SHA:** `03ff95cc6`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
+- **Decision commit SHA:** `fcc6a11b1`.
+- **Merge SHA:** `f886a7d9949990e38d45b6b4e666615a6934eade`.
+- **Merge evidence:** PR #3164 merged after CI run `29899749158` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
