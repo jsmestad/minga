@@ -4255,7 +4255,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W103/ES05: Type the retained visual-row pipeline
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES05
 - **Planning profile:** `ES05Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES05Worker`, no delegation.
@@ -4276,3 +4276,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Elixir craftsmanship returned `PASS/Lean` and confirmed the two typed owners, exact fields, mutation locality, specs, module placement, and compatibility-free data flow. Ponytail required deleting the redundant seven-argument Builder forwarding wrapper so `VisualRow.new/7` remains the sole constructor owner; the correction removed 28 production lines and the recheck returned `PASS/Lean`. Correctness required retaining the locked `VisualRow.reused?/1` owner projection and refreshing the roadmap after simplification, then returned `PASS/Lean` with 0.99 confidence.
 - **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' make test` rebuilt native support and passed 10,292 tests, including 58 doctests and 99 properties, with zero failures, one skipped, and 204 excluded.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete 11-path artifact, exact two typed owners, clean map cutover, typed producer/mutator/consumer/cache/store boundaries, opaque payload preservation, stable row identity and hashes, splice and retention constraints, protocol compatibility, exact budgets, grounded validation evidence, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3198
+- **Implementation commit SHA:** `34bd757ef86a164d64a45e5d1e99c5a1c9f32201`.
+- **Merge SHA:** `13673d86422b792e83e3b89099a330ddeacb5f9d`; **Merge evidence:** PR #3198 merged after CI run `29964332481` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
