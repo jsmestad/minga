@@ -3826,3 +3826,26 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `e4a6c44805de97a0b0b9fe52f96a374f286da15c`.
 - **Merge evidence:** PR #3162 merged after CI run `29897547013` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W088/S21: Evaluate Doom One Palette/Builder conversion
+
+- **Status:** DROPPED
+- **Audit ID:** S21
+- **Planning profile:** `S21Planner`, `editor-lifecycle-planner`, read-only.
+- **Decision profiles:** `S21Architecture`, `archie`, read-only; `S21PonytailDecision`, reviewer, read-only.
+- **Freshness commit SHA:** `6dcb9c4c895b2576b08b3759139a698de9998104`.
+- **Reproduced finding:** `MingaEditor.UI.Theme.DoomOne.theme/0` still constructs the full theme and private syntax map directly while maintained palette themes use `Builder.from_palette/3`.
+- **Blocked conversion path:** Existing Palette and Builder roles plus section overrides can reproduce every concrete Doom One color and protocol-facing slot, but `Builder.syntax/1` always emits capture keys that Doom One does not currently define. `Builder.apply_overrides/2` merges syntax overrides and cannot remove those generated keys, so it cannot preserve the exact `theme.syntax` map.
+- **Observable parity boundary:** Additional captures change `MingaEditor.UI.Face.Registry` names and resolved fallback styles, including `string.regexp`, `type.qualifier`, `storageclass`, `diff.plus`, and `@lsp.type.*`; `MingaEditor.Agent.UIState.Panel.styled_cache_fingerprint/1` also hashes the complete syntax map. Resolved colors alone are therefore not an exact-equivalence standard.
+- **Architecture decision:** Do not add syntax replace/delete semantics to `MingaEditor.UI.Theme.Builder`. Builder owns a complete additive capture cascade, its merge-only overrides are exposed through `Theme.Loader` to user themes, and a replacement escape hatch would let a nominally Builder-derived theme opt out of future central capture fixes. Do not hide the same exception behind a Doom-specific Builder API or post-build `%Theme{}` rewrite.
+- **Ponytail decision:** `DROP/Lean` with 0.98 confidence. Exact parity would retain Doom One's full syntax map while adding palette/override indirection, a public replacement mode, and 80–180 lines of parity coverage, so total complexity would increase. Relaxing parity would change actual capture behavior, registry identity, and cache fingerprints.
+- **Terminal rationale:** Retain the explicit 323-line Doom One definition as an honest legacy exception. One visible duplicate theme representation is simpler and safer than a system-wide escape hatch that preserves the same independently maintained syntax data. S21 no longer qualifies as an implementation shrink under the exact-parity and zero-new-concept floors.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the additive Builder and public Loader contracts, retained syntax duplication under any exact replacement, observable fallback/registry/fingerprint drift under relaxed parity, terminal `DROPPED` status, and absence of any remaining implementation obligation.
+- **Retained contracts:** Doom One concrete colors, syntax keyset and styles, face registry, styled-cache fingerprint, semantic theme slots, encoded `gui_theme` bytes, Swift and Go consumers, preview fixtures, and visual output remain unchanged because no production or test code changed.
+- **Files changed:** `docs/workstreams/editor-lifecycle-roadmap.md` only.
+- **Validation:** `git diff --check` passed. Markdown diagnostics were unavailable because this Linux environment has no Markdown language server. `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo retained one unrelated global-state test warning and two pre-existing refactoring suggestions.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3164
+- **Decision commit SHA:** `03ff95cc6`.
+- **Merge SHA:** Pending delivery.
+- **Merge evidence:** Pending delivery.
+- **Completion date:** 2026-07-22.
