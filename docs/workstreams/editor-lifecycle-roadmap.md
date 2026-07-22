@@ -3944,7 +3944,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W092/S26: Delete render DTO duplicates and Input overloads
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S26
 - **Planning profile:** `S26Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S26Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3969,7 +3969,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence after tracing every removed field and overload through frame, window, scroll, cache, resident, recovery, status, parser/LSP, popup, fold, and receipt consumers. Elixir craftsmanship and Ponytail found two test-only compatibility residues: a parked `%Input{}` renderer frame and a two-type helper that mirrored the deleted scroll overload without calling the retained stage. The test fixtures now use `stub_intent/0`; the shared helper accepts only `EditorState` and executes Intent -> prepare -> prefetch -> `Scroll.scroll_windows/3`; Input-origin tests call the production prefetch and scroll stages explicitly. Both targeted rechecks returned `RESOLVED/PASS/Lean`, with Ponytail at 0.99 confidence. A final focused `scroll_test.exs` plus `server_test.exs` run passed 50 tests after renaming the last stale `/2` describe label.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence after the ledger test numstat was corrected to the exact current diff. The reviewer confirmed the dead-field and overload deletion, retained owners and production boundaries, corrected test migration, validation evidence, budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3173
-- **Implementation commit SHA:** `addfdd680`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Implementation commit SHA:** `394c17db3`.
+- **Merge SHA:** `c85c7f08a841424db6e7394203f61c7f739d855c`.
+- **Merge evidence:** PR #3173 merged after CI run `29918803043` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
