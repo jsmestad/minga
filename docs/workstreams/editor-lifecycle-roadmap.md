@@ -3798,7 +3798,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W087/S20: Clear completion pending refs on dismiss
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S20
 - **Planning profile:** `S20Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S20Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3822,7 +3822,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete owner transition, stale primary and secondary `:ignore` dispatch, no processing or modal side effects, corrected process-free unit test, exact three-file scope, locked budgets, validation evidence, and merge safety.
 - **Discoveries affecting later work:** No replan trigger, production budget issue, test budget issue, new dependency, owner drift, resolve/signature/workspace pending impact, modal/protocol/frontend impact, or compatibility need was found.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3162
-- **Implementation commit SHA:** `1f2e85d83`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
+- **Implementation commit SHA:** `519af7206`.
+- **Merge SHA:** `e4a6c44805de97a0b0b9fe52f96a374f286da15c`.
+- **Merge evidence:** PR #3162 merged after CI run `29897547013` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
