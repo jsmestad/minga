@@ -19,7 +19,6 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
-  alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.BufferChanges
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.State, as: RendererState
@@ -33,7 +32,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, state} = run_scroll_stage(state, layout)
     {scrolls, state, layout}
   end
 

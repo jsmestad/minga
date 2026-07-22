@@ -11,16 +11,15 @@ defmodule MingaEditor.Renderer.BufferChanges do
   alias Minga.Buffer.RenderSnapshot
   alias Minga.Buffer.RendererConsume
   alias Minga.Telemetry
-  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.State.Windows
   alias MingaEditor.Renderer.ResidentWindowState
   alias MingaEditor.Renderer.State
 
   @doc "Reconciles lifecycle, consumes changed buffers once, and materializes pipeline input."
-  @spec prepare(State.t(), Intent.t() | Input.t()) :: {State.t(), Input.t()}
-  def prepare(%State{} = state, %Input{} = input), do: prepare(state, Intent.from_input(input))
+  @spec prepare(State.t(), Intent.t()) :: {State.t(), Input.t()}
 
   def prepare(%State{} = state, %Intent{} = intent) do
     state = State.reconcile_windows(state, intent)
@@ -224,7 +223,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
     map =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
         cache = materialize_cache(state, id)
-        {id, WindowIntent.materialize(carrier, cache)}
+        {id, WindowIntent.materialize(id, carrier, cache)}
       end)
 
     windows = struct!(Windows, Map.put(intent.window_layout, :map, map))

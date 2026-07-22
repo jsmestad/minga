@@ -60,7 +60,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Viewport
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Runtime
@@ -87,8 +86,6 @@ defmodule MingaEditor.RenderPipeline.Input do
     :backend,
     :layout,
     :focus_tree,
-    :lsp,
-    :parser_status,
     :diff_views,
     :status_bar_data,
     :highlighting,
@@ -163,8 +160,6 @@ defmodule MingaEditor.RenderPipeline.Input do
           backend: EditorState.backend(),
           layout: Layout.t() | nil,
           focus_tree: MingaEditor.FocusTree.t() | nil,
-          lsp: LSPState.t(),
-          parser_status: atom(),
           diff_views: %{pid() => MingaEditor.State.Git.diff_view_info()},
           git_syncing: boolean(),
           status_bar_data: StatusBarData.t() | nil,
@@ -204,8 +199,6 @@ defmodule MingaEditor.RenderPipeline.Input do
       backend: state.frontend.backend,
       layout: state.render.layout,
       focus_tree: state.render.focus_tree,
-      lsp: state.lsp,
-      parser_status: state.parser.parser_status,
       diff_views: state.git.diff_views,
       git_syncing: EffectScheduler.active_activity?(state.effect_scheduler, :git_syncing),
       status_bar_data: safe_status_bar_data(state),
@@ -297,8 +290,11 @@ defmodule MingaEditor.RenderPipeline.Input do
 
     fingerprint_data =
       case Map.get(scrolls, active) do
-        %{cursor_line: line, cursor_byte_col: col, buf_version: version} -> {{line, col}, version}
-        _ -> buffer_fingerprint_data(input.workspace.buffers.active)
+        %{cursor_line: line, cursor_byte_col: col, snapshot: %{version: version}} ->
+          {{line, col}, version}
+
+        _ ->
+          buffer_fingerprint_data(input.workspace.buffers.active)
       end
 
     chrome_fingerprint(input, fingerprint_data)

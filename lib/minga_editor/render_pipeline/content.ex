@@ -82,7 +82,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           {Minga.RenderModel.Window.t(), WindowModelBuilder.build_stats(), Window.t()}
   defp build_window_model_with_slot_reset(state, scroll, window, render_ctx) do
     result =
-      Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
+      Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.window.id}, fn ->
         WindowModelBuilder.build_with_stats(state, %{scroll | window: window}, render_ctx,
           content_kind: :buffer,
           retained_rows: Window.retained_rows(window),
@@ -244,11 +244,11 @@ defmodule MingaEditor.RenderPipeline.Content do
         gutter_w,
         snapshot.line_count,
         cursor_line,
-        scroll.buf_version,
+        scroll.snapshot.version,
         ctx_fp
       )
 
-    state = Input.record_render_window(state, scroll.win_id, updated_window)
+    state = Input.record_render_window(state, scroll.window.id, updated_window)
 
     {window_content, cursor_info, state}
   end

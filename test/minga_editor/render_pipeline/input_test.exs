@@ -15,6 +15,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ClickRegions
@@ -27,6 +28,11 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   setup do
     state = TestHelpers.base_state()
     %{state: state}
+  end
+
+  defp materialized_window(input, id) do
+    window = Map.fetch!(input.workspace.windows.map, id)
+    WindowIntent.materialize(id, WindowIntent.from_window(window), WindowCache.reset())
   end
 
   describe "from_editor_state/1" do
@@ -137,12 +143,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     } do
       input = Input.from_editor_state(state)
       id = state.workspace.windows.active
-      window = Map.fetch!(state.workspace.windows.map, id)
-
-      render_window =
-        window
-        |> WindowIntent.from_window()
-        |> WindowIntent.materialize(%MingaEditor.Renderer.WindowCache{})
+      render_window = materialized_window(input, id)
 
       result = Input.record_render_window(input, id, render_window)
 
@@ -200,7 +201,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       assert intent.revision == 7
       assert intent.frame.highlighting == state.parser.highlighting
-      assert Enum.all?(intent.windows, fn {_id, window} -> match?(%WindowIntent{}, window) end)
+
+      assert Enum.all?(intent.windows, fn {_id, window} ->
+               match?(%MingaEditor.RenderPipeline.WindowIntent{}, window)
+             end)
 
       refute Enum.any?(intent.windows, fn {_id, window} ->
                Map.has_key?(Map.from_struct(window), :render_cache)
@@ -271,11 +275,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       viewport = MingaEditor.Viewport.put_top(window.viewport, 12)
 
       render_window =
-        window
-        |> WindowIntent.from_window()
-        |> WindowIntent.materialize(%MingaEditor.Renderer.WindowCache{
-          last_buf_version: window.render_cache.buffer_version
-        })
+        input
+        |> materialized_window(id)
         |> MingaEditor.Renderer.RenderWindow.set_viewport(viewport)
 
       windows = MingaEditor.State.Windows.set_map(input.workspace.windows, %{id => render_window})

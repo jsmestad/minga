@@ -18,7 +18,6 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
-  alias MingaEditor.RenderPipeline.Scroll
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -27,7 +26,7 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, state} = run_scroll_stage(state, layout)
     {contents, _cursor, _state} = Content.build_content(state, scrolls)
 
     models =

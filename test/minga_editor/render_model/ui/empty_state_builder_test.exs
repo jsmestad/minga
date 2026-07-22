@@ -22,8 +22,9 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
     }
   end
 
-  defp render_window(window),
-    do: window |> WindowIntent.from_window() |> WindowIntent.materialize(WindowCache.reset())
+  defp render_window(window) do
+    WindowIntent.materialize(window.id, WindowIntent.from_window(window), WindowCache.reset())
+  end
 
   defp launchpad(opts) do
     defaults = [session_file_count: 0, crashed?: false, recents: []]

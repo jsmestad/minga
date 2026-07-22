@@ -7,11 +7,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
 
   alias MingaEditor.FoldMap.VisibleLines
   alias MingaEditor.Layout
-  alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.RenderPipeline.Intent
-  alias MingaEditor.Renderer.BufferChanges
-  alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Viewport
   alias MingaEditor.Renderer.RenderWindow, as: Window
 
@@ -28,7 +24,6 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     alias MingaEditor.Renderer.RenderWindow, as: Window
 
     @enforce_keys [
-      :win_id,
       :window,
       :win_layout,
       :is_active,
@@ -45,12 +40,10 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :preview_matches,
       :line_number_style,
       :wrap_on,
-      :buf_version,
       :width_oracle
     ]
 
     defstruct [
-      :win_id,
       :window,
       :win_layout,
       :is_active,
@@ -67,7 +60,6 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :preview_matches,
       :line_number_style,
       :wrap_on,
-      :buf_version,
       :width_oracle,
       git_signs: %{},
       visible_line_map: nil,
@@ -81,7 +73,6 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     ]
 
     @type t :: %__MODULE__{
-            win_id: Window.id(),
             window: Window.t(),
             win_layout: Layout.window_layout(),
             is_active: boolean(),
@@ -98,7 +89,6 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             preview_matches: list(),
             line_number_style: atom(),
             wrap_on: boolean(),
-            buf_version: non_neg_integer(),
             width_oracle: Minga.Core.WidthOracle.t(),
             git_signs: %{non_neg_integer() => atom()},
             visible_line_map:
@@ -126,23 +116,5 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   def scroll_windows(%Input{} = input, _layout, prefetched_scrolls)
       when is_map(prefetched_scrolls) do
     {prefetched_scrolls, input}
-  end
-
-  @doc """
-  Compatibility wrapper for tests and older direct callers.
-
-  Production rendering uses `scroll_windows/3` with pre-fetched data so the scroll stage stays pure.
-  """
-  @spec scroll_windows(state() | MingaEditor.State.t(), Layout.t()) ::
-          {%{Window.id() => WindowScroll.t()}, state()}
-  def scroll_windows(%Input{} = input, %Layout{} = layout) do
-    BufferPrefetch.prefetch_scrolls(input, layout)
-  end
-
-  def scroll_windows(%MingaEditor.State{} = state, %Layout{} = layout) do
-    intent = Intent.from_editor_state(state)
-    renderer = RendererState.new(editor_pid: nil, pipeline: &MingaEditor.RenderPipeline.run/1)
-    {_renderer, input} = BufferChanges.prepare(renderer, intent)
-    BufferPrefetch.prefetch_scrolls(input, layout)
   end
 end

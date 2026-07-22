@@ -93,8 +93,6 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
   @doc "Executes the currently in-flight asynchronous frame."
   @spec run(State.t()) :: result()
-  def run(%State{in_flight: {%Input{} = input, seq, pushed_at}} = state),
-    do: run(%{state | in_flight: {Intent.from_input(input), seq, pushed_at}})
 
   def run(%State{in_flight: {%Intent{} = intent, seq, pushed_at}} = state) do
     {prepared, input} = BufferChanges.prepare(state, intent)

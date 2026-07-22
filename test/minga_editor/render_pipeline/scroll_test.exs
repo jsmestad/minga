@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
   alias Minga.Core.WrapMap
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
@@ -26,14 +27,19 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
     state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, input} = Scroll.scroll_windows(state, layout)
+    {scrolls, input} = run_scroll_stage(state, layout)
     {scrolls, input, layout}
   end
 
   defp run_through_scroll(%Input{} = input) do
     layout = Layout.get(input)
-    {scrolls, input} = Scroll.scroll_windows(input, layout)
+    {scrolls, input} = scroll_input(input, layout)
     {scrolls, input, layout}
+  end
+
+  defp scroll_input(input, layout) do
+    {prefetched, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+    Scroll.scroll_windows(input, layout, prefetched)
   end
 
   defp wrapped_content_width(state, buffer) do
@@ -56,7 +62,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
     max(content_width - gutter_width, 1)
   end
 
-  describe "scroll_windows/2" do
+  describe "scroll_windows/3" do
     test "returns {scrolls, state} for each window" do
       state = base_state()
       {scrolls, state, _layout} = run_through_scroll(state)
@@ -296,13 +302,13 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert scroll.viewport.top <= 20 - visible
     end
 
-    test "scroll result includes buf_version" do
+    test "scroll result uses snapshot version" do
       state = base_state()
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)
 
-      assert is_integer(scroll.buf_version)
-      assert scroll.buf_version >= 0
+      assert is_integer(scroll.snapshot.version)
+      assert scroll.snapshot.version >= 0
     end
 
     test "first frame marks all lines dirty on the window" do
