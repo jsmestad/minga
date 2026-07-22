@@ -26,11 +26,11 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02
+- **IMPLEMENTED:** S34, S35, E02, E03
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
-- **CANDIDATE, craftsmanship:** E03, E05, E08
+- **CANDIDATE, craftsmanship:** E05, E08
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
@@ -4147,4 +4147,27 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence. Elixir craftsmanship and Ponytail required deleting two redundant public State type aliases and correcting absolute line counts; targeted rechecks returned `RESOLVED/PASS`. Correctness also required a timer-cancellation test whose wait exceeds its scheduled timeout; the corrected 25 ms timer and 100 ms refutation passed.
 - **Final reviewer and delivery:** `PASS` with 0.99 confidence. The reviewer confirmed the complete ten-file merge artifact, clean two-struct cutover, exact timer and correlation invariants, preserved cache/adaptation behavior, valid tests, exact budgets, and merge safety. PR: https://github.com/jsmestad/minga/pull/3186. Implementation commit: `8828cdefd`.
 - **Merge evidence:** PR #3186 merged at `d2d676c827aa41246a61d84b9bb8cfdc08c3c710` after CI run `29945417307` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
+
+### W099/E03: Normalize extension event dispatch results
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** E03
+- **Planning profile:** `E03Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `E03Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://E03Planner` for current SHA `485f0385010e088953c4970479b80ff545c6c165`; scope was exactly one `MingaEditor.Extension.EventDispatchResult` owner, dispatcher normalization, EventEffect consumption, focused dispatcher/effect tests, source-finalizer and lifecycle validation, formatting, and this evidence.
+- **Observable result:** Ordinary extension dispatch and token-scoped source-unload dispatch now return `%MingaEditor.Extension.EventDispatchResult{status, state, failures}` across the `EventDispatcher` to `EventEffect` boundary. Public extension callbacks still return only `{:handled, state}` or `:not_matched`; callback ordering, CodeLease admission, unload tokens, source finalizer replies, exact-base stale rejection, render policy, and feedback strings are preserved.
+- **Failure reproduction / source trace:** Before implementation, focused tests passed while source inspection showed ordinary dispatch returning `{:handled, state}`, `:not_matched`, or `{:callback_failed, ...}` and source unload returning `{:ok, state}` or `{:error, failures, state}`. `EventEffect` consumed all families through tuple-family state extraction, render clauses, and unload reply decoding.
+- **Implementation result:** Added the single normalized result owner, normalized `EventDispatcher.dispatch/4`, `dispatch_editor_action/5`, and `dispatch_source_unload/5`, kept `EventHandler.callback_result/0` and `dispatch_core/3` direct, collapsed EventEffect callback-state, feedback, render, failure logging, and unload reply handling onto the struct, and removed the superseded `EventHandler.result/0` alias, private fan-out accumulator map, and ordinary/unload tuple-family consumption.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/extension/event_dispatch_result.ex`; `lib/minga_editor/extension/event_dispatcher.ex`; `lib/minga_editor/extension/event_effect.ex`; `lib/minga_editor/extension/event_handler.ex`; `test/minga_editor/extension/event_dispatcher_test.exs`; `test/minga_editor/extension/event_effect_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/extension/event_dispatcher_test.exs test/minga_editor/extension/event_effect_test.exs` passed with 17 tests. `mix test test/minga_editor/extension/source_finalizer_editor_test.exs` passed with 8 tests. `mix test test/minga/extension/lifecycle_contract_test.exs` passed with 42 tests.
+- **Formatting:** `mix format --check-formatted lib/minga_editor/extension/event_dispatch_result.ex lib/minga_editor/extension/event_handler.ex lib/minga_editor/extension/event_dispatcher.ex lib/minga_editor/extension/event_effect.ex test/minga_editor/extension/event_dispatcher_test.exs test/minga_editor/extension/event_effect_test.exs` passed.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,711 tests, 58 doctests, and 98 properties with zero failures.
+- **Production lines added/removed before roadmap evidence:** Existing production files added 119 and removed 145 lines, net `-26`; the new result owner adds 31 lines, for net production `+5`, within the locked `<=25` target and `<=50` hard stop.
+- **Test lines added/removed before roadmap evidence:** Dispatcher/effect tests added 68 and removed 11 lines, net test `+57`, within the locked `<=90` budget.
+- **Concepts added:** Exactly one production concept: `EventDispatchResult`.
+- **Concepts removed:** Removed ordinary callback tuple result families and unload `{:ok}/{:error}` result families from scheduler results, removed EventEffect tuple-size/tag inspection, and removed the private fan-out accumulator map.
+- **Discoveries affecting later work:** No replan trigger, owner drift, source-finalizer production change, protocol/frontend dependency, callback public API change, compatibility shim need, CodeLease change, unload-token change, feedback-string change, exact-base stale change, or budget miss was found.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.98 confidence and Ponytail returned `PASS/Lean` with 0.99 confidence. Elixir craftsmanship required the `:callback_failed` constructor to enforce a nonempty failure list; the exact type/head correction and focused validation passed, and targeted recheck returned `RESOLVED/PASS`.
+- **Final reviewer and delivery:** `PASS` with 0.99 confidence. The reviewer confirmed the complete seven-file artifact, clean single-struct normalization, no external construction or updates, preserved dispatch/effect semantics, enforced nonempty failure invariant, valid evidence, exact budgets, and merge safety. PR: https://github.com/jsmestad/minga/pull/3188. Implementation commit: `55b61e62a`.
 - **Completion date:** 2026-07-22.

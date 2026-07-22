@@ -24,12 +24,6 @@ defmodule MingaEditor.Extension.EventHandler do
   @typedoc "A handler either updates editor state or successfully declines."
   @type callback_result :: {:handled, EditorState.t()} | :not_matched
 
-  @typedoc "Ordinary dispatch result, including explicit extension failure."
-  @type result ::
-          callback_result()
-          | {:callback_failed, CallbackInvoker.failure()}
-          | {:callback_failed, [CallbackInvoker.failure()], EditorState.t()}
-
   @doc "Handles one runtime editor event in a bounded effect worker."
   @callback handle_editor_event(EditorState.t(), event()) :: callback_result()
 end
