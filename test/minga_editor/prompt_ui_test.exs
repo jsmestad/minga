@@ -40,9 +40,6 @@ defmodule MingaEditor.PromptUITest do
       Process.put(:new_name, text)
       state
     end
-
-    @impl true
-    def on_cancel(state), do: state
   end
 
   @escape 27
@@ -249,6 +246,14 @@ defmodule MingaEditor.PromptUITest do
 
       assert Process.get(:cancelled) == true
       refute PromptUI.open?(state)
+    end
+
+    test "Escape without on_cancel closes as identity fallback" do
+      opened = base_state() |> PromptUI.open(RenameHandler, default: "draft")
+      {actual, nil} = PromptUI.handle_key(opened, @escape, 0)
+
+      assert actual == PromptUI.close(opened)
+      refute PromptUI.open?(actual)
     end
   end
 

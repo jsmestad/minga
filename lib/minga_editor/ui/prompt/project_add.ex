@@ -36,10 +36,6 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
   end
 
   @impl true
-  @spec on_cancel(EditorState.t()) :: EditorState.t()
-  def on_cancel(state), do: state
-
-  @impl true
   @spec on_tab(String.t()) :: String.t()
   def on_tab(text) do
     expanded = Project.expand_home(text)

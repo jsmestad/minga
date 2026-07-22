@@ -62,14 +62,6 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRenameTest do
     end
   end
 
-  describe "on_cancel/1" do
-    test "returns state unchanged" do
-      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "a.ex")))
-
-      assert WorkspaceRename.on_cancel(state) == state
-    end
-  end
-
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},

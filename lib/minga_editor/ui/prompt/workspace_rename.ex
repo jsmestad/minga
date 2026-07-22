@@ -35,8 +35,4 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRename do
   end
 
   def on_submit(_text, state), do: state
-
-  @impl true
-  @spec on_cancel(map()) :: map()
-  def on_cancel(state), do: state
 end

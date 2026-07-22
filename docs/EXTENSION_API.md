@@ -524,10 +524,10 @@ defmodule MyExtension.CaptureTitle do
     insert_capture(state, text)
   end
 
-  @impl true
-  def on_cancel(state), do: state
 end
 ```
+
+`on_cancel/1` is optional and defaults to returning state unchanged. Implement it only when cancellation should have visible behavior.
 
 Open it from a command or from a picker's `on_select` (for multi-step flows):
 

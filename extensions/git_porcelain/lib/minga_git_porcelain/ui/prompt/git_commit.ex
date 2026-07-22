@@ -30,10 +30,6 @@ defmodule MingaGitPorcelain.UI.Prompt.GitCommit do
     end
   end
 
-  @impl true
-  @spec on_cancel(EditorState.t()) :: EditorState.t()
-  def on_cancel(state), do: state
-
   @spec commit_and_refresh(EditorState.t(), String.t()) :: EditorState.t()
   defp commit_and_refresh(state, message) do
     case resolve_git_root() do
