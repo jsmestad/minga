@@ -4090,7 +4090,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Elixir craftsmanship and Ponytail returned `PASS/Lean` with 0.99 confidence. Correctness found one wording defect: the first correction described structured row deltas as u32 rather than the row-delta count/index fields. Source and workstream text were corrected to say GUI window-content row counts and row-delta count/index fields are u32; targeted correctness recheck returned `RESOLVED/PASS` with 0.99 confidence.
 - **Final reviewer verdict:** Initial review found the same structured-delta wording imprecision in the failure trace; after correction to `row counts and row-delta count/index fields`, targeted recheck returned `RESOLVED/PASS` with 0.99 confidence and no residual blocker.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3181
-- **Implementation commit SHA:** `2a8194184`.
+- **Implementation commit SHA:** `ded9ba16b`.
 - **Merge SHA:** Pending delivery.
 - **Merge evidence:** Pending delivery.
 - **Completion date:** Pending merge.
