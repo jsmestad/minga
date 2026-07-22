@@ -3883,7 +3883,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W090/S23: Narrow decoration composition exit handling
 
-- **Status:** IMPLEMENTED, pending delivery.
+- **Status:** VERIFIED
 - **Audit ID:** S23
 - **Planning profile:** `S23Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S23Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3906,6 +3906,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness first found that the broader prefetch claim was false because `safe_scroll_window/5` still catches exits, so `BufferPrefetch` was reverted and the terminal contract was narrowed to the audited owner; targeted recheck returned `RESOLVED/PASS/Lean` with 0.99 confidence. Elixir craftsmanship required atomic `spawn_monitor/1` and exact whole-value assertions; targeted recheck returned `RESOLVED/PASS`. Ponytail returned `PASS/Lean` with 0.99 confidence.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed exact process-call catch placement, catch-free pure composition, preserved merge order, deterministic dead-buffer assertions, honest owner-only roadmap scope, later discoveries, exact budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3168
-- **Implementation commit SHA:** `43c05f571`.
-- **Pending delivery:** Needs CI, merge SHA, and merge evidence before it can move to `VERIFIED`.
+- **Implementation commit SHA:** `243ff8a22`.
+- **Merge SHA:** `2ff51226a115a2eb4b55b1b5c426ba014402a3f2`.
+- **Merge evidence:** PR #3168 merged after CI run `29907131373` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
