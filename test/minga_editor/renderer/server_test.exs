@@ -1347,7 +1347,6 @@ defmodule MingaEditor.Renderer.ServerTest do
         list: [buf],
         active_index: 0
       },
-      viewport: Viewport.new(24, 80),
       editing: MingaEditor.VimState.new(),
       windows: %MingaEditor.State.Windows{
         tree: MingaEditor.WindowTree.new(1),

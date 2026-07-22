@@ -14,7 +14,6 @@ defmodule MingaEditor.MouseClipboardTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Mouse, as: MouseState
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Session.State, as: SessionState
 
@@ -63,7 +62,6 @@ defmodule MingaEditor.MouseClipboardTest do
         capabilities: %Capabilities{frontend_type: frontend_type}
       },
       workspace: %SessionState{
-        viewport: Viewport.new(10, 40),
         buffers: %Buffers{active: buffer, list: [buffer]},
         editing: editing,
         mouse: MouseState.start_drag(%MouseState{}, {0, 0})

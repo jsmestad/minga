@@ -19,7 +19,6 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias Minga.Mode
 
@@ -28,7 +27,6 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       interaction: %MingaEditor.State.Interaction{options_server: options_server},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []},
         keymap_scope: :editor
@@ -79,7 +77,6 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}
       }

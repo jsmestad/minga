@@ -14,7 +14,6 @@ defmodule MingaEditor.Commands.HelpTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.OptionSource
-  alias MingaEditor.Viewport
 
   defp build_state do
     {:ok, buf} =
@@ -29,10 +28,7 @@ defmodule MingaEditor.Commands.HelpTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       interaction: %MingaEditor.State.Interaction{keymap_server: keymap, options_server: options},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buf, list: [buf]}
-      }
+      workspace: %MingaEditor.Session.State{buffers: %Buffers{active: buf, list: [buf]}}
     }
   end
 

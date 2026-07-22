@@ -48,7 +48,6 @@ defmodule MingaEditor.LayoutTest do
         sidebar_registry: Process.get(:sidebar_registry)
       },
       workspace: %MingaEditor.Session.State{
-        viewport: vp,
         editing: VimState.new()
       }
     }
@@ -303,9 +302,6 @@ defmodule MingaEditor.LayoutTest do
 
       state2 =
         state
-        |> then(fn state ->
-          %{state | workspace: SessionState.set_viewport(state.workspace, vp)}
-        end)
         |> then(fn state ->
           %{state | frontend: MingaEditor.State.Frontend.resize_terminal(state.frontend, vp)}
         end)

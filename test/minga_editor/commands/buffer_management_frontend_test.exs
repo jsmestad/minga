@@ -5,7 +5,6 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   # The message-panel commands no longer branch on the frontend. Both the macOS
@@ -18,10 +17,7 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   defp base_state(caps) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, capabilities: caps},
-      workspace: %SessionState{
-        viewport: Viewport.new(40, 120),
-        buffers: %Buffers{}
-      }
+      workspace: %SessionState{buffers: %Buffers{}}
     }
   end
 

@@ -11,7 +11,6 @@ defmodule MingaEditor.Commands.FormattingLSPTest do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -139,7 +138,6 @@ defmodule MingaEditor.Commands.FormattingLSPTest do
       )
 
     workspace = %MingaEditor.Session.State{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{

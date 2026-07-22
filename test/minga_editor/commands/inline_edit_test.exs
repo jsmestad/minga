@@ -16,7 +16,6 @@ defmodule MingaEditor.Commands.InlineEditTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -191,7 +190,6 @@ defmodule MingaEditor.Commands.InlineEditTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace:
         %SessionState{
-          viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
           windows: %Windows{
             tree: WindowTree.new(1),

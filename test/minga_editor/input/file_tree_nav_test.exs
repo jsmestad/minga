@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.FileTreeNavTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.Viewport
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
 
@@ -31,7 +30,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
     buf = BufferSync.start_buffer(tree)
 
     workspace =
-      %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
+      %SessionState{keymap_scope: :file_tree}
       |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf})
 
     %EditorState{

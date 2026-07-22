@@ -12,11 +12,10 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   defp make_state(completion, opts \\ []) do
-    ws = %SessionState{viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80}}
+    ws = %SessionState{}
 
     modal =
       case completion do

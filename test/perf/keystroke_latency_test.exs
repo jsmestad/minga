@@ -27,7 +27,6 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
-  alias MingaEditor.Viewport
   alias Minga.Test.HeadlessPort
 
   @moduletag :perf
@@ -186,7 +185,6 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
 
     workspace = %MingaEditor.Session.State{
       buffers: %MingaEditor.State.Buffers{active: buf, list: [buf], active_index: 0},
-      viewport: Viewport.new(24, 80),
       editing: MingaEditor.VimState.new(),
       windows: %MingaEditor.State.Windows{
         tree: MingaEditor.WindowTree.new(1),

@@ -10,7 +10,6 @@ defmodule MingaEditor.FeatureStateTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
 
   @source {:extension, :fake_feature}
   @other_source {:extension, :other_feature}
@@ -275,8 +274,7 @@ defmodule MingaEditor.FeatureStateTest do
     context =
       MingaEditor.State.Tab.Context.new_agent(
         state.frontend.terminal_viewport,
-        state.workspace.file_tree.project_root,
-        %MingaEditor.State.Windows{}
+        state.workspace.file_tree.project_root
       )
 
     restored = SessionState.restore_tab_context(live_workspace, context)
@@ -313,7 +311,7 @@ defmodule MingaEditor.FeatureStateTest do
 
   @spec workspace() :: SessionState.t()
   defp workspace do
-    %SessionState{viewport: Viewport.new(24, 80)}
+    %SessionState{}
   end
 
   @spec assert_snapshot_feature_state(TabContext.t(), keyword()) :: :ok

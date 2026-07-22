@@ -10,13 +10,12 @@ defmodule MingaEditor.LspActions.NavigationTest do
 
   alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   defp stub_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(40, 120)}
+      workspace: %SessionState{}
     }
   end
 

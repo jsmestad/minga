@@ -6,7 +6,6 @@ defmodule MingaEditor.Commands.EditTimelineTest do
   alias MingaEditor.Commands.EditTimeline, as: EditTimelineCommands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: WorkspaceState
-  alias MingaEditor.Viewport
 
   describe "execute/2" do
     test "timeline_next_edit stays guarded when no buffer is active" do
@@ -42,7 +41,7 @@ defmodule MingaEditor.Commands.EditTimelineTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
+      workspace: %WorkspaceState{}
     }
     |> then(fn state ->
       MingaEditor.Shell.Traditional.Workflow.install_agent_ui(

@@ -291,7 +291,7 @@ defmodule MingaEditor.MouseTest do
     end
 
     test "wrapped visual row offset maps top-screen clicks into the visible continuation row" do
-      {state, buffer} = start_mouse_state(String.duplicate("a", 120), width: 20)
+      {state, buffer} = start_mouse_state(String.duplicate("a", 120), width: 80)
       assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
       assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
 
@@ -341,7 +341,7 @@ defmodule MingaEditor.MouseTest do
     end
 
     test "wrapped mouse hit testing uses composed inline virtual text wrap boundaries" do
-      {state, buffer} = start_mouse_state(String.duplicate("a", 100))
+      {state, buffer} = start_mouse_state(String.duplicate("a", 100), width: 80)
       assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
       assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
       assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
@@ -360,7 +360,7 @@ defmodule MingaEditor.MouseTest do
     end
 
     test "wrapped mouse hit testing does not adjust inline virtual text twice" do
-      {state, buffer} = start_mouse_state(String.duplicate("a", 100))
+      {state, buffer} = start_mouse_state(String.duplicate("a", 100), width: 80)
       assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
       assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
       assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)

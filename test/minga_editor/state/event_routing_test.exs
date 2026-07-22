@@ -8,7 +8,6 @@ defmodule MingaEditor.State.EventRoutingTest do
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.{Tab, TabBar}
-  alias MingaEditor.Viewport
 
   defp make_state(opts \\ []) do
     session = opts[:session] || spawn(fn -> :timer.sleep(:infinity) end)
@@ -19,9 +18,7 @@ defmodule MingaEditor.State.EventRoutingTest do
 
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80)
-      },
+      workspace: %MingaEditor.Session.State{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

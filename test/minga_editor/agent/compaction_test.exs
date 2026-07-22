@@ -12,7 +12,6 @@ defmodule MingaEditor.Agent.CompactionTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
 
   test "request is zero-queue FIFO keyed by session pid" do
     session = fake_session()
@@ -120,7 +119,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self(), backend: :tui},
-      workspace: %WorkspaceState{viewport: Viewport.new(24, 80), agent_ui: agent_ui},
+      workspace: %WorkspaceState{agent_ui: agent_ui},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

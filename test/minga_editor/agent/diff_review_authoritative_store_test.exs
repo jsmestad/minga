@@ -15,7 +15,6 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
-  alias MingaEditor.Viewport
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
 
   @moduletag :tmp_dir
@@ -190,7 +189,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %SessionState{agent_ui: agent_ui, viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{agent_ui: agent_ui},
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }
   end
@@ -214,7 +213,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %SessionState{agent_ui: agent_ui, viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{agent_ui: agent_ui},
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }
   end

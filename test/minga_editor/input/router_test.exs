@@ -59,7 +59,6 @@ defmodule MingaEditor.Input.RouterTest do
         sidebar_registry: Process.get(:sidebar_registry)
       },
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{
           active: buf,
@@ -369,7 +368,6 @@ defmodule MingaEditor.Input.RouterTest do
           sidebar_registry: Process.get(:sidebar_registry)
         },
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},
           windows: %MingaEditor.State.Windows{

@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.Viewport
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(MingaEditor.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -43,10 +42,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        agent_ui: agent_ui
-      },
+      workspace: %MingaEditor.Session.State{agent_ui: agent_ui},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

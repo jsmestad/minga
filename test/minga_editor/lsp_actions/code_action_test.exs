@@ -3,13 +3,12 @@ defmodule MingaEditor.LspActions.CodeActionTest do
 
   alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   defp stub_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(40, 120)},
+      workspace: %SessionState{},
       appearance: %MingaEditor.State.Appearance{theme: MingaEditor.UI.Theme.get!(:doom_one)}
     }
   end

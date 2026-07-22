@@ -6,7 +6,6 @@ defmodule MingaEditor.TitleTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
   alias MingaEditor.Title
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -42,7 +41,6 @@ defmodule MingaEditor.TitleTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{
@@ -158,7 +156,6 @@ defmodule MingaEditor.TitleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: file_buf, list: []},
           windows: %Windows{
@@ -188,7 +185,6 @@ defmodule MingaEditor.TitleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
@@ -236,7 +232,6 @@ defmodule MingaEditor.TitleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
@@ -266,7 +261,6 @@ defmodule MingaEditor.TitleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
@@ -295,7 +289,6 @@ defmodule MingaEditor.TitleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
@@ -319,7 +312,6 @@ defmodule MingaEditor.TitleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: file_buf, list: []},
           windows: %Windows{

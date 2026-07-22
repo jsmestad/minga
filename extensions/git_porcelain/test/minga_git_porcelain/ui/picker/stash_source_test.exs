@@ -93,7 +93,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
 
   defp test_state do
     %EditorState{
-      workspace: %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(80, 24)}
+      workspace: %MingaEditor.Session.State{}
     }
   end
 end

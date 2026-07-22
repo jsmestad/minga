@@ -25,7 +25,6 @@ defmodule MingaEditor.Input.InterruptTest do
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Picker
   alias MingaEditor.State.Prompt, as: PromptState
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   @ctrl_g 7
@@ -38,7 +37,6 @@ defmodule MingaEditor.Input.InterruptTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{
           active: buf,

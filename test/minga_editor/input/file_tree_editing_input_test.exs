@@ -21,7 +21,6 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.Viewport
   alias MingaEditor.Input.FileTreeHandler
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
@@ -42,7 +41,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self(), backend: :tui},
       effect_scheduler: scheduler,
       workspace:
-        %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
+        %SessionState{keymap_scope: :file_tree}
         |> SessionState.set_file_tree(%FileTreeState{} |> FileTreeState.open(tree, buf)),
       interaction: %MingaEditor.State.Interaction{}
     }

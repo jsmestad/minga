@@ -12,7 +12,6 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
   alias MingaEditor.Test.ExtensionEventHandlerOne, as: HandlerOne
   alias MingaEditor.Test.ExtensionEventHandlerThree, as: HandlerThree
   alias MingaEditor.Test.ExtensionEventHandlerTwo, as: HandlerTwo
-  alias MingaEditor.Viewport
 
   setup do
     registry = unique_name(:callback_registry)
@@ -34,7 +33,7 @@ defmodule MingaEditor.Extension.EventDispatcherTest do
 
     state = %EditorState{
       frontend: %Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(80, 24)}
+      workspace: %SessionState{}
     }
 
     %{registry: registry, admission: admission, code_lease: code_lease, state: state}

@@ -36,6 +36,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
+  alias MingaEditor.Viewport
   alias MingaEditor.Shell.BufferMetadata
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.RenderPipeline.Input, as: RenderInput
@@ -61,7 +62,8 @@ defmodule MingaEditor.Shell.Traditional do
   def handle_event(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:background_subagent_started, %MingaAgent.Subagent.Handle{} = handle}
+        {:background_subagent_started, %MingaAgent.Subagent.Handle{} = handle,
+         %Viewport{} = viewport}
       ) do
     if TabBar.find_by_session(tb, handle.pid) do
       {shell_state, workspace}
@@ -82,7 +84,7 @@ defmodule MingaEditor.Shell.Traditional do
         |> TabBar.accept_tab(tab)
         |> TabBar.move_tab_to_workspace(tab.id, agent_workspace.id)
 
-      context = background_agent_context(workspace)
+      context = background_agent_context(workspace, viewport)
       tb = TabBar.update_context(tb, tab.id, context)
       {ShellState.install_tab_bar(shell_state, tb), workspace}
     end
@@ -633,10 +635,10 @@ defmodule MingaEditor.Shell.Traditional do
   # Buffer lifecycle helpers
   # -------------------------------------------------------------------
 
-  @spec background_agent_context(SessionState.t()) :: Tab.context()
-  defp background_agent_context(workspace) do
-    rows = max(workspace.viewport.rows, 1)
-    cols = max(workspace.viewport.cols, 1)
+  @spec background_agent_context(SessionState.t(), Viewport.t()) :: Tab.context()
+  defp background_agent_context(workspace, %Viewport{} = viewport) do
+    rows = max(viewport.rows, 1)
+    cols = max(viewport.cols, 1)
 
     workspace
     |> SessionState.to_tab_context()

@@ -11,7 +11,6 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Highlighting
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.UI.Theme
 
@@ -47,10 +46,12 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       |> UIState.set_focus(Keyword.get(opts, :focus, :chat))
 
     %EditorState{
-      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      frontend: %MingaEditor.State.Frontend{
+        port_manager: self(),
+        terminal_viewport: MingaEditor.Viewport.new(rows, cols)
+      },
       parser: %MingaEditor.State.Parser{highlighting: %Highlighting{}},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(rows, cols),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         agent_ui: agentic

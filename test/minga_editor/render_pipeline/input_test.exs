@@ -35,7 +35,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       assert input.workspace.windows == state.workspace.windows
       assert input.workspace.buffers == state.workspace.buffers
-      assert input.workspace.viewport == state.workspace.viewport
+      refute Map.has_key?(input.workspace, :viewport)
+      assert input.terminal_viewport == state.frontend.terminal_viewport
       assert input.workspace.editing == state.workspace.editing
       assert input.highlighting == state.parser.highlighting
       assert input.workspace.file_tree == state.workspace.file_tree

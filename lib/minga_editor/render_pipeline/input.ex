@@ -31,9 +31,9 @@ defmodule MingaEditor.RenderPipeline.Input do
   before it runs the pipeline.
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
-  `windows`, `buffers`, `viewport`, `file_tree` (FileTree feature state),
-  `agent_ui`, `editing`, `document_highlights`, `cmd_hover_link`, `mouse`,
-  `search`, `keymap_scope`, `launchpad`
+  `windows`, `buffers`, `file_tree` (FileTree feature state), `agent_ui`,
+  `editing`, `document_highlights`, `cmd_hover_link`, `mouse`, `search`,
+  `keymap_scope`, `launchpad`
 
   Every `Session.State` field must be either snapshotted here or listed in
   the explicit exclusions pinned by
@@ -135,7 +135,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   @type workspace :: %{
           windows: Windows.t(),
           buffers: Buffers.t(),
-          viewport: Viewport.t(),
           file_tree: FileTreeState.t(),
           agent_ui: UIState.t(),
           editing: VimState.t(),
@@ -220,7 +219,6 @@ defmodule MingaEditor.RenderPipeline.Input do
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,
-        viewport: ws.viewport,
         file_tree: MingaEditor.Session.State.file_tree_state(ws),
         agent_ui: ws.agent_ui,
         editing: ws.editing,

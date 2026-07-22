@@ -54,7 +54,6 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
     %{
       shell_state: %{tab_bar: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: MingaEditor.Viewport.new(24, 80),
         editing: MingaEditor.VimState.new(),
         buffers: %MingaEditor.State.Buffers{active: nil, list: [], active_index: 0},
         windows: %MingaEditor.State.Windows{

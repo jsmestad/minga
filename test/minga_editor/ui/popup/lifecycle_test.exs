@@ -54,7 +54,6 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
@@ -160,8 +159,8 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       frontend = FrontendState.resize_terminal(state.frontend, Viewport.new(40, 120))
       state = %{state | frontend: frontend}
 
-      assert state.workspace.viewport.rows == 24
-      assert state.workspace.viewport.cols == 80
+      assert state.frontend.terminal_viewport.rows == 40
+      assert state.frontend.terminal_viewport.cols == 120
 
       PopupRegistry.register(Rule.new("*Split*", focus: false), table)
       PopupRegistry.register(Rule.new("*Float*", display: :float, focus: false), table)

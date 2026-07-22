@@ -47,7 +47,6 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
-        viewport: Viewport.new(80, 24),
         editing: %VimState{mode: mode, mode_state: Minga.Mode.initial_state()},
         buffers: %Buffers{list: [buffer], active: buffer, active_index: 0},
         keymap_scope: :editor

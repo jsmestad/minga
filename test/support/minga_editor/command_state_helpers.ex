@@ -10,7 +10,6 @@ defmodule MingaEditor.CommandStateHelpers do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Registers
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Session.State, as: SessionState
 
@@ -39,11 +38,7 @@ defmodule MingaEditor.CommandStateHelpers do
           backend: Keyword.get(opts, :backend, :headless),
           port_manager: Keyword.get(opts, :port_manager, nil)
         ),
-      workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: buffers,
-        editing: editing
-      }
+      workspace: %SessionState{buffers: buffers, editing: editing}
     }
   end
 

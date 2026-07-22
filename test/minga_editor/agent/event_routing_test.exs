@@ -30,16 +30,15 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Session.State, as: SessionState
 
-  defp workspace, do: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()}
+  defp workspace, do: %SessionState{editing: VimState.new()}
 
   defp event_state(agent) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
+      workspace: %SessionState{agent_ui: UIState.new()},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -289,7 +288,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
-        workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
+        workspace: %SessionState{agent_ui: UIState.new()},
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
@@ -327,7 +326,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
-          %SessionState{viewport: Viewport.new(24, 80)}
+          %SessionState{}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_runtime:
           Runtime.new(
@@ -378,7 +377,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
-          %SessionState{viewport: Viewport.new(24, 80)}
+          %SessionState{}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_runtime:
           Runtime.new(
@@ -427,7 +426,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
-          %SessionState{viewport: Viewport.new(24, 80)}
+          %SessionState{}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_runtime:
           Runtime.new(
@@ -463,7 +462,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
-          %SessionState{viewport: Viewport.new(24, 80)}
+          %SessionState{}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_runtime:
           Runtime.new(

@@ -13,7 +13,6 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
@@ -63,7 +62,6 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         agent_ui: agentic,

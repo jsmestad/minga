@@ -17,7 +17,6 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.WorkspaceReview
-  alias MingaEditor.Viewport
   alias MingaEditor.WorkspaceWorkflow
 
   @moduletag :tmp_dir
@@ -286,7 +285,7 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
       |> Runtime.activate(foreign_entry, %{marker: :foreign})
 
     previous = %EditorState{
-      workspace: %SessionState{viewport: Viewport.new(1, 1)},
+      workspace: %SessionState{},
       shell_runtime: previous_runtime
     }
 

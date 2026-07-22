@@ -24,7 +24,6 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Item
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -79,7 +78,6 @@ defmodule MingaEditor.PickerUITest do
     preview_window = Window.show_buffer(original_window, preview_buf)
 
     original_workspace = %SessionState{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       buffers: %Buffers{active: original_buf, list: [original_buf], active_index: 0},
       windows: %Windows{
@@ -319,7 +317,7 @@ defmodule MingaEditor.PickerUITest do
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
-        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        workspace: %SessionState{editing: VimState.new()},
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
@@ -347,7 +345,7 @@ defmodule MingaEditor.PickerUITest do
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
-        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        workspace: %SessionState{editing: VimState.new()},
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),

@@ -487,7 +487,7 @@ defmodule MingaEditor.LspActionsTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, terminal_viewport: viewport},
       parser: %MingaEditor.State.Parser{highlighting: %Highlighting{}},
-      workspace: %SessionState{viewport: viewport}
+      workspace: %SessionState{}
     }
   end
 

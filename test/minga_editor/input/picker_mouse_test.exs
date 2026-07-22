@@ -36,8 +36,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, terminal_viewport: vp},
       workspace: %MingaEditor.Session.State{
-        editing: VimState.new(),
-        viewport: vp
+        editing: VimState.new()
       },
       shell_runtime:
         Runtime.new(
@@ -138,8 +137,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
       %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
-          editing: VimState.new(),
-          viewport: Viewport.new(24, 80)
+          editing: VimState.new()
         },
         shell_runtime:
           Runtime.new(

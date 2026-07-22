@@ -8,7 +8,6 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.UI.Picker.CommandSource
 
@@ -33,7 +32,6 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},
           editing: VimState.new()
         },

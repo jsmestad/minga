@@ -16,7 +16,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
   alias MingaGitPorcelain.UI.Picker.GitLogFileSource
   alias MingaGitPorcelain.UI.Picker.GitLogSource
   alias MingaEditor.UI.Picker.Item
-  alias MingaEditor.Viewport
 
   @moduletag :tmp_dir
 
@@ -227,7 +226,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
     %State{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buf, list: [active_buf], active_index: 0}
       }
     }

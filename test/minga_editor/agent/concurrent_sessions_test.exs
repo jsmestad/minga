@@ -35,7 +35,6 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{rendering: :disabled},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,
         agent_ui: UIState.new()

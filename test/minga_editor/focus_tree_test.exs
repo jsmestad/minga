@@ -17,7 +17,6 @@ defmodule MingaEditor.FocusTreeTest do
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   defp single_window_layout do
@@ -180,7 +179,7 @@ defmodule MingaEditor.FocusTreeTest do
     test "visible bottom panel is a focusable frontmost hit target" do
       state = %MingaEditor.State{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
-        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        workspace: %SessionState{editing: VimState.new()},
         render: %MingaEditor.State.Render{layout: single_window_layout()},
         shell_runtime:
           Runtime.new(

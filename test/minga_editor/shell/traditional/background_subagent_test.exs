@@ -17,10 +17,15 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
   test "background subagent event creates one agent tab for the child session" do
     handle = background_handle(session_id: "session-2", pid: self(), task: "write tests")
     shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "editor.ex"))}
-    workspace = %SessionState{viewport: Viewport.new(24, 80)}
+    workspace = %SessionState{}
+    viewport = Viewport.new(40, 120)
 
     {shell_state, ^workspace} =
-      Traditional.handle_event(shell_state, workspace, {:background_subagent_started, handle})
+      Traditional.handle_event(
+        shell_state,
+        workspace,
+        {:background_subagent_started, handle, viewport}
+      )
 
     assert TabBar.count(shell_state.tab_bar) == 2
 
@@ -31,6 +36,10 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
     assert tab.background_subagent == handle
     assert tab.label == "session-2: write tests"
     assert tab.context.keymap_scope == :agent
+    refute Map.has_key?(tab.context, :viewport)
+    window = tab.context.windows.map[tab.context.windows.active]
+    assert window.viewport.rows == 40
+    assert window.viewport.cols == 120
   end
 
   @tag :tmp_dir
@@ -40,8 +49,9 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
     tab_bar = TabBar.new(Tab.new_file(1, "editor.ex"), root)
 
     state = %EditorState{
+      frontend: %MingaEditor.State.Frontend{terminal_viewport: Viewport.new(40, 120)},
       shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar}),
-      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+      workspace: %SessionState{}
     }
 
     result = EventDispatcher.dispatch(state, :background_subagent_started, handle, :event)
@@ -51,18 +61,31 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
     assert File.exists?(path)
     assert {:ok, persisted} = WorkspacePersistence.read(path, root)
     assert persisted.label == "session-4: persist tests"
+    tab = TabBar.find_by_session(result.shell_runtime.state.tab_bar, session)
+    window = tab.context.windows.map[tab.context.windows.active]
+    assert window.viewport.rows == 40
+    assert window.viewport.cols == 120
   end
 
   test "duplicate background subagent event for the same pid does not create another tab" do
     handle = background_handle(session_id: "session-3", pid: self(), task: "avoid duplicates")
     shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "editor.ex"))}
-    workspace = %SessionState{viewport: Viewport.new(24, 80)}
+    workspace = %SessionState{}
+    viewport = Viewport.new(40, 120)
 
     {shell_state, ^workspace} =
-      Traditional.handle_event(shell_state, workspace, {:background_subagent_started, handle})
+      Traditional.handle_event(
+        shell_state,
+        workspace,
+        {:background_subagent_started, handle, viewport}
+      )
 
     {shell_state, ^workspace} =
-      Traditional.handle_event(shell_state, workspace, {:background_subagent_started, handle})
+      Traditional.handle_event(
+        shell_state,
+        workspace,
+        {:background_subagent_started, handle, viewport}
+      )
 
     assert TabBar.count(shell_state.tab_bar) == 2
     assert Enum.count(shell_state.tab_bar.tabs, &(&1.session == self())) == 1

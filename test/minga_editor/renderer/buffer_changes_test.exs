@@ -178,8 +178,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :keymap_scope,
                :launchpad,
                :mouse,
-               :search,
-               :viewport
+               :search
              ]
 
     assert :erlang.external_size(bounded) < 100_000

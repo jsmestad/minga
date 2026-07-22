@@ -205,7 +205,7 @@ defmodule MingaEditor.Test.FakeShellAlt do
   @spec restore_context(MingaEditor.State.Tab.Context.t()) :: MingaEditor.Session.State.t()
   defp restore_context(context) do
     MingaEditor.Session.State.restore_tab_context(
-      %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(1, 1)},
+      %MingaEditor.Session.State{},
       context
     )
   end

@@ -14,7 +14,6 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
@@ -23,10 +22,7 @@ defmodule MingaEditor.StateTest do
 
   defp new_state do
     %EditorState{
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        editing: VimState.new()
-      }
+      workspace: %MingaEditor.Session.State{editing: VimState.new()}
     }
   end
 
@@ -72,7 +68,7 @@ defmodule MingaEditor.StateTest do
 
   describe "root ownership shape" do
     test "contains exactly the documented 16 owner fields" do
-      state = %EditorState{workspace: %SessionState{viewport: Viewport.new(24, 80)}}
+      state = %EditorState{workspace: %SessionState{}}
 
       assert state |> Map.keys() |> List.delete(:__struct__) |> Enum.sort() == [
                :agent_connection,
@@ -368,7 +364,7 @@ defmodule MingaEditor.StateTest do
       state = %EditorState{
         frontend: FrontendState.new(port_manager: self()),
         workspace:
-          %SessionState{viewport: Viewport.new(24, 80)}
+          %SessionState{}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
       }
@@ -455,7 +451,6 @@ defmodule MingaEditor.StateTest do
         frontend: FrontendState.new(port_manager: self()),
         workspace:
           %SessionState{
-            viewport: Viewport.new(24, 80),
             buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
           }
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),

@@ -6,7 +6,6 @@ defmodule MingaEditor.Commands.FoldingTest do
   alias MingaEditor.FoldMap
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
@@ -61,7 +60,7 @@ defmodule MingaEditor.Commands.FoldingTest do
       |> Windows.set_active(1)
 
     workspace =
-      %SessionState{viewport: Viewport.new(24, 80)}
+      %SessionState{}
       |> SessionState.set_windows(windows)
 
     %EditorState{frontend: %MingaEditor.State.Frontend{port_manager: nil}, workspace: workspace}
@@ -87,7 +86,7 @@ defmodule MingaEditor.Commands.FoldingTest do
       |> Windows.set_active(1)
 
     workspace =
-      %SessionState{viewport: Viewport.new(24, 80)}
+      %SessionState{}
       |> SessionState.set_windows(windows)
 
     %EditorState{frontend: %MingaEditor.State.Frontend{port_manager: nil}, workspace: workspace}

@@ -11,7 +11,6 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.UI.Highlight
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   setup do
@@ -175,10 +174,7 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       parser: %MingaEditor.State.Parser{parser_manager: manager()},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        editing: VimState.new()
-      }
+      workspace: %MingaEditor.Session.State{editing: VimState.new()}
     }
   end
 

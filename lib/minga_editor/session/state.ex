@@ -42,7 +42,6 @@ defmodule MingaEditor.Session.State do
           buffers: Buffers.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
-          viewport: Viewport.t(),
           mouse: Mouse.t(),
           lsp_pending: %{reference() => atom() | tuple()},
           search: Search.t(),
@@ -54,12 +53,10 @@ defmodule MingaEditor.Session.State do
           launchpad: MingaEditor.State.Launchpad.t() | nil
         }
 
-  @enforce_keys [:viewport]
   defstruct keymap_scope: :editor,
             buffers: %Buffers{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
-            viewport: nil,
             mouse: %Mouse{},
             lsp_pending: %{},
             search: %Search{},
@@ -532,12 +529,6 @@ defmodule MingaEditor.Session.State do
   @spec delete_lsp_pending(t(), reference()) :: t()
   def delete_lsp_pending(%__MODULE__{} = workspace, ref) when is_reference(ref) do
     set_lsp_pending(workspace, Map.delete(workspace.lsp_pending, ref))
-  end
-
-  @doc "Sets the viewport dimensions."
-  @spec set_viewport(t(), Viewport.t()) :: t()
-  def set_viewport(%__MODULE__{} = wspace, viewport) do
-    %{wspace | viewport: viewport}
   end
 
   @doc "Replaces the windows sub-struct."

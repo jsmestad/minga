@@ -12,7 +12,6 @@ defmodule MingaEditor.EditingTest do
   alias MingaEditor.Editing
   alias MingaEditor.MacroRecorder
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias Minga.Mode
 
@@ -27,10 +26,7 @@ defmodule MingaEditor.EditingTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: @port_manager},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        editing: vim
-      }
+      workspace: %MingaEditor.Session.State{editing: vim}
     }
   end
 

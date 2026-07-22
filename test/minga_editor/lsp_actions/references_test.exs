@@ -10,7 +10,6 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.UI.Picker.LocationSource
-  alias MingaEditor.Viewport
 
   test "error, nil, and empty responses finish the same correlated operation" do
     cases = [
@@ -110,7 +109,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   @spec start_operation(String.t() | nil) ::
           {EditorState.t(), MingaEditor.State.Operation.t()}
   defp start_operation(project_root \\ nil) do
-    workspace = %SessionState{viewport: Viewport.new(40, 120)}
+    workspace = %SessionState{}
     workspace = with_project_root(workspace, project_root)
 
     state = %EditorState{

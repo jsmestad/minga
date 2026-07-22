@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.CompletionKeyTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.WhichKey
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   @arrow_up_legacy 0x415B1B
@@ -34,8 +33,7 @@ defmodule MingaEditor.Input.CompletionKeyTest do
           }
         ),
       workspace: %MingaEditor.Session.State{
-        editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
-        viewport: Viewport.new(30, 80)
+        editing: %VimState{mode: :insert, mode_state: Mode.initial_state()}
       }
     }
   end

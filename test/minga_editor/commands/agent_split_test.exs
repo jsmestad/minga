@@ -10,7 +10,6 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias Minga.Test.StubServer
@@ -67,7 +66,6 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{
           tree: {:leaf, 1},

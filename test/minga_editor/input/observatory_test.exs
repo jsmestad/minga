@@ -11,7 +11,6 @@ defmodule MingaEditor.Input.ObservatoryTest do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   describe "inspect_process/2" do
     test "formats GenServer state for a selected process" do
@@ -58,7 +57,7 @@ defmodule MingaEditor.Input.ObservatoryTest do
   defp base_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{})
     }
   end

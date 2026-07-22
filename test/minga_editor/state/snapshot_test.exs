@@ -24,7 +24,6 @@ defmodule MingaEditor.State.SnapshotTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{
           active: buf,
@@ -87,7 +86,8 @@ defmodule MingaEditor.State.SnapshotTest do
 
       assert ctx.buffers.active == buf
       assert ctx.editing == state.workspace.editing
-      assert ctx.viewport == state.workspace.viewport
+      refute Map.has_key?(ctx, :viewport)
+      refute :viewport in ctx.present_fields
       assert ctx.mouse == state.workspace.mouse
       assert ctx.lsp_pending == pending
       assert ctx.search == state.workspace.search
@@ -147,6 +147,33 @@ defmodule MingaEditor.State.SnapshotTest do
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.workspace.keymap_scope == :agent
       assert restored.workspace.buffers.active == buf_b
+    end
+
+    test "legacy viewport contexts do not restore stale terminal dimensions" do
+      {:ok, buf} = BufferProcess.start_link(content: "legacy")
+
+      frontend_viewport = Viewport.new(40, 120)
+      stale_viewport = Viewport.new(24, 80)
+      state = make_state(buffer: buf)
+
+      state = %{
+        state
+        | frontend: MingaEditor.State.Frontend.resize_terminal(state.frontend, frontend_viewport)
+      }
+
+      ctx =
+        Context.from_workspace_map(%{
+          "present_fields" => ["viewport", "buffers"],
+          "viewport" => stale_viewport,
+          "buffers" => %Buffers{active: buf, list: [buf]}
+        })
+
+      restored = EditorState.restore_tab_context(state, ctx)
+
+      assert restored.frontend.terminal_viewport == frontend_viewport
+      refute Map.has_key?(Map.from_struct(restored.workspace), :viewport)
+      assert restored.workspace.buffers.active == buf
+      refute Map.has_key?(Context.to_workspace_map(ctx), :viewport)
     end
 
     test "older bare-field contexts are not migrated; only canonical keys are read" do
@@ -425,7 +452,6 @@ defmodule MingaEditor.State.SnapshotTest do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       ws = %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
         keymap_scope: :agent
@@ -448,7 +474,8 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.windows == old_ctx.windows
       assert new_ctx.file_tree == old_ctx.file_tree
       assert new_ctx.feature_state == old_ctx.feature_state
-      assert new_ctx.viewport == old_ctx.viewport
+      refute Map.has_key?(new_ctx, :viewport)
+      refute Map.has_key?(old_ctx, :viewport)
       assert new_ctx.mouse == old_ctx.mouse
       assert new_ctx.search == old_ctx.search
       assert new_ctx.editing == old_ctx.editing
@@ -464,6 +491,7 @@ defmodule MingaEditor.State.SnapshotTest do
       new_map = Context.to_workspace_map(new_ctx)
       old_map = Context.to_workspace_map(old_ctx) |> Map.drop(excluded)
       assert new_map == old_map
+      refute Map.has_key?(new_map, :viewport)
     end
 
     test "round-trips through to_workspace_map preserving snapshot fields" do
@@ -471,7 +499,6 @@ defmodule MingaEditor.State.SnapshotTest do
       pending = %{make_ref() => {:semantic_tokens, buf}}
 
       ws = %MingaEditor.Session.State{
-        viewport: Viewport.new(30, 100),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
         keymap_scope: :editor,
@@ -484,7 +511,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.keymap_scope == :editor
       assert restored_map.editing.mode == :normal
       assert restored_map.buffers.active == buf
-      assert restored_map.viewport == ws.viewport
+      refute Map.has_key?(restored_map, :viewport)
       assert restored_map.windows == ws.windows
       assert restored_map.file_tree == ws.file_tree
       assert restored_map.mouse == ws.mouse
@@ -500,7 +527,6 @@ defmodule MingaEditor.State.SnapshotTest do
 
       legacy_ctx =
         Context.from_workspace_map(%{
-          viewport: Viewport.new(24, 80),
           feature_state: FeatureState.put(FeatureState.new(), :builtin, :file_tree, file_tree)
         })
 
@@ -515,7 +541,6 @@ defmodule MingaEditor.State.SnapshotTest do
 
       legacy_ctx =
         Context.from_workspace_map(%{
-          viewport: Viewport.new(24, 80),
           file_tree: direct_file_tree,
           feature_state:
             FeatureState.put(FeatureState.new(), :builtin, :file_tree, legacy_file_tree)
@@ -528,7 +553,6 @@ defmodule MingaEditor.State.SnapshotTest do
 
     test "normalises transient vim state" do
       ws = %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: %Mode.CommandState{input: ""}},
         buffers: %Buffers{},
         keymap_scope: :editor

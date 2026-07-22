@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   # The bottom-panel and observatory commands no longer branch on the frontend.
   # Both the macOS GUI and the Go TUI advertise `semantic_ui` and share the same
@@ -39,7 +38,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         port_manager: Process.get(:ui_frontend_recorder),
         capabilities: caps
       },
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

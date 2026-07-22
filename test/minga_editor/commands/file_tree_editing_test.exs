@@ -21,7 +21,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   @backspace 127
@@ -230,12 +229,10 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       {:ok, active_ref} = FileRef.from_path(dir, "active.txt")
 
       inactive_workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}
       }
 
       active_workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
       }
 
@@ -261,7 +258,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
         workspace:
           %SessionState{
-            viewport: Viewport.new(24, 80),
             buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
           }
           |> SessionState.set_file_tree(
@@ -426,11 +422,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
     tree = FileTree.new(dir)
 
     workspace =
-      %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: buffers_for_active_buffer(active_buffer),
-        keymap_scope: :file_tree
-      }
+      %SessionState{buffers: buffers_for_active_buffer(active_buffer), keymap_scope: :file_tree}
       |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
 
     {workspace, shell_state} =

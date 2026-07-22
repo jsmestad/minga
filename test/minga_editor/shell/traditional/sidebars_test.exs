@@ -43,7 +43,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
 
   test "Git status replacement rejects legacy map-shaped panel and TUI state" do
     editor_state = %EditorState{
-      workspace: %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(24, 80)}
+      workspace: %MingaEditor.Session.State{}
     }
 
     assert_raise FunctionClauseError, fn ->

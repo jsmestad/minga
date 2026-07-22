@@ -3,7 +3,6 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
 
   @fields [
     :buffers,
-    :viewport,
     :file_tree,
     :agent_ui,
     :editing,
@@ -20,7 +19,6 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
 
   @type t :: %__MODULE__{
           buffers: term(),
-          viewport: term(),
           file_tree: term(),
           agent_ui: term(),
           editing: term(),
@@ -37,7 +35,6 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
   def from_workspace(workspace) when is_map(workspace) do
     %__MODULE__{
       buffers: Map.get(workspace, :buffers),
-      viewport: Map.get(workspace, :viewport),
       file_tree: Map.get(workspace, :file_tree),
       agent_ui: Map.get(workspace, :agent_ui),
       editing: Map.get(workspace, :editing),

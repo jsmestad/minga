@@ -17,7 +17,6 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
   alias MingaEditor.Editing
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   setup :verify_on_exit!
@@ -26,7 +25,6 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: %MingaEditor.VimState{
           mode: :normal,
           mode_state: Minga.Mode.initial_state(),

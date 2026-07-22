@@ -10,7 +10,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   @moduletag :tmp_dir
@@ -222,11 +221,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
-        workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
-          editing: VimState.new(),
-          agent_ui: UIState.new()
-        }
+        workspace: %MingaEditor.Session.State{editing: VimState.new(), agent_ui: UIState.new()}
       }
       |> then(fn root ->
         shell_state =

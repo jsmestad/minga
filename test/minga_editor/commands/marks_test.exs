@@ -11,7 +11,6 @@ defmodule MingaEditor.Commands.MarksTest do
   alias MingaEditor.Commands.Marks
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   # "hello\n  world\nfoo" — line 1 has leading spaces (first non-blank at col 2)
@@ -34,11 +33,7 @@ defmodule MingaEditor.Commands.MarksTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: %MingaEditor.State.Buffers{active: buffer},
-        editing: vim
-      }
+      workspace: %SessionState{buffers: %MingaEditor.State.Buffers{active: buffer}, editing: vim}
     }
   end
 

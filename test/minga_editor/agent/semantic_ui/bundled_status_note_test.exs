@@ -9,7 +9,6 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
   alias MingaEditor.Agent.SemanticUI.Registry
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   setup do
     table = Module.concat(__MODULE__, "Registry#{System.unique_integer([:positive])}")
@@ -88,7 +87,7 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       extension_surfaces: %MingaEditor.State.ExtensionSurfaces{agent_semantic_ui_registry: table},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+      workspace: %SessionState{}
     }
   end
 end

@@ -14,7 +14,6 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Item
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   @moduletag :tmp_dir
@@ -80,7 +79,7 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()}
+      workspace: %SessionState{editing: VimState.new()}
     }
     |> ModalWorkflow.transition({:picker, PickerPayload.new(picker_state)})
   end

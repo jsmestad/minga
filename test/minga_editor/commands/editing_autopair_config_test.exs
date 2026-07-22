@@ -19,7 +19,6 @@ defmodule MingaEditor.Commands.EditingAutopairConfigTest do
         highlighting: %Highlighting{highlights: %{buffer => highlight}}
       },
       workspace: %MingaEditor.Session.State{
-        viewport: %MingaEditor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
         buffers: %MingaEditor.State.Buffers{active: buffer, list: [buffer]},
         editing: MingaEditor.VimState.new()
       }

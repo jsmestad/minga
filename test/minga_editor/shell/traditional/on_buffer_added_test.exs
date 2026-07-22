@@ -18,11 +18,10 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   defp blank_workspace do
-    %SessionState{viewport: Viewport.new(24, 80)}
+    %SessionState{}
   end
 
   defp elem_insert(%TabBar{} = tab_bar, kind, label) do
@@ -107,10 +106,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
   @spec workspace_for(pid(), String.t()) :: SessionState.t()
   defp workspace_for(buffer, root) do
-    %SessionState{
-      viewport: Viewport.new(24, 80),
-      buffers: %Buffers{active: buffer, list: [buffer]}
-    }
+    %SessionState{buffers: %Buffers{active: buffer, list: [buffer]}}
     |> SessionState.set_file_tree(%FileTreeState{project_root: root})
   end
 end

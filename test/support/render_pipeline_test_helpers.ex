@@ -72,7 +72,6 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
       session: Keyword.get(opts, :session, %MingaEditor.State.Session{}),
       extension_surfaces: ExtensionSurfaces.new(sidebar_registry: sidebar_registry),
       workspace: %MingaEditor.Session.State{
-        viewport: vp,
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         windows: %Windows{

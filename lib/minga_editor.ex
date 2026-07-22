@@ -580,13 +580,7 @@ defmodule MingaEditor do
     # is given and derives nothing from line spacing.
     vp = Viewport.new(height, width)
 
-    new_state =
-      state
-      |> EditorState.accept_frontend_ready(vp, caps)
-      |> EditorState.reset_frontend_render_state()
-
-    render = MingaEditor.State.Render.invalidate_layout(new_state.render)
-    new_state = %{new_state | render: render}
+    new_state = EditorState.accept_frontend_ready(state, vp, caps)
 
     Startup.send_font_config(new_state)
     new_state = refresh_gui_config_state(new_state)
@@ -616,10 +610,6 @@ defmodule MingaEditor do
     vp = Viewport.new(height, width)
 
     new_state = EditorState.resize_frontend(state, vp)
-
-    # Invalidate the cached layout so resize_all_windows computes fresh
-    # rectangles from the new viewport dimensions.
-    new_state = Layout.invalidate(new_state)
     new_state = resize_all_windows(new_state)
     new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}

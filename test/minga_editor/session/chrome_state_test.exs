@@ -10,7 +10,6 @@ defmodule MingaEditor.Session.ChromeStateTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.State, as: SessionState
 
@@ -225,7 +224,6 @@ defmodule MingaEditor.Session.ChromeStateTest do
     %{
       workspace:
         %SessionState{
-          viewport: Viewport.new(24, 80),
           keymap_scope: :editor,
           buffers: %Buffers{active: active_buffer, list: List.wrap(active_buffer)}
         }

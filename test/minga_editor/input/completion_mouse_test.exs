@@ -7,7 +7,6 @@ defmodule MingaEditor.Input.CompletionMouseTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.WhichKey
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input.Router
   alias Minga.Mode
@@ -28,8 +27,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
           }
         ),
       workspace: %MingaEditor.Session.State{
-        editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
-        viewport: Viewport.new(30, 80)
+        editing: %VimState{mode: mode, mode_state: Mode.initial_state()}
       }
     }
   end

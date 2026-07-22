@@ -7,9 +7,8 @@ defmodule MingaEditor.Shell.RuntimeTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
-  alias MingaEditor.Viewport
 
-  @workspace %SessionState{viewport: Viewport.new(24, 80)}
+  @workspace %SessionState{}
 
   setup_all do
     {:module, FakeShell} = Code.ensure_loaded(FakeShell)

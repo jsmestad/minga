@@ -4,7 +4,6 @@ defmodule MingaEditor.Input.PromptTest do
   alias MingaEditor.Input.Prompt, as: InputPrompt
   alias MingaEditor.PromptUI
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   defmodule TestHandler do
     @behaviour MingaEditor.UI.Prompt.Handler
@@ -28,7 +27,7 @@ defmodule MingaEditor.Input.PromptTest do
   defp base_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)}
+      workspace: %MingaEditor.Session.State{}
     }
   end
 
