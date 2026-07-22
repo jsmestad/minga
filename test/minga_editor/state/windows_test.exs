@@ -149,7 +149,7 @@ defmodule MingaEditor.State.WindowsTest do
 
     test "returns windows with popup_meta" do
       rule = Rule.new("*Warnings*")
-      popup_meta = PopupActive.new(rule, 3, 1)
+      popup_meta = PopupActive.new(rule, 1)
       popup_win = %{Window.new(3, self(), 10, 80) | popup_meta: popup_meta}
 
       ws = %{new_windows() | map: Map.put(new_windows().map, 3, popup_win)}
@@ -161,7 +161,7 @@ defmodule MingaEditor.State.WindowsTest do
 
     test "filters only popup windows among mixed windows" do
       rule = Rule.new("*Messages*")
-      popup_meta = PopupActive.new(rule, 3, 1)
+      popup_meta = PopupActive.new(rule, 1)
       popup_win = %{Window.new(3, self(), 10, 80) | popup_meta: popup_meta}
 
       ws = split_windows()

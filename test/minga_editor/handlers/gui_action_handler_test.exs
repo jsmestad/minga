@@ -588,11 +588,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     popup_window =
       %Window{
         Window.new(popup_id, popup_buf, 10, 40)
-        | popup_meta: %PopupActive{
-            rule: Rule.new("*Help*", display: :float),
-            window_id: popup_id,
-            previous_active: main_id
-          }
+        | popup_meta: PopupActive.new(Rule.new("*Help*", display: :float), main_id)
       }
 
     state =

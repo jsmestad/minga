@@ -98,6 +98,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       assert Window.popup?(popup_window)
       assert popup_window.popup_meta.rule.side == :bottom
       assert popup_window.popup_meta.previous_active == 1
+      refute Map.has_key?(Map.from_struct(popup_window.popup_meta), :window_id)
 
       # The tree should be a horizontal split
       assert {:split, :horizontal, _, _, _} = new_state.workspace.windows.tree
@@ -318,7 +319,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     } do
       rule = Rule.new("*Warnings*", focus: true)
       popup_window = Window.new(3, popup_buf, 24, 80)
-      popup_window = %{popup_window | popup_meta: PopupActive.new(rule, 3, 2)}
+      popup_window = %{popup_window | popup_meta: PopupActive.new(rule, 2)}
 
       {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 3)
 

@@ -200,7 +200,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
         new_tree = apply_split_size(new_tree, next_id, rule, state)
 
         # Attach popup metadata to the new window
-        active = PopupActive.new(rule, next_id, previous_active)
+        active = PopupActive.new(rule, previous_active)
         popup_window = %{popup_window | popup_meta: active}
 
         # Update state
@@ -228,7 +228,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     popup_window = Window.new(next_id, buffer_pid, rows, cols)
 
     # Attach popup metadata
-    active = PopupActive.new(rule, next_id, previous_active)
+    active = PopupActive.new(rule, previous_active)
     popup_window = %{popup_window | popup_meta: active}
 
     # Add window to map but NOT to the tree (floats overlay the layout)
