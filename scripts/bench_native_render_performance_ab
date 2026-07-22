@@ -69,6 +69,10 @@ measure_revision() {
   MINGA_NATIVE_RENDER_ROOT="$source_root" "$runner" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
   if (( status != 0 )); then
     find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'minga-native-render-performance*.ips' -mmin -10 -print -exec cp {} "$artifact_dir/" \; -exec cat {} \; 2>/dev/null || true
+    if command -v lldb >/dev/null; then
+      echo "Native benchmark trapped; rerunning once under LLDB for a symbolic backtrace" | tee -a "$metrics_file"
+      lldb --batch -o run -o "thread backtrace all" -- "$build_dir/Build/Products/Release/minga-native-render-performance" --measurement-output "$work_dir/$side-$pair-lldb.json" 2>&1 | tee -a "$metrics_file" || true
+    fi
   fi
   echo "::endgroup::"
   [[ -s "$output" ]] || return 1
