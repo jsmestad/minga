@@ -3880,3 +3880,32 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `48f38035ee4179b3c10fb6e8c24f14db445a26cc`.
 - **Merge evidence:** PR #3166 merged after CI run `29902929886` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
+
+### W090/S23: Narrow decoration composition exit handling
+
+- **Status:** IMPLEMENTED, pending delivery.
+- **Audit ID:** S23
+- **Planning profile:** `S23Planner`, `editor-lifecycle-planner`, read-only.
+- **Implementation profile:** `S23Worker`, `editor-lifecycle-worker`, no delegation.
+- **Ready provenance:** Locked by `agent://S23Planner` for current SHA `5f9f43d47a0d94f1b6751c40ad923fb98c2f8e0b`; the terminal implementation scope is the exact audited owner `MingaEditor.BufferDecorations`, with `RenderPipeline.BufferPrefetch`, `MergeConflict.Render`, and `HitTest` recorded as later discoveries/non-goals for this slice.
+- **Freshness commit SHA:** `5f9f43d47a0d94f1b6751c40ad923fb98c2f8e0b`.
+- **Observable result:** `BufferDecorations.compose/2` now catches exits only while reading base decorations from the process-backed `Buffer.decorations/1` call through a private `buffer_decorations/1` helper. `compose/3` no longer catches downstream transient decoration exits and preserves the existing base -> inline ask -> inline edit -> merge conflict pipeline.
+- **Failure reproduction / source trace:** Before the correction, `lib/minga_editor/buffer_decorations.ex` wrapped both `compose/2` and `compose/3` in function-wide `catch :exit` blocks, so any downstream transient composition exit became either `Decorations.new()` or the supplied base decorations. The terminal correction narrows only the audited owner catch placement instead of claiming end-to-end propagation through current outer render/hit-test catches.
+- **Implementation result:** Replaced the `compose/2` broad catch with private `buffer_decorations/1` returning `{:ok, decorations}` or `:dead_buffer`, and removed the `compose/3` broad catch while preserving the existing compose pipeline and public arities.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/buffer_decorations.ex`; `test/minga_editor/merge_conflict/render_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/merge_conflict/render_test.exs test/minga_editor/render_pipeline/resident_incremental_test.exs` passed 14 tests with 4 excluded.
+- **Formatting validation:** `mix format lib/minga_editor/buffer_decorations.ex test/minga_editor/merge_conflict/render_test.exs` ran, then `mix format --check-formatted lib/minga_editor/buffer_decorations.ex test/minga_editor/merge_conflict/render_test.exs` passed.
+- **Project validation:** `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with zero errors; Credo retained one unrelated global-state test warning and two pre-existing refactoring opportunities. Final `git diff --check` passed after the roadmap evidence update.
+- **Production lines added/removed before roadmap evidence:** `11 added / 6 removed`, net `+5`, within the locked hard `<= +10`; per-file numstat before this roadmap update: `lib/minga_editor/buffer_decorations.ex 11 6`.
+- **Test lines added/removed before roadmap evidence:** `24 added / 0 removed` in `test/minga_editor/merge_conflict/render_test.exs`, within the locked test budget `<= +25`; limited to the two required behavior tests.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, data representation, generic wrapper, or public result type was added.
+- **Concepts removed:** Removed the broad `compose/3` catch while retaining the dead base-buffer fallback in `compose/2`.
+- **Retained contracts:** Base buffer decorations still precede inline ask, inline edit, and merge-conflict decorations in the same order; dead base buffer `compose/2` returns empty decorations; dead `compose/3` buffer preserves the supplied decoration value exactly.
+- **Findings resolved:** S23's terminal slice narrows `BufferDecorations.compose/2` fallback to the process-backed base decoration read and removes silent broad catch behavior from `BufferDecorations.compose/3`.
+- **Discoveries affecting later work:** `RenderPipeline.BufferPrefetch.fetch_decorations/2` remains unchanged because the current outer `safe_scroll_window/5` catch would convert a propagated composition exit into a misleading `:skip` dead-buffer log/fallback. `MergeConflict.Render` and `HitTest` catch narrowing remain valid broader discoveries outside this audited-owner correction.
+- **Pre-acceptance reviews:** Correctness first found that the broader prefetch claim was false because `safe_scroll_window/5` still catches exits, so `BufferPrefetch` was reverted and the terminal contract was narrowed to the audited owner; targeted recheck returned `RESOLVED/PASS/Lean` with 0.99 confidence. Elixir craftsmanship required atomic `spawn_monitor/1` and exact whole-value assertions; targeted recheck returned `RESOLVED/PASS`. Ponytail returned `PASS/Lean` with 0.99 confidence.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed exact process-call catch placement, catch-free pure composition, preserved merge order, deterministic dead-buffer assertions, honest owner-only roadmap scope, later discoveries, exact budgets, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3168
+- **Implementation commit SHA:** `43c05f571`.
+- **Pending delivery:** Needs CI, merge SHA, and merge evidence before it can move to `VERIFIED`.
+- **Completion date:** 2026-07-22.

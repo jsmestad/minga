@@ -16,10 +16,10 @@ defmodule MingaEditor.BufferDecorations do
   @doc "Returns base buffer decorations plus editor-owned transient decorations."
   @spec compose(state(), pid()) :: Decorations.t()
   def compose(state, buf) when is_pid(buf) do
-    state
-    |> compose(buf, Buffer.decorations(buf))
-  catch
-    :exit, _ -> Decorations.new()
+    case buffer_decorations(buf) do
+      {:ok, decorations} -> compose(state, buf, decorations)
+      :dead_buffer -> Decorations.new()
+    end
   end
 
   @doc "Adds editor-owned transient decorations to an existing decoration set."
@@ -29,9 +29,14 @@ defmodule MingaEditor.BufferDecorations do
     |> InlineAskRender.merge_decorations(state, buf)
     |> InlineEditRender.merge_decorations(state, buf)
     |> MergeConflictRender.merge_decorations(state, buf)
-  catch
-    :exit, _ -> decorations
   end
 
   def compose(_state, _buf, %Decorations{} = decorations), do: decorations
+
+  @spec buffer_decorations(pid()) :: {:ok, Decorations.t()} | :dead_buffer
+  defp buffer_decorations(buf) do
+    {:ok, Buffer.decorations(buf)}
+  catch
+    :exit, _ -> :dead_buffer
+  end
 end
