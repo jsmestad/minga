@@ -3650,7 +3650,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W082/S11: Make FrontendState the sole terminal viewport authority
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S11
 - **Planning profile:** `S11Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S11Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3670,4 +3670,8 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed the duplicate session/tab/render-workspace terminal viewport copy, the stale `SessionState.set_viewport/2` terminal-dimension writer, and the ignored `Tab.Context.new_agent/3` duplicate-window path.
 - **Retained contracts:** `MingaEditor.State.Frontend.resize_terminal/2` remains the terminal viewport writer; the root ready/resize transitions install its result while coordinating existing render reset or layout invalidation, satisfying the root state one-writer check without restoring a workspace dimension copy. `MingaEditor.Window.viewport` and active-window resizing remain the per-window scroll/render geometry owner; frontend row-fit semantics from ADR-0001 remain unchanged; new file, agent, and background-agent tab windows are still sized from the current frontend-reported viewport.
 - **Discovery affecting later work:** Existing support helpers and tests that construct bare `%Session.State{}` no longer need a terminal viewport fallback; the migration touched all such fixtures rather than introducing compatibility defaults. Legacy tab-context maps may still contain `"viewport"` in `present_fields`, and the narrowed `Tab.Context` filter now ignores that field without crashing. Short wall-clock callback timeouts can expire before a worker starts on loaded CI runners; timeout tests must leave scheduler margin while still asserting the same failure contract.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3152
+- **Implementation commit SHA:** `c078f9fef`.
+- **Merge SHA:** `b33a933708dbcbad59ce612c08aba96d8df19d76`.
+- **Merge evidence:** PR #3152 merged after CI run `29885645310` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-22.
