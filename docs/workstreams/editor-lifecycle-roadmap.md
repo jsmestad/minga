@@ -4097,7 +4097,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W097/S35: Move ProductionGate to test performance support
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S35
 - **Planning profile:** `S35Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S35Worker`, no delegation.
@@ -4121,6 +4121,6 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** Initial review found the untracked relocation destinations missing from the merge artifact. Both files were added to the patch, `git diff --find-renames origin/main` recognized the comparator and unit-test moves, and targeted recheck returned `RESOLVED/PASS` with 1.0 confidence and no residual blocker.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3183
 - **Implementation commit SHA:** `23e944eec`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Merge SHA:** `07f436432c6d2b751bb78f54137e9be4b34da6e1`.
+- **Merge evidence:** PR #3183 merged after CI run `29941423785` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. Earlier runs exposed the newly merged observation-inventory count mismatch from #3017; #3184 corrected that independent main-branch guardrail before the final rebase and green run.
+- **Completion date:** 2026-07-22.
