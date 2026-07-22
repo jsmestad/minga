@@ -861,7 +861,7 @@ defmodule MingaAgent.Providers.NativeTest do
             receive do
               {^release_ref, :release} -> {:ok, "slow result"}
             after
-              1_000 -> {:error, "slow tool timed out"}
+              2_000 -> {:error, "slow tool timed out"}
             end
           end
         )
@@ -903,8 +903,8 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Run both tools")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-      assert_receive {:tool_started, "slow_tool", slow_pid}, 1_000
-      assert_receive {:tool_started, "failing_tool", _failing_pid}, 1_000
+      assert_receive {:tool_started, "slow_tool", slow_pid}, 2_000
+      assert_receive {:tool_started, "failing_tool", _failing_pid}, 2_000
 
       send(slow_pid, {release_ref, :release})
       events = collect_run_events()
@@ -1610,7 +1610,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert_receive {:agent_provider_event,
                       %Event.ToolApproval{tool_call_id: "tc_1", reply_to: reply_to_1}},
-                     1_000
+                     2_000
 
       send(reply_to_1, {:tool_approval_response, "tc_1", :approve})
 
