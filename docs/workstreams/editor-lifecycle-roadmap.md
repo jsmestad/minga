@@ -26,11 +26,11 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35
+- **IMPLEMENTED:** S34, S35, E02
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
-- **CANDIDATE, craftsmanship:** E02, E03, E05, E08
+- **CANDIDATE, craftsmanship:** E03, E05, E08
 - **CANDIDATE, data shape:** ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
@@ -4124,3 +4124,25 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge SHA:** `07f436432c6d2b751bb78f54137e9be4b34da6e1`.
 - **Merge evidence:** PR #3183 merged after CI run `29941423785` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency. Earlier runs exposed the newly merged observation-inventory count mismatch from #3017; #3184 corrected that independent main-branch guardrail before the final rebase and green run.
 - **Completion date:** 2026-07-22.
+
+### W098/E02: Own renderer frame attempts and acknowledgement leases
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** E02
+- **Planning profile:** `E02Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `E02Worker`, no delegation.
+- **Ready provenance:** Locked by `agent://E02Planner` for current SHA `76e5155fb812c8aeb1ed9fedba531e6373ae31ab`; scope was exactly `FrameAttempt`, `AckLease`, renderer State/FrameHandler/RecoveryHandler/AckHandler migration, focused owner tests, server wrong-sequence terminal rejection coverage, and this evidence.
+- **Observable result:** Renderer frame credit behavior is unchanged, but pending and in-flight work now use `%MingaEditor.Renderer.FrameAttempt{}` and outstanding frontend acknowledgement state now uses `%MingaEditor.Renderer.AckLease{}`. Exact generation, sequence, and base matching remains mandatory; stale acknowledgements, rejections, timeouts, terminal rejects, and window misses remain side-effect free.
+- **Failure reproduction / source trace:** Before implementation, focused source trace found renderer frame attempts stored and destructured as `{intent, seq, pushed_at}` tuples and acknowledgement leases stored as bare maps across `State`, `FrameHandler`, `RecoveryHandler`, `AckHandler`, plus direct tuple setup in `server_test.exs`.
+- **Implementation result:** Added the two renderer-local owner structs, moved lease timer start/match/cancel behavior into `AckLease`, moved latest-attempt selection and keyframe forcing into `FrameAttempt`, migrated every production renderer tuple/map callsite, removed unused `State.release_credit/1` and `RecoveryHandler.cancel_timer/1`, and kept adaptation evidence in `RejectionState`.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/renderer/ack_handler.ex`; `lib/minga_editor/renderer/ack_lease.ex`; `lib/minga_editor/renderer/frame_attempt.ex`; `lib/minga_editor/renderer/frame_handler.ex`; `lib/minga_editor/renderer/recovery_handler.ex`; `lib/minga_editor/renderer/state.ex`; `test/minga_editor/renderer/ack_lease_test.exs`; `test/minga_editor/renderer/frame_attempt_test.exs`; `test/minga_editor/renderer/server_test.exs`.
+- **Focused validation:** `mix test.debug test/minga_editor/renderer/frame_attempt_test.exs test/minga_editor/renderer/ack_lease_test.exs test/minga_editor/renderer/server_test.exs` passed with 44 tests.
+- **Formatting and reference validation:** `mix format --check-formatted` passed for all touched renderer production/test files before roadmap evidence. Focused renderer production search found no remaining old frame-work tuple, bare acknowledgement lease map, `State.release_credit/1`, or `RecoveryHandler.cancel_timer/1`; the only `cancel_timer` owner is `AckLease`.
+- **Broad validation:** `make lint` passed Credo, compile, format, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `mix test.quick` exposed one full-suite timing failure at `NativeMCPTest:478`; the exact failed test passed with the original seed. `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed 9,710 tests, 58 doctests, and 98 properties with zero failures.
+- **Production lines added/removed before roadmap evidence:** Existing renderer files added 158 and removed 200 lines, net `-42`; new owner files add 82 lines, for net production `+40`, within the locked `<=45` budget.
+- **Test lines added/removed before roadmap evidence:** Existing server test added 15 and removed 5 lines; new owner tests add 125 lines, for net test `+135`, within the locked `<=170` budget.
+- **Concepts added:** Exactly two production concepts: `FrameAttempt` and `AckLease`.
+- **Concepts removed:** Removed positional frame-work tuples and bare acknowledgement lease maps from production renderer paths, plus dead `State.release_credit/1` and `RecoveryHandler.cancel_timer/1`.
+- **Discoveries affecting later work:** No replan trigger, owner drift, protocol/frontend dependency, ES03 phase-design dependency, third production concept, compatibility shim need, or budget miss was found.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence. Elixir craftsmanship and Ponytail required deleting two redundant public State type aliases and correcting absolute line counts; targeted rechecks returned `RESOLVED/PASS`. Correctness also required a timer-cancellation test whose wait exceeds its scheduled timeout; the corrected 25 ms timer and 100 ms refutation passed.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete ten-file merge artifact, clean two-struct cutover, exact timer and correlation invariants, preserved cache/adaptation behavior, valid tests, exact budgets, and merge safety.

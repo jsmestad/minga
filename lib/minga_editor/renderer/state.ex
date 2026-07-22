@@ -13,6 +13,8 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Renderer.AckLease
+  alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RejectionState
   alias MingaEditor.Renderer.ResidentWindowState
@@ -21,15 +23,6 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.Window
 
   @type editor_ref :: pid() | atom() | nil
-  @type frame_work :: {Intent.t(), non_neg_integer(), integer()}
-  @type ack_lease :: %{
-          required(:generation) => non_neg_integer(),
-          required(:seq) => non_neg_integer(),
-          required(:timer_ref) => reference(),
-          required(:output) => Input.t(),
-          required(:intent) => Intent.t(),
-          required(:pushed_at) => integer()
-        }
   @type pipeline :: (Input.t() -> Input.t())
 
   @type t :: %__MODULE__{
@@ -37,9 +30,9 @@ defmodule MingaEditor.Renderer.State do
           rendering?: boolean(),
           render_token: reference() | nil,
           stale_retry_count: non_neg_integer(),
-          pending: frame_work() | nil,
-          in_flight: frame_work() | nil,
-          awaiting_ack: ack_lease() | nil,
+          pending: FrameAttempt.t() | nil,
+          in_flight: FrameAttempt.t() | nil,
+          awaiting_ack: AckLease.t() | nil,
           ack_timeout_ms: pos_integer(),
           font_registry: FontRegistry.t(),
           caches: Caches.t(),
@@ -100,8 +93,12 @@ defmodule MingaEditor.Renderer.State do
           Intent.t()
         ) :: {:ok, t()} | {:error, t()}
   def record_adaptation(
-        %__MODULE__{awaiting_ack: %{generation: generation, seq: frame_seq, intent: rejected}} =
-          state,
+        %__MODULE__{
+          awaiting_ack: %AckLease{
+            generation: generation,
+            attempt: %FrameAttempt{seq: frame_seq, intent: rejected}
+          }
+        } = state,
         generation,
         frame_seq,
         %{dimension: dimension} = descriptor,
@@ -121,20 +118,20 @@ defmodule MingaEditor.Renderer.State do
   def record_adaptation(%__MODULE__{} = state, _generation, _frame_seq, _descriptor, %Intent{}),
     do: {:error, state}
 
-  @doc "Releases the outstanding acknowledgement lease without committing its output."
-  @spec release_credit(t()) :: t()
-  def release_credit(%__MODULE__{} = state), do: %{state | awaiting_ack: nil}
-
-  @doc "Returns frame credit and queues the next semantic frame through the state owner."
-  @spec queue_frame(t(), frame_work()) :: t()
-  def queue_frame(%__MODULE__{} = state, work) do
+  @spec queue_frame(t(), FrameAttempt.t()) :: t()
+  def queue_frame(%__MODULE__{} = state, %FrameAttempt{} = work) do
     %{state | awaiting_ack: nil, pending: work}
   end
 
   @doc "Enters a visible terminal frontend failure while preserving acknowledged caches."
   @spec terminal_failure(t(), non_neg_integer(), atom()) :: t()
   def terminal_failure(
-        %__MODULE__{awaiting_ack: %{generation: generation, seq: seq, intent: intent}} = state,
+        %__MODULE__{
+          awaiting_ack: %AckLease{
+            generation: generation,
+            attempt: %FrameAttempt{seq: seq, intent: intent}
+          }
+        } = state,
         last_good_frame_seq,
         reason
       ) do
@@ -165,11 +162,13 @@ defmodule MingaEditor.Renderer.State do
   def terminal_failure(%__MODULE__{} = state), do: state.rejection_state.terminal
 
   @doc "Consumes matching one-shot evidence and returns its concrete adapted intent."
-  @spec consume_adaptation(t(), non_neg_integer(), non_neg_integer()) ::
-          {:ok, t(), Intent.t()} | :error
+  @spec consume_adaptation(t(), AckLease.t()) :: {:ok, t(), Intent.t()} | :error
   def consume_adaptation(
         %__MODULE__{
-          awaiting_ack: %{generation: generation, seq: frame_seq, intent: rejected},
+          awaiting_ack: %AckLease{
+            generation: generation,
+            attempt: %FrameAttempt{seq: frame_seq, intent: rejected}
+          },
           rejection_state: %{
             adaptation: %{
               generation: generation,
@@ -181,8 +180,7 @@ defmodule MingaEditor.Renderer.State do
             }
           }
         } = state,
-        generation,
-        frame_seq
+        %AckLease{generation: generation, attempt: %FrameAttempt{seq: frame_seq}}
       )
       when rejected_value != adapted_value and adapted != rejected do
     if advertised_dimension?(rejected, dimension) do
@@ -193,7 +191,7 @@ defmodule MingaEditor.Renderer.State do
     end
   end
 
-  def consume_adaptation(%__MODULE__{}, _generation, _frame_seq), do: :error
+  def consume_adaptation(%__MODULE__{}, %AckLease{}), do: :error
 
   @doc "Clears rejection visibility after reconnect or another external state change."
   @spec clear_rejection(t()) :: t()

@@ -3,12 +3,14 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.BufferChanges
+  alias MingaEditor.Renderer.AckLease
+  alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.FrameHandler
   alias MingaEditor.Renderer.State
 
   @spec reset(State.t(), Intent.t(), non_neg_integer(), integer()) :: {:reply, :ok, State.t()}
   def reset(state, intent, seq, pushed_at) do
-    cancel_timer(state.awaiting_ack)
+    AckLease.cancel_timer(state.awaiting_ack)
     state = state |> State.reset_frontend(:renderer_restart) |> State.clear_rejection()
     token = schedule_render()
 
@@ -19,7 +21,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
          render_token: token,
          stale_retry_count: 0,
          pending: nil,
-         in_flight: {Intent.force_keyframe(intent), seq, pushed_at},
+         in_flight: FrameAttempt.new(Intent.force_keyframe(intent), seq, pushed_at),
          awaiting_ack: nil
      }}
   end
@@ -29,7 +31,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
           {:reply, {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()},
            State.t()}
   def reset_sync(state, intent, seq, pushed_at) do
-    cancel_timer(state.awaiting_ack)
+    AckLease.cancel_timer(state.awaiting_ack)
 
     state
     |> State.reset_frontend(:renderer_restart)
@@ -38,119 +40,80 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
   end
 
   @spec request(State.t()) :: {:noreply, State.t()}
-  def request(%State{awaiting_ack: %{intent: intent, seq: seq, pushed_at: pushed_at}} = state),
-    do: transaction(state, intent, seq, pushed_at)
+  def request(%State{awaiting_ack: %AckLease{attempt: attempt}} = state),
+    do: transaction(state, attempt)
 
-  def request(%State{pending: {intent, seq, pushed_at}} = state),
-    do: transaction(state, intent, seq, pushed_at)
+  def request(%State{pending: %FrameAttempt{} = attempt} = state),
+    do: transaction(state, attempt)
 
   def request(state), do: {:noreply, state}
 
   @doc "Starts one fresh-generation retry only after consuming explicit adaptation evidence."
   @spec adapted(State.t(), non_neg_integer(), atom()) :: {:noreply, State.t()}
-  def adapted(
-        %State{
-          awaiting_ack: %{
-            generation: generation,
-            seq: rejected_seq,
-            pushed_at: pushed_at
-          }
-        } = state,
-        last_applied,
-        reason
-      ) do
-    case State.consume_adaptation(state, generation, rejected_seq) do
+  def adapted(%State{awaiting_ack: %AckLease{} = lease} = state, last_applied, reason) do
+    case State.consume_adaptation(state, lease) do
       {:ok, adapted_state, adapted_intent} ->
-        adapted_transaction(adapted_state, adapted_intent, rejected_seq, pushed_at)
+        adapted_transaction(adapted_state, adapted_intent, lease.attempt)
 
       :error ->
         terminal_without_adaptation(state, last_applied, reason)
     end
   end
 
-  @spec adapted_transaction(State.t(), Intent.t(), non_neg_integer(), integer()) ::
-          {:noreply, State.t()}
-  defp adapted_transaction(state, adapted_intent, rejected_seq, pushed_at) do
-    cancel_timer(state.awaiting_ack)
-    retry_seq = max(System.unique_integer([:positive, :monotonic]), rejected_seq + 1)
+  @spec adapted_transaction(State.t(), Intent.t(), FrameAttempt.t()) :: {:noreply, State.t()}
+  defp adapted_transaction(state, adapted_intent, %FrameAttempt{} = rejected_attempt) do
+    AckLease.cancel_timer(state.awaiting_ack)
+    retry_seq = max(System.unique_integer([:positive, :monotonic]), rejected_attempt.seq + 1)
+    retry = FrameAttempt.new(adapted_intent, retry_seq, rejected_attempt.pushed_at)
 
     state
     |> State.reset_frontend()
-    |> State.queue_frame({adapted_intent, retry_seq, pushed_at})
+    |> State.queue_frame(retry)
     |> FrameHandler.advance()
   end
 
   @doc "Starts transaction recovery from the latest semantic intent."
-  @spec transaction(State.t(), Intent.t(), non_neg_integer(), integer()) ::
-          {:noreply, State.t()}
-  def transaction(state, rejected_intent, rejected_seq, rejected_pushed_at) do
-    cancel_timer(state.awaiting_ack)
+  @spec transaction(State.t(), FrameAttempt.t()) :: {:noreply, State.t()}
+  def transaction(state, %FrameAttempt{} = rejected_attempt) do
+    AckLease.cancel_timer(state.awaiting_ack)
 
-    {latest, seq, pushed_at} =
-      latest(state.pending, rejected_intent, rejected_seq, rejected_pushed_at)
+    latest = FrameAttempt.latest(state.pending, rejected_attempt)
+    retry = FrameAttempt.force_keyframe(latest)
 
     state
     |> State.reset_frontend()
-    |> State.queue_frame({Intent.force_keyframe(latest), seq, pushed_at})
+    |> State.queue_frame(retry)
     |> FrameHandler.advance()
   end
 
   @doc "Recovers one missed retained window without resetting unrelated frontend state."
-  @spec window(State.t(), Intent.t(), non_neg_integer(), integer(), non_neg_integer()) ::
-          {:noreply, State.t()}
-  def window(state, rejected_intent, rejected_seq, rejected_pushed_at, window_id) do
-    cancel_timer(state.awaiting_ack)
+  @spec window(State.t(), FrameAttempt.t(), non_neg_integer()) :: {:noreply, State.t()}
+  def window(state, %FrameAttempt{} = rejected_attempt, window_id) do
+    AckLease.cancel_timer(state.awaiting_ack)
 
-    {latest, seq, pushed_at} =
-      latest(state.pending, rejected_intent, rejected_seq, rejected_pushed_at)
+    latest = FrameAttempt.latest(state.pending, rejected_attempt)
 
-    recover_existing_window(state, latest, seq, pushed_at, window_id)
+    recover_existing_window(state, latest, window_id)
   end
 
-  @doc "Cancels an acknowledgement lease timer."
-  @spec cancel_timer(State.ack_lease() | nil) :: :ok
-  def cancel_timer(nil), do: :ok
-
-  def cancel_timer(%{timer_ref: timer_ref}) do
-    _ = Process.cancel_timer(timer_ref)
-    :ok
-  end
-
-  @spec recover_existing_window(
-          State.t(),
-          Intent.t(),
-          non_neg_integer(),
-          integer(),
-          non_neg_integer()
-        ) ::
+  @spec recover_existing_window(State.t(), FrameAttempt.t(), non_neg_integer()) ::
           {:noreply, State.t()}
-  defp recover_existing_window(state, intent, seq, pushed_at, window_id) do
-    if Map.has_key?(intent.windows, window_id) do
+  defp recover_existing_window(state, %FrameAttempt{} = attempt, window_id) do
+    if Map.has_key?(attempt.intent.windows, window_id) do
       state
       |> BufferChanges.invalidate_window(window_id)
-      |> State.queue_frame({intent, seq, pushed_at})
+      |> State.queue_frame(attempt)
       |> FrameHandler.advance()
     else
-      transaction(state, intent, seq, pushed_at)
+      transaction(state, attempt)
     end
   end
 
   @spec terminal_without_adaptation(State.t(), non_neg_integer(), atom()) ::
           {:noreply, State.t()}
   defp terminal_without_adaptation(state, last_applied, reason) do
-    cancel_timer(state.awaiting_ack)
+    AckLease.cancel_timer(state.awaiting_ack)
     {:noreply, State.terminal_failure(state, last_applied, reason)}
-  end
-
-  @spec latest(State.frame_work() | nil, Intent.t(), non_neg_integer(), integer()) ::
-          State.frame_work()
-  defp latest({intent, seq, pushed_at}, _fallback, rejected_seq, _fallback_at)
-       when seq > rejected_seq,
-       do: {intent, seq, pushed_at}
-
-  defp latest(_pending, fallback, rejected_seq, fallback_at) do
-    unique_seq = System.unique_integer([:positive, :monotonic])
-    {fallback, max(unique_seq, rejected_seq + 1), fallback_at}
   end
 
   @spec schedule_render() :: reference()
