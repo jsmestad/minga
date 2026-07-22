@@ -3852,7 +3852,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W089/S22: Move repeated operation lifecycle installation into Feedback
 
-- **Status:** IMPLEMENTED, pending delivery.
+- **Status:** VERIFIED
 - **Audit ID:** S22
 - **Planning profile:** `S22Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S22Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3876,6 +3876,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence after tracing all 22 migrated lifecycle sites and unchanged consumers. Ponytail returned `PASS/Lean` with 0.99 confidence, confirming the three named owner APIs replace 163 lines of repeated plumbing without a new framework or data shape. Elixir craftsmanship required removal of a fabricated admission request and nested test struct mutation; after correction, its targeted recheck returned `RESOLVED/PASS`, and test churn fell from net `+43` to net `+39`.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact three owner APIs, unchanged effect policies and side effects, real correlated test requests, unchanged downstream `Operation` contract, accurate validation chronology, exact production/test budgets, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3166
-- **Implementation commit SHA:** `3f38fdd83`.
-- **Pending delivery:** Needs CI, merge SHA, and merge evidence before it can move from `IMPLEMENTED` to `VERIFIED`.
-- **Implementation date:** 2026-07-22.
+- **Implementation commit SHA:** `20676c4ed`.
+- **Merge SHA:** `48f38035ee4179b3c10fb6e8c24f14db445a26cc`.
+- **Merge evidence:** PR #3166 merged after CI run `29902929886` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
