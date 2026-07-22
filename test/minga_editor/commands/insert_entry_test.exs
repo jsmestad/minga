@@ -14,7 +14,6 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   alias MingaEditor.KeyDispatch
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Session.State, as: SessionState
 
@@ -26,7 +25,6 @@ defmodule MingaEditor.Commands.InsertEntryTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buffer, list: [buffer]},
         editing: VimState.new()
       }

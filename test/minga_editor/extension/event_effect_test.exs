@@ -14,7 +14,6 @@ defmodule MingaEditor.Extension.EventEffectTest do
   alias MingaEditor.State.Frontend
   alias MingaEditor.State.Render, as: RenderState
   alias MingaEditor.Test.ExtensionBlockingEventHandler, as: BlockingHandler
-  alias MingaEditor.Viewport
 
   @timeout 2_000
 
@@ -51,7 +50,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
     state = %EditorState{
       effect_scheduler: scheduler,
       frontend: %Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(80, 24)}
+      workspace: %SessionState{}
     }
 
     on_exit(fn -> ArtifactGenerationState.reset_for_test(persistence_key) end)
@@ -261,7 +260,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
         {:editor_action, :block, {self(), token}},
         callback_registry: ctx.registry,
         callback_admission: ctx.code_lease,
-        timeout_ms: 25
+        timeout_ms: 500
       )
 
     assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},

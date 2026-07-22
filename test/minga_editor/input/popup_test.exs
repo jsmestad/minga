@@ -4,7 +4,6 @@ defmodule MingaEditor.Input.PopupTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -50,7 +49,6 @@ defmodule MingaEditor.Input.PopupTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: vim,
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
@@ -76,7 +74,6 @@ defmodule MingaEditor.Input.PopupTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
           tree: WindowTree.new(1),
@@ -163,7 +160,6 @@ defmodule MingaEditor.Input.PopupTest do
       %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
-          viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: main_buf, list: [main_buf]},
           windows: %Windows{
             tree: WindowTree.new(1),

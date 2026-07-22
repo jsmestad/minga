@@ -23,7 +23,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.MentionCompletion
@@ -67,7 +66,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf]},
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),

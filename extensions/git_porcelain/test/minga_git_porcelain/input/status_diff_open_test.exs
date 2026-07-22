@@ -12,7 +12,6 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   @none 0
   @effect_timeout 1_000
@@ -136,10 +135,7 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
     %EditorState{
       effect_scheduler: scheduler,
       frontend: %MingaEditor.State.Frontend{port_manager: self(), rendering: :disabled},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        keymap_scope: :git_status
-      },
+      workspace: %MingaEditor.Session.State{keymap_scope: :git_status},
       interaction: %MingaEditor.State.Interaction{}
     }
     |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))

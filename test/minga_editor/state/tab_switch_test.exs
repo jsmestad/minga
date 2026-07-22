@@ -25,7 +25,6 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -51,7 +50,6 @@ defmodule MingaEditor.State.TabSwitchTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,
         buffers: %Buffers{active: buf1, list: [buf1], active_index: 0},
@@ -77,7 +75,6 @@ defmodule MingaEditor.State.TabSwitchTest do
     win2 = Window.new(win_id, buf2, 24, 80)
 
     tab2_ws = %SessionState{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       keymap_scope: :editor,
       buffers: %Buffers{active: buf2, list: [buf2], active_index: 0},
@@ -126,7 +123,6 @@ defmodule MingaEditor.State.TabSwitchTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,
         buffers: %Buffers{active: file_buf, list: [file_buf], active_index: 0},
@@ -151,7 +147,6 @@ defmodule MingaEditor.State.TabSwitchTest do
     agent_window = Window.new_agent_chat(win_id, 24, 80)
 
     agent_ws = %SessionState{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       keymap_scope: :agent,
       buffers: %Buffers{active: nil, list: [], active_index: 0},

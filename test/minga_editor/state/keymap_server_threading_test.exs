@@ -18,7 +18,6 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
   alias Minga.Keymap.Scope
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias Minga.Mode
 
@@ -27,7 +26,6 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       interaction: %MingaEditor.State.Interaction{keymap_server: keymap_server},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []},
         keymap_scope: :agent
@@ -72,7 +70,6 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}
       }

@@ -11,7 +11,6 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -128,7 +127,6 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{list: [buffer], active_index: 0, active: buffer},
         windows: %Windows{
           tree: WindowTree.new(1),

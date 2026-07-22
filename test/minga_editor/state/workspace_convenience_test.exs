@@ -6,11 +6,10 @@ defmodule MingaEditor.State.WorkspaceConvenienceTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   defp workspace do
-    %SessionState{viewport: Viewport.new(24, 80)}
+    %SessionState{}
   end
 
   test "workspace owner commits focused child transitions" do

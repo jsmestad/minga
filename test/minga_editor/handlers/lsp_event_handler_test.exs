@@ -28,7 +28,6 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
-  alias MingaEditor.Viewport
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Window
@@ -992,7 +991,6 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
   defp workspace_for(buffer) do
     %MingaEditor.Session.State{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{

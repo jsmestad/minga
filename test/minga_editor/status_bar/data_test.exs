@@ -20,7 +20,6 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
@@ -318,7 +317,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       interaction: %MingaEditor.State.Interaction{options_server: options},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime:
         Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
     }
@@ -423,7 +422,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime:
         Runtime.new(
           Registry.get(:traditional),
@@ -436,7 +435,6 @@ defmodule MingaEditor.StatusBar.DataTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{list: [], active_index: 0, active: nil},
         windows: %Windows{
           tree: WindowTree.new(1),
@@ -472,7 +470,6 @@ defmodule MingaEditor.StatusBar.DataTest do
 
   defp workspace_with_buffer(buf) do
     %SessionState{
-      viewport: Viewport.new(24, 80),
       buffers: %Buffers{list: [buf], active_index: 0, active: buf},
       windows: %Windows{
         tree: WindowTree.new(1),

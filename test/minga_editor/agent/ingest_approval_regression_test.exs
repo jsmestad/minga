@@ -36,7 +36,6 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
   alias MingaAgent.RuntimeState
 
   @event_timeout 5_000
@@ -171,9 +170,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80)
-      },
+      workspace: %MingaEditor.Session.State{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

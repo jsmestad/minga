@@ -8,7 +8,6 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
   alias MingaEditor.KeyDispatch
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   test "SPC g d s is available for GUI frontends only" do
     gui_state = state_with_frontend(:native_gui)
@@ -76,7 +75,7 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
         port_manager: self(),
         capabilities: %Capabilities{frontend_type: frontend_type}
       },
-      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+      workspace: %SessionState{}
     }
 
     state =

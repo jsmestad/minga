@@ -23,7 +23,6 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Test.FakeShell
-  alias MingaEditor.Viewport
   alias MingaGitPorcelain.Commands
   alias MingaGitPorcelain.Effects.RemoteOperation
   alias MingaGitPorcelain.Input.GitStatus
@@ -389,7 +388,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, backend: :headless},
-      workspace: %MingaEditor.Session.State{viewport: Viewport.new(80, 24)},
+      workspace: %MingaEditor.Session.State{},
       effect_scheduler: scheduler
     }
 

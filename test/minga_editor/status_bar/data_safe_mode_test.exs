@@ -9,7 +9,6 @@ defmodule MingaEditor.StatusBar.DataSafeModeTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Viewport
 
   test "from_state to_modeline_data carries safe_mode true" do
     Minga.SafeMode.put(true)
@@ -20,7 +19,7 @@ defmodule MingaEditor.StatusBar.DataSafeModeTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       interaction: %MingaEditor.State.Interaction{options_server: options},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime: Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
     }
 

@@ -6,7 +6,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSourceTest do
   alias MingaEditor.State, as: EditorState
   alias MingaGitPorcelain.UI.Picker.GitBranchSource
   alias MingaEditor.UI.Picker.Item
-  alias MingaEditor.Viewport
 
   test "local branch items expose a delete action" do
     item = %Item{id: {:branch, "feature", false, false}, label: "feature"}
@@ -25,7 +24,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSourceTest do
   test "delete action on current branch reports an error without entering confirmation" do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+      workspace: %SessionState{}
     }
 
     item = %Item{id: {:branch, "main", true, false}, label: "main"}

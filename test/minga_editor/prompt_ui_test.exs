@@ -6,7 +6,6 @@ defmodule MingaEditor.PromptUITest do
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Prompt, as: PromptState
-  alias MingaEditor.Viewport
 
   # Test handlers record their callbacks via the test process dictionary.
   # The state passed in/out is the editor state; the side channel keeps
@@ -54,7 +53,7 @@ defmodule MingaEditor.PromptUITest do
   defp base_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)}
+      workspace: %MingaEditor.Session.State{}
     }
   end
 

@@ -16,9 +16,6 @@ defmodule MingaEditor.Commands.InlineAsk do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
-  alias MingaEditor.State.Windows
-  alias MingaEditor.Window
-  alias MingaEditor.WindowTree
 
   @type state :: EditorState.t()
 
@@ -93,23 +90,10 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec create_agent_tab(state()) :: state()
   defp create_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    win_id = 1
-    rows = max(state.frontend.terminal_viewport.rows, 1)
-    cols = max(state.frontend.terminal_viewport.cols, 1)
-    agent_window = Window.new_agent_chat(win_id, rows, cols)
-
-    windows = %Windows{
-      tree: WindowTree.new(win_id),
-      map: %{win_id => agent_window},
-      active: win_id,
-      next_id: win_id + 1
-    }
-
     context =
       TabContext.new_agent(
         state.frontend.terminal_viewport,
-        state.workspace.file_tree.project_root,
-        windows
+        state.workspace.file_tree.project_root
       )
 
     {tb, tab} = TabBar.insert(tb, :agent, "Inline Ask")

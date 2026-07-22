@@ -12,7 +12,6 @@ defmodule MingaEditor.BufferFileIdentityTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Viewport
 
   @moduletag :tmp_dir
 
@@ -45,7 +44,6 @@ defmodule MingaEditor.BufferFileIdentityTest do
 
     state = %EditorState{
       workspace: %SessionState{
-        viewport: Viewport.new(80, 24),
         buffers: %Buffers{active: self(), list: [self()]},
         file_tree: %FileTree{project_root: root}
       },
@@ -71,10 +69,7 @@ defmodule MingaEditor.BufferFileIdentityTest do
     tab_bar = TabBar.new(tab, root)
 
     state = %EditorState{
-      workspace: %SessionState{
-        viewport: Viewport.new(80, 24),
-        file_tree: %FileTree{project_root: root}
-      },
+      workspace: %SessionState{file_tree: %FileTree{project_root: root}},
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }
 

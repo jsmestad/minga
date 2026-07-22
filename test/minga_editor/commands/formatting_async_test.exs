@@ -16,7 +16,6 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -263,7 +262,6 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     buffer = start_supervised!({BufferProcess, buffer_opts}, id: {:buffer, make_ref()})
 
     workspace = %MingaEditor.Session.State{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{

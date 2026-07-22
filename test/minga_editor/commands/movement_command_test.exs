@@ -37,7 +37,6 @@ defmodule MingaEditor.Commands.MovementCommandTest do
         terminal_viewport: Viewport.new(rows, cols)
       },
       workspace: %SessionState{
-        viewport: Viewport.new(rows, cols),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{tree: {:leaf, 1}, map: %{1 => window}, active: 1, next_id: 2},
         editing: editing

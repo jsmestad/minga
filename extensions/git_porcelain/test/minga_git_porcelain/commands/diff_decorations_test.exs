@@ -294,10 +294,8 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
         |> then(fn state ->
           %{
             state
-            | workspace:
-                then(state.workspace, fn workspace ->
-                  MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
-                end)
+            | frontend:
+                MingaEditor.State.Frontend.resize_terminal(state.frontend, Viewport.new(24, 40))
           }
         end)
         |> set_frontend_capabilities(:native_gui)
@@ -351,10 +349,8 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
         |> then(fn state ->
           %{
             state
-            | workspace:
-                then(state.workspace, fn workspace ->
-                  MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
-                end)
+            | frontend:
+                MingaEditor.State.Frontend.resize_terminal(state.frontend, Viewport.new(24, 40))
           }
         end)
         |> set_frontend_capabilities(:native_gui)
@@ -402,10 +398,8 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
         |> then(fn state ->
           %{
             state
-            | workspace:
-                then(state.workspace, fn workspace ->
-                  MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
-                end)
+            | frontend:
+                MingaEditor.State.Frontend.resize_terminal(state.frontend, Viewport.new(24, 40))
           }
         end)
         |> set_frontend_capabilities(:native_gui)
@@ -641,7 +635,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
   defp build_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)}
+      workspace: %MingaEditor.Session.State{}
     }
   end
 

@@ -16,7 +16,6 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   setup :verify_on_exit!
@@ -138,12 +137,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       {:ok, active_ref} = FileRef.from_path(tmp_dir, "active.txt")
 
       inactive_workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}
       }
 
       active_workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
       }
 
@@ -499,7 +496,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace:
-        %SessionState{buffers: buffers, viewport: Viewport.new(24, 80)}
+        %SessionState{buffers: buffers}
         |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
     }
   end

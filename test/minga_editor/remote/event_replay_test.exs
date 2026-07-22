@@ -6,7 +6,6 @@ defmodule MingaEditor.Remote.EventReplayTest do
   alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Taxonomy
   alias MingaAgent.TodoItem
@@ -210,7 +209,7 @@ defmodule MingaEditor.Remote.EventReplayTest do
   defp editor_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
+      workspace: %WorkspaceState{}
     }
   end
 

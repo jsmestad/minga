@@ -24,7 +24,6 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace.Persistence
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
@@ -73,7 +72,6 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: Runtime.new(Registry.get(:traditional), %TraditionalState{}),
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
         buffers: %Buffers{active: nil, list: [], active_index: 0},
@@ -98,7 +96,6 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: Runtime.new(Registry.get(:traditional), %TraditionalState{}),
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
         buffers: %Buffers{active: nil, list: [], active_index: 0},

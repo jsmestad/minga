@@ -18,7 +18,7 @@ defmodule MingaEditor.FileTree.FeatureTest do
   end
 
   test "FileTree state is stored as a direct workspace field" do
-    workspace = %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(24, 80)}
+    workspace = %MingaEditor.Session.State{}
     file_tree = %FileTreeState{project_root: "/tmp/project"}
 
     workspace = MingaEditor.Session.State.set_file_tree(workspace, file_tree)

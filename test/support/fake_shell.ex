@@ -234,7 +234,7 @@ defmodule MingaEditor.Test.FakeShell do
           MingaEditor.FeatureState.source()
         ) :: MingaEditor.State.Tab.Context.t()
   defp drop_context_feature_source(context, source) do
-    %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(1, 1)}
+    %MingaEditor.Session.State{}
     |> MingaEditor.Session.State.restore_tab_context(context)
     |> MingaEditor.Session.State.drop_feature_state_source(source)
     |> MingaEditor.Session.State.to_tab_context()
@@ -243,7 +243,7 @@ defmodule MingaEditor.Test.FakeShell do
   @spec drop_context_extension_feature_sources(MingaEditor.State.Tab.Context.t()) ::
           MingaEditor.State.Tab.Context.t()
   defp drop_context_extension_feature_sources(context) do
-    %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(1, 1)}
+    %MingaEditor.Session.State{}
     |> MingaEditor.Session.State.restore_tab_context(context)
     |> MingaEditor.Session.State.drop_extension_feature_state_sources()
     |> MingaEditor.Session.State.to_tab_context()

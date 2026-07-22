@@ -213,7 +213,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           Runtime.route_event(
             state.shell_runtime,
             state.workspace,
-            {:background_subagent_started, handle}
+            {:background_subagent_started, handle, state.frontend.terminal_viewport}
           )
 
         transitioned = %{state | shell_runtime: runtime, workspace: workspace}

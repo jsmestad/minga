@@ -10,14 +10,13 @@ defmodule MingaEditor.LspActions.RenameTest do
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
   defp stub_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(40, 120)},
+      workspace: %SessionState{},
       appearance: %MingaEditor.State.Appearance{theme: MingaEditor.UI.Theme.get!(:doom_one)}
     }
   end
@@ -237,7 +236,6 @@ defmodule MingaEditor.LspActions.RenameTest do
       )
 
     workspace = %SessionState{
-      viewport: Viewport.new(40, 120),
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{
         tree: WindowTree.new(1),

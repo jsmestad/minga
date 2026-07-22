@@ -26,7 +26,6 @@ defmodule MingaEditor.State.Tab.Context do
     :buffers,
     :windows,
     :file_tree,
-    :viewport,
     :mouse,
     :lsp_pending,
     :search,
@@ -58,7 +57,6 @@ defmodule MingaEditor.State.Tab.Context do
           | :buffers
           | :windows
           | :file_tree
-          | :viewport
           | :mouse
           | :lsp_pending
           | :search
@@ -80,7 +78,6 @@ defmodule MingaEditor.State.Tab.Context do
           buffers: Buffers.t() | nil,
           windows: Windows.t() | nil,
           file_tree: FileTreeState.t() | nil,
-          viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
           lsp_pending: %{reference() => atom() | tuple()} | nil,
           search: Search.t() | nil,
@@ -96,7 +93,6 @@ defmodule MingaEditor.State.Tab.Context do
             buffers: nil,
             windows: nil,
             file_tree: nil,
-            viewport: nil,
             mouse: nil,
             lsp_pending: nil,
             search: nil,
@@ -145,7 +141,6 @@ defmodule MingaEditor.State.Tab.Context do
       buffers: ws.buffers,
       windows: ws.windows,
       file_tree: ws.file_tree,
-      viewport: ws.viewport,
       mouse: ws.mouse,
       lsp_pending: ws.lsp_pending,
       search: ws.search,
@@ -182,7 +177,6 @@ defmodule MingaEditor.State.Tab.Context do
         active_index: workspace.buffers.active_index
       },
       windows,
-      viewport,
       workspace.file_tree.project_root
     )
   end
@@ -203,14 +197,7 @@ defmodule MingaEditor.State.Tab.Context do
       next_id: window_id + 1
     }
 
-    new_agent(viewport, project_root, windows)
-  end
-
-  @doc "Builds an agent context around an already-constructed semantic window set."
-  @spec new_agent(Viewport.t(), String.t() | nil, Windows.t()) :: t()
-  def new_agent(%Viewport{} = viewport, project_root, %Windows{} = windows)
-      when is_binary(project_root) or is_nil(project_root) do
-    from_workspace_values(:agent, %Buffers{}, windows, viewport, project_root)
+    from_workspace_values(:agent, %Buffers{}, windows, project_root)
   end
 
   @doc "Returns the active buffer pid represented by this context, when present."
@@ -315,10 +302,9 @@ defmodule MingaEditor.State.Tab.Context do
           Scope.scope_name(),
           Buffers.t(),
           Windows.t(),
-          Viewport.t(),
           String.t() | nil
         ) :: t()
-  defp from_workspace_values(scope, buffers, windows, viewport, project_root) do
+  defp from_workspace_values(scope, buffers, windows, project_root) do
     %__MODULE__{
       version: @version,
       present_fields: @snapshot_fields,
@@ -326,7 +312,6 @@ defmodule MingaEditor.State.Tab.Context do
       buffers: buffers,
       windows: windows,
       file_tree: %FileTreeState{project_root: project_root},
-      viewport: viewport,
       mouse: %Mouse{},
       lsp_pending: %{},
       search: %Search{},
@@ -423,7 +408,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
-  defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
   defp valid_field?(:lsp_pending, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true

@@ -6,15 +6,11 @@ defmodule MingaEditor.Commands.EvalTest do
   alias MingaEditor.Commands.Eval
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
 
   defp build_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{}
-      }
+      workspace: %MingaEditor.Session.State{buffers: %Buffers{}}
     }
   end
 

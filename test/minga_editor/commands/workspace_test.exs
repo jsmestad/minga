@@ -20,7 +20,6 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.UI.Picker.WorkspaceSource
   alias MingaEditor.UI.Picker.WorkspaceTargetSource
   alias MingaEditor.UI.Prompt.WorkspaceRename
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -56,7 +55,6 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{
           tree: {:leaf, 1},
@@ -71,7 +69,6 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   defp manual_workspace_state(buffer, mode) do
     %SessionState{
-      viewport: Viewport.new(24, 80),
       keymap_scope: :editor,
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{
@@ -86,7 +83,6 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   defp agent_workspace_state(mode) do
     %SessionState{
-      viewport: Viewport.new(24, 80),
       keymap_scope: :agent,
       buffers: %Buffers{active: nil, list: [], active_index: 0},
       windows: %Windows{
@@ -732,7 +728,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
-        workspace: %SessionState{viewport: Viewport.new(24, 80)},
+        workspace: %SessionState{},
         shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
       }
 

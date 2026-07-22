@@ -10,7 +10,6 @@ defmodule MingaEditor.Commands.OperatorsTest do
   alias MingaEditor.Commands.Operators
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
   defp start_buffer(content) do
@@ -20,10 +19,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
   defp build_state(buf) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}
-      }
+      workspace: %SessionState{buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}}
     }
   end
 

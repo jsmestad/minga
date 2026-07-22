@@ -11,7 +11,6 @@ defmodule MingaGitPorcelain.CommandsStashTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaGitPorcelain.UI.Picker.GitStashSource
-  alias MingaEditor.Viewport
 
   @moduletag :tmp_dir
 
@@ -116,7 +115,7 @@ defmodule MingaGitPorcelain.CommandsStashTest do
   defp build_state do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+      workspace: %SessionState{}
     }
   end
 

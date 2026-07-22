@@ -22,7 +22,6 @@ defmodule MingaEditor.Renderer.ReceiptProjectionTest do
     window = Window.new(1, self(), old_viewport.rows, old_viewport.cols)
 
     workspace = %SessionState{
-      viewport: old_viewport,
       buffers: %Buffers{active: self(), list: [self()]},
       windows: %Windows{
         tree: WindowTree.new(1),

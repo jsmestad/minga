@@ -36,7 +36,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(80, 24),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{list: [buffer], active: buffer, active_index: 0},
         keymap_scope: :editor

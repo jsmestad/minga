@@ -7,7 +7,6 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
   alias Minga.Events
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias Minga.Mode
 
@@ -16,7 +15,6 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}
       }
@@ -57,7 +55,6 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}
       }

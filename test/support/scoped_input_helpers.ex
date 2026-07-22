@@ -16,7 +16,6 @@ defmodule Minga.Test.ScopedInputHelpers do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input.Scoped
   alias Minga.Mode
@@ -68,7 +67,6 @@ defmodule Minga.Test.ScopedInputHelpers do
       extension_surfaces:
         ExtensionSurfaces.new(sidebar_registry: Keyword.fetch!(opts, :sidebar_registry)),
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),

@@ -38,7 +38,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Viewport
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -177,27 +176,6 @@ defmodule MingaEditor.State do
     end
   end
 
-  @doc "Commits frontend capabilities and viewport dimensions as one connection observation."
-  @spec accept_frontend_ready(t(), Viewport.t(), MingaEditor.Frontend.Capabilities.t()) :: t()
-  def accept_frontend_ready(%__MODULE__{} = state, %Viewport{} = viewport, capabilities) do
-    workspace = SessionState.set_viewport(state.workspace, viewport)
-
-    frontend =
-      state.frontend
-      |> FrontendState.resize_terminal(viewport)
-      |> FrontendState.accept_capabilities(capabilities)
-
-    %{state | workspace: workspace, frontend: frontend}
-  end
-
-  @doc "Commits a frontend resize to workspace and frontend owners atomically."
-  @spec resize_frontend(t(), Viewport.t()) :: t()
-  def resize_frontend(%__MODULE__{} = state, %Viewport{} = viewport) do
-    workspace = SessionState.set_viewport(state.workspace, viewport)
-    frontend = FrontendState.resize_terminal(state.frontend, viewport)
-    %{state | workspace: workspace, frontend: frontend}
-  end
-
   @doc "Advances the semantic render revision and installs it through the Render owner."
   @spec submit_render_intent(t()) :: {t(), pos_integer()}
   def submit_render_intent(%__MODULE__{} = state) do
@@ -214,6 +192,35 @@ defmodule MingaEditor.State do
 
     render = RenderState.accept_correlation(state.render, correlation)
     {keyframe?, %{state | render: render}}
+  end
+
+  @doc "Accepts frontend dimensions and capabilities, then resets render observations."
+  @spec accept_frontend_ready(
+          t(),
+          MingaEditor.Viewport.t(),
+          MingaEditor.Frontend.Capabilities.t()
+        ) :: t()
+  def accept_frontend_ready(
+        %__MODULE__{} = state,
+        %MingaEditor.Viewport{} = viewport,
+        %MingaEditor.Frontend.Capabilities{} = capabilities
+      ) do
+    frontend =
+      state.frontend
+      |> FrontendState.resize_terminal(viewport)
+      |> FrontendState.accept_capabilities(capabilities)
+
+    state = reset_frontend_render_state(%{state | frontend: frontend})
+    render = RenderState.invalidate_layout(state.render)
+    %{state | render: render}
+  end
+
+  @doc "Accepts frontend dimensions and invalidates layout observations."
+  @spec resize_frontend(t(), MingaEditor.Viewport.t()) :: t()
+  def resize_frontend(%__MODULE__{} = state, %MingaEditor.Viewport{} = viewport) do
+    frontend = FrontendState.resize_terminal(state.frontend, viewport)
+    render = RenderState.invalidate_layout(state.render)
+    %{state | frontend: frontend, render: render}
   end
 
   @doc "Clears render observations after frontend state loss."

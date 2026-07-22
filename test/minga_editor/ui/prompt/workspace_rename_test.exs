@@ -8,7 +8,6 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRenameTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Prompt.WorkspaceRename
-  alias MingaEditor.Viewport
 
   describe "label/0" do
     test "returns the prompt label" do
@@ -74,7 +73,7 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRenameTest do
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }
   end

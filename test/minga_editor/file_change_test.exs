@@ -98,7 +98,6 @@ defmodule MingaEditor.FileChangeTest do
 
     state = %EditorState{
       workspace: %MingaEditor.Session.State{
-        viewport: MingaEditor.Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0}
       }
     }

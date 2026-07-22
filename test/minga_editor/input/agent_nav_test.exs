@@ -10,7 +10,6 @@ defmodule MingaEditor.Input.AgentNavTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
 
   @ctrl MingaEditor.Frontend.Protocol.mod_ctrl()
@@ -40,7 +39,6 @@ defmodule MingaEditor.Input.AgentNavTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         agent_ui: agent_ui,
         buffers: %Buffers{active: file_buf, list: [file_buf]},
         keymap_scope: :agent,

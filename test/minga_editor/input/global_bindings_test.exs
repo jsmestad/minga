@@ -11,7 +11,6 @@ defmodule MingaEditor.Input.GlobalBindingsTest do
   alias MingaEditor.State.LSP.FormatOperation
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -67,7 +66,6 @@ defmodule MingaEditor.Input.GlobalBindingsTest do
     buffer = start_supervised!({BufferProcess, content: "hello\n"}, id: {:buffer, make_ref()})
 
     workspace = %MingaEditor.Session.State{
-      viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
       windows: %Windows{

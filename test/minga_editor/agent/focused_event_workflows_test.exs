@@ -25,7 +25,6 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.WorkspaceWorkflow
-  alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
   alias MingaAgent.Session
   alias MingaEditor.Test.FakeShell
@@ -417,7 +416,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
+      workspace: %SessionState{agent_ui: UIState.new()},
       effect_scheduler: effect_scheduler,
       shell_runtime:
         Runtime.new(

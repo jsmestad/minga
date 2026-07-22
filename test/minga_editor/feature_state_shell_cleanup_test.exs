@@ -9,7 +9,6 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.StateStash
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   @source {:extension, :fake_feature}
   @other_source {:extension, :other_feature}
@@ -172,6 +171,6 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
 
   @spec workspace() :: SessionState.t()
   defp workspace do
-    %SessionState{viewport: Viewport.new(24, 80), feature_state: FeatureState.new()}
+    %SessionState{feature_state: FeatureState.new()}
   end
 end

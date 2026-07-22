@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.HandlerTest do
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Input.ConflictPrompt
@@ -25,7 +24,6 @@ defmodule MingaEditor.Input.HandlerTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{
           active: buf,

@@ -50,7 +50,7 @@ defmodule MingaEditor.Layout.GUITest do
       {row, 0, _, 1} = layout.minibuffer
       # Native GUI renders the minibuffer outside the Metal surface, so no grid
       # row is reserved: the rect is anchored on the row directly below content.
-      assert row == state.workspace.viewport.rows
+      assert row == state.frontend.terminal_viewport.rows
     end
 
     test "editor fills the full viewport for native GUI (no phantom minibuffer row)" do
@@ -58,7 +58,7 @@ defmodule MingaEditor.Layout.GUITest do
       layout = LayoutGUI.compute(state)
 
       {_r, _c, _w, editor_h} = layout.editor_area
-      assert editor_h == state.workspace.viewport.rows
+      assert editor_h == state.frontend.terminal_viewport.rows
     end
 
     test "single window has no per-window modeline field" do

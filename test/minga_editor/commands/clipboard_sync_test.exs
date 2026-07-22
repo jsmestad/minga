@@ -19,7 +19,6 @@ defmodule MingaEditor.Commands.ClipboardSyncTest do
   alias Minga.Config.Options
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.State
-  alias MingaEditor.Viewport
 
   setup :verify_on_exit!
 
@@ -49,9 +48,7 @@ defmodule MingaEditor.Commands.ClipboardSyncTest do
   defp make_state do
     %State{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80)
-      }
+      workspace: %MingaEditor.Session.State{}
     }
   end
 

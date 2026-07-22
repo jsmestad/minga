@@ -48,7 +48,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
     {%EditorState{
        frontend: %MingaEditor.State.Frontend{port_manager: self()},
-       workspace: %SessionState{viewport: Viewport.new(24, 80)},
+       workspace: %SessionState{},
        shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tb})
      }, ref, agent_a, agent_b}
   end

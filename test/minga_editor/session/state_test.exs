@@ -185,7 +185,6 @@ defmodule MingaEditor.Session.StateTest do
 
       assert restored.buffers == replacement
       assert restored.windows == ws.windows
-      assert restored.viewport == ws.viewport
     end
 
     test "ignores fields that are not part of the workspace" do
@@ -205,7 +204,7 @@ defmodule MingaEditor.Session.StateTest do
       assert %Context{} = ctx
       assert ctx.buffers == ws.buffers
       assert ctx.windows == ws.windows
-      assert ctx.viewport == ws.viewport
+      refute Map.has_key?(ctx, :viewport)
       snapshot_fields = SessionState.field_names() -- [:agent_ui]
       assert Enum.sort(snapshot_fields) == Enum.sort(ctx.present_fields)
     end

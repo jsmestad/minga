@@ -18,7 +18,6 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Test.FakeShell
-  alias MingaEditor.Viewport
   alias MingaGitPorcelain.Commands
   alias MingaGitPorcelain.Effects.CommitMessageGeneration
   alias MingaGitPorcelain.Test.EffectDependencies, as: Dependencies
@@ -339,7 +338,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
 
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, backend: :headless},
-      workspace: %MingaEditor.Session.State{viewport: Viewport.new(80, 24)},
+      workspace: %MingaEditor.Session.State{},
       effect_scheduler: scheduler
     }
 

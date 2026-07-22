@@ -5,7 +5,6 @@ defmodule MingaEditor.LayoutPresetTest do
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
 
@@ -16,7 +15,6 @@ defmodule MingaEditor.LayoutPresetTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %MingaEditor.State.Windows{
           tree: {:leaf, 1},

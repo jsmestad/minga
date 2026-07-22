@@ -13,7 +13,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
@@ -47,7 +46,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
         sidebar_registry: Process.get(:sidebar_registry)
       },
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
@@ -207,7 +205,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       # The file viewer sidebar is to the right of the chat area.
       # chat_width_pct defaults to 65, so sidebar starts at ~65% of the window width.
       # Use a column well to the right of the chat area.
-      sidebar_col = state.workspace.viewport.cols - 5
+      sidebar_col = state.frontend.terminal_viewport.cols - 5
 
       before_offset = state.workspace.agent_ui.view.preview.scroll.offset
 
@@ -298,7 +296,8 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
     test "scroll down over agent panel scrolls chat", %{state: state, panel_rect: panel_rect} do
       {row, col, _w, _h} = panel_rect
-      old_viewport_top = state.workspace.viewport.top
+      active_window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+      old_viewport_top = active_window.viewport.top
 
       new_state = Router.dispatch_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
 
@@ -306,8 +305,11 @@ defmodule MingaEditor.Input.AgentMouseTest do
       panel = new_state.workspace.agent_ui.panel
       assert panel.scroll.offset > 0 or panel.scroll.pinned == false
 
-      # Editor viewport should be untouched
-      assert new_state.workspace.viewport.top == old_viewport_top
+      # Active editor window viewport should be untouched
+      new_active_window =
+        Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
+
+      assert new_active_window.viewport.top == old_viewport_top
     end
 
     test "scroll up over agent panel scrolls chat", %{state: state, panel_rect: panel_rect} do

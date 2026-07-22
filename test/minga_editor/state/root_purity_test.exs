@@ -12,7 +12,6 @@ defmodule MingaEditor.State.RootPurityTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Parser, as: ParserState
-  alias MingaEditor.Viewport
 
   @effect_modules [
     Minga.Buffer,
@@ -104,11 +103,7 @@ defmodule MingaEditor.State.RootPurityTest do
         nil -> %Buffers{}
       end
 
-    workspace = %SessionState{
-      viewport: Viewport.new(24, 80),
-      buffers: buffers,
-      file_tree: %FileTreeState{project_root: root}
-    }
+    workspace = %SessionState{buffers: buffers, file_tree: %FileTreeState{project_root: root}}
 
     runtime = Runtime.new(Registry.get(:root_purity_shell), %{effect_probe: self()})
 

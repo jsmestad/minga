@@ -33,7 +33,6 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -157,7 +156,6 @@ defmodule MingaEditor.Startup do
           list: buffers,
           active_index: 0
         },
-        viewport: Viewport.new(height, width),
         editing: VimState.new(),
         windows: %Windows{
           tree: WindowTree.new(initial_window_id),
@@ -193,7 +191,8 @@ defmodule MingaEditor.Startup do
         FrontendState.new(
           backend: backend,
           rendering: rendering,
-          port_manager: port_manager
+          port_manager: port_manager,
+          terminal_viewport: MingaEditor.Viewport.new(height, width)
         ),
       render: RenderState.new(),
       parser: ParserState.new(parser_manager),

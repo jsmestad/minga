@@ -20,7 +20,6 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
@@ -584,7 +583,6 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: buf_one, list: [buf_one, buf_two], active_index: 0},
         windows: %Windows{

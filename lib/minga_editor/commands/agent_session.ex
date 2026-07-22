@@ -23,9 +23,6 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Windows
-  alias MingaEditor.Window
-  alias MingaEditor.WindowTree
 
   @type state :: EditorState.t()
 
@@ -498,23 +495,10 @@ defmodule MingaEditor.Commands.AgentSession do
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          _server_name
        ) do
-    rows = max(state.frontend.terminal_viewport.rows, 1)
-    cols = max(state.frontend.terminal_viewport.cols, 1)
-    win_id = 1
-    agent_window = Window.new_agent_chat(win_id, rows, cols)
-
-    windows = %Windows{
-      tree: WindowTree.new(win_id),
-      map: %{win_id => agent_window},
-      active: win_id,
-      next_id: win_id + 1
-    }
-
     context =
       MingaEditor.State.Tab.Context.new_agent(
         state.frontend.terminal_viewport,
-        state.workspace.file_tree.project_root,
-        windows
+        state.workspace.file_tree.project_root
       )
 
     {tb, tab} = TabBar.add(tb, :agent, "Agent")

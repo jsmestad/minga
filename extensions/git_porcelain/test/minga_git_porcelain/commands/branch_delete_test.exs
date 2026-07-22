@@ -14,7 +14,6 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
   alias MingaGitPorcelain.Commands, as: GitCommands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker
-  alias MingaEditor.Viewport
 
   setup %{tmp_dir: dir} do
     reset_global_project!()
@@ -148,7 +147,7 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
     %EditorState{
       effect_scheduler: scheduler,
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+      workspace: %SessionState{}
     }
   end
 

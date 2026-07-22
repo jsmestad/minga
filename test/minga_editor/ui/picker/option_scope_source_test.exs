@@ -139,8 +139,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
-        buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
-        viewport: Viewport.new(24, 80)
+        buffers: %Buffers{active: buffer, list: [buffer], active_index: 0}
       },
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{})
     }

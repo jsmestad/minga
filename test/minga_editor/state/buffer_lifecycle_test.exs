@@ -85,7 +85,6 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: resolved_traditional_runtime(),
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
         buffers: %Buffers{active: nil, list: [], active_index: 0},
@@ -261,7 +260,6 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: nil, list: [], active_index: 0},
           windows: %Windows{
@@ -500,7 +498,6 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: resolved_traditional_runtime(),
       workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: buffers,
         windows: %Windows{

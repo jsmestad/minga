@@ -16,7 +16,6 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   # Keycodes
   @j ?j
@@ -44,10 +43,7 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        keymap_scope: :git_status
-      },
+      workspace: %MingaEditor.Session.State{keymap_scope: :git_status},
       interaction: %MingaEditor.State.Interaction{}
     }
     |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))

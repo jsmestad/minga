@@ -37,13 +37,10 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Windows
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
-  alias MingaEditor.Window
-  alias MingaEditor.WindowTree
   alias MingaEditor.Input.AgentPanel
 
   @typedoc "Internal editor state."
@@ -208,24 +205,11 @@ defmodule MingaEditor.Commands.Agent do
   defp ensure_agent_tab(state) do
     case find_agent_tab(state) do
       nil ->
-        win_id = 1
-        rows = max(state.frontend.terminal_viewport.rows, 1)
-        cols = max(state.frontend.terminal_viewport.cols, 1)
-        agent_window = Window.new_agent_chat(win_id, rows, cols)
-
-        windows = %Windows{
-          tree: WindowTree.new(win_id),
-          map: %{win_id => agent_window},
-          active: win_id,
-          next_id: win_id + 1
-        }
-
         # Build complete context with all @per_tab_fields populated.
         context =
           MingaEditor.State.Tab.Context.new_agent(
             state.frontend.terminal_viewport,
-            state.workspace.file_tree.project_root,
-            windows
+            state.workspace.file_tree.project_root
           )
 
         # Create agent tab in the background (don't switch to it).
@@ -1012,15 +996,10 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec create_active_agent_tab(state()) :: state()
   defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    rows = max(state.frontend.terminal_viewport.rows, 1)
-    cols = max(state.frontend.terminal_viewport.cols, 1)
-    windows = agent_tab_windows(rows, cols)
-
     context =
       MingaEditor.State.Tab.Context.new_agent(
         state.frontend.terminal_viewport,
-        state.workspace.file_tree.project_root,
-        windows
+        state.workspace.file_tree.project_root
       )
 
     {tb, tab} = TabBar.insert(tb, :agent, "Agent")
@@ -1041,19 +1020,6 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   defp create_active_agent_tab(state), do: state
-
-  @spec agent_tab_windows(pos_integer(), pos_integer()) :: Windows.t()
-  defp agent_tab_windows(rows, cols) do
-    win_id = 1
-    agent_window = Window.new_agent_chat(win_id, rows, cols)
-
-    %Windows{
-      tree: WindowTree.new(win_id),
-      map: %{win_id => agent_window},
-      active: win_id,
-      next_id: win_id + 1
-    }
-  end
 
   @doc "Stops the current agent session process."
   @spec stop_current_session(state()) :: state()

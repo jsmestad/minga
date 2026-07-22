@@ -21,7 +21,6 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Interaction
-  alias MingaEditor.Viewport
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
 
@@ -58,7 +57,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     %EditorState{
       frontend: FrontendState.new(port_manager: self()),
       workspace:
-        %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
+        %SessionState{keymap_scope: :file_tree}
         |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf}),
       interaction: Interaction.new()
     }

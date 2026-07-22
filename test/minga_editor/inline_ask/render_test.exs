@@ -27,7 +27,7 @@ defmodule MingaEditor.InlineAsk.RenderTest do
 
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: MingaEditor.Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -91,7 +91,7 @@ defmodule MingaEditor.InlineAsk.RenderTest do
 
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %SessionState{viewport: MingaEditor.Viewport.new(24, 80)},
+      workspace: %SessionState{},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),

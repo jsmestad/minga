@@ -19,7 +19,6 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
   defp single_window_layout do
@@ -228,7 +227,7 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
     test "with a bottom panel visible, the panel is placed as floating chrome above the editor" do
       state = %MingaEditor.State{
         frontend: %MingaEditor.State.Frontend{port_manager: self()},
-        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        workspace: %SessionState{editing: VimState.new()},
         render: %MingaEditor.State.Render{layout: single_window_layout()},
         shell_runtime:
           Runtime.new(

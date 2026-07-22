@@ -799,7 +799,7 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   @spec diff_pane_width(state()) :: pos_integer()
-  defp diff_pane_width(%{workspace: %{viewport: %{cols: cols}}})
+  defp diff_pane_width(%{frontend: %{terminal_viewport: %{cols: cols}}})
        when is_integer(cols) and cols > 20 do
     max(div(cols - 5, 2), 20)
   end
