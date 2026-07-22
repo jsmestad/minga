@@ -93,10 +93,8 @@ jobs:
       - name: Check cross-language golden manifest is committed
         run: MIX_ENV=test mix protocol.golden --check
       - run: mix native.build.support
-      - name: Run non-heavy Elixir tests
-        run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance --exclude heavy --exclude extension_compile_cache
-      - name: Run heavy Elixir tests
-        run: mix test --warnings-as-errors --max-cases 1 --exclude system_clipboard --exclude conformance --only heavy --exclude extension_compile_cache
+      - name: Run Elixir tests except the isolated compile-cache suite
+        run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
 
