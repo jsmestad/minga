@@ -3976,7 +3976,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W093/S28: Shrink Breadcrumb semantic model and fingerprint to segments
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S28
 - **Planning profile:** `S28Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S28Worker`, no delegation.
@@ -4000,7 +4000,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Pre-acceptance reviews:** Correctness, Elixir craftsmanship, and Ponytail all returned `PASS/Lean` with 0.99 confidence. They confirmed builder ownership, segments-only carrier and fingerprint parity, unchanged wire bytes and frontend consumers, behavior-boundary test coverage, safe deletion of the storage-only test, production net `-5`, test/support net `-39`, and zero new concepts.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact segments-only cutover, unchanged builder derivation and cross-frontend wire contract, behavior regression and test deletion safety, exact budgets, validation evidence, and merge safety.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3175
-- **Implementation commit SHA:** `c89d6ffd1`.
-- **Merge SHA:** Pending delivery.
-- **Merge evidence:** Pending delivery.
-- **Completion date:** Pending merge.
+- **Implementation commit SHA:** `125bfee07`.
+- **Merge SHA:** `f17419d9875c34e019cced5b2eeb6c6e359ae729`.
+- **Merge evidence:** PR #3175 merged after CI run `29921935921` passed Dialyzer, Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
