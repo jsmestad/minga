@@ -847,8 +847,6 @@ final class CommandDispatcher {
         case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove, let progress, let todos):
             guiState.agentContextBarState.update(visible: visible, task: task, dispatchTimestamp: dispatchTimestamp,
                                                   status: status, canApprove: canApprove, progress: progress, todos: todos)
-        case .guiChangeSummary(let visible, let entries, let selectedIndex):
-            guiState.changeSummaryState.update(visible: visible, entries: entries, selectedIndex: selectedIndex)
 
         case .guiIndentGuides(let data):
             frameState.windowIndentGuides[data.windowId] = data

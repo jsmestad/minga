@@ -234,13 +234,6 @@ func EncodeGUIAgentToolToggle(messageID uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
 }
 
-// EncodeGUIBreadcrumbClick encodes a breadcrumb_click action. Wire format:
-// <gui_action, 0x06, segment_index:u8>. The GUI sends the clicked segment's
-// zero-based index (BreadcrumbBar.swift:51).
-func EncodeGUIBreadcrumbClick(index byte) []byte {
-	return []byte{generated.OPGuiAction, generated.GUIActionBreadcrumbClick, index}
-}
-
 // EncodeGUICompletionSelect encodes a completion_select action. Wire format:
 // <gui_action, 0x05, index:u16>. The GUI sends the selected completion item
 // index (CompletionOverlay.swift:93).

@@ -29,7 +29,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert ui.git_status.repo_state == :not_a_repo
     end
 
-    # The builder doesn't read any fields yet, so values are stubs.
+    # The builder fills UI fields from the emit context; values are stubs here.
     defp build_minimal_context do
       %MingaEditor.Frontend.Emit.Context{
         port_manager: self(),

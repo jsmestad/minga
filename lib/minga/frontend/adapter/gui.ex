@@ -7,7 +7,6 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
   alias Minga.Frontend.Adapter.GUI.CursorAnimationEncoder
@@ -65,7 +64,6 @@ defmodule Minga.Frontend.Adapter.GUI do
     # alongside the 0x78 chrome frame.
     {:agent_chat, AgentTranscriptEncoder},
     {:bottom_panel, BottomPanelEncoder},
-    {:change_summary, ChangeSummaryEncoder},
     {:edit_timeline, EditTimelineEncoder},
     {:extension_overlay, ExtensionOverlayEncoder},
     {:extension_panel, ExtensionPanelEncoder},

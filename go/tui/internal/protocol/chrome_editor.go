@@ -532,30 +532,6 @@ func decodeSearchState(payload []byte) (SearchState, string, int) {
 	return search, summary, size
 }
 
-func decodeChangeSummary(payload []byte) (ChangeSummary, string, int) {
-	if len(payload) < 6 {
-		return ChangeSummary{}, "", len(payload)
-	}
-	change := ChangeSummary{Visible: payload[1] != 0, SelectedIndex: u16(payload, 2)}
-	count := int(u16(payload, 4))
-	offset := 6
-	change.Entries = make([]ChangeEntry, 0, count)
-	for i := 0; i < count && len(payload) >= offset+11; i++ {
-		entry := ChangeEntry{}
-		var ok bool
-		entry.Path, offset, ok = readString16(payload, offset)
-		if !ok || len(payload) < offset+9 {
-			break
-		}
-		entry.Action = payload[offset]
-		entry.LinesAdded = u32(payload, offset+1)
-		entry.LinesRemoved = u32(payload, offset+5)
-		offset += 9
-		change.Entries = append(change.Entries, entry)
-	}
-	return change, fmt.Sprintf("%d changes", len(change.Entries)), offset
-}
-
 func decodeGutterSeparator(payload []byte) (GutterSeparator, string, int) {
 	if len(payload) < 6 {
 		return GutterSeparator{}, "", len(payload)

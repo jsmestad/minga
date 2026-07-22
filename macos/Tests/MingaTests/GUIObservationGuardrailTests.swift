@@ -57,7 +57,6 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/Shared/GUIState.swift#GUIWindowContentBacking": "observable resident-window backing",
         "Sources/Views/Shared/GUIState.swift#GUIState": "aggregate observable state",
         "Sources/Views/Shared/ThemeColors.swift#ThemeColors": "observable theme slots",
-        "Sources/Views/Sidebar/ChangeSummaryState.swift#ChangeSummaryState": "protocol presentation owner",
         "Sources/Views/Sidebar/FileTreeState.swift#FileTreeState": "protocol presentation owner",
         "Sources/Views/Sidebar/GitStatusState.swift#GitStatusState": "protocol presentation owner",
         "Sources/Views/Sidebar/ObservatoryState.swift#ObservatoryState": "protocol presentation owner",

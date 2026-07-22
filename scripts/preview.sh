@@ -12,7 +12,6 @@
 #                  AgentChatView,
 #                  AgentChatStreaming, AgentChatApproval, AgentChatError,
 #                  AgentChatCompletion, AgentChatSummary,
-#                  ChangeSummaryView,
 #                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar,
 #                  HoverPopupOverlay, SignatureHelpOverlay, DiagnosticsEditorView,
 #                  TabBarOverflow

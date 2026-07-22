@@ -25,7 +25,6 @@ defmodule Minga.Test.ProtocolGolden do
 
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
@@ -33,7 +32,6 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.Protocol.Encode
   alias Minga.Protocol.GoldenFields
   alias Minga.RenderModel.UI.Breadcrumb
-  alias Minga.RenderModel.UI.ChangeSummary
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.GitStatus
   alias Minga.RenderModel.UI.Picker
@@ -65,7 +63,6 @@ defmodule Minga.Test.ProtocolGolden do
       picker_query_fixtures() ++
       breadcrumb_fixtures() ++
       git_status_fixtures() ++
-      change_summary_fixtures() ++
       search_state_fixtures() ++
       surface_layout_fixtures() ++
       theme_fixtures()
@@ -685,46 +682,6 @@ defmodule Minga.Test.ProtocolGolden do
           last_commit_message: max_message,
           stash_count: 65_535
         }
-      }
-    ]
-  end
-
-  # ── Fixtures: gui_change_summary header (GuiChangeSummaryFields) ──────────
-
-  @spec change_summary_payload(ChangeSummary.t()) :: binary()
-  defp change_summary_payload(model) do
-    # gui_change_summary is custom-framed: opcode(1) then the payload. The
-    # generated decoder reads only the 5-byte header
-    # (visible, selected_index, entry_count).
-    {cmd, _caches} = ChangeSummaryEncoder.encode(model, Caches.new())
-    <<_op::8, header::binary-size(5), _tail::binary>> = cmd
-    header
-  end
-
-  @spec change_summary_fixtures() :: [fixture()]
-  defp change_summary_fixtures do
-    empty = %ChangeSummary{entries: [], selected_index: 0}
-
-    populated = %ChangeSummary{
-      selected_index: 1,
-      entries: [
-        %ChangeSummary.Entry{path: "a.ex", action: :modified, lines_added: 3, lines_removed: 1},
-        %ChangeSummary.Entry{path: "b.ex", action: :added, lines_added: 10, lines_removed: 0}
-      ]
-    }
-
-    [
-      %{
-        name: "change_summary_empty",
-        decoder: "GuiChangeSummaryFields",
-        payload: change_summary_payload(empty),
-        expected: %{visible: 0, selected_index: 0, entry_count: 0}
-      },
-      %{
-        name: "change_summary_populated",
-        decoder: "GuiChangeSummaryFields",
-        payload: change_summary_payload(populated),
-        expected: %{visible: 1, selected_index: 1, entry_count: 2}
       }
     ]
   end

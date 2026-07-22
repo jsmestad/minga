@@ -423,7 +423,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:breadcrumb_click, _segment_index}) do
-    # Breadcrumb navigation is a follow-up feature.
+    # Legacy frontends may still emit breadcrumb clicks; breadcrumbs are display-only.
     state
   end
 

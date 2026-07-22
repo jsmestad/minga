@@ -942,7 +942,6 @@ struct GUIFrameSwiftUIInvalidationTests {
                 "@ObservationIgnored private var warnedUnknownKinds: Set<String> = []",
             ]),
             ("ObservatoryState", "Sources/Views/Sidebar/ObservatoryState.swift", []),
-            ("ChangeSummaryState", "Sources/Views/Sidebar/ChangeSummaryState.swift", []),
             ("GitStatusState", "Sources/Views/Sidebar/GitStatusState.swift", []),
             ("EditTimelineState", "Sources/Views/Shared/EditTimelineState.swift", []),
             ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", []),

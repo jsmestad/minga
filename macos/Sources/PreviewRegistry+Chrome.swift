@@ -500,26 +500,4 @@ extension PreviewRegistry {
             .environment(theme)
     }
 
-    // MARK: - ChangeSummaryView
-
-    static func changeSummaryPreview() -> some View {
-        let state = ChangeSummaryState()
-        let theme = PreviewFixtures.theme()
-        state.update(
-            visible: true,
-            entries: [
-                ChangeSummaryEntry(id: 1, path: "lib/minga/accounts/registration.ex", action: .modified, linesAdded: 24, linesRemoved: 3),
-                ChangeSummaryEntry(id: 2, path: "lib/minga/accounts/validation.ex", action: .added, linesAdded: 48, linesRemoved: 0),
-                ChangeSummaryEntry(id: 3, path: "test/minga/accounts/registration_test.exs", action: .modified, linesAdded: 36, linesRemoved: 2),
-                ChangeSummaryEntry(id: 4, path: "lib/minga/accounts/old_validator.ex", action: .deleted, linesAdded: 0, linesRemoved: 31),
-                ChangeSummaryEntry(id: 5, path: "lib/minga/accounts/user.ex", action: .modified, linesAdded: 5, linesRemoved: 1),
-            ],
-            selectedIndex: 0
-        )
-
-        return ChangeSummaryView(state: state, encoder: nil)
-            .frame(width: 280, height: 400)
-            .background(theme.treeBg)
-            .environment(theme)
-    }
 }

@@ -203,7 +203,7 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
 		if index == len(crumb.Segments)-1 {
 			style = style.Foreground(m.palette().Text())
 		}
-		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
+		segments = append(segments, style.Render(segment))
 	}
 	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(bg).Render(" ❯ ")
 	text := "  " + strings.Join(segments, separator)
@@ -240,9 +240,6 @@ func (m Model) footerLines() []string {
 	}
 	if search, ok := m.searchState(); ok && search.Active {
 		status += fmt.Sprintf("  search %d/%d", search.CurrentIndex, search.Count)
-	}
-	if changes, ok := m.changeSummary(); ok && changes.Visible && len(changes.Entries) > 0 {
-		status += fmt.Sprintf("  changes %d", len(changes.Entries))
 	}
 	if ext := m.extensionRuntimeStatus(); ext != "" {
 		status += "  " + ext

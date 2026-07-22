@@ -7,7 +7,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderModel.UI.BottomPanelBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
-  alias MingaEditor.RenderModel.UI.ChangeSummaryBuilder
   alias MingaEditor.RenderModel.UI.CompletionBuilder
   alias MingaEditor.RenderModel.UI.CursorAnimationBuilder
   alias MingaEditor.RenderModel.UI.LineSpacingBuilder
@@ -43,7 +42,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
     active_buf = active_buffer_pid(ctx)
-    gui_payload = shell_gui_payload(ctx)
     sb_data = status_bar_data || ctx.status_bar_data
 
     # Bottom panel has a side effect: encoding may advance the message_store cursor.
@@ -77,7 +75,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       agent_chat: AgentChatBuilder.build(ctx),
       empty_state: EmptyStateBuilder.build(ctx),
       bottom_panel: bottom_panel,
-      change_summary: ChangeSummaryBuilder.build(gui_payload),
       edit_timeline: EditTimelineBuilder.build(ctx),
       extension_overlay: ExtensionOverlayBuilder.build(ctx),
       extension_panel: ExtensionPanelBuilder.build(),
@@ -140,16 +137,5 @@ defmodule MingaEditor.RenderModel.UI.Builder do
 
   defp build_status_bar(status_bar_data, ctx) do
     StatusBarBuilder.build(status_bar_data, ctx.theme, ctx)
-  end
-
-  @spec shell_gui_payload(Context.t()) :: term()
-  defp shell_gui_payload(%{shell: shell} = ctx) do
-    if function_exported?(shell, :gui_payload, 1) do
-      shell.gui_payload(ctx)
-    else
-      nil
-    end
-  rescue
-    _ -> nil
   end
 end

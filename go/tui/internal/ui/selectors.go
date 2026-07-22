@@ -118,15 +118,6 @@ func (m Model) searchState() (protocol.SearchState, bool) {
 	return protocol.SearchState{}, false
 }
 
-func (m Model) changeSummary() (protocol.ChangeSummary, bool) {
-	for _, payload := range m.chrome {
-		if payload.Change.Visible || len(payload.Change.Entries) > 0 {
-			return payload.Change, true
-		}
-	}
-	return protocol.ChangeSummary{}, false
-}
-
 func (m Model) hoverPopup() (protocol.HoverPopup, bool) {
 	for _, payload := range m.chrome {
 		if payload.Hover.Visible {

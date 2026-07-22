@@ -56,7 +56,6 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendFileTreeCollapseAll()
     func sendFileTreeRefresh()
     func sendCompletionSelect(index: UInt16)
-    func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
     func sendSidebarAction(sidebarId: String, kind: String, action: String)
     func sendExtensionAction(extensionID: String, action: String, payload: Data)
@@ -117,7 +116,6 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendAgentApprove()
     func sendAgentRequestChanges()
     func sendAgentDismiss()
-    func sendChangeSummaryClick(index: UInt32)
     func sendScrollToLine(line: UInt32)
 
     // Agent chat pin intents (#2654 slice 2): reported when a frontend that owns
@@ -260,7 +258,6 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendFileTreeCollapseAll() {}
     public func sendFileTreeRefresh() {}
     public func sendCompletionSelect(index: UInt16) {}
-    public func sendBreadcrumbClick(index: UInt8) {}
     public func sendTogglePanel(panel: UInt8) {}
     public func sendNewTab() {}
     public func sendSystemWillSleep() {}
@@ -297,7 +294,6 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendAgentApprove() {}
     public func sendAgentRequestChanges() {}
     public func sendAgentDismiss() {}
-    public func sendChangeSummaryClick(index: UInt32) {}
     public func sendScrollToLine(line: UInt32) {}
     public func sendChatScrolledAwayFromBottom() {}
     public func sendChatReturnedToBottom() {}

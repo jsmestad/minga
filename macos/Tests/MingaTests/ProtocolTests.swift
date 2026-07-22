@@ -980,7 +980,6 @@ final class SpyEncoder: InputEncoder, Sendable {
         case fileTreeCollapseAll
         case fileTreeRefresh
         case completionSelect(index: UInt16)
-        case breadcrumbClick(index: UInt8)
         case togglePanel(panel: UInt8)
         case sidebarAction(sidebarId: String, kind: String, action: String)
         case newTab
@@ -1086,7 +1085,6 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendFileTreeCollapseAll() { state.withLock { $0.guiActions.append(.fileTreeCollapseAll) } }
     func sendFileTreeRefresh() { state.withLock { $0.guiActions.append(.fileTreeRefresh) } }
     func sendCompletionSelect(index: UInt16) { state.withLock { $0.guiActions.append(.completionSelect(index: index)) } }
-    func sendBreadcrumbClick(index: UInt8) { state.withLock { $0.guiActions.append(.breadcrumbClick(index: index)) } }
     func sendTogglePanel(panel: UInt8) { state.withLock { $0.guiActions.append(.togglePanel(panel: panel)) } }
     func sendSidebarAction(sidebarId: String, kind: String, action: String) { state.withLock { $0.guiActions.append(.sidebarAction(sidebarId: sidebarId, kind: kind, action: action)) } }
     func sendNewTab() { state.withLock { $0.guiActions.append(.newTab) } }
@@ -1126,7 +1124,6 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendAgentApprove() { /* no-op for tests */ }
     func sendAgentRequestChanges() { /* no-op for tests */ }
     func sendAgentDismiss() { /* no-op for tests */ }
-    func sendChangeSummaryClick(index: UInt32) { /* no-op for tests */ }
     func sendScrollToLine(line: UInt32) { /* no-op for tests */ }
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
         state.withLock { $0.guiActions.append(.foldToggleAtLine(windowId: windowId, bufferLine: bufferLine)) }

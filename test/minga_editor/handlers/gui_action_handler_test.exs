@@ -122,6 +122,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert [%{id: "other"}] = NotificationCenter.list(state.feedback.notifications)
   end
 
+  test "legacy breadcrumb_click is ignored without mutating state", %{sidebar_registry: table} do
+    state = base_state(table)
+
+    assert GuiActionHandler.dispatch(state, {:breadcrumb_click, 0}) == state
+  end
+
   test "panel_switch_tab is an explicit no-op", %{sidebar_registry: table} do
     panel = %BottomPanel{visible: true, focused: true, filter: :warnings, height_percent: 45}
 

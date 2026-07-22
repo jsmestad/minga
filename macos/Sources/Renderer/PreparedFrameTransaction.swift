@@ -35,8 +35,7 @@ extension GUIFrameImpact {
 
         case .guiTabBar, .guiFileTree, .guiFileTreeSelection, .guiObservatory,
              .guiBreadcrumb, .guiGitStatus, .guiWorkspaces, .guiAgentContext,
-             .guiChangeSummary, .guiEditTimeline, .guiMinibuffer,
-             .guiSearchState, .guiSidebars:
+             .guiEditTimeline, .guiMinibuffer, .guiSearchState, .guiSidebars:
             return .shell
 
         case .guiStatusBar, .guiAgentChat, .guiEmptyState:
@@ -413,9 +412,8 @@ struct PreparedFrameTransactionBuilder {
             stageAppending(command, weight: resourceWeight, domain: .chrome)
 
         case .guiTabBar, .guiFileTree, .guiObservatory, .guiBreadcrumb,
-             .guiGitStatus, .guiWorkspaces, .guiAgentContext,
-             .guiChangeSummary, .guiNotifications, .guiEditTimeline,
-             .guiExtensionPanel, .guiSidebars:
+             .guiGitStatus, .guiWorkspaces, .guiAgentContext, .guiNotifications,
+             .guiEditTimeline, .guiExtensionPanel, .guiSidebars:
             stageReplacing(
                 command, key: .command(command.preparedUpdateKey),
                 weight: resourceWeight, domain: .chrome
@@ -764,7 +762,6 @@ private extension RenderCommand {
         case .guiGitStatus: 43
         case .guiWorkspaces: 44
         case .guiAgentContext: 45
-        case .guiChangeSummary: 46
         case .guiConfigState: 47
         case .guiNotifications: 48
         case .guiEditTimeline: 49
