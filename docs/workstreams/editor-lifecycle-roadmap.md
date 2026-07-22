@@ -3768,7 +3768,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W086/S18: Delete duplicate Popup.Active window identity
 
-- **Status:** IMPLEMENTED, pending delivery.
+- **Status:** VERIFIED
 - **Audit ID:** S18
 - **Planning profile:** `S18Planner`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S18Worker`, `editor-lifecycle-worker`, no delegation.
@@ -3791,7 +3791,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the exact two-field metadata shape, complete `new/2` cutover, authoritative Windows identity, retained popup and Observatory behavior, unchanged protocol/persistence/frontends, exact nine-file scope, line budgets, validation evidence, and merge safety.
 - **Discoveries affecting later work:** No replan trigger, production budget issue, new dependency, owner drift, Observatory boundary drift, protocol impact, persistence impact, frontend impact, or compatibility need was found.
 - **PR URL:** https://github.com/jsmestad/minga/pull/3160
-- **Implementation commit SHA:** `45bc8e354`.
-- **Merge SHA:** Pending.
-- **Merge evidence:** Pending.
-- **Completion date:** Pending.
+- **Implementation commit SHA:** `fbd62a38c`.
+- **Merge SHA:** `9285a25a8bb1133c5d738998f67e472c5ef865e0`.
+- **Merge evidence:** PR #3160 merged after CI run `29894910502` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-22.
