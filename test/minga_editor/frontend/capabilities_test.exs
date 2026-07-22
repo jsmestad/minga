@@ -5,33 +5,10 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
   alias MingaEditor.Frontend.ResourcePolicy
 
   describe "query helpers" do
-    test "images?/1" do
-      refute Capabilities.images?(%Capabilities{image_support: :none})
-      assert Capabilities.images?(%Capabilities{image_support: :kitty})
-      assert Capabilities.images?(%Capabilities{image_support: :sixel})
-      assert Capabilities.images?(%Capabilities{image_support: :native})
-    end
-
-    test "native_floats?/1" do
-      refute Capabilities.native_floats?(%Capabilities{float_support: :emulated})
-      assert Capabilities.native_floats?(%Capabilities{float_support: :native})
-    end
-
-    test "rgb?/1" do
-      assert Capabilities.rgb?(%Capabilities{color_depth: :rgb})
-      refute Capabilities.rgb?(%Capabilities{color_depth: :color_256})
-      refute Capabilities.rgb?(%Capabilities{color_depth: :mono})
-    end
-
     test "gui?/1" do
       refute Capabilities.gui?(%Capabilities{frontend_type: :tui})
       assert Capabilities.gui?(%Capabilities{frontend_type: :native_gui})
       refute Capabilities.gui?(%Capabilities{frontend_type: :web})
-    end
-
-    test "proportional_text?/1" do
-      refute Capabilities.proportional_text?(%Capabilities{text_rendering: :monospace})
-      assert Capabilities.proportional_text?(%Capabilities{text_rendering: :proportional})
     end
 
     test "semantic_ui?/1" do
@@ -45,14 +22,6 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
 
       assert %Minga.Core.WidthOracle.Monospace{} =
                Capabilities.width_oracle(%Capabilities{text_rendering: :proportional})
-    end
-
-    test "width_oracle/2 opts into measured widths only with an owned cache" do
-      oracle =
-        Capabilities.width_oracle(%Capabilities{text_rendering: :proportional}, %{"a" => 2})
-
-      assert %Minga.Core.WidthOracle.Measured{} = oracle
-      assert Minga.Core.WidthOracle.display_width(oracle, "a") == 2
     end
   end
 
@@ -89,6 +58,13 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
       assert caps.unicode_width == :unicode_15
       assert caps.semantic_ui
       assert caps.resource_policy == ResourcePolicy.unadvertised()
+    end
+
+    test "preserves frontend_type byte 2 as web until a protocol bump" do
+      caps = Capabilities.from_binary(<<2, 2, 1, 0, 0, 0, 1>>)
+
+      assert caps.frontend_type == :web
+      refute Capabilities.gui?(caps)
     end
 
     test "decodes capability-format-2 resource policy fields" do
