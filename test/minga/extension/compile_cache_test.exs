@@ -3,6 +3,9 @@ defmodule Minga.Extension.CompileCacheTest do
   # avoid the runtime's erl_child_setup EPIPE race.
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
+  @moduletag :extension_compile_cache
+
   import ExUnit.CaptureIO
 
   alias Minga.Extension.ArtifactAdmission
