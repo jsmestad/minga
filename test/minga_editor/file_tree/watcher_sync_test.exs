@@ -42,7 +42,10 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
 
     outcome = receive_outcome(scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, outcome)
-    assert {state, %Outcome{status: :completed} = applied} = WatcherSync.apply(state, outcome)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             WatcherSync.apply(state, outcome)
+
     refute_receive {:file_tree_watcher_call, :initial, _, _, _}
     EffectScheduler.finalize(scheduler, applied)
 
@@ -183,7 +186,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     failed = receive_outcome(scheduler, failed_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed)
 
-    {{state, %Outcome{status: :failed} = applied_failure}, log} =
+    {{state, %Outcome{value: {:failed, _reason}} = applied_failure}, log} =
       with_log(fn -> WatcherSync.apply(state, failed) end)
 
     EffectScheduler.finalize(scheduler, applied_failure)
@@ -207,7 +210,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     recovered = receive_outcome(scheduler, recovered_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, recovered)
 
-    assert {state, %Outcome{status: :completed} = applied_recovery} =
+    assert {state, %Outcome{value: {:completed, _result}} = applied_recovery} =
              WatcherSync.apply(state, recovered)
 
     EffectScheduler.finalize(scheduler, applied_recovery)
@@ -256,7 +259,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
         failed = receive_outcome(scheduler, request_id, :failed)
         assert :ok = EffectScheduler.claim(scheduler, failed)
 
-        assert {failed_state, %Outcome{status: :failed} = applied} =
+        assert {failed_state, %Outcome{value: {:failed, _reason}} = applied} =
                  WatcherSync.apply(current, failed)
 
         EffectScheduler.finalize(scheduler, applied)
@@ -307,7 +310,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     b_filter = receive_outcome(scheduler, b_filter_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, b_filter)
 
-    assert {state, %Outcome{status: :completed} = applied_filter} =
+    assert {state, %Outcome{value: {:completed, _result}} = applied_filter} =
              FilterWalk.apply(state, b_filter)
 
     EffectScheduler.finalize(scheduler, applied_filter)
@@ -317,7 +320,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     stale_refresh = receive_outcome(scheduler, b_refresh_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, stale_refresh)
 
-    assert {state, %Outcome{status: :stale} = applied_stale_refresh} =
+    assert {state, %Outcome{value: {:stale, _reason}} = applied_stale_refresh} =
              Refresh.apply(state, stale_refresh)
 
     EffectScheduler.finalize(scheduler, applied_stale_refresh)
@@ -336,7 +339,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     c_refresh = receive_outcome(scheduler, c_refresh_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, c_refresh)
 
-    assert {state, %Outcome{status: :completed} = applied_c_refresh} =
+    assert {state, %Outcome{value: {:completed, _result}} = applied_c_refresh} =
              Refresh.apply(state, c_refresh)
 
     EffectScheduler.finalize(scheduler, applied_c_refresh)
@@ -348,7 +351,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     b_watchers = receive_outcome_by_handler(scheduler, WatcherSync, :completed)
     assert :ok = EffectScheduler.claim(scheduler, b_watchers)
 
-    assert {state, %Outcome{status: :stale} = stale_b_watchers} =
+    assert {state, %Outcome{value: {:stale, _reason}} = stale_b_watchers} =
              WatcherSync.apply(state, b_watchers)
 
     EffectScheduler.finalize(scheduler, stale_b_watchers)
@@ -360,7 +363,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     c_watchers = receive_outcome_by_handler(scheduler, WatcherSync, :completed)
     assert :ok = EffectScheduler.claim(scheduler, c_watchers)
 
-    assert {state, %Outcome{status: :completed} = applied_c_watchers} =
+    assert {state, %Outcome{value: {:completed, _result}} = applied_c_watchers} =
              WatcherSync.apply(state, c_watchers)
 
     EffectScheduler.finalize(scheduler, applied_c_watchers)
@@ -390,7 +393,10 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     assert_receive {:file_tree_scan_started, :missing, _worker}, @timeout
     failed = receive_outcome(scheduler, refresh_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed)
-    assert {state, %Outcome{status: :failed} = applied_failure} = Refresh.apply(state, failed)
+
+    assert {state, %Outcome{value: {:failed, _reason}} = applied_failure} =
+             Refresh.apply(state, failed)
+
     EffectScheduler.finalize(scheduler, applied_failure)
 
     assert {:error, _reason} = FileTreeState.status(file_tree(state))
@@ -402,7 +408,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     cleanup = receive_outcome_by_handler(scheduler, WatcherSync, :completed)
     assert :ok = EffectScheduler.claim(scheduler, cleanup)
 
-    assert {state, %Outcome{status: :completed} = applied_cleanup} =
+    assert {state, %Outcome{value: {:completed, _result}} = applied_cleanup} =
              WatcherSync.apply(state, cleanup)
 
     EffectScheduler.finalize(scheduler, applied_cleanup)
@@ -424,7 +430,10 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
 
     outcome = receive_outcome(scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, outcome)
-    assert {state, %Outcome{status: :completed} = applied} = WatcherSync.apply(state, outcome)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             WatcherSync.apply(state, outcome)
+
     EffectScheduler.finalize(scheduler, applied)
     state
   end
@@ -467,7 +476,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
 
   defp receive_outcome(scheduler, request_id, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                    %Outcome{request: %{id: ^request_id}, value: {^status, _payload}} = outcome},
                    @timeout
 
     outcome
@@ -475,7 +484,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
 
   defp receive_outcome_by_handler(scheduler, handler, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{handler: ^handler}, status: ^status} = outcome},
+                    %Outcome{request: %{handler: ^handler}, value: {^status, _payload}} = outcome},
                    @timeout
 
     outcome

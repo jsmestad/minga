@@ -74,7 +74,7 @@ defmodule MingaEditor.Session.Save do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(%EditorState{} = state, %Outcome{status: :failed, reason: reason} = outcome) do
+  def apply(%EditorState{} = state, %Outcome{value: {:failed, reason}} = outcome) do
     Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
     {state, outcome}
   end

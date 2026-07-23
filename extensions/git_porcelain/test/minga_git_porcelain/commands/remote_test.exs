@@ -96,7 +96,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
     assert :ok = EffectScheduler.cancel(scheduler, running.request.id)
     {_state, canceled} = receive_and_apply(returned, scheduler, :canceled)
-    assert canceled.reason == :requested
+    assert canceled.value == {:canceled, :requested}
 
     Stub.set_remote_blocker(git_root, :pull, self())
     status_state = git_status_state(%{state | effect_scheduler: scheduler})
@@ -145,7 +145,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       end
 
       {result, outcome} = receive_and_apply(returned, scheduler, :completed)
-      assert outcome.result == :ok
+      assert outcome.value == {:completed, :ok}
       assert result.shell_runtime.state.notice.message == success_message(operation)
 
       assert %{message: message, level: :success, action: nil} =
@@ -174,7 +174,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
     _running = receive_running(scheduler, :push)
     {result, outcome} = receive_and_apply(returned, scheduler, :failed)
-    assert outcome.reason == "non-fast-forward rejected"
+    assert outcome.value == {:failed, "non-fast-forward rejected"}
     assert result.shell_runtime.state.notice.message == "Push failed: non-fast-forward rejected"
 
     assert %{
@@ -202,10 +202,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     _running = receive_running(scheduler, :push)
     {result, outcome} = receive_and_apply(returned, scheduler, :failed)
 
-    assert match?(
-             {:source_unavailable, @source, RemoteOperation, :execute, _},
-             outcome.reason
-           )
+    assert {:failed, {:source_unavailable, @source, RemoteOperation, :execute, _}} = outcome.value
 
     assert String.starts_with?(
              result.shell_runtime.state.notice.message,
@@ -244,7 +241,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       {result, outcome} = receive_and_apply(returned, scheduler, :failed)
       expected_reason = if failing_operation == :pull, do: "pull failed: #{reason}", else: reason
-      assert outcome.reason == expected_reason
+      assert outcome.value == {:failed, expected_reason}
 
       expected_message = "Pull and retry failed: #{expected_reason}"
       assert result.shell_runtime.state.notice.message == expected_message
@@ -290,10 +287,8 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       assert String.starts_with?(result.shell_runtime.state.notice.message, expected_message)
 
       if match?({:raise, _}, action) do
-        assert match?(
-                 {:callback_failed, @source, RemoteOperation, :execute, :exception, _},
-                 outcome.reason
-               )
+        assert {:failed, {:callback_failed, @source, RemoteOperation, :execute, :exception, _}} =
+                 outcome.value
       end
 
       assert %{level: :error, action: nil} = Runtime.state(result.shell_runtime).git_toast
@@ -326,7 +321,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
     assert :ok = EffectScheduler.cancel(scheduler, running.request.id)
     {result, outcome} = receive_and_apply(returned, scheduler, :canceled)
-    assert outcome.reason == :requested
+    assert outcome.value == {:canceled, :requested}
     assert result.shell_runtime.state.notice.message == "Git operation canceled"
 
     assert %{message: "Git operation canceled", level: :error} =
@@ -423,7 +418,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   defp receive_running(_scheduler, operation) do
     assert_receive {:effect_lifecycle,
                     %Outcome{
-                      status: :running,
+                      value: :running,
                       request: %{effect: %RemoteOperation{operation: ^operation}}
                     } = outcome},
                    @timeout
@@ -432,7 +427,9 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   end
 
   defp receive_and_apply(state, scheduler, status) do
-    assert_receive {:effect_result, ^scheduler, %Outcome{status: ^status} = outcome}, @timeout
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {^status, _payload}} = outcome},
+                   @timeout
+
     assert :ok = EffectScheduler.claim(scheduler, outcome)
     {state, outcome} = outcome.request.handler.apply(state, outcome)
     EffectScheduler.finalize(scheduler, outcome)

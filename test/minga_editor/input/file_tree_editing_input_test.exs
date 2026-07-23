@@ -55,7 +55,10 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     request_id = ft(state).filter_request.token
     outcome = receive_outcome(state.effect_scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(state.effect_scheduler, outcome)
-    assert {state, %Outcome{status: :completed} = applied} = FilterWalk.apply(state, outcome)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             FilterWalk.apply(state, outcome)
+
     EffectScheduler.finalize(state.effect_scheduler, applied)
     cancel_render_timer(state)
   end
@@ -64,14 +67,17 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     {:admitted, _root, %{token: request_id}} = ft(state).refresh.phase
     outcome = receive_outcome(state.effect_scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(state.effect_scheduler, outcome)
-    assert {state, %Outcome{status: :completed} = applied} = Refresh.apply(state, outcome)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             Refresh.apply(state, outcome)
+
     EffectScheduler.finalize(state.effect_scheduler, applied)
     cancel_render_timer(state)
   end
 
   defp receive_outcome(scheduler, request_id, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                    %Outcome{request: %{id: ^request_id}, value: {^status, _payload}} = outcome},
                    2_000
 
     outcome

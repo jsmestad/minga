@@ -13,6 +13,7 @@ defmodule MingaEditor.EffectSchedulerTest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.GenerationSupervisor
+  alias MingaEditor.State.OperationQueue
 
   @effect_timeout 15_000
 
@@ -31,7 +32,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert outcome.request.resource == {:todo_search, root}
     assert outcome.request.effect.root == root
-    assert outcome.reason == "TODO search root rejected: not_a_directory"
+    assert outcome.value == {:failed, "TODO search root rejected: not_a_directory"}
     finalize_once(scheduler, outcome)
   end
 
@@ -45,7 +46,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
     assert_receive {:effect_started, :normal, _worker, [:normal]}
     outcome = receive_candidate(scheduler, request.id, :completed)
-    assert outcome.result == :done
+    assert outcome.value == {:completed, :done}
     assert :sys.get_state(scheduler).timers == %{}
 
     send(scheduler, {:effect_timeout, request.id})
@@ -83,7 +84,12 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert EffectScheduler.schedule(scheduler, raised) == {:ok, raised.id, :running}
     assert_receive {:effect_started, :raised, _raised_worker, [:raised]}
     raised_outcome = receive_candidate(scheduler, raised.id, :failed)
-    assert match?({:worker_exit, {%RuntimeError{message: "boom"}, _stack}}, raised_outcome.reason)
+
+    assert match?(
+             {:failed, {:worker_exit, {%RuntimeError{message: "boom"}, _stack}}},
+             raised_outcome.value
+           )
+
     assert :sys.get_state(scheduler).timers == %{}
     finalize_once(scheduler, raised_outcome)
 
@@ -95,7 +101,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     Process.exit(killed_worker, :kill)
 
     killed_outcome = receive_candidate(scheduler, killed.id, :failed)
-    assert killed_outcome.reason == {:worker_exit, :killed}
+    assert killed_outcome.value == {:failed, {:worker_exit, :killed}}
     assert :sys.get_state(scheduler).timers == %{}
     finalize_once(scheduler, killed_outcome)
   end
@@ -113,7 +119,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     worker_monitor = Process.monitor(worker)
 
     outcome = receive_candidate(scheduler, request.id, :failed)
-    assert outcome.reason == :timeout
+    assert outcome.value == {:failed, :timeout}
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, 1_000
 
     finalize_once(scheduler, outcome)
@@ -136,7 +142,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     send(scheduler, {:effect_timeout, first.id})
 
     outcome = receive_candidate(scheduler, first.id, :failed)
-    assert outcome.reason == :timeout
+    assert outcome.value == {:failed, :timeout}
     assert EffectScheduler.stats(scheduler) == stats(1, 0, 1, 1, 2)
     refute_received {:effect_started, :successor, _worker, _payloads}
 
@@ -172,7 +178,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
     outcome = receive_candidate(scheduler, request.id, :failed)
-    assert match?({:start_failed, _reason}, outcome.reason)
+    assert match?({:failed, {:start_failed, _reason}}, outcome.value)
     finalize_once(scheduler, outcome)
     assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
   end
@@ -187,7 +193,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert :ok = EffectScheduler.cancel(scheduler, request.id)
     outcome = receive_candidate(scheduler, request.id, :canceled)
-    assert outcome.reason == :requested
+    assert outcome.value == {:canceled, :requested}
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
     assert :sys.get_state(scheduler).timers == %{}
     finalize_once(scheduler, outcome)
@@ -267,6 +273,9 @@ defmodule MingaEditor.EffectSchedulerTest do
     unclaimed_outcome = receive_candidate(scheduler, unclaimed.id, :completed)
     claimed_outcome = receive_candidate(scheduler, claimed.id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, claimed_outcome)
+
+    fabricated = %{unclaimed_outcome | value: {:failed, :fabricated}}
+    assert EffectScheduler.claim(scheduler, fabricated) == {:error, :not_pending}
     assert EffectScheduler.active_source?(scheduler, source)
 
     assert :ok = EffectScheduler.cancel_source(scheduler, source)
@@ -340,7 +349,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert :ok = EffectScheduler.cancel_operation(scheduler, request.operation_id)
     outcome = receive_candidate(scheduler, request.id, :canceled)
-    assert outcome.reason == :requested
+    assert outcome.value == {:canceled, :requested}
     finalize_once(scheduler, outcome)
 
     assert EffectScheduler.cancel_operation(scheduler, request.operation_id) ==
@@ -358,7 +367,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert :ok = EffectScheduler.cancel_operation(scheduler, queued.operation_id)
     queued_outcome = receive_candidate(scheduler, queued_id, :canceled)
-    assert queued_outcome.reason == :requested
+    assert queued_outcome.value == {:canceled, :requested}
     finalize_once(scheduler, queued_outcome)
 
     assert :ok = EffectScheduler.cancel_operation(scheduler, first.operation_id)
@@ -497,6 +506,38 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_terminal_direct(follow_up.id, :completed, nil)
   end
 
+  test "same-resource FIFO stale finalization releases admission and starts queued successor" do
+    scheduler = start_scheduler()
+    policy = Policy.fifo(1)
+    first = EffectProbe.request(self(), :first_stale_fifo, :repository, policy)
+    second = EffectProbe.request(self(), :second_stale_fifo, :repository, policy)
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_receive {:effect_started, :first_stale_fifo, first_worker, [:first_stale_fifo]}
+    assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+    assert EffectScheduler.stats(scheduler) == stats(1, 1, 1, 0, 2)
+
+    send(first_worker, {:release_effect, :first_stale_fifo})
+    first_outcome = receive_candidate(scheduler, first.id, :completed)
+    first_request = first_outcome.request
+    assert :ok = EffectScheduler.claim(scheduler, first_outcome)
+    stale = Outcome.stale(first_outcome, :domain_reclassified)
+
+    EffectScheduler.finalize(scheduler, stale)
+
+    assert_receive {:effect_terminal,
+                    %Outcome{
+                      request: ^first_request,
+                      value: {:stale, :domain_reclassified}
+                    }}
+
+    assert EffectScheduler.stats(scheduler) == stats(1, 1, 0, 0, 1)
+    assert_receive {:effect_started, :second_stale_fifo, second_worker, [:second_stale_fifo]}
+
+    send(second_worker, {:release_effect, :second_stale_fifo})
+    finalize_once(scheduler, receive_candidate(scheduler, second.id, :completed))
+  end
+
   test "bounded FIFO rejects overflow without admitting the request" do
     scheduler = start_scheduler()
     policy = Policy.fifo(1)
@@ -511,9 +552,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: second_id},
-                      status: :queued,
-                      queue_position: 1,
-                      queue_total: 1
+                      value: {:queued, %OperationQueue{position: 1, total: 1}}
                     }}
 
     assert second_id == second.id
@@ -522,8 +561,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert :ok = EffectScheduler.cancel(scheduler, second.id)
     canceled = receive_candidate(scheduler, second.id, :canceled)
-    assert canceled.queue_position == nil
-    assert canceled.queue_total == nil
+    assert canceled.value == {:canceled, :requested}
     finalize_once(scheduler, canceled)
     assert :ok = EffectScheduler.cancel(scheduler, first.id)
     finalize_once(scheduler, receive_candidate(scheduler, first.id, :canceled))
@@ -587,7 +625,10 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
 
     assert_receive {:effect_lifecycle,
-                    %Outcome{request: %Request{id: second_id}, queue_position: 1, queue_total: 1}}
+                    %Outcome{
+                      request: %Request{id: second_id},
+                      value: {:queued, %OperationQueue{position: 1, total: 1}}
+                    }}
 
     assert second_id == second.id
     assert EffectScheduler.schedule(scheduler, third) == {:ok, third.id, :queued}
@@ -595,14 +636,16 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: refreshed_second_id},
-                      queue_position: 1,
-                      queue_total: 2
+                      value: {:queued, %OperationQueue{position: 1, total: 2}}
                     }}
 
     assert refreshed_second_id == second.id
 
     assert_receive {:effect_lifecycle,
-                    %Outcome{request: %Request{id: third_id}, queue_position: 2, queue_total: 2}}
+                    %Outcome{
+                      request: %Request{id: third_id},
+                      value: {:queued, %OperationQueue{position: 2, total: 2}}
+                    }}
 
     assert third_id == third.id
     send(first_worker, {:release_effect, :first})
@@ -611,9 +654,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: advanced_third_id},
-                      status: :queued,
-                      queue_position: 1,
-                      queue_total: 1
+                      value: {:queued, %OperationQueue{position: 1, total: 1}}
                     }}
 
     assert advanced_third_id == third.id
@@ -641,9 +682,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: second_id},
-                      status: :queued,
-                      queue_position: 1,
-                      queue_total: 1
+                      value: {:queued, %OperationQueue{position: 1, total: 1}}
                     }}
 
     assert second_id == second.id
@@ -652,9 +691,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: refreshed_second_id},
-                      status: :queued,
-                      queue_position: 1,
-                      queue_total: 2
+                      value: {:queued, %OperationQueue{position: 1, total: 2}}
                     }}
 
     assert refreshed_second_id == second.id
@@ -662,9 +699,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: third_id},
-                      status: :queued,
-                      queue_position: 2,
-                      queue_total: 2
+                      value: {:queued, %OperationQueue{position: 2, total: 2}}
                     }}
 
     assert third_id == third.id
@@ -673,9 +708,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_lifecycle,
                     %Outcome{
                       request: %Request{id: refreshed_third_id},
-                      status: :queued,
-                      queue_position: 1,
-                      queue_total: 1
+                      value: {:queued, %OperationQueue{position: 1, total: 1}}
                     }}
 
     assert refreshed_third_id == third.id
@@ -883,8 +916,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_receive {:effect_terminal,
                     %Outcome{
                       request: %{id: ^request_id},
-                      status: :canceled,
-                      reason: :owner_shutdown
+                      value: {:canceled, :owner_shutdown}
                     }}
 
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
@@ -904,10 +936,10 @@ defmodule MingaEditor.EffectSchedulerTest do
     replacement_id = replacement.id
 
     assert_receive {:owner_result, ^second_owner,
-                    %Outcome{request: %{id: ^replacement_id}, status: :completed}}
+                    %Outcome{request: %{id: ^replacement_id}, value: {:completed, _result}}}
 
     assert_receive {:effect_terminal,
-                    %Outcome{request: %{id: ^replacement_id}, status: :completed}}
+                    %Outcome{request: %{id: ^replacement_id}, value: {:completed, _result}}}
 
     assert Supervisor.count_children(generation).active == 3
     refute_received {:effect_terminal, %Outcome{request: %{id: ^request_id}}}
@@ -958,43 +990,43 @@ defmodule MingaEditor.EffectSchedulerTest do
     end
   end
 
-  @spec assert_owner_lifecycle(reference(), Outcome.status(), term() | nil) :: :ok
+  @spec assert_owner_lifecycle(reference(), atom(), term() | nil) :: :ok
   defp assert_owner_lifecycle(request_id, status, reason \\ nil) do
     assert_receive {:owner_message,
-                    {:effect_lifecycle,
-                     %Outcome{request: %{id: ^request_id}, status: ^status, reason: ^reason}}},
+                    {:effect_lifecycle, %Outcome{request: %{id: ^request_id}} = outcome}},
                    @effect_timeout
 
+    assert outcome_matches?(outcome, status, reason)
     :ok
   end
 
-  @spec receive_owner_candidate(pid(), reference(), Outcome.terminal_status()) :: Outcome.t()
+  @spec receive_owner_candidate(pid(), reference(), atom()) :: Outcome.t()
   defp receive_owner_candidate(scheduler, request_id, status) do
     assert_receive {:owner_message,
-                    {:effect_result, ^scheduler,
-                     %Outcome{request: %{id: ^request_id}, status: ^status} = outcome}},
+                    {:effect_result, ^scheduler, %Outcome{request: %{id: ^request_id}} = outcome}},
                    @effect_timeout
 
+    assert outcome_matches?(outcome, status)
     outcome
   end
 
-  @spec receive_candidate(pid(), reference(), Outcome.terminal_status()) :: Outcome.t()
+  @spec receive_candidate(pid(), reference(), atom()) :: Outcome.t()
   defp receive_candidate(scheduler, request_id, status) do
-    assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: id}, status: ^status} = outcome}
+    assert_receive {:effect_result, ^scheduler, %Outcome{request: %{id: id}} = outcome}
                    when id == request_id,
                    @effect_timeout
 
+    assert outcome_matches?(outcome, status)
     outcome
   end
 
   @spec finalize_once(pid(), Outcome.t()) :: :ok
   defp finalize_once(scheduler, %Outcome{} = outcome) do
     request_id = outcome.request.id
-    status = outcome.status
+    value = outcome.value
     EffectScheduler.finalize(scheduler, outcome)
 
-    assert_receive {:effect_terminal, %Outcome{request: %{id: ^request_id}, status: ^status}},
+    assert_receive {:effect_terminal, %Outcome{request: %{id: ^request_id}, value: ^value}},
                    @effect_timeout
 
     _stats = EffectScheduler.stats(scheduler)
@@ -1021,13 +1053,28 @@ defmodule MingaEditor.EffectSchedulerTest do
     }
   end
 
-  @spec assert_terminal_direct(reference(), Outcome.terminal_status(), term()) :: :ok
+  @spec assert_terminal_direct(reference(), atom(), term()) :: :ok
   defp assert_terminal_direct(request_id, status, reason) do
-    assert_receive {:effect_terminal,
-                    %Outcome{request: %{id: id}, status: ^status, reason: ^reason}}
+    assert_receive {:effect_terminal, %Outcome{request: %{id: id}} = outcome}
                    when id == request_id,
                    @effect_timeout
 
+    assert outcome_matches?(outcome, status, reason)
     :ok
   end
+
+  defp outcome_matches?(%Outcome{value: :running}, :running, nil), do: true
+  defp outcome_matches?(%Outcome{value: {:queued, %OperationQueue{}}}, :queued, nil), do: true
+
+  defp outcome_matches?(%Outcome{value: {status, _payload}}, status, nil)
+       when status in [:completed, :failed, :canceled, :stale],
+       do: true
+
+  defp outcome_matches?(%Outcome{value: {status, reason}}, status, reason)
+       when status in [:completed, :failed, :canceled, :stale],
+       do: true
+
+  defp outcome_matches?(%Outcome{}, _status, _reason), do: false
+
+  defp outcome_matches?(outcome, status), do: outcome_matches?(outcome, status, nil)
 end

@@ -149,12 +149,12 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       {snapshot, state, revision, request} = live_request()
       assert Project.snapshot().activation_id == snapshot.activation_id
 
-      assert {completed_state, %Outcome{status: :completed}} =
+      assert {completed_state, %Outcome{value: {:completed, _result}}} =
                TodoSearch.apply(state, Outcome.completed(request, result(revision)))
 
       refute completed_state == state
 
-      assert {failed_state, %Outcome{status: :failed}} =
+      assert {failed_state, %Outcome{value: {:failed, _reason}}} =
                TodoSearch.apply(state, Outcome.failed(request, "probe failure"))
 
       refute failed_state == state
@@ -184,7 +184,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
     test "marks a completed result stale when its carried revision differs" do
       {_snapshot, state, _revision, request} = live_request()
 
-      assert {^state, %Outcome{status: :stale, reason: :revision_mismatch}} =
+      assert {^state, %Outcome{value: {:stale, :revision_mismatch}}} =
                TodoSearch.apply(state, Outcome.completed(request, result(make_ref())))
     end
 
@@ -306,10 +306,10 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
 
   @spec assert_stale_pair(EditorState.t(), term(), reference(), atom()) :: :ok
   defp assert_stale_pair(state, request, revision, reason) do
-    assert {^state, %Outcome{status: :stale, reason: ^reason}} =
+    assert {^state, %Outcome{value: {:stale, ^reason}}} =
              TodoSearch.apply(state, Outcome.completed(request, result(revision)))
 
-    assert {^state, %Outcome{status: :stale, reason: ^reason}} =
+    assert {^state, %Outcome{value: {:stale, ^reason}}} =
              TodoSearch.apply(state, Outcome.failed(request, "probe failure"))
 
     :ok

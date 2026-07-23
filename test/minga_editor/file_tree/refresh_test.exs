@@ -10,6 +10,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
   alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.OperationQueue
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -99,7 +100,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
 
     assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
 
-    {state, %Outcome{status: :running}} =
+    {state, %Outcome{value: :running}} =
       Refresh.apply(state, receive_lifecycle(first.id, :running))
 
     assert_receive {:file_tree_scan_started, :first_composed, first_worker}, @timeout
@@ -110,7 +111,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
     state = invalidate_current(state)
     assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
 
-    {state, %Outcome{status: :queued}} =
+    {state, %Outcome{value: {:queued, %OperationQueue{}}}} =
       Refresh.apply(state, receive_lifecycle(second.id, :queued))
 
     state = track(state, second)
@@ -119,15 +120,15 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert EffectScheduler.schedule(scheduler, latest) == {:ok, latest.id, :queued}
     state = track(state, latest)
 
-    {state, %Outcome{status: :stale}} =
+    {state, %Outcome{value: {:stale, _reason}}} =
       Refresh.apply(state, receive_lifecycle(second.id, :stale))
 
-    {state, %Outcome{status: :queued}} =
+    {state, %Outcome{value: {:queued, %OperationQueue{}}}} =
       Refresh.apply(state, receive_lifecycle(latest.id, :queued))
 
     assert :ok = EffectScheduler.claim(scheduler, first_outcome)
 
-    assert {state, %Outcome{status: :stale} = stale_first} =
+    assert {state, %Outcome{value: {:stale, _reason}} = stale_first} =
              Refresh.apply(state, first_outcome)
 
     assert state |> file_tree() |> FileTreeState.tree() == original
@@ -138,7 +139,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
     latest_outcome = receive_outcome(scheduler, latest.id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, latest_outcome)
 
-    assert {state, %Outcome{status: :completed} = accepted_latest} =
+    assert {state, %Outcome{value: {:completed, _result}} = accepted_latest} =
              Refresh.apply(state, latest_outcome)
 
     EffectScheduler.finalize(scheduler, accepted_latest)
@@ -157,7 +158,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert_lifecycle(failed.id, :running)
     assert_receive {:file_tree_scan_started, :failed_work, _worker}, @timeout
     outcome = receive_outcome(scheduler, failed.id, :failed)
-    assert outcome.reason == :gone
+    assert outcome.value == {:failed, :gone}
     :ok = EffectScheduler.claim(scheduler, outcome)
     EffectScheduler.finalize(scheduler, outcome)
     assert_terminal(failed.id, :failed)
@@ -182,7 +183,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
 
     assert :ok = EffectScheduler.cancel(scheduler, canceled.id)
     outcome = receive_outcome(scheduler, canceled.id, :canceled)
-    assert outcome.reason == :requested
+    assert outcome.value == {:canceled, :requested}
     assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}
     :ok = EffectScheduler.claim(scheduler, outcome)
     EffectScheduler.finalize(scheduler, outcome)
@@ -302,23 +303,30 @@ defmodule MingaEditor.FileTree.RefreshTest do
   end
 
   defp receive_lifecycle(request_id, status) do
-    assert_receive {:effect_lifecycle,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
-                   @timeout
-
+    assert_receive {:effect_lifecycle, %Outcome{request: %{id: ^request_id}} = outcome}, @timeout
+    assert outcome_status?(outcome, status)
     outcome
   end
 
   defp receive_outcome(scheduler, request_id, status) do
-    assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+    assert_receive {:effect_result, ^scheduler, %Outcome{request: %{id: ^request_id}} = outcome},
                    @timeout
 
+    assert outcome_status?(outcome, status)
     outcome
   end
 
   defp assert_terminal(request_id, status) do
-    assert_receive {:effect_terminal, %Outcome{request: %{id: ^request_id}, status: ^status}},
-                   @timeout
+    assert_receive {:effect_terminal, %Outcome{request: %{id: ^request_id}} = outcome}, @timeout
+    assert outcome_status?(outcome, status)
   end
+
+  defp outcome_status?(%Outcome{value: :running}, :running), do: true
+  defp outcome_status?(%Outcome{value: {:queued, %OperationQueue{}}}, :queued), do: true
+
+  defp outcome_status?(%Outcome{value: {status, _payload}}, status)
+       when status in [:completed, :failed, :canceled, :stale],
+       do: true
+
+  defp outcome_status?(%Outcome{}, _status), do: false
 end

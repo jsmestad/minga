@@ -80,7 +80,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
     assert_receive {:effect_lifecycle,
                     %Outcome{
-                      status: :running,
+                      value: :running,
                       request: %{id: request_id, effect: %EventEffect{}}
                     }},
                    @timeout
@@ -91,12 +91,16 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
     outcome = receive_outcome(ctx.scheduler, request_id, :completed)
 
-    assert %EventDispatchResult{status: :handled, state: outcome_state, failures: []} =
-             outcome.result
+    assert {:completed,
+            %EventDispatchResult{status: :handled, state: outcome_state, failures: []}} =
+             outcome.value
 
     assert outcome_state == ctx.state
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
-    assert {state, %Outcome{status: :completed} = applied} = EventEffect.apply(ctx.state, outcome)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             EventEffect.apply(ctx.state, outcome)
+
     assert state == ctx.state
     EffectScheduler.finalize(ctx.scheduler, applied)
   end
@@ -125,7 +129,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
         callback_admission: ctx.code_lease
       )
 
-    assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},
+    assert_receive {:effect_lifecycle, %Outcome{value: :running, request: %{id: request_id}}},
                    @timeout
 
     assert_receive {:extension_callback_entered, ^token, worker}, @timeout
@@ -155,18 +159,21 @@ defmodule MingaEditor.Extension.EventEffectTest do
         callback_admission: ctx.code_lease
       )
 
-    assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},
+    assert_receive {:effect_lifecycle, %Outcome{value: :running, request: %{id: request_id}}},
                    @timeout
 
     outcome = receive_outcome(ctx.scheduler, request_id, :completed)
 
-    assert %EventDispatchResult{status: :not_matched, state: outcome_state, failures: []} =
-             outcome.result
+    assert {:completed,
+            %EventDispatchResult{status: :not_matched, state: outcome_state, failures: []}} =
+             outcome.value
 
     assert outcome_state == ctx.state
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
     current = EditorState.apply_theme(state, MingaEditor.UI.Theme.get!(:doom_one))
-    assert {result, %Outcome{status: :stale} = applied} = EventEffect.apply(current, outcome)
+
+    assert {result, %Outcome{value: {:stale, _reason}} = applied} =
+             EventEffect.apply(current, outcome)
 
     assert result.shell_runtime.state.notice.message ==
              "Git porcelain extension is disabled or failed to load"
@@ -190,18 +197,22 @@ defmodule MingaEditor.Extension.EventEffectTest do
           callback_admission: ctx.code_lease
         )
 
-      assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},
+      assert_receive {:effect_lifecycle, %Outcome{value: :running, request: %{id: request_id}}},
                      @timeout
 
       outcome = receive_outcome(ctx.scheduler, request_id, :completed)
 
-      assert %EventDispatchResult{status: :not_matched, state: outcome_state, failures: []} =
-               outcome.result
+      assert {:completed,
+              %EventDispatchResult{status: :not_matched, state: outcome_state, failures: []}} =
+               outcome.value
 
       assert outcome_state == ctx.state
       assert EventEffect.render?(outcome)
       assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
-      assert {result, %Outcome{status: :completed} = applied} = EventEffect.apply(state, outcome)
+
+      assert {result, %Outcome{value: {:completed, _result}} = applied} =
+               EventEffect.apply(state, outcome)
+
       assert result.shell_runtime.state.notice.message == message
       EffectScheduler.finalize(ctx.scheduler, applied)
     end)
@@ -225,7 +236,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
     assert_receive {:effect_lifecycle,
                     %Outcome{
-                      status: :running,
+                      value: :running,
                       request: %{id: request_id, source: nil, resource: resource}
                     }},
                    @timeout
@@ -234,15 +245,17 @@ defmodule MingaEditor.Extension.EventEffectTest do
     outcome = receive_outcome(ctx.scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
 
-    assert %EventDispatchResult{
-             status: :callback_failed,
-             failures: [failure],
-             state: callback_state
-           } =
-             outcome.result
+    assert {:completed,
+            %EventDispatchResult{
+              status: :callback_failed,
+              failures: [failure],
+              state: callback_state
+            }} = outcome.value
 
-    assert {^state, %Outcome{status: :completed} = applied} = EventEffect.apply(state, outcome)
-    assert applied.result.state == callback_state
+    assert {^state, %Outcome{value: {:completed, _result}} = applied} =
+             EventEffect.apply(state, outcome)
+
+    assert {:completed, %EventDispatchResult{state: ^callback_state}} = applied.value
     assert EventEffect.render?(applied)
     EffectScheduler.finalize(ctx.scheduler, applied)
 
@@ -260,7 +273,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
         callback_admission: ctx.code_lease
       )
 
-    assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},
+    assert_receive {:effect_lifecycle, %Outcome{value: :running, request: %{id: request_id}}},
                    @timeout
 
     assert_receive {:extension_callback_entered, ^token, worker}, @timeout
@@ -271,7 +284,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
     outcome = receive_outcome(ctx.scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
 
-    assert {^current, %Outcome{status: :stale, reason: :editor_state_changed} = applied} =
+    assert {^current, %Outcome{value: {:stale, :editor_state_changed}} = applied} =
              EventEffect.apply(current, outcome)
 
     EffectScheduler.finalize(ctx.scheduler, applied)
@@ -289,13 +302,16 @@ defmodule MingaEditor.Extension.EventEffectTest do
         timeout_ms: 500
       )
 
-    assert_receive {:effect_lifecycle, %Outcome{status: :running, request: %{id: request_id}}},
+    assert_receive {:effect_lifecycle, %Outcome{value: :running, request: %{id: request_id}}},
                    @timeout
 
     assert_receive {:extension_callback_entered, ^token, _worker}, @timeout
     outcome = receive_outcome(ctx.scheduler, request_id, :failed)
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
-    assert {state, %Outcome{status: :failed} = applied} = EventEffect.apply(ctx.state, outcome)
+
+    assert {state, %Outcome{value: {:failed, _reason}} = applied} =
+             EventEffect.apply(ctx.state, outcome)
+
     assert state == ctx.state
     EffectScheduler.finalize(ctx.scheduler, applied)
     _lease_state = :sys.get_state(ctx.code_lease)
@@ -330,7 +346,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
   defp receive_outcome(scheduler, request_id, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                    %Outcome{request: %{id: ^request_id}, value: {^status, _payload}} = outcome},
                    @timeout
 
     outcome

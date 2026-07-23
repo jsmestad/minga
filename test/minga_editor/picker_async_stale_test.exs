@@ -148,7 +148,7 @@ defmodule MingaEditor.PickerAsyncStaleTest do
 
     outcome = Outcome.completed(request, result)
 
-    assert {^state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+    assert {^state, %Outcome{value: {:stale, :picker_closed_or_replaced}}} =
              TodoSearch.apply(state, outcome)
   end
 
@@ -225,7 +225,7 @@ defmodule MingaEditor.PickerAsyncStaleTest do
       meta: %{}
     }
 
-    assert {^state, %Outcome{status: :stale, reason: :workspace_rerooted}} =
+    assert {^state, %Outcome{value: {:stale, :workspace_rerooted}}} =
              TodoSearch.apply(state, Outcome.completed(request, result))
   end
 

@@ -51,7 +51,7 @@ defmodule MingaEditor.Session.RecoveryTest do
     request = Recovery.request(state, [swap_dir: nil], [session_dir: dir], false, true)
 
     completed = Outcome.completed(request, {:restore, snapshot(false)})
-    assert {restored, %Outcome{status: :completed}} = Recovery.apply(state, completed)
+    assert {restored, %Outcome{value: {:completed, _result}}} = Recovery.apply(state, completed)
     assert restored.session == state.session
     assert Recovery.render?(completed)
 
@@ -63,7 +63,7 @@ defmodule MingaEditor.Session.RecoveryTest do
 
     changed = %{state | session: SessionState.new(session_dir: Path.join(dir, "other"))}
 
-    assert {^changed, %Outcome{status: :stale, reason: :session_configuration_changed}} =
+    assert {^changed, %Outcome{value: {:stale, :session_configuration_changed}}} =
              Recovery.apply(changed, completed)
 
     workspace =
@@ -75,7 +75,7 @@ defmodule MingaEditor.Session.RecoveryTest do
 
     workspace_changed = then(state, fn state -> %{state | workspace: workspace} end)
 
-    assert {^workspace_changed, %Outcome{status: :stale, reason: :workspace_changed}} =
+    assert {^workspace_changed, %Outcome{value: {:stale, :workspace_changed}}} =
              Recovery.apply(workspace_changed, completed)
   end
 

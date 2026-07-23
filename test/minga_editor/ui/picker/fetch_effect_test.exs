@@ -139,7 +139,7 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
     stale_request = FetchEffect.request(Source, nil, context(:success), make_ref())
     stale_outcome = Outcome.completed(stale_request, {:ok, items, candidates, %{}})
 
-    assert {^state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+    assert {^state, %Outcome{value: {:stale, :picker_closed_or_replaced}}} =
              FetchEffect.apply(state, stale_outcome)
   end
 
@@ -156,7 +156,7 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
     {source_b_state, _source_b_revision} =
       PickerUI.open_loading(source_a_state, ReplacementSource)
 
-    assert {^source_b_state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+    assert {^source_b_state, %Outcome{value: {:stale, :picker_closed_or_replaced}}} =
              FetchEffect.apply(source_b_state, source_a_outcome)
 
     {:picker, payload} = source_b_state.shell_runtime.state.modal
@@ -202,7 +202,7 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
     outcome = Outcome.completed(request, {:ok, items, Candidate.from_items(items), %{}})
     closed = PickerUI.close(state)
 
-    assert {^closed, %Outcome{status: :stale}} = FetchEffect.apply(closed, outcome)
+    assert {^closed, %Outcome{value: {:stale, _reason}}} = FetchEffect.apply(closed, outcome)
   end
 
   defp context(action) do

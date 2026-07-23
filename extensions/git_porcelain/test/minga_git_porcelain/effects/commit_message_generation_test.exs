@@ -75,7 +75,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     assert_receive {:dependency_called, :generator, ^worker, "diff --git"}, @timeout
 
     {result, outcome} = receive_and_apply(returned, scheduler, :completed)
-    assert outcome.result == {:generated, "feat: generated"}
+    assert outcome.value == {:completed, {:generated, "feat: generated"}}
     assert result.shell_runtime.state.notice.message == "Commit message generated"
 
     assert {:prompt, %{prompt_ui: %{handler: MingaGitPorcelain.UI.Prompt.GitCommit}} = payload} =
@@ -124,16 +124,15 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
 
       case action do
         {:return, _result} ->
-          assert outcome.reason == {:generation_failed, "provider unavailable"}
+          assert outcome.value == {:failed, {:generation_failed, "provider unavailable"}}
 
         _contained_failure ->
-          assert match?(
-                   {:callback_failed, @source, CommitMessageGeneration, :execute, _, _},
-                   outcome.reason
-                 )
+          assert {:failed,
+                  {:callback_failed, @source, CommitMessageGeneration, :execute, _, _}} =
+                   outcome.value
       end
 
-      refute match?({:worker_exit, _reason}, outcome.reason)
+      refute match?({:failed, {:worker_exit, _reason}}, outcome.value)
       assert CodeLease.active_leases(server: @admission) == []
     end
   end
@@ -145,10 +144,8 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     _running = receive_running()
     {result, outcome} = receive_and_apply(returned, scheduler, :failed)
 
-    assert match?(
-             {:source_unavailable, @source, CommitMessageGeneration, :execute, _},
-             outcome.reason
-           )
+    assert {:failed, {:source_unavailable, @source, CommitMessageGeneration, :execute, _}} =
+             outcome.value
 
     assert String.starts_with?(
              result.shell_runtime.state.notice.message,
@@ -178,7 +175,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     send(scheduler, {:effect_timeout, running.request.id})
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, @timeout
     {result, outcome} = receive_and_apply(duplicate, scheduler, :failed)
-    assert outcome.reason == :timeout
+    assert outcome.value == {:failed, :timeout}
     assert result.shell_runtime.state.notice.message == "Commit message generation timed out"
     assert result.shell_runtime.state.modal == :none
     assert EffectScheduler.stats(scheduler).admitted == 0
@@ -195,7 +192,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     assert :ok = EffectScheduler.cancel(scheduler, running.request.id)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, @timeout
     {result, outcome} = receive_and_apply(returned, scheduler, :canceled)
-    assert outcome.reason == :requested
+    assert outcome.value == {:canceled, :requested}
     assert result.shell_runtime.state.notice.message == "Commit message generation canceled"
     assert result.shell_runtime.state.modal == :none
   end
@@ -213,8 +210,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
 
     assert_receive {:effect_terminal,
                     %Outcome{
-                      status: :canceled,
-                      reason: :source_canceled,
+                      value: {:canceled, :source_canceled},
                       request: %{id: request_id}
                     }},
                    @timeout
@@ -229,14 +225,14 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     _running = receive_running()
 
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{status: :completed, request: %{id: completed_id}} = delayed},
+                    %Outcome{value: {:completed, _result}, request: %{id: completed_id}} = delayed},
                    @timeout
 
     assert :ok = EffectScheduler.cancel_source(scheduler, @source)
     assert EffectScheduler.claim(scheduler, delayed) == {:error, :not_pending}
     assert returned.shell_runtime.state.modal == :none
 
-    assert_receive {:effect_terminal, %Outcome{status: :canceled, request: %{id: ^completed_id}}},
+    assert_receive {:effect_terminal, %Outcome{value: {:canceled, _reason}, request: %{id: ^completed_id}}},
                    @timeout
   end
 
@@ -272,8 +268,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     send(worker, {:release_dependency, :generator})
 
     {result, outcome} = receive_and_apply(switched, scheduler, :completed)
-    assert outcome.status == :stale
-    assert outcome.reason == :repository_changed
+    assert outcome.value == {:stale, :repository_changed}
     assert result.shell_runtime.state.modal == :none
 
     assert result.shell_runtime.state.notice.message ==
@@ -348,7 +343,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
   defp receive_running do
     assert_receive {:effect_lifecycle,
                     %Outcome{
-                      status: :running,
+                      value: :running,
                       request: %{handler: CommitMessageGeneration}
                     } = outcome},
                    @timeout
@@ -357,7 +352,9 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
   end
 
   defp receive_and_apply(state, scheduler, status) do
-    assert_receive {:effect_result, ^scheduler, %Outcome{status: ^status} = outcome}, @timeout
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {^status, _payload}} = outcome},
+                   @timeout
+
     assert :ok = EffectScheduler.claim(scheduler, outcome)
     {state, outcome} = outcome.request.handler.apply(state, outcome)
     EffectScheduler.finalize(scheduler, outcome)

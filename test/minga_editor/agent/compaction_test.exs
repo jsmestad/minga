@@ -27,7 +27,7 @@ defmodule MingaEditor.Agent.CompactionTest do
     state = state_for(session)
     request = Compaction.request(session)
 
-    {failed, %Outcome{status: :failed}} =
+    {failed, %Outcome{value: {:failed, _reason}}} =
       Compaction.apply(state, Outcome.failed(request, :provider_error))
 
     refute failed.workspace.agent_ui.view.compaction_in_progress
@@ -35,7 +35,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
     state = state_for(session)
 
-    {canceled, %Outcome{status: :canceled}} =
+    {canceled, %Outcome{value: {:canceled, _reason}}} =
       Compaction.apply(state, Outcome.canceled(request, :requested))
 
     refute canceled.workspace.agent_ui.view.compaction_in_progress
@@ -43,7 +43,7 @@ defmodule MingaEditor.Agent.CompactionTest do
     other_session = fake_session()
     stale_state = state_for(other_session)
 
-    {unchanged, %Outcome{status: :stale, reason: :agent_session_changed}} =
+    {unchanged, %Outcome{value: {:stale, :agent_session_changed}}} =
       Compaction.apply(stale_state, Outcome.completed(request, "summary"))
 
     assert unchanged == stale_state
@@ -82,7 +82,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
     request = Compaction.request(background_session)
 
-    {updated, %Outcome{status: :failed}} =
+    {updated, %Outcome{value: {:failed, _reason}}} =
       Compaction.apply(state, Outcome.failed(request, :provider_error))
 
     background =

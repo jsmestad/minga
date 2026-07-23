@@ -97,14 +97,14 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
   @doc "Applies remote feedback, refreshes the repository, and offers retry recovery."
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{status: :running, request: %{effect: effect}} = outcome) do
+  def apply(state, %Outcome{value: :running, request: %{effect: effect}} = outcome) do
     state = GitToastWorkflow.dismiss(state)
     {publish_notice(state, progress_message(effect.operation)), outcome}
   end
 
   def apply(
         state,
-        %Outcome{status: :completed, request: %{effect: effect}, result: :ok} = outcome
+        %Outcome{value: {:completed, :ok}, request: %{effect: effect}} = outcome
       ) do
     refresh_repo(effect)
     message = success_message(effect.operation)
@@ -119,7 +119,7 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{effect: effect}, reason: reason} = outcome
+        %Outcome{value: {:failed, reason}, request: %{effect: effect}} = outcome
       ) do
     refresh_repo(effect)
     message = failure_message(effect.operation, reason)
@@ -130,10 +130,10 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
     {publish_toast(state, message, :error, action), outcome}
   end
 
-  def apply(state, %Outcome{status: :canceled, reason: :source_canceled} = outcome),
+  def apply(state, %Outcome{value: {:canceled, :source_canceled}} = outcome),
     do: {state, outcome}
 
-  def apply(state, %Outcome{status: :canceled, request: %{effect: effect}} = outcome) do
+  def apply(state, %Outcome{value: {:canceled, _reason}, request: %{effect: effect}} = outcome) do
     refresh_repo(effect)
     message = "Git operation canceled"
 
@@ -145,7 +145,7 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
     {state, outcome}
   end
 
-  def apply(state, %Outcome{status: :stale} = outcome), do: {state, outcome}
+  def apply(state, %Outcome{value: {:stale, _reason}} = outcome), do: {state, outcome}
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()

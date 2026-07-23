@@ -109,9 +109,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_refresh_outcome(
         state,
         %Outcome{
-          status: :completed,
-          request: %Request{effect: %Refresh{} = effect},
-          result: %FileTree{} = tree
+          value: {:completed, %FileTree{} = tree},
+          request: %Request{effect: %Refresh{} = effect}
         } =
           outcome
       ) do
@@ -121,9 +120,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_refresh_outcome(
         state,
         %Outcome{
-          status: :failed,
-          request: %Request{effect: %Refresh{} = effect} = request,
-          reason: {:root_unavailable, reason}
+          value: {:failed, {:root_unavailable, reason}},
+          request: %Request{effect: %Refresh{} = effect} = request
         } = outcome
       ) do
     {finish_failed_refresh(state, effect, request.id, reason), outcome}
@@ -132,9 +130,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_refresh_outcome(
         state,
         %Outcome{
-          status: :failed,
-          request: %Request{effect: %Refresh{} = effect} = request,
-          reason: reason
+          value: {:failed, reason},
+          request: %Request{effect: %Refresh{} = effect} = request
         } = outcome
       ) do
     {finish_failed_refresh(state, effect, request.id, reason), outcome}
@@ -142,7 +139,10 @@ defmodule MingaEditor.FileTree.Freshness do
 
   def apply_refresh_outcome(
         state,
-        %Outcome{status: status, request: %Request{effect: %Refresh{} = effect} = request} =
+        %Outcome{
+          value: {status, _reason},
+          request: %Request{effect: %Refresh{} = effect} = request
+        } =
           outcome
       )
       when status in [:canceled, :stale] do
@@ -156,9 +156,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_filter_outcome(
         state,
         %Outcome{
-          status: :completed,
-          request: %Request{effect: %FilterWalk{} = effect} = request,
-          result: %FilterResult{} = result
+          value: {:completed, %FilterResult{} = result},
+          request: %Request{effect: %FilterWalk{} = effect} = request
         } = outcome
       ) do
     case FileTreeState.accept_filter_result(
@@ -187,9 +186,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_filter_outcome(
         state,
         %Outcome{
-          status: :failed,
-          request: %Request{effect: %FilterWalk{} = effect} = request,
-          reason: reason
+          value: {:failed, reason},
+          request: %Request{effect: %FilterWalk{} = effect} = request
         } = outcome
       ) do
     case FileTreeState.finish_filter(
@@ -216,7 +214,7 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_filter_outcome(
         state,
         %Outcome{
-          status: status,
+          value: {status, _reason},
           request: %Request{effect: %FilterWalk{} = effect} = request
         } = outcome
       )
@@ -239,9 +237,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_watcher_outcome(
         state,
         %Outcome{
-          status: :completed,
-          request: %Request{effect: %WatcherSync{}} = request,
-          result: %WatcherResult{target: target}
+          value: {:completed, %WatcherResult{target: target}},
+          request: %Request{effect: %WatcherSync{}} = request
         } = outcome
       ) do
     case FileTreeState.accept_watcher_result(file_tree_state(state), request.id, target) do
@@ -253,9 +250,8 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_watcher_outcome(
         state,
         %Outcome{
-          status: :failed,
-          request: %Request{effect: %WatcherSync{} = effect} = request,
-          reason: reason
+          value: {:failed, reason},
+          request: %Request{effect: %WatcherSync{} = effect} = request
         } = outcome
       ) do
     case FileTreeState.finish_watcher_request(file_tree_state(state), request.id) do
@@ -272,7 +268,7 @@ defmodule MingaEditor.FileTree.Freshness do
   def apply_watcher_outcome(
         state,
         %Outcome{
-          status: status,
+          value: {status, _reason},
           request: %Request{effect: %WatcherSync{}} = request
         } = outcome
       )

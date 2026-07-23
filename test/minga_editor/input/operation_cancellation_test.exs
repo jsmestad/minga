@@ -159,11 +159,11 @@ defmodule MingaEditor.Input.OperationCancellationTest do
 
     assert after_hover_escape.shell_runtime.state.hover_popup == nil
     assert %{running: 1} = EffectScheduler.stats(scheduler)
-    refute_receive {:effect_result, ^scheduler, %Outcome{status: :canceled}}
+    refute_receive {:effect_result, ^scheduler, %Outcome{value: {:canceled, _reason}}}
 
     _after_operation_escape = Router.dispatch(after_hover_escape, 27, 0)
 
-    assert_receive {:effect_result, ^scheduler, %Outcome{status: :canceled} = outcome}
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {:canceled, _reason}} = outcome}
     assert :ok = EffectScheduler.claim(scheduler, outcome)
     assert :ok = EffectScheduler.finalize(scheduler, outcome)
   end

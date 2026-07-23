@@ -51,11 +51,11 @@ defmodule MingaEditor.ConfigReloadEffect do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{status: :completed, result: result} = outcome) do
+  def apply(state, %Outcome{value: {:completed, result}} = outcome) do
     {finish(state, result), outcome}
   end
 
-  def apply(state, %Outcome{status: :failed, reason: reason} = outcome) do
+  def apply(state, %Outcome{value: {:failed, reason}} = outcome) do
     {finish(state, {:error, failure_message(reason)}), outcome}
   end
 
@@ -63,7 +63,11 @@ defmodule MingaEditor.ConfigReloadEffect do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{status: status}), do: status in [:completed, :failed]
+  def render?(%Outcome{value: {status, _payload}})
+      when status in [:completed, :failed],
+      do: true
+
+  def render?(%Outcome{}), do: false
 
   @doc "Applies user feedback for a completed reload to the current Editor state."
   @spec finish(EditorState.t(), reload_result()) :: EditorState.t()

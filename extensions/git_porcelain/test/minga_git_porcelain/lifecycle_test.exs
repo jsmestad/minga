@@ -104,8 +104,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
 
     assert_receive {:effect_terminal,
                     %Outcome{
-                      status: :canceled,
-                      reason: :source_canceled,
+                      value: {:canceled, :source_canceled},
                       request: %{id: git_request_id}
                     }},
                    @timeout
@@ -152,8 +151,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
 
     assert_receive {:effect_terminal,
                     %Outcome{
-                      status: :canceled,
-                      reason: :source_canceled,
+                      value: {:canceled, :source_canceled},
                       request: %{id: request_id}
                     }},
                    @timeout
@@ -321,7 +319,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
 
   defp receive_candidate(scheduler, request_id, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{status: ^status, request: %{id: id}} = outcome}
+                    %Outcome{request: %{id: id}, value: {^status, _payload}} = outcome}
                    when id == request_id,
                    @timeout
 

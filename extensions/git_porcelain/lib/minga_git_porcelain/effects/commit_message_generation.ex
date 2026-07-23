@@ -142,13 +142,13 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   end
 
   @spec apply_current(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  defp apply_current(state, %Outcome{status: :running} = outcome) do
+  defp apply_current(state, %Outcome{value: :running} = outcome) do
     {publish_notice(state, "Generating commit message…"), outcome}
   end
 
   defp apply_current(
          %{shell_runtime: %{state: %TraditionalState{modal: modal}}} = state,
-         %Outcome{status: :completed, result: {:generated, message}} = outcome
+         %Outcome{value: {:completed, {:generated, message}}} = outcome
        ) do
     state =
       if ModalOverlay.active?(modal) do
@@ -164,22 +164,22 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
 
   defp apply_current(
          state,
-         %Outcome{status: :completed, result: {:generated, _message}} = outcome
+         %Outcome{value: {:completed, {:generated, _message}}} = outcome
        ),
        do: {state, outcome}
 
-  defp apply_current(state, %Outcome{status: :failed, reason: reason} = outcome) do
+  defp apply_current(state, %Outcome{value: {:failed, reason}} = outcome) do
     {publish_notice(state, failure_message(reason)), outcome}
   end
 
-  defp apply_current(state, %Outcome{status: :canceled, reason: :source_canceled} = outcome),
+  defp apply_current(state, %Outcome{value: {:canceled, :source_canceled}} = outcome),
     do: {state, outcome}
 
-  defp apply_current(state, %Outcome{status: :canceled} = outcome) do
+  defp apply_current(state, %Outcome{value: {:canceled, _reason}} = outcome) do
     {publish_notice(state, "Commit message generation canceled"), outcome}
   end
 
-  defp apply_current(state, %Outcome{status: :stale} = outcome), do: {state, outcome}
+  defp apply_current(state, %Outcome{value: {:stale, _reason}} = outcome), do: {state, outcome}
 
   @spec stale_repository_result(EditorState.t(), Outcome.t()) ::
           {EditorState.t(), Outcome.t()}

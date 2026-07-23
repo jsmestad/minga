@@ -92,16 +92,19 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
     assert_receive {:DOWN, ^older_monitor, :process, ^older_worker, _reason}, @timeout
 
     assert_receive {:effect_lifecycle,
-                    %Outcome{request: %{id: ^older_id}, status: :canceled} = canceled},
+                    %Outcome{request: %{id: ^older_id}, value: {:canceled, _reason}} = canceled},
                    @timeout
 
-    assert {state, %Outcome{status: :stale}} = FilterWalk.apply(state, canceled)
+    assert {state, %Outcome{value: {:stale, _reason}}} = FilterWalk.apply(state, canceled)
     assert_receive {:file_tree_filter_scan_started, :newer, newer_worker}, @timeout
 
     send(newer_worker, {:release_file_tree_filter_scan, :newer, {:return, latest_result}})
     outcome = receive_outcome(scheduler, newer_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, outcome)
-    assert {state, %Outcome{status: :completed} = applied} = FilterWalk.apply(state, outcome)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             FilterWalk.apply(state, outcome)
+
     EffectScheduler.finalize(scheduler, applied)
 
     assert Enum.map(FileTree.visible_entries(tree(state)), & &1.name) == ["newer.ex"]
@@ -122,9 +125,9 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
     broken_id = file_tree(state).filter_request.token
     assert_receive {:file_tree_filter_scan_started, :broken, _worker}, @timeout
     broken = receive_outcome(scheduler, broken_id, :failed)
-    assert broken.reason == :unreadable
+    assert broken.value == {:failed, :unreadable}
     assert :ok = EffectScheduler.claim(scheduler, broken)
-    assert {state, %Outcome{status: :failed} = failed} = FilterWalk.apply(state, broken)
+    assert {state, %Outcome{value: {:failed, _reason}} = failed} = FilterWalk.apply(state, broken)
     EffectScheduler.finalize(scheduler, failed)
     assert {:error, _reason} = FileTreeState.status(file_tree(state))
     Process.cancel_timer(state.render.render_correlation.timer)
@@ -141,7 +144,10 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
     assert_receive {:file_tree_filter_scan_started, :fixed, _worker}, @timeout
     fixed = receive_outcome(scheduler, fixed_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, fixed)
-    assert {state, %Outcome{status: :completed} = applied} = FilterWalk.apply(state, fixed)
+
+    assert {state, %Outcome{value: {:completed, _result}} = applied} =
+             FilterWalk.apply(state, fixed)
+
     EffectScheduler.finalize(scheduler, applied)
 
     assert FileTreeState.status(file_tree(state)) == :ready
@@ -186,7 +192,7 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
 
   defp receive_outcome(scheduler, request_id, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                    %Outcome{request: %{id: ^request_id}, value: {^status, _payload}} = outcome},
                    @timeout
 
     outcome

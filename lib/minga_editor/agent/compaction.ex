@@ -85,10 +85,14 @@ defmodule MingaEditor.Agent.Compaction do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{status: status}), do: status in [:completed, :failed, :canceled]
+  def render?(%Outcome{value: {status, _payload}})
+      when status in [:completed, :failed, :canceled],
+      do: true
+
+  def render?(%Outcome{}), do: false
 
   @spec apply_active(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  defp apply_active(state, %Outcome{status: :completed, result: summary} = outcome)
+  defp apply_active(state, %Outcome{value: {:completed, summary}} = outcome)
        when is_binary(summary) do
     Session.add_system_message(
       outcome.request.effect.session,
@@ -107,7 +111,7 @@ defmodule MingaEditor.Agent.Compaction do
     {state, outcome}
   end
 
-  defp apply_active(state, %Outcome{status: :failed, reason: reason} = outcome) do
+  defp apply_active(state, %Outcome{value: {:failed, reason}} = outcome) do
     state =
       update_active_ui(state, fn ui ->
         ui
@@ -118,7 +122,7 @@ defmodule MingaEditor.Agent.Compaction do
     {state, outcome}
   end
 
-  defp apply_active(state, %Outcome{status: :canceled} = outcome) do
+  defp apply_active(state, %Outcome{value: {:canceled, _reason}} = outcome) do
     {update_active_ui(state, &clear_ui_progress/1), outcome}
   end
 
@@ -142,7 +146,7 @@ defmodule MingaEditor.Agent.Compaction do
          state,
          workspace_id,
          session,
-         %Outcome{status: :completed, result: summary}
+         %Outcome{value: {:completed, summary}}
        )
        when is_binary(summary) do
     Session.add_system_message(session, "Context auto-compacted: #{summary}")
@@ -155,8 +159,7 @@ defmodule MingaEditor.Agent.Compaction do
   end
 
   defp apply_background_outcome(state, workspace_id, _session, %Outcome{
-         status: :failed,
-         reason: reason
+         value: {:failed, reason}
        }) do
     update_background_ui(state, workspace_id, fn ui ->
       ui
@@ -165,7 +168,9 @@ defmodule MingaEditor.Agent.Compaction do
     end)
   end
 
-  defp apply_background_outcome(state, workspace_id, _session, %Outcome{status: :canceled}) do
+  defp apply_background_outcome(state, workspace_id, _session, %Outcome{
+         value: {:canceled, _reason}
+       }) do
     update_background_ui(state, workspace_id, &clear_ui_progress/1)
   end
 

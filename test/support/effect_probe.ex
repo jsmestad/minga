@@ -61,7 +61,7 @@ defmodule Minga.Test.EffectProbe do
     send(outcome.request.effect.test_pid, {
       :effect_applied,
       outcome.request.effect.label,
-      outcome.status
+      outcome.value
     })
 
     {state, outcome}

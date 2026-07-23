@@ -18,6 +18,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
 
+  alias MingaEditor.State.OperationQueue
   @enforce_keys [:buffer, :formatter]
   defstruct [:buffer, :formatter]
 
@@ -61,10 +62,8 @@ defmodule MingaEditor.Effects.ExternalFormat do
   def apply(
         state,
         %Outcome{
-          status: :queued,
-          request: %{operation_id: id},
-          queue_position: position,
-          queue_total: total
+          value: {:queued, %OperationQueue{position: position, total: total}},
+          request: %{operation_id: id}
         } = outcome
       ) do
     {:ok, feedback} =
@@ -75,7 +74,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
     {state, outcome}
   end
 
-  def apply(state, %Outcome{status: :running, request: %{operation_id: id}} = outcome) do
+  def apply(state, %Outcome{value: :running, request: %{operation_id: id}} = outcome) do
     state = %{state | feedback: Feedback.run_operation(state.feedback, id, "Formatting…")}
 
     {state, outcome}
@@ -83,14 +82,14 @@ defmodule MingaEditor.Effects.ExternalFormat do
 
   def apply(
         state,
-        %Outcome{status: :completed, result: %ExternalFormatResult{} = result} = outcome
+        %Outcome{value: {:completed, %ExternalFormatResult{} = result}} = outcome
       ) do
     apply_formatted_content(state, outcome, result)
   end
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{operation_id: id}, reason: :timeout} = outcome
+        %Outcome{value: {:failed, :timeout}, request: %{operation_id: id}} = outcome
       ) do
     {%{
        state
@@ -100,7 +99,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{operation_id: id}, reason: reason} = outcome
+        %Outcome{value: {:failed, reason}, request: %{operation_id: id}} = outcome
       ) do
     message = format_failure_message(reason)
     Minga.Log.warning(:editor, message)
@@ -110,7 +109,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
 
   def apply(
         state,
-        %Outcome{status: :canceled, request: %{operation_id: id}, reason: :superseded} = outcome
+        %Outcome{value: {:canceled, :superseded}, request: %{operation_id: id}} = outcome
       ) do
     {%{
        state
@@ -118,14 +117,14 @@ defmodule MingaEditor.Effects.ExternalFormat do
      }, outcome}
   end
 
-  def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
+  def apply(state, %Outcome{value: {:canceled, _reason}, request: %{operation_id: id}} = outcome) do
     {%{
        state
        | feedback: Feedback.finish_operation(state.feedback, id, :canceled, "Format canceled")
      }, outcome}
   end
 
-  def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
+  def apply(state, %Outcome{value: {:stale, _reason}, request: %{operation_id: id}} = outcome) do
     {%{
        state
        | feedback:
