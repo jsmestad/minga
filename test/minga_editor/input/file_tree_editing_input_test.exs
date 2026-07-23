@@ -48,6 +48,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   end
 
   defp ft(state), do: state.workspace.file_tree
+  defp tree(state), do: state |> ft() |> FileTreeState.tree()
   defp editing(state), do: FileTreeState.editing(ft(state))
 
   defp complete_current_filter(state) do
@@ -105,7 +106,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     state = make_state(tmp_dir)
     type = Keyword.get(opts, :type, :new_file)
     text = Keyword.get(opts, :text, "")
-    index = ft(state).tree.cursor
+    index = tree(state).cursor
 
     file_tree = FileTreeState.start_editing(ft(state), index, type, text)
 
@@ -205,10 +206,10 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_state(dir) |> select_entry("subdir")
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?., 0)
-      assert ft(state).tree.root == Path.join(dir, "subdir")
+      assert tree(state).root == Path.join(dir, "subdir")
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?~, 0)
-      assert ft(state).tree.root == Path.expand(dir)
+      assert tree(state).root == Path.expand(dir)
     end
   end
 
@@ -219,7 +220,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_state(dir)
       File.write!(Path.join(dir, "alpha.txt"), "alpha")
       File.write!(Path.join(dir, "beta.txt"), "beta")
-      tree = FileTree.refresh(ft(state).tree)
+      tree = FileTree.refresh(tree(state))
       file_tree = FileTreeState.replace_tree(ft(state), tree)
 
       state =
@@ -239,20 +240,20 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       {:handled, state} = FileTreeHandler.handle_key(state, ?a, 0)
       {:handled, state} = FileTreeHandler.handle_key(state, ?l, 0)
       state = complete_current_filter(state)
-      assert ft(state).tree.filter == "al"
+      assert tree(state).filter == "al"
       assert BufferProcess.content(ft(state).buffer) =~ "alpha.txt"
       refute BufferProcess.content(ft(state).buffer) =~ "beta.txt"
 
-      assert Enum.map(FileTree.visible_entries(ft(state).tree), & &1.name) == [
+      assert Enum.map(FileTree.visible_entries(tree(state)), & &1.name) == [
                "alpha.txt"
              ]
 
       {:handled, state} = FileTreeHandler.handle_key(state, @backspace, 0)
-      assert ft(state).tree.filter == "a"
+      assert tree(state).filter == "a"
 
       {:handled, state} = FileTreeHandler.handle_key(state, @enter, 0)
       assert ft(state).interaction == :browse
-      assert ft(state).tree.filter == "a"
+      assert tree(state).filter == "a"
 
       file_tree = FileTreeState.start_filtering(ft(state))
 
@@ -270,13 +271,13 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
       state = complete_current_refresh(state)
       assert ft(state).interaction == :browse
-      assert ft(state).tree.filter == nil
+      assert tree(state).filter == nil
     end
 
     test "clearing a no-match filter restores existing rows", %{tmp_dir: dir} do
       state = make_state(dir)
       File.write!(Path.join(dir, "visible.txt"), "visible")
-      tree = FileTree.refresh(ft(state).tree)
+      tree = FileTree.refresh(tree(state))
 
       state =
         then(state, fn state ->
@@ -302,9 +303,9 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = complete_current_refresh(state)
 
       assert ft(state).interaction == :browse
-      assert ft(state).tree.filter == nil
+      assert tree(state).filter == nil
       assert FileTreeState.status(ft(state)) == :ready
-      assert Enum.any?(FileTree.visible_entries(ft(state).tree), &(&1.name == "visible.txt"))
+      assert Enum.any?(FileTree.visible_entries(tree(state)), &(&1.name == "visible.txt"))
       assert BufferProcess.content(ft(state).buffer) =~ "visible.txt"
     end
 
@@ -338,17 +339,17 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
       assert ft(state).interaction == :browse
-      assert ft(state).tree != nil
+      assert tree(state) != nil
     end
   end
 
   @spec select_entry(EditorState.t(), String.t()) :: EditorState.t()
   defp select_entry(state, name) do
-    entries = FileTree.visible_entries(ft(state).tree)
+    entries = FileTree.visible_entries(tree(state))
     index = Enum.find_index(entries, &(&1.name == name))
     refute index == nil
 
-    tree = FileTree.select(ft(state).tree, index)
+    tree = FileTree.select(tree(state), index)
     file_tree = FileTreeState.replace_tree(ft(state), tree)
 
     then(state, fn state ->
@@ -416,7 +417,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
             0xF728
           ] do
         {:handled, state} = FileTreeHandler.handle_key(state, code, 0)
-        assert ft(state).tree.filter == ""
+        assert tree(state).filter == ""
         assert ft(state).interaction == :filtering
       end
     end
@@ -453,7 +454,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       assert ft(state).interaction == :help
       assert BufferProcess.cursor(buffer) == before
-      assert ft(state).tree.cursor == 0
+      assert tree(state).cursor == 0
     end
 
     test "q appends to text instead of closing tree", %{tmp_dir: dir} do
@@ -461,7 +462,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?q, 0)
       assert editing(state).text == "q"
-      assert ft(state).tree != nil
+      assert tree(state) != nil
     end
   end
 end

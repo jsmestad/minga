@@ -347,7 +347,7 @@ defmodule MingaEditor.FileTree.WatcherSyncTest do
     EffectScheduler.finalize(scheduler, applied_failure)
 
     assert {:error, _reason} = FileTreeState.status(file_tree(state))
-    assert file_tree(state).tree.root == missing
+    assert FileTreeState.tree(file_tree(state)).root == missing
     assert_receive {:file_tree_watcher_call, :cleanup, :unwatch, ^a, worker}, @timeout
     assert worker != self()
     assert_receive {:file_tree_watcher_call, :cleanup, :unwatch, ^missing, ^worker}, @timeout

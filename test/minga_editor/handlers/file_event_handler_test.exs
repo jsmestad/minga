@@ -165,7 +165,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
-      assert ft(new_state).tree.git_status[file_path] == :modified
+      assert tree(new_state).git_status[file_path] == :modified
       assert {:render, 16} in effects
     end
   end
@@ -312,8 +312,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         })
 
       assert ft(new_state).project_root == Path.expand(new_root)
-      assert ft(new_state).tree.root == Path.expand(new_root)
-      assert ft(new_state).tree.entries == nil
+      assert tree(new_state).root == Path.expand(new_root)
+      assert tree(new_state).entries == nil
       assert FileTreeState.status(ft(new_state)) == :loading
       assert {:render, 16} in effects
     end
@@ -531,6 +531,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   end
 
   defp ft(state), do: state.workspace.file_tree
+  defp tree(state), do: state |> ft() |> FileTreeState.tree()
 
   defp state_with_tree(root) do
     tree = FileTree.new(root)

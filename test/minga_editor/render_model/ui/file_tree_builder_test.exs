@@ -46,13 +46,13 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{
-        tree: tree,
-        visibility: :focused,
-        interaction:
-          {:editing, %{index: 0, type: :rename, text: "renamed", original_name: "lib"}},
-        tree_status: :ready
-      }
+      file_tree =
+        %FileTreeState{}
+        |> FileTreeState.open(tree, nil)
+        |> Map.put(
+          :interaction,
+          {:editing, %{index: 0, type: :rename, text: "renamed", original_name: "lib"}}
+        )
 
       ctx = build_minimal_context(file_tree: file_tree)
       model = FileTreeBuilder.build(ctx)
@@ -92,12 +92,10 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       }
 
       # `visibility: :hidden` keeps the loaded tree alive; the sidebar is just toggled off.
-      file_tree = %FileTreeState{
-        tree: tree,
-        visibility: :hidden,
-        interaction: :browse,
-        tree_status: :ready
-      }
+      file_tree =
+        %FileTreeState{}
+        |> FileTreeState.open(tree, nil)
+        |> FileTreeState.hide()
 
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
@@ -133,12 +131,10 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{
-        tree: tree,
-        visibility: :focused,
-        interaction: :filtering,
-        tree_status: :ready
-      }
+      file_tree =
+        %FileTreeState{}
+        |> FileTreeState.open(tree, nil)
+        |> Map.put(:interaction, :filtering)
 
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
@@ -165,12 +161,10 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{
-        tree: tree,
-        visibility: :focused,
-        interaction: :help,
-        tree_status: :ready
-      }
+      file_tree =
+        %FileTreeState{}
+        |> FileTreeState.open(tree, nil)
+        |> Map.put(:interaction, :help)
 
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
@@ -197,7 +191,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{tree: tree, visibility: :visible, tree_status: :ready}
+      file_tree = %FileTreeState{} |> FileTreeState.open(tree, nil) |> FileTreeState.unfocus()
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
       assert model.status == :ready
@@ -218,7 +212,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{tree: tree, visibility: :focused, tree_status: :ready}
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
       astrodark =
         FileTreeBuilder.build(build_minimal_context(file_tree: file_tree, theme: :astrodark))
@@ -233,6 +227,48 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       # astrodark overrides Rust's icon color; doom_one keeps the language default.
       assert astrodark_color == 0xDEA584
       assert doom_color == Minga.Language.Devicon.color(:rust)
+    end
+
+    test "loading and error content with retained tree emit state-only models" do
+      tree =
+        "/project"
+        |> ProjectFileTree.new()
+        |> ProjectFileTree.put_entries([
+          %{
+            path: "/project/main.rs",
+            name: "main.rs",
+            dir?: false,
+            depth: 1,
+            last_child?: true,
+            guides: []
+          }
+        ])
+
+      loading = %FileTreeState{} |> FileTreeState.open(tree, nil) |> FileTreeState.loading()
+      loading_model = FileTreeBuilder.build(build_minimal_context(file_tree: loading))
+
+      assert loading_model.status == :loading
+      assert loading_model.rows == []
+      assert loading_model.root_path == "/project"
+
+      hidden_loading_model =
+        FileTreeBuilder.build(build_minimal_context(file_tree: FileTreeState.hide(loading)))
+
+      assert hidden_loading_model.status == :hidden
+      assert [%{name: "main.rs"}] = hidden_loading_model.rows
+
+      errored = FileTreeState.error(FileTreeState.open(%FileTreeState{}, tree, nil), :eacces)
+      error_model = FileTreeBuilder.build(build_minimal_context(file_tree: errored))
+
+      assert error_model.status == {:error, "permission denied"}
+      assert error_model.rows == []
+      assert error_model.root_path == "/project"
+
+      hidden_error_model =
+        FileTreeBuilder.build(build_minimal_context(file_tree: FileTreeState.hide(errored)))
+
+      assert hidden_error_model.status == :hidden
+      assert [%{name: "main.rs"}] = hidden_error_model.rows
     end
 
     test "semantic model is consistent for same hidden state" do

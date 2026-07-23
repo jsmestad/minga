@@ -64,7 +64,8 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert {:accepted, accepted} =
              FileTreeState.accept_refresh_result(tracked, root, request, refreshed)
 
-    assert accepted.tree == refreshed
+    assert FileTreeState.tree(accepted) == refreshed
+    assert FileTreeState.content(accepted) == {:ready, refreshed}
 
     assert {:stale, ^accepted} =
              FileTreeState.accept_refresh_result(accepted, root, request, refreshed)
@@ -80,12 +81,12 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert {:stale, unchanged} =
              FileTreeState.accept_refresh_result(file_tree, root, stale, refreshed)
 
-    assert unchanged.tree == file_tree.tree
+    assert FileTreeState.tree(unchanged) == FileTreeState.tree(file_tree)
 
     assert {:accepted, accepted} =
              FileTreeState.accept_refresh_result(unchanged, root, current, refreshed)
 
-    assert accepted.tree == refreshed
+    assert FileTreeState.tree(accepted) == refreshed
   end
 
   test "a matching request and tree root still require the current project root" do
@@ -104,7 +105,7 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert {:rerooted, unchanged} =
              FileTreeState.accept_refresh_result(file_tree, root, request, result)
 
-    assert unchanged.tree == file_tree.tree
+    assert FileTreeState.tree(unchanged) == FileTreeState.tree(file_tree)
     assert unchanged.project_root == Path.expand(other_root)
   end
 
@@ -121,7 +122,7 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert {:stale, unchanged} =
              FileTreeState.accept_refresh_result(closed, root, request, tree(root, []))
 
-    assert unchanged.tree == nil
+    assert FileTreeState.tree(unchanged) == nil
 
     reopened = FileTreeState.open(closed, tree(root, [entry(root, "current.ex")]), nil)
     old_result = tree(root, [entry(root, "old.ex")])
@@ -129,7 +130,7 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert {:stale, still_current} =
              FileTreeState.accept_refresh_result(reopened, root, request, old_result)
 
-    assert Enum.map(still_current.tree.entries, & &1.name) == ["current.ex"]
+    assert Enum.map(FileTreeState.tree(still_current).entries, & &1.name) == ["current.ex"]
   end
 
   test "rerooting away and back invalidates the old result" do
@@ -152,7 +153,7 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
                tree(old_root, [entry(old_root, "old.ex")])
              )
 
-    assert Enum.map(current.tree.entries, & &1.name) == ["current.ex"]
+    assert Enum.map(FileTreeState.tree(current).entries, & &1.name) == ["current.ex"]
   end
 
   test "metadata replacement preserves root errors and refresh correlation" do
@@ -168,9 +169,13 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     metadata_tree = tree(root, [entry(root, "badged.ex")])
     replaced = FileTreeState.replace_tree_metadata(file_tree, metadata_tree)
 
-    assert replaced.tree == metadata_tree
+    assert FileTreeState.content(replaced) == {:error, "no such file or directory", metadata_tree}
     assert FileTreeState.status(replaced) == FileTreeState.status(file_tree)
     assert replaced.refresh == file_tree.refresh
+
+    loading = root |> open_tree() |> FileTreeState.loading()
+    loading_replaced = FileTreeState.replace_tree_metadata(loading, metadata_tree)
+    assert FileTreeState.content(loading_replaced) == {:loading, metadata_tree}
   end
 
   test "failed and canceled terminals clear only the matching request" do
@@ -179,11 +184,15 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     second = make_ref()
 
     file_tree = open_tree(root) |> FileTreeState.track_refresh_request(root, first)
+    original_content = FileTreeState.content(file_tree)
     assert {:stale, ^file_tree} = FileTreeState.finish_refresh(file_tree, root, second)
     assert {:current, finished} = FileTreeState.finish_refresh(file_tree, root, first)
+    assert FileTreeState.content(finished) == original_content
 
     reusable = FileTreeState.track_refresh_request(finished, root, second)
-    assert {:current, _finished_again} = FileTreeState.finish_refresh(reusable, root, second)
+    reusable_content = FileTreeState.content(reusable)
+    assert {:current, finished_again} = FileTreeState.finish_refresh(reusable, root, second)
+    assert FileTreeState.content(finished_again) == reusable_content
   end
 
   defp open_tree(root) do

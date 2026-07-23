@@ -1408,7 +1408,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
   @spec move_tree_cursor(state(), non_neg_integer()) :: state()
   defp move_tree_cursor(state, index) do
-    case state.workspace.file_tree.tree do
+    case FileTreeState.tree(state.workspace.file_tree) do
       nil ->
         state
 
@@ -1418,9 +1418,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
           | workspace:
               State.set_file_tree(
                 state.workspace,
-                (fn file_tree ->
-                   FileTreeState.set_tree(file_tree, FileTree.select(tree, index))
-                 end).(state.workspace.file_tree)
+                FileTreeState.set_tree(state.workspace.file_tree, FileTree.select(tree, index))
               )
         }
     end
@@ -1429,7 +1427,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
   defp gui_tree_action(state, index, action) do
-    if state.workspace.file_tree.tree == nil do
+    if FileTreeState.tree(state.workspace.file_tree) == nil do
       state
     else
       do_gui_tree_action(state, index, action)
@@ -1448,7 +1446,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
   defp open_file_tree_entry_in_split(state, index) do
-    if state.workspace.file_tree.tree == nil do
+    if FileTreeState.tree(state.workspace.file_tree) == nil do
       state
     else
       do_open_file_tree_entry_in_split(state, index)
@@ -1462,7 +1460,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> move_tree_cursor(index)
       |> unfocus_file_tree_for_split()
 
-    case FileTree.selected_entry(state.workspace.file_tree.tree) do
+    case state.workspace.file_tree |> FileTreeState.tree() |> FileTree.selected_entry() do
       %{dir?: false, path: path} ->
         state
         |> Commands.Movement.execute(:split_vertical)

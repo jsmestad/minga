@@ -17,9 +17,9 @@ defmodule MingaEditor.State.FileTreeFilterTest do
   test "filter transition immediately publishes loading without resolving rows" do
     ft = open_tree("/nonexistent_root") |> FileTreeState.update_filter("needle")
 
-    assert ft.tree.filter == "needle"
-    assert ft.tree.entries == nil
-    assert ft.tree_status == :loading
+    assert tree(ft).filter == "needle"
+    assert tree(ft).entries == nil
+    assert FileTreeState.content(ft) == {:loading, tree(ft)}
     assert ft.filter_request == nil
   end
 
@@ -76,27 +76,27 @@ defmodule MingaEditor.State.FileTreeFilterTest do
              FileTreeState.accept_filter_result(accepted_input, root, "needle", token, result)
 
     assert updated.filter_request == nil
-    assert Enum.map(FileTree.visible_entries(updated.tree), & &1.name) == ["needle.ex"]
+    assert Enum.map(FileTree.visible_entries(tree(updated)), & &1.name) == ["needle.ex"]
   end
 
   test "cache data is injected as a value and installed only for the current request" do
     ft = open_tree("/project") |> FileTreeState.update_filter("needle")
     token = make_ref()
-    ft = FileTreeState.track_filter_request(ft, ft.tree.root, "needle", token)
+    ft = FileTreeState.track_filter_request(ft, tree(ft).root, "needle", token)
 
-    snapshot = Snapshot.new(ft.tree.root, true, ["lib/recomputed-would-differ.ex"], false)
-    entries = [entry(ft.tree.root, "worker-materialized.ex")]
-    result = Result.project_cache(ft.tree.root, "needle", entries, snapshot)
+    snapshot = Snapshot.new(tree(ft).root, true, ["lib/recomputed-would-differ.ex"], false)
+    entries = [entry(tree(ft).root, "worker-materialized.ex")]
+    result = Result.project_cache(tree(ft).root, "needle", entries, snapshot)
 
     assert {:accepted, updated} =
-             FileTreeState.accept_filter_result(ft, ft.tree.root, "needle", token, result)
+             FileTreeState.accept_filter_result(ft, tree(ft).root, "needle", token, result)
 
-    assert updated.tree.entries == entries
-    assert updated.tree.cached_files == snapshot.files
-    assert updated.tree_status == :ready
+    assert tree(updated).entries == entries
+    assert tree(updated).cached_files == snapshot.files
+    assert FileTreeState.content(updated) == {:ready, tree(updated)}
     assert updated.filter_request == nil
 
-    buffer = BufferSync.start_buffer(updated.tree)
+    buffer = BufferSync.start_buffer(tree(updated))
     assert Minga.Buffer.content(buffer) =~ "worker-materialized.ex"
     refute Minga.Buffer.content(buffer) =~ "recomputed-would-differ.ex"
   end
@@ -104,15 +104,15 @@ defmodule MingaEditor.State.FileTreeFilterTest do
   test "rebuilding empty cache remains loading without a filesystem fallback" do
     ft = open_tree("/project") |> FileTreeState.update_filter("needle")
     token = make_ref()
-    ft = FileTreeState.track_filter_request(ft, ft.tree.root, "needle", token)
-    snapshot = Snapshot.new(ft.tree.root, true, [], true)
-    result = Result.project_cache(ft.tree.root, "needle", [], snapshot)
+    ft = FileTreeState.track_filter_request(ft, tree(ft).root, "needle", token)
+    snapshot = Snapshot.new(tree(ft).root, true, [], true)
+    result = Result.project_cache(tree(ft).root, "needle", [], snapshot)
 
     assert {:accepted, updated} =
-             FileTreeState.accept_filter_result(ft, ft.tree.root, "needle", token, result)
+             FileTreeState.accept_filter_result(ft, tree(ft).root, "needle", token, result)
 
-    assert updated.tree.cached_files == []
-    assert updated.tree_status == :loading
+    assert tree(updated).cached_files == []
+    assert FileTreeState.content(updated) == {:loading, tree(updated)}
   end
 
   test "filesystem rows install for the exact request and stale repeated filters are dropped" do
@@ -143,7 +143,7 @@ defmodule MingaEditor.State.FileTreeFilterTest do
     assert {:accepted, updated} =
              FileTreeState.accept_filter_result(newer, root, "newer", newer_token, new_result)
 
-    assert Enum.map(FileTree.visible_entries(updated.tree), & &1.name) == ["newer.ex"]
+    assert Enum.map(FileTree.visible_entries(tree(updated)), & &1.name) == ["newer.ex"]
   end
 
   test "closed and rerooted filter results remain harmless" do
@@ -163,11 +163,13 @@ defmodule MingaEditor.State.FileTreeFilterTest do
              FileTreeState.accept_filter_result(closed, root, "needle", token, result)
 
     rerooted =
-      FileTreeState.begin_root_scan(current, FileTree.reroot(current.tree, "/new-root"), :reroot)
+      FileTreeState.begin_root_scan(current, FileTree.reroot(tree(current), "/new-root"), :reroot)
 
     assert {:stale, ^rerooted} =
              FileTreeState.accept_filter_result(rerooted, root, "needle", token, result)
   end
+
+  defp tree(file_tree), do: FileTreeState.tree(file_tree)
 
   defp entry(root, name) do
     %{

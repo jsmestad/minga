@@ -45,15 +45,12 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec toggle(state()) :: state()
   def toggle(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} ->
-        open(state)
+    file_tree = file_tree_state(state)
 
-      %FileTreeState{visibility: :hidden} ->
-        show_tree(state)
-
-      %FileTreeState{tree: %FileTree{}} ->
-        hide_tree(state)
+    case FileTreeState.tree(file_tree) do
+      nil -> open(state)
+      %FileTree{} when file_tree.visibility == :hidden -> show_tree(state)
+      %FileTree{} -> hide_tree(state)
     end
   end
 
@@ -116,29 +113,22 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec project_browse(state()) :: state()
   def project_browse(state) do
-    case file_tree_state(state) do
-      # No tree yet: build it (and its backing buffer) for the first time.
-      %FileTreeState{tree: nil} ->
-        open(state)
+    file_tree = file_tree_state(state)
 
-      # Loaded but hidden: reveal it, reusing the existing buffer and watchers.
-      # Calling open/1 here would orphan the running tree buffer (#2626 leak fix).
-      %FileTreeState{visibility: :hidden} ->
-        show_tree(state)
-
-      # Already visible: just refocus it.
-      %FileTreeState{tree: %FileTree{}} ->
-        focus_visible_tree(state)
+    case FileTreeState.tree(file_tree) do
+      nil -> open(state)
+      %FileTree{} when file_tree.visibility == :hidden -> show_tree(state)
+      %FileTree{} -> focus_visible_tree(state)
     end
   end
 
   @spec open_or_toggle(state()) :: state()
   def open_or_toggle(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{} = tree} ->
+    case FileTreeState.tree(file_tree_state(state)) do
+      %FileTree{} = tree ->
         open_or_toggle_entry(state, tree, FileTree.selected_entry(tree))
 
-      %FileTreeState{} ->
+      nil ->
         state
     end
   end
@@ -183,16 +173,16 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec with_tree(state(), (FileTree.t() -> FileTree.t())) :: state()
   defp with_tree(state, fun) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{} = tree} -> sync_and_update(state, fun.(tree))
-      %FileTreeState{} -> state
+    case FileTreeState.tree(file_tree_state(state)) do
+      %FileTree{} = tree -> sync_and_update(state, fun.(tree))
+      nil -> state
     end
   end
 
   @doc "Copies the selected entry's absolute path to the system clipboard."
   @spec copy_path(state()) :: state()
   def copy_path(state) do
-    with %FileTreeState{tree: %FileTree{} = tree} <- file_tree_state(state),
+    with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{path: path} <- FileTree.selected_entry(tree) do
       state
       |> Helpers.force_clipboard_sync(Path.expand(path))
@@ -213,17 +203,19 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Pastes the marked copy or move entry into the selected directory or file parent."
   @spec paste(state()) :: state()
   def paste(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} ->
+    file_tree = file_tree_state(state)
+
+    case {FileTreeState.tree(file_tree), file_tree.clipboard_mark} do
+      {nil, _mark} ->
         state
 
-      %FileTreeState{clipboard_mark: nil} ->
+      {_tree, nil} ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           state,
           "No file tree copy or move is pending"
         )
 
-      %FileTreeState{clipboard_mark: mark, tree: tree} ->
+      {tree, mark} ->
         target_dir = selected_target_dir(tree)
         destination = Path.join(target_dir, mark.name)
         paste_marked_entry(state, mark, destination)
@@ -233,12 +225,12 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Changes the tree root to the parent directory of the current root."
   @spec root_parent(state()) :: state()
   def root_parent(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{root: root}} ->
+    case FileTreeState.tree(file_tree_state(state)) do
+      %FileTree{root: root} ->
         parent = Path.dirname(root)
         if parent == root, do: state, else: reroot(state, parent)
 
-      %FileTreeState{} ->
+      nil ->
         state
     end
   end
@@ -246,15 +238,15 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Changes the tree root to the selected directory."
   @spec root_selected(state()) :: state()
   def root_selected(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{} = tree} ->
+    case FileTreeState.tree(file_tree_state(state)) do
+      %FileTree{} = tree ->
         case FileTree.selected_entry(tree) do
           %{dir?: true, path: path} -> reroot(state, path)
           %{dir?: false} -> state
           nil -> state
         end
 
-      %FileTreeState{} ->
+      nil ->
         state
     end
   end
@@ -262,11 +254,20 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Restores the tree root to the original project directory."
   @spec root_original(state()) :: state()
   def root_original(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} -> state
-      %FileTreeState{original_root: root} when is_binary(root) -> reroot(state, root)
-      %FileTreeState{project_root: root} when is_binary(root) -> reroot(state, root)
-      %FileTreeState{} -> state
+    file_tree = file_tree_state(state)
+
+    case FileTreeState.tree(file_tree) do
+      nil ->
+        state
+
+      %FileTree{} when is_binary(file_tree.original_root) ->
+        reroot(state, file_tree.original_root)
+
+      %FileTree{} when is_binary(file_tree.project_root) ->
+        reroot(state, file_tree.project_root)
+
+      %FileTree{} ->
+        state
     end
   end
 
@@ -318,10 +319,11 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   @spec prepare_new_entry_edit(FileTreeState.t(), state(), :new_file | :new_folder) :: state()
-  defp prepare_new_entry_edit(%FileTreeState{tree: nil}, state, _type), do: state
-
-  defp prepare_new_entry_edit(%FileTreeState{tree: tree}, state, type) do
-    continue_new_entry_edit(resolve_tree_entries(tree), state, type)
+  defp prepare_new_entry_edit(%FileTreeState{} = file_tree, state, type) do
+    case FileTreeState.tree(file_tree) do
+      nil -> state
+      tree -> continue_new_entry_edit(resolve_tree_entries(tree), state, type)
+    end
   end
 
   @spec continue_new_entry_edit(tree_resolution(), state(), :new_file | :new_folder) :: state()
@@ -362,11 +364,11 @@ defmodule MingaEditor.Commands.FileTree do
   """
   @spec rename(state()) :: state()
   def rename(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} ->
+    case FileTreeState.tree(file_tree_state(state)) do
+      nil ->
         state
 
-      %FileTreeState{tree: tree} ->
+      tree ->
         case FileTree.selected_entry(tree) do
           nil ->
             state
@@ -418,7 +420,12 @@ defmodule MingaEditor.Commands.FileTree do
            events_registry: state.extension_surfaces.events_registry
          ) do
       {:ok, pid} ->
-        BufferRegistry.do_file_tree_open(state, pid, full_path, file_tree_state(state).tree)
+        BufferRegistry.do_file_tree_open(
+          state,
+          pid,
+          full_path,
+          FileTreeState.tree(file_tree_state(state))
+        )
 
       {:error, reason} ->
         Log.warning(:editor, "[file-tree] Failed to open #{full_path}: #{inspect(reason)}")
@@ -446,7 +453,8 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec confirm_rename(state()) :: state()
   defp confirm_rename(state) do
-    case {file_tree_state(state).tree, FileTreeState.editing(file_tree_state(state))} do
+    case {FileTreeState.tree(file_tree_state(state)),
+          FileTreeState.editing(file_tree_state(state))} do
       {%FileTree{} = tree, %{text: text}} ->
         case FileTree.selected_entry(tree) do
           nil -> cancel_editing(state)
@@ -466,7 +474,7 @@ defmodule MingaEditor.Commands.FileTree do
   """
   @spec delete(state()) :: state()
   def delete(state) do
-    with %FileTreeState{tree: %FileTree{} = tree} <- file_tree_state(state),
+    with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{} = entry <- FileTree.selected_entry(tree) do
       child_count = if entry.dir?, do: count_children(entry.path), else: 0
       ms = DeleteConfirmState.new(entry.path, entry.name, entry.dir?, child_count)
@@ -483,7 +491,7 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Duplicates the selected file or directory with a \" copy\" suffix."
   @spec duplicate(state()) :: state()
   def duplicate(state) do
-    with %FileTreeState{tree: %FileTree{} = tree} <- file_tree_state(state),
+    with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{} = entry <- FileTree.selected_entry(tree) do
       dest = unique_copy_path(entry.path)
 
@@ -531,7 +539,7 @@ defmodule MingaEditor.Commands.FileTree do
   """
   @spec move(state(), non_neg_integer(), non_neg_integer()) :: state()
   def move(state, source_index, target_dir_index) do
-    case file_tree_state(state).tree do
+    case FileTreeState.tree(file_tree_state(state)) do
       nil -> move_without_tree(state)
       tree -> move_with_tree(state, tree, source_index, target_dir_index)
     end
@@ -569,7 +577,7 @@ defmodule MingaEditor.Commands.FileTree do
   @spec drop(state(), DropIntent.t()) :: state()
 
   def drop(state, %DropIntent{} = intent) do
-    case file_tree_state(state).tree do
+    case FileTreeState.tree(file_tree_state(state)) do
       nil ->
         Log.warning(:editor, "[file-tree] Drop rejected: file tree is unavailable")
         state
@@ -623,7 +631,7 @@ defmodule MingaEditor.Commands.FileTree do
 
       path ->
         state = ensure_tree_open(state)
-        tree = FileTree.reveal(file_tree_state(state).tree, path)
+        tree = FileTree.reveal(FileTreeState.tree(file_tree_state(state)), path)
         state = sync_and_update(state, tree)
         state = update_file_tree(state, &FileTreeState.show/1)
 
@@ -661,7 +669,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec mark_for_paste(state(), FileTreeState.clipboard_operation()) :: state()
   defp mark_for_paste(state, operation) do
-    with %FileTreeState{tree: %FileTree{} = tree} <- file_tree_state(state),
+    with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{} = entry <- FileTree.selected_entry(tree) do
       store_clipboard_mark(state, entry, operation)
     else
@@ -928,7 +936,7 @@ defmodule MingaEditor.Commands.FileTree do
   # ensure the tree exists before calling FileTree.reveal.
   @spec ensure_tree_open(state()) :: state()
   defp ensure_tree_open(state) do
-    case file_tree_state(state).tree do
+    case FileTreeState.tree(file_tree_state(state)) do
       %FileTree{} -> state
       nil -> open(state)
     end
@@ -1057,7 +1065,7 @@ defmodule MingaEditor.Commands.FileTree do
   # Determines the parent directory path for the current editing operation.
   @spec editing_parent_dir(state()) :: String.t()
   defp editing_parent_dir(state) do
-    %{tree: tree} = file_tree_state(state)
+    tree = FileTreeState.tree(file_tree_state(state))
     editing = FileTreeState.editing(file_tree_state(state))
     entries = FileTree.visible_entries(tree)
 
@@ -1326,9 +1334,11 @@ defmodule MingaEditor.Commands.FileTree do
   # Syncs the buffer after editing state changes.
   @spec sync_buffer(state()) :: state()
   defp sync_buffer(state) do
-    case file_tree_state(state) do
-      %FileTreeState{buffer: buf, tree: tree} when is_pid(buf) -> BufferSync.sync(buf, tree)
-      %FileTreeState{} -> :ok
+    file_tree = file_tree_state(state)
+
+    case {file_tree.buffer, FileTreeState.tree(file_tree)} do
+      {buf, %FileTree{} = tree} when is_pid(buf) -> BufferSync.sync(buf, tree)
+      _ -> :ok
     end
 
     state

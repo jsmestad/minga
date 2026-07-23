@@ -10,20 +10,23 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Input.Scoped
   alias Minga.Project.FileTree
+  alias MingaEditor.State.FileTree, as: FileTreeState
+
+  defp ft_tree(state), do: state |> ft() |> FileTreeState.tree()
 
   describe "file tree scope" do
     test "q closes tree", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       {:handled, new_state} = FileTreeHandler.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert ft(new_state).tree == nil
+      assert ft_tree(new_state) == nil
     end
 
     test "unbound key delegates to mode FSM for vim nav", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       # j is not bound in file_tree scope (handled by mode FSM delegation)
       {:handled, new_state} = FileTreeHandler.handle_key(state, ?j, 0)
-      assert ft(new_state).tree.cursor == 1
+      assert ft_tree(new_state).cursor == 1
     end
 
     test "leader sequence in progress delegates to mode FSM", %{tmp_dir: tmp_dir} do
@@ -60,9 +63,9 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
       File.write!(Path.join(tmp_dir, ".hidden"), "")
       state = make_tree_state(tmp_dir, 0)
 
-      entries_before = Enum.count(FileTree.visible_entries(ft(state).tree))
+      entries_before = Enum.count(FileTree.visible_entries(ft_tree(state)))
       {:handled, new_state} = FileTreeHandler.handle_key(state, ?H, 0)
-      entries_after = Enum.count(FileTree.visible_entries(ft(new_state).tree))
+      entries_after = Enum.count(FileTree.visible_entries(ft_tree(new_state)))
 
       assert entries_after != entries_before
     end

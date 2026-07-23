@@ -276,7 +276,7 @@ defmodule MingaEditor.FileTree.RowsTest do
   end
 
   describe "FileTreeState.status/1" do
-    test "distinguishes hidden, empty, ready, loading, and error states", %{tmp_dir: tmp_dir} do
+    test "derives status from content tags", %{tmp_dir: tmp_dir} do
       assert FileTreeState.status(%FileTreeState{}) == :hidden
 
       empty_tree = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
@@ -285,26 +285,36 @@ defmodule MingaEditor.FileTree.RowsTest do
       ready_tree = flat_tree(tmp_dir)
       assert FileTreeState.status(FileTreeState.open(%FileTreeState{}, ready_tree, nil)) == :ready
 
-      loading = FileTreeState.loading(%FileTreeState{project_root: tmp_dir})
+      loading = FileTreeState.loading(FileTreeState.open(%FileTreeState{}, ready_tree, nil))
       assert FileTreeState.status(loading) == :loading
+      assert FileTreeState.content(loading) == {:loading, ready_tree}
 
-      errored = FileTreeState.error(%FileTreeState{}, :enoent)
+      errored =
+        FileTreeState.error(FileTreeState.open(%FileTreeState{}, ready_tree, nil), :enoent)
+
       assert {:error, reason} = FileTreeState.status(errored)
-      assert reason != ""
+      assert FileTreeState.content(errored) == {:error, reason, ready_tree}
+
+      hidden =
+        ready_tree |> then(&FileTreeState.open(%FileTreeState{}, &1, nil)) |> FileTreeState.hide()
+
+      assert FileTreeState.status(hidden) == :hidden
     end
 
     test "replace_tree clears stale loading or error state", %{tmp_dir: tmp_dir} do
       ready_tree = flat_tree(tmp_dir)
 
       loading =
-        %FileTreeState{tree: ready_tree}
+        %FileTreeState{}
+        |> FileTreeState.open(ready_tree, nil)
         |> FileTreeState.loading()
         |> FileTreeState.replace_tree(ready_tree)
 
       assert FileTreeState.status(loading) == :ready
 
       errored =
-        %FileTreeState{tree: ready_tree}
+        %FileTreeState{}
+        |> FileTreeState.open(ready_tree, nil)
         |> FileTreeState.error(:eacces)
         |> FileTreeState.replace_tree(ready_tree)
 
@@ -313,7 +323,7 @@ defmodule MingaEditor.FileTree.RowsTest do
 
     test "entry-invalidating transitions preserve the current visible status", %{tmp_dir: tmp_dir} do
       file_tree = FileTreeState.open(%FileTreeState{}, flat_tree(tmp_dir), nil)
-      invalidated = FileTree.collapse_all(file_tree.tree)
+      invalidated = FileTree.collapse_all(FileTreeState.tree(file_tree))
 
       assert invalidated.entries == nil
 
@@ -327,14 +337,14 @@ defmodule MingaEditor.FileTree.RowsTest do
       tree = flat_tree(tmp_dir)
       file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-      assert is_list(file_tree.tree.entries)
-      assert Enum.count(file_tree.tree.entries) == 2
+      assert is_list(FileTreeState.tree(file_tree).entries)
+      assert Enum.count(FileTreeState.tree(file_tree).entries) == 2
 
-      replaced_tree = FileTree.toggle_hidden(file_tree.tree)
+      replaced_tree = FileTree.toggle_hidden(FileTreeState.tree(file_tree))
       replaced = FileTreeState.replace_tree(file_tree, replaced_tree)
 
-      assert is_list(replaced.tree.entries)
-      assert replaced.tree.entries != []
+      assert is_list(FileTreeState.tree(replaced).entries)
+      assert FileTreeState.tree(replaced).entries != []
     end
 
     test "width preserves the last sidebar width for state-only payloads", %{tmp_dir: tmp_dir} do

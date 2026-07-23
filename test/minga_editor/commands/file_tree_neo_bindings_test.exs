@@ -419,7 +419,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       state = FileTreeCommands.root_parent(state)
 
-      assert ft(state).tree.root == Path.expand(tmp_dir)
+      assert tree(state).root == Path.expand(tmp_dir)
       assert ft(state).original_root == Path.expand(child)
     end
 
@@ -434,10 +434,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state =
         tmp_dir |> build_state() |> select_entry("child") |> FileTreeCommands.root_selected()
 
-      assert ft(state).tree.root == Path.expand(child)
+      assert tree(state).root == Path.expand(child)
 
       state = FileTreeCommands.root_original(state)
-      assert ft(state).tree.root == Path.expand(tmp_dir)
+      assert tree(state).root == Path.expand(tmp_dir)
     end
   end
 
@@ -451,7 +451,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       file_tree = FileTreeState.update_filter(ft(state), "alpha")
 
       assert file_tree.interaction == :filtering
-      assert Enum.map(FileTree.visible_entries(file_tree.tree), & &1.name) == ["alpha.txt"]
+
+      assert Enum.map(FileTree.visible_entries(FileTreeState.tree(file_tree)), & &1.name) == [
+               "alpha.txt"
+             ]
     end
 
     @tag :tmp_dir
@@ -502,9 +505,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   end
 
   defp ft(state), do: state.workspace.file_tree
+  defp tree(state), do: state |> ft() |> FileTreeState.tree()
 
   defp expand_path(state, path) do
-    tree = FileTree.expand_path(ft(state).tree, path)
+    tree = FileTree.expand_path(tree(state), path)
     file_tree = FileTreeState.replace_tree(ft(state), tree)
 
     then(state, fn state ->
@@ -519,11 +523,11 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   end
 
   defp select_entry(state, name) do
-    entries = FileTree.visible_entries(ft(state).tree)
+    entries = FileTree.visible_entries(tree(state))
     index = Enum.find_index(entries, &(&1.name == name))
     refute index == nil
 
-    tree = FileTree.select(ft(state).tree, index)
+    tree = FileTree.select(tree(state), index)
     file_tree = FileTreeState.replace_tree(ft(state), tree)
 
     then(state, fn state ->
