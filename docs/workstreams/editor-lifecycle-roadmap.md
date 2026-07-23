@@ -4283,7 +4283,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W104/ES07: Own completion trigger lifecycle as one tagged phase
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES07
 - **Planning profile:** `ES07Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES07Worker`, no delegation.
@@ -4306,5 +4306,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Findings resolved:** ES07's raw completion-trigger lifecycle map is clean-cut into the tagged phase owner without adding a module, process, dependency, behaviour, protocol, registry, compatibility shim, or second representation.
 - **Discoveries affecting later work:** Existing buffer test helpers in this focused surface initialize cursor position at `{0, 0}` even when test content is nonempty, so owner tests assert the actual cursor returned by `Buffer.content_and_cursor/1` instead of assuming end-of-line. No replan trigger, owner drift, L07 identity-scope leak, protocol/frontend dependency, single-pid overload conflict, production budget miss, test budget miss, raw compatibility need, or second concept was found.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the complete nine-path diff matches the locked specification, preserves the debounce, role, stale/error, multi-client, generation, modal-identity, and protocol contracts, and keeps the roadmap evidence and line/concept budgets consistent with the patch.
-- **Pending review/delivery:** Commit, PR, CI, merge evidence, and VERIFIED status remain pending.
-- **Completion date:** 2026-07-22.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3200
+- **Implementation commit SHA:** `426aa7a9f8574cf6ac39084f05341128faa2eaaf`.
+- **Merge SHA:** `33d00edb30d2e4e82e4224b5e3f52d69acb6f93a`; **Merge evidence:** PR #3200 merged after CI run `29967431751` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-23.
