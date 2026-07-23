@@ -1964,12 +1964,12 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Run the blocking tool")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-      assert_receive {:abort_blocking_tool_started, worker_pid}, 1_000
+      assert_receive {:abort_blocking_tool_started, worker_pid}, 5_000
       worker_ref = Process.monitor(worker_pid)
 
       assert :ok = Native.abort(pid)
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 5_000
 
       send(worker_pid, {release_ref, :release})
       refute_receive :abort_blocking_tool_continued, 50

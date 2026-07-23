@@ -658,7 +658,14 @@ defmodule Minga.Extension.LifecycleContractTest do
     assert_receive {:init_entered, workflow}, 5_000
 
     second = Task.async(fn -> start_extension(ctx, name, entry) end)
-    refute Task.yield(second, 50)
+
+    assert {:starting, %{waiters: [_, _]}} =
+             eventually(fn ->
+               case Instance.phase(instance(ctx, name)) do
+                 {:starting, %{waiters: [_, _]}} = phase -> phase
+                 _phase -> nil
+               end
+             end)
 
     send(workflow, :continue_init)
     assert {:ok, pid} = Task.await(first)
@@ -674,6 +681,15 @@ defmodule Minga.Extension.LifecycleContractTest do
     first = Task.async(fn -> start_extension(ctx, name, entry) end)
     assert_receive {:init_entered, workflow}, 5_000
     second = Task.async(fn -> start_extension(ctx, name, entry) end)
+
+    assert {:starting, %{waiters: [_, _]}} =
+             eventually(fn ->
+               case Instance.phase(instance(ctx, name)) do
+                 {:starting, %{waiters: [_, _]}} = phase -> phase
+                 _phase -> nil
+               end
+             end)
+
     send(workflow, :continue_init)
 
     assert {:error, reason} = Task.await(first)
