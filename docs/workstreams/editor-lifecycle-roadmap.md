@@ -4415,7 +4415,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W108/ES10: Cut over FileTree refresh and watcher correlation phases
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES10
 - **Planning profile:** `ES10Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES10Worker`, no delegation.
@@ -4439,3 +4439,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed source-strict and exact refresh/watcher correlation, clear-filter invalidation before direct admission, retained retry and cleanup lineage, complete caller/mailbox migration, stale-field removal, preserved W106/W107 contracts, truthful evidence and budgets, full ES10 resolution, and merge safety.
 - **Discoveries affecting later work:** No replan trigger, owner drift, production budget issue, test budget issue, new dependency, protocol/frontend dependency, persisted tab migration need, compatibility need, or additional ES10 scope dependency was found.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3210
+- **Implementation commit SHA:** `0e13c263a14a77a59370a29a2f70ea6295218d45`
+- **Merge SHA:** `138f805e71bf9265357e9de191c950bcd4efbe27`
+- **Merge evidence:** PR #3210 merged after CI run `29984831915` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES10 is fully resolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR, implementation SHA, merge SHA, successful CI run, completion date, and full ES10 resolution were independently confirmed.
