@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
   alias MingaEditor.Agent.Compaction
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Compaction, as: CompactionState
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Shell.Runtime
@@ -30,7 +31,7 @@ defmodule MingaEditor.Agent.CompactionTest do
     {failed, %Outcome{value: {:failed, _reason}}} =
       Compaction.apply(state, Outcome.failed(request, :provider_error))
 
-    refute failed.workspace.agent_ui.view.compaction_in_progress
+    assert failed.workspace.agent_ui.view.compaction.execution == :idle
     assert failed.workspace.agent_ui.view.toast.message == "Auto-compact failed: :provider_error"
 
     state = state_for(session)
@@ -38,7 +39,7 @@ defmodule MingaEditor.Agent.CompactionTest do
     {canceled, %Outcome{value: {:canceled, _reason}}} =
       Compaction.apply(state, Outcome.canceled(request, :requested))
 
-    refute canceled.workspace.agent_ui.view.compaction_in_progress
+    assert canceled.workspace.agent_ui.view.compaction.execution == :idle
 
     other_session = fake_session()
     stale_state = state_for(other_session)
@@ -60,7 +61,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
     background_ui =
       UIState.new()
-      |> then(fn ui -> %{ui | view: %{ui.view | compaction_in_progress: true}} end)
+      |> UIState.replace_compaction(%CompactionState{execution: :requested})
 
     tab_bar =
       TabBar.set_workspace_agent_ui(tab_bar, background_workspace.id, background_ui)
@@ -89,7 +90,7 @@ defmodule MingaEditor.Agent.CompactionTest do
       updated.shell_runtime.state.tab_bar
       |> TabBar.find_workspace_by_session(background_session)
 
-    refute background.agent_ui.view.compaction_in_progress
+    assert background.agent_ui.view.compaction.execution == :idle
     assert background.agent_ui.view.toast.message == "Auto-compact failed: :provider_error"
     assert MingaEditor.Shell.Runtime.active_session(updated.shell_runtime) == active_session
   end
@@ -100,7 +101,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
     updated = Compaction.schedule(state, session)
 
-    refute updated.workspace.agent_ui.view.compaction_in_progress
+    assert updated.workspace.agent_ui.view.compaction.execution == :idle
     assert updated.workspace.agent_ui.view.toast.level == :error
     assert updated.workspace.agent_ui.view.toast.message =~ "admission_failed"
     assert updated.render.render_correlation.timer != nil
@@ -115,7 +116,7 @@ defmodule MingaEditor.Agent.CompactionTest do
 
     agent_ui =
       UIState.new()
-      |> then(fn ui -> %{ui | view: %{ui.view | compaction_in_progress: true}} end)
+      |> UIState.replace_compaction(%CompactionState{execution: :requested})
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self(), backend: :tui},

@@ -12,8 +12,10 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.Agent.StreamEventWorkflow
   alias MingaEditor.Agent.ToolEventWorkflow
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Compaction, as: CompactionState
   alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
@@ -366,14 +368,77 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     state = StatusEventWorkflow.status_changed(state, :thinking)
     state = StatusEventWorkflow.context_usage(state, 95, 100)
 
-    assert state.workspace.agent_ui.view.compact_pending_fill_pct == 95
-    refute state.workspace.agent_ui.view.compaction_in_progress
+    assert state.workspace.agent_ui.view.compaction.execution == {:deferred, 95}
+    refute CompactionState.requested?(state.workspace.agent_ui.view.compaction)
 
     state = StatusEventWorkflow.status_changed(state, :idle)
 
-    assert state.workspace.agent_ui.view.compact_pending_fill_pct == nil
-    assert state.workspace.agent_ui.view.compaction_in_progress
+    assert state.workspace.agent_ui.view.compaction.execution == :requested
+    assert state.workspace.agent_ui.view.compaction.threshold == :triggered
     assert EffectScheduler.active?(effect_scheduler, Compaction)
+  end
+
+  test "idle deferred compaction ignores stale shell session after registration fallback" do
+    ShellRegistry.seed_builtin()
+
+    old_session =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> send(old_session, :stop) end)
+    task_supervisor = start_supervised!({Task.Supervisor, []})
+
+    effect_scheduler =
+      start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+
+    agent_ui =
+      UIState.new()
+      |> UIState.replace_compaction(%CompactionState{
+        threshold: :warned,
+        execution: {:deferred, 95}
+      })
+
+    stale_entry = Entry.builtin!(:stale_fake, FakeShell, "Stale fake", "Stale fake shell", false)
+
+    state = %{
+      event_state(nil, effect_scheduler)
+      | workspace: %SessionState{agent_ui: agent_ui},
+        shell_runtime: Runtime.new(stale_entry, %{session: old_session})
+    }
+
+    state = StatusEventWorkflow.status_changed(state, :idle)
+
+    assert Runtime.active_session(state.shell_runtime) == nil
+    assert state.workspace.agent_ui.view.compaction.execution == :idle
+    assert state.workspace.agent_ui.view.compaction.threshold == :fresh
+    refute EffectScheduler.active?(effect_scheduler, Compaction)
+  end
+
+  test "context warning toast is emitted once without scheduling compaction" do
+    {:ok, session} = start_supervised({Session, provider_opts: []})
+    task_supervisor = start_supervised!({Task.Supervisor, []})
+
+    effect_scheduler =
+      start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+
+    state = event_state(session, effect_scheduler)
+    state = StatusEventWorkflow.context_usage(state, 80, 100)
+
+    assert state.workspace.agent_ui.view.compaction.threshold == :warned
+
+    assert state.workspace.agent_ui.view.toast.message ==
+             "Context at 80%. Run /compact to free space."
+
+    refute EffectScheduler.active?(effect_scheduler, Compaction)
+
+    state = StatusEventWorkflow.context_usage(state, 85, 100)
+
+    assert state.workspace.agent_ui.view.compaction.threshold == :warned
+    assert state.workspace.agent_ui.view.toast_queue == :queue.new()
+    refute EffectScheduler.active?(effect_scheduler, Compaction)
   end
 
   test "session error cancellation path tolerates a session that exited before queue recall" do

@@ -16,6 +16,7 @@ defmodule MingaEditor.Agent.UIState.View do
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.UIState.Presentation
   alias MingaEditor.Agent.UIState.ReturnTarget
+  alias MingaEditor.Agent.UIState.Compaction
   alias MingaEditor.Agent.View.Preview
   alias Minga.Config
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -59,10 +60,7 @@ defmodule MingaEditor.Agent.UIState.View do
           edit_timeline: EditTimeline.t(),
           activity: Activity.t(),
           context_estimate: non_neg_integer(),
-          compact_warned: boolean(),
-          compact_triggered: boolean(),
-          compact_pending_fill_pct: non_neg_integer() | nil,
-          compaction_in_progress: boolean()
+          compaction: Compaction.t()
         }
 
   @min_chat_pct 30
@@ -77,10 +75,7 @@ defmodule MingaEditor.Agent.UIState.View do
             toast: nil,
             toast_queue: :queue.new(),
             context_estimate: 0,
-            compact_warned: false,
-            compact_triggered: false,
-            compact_pending_fill_pct: nil,
-            compaction_in_progress: false,
+            compaction: Compaction.new(),
             edit_timeline: EditTimeline.new(),
             activity: Activity.new()
 
@@ -88,9 +83,23 @@ defmodule MingaEditor.Agent.UIState.View do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Marks compaction as no longer running."
+  @doc "Installs terminal compaction lifecycle state."
   @spec finish_compaction(t()) :: t()
-  def finish_compaction(%__MODULE__{} = view), do: %{view | compaction_in_progress: false}
+  def finish_compaction(%__MODULE__{compaction: compaction} = view) do
+    %{view | compaction: Compaction.finish(compaction)}
+  end
+
+  @doc "Installs the compaction value produced by a Compaction transition."
+  @spec replace_compaction(t(), Compaction.t()) :: t()
+  def replace_compaction(%__MODULE__{} = view, %Compaction{} = compaction) do
+    %{view | compaction: compaction}
+  end
+
+  @doc "Records the latest displayed context estimate."
+  @spec record_context_estimate(t(), non_neg_integer()) :: t()
+  def record_context_estimate(%__MODULE__{} = view, estimated_tokens) do
+    %{view | context_estimate: estimated_tokens}
+  end
 
   @doc "Installs the activity value produced by an Activity transition."
   @spec replace_activity(t(), Activity.t()) :: t()
