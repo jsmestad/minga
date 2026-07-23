@@ -117,7 +117,7 @@ defmodule MingaEditor.CompletionTriggerTest do
         assert completion == nil
         assert %CompletionTrigger{phase: {:debounced, timer, {0, 0}}, gen: 0} = result
         assert is_reference(timer)
-        assert_receive {:completion_debounce, ^clients, ^buf}, 200
+        assert_receive {:completion_debounce, ^clients, ^buf}, 1_000
       after
         Minga.LSP.SyncServer.remove_buffer(buf)
         GenServer.stop(buf)

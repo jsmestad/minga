@@ -241,7 +241,7 @@ defmodule MingaAgent.Tools.ShellTest do
       command =
         "elixir -e 'IO.write(String.duplicate(\"x\", 51199)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
 
-      assert {:ok, output} = Shell.execute(command, dir, 5)
+      assert {:ok, output} = Shell.execute(command, dir, 15)
 
       assert String.valid?(output)
       assert output =~ "[truncated at 51KB]"

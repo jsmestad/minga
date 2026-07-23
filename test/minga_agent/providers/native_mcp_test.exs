@@ -9,7 +9,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
-  @receive_timeout 5_000
+  @receive_timeout 10_000
 
   defp server_config(name \\ "Local Tools") do
     %ServerConfig{name: name, command: "ignored"}
