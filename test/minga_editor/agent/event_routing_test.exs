@@ -300,8 +300,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       }
 
       state = Events.dispatch(state, {:context_usage, 95, 100})
-      assert state.workspace.agent_ui.view.compact_pending_fill_pct == 95
-      refute state.workspace.agent_ui.view.compaction_in_progress
+      assert state.workspace.agent_ui.view.compaction.execution == {:deferred, 95}
+      assert state.workspace.agent_ui.view.compaction.threshold == :fresh
     end
   end
 

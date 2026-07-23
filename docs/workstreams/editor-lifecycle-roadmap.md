@@ -26,12 +26,12 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **CANDIDATE, craftsmanship:** (none)
-- **CANDIDATE, data shape:** ES09, ES10, ES14, ES16, ES17, ES18, ES21, ES24
+- **CANDIDATE, data shape:** ES09, ES10, ES14, ES16, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
 
@@ -41,7 +41,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03
-- **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
+- **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES18, ES24
 - **DRIFTED:** D13, D36, D40, S14, ES21
 
 Drift evidence:
@@ -4549,3 +4549,31 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Findings resolved:** ES16 is fully resolved.
 - **Completion date:** 2026-07-23
 - **Ledger reviewer verdict:** Initial review required explicit post-merge full-resolution evidence. After correction, PR URL, implementation SHA, merge SHA, successful CI run, completion date, and full ES16 resolution are all recorded.
+
+### W112/ES17: Make agent compaction UI lifecycle a tagged owner value
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** ES17
+- **Planning profile:** `ES17Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `ES17Worker`, no delegation.
+- **Current baseline:** `e58c66d53061bdcac02a750714d5b41d6d0b1441`.
+- **Ready provenance:** Locked by `local://es17-plan.json` with status `READY`; scope was exactly one pure `MingaEditor.Agent.UIState.Compaction` owner with `%Compaction{threshold, execution}`, View/UIState aggregate APIs, StatusEventWorkflow threshold and execution migration, compaction terminal outcome migration, named owner/workflow/routing/outcome tests, exhaustive old-field search, formatting, `git diff --check`, `make lint`, full-suite validation, production net `<= +50`, test net `<= +160`, and this W112 evidence. Scheduler execution remained owned by `MingaEditor.EffectScheduler` and `MingaEditor.Agent.Compaction`.
+- **Failure reproduction:** Baseline source still stored four independent `MingaEditor.Agent.UIState.View` fields: `compact_warned`, `compact_triggered`, `compact_pending_fill_pct`, and `compaction_in_progress`. `StatusEventWorkflow` directly produced, consumed, and reset those fields across context usage, busy deferral, idle reset, warning, auto-trigger, and pending-fill application; terminal compaction outcomes cleared only the progress boolean through `UIState.finish_compaction/1`. The pre-change search reproduced old-field production and consumption in `lib/minga_editor/agent/status_event_workflow.ex`, `lib/minga_editor/agent/ui_state/view.ex`, and the named agent tests.
+- **Observable result:** Agent context-compaction UI state is now represented by one `%MingaEditor.Agent.UIState.Compaction{threshold, execution}` value. `threshold` is `:fresh | :warned | :triggered`; `execution` is `:idle | {:deferred, fill_pct} | :requested`. The owner returns only `:none | {:warn, fill_pct} | :schedule`; warning toasts, render scheduling, active-session lookup, scheduler admission, and terminal outcome effects stay in `StatusEventWorkflow` or `MingaEditor.Agent.Compaction`.
+- **Implementation result:** Added the pure Compaction owner with `new/0`, `record_context_usage/6`, `status_changed/5`, `finish/1`, and `requested?/1`; replaced the four View fields with `compaction: Compaction.new()`; added `View.replace_compaction/2`, `View.record_context_estimate/2`, and `UIState.replace_compaction/2`; changed `View.finish_compaction/1` and `UIState.finish_compaction/1` to clear only `execution`; migrated `StatusEventWorkflow.context_usage/3` and `status_changed/2` to install owner-returned state and map local actions after render; preserved shell-registration normalization before idle deferred action evaluation; captured the active session once for owner admission and scheduler mapping; renamed the scheduler effect alias to `AgentCompaction`; and migrated compaction outcome, routing, and focused workflow assertions to the tagged value.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/agent/status_event_workflow.ex`; `lib/minga_editor/agent/ui_state.ex`; `lib/minga_editor/agent/ui_state/view.ex`; `lib/minga_editor/agent/ui_state/compaction.ex`; `test/minga_editor/agent/ui_state/compaction_test.exs`; `test/minga_editor/agent/focused_event_workflows_test.exs`; `test/minga_editor/agent/event_routing_test.exs`; `test/minga_editor/agent/compaction_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/agent/ui_state/compaction_test.exs test/minga_editor/agent/focused_event_workflows_test.exs test/minga_editor/agent/event_routing_test.exs test/minga_editor/agent/compaction_test.exs` passed 49 tests.
+- **Reference validation:** Exhaustive grep over `lib/minga_editor` and `test/minga_editor` found no executable `compact_warned`, `compact_triggered`, `compact_pending_fill_pct`, or `compaction_in_progress` references after cutover.
+- **Formatting and diff validation:** `mix format` ran on every touched Elixir source and test path. `mix format --check-formatted` passed. `git diff --check` passed.
+- **Broad validation:** `make lint` passed Credo on 8 changed source files, compile with warnings as errors, formatting, and incremental Dialyzer with zero Dialyzer errors. Final `mix test --max-cases 1` passed 10,326 tests, including 58 doctests and 99 properties, with 1 skipped and 204 excluded. Exact parallel `mix test` retries exposed unrelated async flakes in `MingaAgent.Providers.NativeTest`, `MingaAgent.Tools.SubagentTest`, `MingaAgent.SessionManagerTest`, and `MingaAgent.Providers.NativeMCPTest`; each named failure passed when rerun directly.
+- **Production lines added/removed before roadmap evidence:** `155 added / 136 removed`, net `+19`, within the locked production net `<= +50`; production numstat before this roadmap update: `lib/minga_editor/agent/status_event_workflow.ex 50 126`, `lib/minga_editor/agent/ui_state.ex 7 0`, `lib/minga_editor/agent/ui_state/view.ex 19 10`, `lib/minga_editor/agent/ui_state/compaction.ex 79 0`.
+- **Test lines added/removed before roadmap evidence:** `137 added / 12 removed`, net `+125`, within the locked test net `<= +160`; test numstat before this roadmap update: `test/minga_editor/agent/ui_state/compaction_test.exs 59 0`, `test/minga_editor/agent/focused_event_workflows_test.exs 69 4`, `test/minga_editor/agent/event_routing_test.exs 2 2`, `test/minga_editor/agent/compaction_test.exs 7 6`.
+- **Concepts added:** One pure UI lifecycle value, `MingaEditor.Agent.UIState.Compaction`; one workflow-local action union, `:none | {:warn, fill_pct} | :schedule`.
+- **Concepts removed:** Four independent View compaction fields and direct `StatusEventWorkflow` mutation ownership for compaction threshold/execution flags.
+- **Retained contracts:** Event order, context estimate display, nil/zero context-limit no-op behavior, warning threshold fallback and disabling, warning toast text and single-emission gate, auto threshold and active-session scheduling, busy `:thinking` and `:tool_executing` deferred latest-fill behavior, idle reset before deferred-fill evaluation, one requested compaction at a time, scheduler-owned admission/execution, terminal outcome progress clearing, admission-failure toast/render behavior, and stale/background outcome handling remain unchanged.
+- **Findings resolved:** ES17 is implemented as the locked `%Compaction{threshold, execution}` lifecycle owner without a process, dependency, behaviour, protocol, registry, configuration, compatibility shim, parallel fields, universal interpreter, or scheduler lifecycle copy.
+- **Mandatory review corrections:** Applied the required stale shell-registration ordering fix, single active-session capture and explicit local action mapping, consolidated one-shot agent UI installation, fixture owner-helper cleanup, latest-fill deferred owner test correction, and removal of the impossible schedule-without-session fallback so such a regression fails visibly instead of silently stranding `execution: :requested`. The stale registration regression proves idle deferred compaction does not schedule an old session and does not strand `execution: :requested` after shell normalization removes the stale session.
+- **Discoveries affecting later work:** The exact parallel `mix test` command remains susceptible to unrelated async timeouts/flakes in agent native/provider/session/extension tests in this worktree; direct reruns of the observed failures passed, and the final serial full suite passed. No replan trigger, owner drift, production budget issue, test budget issue, dependency, protocol/frontend dependency, compatibility need, or wider scope requirement was found.
+- **needs_replan:** false.
+- **Pre-acceptance reviews:** Correctness found stale shell-registration ordering and a missing latest-fill replacement regression; both were corrected and rechecked `RESOLVED/PASS`. Elixir craftsmanship required one captured session, exhaustive action mapping without silent impossible-state fallback, and aggregate-owner test fixtures; all were corrected and the final recheck returned `PASS`. Ponytail removed duplicate UI installation and fixture ceremony, then returned `RESOLVED`.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked owner shape, preserved event order and active-session identity, exhaustive owner-action consumption, terminal and old-field migration, budgets, validation evidence, and merge safety with no findings.

@@ -14,6 +14,7 @@ defmodule MingaEditor.Agent.UIState do
 
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
+  alias MingaEditor.Agent.UIState.Compaction
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.View.Preview
@@ -138,6 +139,12 @@ defmodule MingaEditor.Agent.UIState do
   @spec replace_edit_timeline(t(), EditTimeline.t()) :: t()
   def replace_edit_timeline(%__MODULE__{view: view} = state, %EditTimeline{} = timeline) do
     %{state | view: View.replace_edit_timeline(view, timeline)}
+  end
+
+  @doc "Installs the compaction lifecycle produced by a Compaction transition."
+  @spec replace_compaction(t(), Compaction.t()) :: t()
+  def replace_compaction(%__MODULE__{view: view} = state, %Compaction{} = compaction) do
+    %{state | view: View.replace_compaction(view, compaction)}
   end
 
   @doc "Marks compaction as no longer running."

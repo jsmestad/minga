@@ -6,14 +6,14 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   """
 
   alias MingaEditor.Agent.Activity
-  alias MingaEditor.Agent.Compaction
+  alias MingaEditor.Agent.Compaction, as: AgentCompaction
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Compaction
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -23,8 +23,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   @doc "Synchronizes a foreground agent status and its dependent UI state."
   @spec status_changed(EditorState.t(), Tab.agent_status()) :: EditorState.t()
   def status_changed(%EditorState{} = state, status) do
-    state = transition_status(state, status)
-    {state, compaction_action} = apply_pending_auto_compact(state, status)
+    {state, compaction_action} = transition_status(state, status)
     state = MingaEditor.schedule_render(state, 16)
     state = log_status(state, status)
     apply_compaction_action(state, compaction_action)
@@ -37,9 +36,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     state =
       TraditionalWorkflow.install_agent_view(
         state,
-        (fn view -> %{view | context_estimate: estimated_tokens} end).(
-          state.workspace.agent_ui.view
-        )
+        UIState.View.record_context_estimate(state.workspace.agent_ui.view, estimated_tokens)
       )
 
     {state, compaction_action} = maybe_auto_compact(state, estimated_tokens, context_limit)
@@ -49,15 +46,16 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     |> apply_compaction_action(compaction_action)
   end
 
-  @spec transition_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
+  @spec transition_status(EditorState.t(), Tab.agent_status()) ::
+          {EditorState.t(), compaction_action()}
   defp transition_status(state, status) do
     state = TraditionalWorkflow.install_agent_status(state, status)
     state = engage_scroll(state, status)
     state = update_turn_activity(state, status)
     state = update_spinner(state, status)
-    state = reset_compact_state(state, status)
     state = sync_tab_agent_status(state, status)
-    sync_active_shell_agent_status(state, status)
+    state = sync_active_shell_agent_status(state, status)
+    apply_status_compaction(state, status)
   end
 
   @spec engage_scroll(EditorState.t(), Tab.agent_status()) :: EditorState.t()
@@ -79,19 +77,22 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
 
   defp update_spinner(state, _status), do: TraditionalWorkflow.install_agent_spinner_stop(state)
 
-  @spec reset_compact_state(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp reset_compact_state(state, :idle) do
-    TraditionalWorkflow.install_agent_view(
-      state,
-      (fn view -> %{view | compact_warned: false, compact_triggered: false} end).(
-        state.workspace.agent_ui.view
-      )
-    )
-  rescue
-    _error -> state
-  end
+  @spec apply_status_compaction(EditorState.t(), Tab.agent_status()) ::
+          {EditorState.t(), compaction_action()}
+  defp apply_status_compaction(state, status) do
+    session = Runtime.active_session(state.shell_runtime)
 
-  defp reset_compact_state(state, _status), do: state
+    {compaction, action} =
+      Compaction.status_changed(
+        state.workspace.agent_ui.view.compaction,
+        status,
+        compact_warn_threshold(),
+        compact_auto_threshold(),
+        is_pid(session)
+      )
+
+    {install_compaction_action(state, compaction, action), map_compaction_action(action, session)}
+  end
 
   @spec log_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
   defp log_status(state, :error) do
@@ -112,125 +113,48 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
          context_limit
        ) do
     fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
-    view = state.workspace.agent_ui.view
     agent_status = TraditionalState.agent(shell_state).runtime.status
-    compact_when_ready(state, view, agent_status, fill_pct)
+
+    session = Runtime.active_session(state.shell_runtime)
+
+    {compaction, action} =
+      Compaction.record_context_usage(
+        state.workspace.agent_ui.view.compaction,
+        fill_pct,
+        agent_status,
+        compact_warn_threshold(),
+        compact_auto_threshold(),
+        is_pid(session)
+      )
+
+    {install_compaction_action(state, compaction, action), map_compaction_action(action, session)}
   end
 
   defp maybe_auto_compact(%EditorState{} = state, _estimated_tokens, _context_limit),
     do: {state, :none}
 
-  @spec compact_when_ready(EditorState.t(), term(), AgentState.status(), non_neg_integer()) ::
-          {EditorState.t(), compaction_action()}
-  defp compact_when_ready(state, _view, status, fill_pct)
-       when status in [:thinking, :tool_executing] do
-    state =
-      TraditionalWorkflow.install_agent_view(
-        state,
-        (&%{&1 | compact_pending_fill_pct: fill_pct}).(state.workspace.agent_ui.view)
-      )
-
-    {state, :none}
+  @spec install_compaction_action(EditorState.t(), Compaction.t(), Compaction.action()) ::
+          EditorState.t()
+  defp install_compaction_action(state, compaction, action) do
+    ui = UIState.replace_compaction(state.workspace.agent_ui, compaction)
+    ui = maybe_push_compaction_warning(ui, action)
+    TraditionalWorkflow.install_agent_ui(state, ui)
   end
 
-  defp compact_when_ready(state, %{compaction_in_progress: true}, _status, _fill_pct),
-    do: {state, :none}
-
-  defp compact_when_ready(state, view, _status, fill_pct),
-    do: apply_compact_threshold(state, view, fill_pct)
-
-  @spec apply_pending_auto_compact(EditorState.t(), Tab.agent_status()) ::
-          {EditorState.t(), compaction_action()}
-  defp apply_pending_auto_compact(state, :idle) do
-    case state.workspace.agent_ui.view.compact_pending_fill_pct do
-      nil ->
-        {state, :none}
-
-      fill_pct ->
-        state =
-          TraditionalWorkflow.install_agent_view(
-            state,
-            (&%{&1 | compact_pending_fill_pct: nil}).(state.workspace.agent_ui.view)
-          )
-
-        apply_compact_threshold(state, state.workspace.agent_ui.view, fill_pct)
-    end
+  @spec maybe_push_compaction_warning(UIState.t(), Compaction.action()) :: UIState.t()
+  defp maybe_push_compaction_warning(ui, {:warn, fill_pct}) do
+    UIState.push_toast(ui, "Context at #{fill_pct}%. Run /compact to free space.", :warning)
   end
 
-  defp apply_pending_auto_compact(state, _status), do: {state, :none}
+  defp maybe_push_compaction_warning(ui, :none), do: ui
+  defp maybe_push_compaction_warning(ui, :schedule), do: ui
 
-  @spec apply_compact_threshold(EditorState.t(), term(), non_neg_integer()) ::
-          {EditorState.t(), compaction_action()}
-  defp apply_compact_threshold(state, view, fill_pct) do
-    compact_threshold_result(
-      state,
-      view,
-      fill_pct,
-      compact_auto_threshold(),
-      compact_warn_threshold()
-    )
-  end
+  @spec map_compaction_action(Compaction.action(), pid() | nil) :: compaction_action()
+  defp map_compaction_action(:schedule, session) when is_pid(session),
+    do: {:compact_session, session}
 
-  @spec compact_threshold_result(
-          EditorState.t(),
-          term(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {EditorState.t(), compaction_action()}
-  defp compact_threshold_result(state, %{compact_triggered: false}, fill_pct, auto_pct, _warn_pct)
-       when auto_pct > 0 and fill_pct >= auto_pct,
-       do: trigger_auto_compact(state)
-
-  defp compact_threshold_result(state, %{compact_warned: false}, fill_pct, _auto_pct, warn_pct)
-       when warn_pct > 0 and fill_pct >= warn_pct,
-       do: warn_context_pressure(state, fill_pct)
-
-  defp compact_threshold_result(state, _view, _fill_pct, _auto_pct, _warn_pct),
-    do: {state, :none}
-
-  @spec trigger_auto_compact(EditorState.t()) :: {EditorState.t(), compaction_action()}
-  defp trigger_auto_compact(state) do
-    case Runtime.active_session(state.shell_runtime) do
-      session when is_pid(session) ->
-        state =
-          TraditionalWorkflow.install_agent_view(
-            state,
-            (fn view ->
-               %{view | compact_triggered: true, compaction_in_progress: true}
-             end).(state.workspace.agent_ui.view)
-          )
-
-        {state, {:compact_session, session}}
-
-      _session ->
-        {state, :none}
-    end
-  end
-
-  @spec warn_context_pressure(EditorState.t(), non_neg_integer()) ::
-          {EditorState.t(), compaction_action()}
-  defp warn_context_pressure(state, fill_pct) do
-    state =
-      TraditionalWorkflow.install_agent_view(
-        state,
-        (fn view -> %{view | compact_warned: true} end).(state.workspace.agent_ui.view)
-      )
-
-    state =
-      TraditionalWorkflow.install_agent_ui(
-        state,
-        (fn ui ->
-           UIState.push_toast(
-             ui,
-             "Context at #{fill_pct}%. Run /compact to free space.",
-             :warning
-           )
-         end).(state.workspace.agent_ui)
-      )
-
-    {state, :none}
-  end
+  defp map_compaction_action(:none, _session), do: :none
+  defp map_compaction_action({:warn, _fill_pct}, _session), do: :none
 
   @spec compact_warn_threshold() :: non_neg_integer()
   defp compact_warn_threshold do
@@ -253,7 +177,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   defp apply_compaction_action(state, :none), do: state
 
   defp apply_compaction_action(state, {:compact_session, session}),
-    do: Compaction.schedule(state, session)
+    do: AgentCompaction.schedule(state, session)
 
   @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
   defp update_activity(state, fun) when is_function(fun, 1) do
