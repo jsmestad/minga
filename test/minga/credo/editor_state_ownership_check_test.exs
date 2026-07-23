@@ -101,9 +101,9 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
         alias MingaEditor.State.FileTree
 
         def evaluate(tree, value) do
-          if %FileTree{tree | hidden: true}, do: value
-          if typed = %FileTree{}, do: %{typed | hidden: true}
-          %{typed | hidden: false}
+          if %FileTree{tree | visibility: :hidden}, do: value
+          if typed = %FileTree{}, do: %{typed | visibility: :hidden}
+          %{typed | visibility: :visible}
           unless MingaEditor.RenderPipeline.render(value), do: value
         end
       end
@@ -116,7 +116,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     allowed =
       """
       defmodule MingaEditor.State.FileTree do
-        def visible?(tree), do: if(%__MODULE__{tree | hidden: false}, do: true, else: false)
+        def visible?(tree), do: if(%__MODULE__{tree | visibility: :visible}, do: true, else: false)
       end
 
       defmodule MingaEditor.RenderWorkflow do
@@ -223,7 +223,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     source =
       """
       defmodule MingaEditor.BadPathWrites do
-        def put_hidden(state), do: put_in(state.workspace.file_tree.hidden, true)
+        def put_hidden(state), do: put_in(state.workspace.file_tree.visibility, :hidden)
         def update_tree(state, fun), do: update_in(state.workspace.file_tree, fun)
         def put_workspace(state, editing), do: Map.put(state.workspace, :editing, editing)
       end
@@ -706,14 +706,14 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     forbidden =
       """
       defmodule MingaEditor.ForeignFileTreeWrite do
-        def hide(state), do: state.workspace.file_tree |> Map.put(:hidden, true)
+        def hide(state), do: state.workspace.file_tree |> Map.put(:visibility, :hidden)
       end
       """
 
     allowed =
       """
       defmodule MingaEditor.State.FileTree do
-        def hide(%__MODULE__{} = tree), do: tree |> Map.put(:hidden, true)
+        def hide(%__MODULE__{} = tree), do: tree |> Map.put(:visibility, :hidden)
       end
       """
 
@@ -733,7 +733,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     forbidden =
       """
       defmodule MingaEditor.ForeignPipedAccess do
-        def hide(state), do: state.workspace.file_tree |> put_in([:hidden], true)
+        def hide(state), do: state.workspace.file_tree |> put_in([:visibility], :hidden)
 
         def clear_refresh(state, fun) do
           state.workspace.file_tree |> update_in([:refresh, :timer], fun)
@@ -747,7 +747,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
 
     """
     defmodule MingaEditor.State.FileTree do
-      def hide(%__MODULE__{} = tree), do: tree |> put_in([:hidden], true)
+      def hide(%__MODULE__{} = tree), do: tree |> put_in([:visibility], :hidden)
     end
     """
     |> check("lib/minga_editor/state/file_tree.ex")
@@ -796,7 +796,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
       defmodule MingaEditor.ForeignTypeFlow do
         def hide(state) do
           tree = state.workspace.file_tree
-          changed = Map.put(tree, :hidden, true)
+          changed = Map.put(tree, :visibility, :hidden)
           Map.put(changed, :width, 40)
         end
       end
@@ -807,7 +807,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     """
     defmodule MingaEditor.State.FileTree do
       def hide(%__MODULE__{} = tree) do
-        changed = Map.put(tree, :hidden, true)
+        changed = Map.put(tree, :visibility, :hidden)
         Map.put(changed, :width, 40)
       end
     end
@@ -1009,9 +1009,9 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
         alias MingaEditor.State
         alias MingaEditor.State.{RenderCorrelation, FileTree}
 
-        def tree(value), do: %State.FileTree{value | hidden: true}
+        def tree(value), do: %State.FileTree{value | visibility: :hidden}
         def render(value), do: %RenderCorrelation{value | timer: nil}
-        def grouped_tree(value), do: %FileTree{value | hidden: true}
+        def grouped_tree(value), do: %FileTree{value | visibility: :hidden}
       end
       """
 
@@ -1027,7 +1027,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
         def before_alias(value), do: %Owned{value | timer: nil}
 
         alias MingaEditor.State.FileTree, as: Owned
-        def file_tree(value), do: %Owned{value | hidden: true}
+        def file_tree(value), do: %Owned{value | visibility: :hidden}
 
         def scoped_alias(value) do
           alias MingaEditor.State.RenderCorrelation, as: Owned
@@ -1040,7 +1040,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
         end
 
         def after_scopes(value, state) do
-          {%Owned{value | hidden: true}, put(state.workspace, :editing, :ignored)}
+          {%Owned{value | visibility: :hidden}, put(state.workspace, :editing, :ignored)}
         end
 
         alias MingaEditor.State.RenderCorrelation, as: Owned
@@ -1070,7 +1070,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
         end
 
         def write(value, state) do
-          {%Owned{value | hidden: true}, put(state.workspace, :editing, :ignored)}
+          {%Owned{value | visibility: :hidden}, put(state.workspace, :editing, :ignored)}
         end
       end
       """
@@ -1089,7 +1089,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
 
         def remote(state) do
           state.workspace.file_tree
-          |> Map.put(:hidden, true)
+          |> Map.put(:visibility, :hidden)
           |> Map.put(:width, 40)
         end
 
@@ -1110,7 +1110,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
       import Map, only: [put: 3]
 
       def mutate(%__MODULE__{} = tree) do
-        tree |> put(:hidden, true) |> put(:width, 40)
+        tree |> put(:visibility, :hidden) |> put(:width, 40)
       end
     end
     """
@@ -1144,7 +1144,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
         alias MingaEditor.State.FileTree.Refresh
 
         def nested_value(%FileTree{refresh: refresh}), do: %{refresh | timer: nil}
-        def whole(%FileTree{} = tree), do: %{tree | hidden: true}
+        def whole(%FileTree{} = tree), do: %{tree | visibility: :hidden}
 
         def nested_struct(%FileTree{refresh: %Refresh{} = refresh}) do
           %{refresh | timer: nil}
@@ -1187,7 +1187,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
       defmodule MingaEditor.State.RenderCorrelation do
         def violate(value) do
           MingaEditor.RenderPipeline.render(value)
-          %MingaEditor.State.FileTree{value | hidden: true}
+          %MingaEditor.State.FileTree{value | visibility: :hidden}
         end
       end
       """
@@ -1241,7 +1241,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
       defmodule MingaEditor.State.RenderCorrelation do
         def violate(value) do
           Process.send_after(self(), :tick, 10)
-          %MingaEditor.State.FileTree{value | hidden: true}
+          %MingaEditor.State.FileTree{value | visibility: :hidden}
         end
       end
       """

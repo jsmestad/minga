@@ -60,7 +60,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
     end
 
     test "saves the file tree state" do
-      ft = %FileTreeState{focused: true}
+      ft = %FileTreeState{visibility: :focused}
       ui = UIState.new() |> UIState.activate(%Windows{}, ft)
       assert ui.view.presentation.saved_file_tree == ft
     end
@@ -81,7 +81,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   describe "deactivate/1" do
     test "sets active to false and returns saved windows and file tree" do
       windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 2}
-      ft = %FileTreeState{focused: true}
+      ft = %FileTreeState{visibility: :focused}
 
       ui =
         UIState.new()

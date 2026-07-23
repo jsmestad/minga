@@ -48,8 +48,9 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
 
       file_tree = %FileTreeState{
         tree: tree,
-        focused: true,
-        editing: %{index: 0, type: :rename, text: "renamed", original_name: "lib"},
+        visibility: :focused,
+        interaction:
+          {:editing, %{index: 0, type: :rename, text: "renamed", original_name: "lib"}},
         tree_status: :ready
       }
 
@@ -90,8 +91,13 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      # `hidden: true` keeps the loaded tree alive; the sidebar is just toggled off.
-      file_tree = %FileTreeState{tree: tree, focused: false, hidden: true, tree_status: :ready}
+      # `visibility: :hidden` keeps the loaded tree alive; the sidebar is just toggled off.
+      file_tree = %FileTreeState{
+        tree: tree,
+        visibility: :hidden,
+        interaction: :browse,
+        tree_status: :ready
+      }
 
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
@@ -127,7 +133,13 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{tree: tree, focused: true, filtering: true, tree_status: :ready}
+      file_tree = %FileTreeState{
+        tree: tree,
+        visibility: :focused,
+        interaction: :filtering,
+        tree_status: :ready
+      }
+
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
       assert model.status == :ready
@@ -155,8 +167,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
 
       file_tree = %FileTreeState{
         tree: tree,
-        focused: true,
-        help_visible: true,
+        visibility: :focused,
+        interaction: :help,
         tree_status: :ready
       }
 
@@ -185,7 +197,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{tree: tree, focused: false, tree_status: :ready}
+      file_tree = %FileTreeState{tree: tree, visibility: :visible, tree_status: :ready}
       model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
 
       assert model.status == :ready
@@ -206,7 +218,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         ]
       }
 
-      file_tree = %FileTreeState{tree: tree, focused: true, tree_status: :ready}
+      file_tree = %FileTreeState{tree: tree, visibility: :focused, tree_status: :ready}
 
       astrodark =
         FileTreeBuilder.build(build_minimal_context(file_tree: file_tree, theme: :astrodark))

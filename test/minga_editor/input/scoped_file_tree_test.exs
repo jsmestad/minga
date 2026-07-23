@@ -88,7 +88,7 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
             | workspace:
                 then(
                   state.workspace,
-                  &MingaEditor.Session.State.set_file_tree(&1, %{ft(state) | focused: false})
+                  &MingaEditor.Session.State.set_file_tree(&1, %{ft(state) | visibility: :visible})
                 )
           }
         end)

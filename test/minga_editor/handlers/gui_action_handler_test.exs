@@ -269,7 +269,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   end
 
   test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do
-    file_tree_state = %FileTreeState{tree_status: :loading, focused: false}
+    file_tree_state = %FileTreeState{tree_status: :loading, visibility: :visible}
 
     state = base_state(table)
     state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree_state)}
@@ -277,7 +277,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     file_tree_active =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "renamed_kind", "activate"})
 
-    assert file_tree_active.workspace.file_tree.focused
+    assert file_tree_active.workspace.file_tree.visibility == :focused
     assert file_tree_active.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(file_tree_active) == "file_tree"
 
@@ -308,7 +308,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         {:sidebar_action, "observatory", "observatory", "activate"}
       )
 
-    refute observatory_active.workspace.file_tree.focused
+    refute FileTreeState.focused?(observatory_active.workspace.file_tree)
     assert observatory_active.workspace.keymap_scope == :editor
     assert SidebarWorkflow.active_id(observatory_active) == "observatory"
   end
@@ -325,7 +325,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     file_tree = %FileTreeState{
       tree: ProjectFileTree.new(tmp_dir),
       tree_status: :ready,
-      hidden: true
+      visibility: :hidden
     }
 
     state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
@@ -334,7 +334,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "file_tree", "toggle"})
 
     assert opened.workspace.file_tree.tree != nil
-    assert opened.workspace.file_tree.focused
+    assert FileTreeState.focused?(opened.workspace.file_tree)
     assert SidebarWorkflow.active_id(opened) == "file_tree"
     assert %{visible?: true, focused?: true} = Sidebar.get(table, "file_tree")
 
@@ -347,7 +347,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         {:sidebar_action, "file_tree", "file_tree", "activate"}
       )
 
-    assert focused.workspace.file_tree.focused
+    assert FileTreeState.focused?(focused.workspace.file_tree)
     assert focused.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(focused) == "file_tree"
 
@@ -360,7 +360,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     hidden_state = hidden.workspace.file_tree
     assert hidden_state.tree != nil
     refute FileTreeState.visible?(hidden_state)
-    refute hidden_state.focused
+    refute FileTreeState.focused?(hidden_state)
     assert SidebarWorkflow.active_id(hidden) == nil
     assert %{visible?: false, focused?: false} = Sidebar.get(table, "file_tree")
 
@@ -536,7 +536,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert SidebarWorkflow.active_id(new_state) == "observatory"
     assert SidebarWorkflow.observatory_visible?(new_state)
-    refute new_state.workspace.file_tree.focused
+    refute FileTreeState.focused?(new_state.workspace.file_tree)
     assert new_state.workspace.keymap_scope == :editor
   end
 

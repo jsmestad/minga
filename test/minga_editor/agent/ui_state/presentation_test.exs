@@ -9,8 +9,8 @@ defmodule MingaEditor.Agent.UIState.PresentationTest do
   test "replacement activation installs one coherent return context and clears local input state" do
     first_windows = %Windows{active: 1, next_id: 2}
     second_windows = %Windows{active: 2, next_id: 3}
-    first_tree = %FileTree{focused: true}
-    second_tree = %FileTree{focused: false}
+    first_tree = %FileTree{visibility: :focused}
+    second_tree = %FileTree{visibility: :visible}
     first_target = return_target(1, first_windows, first_tree)
     second_target = return_target(2, second_windows, second_tree)
 
@@ -36,7 +36,7 @@ defmodule MingaEditor.Agent.UIState.PresentationTest do
 
   test "cancellation returns the saved layout and clears every activation-local field" do
     windows = %Windows{active: 1, next_id: 2}
-    file_tree = %FileTree{focused: true}
+    file_tree = %FileTree{visibility: :focused}
     target = return_target(1, windows, file_tree)
 
     presentation =

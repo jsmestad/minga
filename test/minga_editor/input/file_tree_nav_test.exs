@@ -31,7 +31,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
 
     workspace =
       %SessionState{keymap_scope: :file_tree}
-      |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf})
+      |> SessionState.set_file_tree(%FileTreeState{tree: tree, visibility: :focused, buffer: buf})
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -70,7 +70,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       state = make_state(tmp_dir, table)
       {:handled, state} = handle_file_tree_key(state, ?q, 0)
       assert ft(state).tree == nil
-      assert ft(state).focused == false
+      refute FileTreeState.focused?(ft(state))
       assert state.workspace.keymap_scope == :editor
     end
 
@@ -91,7 +91,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
             | workspace:
                 then(
                   state.workspace,
-                  &MingaEditor.Session.State.set_file_tree(&1, %{ft(state) | focused: false})
+                  &MingaEditor.Session.State.set_file_tree(&1, FileTreeState.unfocus(ft(state)))
                 )
           }
         end)

@@ -49,7 +49,7 @@ defmodule MingaEditor.Commands.FileTree do
       %FileTreeState{tree: nil} ->
         open(state)
 
-      %FileTreeState{hidden: true} ->
+      %FileTreeState{visibility: :hidden} ->
         show_tree(state)
 
       %FileTreeState{tree: %FileTree{}} ->
@@ -123,7 +123,7 @@ defmodule MingaEditor.Commands.FileTree do
 
       # Loaded but hidden: reveal it, reusing the existing buffer and watchers.
       # Calling open/1 here would orphan the running tree buffer (#2626 leak fix).
-      %FileTreeState{hidden: true} ->
+      %FileTreeState{visibility: :hidden} ->
         show_tree(state)
 
       # Already visible: just refocus it.
@@ -395,7 +395,7 @@ defmodule MingaEditor.Commands.FileTree do
   """
   @spec confirm_editing(state()) :: state()
   def confirm_editing(state) do
-    case file_tree_state(state).editing do
+    case FileTreeState.editing(file_tree_state(state)) do
       nil -> state
       %{text: ""} -> cancel_editing(state)
       %{type: :new_file} = editing -> confirm_new_file(state, editing)
@@ -446,14 +446,14 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec confirm_rename(state()) :: state()
   defp confirm_rename(state) do
-    case file_tree_state(state).tree do
-      %FileTree{} = tree ->
+    case {file_tree_state(state).tree, FileTreeState.editing(file_tree_state(state))} do
+      {%FileTree{} = tree, %{text: text}} ->
         case FileTree.selected_entry(tree) do
           nil -> cancel_editing(state)
-          entry -> do_rename(state, entry, file_tree_state(state).editing.text)
+          entry -> do_rename(state, entry, text)
         end
 
-      nil ->
+      _ ->
         cancel_editing(state)
     end
   end
@@ -599,7 +599,7 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Cancels the current inline edit without making changes."
   @spec cancel_editing(state()) :: state()
   def cancel_editing(state) do
-    case file_tree_state(state).editing do
+    case FileTreeState.editing(file_tree_state(state)) do
       nil -> state
       _editing -> set_file_tree(state, FileTreeState.cancel_editing(file_tree_state(state)))
     end
@@ -1057,7 +1057,8 @@ defmodule MingaEditor.Commands.FileTree do
   # Determines the parent directory path for the current editing operation.
   @spec editing_parent_dir(state()) :: String.t()
   defp editing_parent_dir(state) do
-    %{editing: editing, tree: tree} = file_tree_state(state)
+    %{tree: tree} = file_tree_state(state)
+    editing = FileTreeState.editing(file_tree_state(state))
     entries = FileTree.visible_entries(tree)
 
     case editing.type do

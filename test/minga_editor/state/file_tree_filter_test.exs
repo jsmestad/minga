@@ -23,6 +23,62 @@ defmodule MingaEditor.State.FileTreeFilterTest do
     assert ft.filter_request == nil
   end
 
+  test "filter requests admit only matching live tree state" do
+    token = make_ref()
+    root = "/project"
+
+    detached = FileTreeState.track_filter_request(%FileTreeState{}, root, "needle", token)
+    assert detached.filter_request == nil
+
+    mismatched_root =
+      root
+      |> open_tree()
+      |> FileTreeState.update_filter("needle")
+      |> FileTreeState.track_filter_request("/other", "needle", token)
+
+    assert mismatched_root.filter_request == nil
+
+    mismatched_filter =
+      root
+      |> open_tree()
+      |> FileTreeState.update_filter("needle")
+      |> FileTreeState.track_filter_request(root, "other", token)
+
+    assert mismatched_filter.filter_request == nil
+
+    admitted =
+      root
+      |> open_tree()
+      |> FileTreeState.update_filter("needle")
+      |> FileTreeState.track_filter_request(root, "needle", token)
+
+    assert admitted.filter_request == %{root: Path.expand(root), filter: "needle", token: token}
+  end
+
+  test "accept_filter closes input but preserves admitted request for result correlation" do
+    root = "/project"
+    token = make_ref()
+
+    ft =
+      root
+      |> open_tree()
+      |> FileTreeState.start_filtering()
+      |> FileTreeState.update_filter("needle")
+      |> FileTreeState.track_filter_request(root, "needle", token)
+
+    accepted_input = FileTreeState.accept_filter(ft)
+    assert accepted_input.interaction == :browse
+    assert accepted_input.filter_request == ft.filter_request
+
+    result = Result.filesystem(root, "needle", [entry(root, "needle.ex")])
+
+    assert {:accepted, updated} =
+             FileTreeState.accept_filter_result(accepted_input, root, "needle", token, result)
+
+    assert updated.filter_request == nil
+    assert Enum.map(FileTree.visible_entries(updated.tree), & &1.name) == ["needle.ex"]
+  end
+
   test "cache data is injected as a value and installed only for the current request" do
     ft = open_tree("/project") |> FileTreeState.update_filter("needle")
     token = make_ref()

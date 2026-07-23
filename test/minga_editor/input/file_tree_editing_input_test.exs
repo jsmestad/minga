@@ -48,6 +48,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   end
 
   defp ft(state), do: state.workspace.file_tree
+  defp editing(state), do: FileTreeState.editing(ft(state))
 
   defp complete_current_filter(state) do
     request_id = ft(state).filter_request.token
@@ -124,20 +125,25 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?h, 0)
-      assert ft(state).editing.text == "h"
+      assert editing(state).text == "h"
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?e, 0)
-      assert ft(state).editing.text == "he"
+      assert editing(state).text == "he"
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?l, 0)
-      assert ft(state).editing.text == "hel"
+      assert editing(state).text == "hel"
+    end
+
+    test "question mark appends text instead of opening help", %{tmp_dir: dir} do
+      {:handled, state} = FileTreeHandler.handle_key(make_editing_state(dir, text: "name"), ??, 0)
+      assert %{interaction: {:editing, %{text: "name?"}}} = ft(state)
     end
 
     test "handles unicode codepoints", %{tmp_dir: dir} do
       state = make_editing_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, 0x00E9, 0)
-      assert ft(state).editing.text == "é"
+      assert editing(state).text == "é"
     end
   end
 
@@ -146,7 +152,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir, text: "test.txt")
 
       {:handled, state} = FileTreeHandler.handle_key(state, @enter, 0)
-      assert ft(state).editing == nil
+      assert editing(state) == nil
     end
   end
 
@@ -155,7 +161,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir, text: "partial")
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
-      assert ft(state).editing == nil
+      assert editing(state) == nil
     end
   end
 
@@ -164,21 +170,21 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir, text: "abc")
 
       {:handled, state} = FileTreeHandler.handle_key(state, @backspace, 0)
-      assert ft(state).editing.text == "ab"
+      assert editing(state).text == "ab"
     end
 
     test "cancels editing when text is empty", %{tmp_dir: dir} do
       state = make_editing_state(dir, text: "")
 
       {:handled, state} = FileTreeHandler.handle_key(state, @backspace, 0)
-      assert ft(state).editing == nil
+      assert editing(state) == nil
     end
 
     test "handles multi-byte unicode correctly", %{tmp_dir: dir} do
       state = make_editing_state(dir, text: "café")
 
       {:handled, state} = FileTreeHandler.handle_key(state, @backspace, 0)
-      assert ft(state).editing.text == "caf"
+      assert editing(state).text == "caf"
     end
   end
 
@@ -228,7 +234,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
         end)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
-      assert ft(state).filtering == true
+      assert ft(state).interaction == :filtering
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?a, 0)
       {:handled, state} = FileTreeHandler.handle_key(state, ?l, 0)
@@ -245,7 +251,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       assert ft(state).tree.filter == "a"
 
       {:handled, state} = FileTreeHandler.handle_key(state, @enter, 0)
-      assert ft(state).filtering == false
+      assert ft(state).interaction == :browse
       assert ft(state).tree.filter == "a"
 
       file_tree = FileTreeState.start_filtering(ft(state))
@@ -263,7 +269,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
       state = complete_current_refresh(state)
-      assert ft(state).filtering == false
+      assert ft(state).interaction == :browse
       assert ft(state).tree.filter == nil
     end
 
@@ -295,7 +301,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
       state = complete_current_refresh(state)
 
-      assert ft(state).filtering == false
+      assert ft(state).interaction == :browse
       assert ft(state).tree.filter == nil
       assert FileTreeState.status(ft(state)) == :ready
       assert Enum.any?(FileTree.visible_entries(ft(state).tree), &(&1.name == "visible.txt"))
@@ -306,22 +312,20 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ??, 0)
-      assert ft(state).help_visible == true
+      assert ft(state).interaction == :help
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
-      assert ft(state).help_visible == false
-      assert ft(state).filtering == true
+      assert ft(state).interaction == :filtering
     end
 
     test "question mark while filtering shows help and exits filtering", %{tmp_dir: dir} do
       state = make_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
-      assert ft(state).filtering == true
+      assert ft(state).interaction == :filtering
 
       {:handled, state} = FileTreeHandler.handle_key(state, ??, 0)
-      assert ft(state).help_visible == true
-      refute ft(state).filtering
+      assert ft(state).interaction == :help
     end
   end
 
@@ -330,10 +334,10 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ??, 0)
-      assert ft(state).help_visible == true
+      assert ft(state).interaction == :help
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
-      assert ft(state).help_visible == false
+      assert ft(state).interaction == :browse
       assert ft(state).tree != nil
     end
   end
@@ -363,7 +367,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir, text: "test")
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?a, 0x02)
-      assert ft(state).editing.text == "test"
+      assert editing(state).text == "test"
     end
 
     test "protocol special keys are swallowed during inline editing", %{tmp_dir: dir} do
@@ -385,8 +389,8 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
             0xF728
           ] do
         {:handled, state} = FileTreeHandler.handle_key(state, code, 0)
-        assert ft(state).editing.text == "test"
-        assert ft(state).editing.type == :new_file
+        assert editing(state).text == "test"
+        assert editing(state).type == :new_file
       end
     end
 
@@ -394,7 +398,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
-      assert ft(state).filtering == true
+      assert ft(state).interaction == :filtering
 
       for code <- [
             57_348,
@@ -413,7 +417,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
           ] do
         {:handled, state} = FileTreeHandler.handle_key(state, code, 0)
         assert ft(state).tree.filter == ""
-        assert ft(state).filtering == true
+        assert ft(state).interaction == :filtering
       end
     end
 
@@ -421,20 +425,20 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir, text: "test")
 
       {:handled, state} = FileTreeHandler.handle_key(state, 9, 0)
-      assert ft(state).editing.text == "test"
+      assert editing(state).text == "test"
     end
 
     test "vim navigation keys append as text instead of moving cursor", %{tmp_dir: dir} do
       state = make_editing_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
-      assert ft(state).editing.text == "j"
+      assert editing(state).text == "j"
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?k, 0)
-      assert ft(state).editing.text == "jk"
+      assert editing(state).text == "jk"
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?d, 0)
-      assert ft(state).editing.text == "jkd"
+      assert editing(state).text == "jkd"
     end
 
     test "help-visible navigation keys are swallowed without moving the buffer cursor", %{
@@ -447,7 +451,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       {:handled, state} = FileTreeHandler.handle_key(state, ??, 0)
       {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
 
-      assert ft(state).help_visible == true
+      assert ft(state).interaction == :help
       assert BufferProcess.cursor(buffer) == before
       assert ft(state).tree.cursor == 0
     end
@@ -456,7 +460,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_editing_state(dir)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?q, 0)
-      assert ft(state).editing.text == "q"
+      assert editing(state).text == "q"
       assert ft(state).tree != nil
     end
   end

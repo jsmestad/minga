@@ -71,8 +71,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
       |> Rows.from_tree(
         active_path: active_path,
         dirty_paths: dirty_path_set,
-        editing: Map.get(file_tree, :editing),
-        focused: file_tree_focused?(file_tree),
+        editing: FileTreeState.editing(file_tree),
+        focused: FileTreeState.focused?(file_tree),
         git_status: tree.git_status,
         diagnostics: diagnostics,
         heat_levels: file_tree_heat_levels(),
@@ -84,7 +84,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
       root_path: tree.root,
       tree_width: tree.width,
       status: status,
-      focused?: file_tree_focused?(file_tree),
+      focused?: FileTreeState.focused?(file_tree),
       local_navigation?: local_navigation?(file_tree),
       selected_id: selected_row_id(tree),
       rows: rows
@@ -193,13 +193,9 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     end
   end
 
-  @spec file_tree_focused?(map()) :: boolean()
-  defp file_tree_focused?(file_tree), do: Map.get(file_tree, :focused, false)
-
   @spec local_navigation?(FileTreeState.t()) :: boolean()
   defp local_navigation?(%FileTreeState{} = file_tree) do
-    file_tree_focused?(file_tree) and file_tree.editing == nil and not file_tree.filtering and
-      not file_tree.help_visible
+    FileTreeState.focused?(file_tree) and file_tree.interaction == :browse
   end
 
   @spec dirty_paths(MingaEditor.State.Buffers.t()) :: MapSet.t(String.t())
