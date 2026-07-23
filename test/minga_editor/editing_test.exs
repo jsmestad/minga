@@ -171,6 +171,16 @@ defmodule MingaEditor.EditingTest do
     test "returns false when not recording" do
       assert Editing.macro_recording?(build_state()) == false
     end
+
+    test "returns the active macro register when recording" do
+      vim = %VimState{
+        mode: :normal,
+        mode_state: Mode.initial_state(),
+        macro_recorder: MacroRecorder.start_recording(MacroRecorder.new(), "a")
+      }
+
+      assert Editing.macro_recording?(build_state(editing: vim)) == {true, "a"}
+    end
   end
 
   describe "active_register/1" do

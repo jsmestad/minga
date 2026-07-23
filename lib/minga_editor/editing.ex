@@ -38,7 +38,7 @@ defmodule MingaEditor.Editing do
   def macro_recorder(%EditorState{workspace: %{editing: vim}}), do: vim.macro_recorder
 
   @doc "Returns the change recorder struct."
-  @spec change_recorder(EditorState.t()) :: term()
+  @spec change_recorder(EditorState.t()) :: MingaEditor.ChangeRecorder.t()
   def change_recorder(%EditorState{workspace: %{editing: vim}}), do: vim.change_recorder
 
   @doc "Returns `{true, register_name}` when recording, `false` otherwise."
@@ -147,7 +147,7 @@ defmodule MingaEditor.Editing do
   end
 
   @doc "Replaces the change recorder."
-  @spec set_change_recorder(EditorState.t(), term()) :: EditorState.t()
+  @spec set_change_recorder(EditorState.t(), MingaEditor.ChangeRecorder.t()) :: EditorState.t()
   def set_change_recorder(%EditorState{} = state, rec) do
     install_editing(
       state,

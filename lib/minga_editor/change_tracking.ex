@@ -30,7 +30,7 @@ defmodule MingaEditor.ChangeTracking do
   def maybe_record_change(state, old_mode, new_mode, commands, key) do
     rec = Editing.change_recorder(state)
 
-    if rec.replaying do
+    if ChangeRecorder.replaying?(rec) do
       state
     else
       rec = update_recorder(rec, old_mode, new_mode, commands, key)
@@ -78,13 +78,13 @@ defmodule MingaEditor.ChangeTracking do
           [Mode.command()],
           ChangeRecorder.key()
         ) :: ChangeRecorder.t()
-  defp update_recorder(%{recording: true} = rec, old_mode, :normal, _commands, key)
-       when old_mode in [:insert, :replace, :operator_pending] do
-    rec |> ChangeRecorder.record_key(key) |> ChangeRecorder.stop_recording()
-  end
-
-  defp update_recorder(%{recording: true} = rec, _old_mode, _new_mode, _commands, key) do
-    ChangeRecorder.record_key(rec, key)
+  defp update_recorder(rec, old_mode, :normal, _commands, key)
+       when old_mode in [:insert, :replace] do
+    if ChangeRecorder.recording?(rec) do
+      rec |> ChangeRecorder.record_key(key) |> ChangeRecorder.stop_recording()
+    else
+      rec
+    end
   end
 
   # From Normal: mode transition starts recording.
@@ -122,8 +122,13 @@ defmodule MingaEditor.ChangeTracking do
     ChangeRecorder.cancel_recording(rec)
   end
 
-  # All other mode transitions: no recording changes.
-  defp update_recorder(rec, _old_mode, _new_mode, _commands, _key), do: rec
+  defp update_recorder(rec, _old_mode, _new_mode, _commands, key) do
+    if ChangeRecorder.recording?(rec) do
+      ChangeRecorder.record_key(rec, key)
+    else
+      rec
+    end
+  end
 
   # Handle Normal → Normal: detect edits, pending keys, or motions.
   @spec do_update_normal_to_normal(ChangeRecorder.t(), [Mode.command()], ChangeRecorder.key()) ::
