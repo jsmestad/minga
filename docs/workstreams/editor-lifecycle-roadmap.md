@@ -4552,7 +4552,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W112/ES17: Make agent compaction UI lifecycle a tagged owner value
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES17
 - **Planning profile:** `ES17Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES17Worker`, no delegation.
@@ -4577,3 +4577,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **needs_replan:** false.
 - **Pre-acceptance reviews:** Correctness found stale shell-registration ordering and a missing latest-fill replacement regression; both were corrected and rechecked `RESOLVED/PASS`. Elixir craftsmanship required one captured session, exhaustive action mapping without silent impossible-state fallback, and aggregate-owner test fixtures; all were corrected and the final recheck returned `PASS`. Ponytail removed duplicate UI installation and fixture ceremony, then returned `RESOLVED`.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked owner shape, preserved event order and active-session identity, exhaustive owner-action consumption, terminal and old-field migration, budgets, validation evidence, and merge safety with no findings.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3218
+- **Implementation commit SHA:** `00e609fa277304422739a4405250ad9e5ad8e125`
+- **Merge SHA:** `b7c85b0d7bffc33c87371661bc75d6cf0b5136f4`
+- **Merge evidence:** PR #3218 merged after CI run `30007407625` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES17 is fully resolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR state, matching implementation and merge trees, successful CI run and required jobs, completion date, and full ES17 resolution were independently confirmed.
