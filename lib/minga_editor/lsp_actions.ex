@@ -36,6 +36,7 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
+  alias MingaEditor.State.Mouse
   alias MingaEditor.VimState
   alias Minga.Log
   alias Minga.LSP.Client
@@ -865,7 +866,7 @@ defmodule MingaEditor.LspActions do
           non_neg_integer()
         ) :: boolean()
   defp current_hover_mouse_target?(state, row, col, buffer, line, buffer_col, version) do
-    with {^row, ^col} <- state.workspace.mouse.hover_pos,
+    with {^row, ^col} <- Mouse.hover_position(state.workspace.mouse),
          {:buffer, %{buffer: ^buffer, line: ^line, col: ^buffer_col}} <-
            HitTest.resolve_buffer(state, row, col),
          ^version <- Buffer.version(buffer) do

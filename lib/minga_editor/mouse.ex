@@ -184,7 +184,7 @@ defmodule MingaEditor.Mouse do
   # ── Left release ──
 
   def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}, editing: %{mode: :visual}}} = state,
+        %{workspace: %{mouse: %MouseState{drag: {:active, _}}, editing: %{mode: :visual}}} = state,
         _r,
         _c,
         :left,
@@ -198,7 +198,7 @@ defmodule MingaEditor.Mouse do
   end
 
   def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
+        %{workspace: %{mouse: %MouseState{drag: {:active, _}}}} = state,
         _r,
         _c,
         :left,
@@ -210,7 +210,7 @@ defmodule MingaEditor.Mouse do
   end
 
   def handle(
-        %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
+        %{workspace: %{mouse: %MouseState{resize: {:active, _}}}} = state,
         _r,
         _c,
         :left,
@@ -234,8 +234,7 @@ defmodule MingaEditor.Mouse do
       do: state
 
   def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true, anchor: anchor, drag_click_count: dcc}}} =
-          state,
+        %{workspace: %{mouse: %MouseState{drag: {:active, _}}}} = state,
         row,
         col,
         :left,
@@ -243,7 +242,8 @@ defmodule MingaEditor.Mouse do
         :drag,
         _cc
       ) do
-    handle_left_drag(state, row, col, anchor, dcc)
+    {:active, anchor, _origin_window, click_count} = MouseState.active_drag(state.workspace.mouse)
+    handle_left_drag(state, row, col, anchor, click_count)
   end
 
   # Ignore negative coordinates except active drags, which clamp to the originating window edge.
@@ -333,7 +333,7 @@ defmodule MingaEditor.Mouse do
   # ── Left drag ──
 
   def handle(
-        %{workspace: %{mouse: %MouseState{resize_dragging: {:vertical, sep_pos}}}} = state,
+        %{workspace: %{mouse: %MouseState{resize: {:active, {:vertical, sep_pos}}}}} = state,
         _row,
         col,
         :left,
@@ -345,7 +345,7 @@ defmodule MingaEditor.Mouse do
   end
 
   def handle(
-        %{workspace: %{mouse: %MouseState{resize_dragging: {:horizontal, sep_pos}}}} = state,
+        %{workspace: %{mouse: %MouseState{resize: {:active, {:horizontal, sep_pos}}}}} = state,
         row,
         _col,
         :left,
@@ -768,7 +768,7 @@ defmodule MingaEditor.Mouse do
       )
 
     state = %{state | workspace: MingaEditor.Session.State.set_mouse(state.workspace, mouse)}
-    click_count = mouse.click_count
+    click_count = MouseState.click_count(mouse)
 
     # Check modifier clicks first
     handle_left_press_modifiers(state, row, col, mods, click_count)
@@ -1110,7 +1110,7 @@ defmodule MingaEditor.Mouse do
 
   @spec maybe_handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp maybe_handle_content_click(
-         %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
+         %{workspace: %{mouse: %MouseState{resize: {:active, _}}}} = state,
          _row,
          _col
        ),
@@ -1609,7 +1609,7 @@ defmodule MingaEditor.Mouse do
   @spec drag_window_context(state()) :: drag_window_context() | nil
   defp drag_window_context(state) do
     layout = Layout.get(state)
-    win_id = state.workspace.mouse.drag_origin_window || state.workspace.windows.active
+    win_id = origin_window_for_drag(state.workspace.mouse, state.workspace.windows.active)
 
     with id when is_integer(id) <- win_id,
          %Window{content: {:buffer, buf}} = window <-
@@ -1619,6 +1619,15 @@ defmodule MingaEditor.Mouse do
       {id, window, buf, content_row, content_col, content_w, max(content_h, 1)}
     else
       _ -> nil
+    end
+  end
+
+  @spec origin_window_for_drag(MouseState.t(), Window.id() | nil) :: Window.id() | nil
+  defp origin_window_for_drag(mouse, fallback) do
+    case MouseState.active_drag(mouse) do
+      {:active, _anchor, nil, _click_count} -> fallback
+      {:active, _anchor, origin_window, _click_count} -> origin_window
+      :idle -> fallback
     end
   end
 

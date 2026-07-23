@@ -336,7 +336,7 @@ defmodule MingaEditor.Input.Router do
           pos_integer()
         ) :: EditorState.t()
   def dispatch_mouse(
-        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
+        %{workspace: %{mouse: %MouseState{drag: {:active, _}}}} = state,
         row,
         col,
         :left,
@@ -349,7 +349,7 @@ defmodule MingaEditor.Input.Router do
   end
 
   def dispatch_mouse(
-        %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
+        %{workspace: %{mouse: %MouseState{resize: {:active, _}}}} = state,
         row,
         col,
         :left,

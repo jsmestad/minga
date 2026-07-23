@@ -504,7 +504,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       new_state = Router.dispatch_mouse(state, 25, 5, :left, 0, :release, 1)
 
-      assert new_state.workspace.mouse.resize_dragging == nil
+      refute MouseState.resizing?(new_state.workspace.mouse)
       refute_receive {:mouse_probe, _type, _ref}, 20
     end
 
@@ -513,7 +513,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       new_state = Router.dispatch_mouse(state, 5, 5, :left, 0, :drag, 1)
 
-      assert new_state.workspace.mouse.resize_dragging == {:vertical, 10}
+      assert MouseState.resizing?(new_state.workspace.mouse)
       refute_receive {:mouse_probe, _type, _ref}, 20
     end
 

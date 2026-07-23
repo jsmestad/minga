@@ -191,10 +191,11 @@ defmodule MingaEditor.LspActionsTest do
 
       state = %{
         state
-        | workspace: %{
-            state.workspace
-            | mouse: Mouse.set_hover(state.workspace.mouse, 6, 21, backend: :headless)
-          }
+        | workspace:
+            SessionState.set_mouse(
+              state.workspace,
+              Mouse.set_hover(state.workspace.mouse, 6, 21, backend: :headless)
+            )
       }
 
       assert LspActions.handle_hover_mouse_response(
