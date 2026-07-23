@@ -143,7 +143,7 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
   end
 
   defp receive_effect(state, scheduler) do
-    assert_receive {:effect_lifecycle, %Outcome{status: :running} = running}, @effect_timeout
+    assert_receive {:effect_lifecycle, %Outcome{value: :running} = running}, @effect_timeout
     {:noreply, state} = MingaEditor.handle_info({:effect_lifecycle, running}, state)
 
     assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, @effect_timeout

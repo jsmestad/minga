@@ -54,7 +54,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
-    assert outcome.status == :completed
+    assert match?({:completed, _result}, outcome.value)
   end
 
   test "successful replacement does not query a buffer that closes after replying" do
@@ -77,7 +77,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
-    assert outcome.status == :completed
+    assert match?({:completed, _result}, outcome.value)
   end
 
   test "buffer mutation makes a completed worker result stale without overwriting content" do
@@ -92,8 +92,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert Buffer.content(buffer) == "modified\n"
     assert feedback(new_state).message == "Buffer changed, format skipped"
     assert feedback(new_state).status == :stale
-    assert outcome.status == :stale
-    assert outcome.reason == :buffer_version_changed
+    assert outcome.value == {:stale, :buffer_version_changed}
   end
 
   test "a mutation queued after the atomic external commit is not overwritten" do
@@ -135,7 +134,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
-    assert outcome.status == :completed
+    assert match?({:completed, _result}, outcome.value)
     assert :ok = Buffer.undo(buffer)
     assert Buffer.content(buffer) == "hello world\n"
   end
@@ -157,8 +156,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert Buffer.content(read_only_buffer) == "hello\n"
     assert feedback(read_only_state).message == "Buffer is read-only, format skipped"
     assert feedback(read_only_state).status == :error
-    assert read_only_outcome.status == :failed
-    assert read_only_outcome.reason == :read_only
+    assert read_only_outcome.value == {:failed, :read_only}
 
     closed_state = base_state("hello\n")
     closed_buffer = closed_state.workspace.buffers.active
@@ -176,8 +174,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
 
     assert feedback(closed_state).message == "Buffer closed, format skipped"
     assert feedback(closed_state).status == :error
-    assert closed_outcome.status == :failed
-    assert closed_outcome.reason == :buffer_closed
+    assert closed_outcome.value == {:failed, :buffer_closed}
   end
 
   test "failed, canceled, and stale outcomes have user-visible feedback" do
@@ -190,26 +187,26 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
 
     assert feedback(failed_state).message == "Format error: formatter failed"
     assert feedback(failed_state).status == :error
-    assert failed.status == :failed
+    assert match?({:failed, _reason}, failed.value)
 
     {timeout_state, timeout} = ExternalFormat.apply(state, Outcome.failed(request, :timeout))
     assert feedback(timeout_state).message == "Format timed out"
     assert feedback(timeout_state).status == :timeout
-    assert timeout.status == :failed
+    assert match?({:failed, _reason}, timeout.value)
 
     {canceled_state, canceled} =
       ExternalFormat.apply(state, Outcome.canceled(request, :requested))
 
     assert feedback(canceled_state).message == "Format canceled"
     assert feedback(canceled_state).status == :canceled
-    assert canceled.status == :canceled
+    assert match?({:canceled, _reason}, canceled.value)
 
     {stale_state, stale} =
       ExternalFormat.apply(state, Outcome.stale(Outcome.completed(request, nil), :changed))
 
     assert feedback(stale_state).message == "Buffer changed, format skipped"
     assert feedback(stale_state).status == :stale
-    assert stale.status == :stale
+    assert match?({:stale, _reason}, stale.value)
   end
 
   test "format application preserves cursor position" do
@@ -232,7 +229,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
-    assert outcome.status == :completed
+    assert match?({:completed, _result}, outcome.value)
   end
 
   @spec feedback(EditorState.t()) :: MingaEditor.State.Operation.t()

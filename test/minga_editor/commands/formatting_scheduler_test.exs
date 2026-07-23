@@ -51,7 +51,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
                         operation_id: operation_id,
                         effect: %ExternalFormat{}
                       },
-                      status: :running
+                      value: :running
                     } = lifecycle},
                    @effect_timeout
 
@@ -90,7 +90,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     assert_receive {:effect_result, ^scheduler,
                     %Outcome{
                       request: %Request{id: ^old_id},
-                      status: :completed
+                      value: {:completed, _result}
                     } = old_candidate},
                    @effect_timeout
 
@@ -113,8 +113,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     assert_receive {:effect_terminal,
                     %Outcome{
                       request: %Request{id: ^old_id},
-                      status: :canceled,
-                      reason: :superseded
+                      value: {:canceled, :superseded}
                     }},
                    @effect_timeout
 

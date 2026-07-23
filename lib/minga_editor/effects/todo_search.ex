@@ -68,9 +68,8 @@ defmodule MingaEditor.Effects.TodoSearch do
   def apply(
         state,
         %Outcome{
-          status: :completed,
-          request: %Request{effect: effect},
-          result: %Result{} = result
+          value: {:completed, %Result{} = result},
+          request: %Request{effect: effect}
         } = outcome
       ) do
     apply_matching_revision(state, effect, result, outcome, result.revision == effect.revision)
@@ -78,7 +77,7 @@ defmodule MingaEditor.Effects.TodoSearch do
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %Request{effect: effect}, reason: reason} = outcome
+        %Outcome{value: {:failed, reason}, request: %Request{effect: effect}} = outcome
       ) do
     apply_failed_for_workspace(
       state,

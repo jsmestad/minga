@@ -79,14 +79,14 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
   def apply(
         state,
-        %Outcome{status: :completed, request: %Request{effect: effect}, result: result} = outcome
+        %Outcome{value: {:completed, result}, request: %Request{effect: effect}} = outcome
       ) do
     apply_result(state, effect, result, outcome)
   end
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %Request{effect: effect}, reason: reason} = outcome
+        %Outcome{value: {:failed, reason}, request: %Request{effect: effect}} = outcome
       ) do
     apply_result(state, effect, {:error, failure_message(reason)}, outcome)
   end
@@ -95,7 +95,11 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{status: status}), do: status in [:completed, :failed, :stale]
+  def render?(%Outcome{value: {status, _payload}})
+      when status in [:completed, :failed, :stale],
+      do: true
+
+  def render?(%Outcome{}), do: false
 
   @spec apply_result(EditorState.t(), t(), tuple(), Outcome.t()) ::
           {EditorState.t(), Outcome.t()}

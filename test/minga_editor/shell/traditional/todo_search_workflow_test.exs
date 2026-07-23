@@ -41,7 +41,7 @@ defmodule MingaEditor.Shell.Traditional.TodoSearchWorkflowTest do
 
     assert_receive {:effect_lifecycle,
                     %Outcome{
-                      status: :running,
+                      value: :running,
                       request: %Request{
                         resource: {:todo_search, ^active_root},
                         effect: %TodoSearch{

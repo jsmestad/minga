@@ -87,8 +87,7 @@ defmodule MingaEditor.UI.PrettifySymbolsEffect do
         %EditorState{} = state,
         %Outcome{
           request: %Request{effect: %__MODULE__{buffer: buffer}},
-          status: :completed,
-          result: update
+          value: {:completed, update}
         } = outcome
       ) do
     :ok = PrettifySymbols.apply_update(buffer, update)
@@ -102,7 +101,7 @@ defmodule MingaEditor.UI.PrettifySymbolsEffect do
       {state, Outcome.failed(outcome.request, {:buffer_exit, {:shutdown, reason}})}
   end
 
-  def apply(%EditorState{} = state, %Outcome{status: :failed, reason: reason} = outcome) do
+  def apply(%EditorState{} = state, %Outcome{value: {:failed, reason}} = outcome) do
     Minga.Log.warning(:editor, "Prettify symbols failed: #{inspect(reason)}")
     {state, outcome}
   end

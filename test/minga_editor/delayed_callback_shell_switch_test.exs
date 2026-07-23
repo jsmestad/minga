@@ -57,7 +57,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
 
     outcome = Outcome.completed(request, result)
 
-    assert {new_state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+    assert {new_state, %Outcome{value: {:stale, :picker_closed_or_replaced}}} =
              FetchEffect.apply(state, outcome)
 
     assert new_state == state

@@ -114,8 +114,7 @@ defmodule MingaEditor.Extension.EventEffect do
   def apply(
         %EditorState{} = current,
         %Outcome{
-          status: :completed,
-          result: %EventDispatchResult{} = result,
+          value: {:completed, %EventDispatchResult{} = result},
           request: %Request{effect: %__MODULE__{base_state: base_state} = effect}
         } = outcome
       ) do
@@ -127,18 +126,18 @@ defmodule MingaEditor.Extension.EventEffect do
   def apply(
         %EditorState{} = state,
         %Outcome{
-          status: status,
+          value: {status, reason},
           request: %Request{id: request_id, effect: %__MODULE__{} = effect}
         } = outcome
       )
       when status in [:failed, :canceled, :stale] do
     Minga.Log.warning(
       :editor,
-      "Extension editor event terminal request=#{inspect(request_id)} mode=#{inspect(effect.mode)} event=#{inspect(event_label(effect.event))} status=#{status} reason=#{bounded_inspect(outcome.reason)}"
+      "Extension editor event terminal request=#{inspect(request_id)} mode=#{inspect(effect.mode)} event=#{inspect(event_label(effect.event))} status=#{status} reason=#{bounded_inspect(reason)}"
     )
 
-    state = terminal_feedback(state, effect.event, status, outcome.reason)
-    reply(effect, {:error, {:extension_event_terminal, status, outcome.reason}})
+    state = terminal_feedback(state, effect.event, status, reason)
+    reply(effect, {:error, {:extension_event_terminal, status, reason}})
     {state, outcome}
   end
 
@@ -146,33 +145,31 @@ defmodule MingaEditor.Extension.EventEffect do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{status: :completed, result: %EventDispatchResult{status: :handled}}),
-    do: true
-
-  def render?(%Outcome{
-        status: :completed,
-        result: %EventDispatchResult{status: :callback_failed}
-      }),
+  def render?(%Outcome{value: {:completed, %EventDispatchResult{status: status}}})
+      when status in [:handled, :callback_failed],
       do: true
 
   def render?(%Outcome{
-        status: :completed,
-        result: %EventDispatchResult{status: :not_matched},
+        value: {:completed, %EventDispatchResult{status: :not_matched}},
         request: %Request{effect: %__MODULE__{mode: {:unload, _source, _token}}}
       }),
       do: true
 
   def render?(%Outcome{
-        status: outcome_status,
-        result: %EventDispatchResult{status: result_status},
+        value: {:stale, _reason},
         request: %Request{effect: %__MODULE__{event: {:editor_action, _action, _arguments}}}
-      })
-      when outcome_status in [:completed, :stale] and
-             result_status in [:not_matched, :callback_failed],
+      }),
       do: true
 
   def render?(%Outcome{
-        status: status,
+        value: {:completed, %EventDispatchResult{status: result_status}},
+        request: %Request{effect: %__MODULE__{event: {:editor_action, _action, _arguments}}}
+      })
+      when result_status in [:not_matched, :callback_failed],
+      do: true
+
+  def render?(%Outcome{
+        value: {status, _reason},
         request: %Request{effect: %__MODULE__{event: {:editor_action, _action, _arguments}}}
       })
       when status in [:failed, :canceled],
@@ -313,15 +310,15 @@ defmodule MingaEditor.Extension.EventEffect do
   defp bounded_inspect(value), do: inspect(value, limit: 10, printable_limit: 200)
 
   @spec unload_reply(EventDispatchResult.t(), Outcome.t()) :: :ok | {:error, term()}
-  defp unload_reply(_result, %Outcome{status: :stale, reason: reason}),
+  defp unload_reply(_result, %Outcome{value: {:stale, reason}}),
     do: {:error, {:extension_unload_stale, reason}}
 
   defp unload_reply(%EventDispatchResult{status: :callback_failed, failures: failures}, %Outcome{
-         status: :completed
+         value: {:completed, _result}
        }),
        do: {:error, failures}
 
-  defp unload_reply(%EventDispatchResult{}, %Outcome{status: :completed}), do: :ok
+  defp unload_reply(%EventDispatchResult{}, %Outcome{value: {:completed, _result}}), do: :ok
 
   @spec timeout(keyword()) :: pos_integer()
   defp timeout(opts) do

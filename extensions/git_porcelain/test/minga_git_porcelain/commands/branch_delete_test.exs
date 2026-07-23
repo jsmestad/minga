@@ -152,7 +152,7 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
   end
 
   defp receive_effect(state, scheduler) do
-    assert_receive {:effect_lifecycle, %Outcome{status: :running} = running}, 2_000
+    assert_receive {:effect_lifecycle, %Outcome{value: :running} = running}, 2_000
     {:noreply, state} = MingaEditor.handle_info({:effect_lifecycle, running}, state)
 
     assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 2_000

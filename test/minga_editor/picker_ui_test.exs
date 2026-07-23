@@ -269,7 +269,7 @@ defmodule MingaEditor.PickerUITest do
       send(worker, :release_blocking_picker)
 
       assert_receive {:effect_result, scheduler,
-                      %Outcome{status: :completed, request: request} = outcome}
+                      %Outcome{value: {:completed, _result}, request: request} = outcome}
 
       assert scheduler == opened.effect_scheduler
       closed = PickerUI.close(opened)
@@ -505,7 +505,7 @@ defmodule MingaEditor.PickerUITest do
         |> FetchEffect.request(nil, Context.from_editor_state(switched_state), old_revision)
         |> Outcome.completed({:ok, sentinel_items, Candidate.from_items(sentinel_items), %{}})
 
-      assert {^reverted_state, %Outcome{status: :stale}} =
+      assert {^reverted_state, %Outcome{value: {:stale, _reason}}} =
                FetchEffect.apply(reverted_state, stale_outcome)
 
       {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal

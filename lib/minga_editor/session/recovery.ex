@@ -125,7 +125,7 @@ defmodule MingaEditor.Session.Recovery do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{status: :completed, result: result}), do: result != :none
+  def render?(%Outcome{value: {:completed, result}}), do: result != :none
   def render?(%Outcome{}), do: false
 
   @spec resource(t()) :: Request.resource()
@@ -211,18 +211,18 @@ defmodule MingaEditor.Session.Recovery do
   end
 
   @spec apply_current(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  defp apply_current(state, %Outcome{status: :completed, result: :none} = outcome),
+  defp apply_current(state, %Outcome{value: {:completed, :none}} = outcome),
     do: {state, outcome}
 
-  defp apply_current(state, %Outcome{status: :completed, result: {:restore, snapshot}} = outcome) do
+  defp apply_current(state, %Outcome{value: {:completed, {:restore, snapshot}}} = outcome) do
     {SessionRestore.apply_session_snapshot(state, snapshot), outcome}
   end
 
-  defp apply_current(state, %Outcome{status: :completed, result: {:recover, entries}} = outcome) do
+  defp apply_current(state, %Outcome{value: {:completed, {:recover, entries}}} = outcome) do
     {SessionRestore.apply_recovered_entries(state, entries), outcome}
   end
 
-  defp apply_current(state, %Outcome{status: :failed, reason: reason} = outcome) do
+  defp apply_current(state, %Outcome{value: {:failed, reason}} = outcome) do
     Minga.Log.warning(:editor, "Session recovery failed: #{inspect(reason)}")
     {state, outcome}
   end

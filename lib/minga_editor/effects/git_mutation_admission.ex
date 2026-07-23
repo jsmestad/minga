@@ -21,6 +21,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
+  alias MingaEditor.State.OperationQueue
 
   @max_queued 16
 
@@ -110,10 +111,8 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
   def apply(
         state,
         %Outcome{
-          status: :queued,
-          request: %{operation_id: id, effect: effect},
-          queue_position: position,
-          queue_total: total
+          value: {:queued, %OperationQueue{position: position, total: total}},
+          request: %{operation_id: id, effect: effect}
         } = outcome
       ) do
     message = "Queued: #{effect.pending_message}"
@@ -127,7 +126,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
 
   def apply(
         state,
-        %Outcome{status: :running, request: %{operation_id: id, effect: effect}} = outcome
+        %Outcome{value: :running, request: %{operation_id: id, effect: effect}} = outcome
       ) do
     state = %{
       state
@@ -137,7 +136,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
     {state, outcome}
   end
 
-  def apply(state, %Outcome{status: :completed, result: %Request{} = request} = outcome) do
+  def apply(state, %Outcome{value: {:completed, %Request{} = request}} = outcome) do
     case EffectScheduler.finalize_and_schedule(state.effect_scheduler, outcome, request) do
       {:ok, _request_id, :running} ->
         {state, outcome}
@@ -166,7 +165,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{operation_id: id}, reason: :not_git} = outcome
+        %Outcome{value: {:failed, :not_git}, request: %{operation_id: id}} = outcome
       ) do
     {%{
        state
@@ -177,7 +176,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{operation_id: id}, reason: :timeout} = outcome
+        %Outcome{value: {:failed, :timeout}, request: %{operation_id: id}} = outcome
       ) do
     {%{
        state
@@ -193,7 +192,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{operation_id: id}, reason: reason} = outcome
+        %Outcome{value: {:failed, reason}, request: %{operation_id: id}} = outcome
       ) do
     message = "Git repository resolution failed: #{inspect(reason)}"
     Minga.Log.error(:editor, message)
@@ -201,14 +200,14 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
     {%{state | feedback: Feedback.finish_operation(state.feedback, id, :error, message)}, outcome}
   end
 
-  def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
+  def apply(state, %Outcome{value: {:canceled, _reason}, request: %{operation_id: id}} = outcome) do
     {%{
        state
        | feedback: Feedback.finish_operation(state.feedback, id, :canceled, "Git action canceled")
      }, outcome}
   end
 
-  def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
+  def apply(state, %Outcome{value: {:stale, _reason}, request: %{operation_id: id}} = outcome) do
     {%{
        state
        | feedback: Feedback.finish_operation(state.feedback, id, :stale, "Git action skipped")

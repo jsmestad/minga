@@ -93,7 +93,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert :ok = EffectScheduler.cancel(scheduler, blocker.id)
 
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: blocker_id}, status: :canceled} = blocker_outcome}
+                    %Outcome{request: %{id: blocker_id}, value: {:canceled, _reason}} =
+                      blocker_outcome}
 
     assert blocker_id == blocker.id
     assert :ok = EffectScheduler.claim(scheduler, blocker_outcome)
@@ -143,7 +144,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     tracked = track(state, request)
     refreshed = tree(root, [entry(root, "fresh.ex")])
 
-    assert {accepted, %Outcome{status: :completed}} =
+    assert {accepted, %Outcome{value: {:completed, _result}}} =
              Refresh.apply(tracked, Outcome.completed(request, refreshed))
 
     assert ft_tree(accepted) == refreshed
@@ -159,7 +160,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
-    assert {failed, %Outcome{status: :failed}} =
+    assert {failed, %Outcome{value: {:failed, _reason}}} =
              Refresh.apply(tracked, Outcome.failed(request, :unreadable))
 
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
@@ -176,7 +177,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
-    assert {canceled, %Outcome{status: :canceled}} =
+    assert {canceled, %Outcome{value: {:canceled, _reason}}} =
              Refresh.apply(tracked, Outcome.canceled(request, :requested))
 
     assert canceled.render.render_correlation.timer == nil
@@ -191,7 +192,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     closed = state_with_tree(old_root) |> track(request) |> close_tree()
 
-    assert {closed_state, %Outcome{status: :stale, reason: :stale}} =
+    assert {closed_state, %Outcome{value: {:stale, :stale}}} =
              Refresh.apply(closed, Outcome.completed(request, refreshed))
 
     assert ft_tree(closed_state) == nil
@@ -215,7 +216,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
         end)
       end)
 
-    assert {rerooted_state, %Outcome{status: :stale, reason: :stale}} =
+    assert {rerooted_state, %Outcome{value: {:stale, :stale}}} =
              Refresh.apply(rerooted, Outcome.completed(request, refreshed))
 
     assert ft_tree(rerooted_state).root == Path.expand(new_root)
@@ -249,7 +250,10 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     send(worker, {:release_file_tree_scan, :project_root, {:return, result}})
     outcome = receive_outcome(scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, outcome)
-    assert {loaded, %Outcome{status: :completed} = applied} = Refresh.apply(loading, outcome)
+
+    assert {loaded, %Outcome{value: {:completed, _result}} = applied} =
+             Refresh.apply(loading, outcome)
+
     EffectScheduler.finalize(scheduler, applied)
 
     assert ft_tree(loaded) == result
@@ -292,7 +296,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     first_outcome = receive_outcome(scheduler, first_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, first_outcome)
 
-    assert {latest_state, %Outcome{status: :stale, reason: :stale} = stale} =
+    assert {latest_state, %Outcome{value: {:stale, :stale}} = stale} =
              Refresh.apply(latest_state, first_outcome)
 
     EffectScheduler.finalize(scheduler, stale)
@@ -302,7 +306,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     latest_outcome = receive_outcome(scheduler, latest_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, latest_outcome)
 
-    assert {loaded, %Outcome{status: :completed} = applied} =
+    assert {loaded, %Outcome{value: {:completed, _result}} = applied} =
              Refresh.apply(latest_state, latest_outcome)
 
     EffectScheduler.finalize(scheduler, applied)
@@ -334,7 +338,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     failed_outcome = receive_outcome(scheduler, failed_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed_outcome)
 
-    assert {failed, %Outcome{status: :failed} = finalized_failure} =
+    assert {failed, %Outcome{value: {:failed, _reason}} = finalized_failure} =
              Refresh.apply(failing, failed_outcome)
 
     EffectScheduler.finalize(scheduler, finalized_failure)
@@ -357,7 +361,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     cleanup_outcome = receive_outcome(scheduler, watcher_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, cleanup_outcome)
 
-    assert {failed, %Outcome{status: :completed} = finalized_cleanup} =
+    assert {failed, %Outcome{value: {:completed, _result}} = finalized_cleanup} =
              WatcherSync.apply(failed, cleanup_outcome)
 
     EffectScheduler.finalize(scheduler, finalized_cleanup)
@@ -377,7 +381,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     recovered_outcome = receive_outcome(scheduler, recovered_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, recovered_outcome)
 
-    assert {recovered, %Outcome{status: :completed} = finalized_recovery} =
+    assert {recovered, %Outcome{value: {:completed, _result}} = finalized_recovery} =
              Refresh.apply(recovering, recovered_outcome)
 
     EffectScheduler.finalize(scheduler, finalized_recovery)
@@ -423,7 +427,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
-    assert {failed, %Outcome{status: :failed}} =
+    assert {failed, %Outcome{value: {:failed, _reason}}} =
              Refresh.apply(tracked, Outcome.failed(request, {:root_unavailable, :enoent}))
 
     assert ft_tree(failed).root == Path.expand(root)
@@ -506,7 +510,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
   defp receive_outcome(scheduler, request_id, status) do
     assert_receive {:effect_result, ^scheduler,
-                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                    %Outcome{request: %{id: ^request_id}, value: {^status, _payload}} = outcome},
                    2_000
 
     outcome
