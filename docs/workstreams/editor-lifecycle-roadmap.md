@@ -26,12 +26,12 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **CANDIDATE, craftsmanship:** (none)
-- **CANDIDATE, data shape:** ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
+- **CANDIDATE, data shape:** ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
 
@@ -42,7 +42,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03
 - **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES24
-- **DRIFTED:** D13, D36, D40, S14, ES08, ES21
+- **DRIFTED:** D13, D36, D40, S14, ES21
 
 Drift evidence:
 
@@ -4310,3 +4310,30 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Implementation commit SHA:** `426aa7a9f8574cf6ac39084f05341128faa2eaaf`.
 - **Merge SHA:** `33d00edb30d2e4e82e4224b5e3f52d69acb6f93a`; **Merge evidence:** PR #3200 merged after CI run `29967431751` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
 - **Completion date:** 2026-07-23.
+
+### W105/ES08: Make Highlight storage tuple-only Span values
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** ES08
+- **Planning profile:** `ES08Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `ES08Worker`, no delegation.
+- **Current baseline:** `485d8900d0c8eda92d850f880f6465bb5ecab9b8`.
+- **Ready provenance:** Locked by `agent://ES08Planner`; scope was exactly Highlight storage, SemanticTokenSync merge, typed specs, markdown helper, named true-highlight map fixture migrations, focused validation, formatting, `git diff --check`, production/test deltas, concept count, and this evidence.
+- **Observable result:** `MingaEditor.UI.Highlight` now stores only tuple-resident `%Minga.Language.Highlight.Span{}` values. `put_spans/3` accepts only lists of `Span` structs, rejects stale versions before validating payloads, validates accepted payload elements, and stores a tuple. Scope lookup, comment ranges, line styling, visible-line batching, masked-line batching, markdown code-block overlays, prettify-symbol input, semantic-token merging, capture IDs, layer priority, width ordering, pattern-index tie-breaks, parser correlation, and semantic layer replacement keep the same named behavior.
+- **Failure reproduction / source trace:** Before implementation, `Highlight.t()` allowed `tuple() | [map()]`, query paths accepted list-resident spans and normalized them to tuples, private helpers were typed as maps, `scope_entry/1` and `sweep_events/7` used `Map.get/3` defaults for layer and pattern index, `SemanticTokenSync.merge_tokens/3` normalized tuple-or-list storage and wrote `%Highlight{spans: ...}` directly, and the markdown helper had a private list-residency fallback.
+- **Implementation result:** Added the existing `Minga.Language.Highlight.Span` struct as the Highlight storage element type, documented the tuple-of-`Span` residency and named its private tuple type, removed list-resident query fallbacks, replaced map/default field reads with direct struct fields, routed semantic-token merge through `Highlight.put_names/2` and `Highlight.put_spans/3`, tightened parser highlight specs to `[Span.t()]`, simplified the markdown `has_spans?/1` helper to call the Highlight owner, and migrated named true-highlight fixtures to pass `Span` lists through the owner pipeline without touching parser/LSP producers, Span definition, frontend protocol, renderer model spans, conceal/injection/fold/edit shapes, or unrelated Highlight direct updates.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/agent/markdown_highlight.ex`; `lib/minga_editor/handlers/highlight_handler.ex`; `lib/minga_editor/highlight_sync.ex`; `lib/minga_editor/semantic_token_sync.ex`; `lib/minga_editor/ui/highlight.ex`; `test/minga_editor/agent/markdown_highlight_test.exs`; `test/minga_editor/handlers/highlight_handler_test.exs`; `test/minga_editor/handlers/lsp_event_handler_test.exs`; `test/minga_editor/handlers/session_restore_test.exs`; `test/minga_editor/highlight_sync_test.exs`; `test/minga_editor/render_pipeline/content_helpers_test.exs`; `test/minga_editor/ui/highlight_test.exs`; `test/minga_editor/ui/prettify_symbols_effect_test.exs`; `test/minga_editor/user_query_override_test.exs`.
+- **Focused validation:** `mix test --warnings-as-errors test/minga_editor/ui/highlight_test.exs test/minga_editor/ui/highlight_scope_test.exs test/minga_editor/highlight_sync_test.exs test/minga_editor/handlers/highlight_handler_test.exs test/minga_editor/handlers/session_restore_test.exs test/minga_editor/handlers/lsp_event_handler_test.exs test/minga_editor/render_pipeline/content_helpers_test.exs test/minga_editor/ui/prettify_symbols_effect_test.exs test/minga_editor/agent/markdown_highlight_test.exs test/minga_editor/user_query_override_test.exs test/minga_editor/render_model/window/builder_test.exs` passed with 166 tests.
+- **Formatting and diff validation:** `mix format` ran on every touched Elixir source and test path. `git diff --check` passed.
+- **Reference validation:** Focused production residual search found no `normalize_spans`, no `Map.get(span...)` defaulting, no `Map.get(s...)` semantic filtering, no list-resident Highlight query fallback, no `Frontend.Protocol.highlight_span` spec, and no mixed `tuple() | [map()]` Highlight storage type. Remaining `is_list(spans)` matches are the locked public `[Span.t()]` ingest boundary and snippet highlighter result guard; remaining `[map()]` specs in the touched handler are conceal-span maps, a separate shape outside ES08.
+- **Production lines added/removed before roadmap evidence:** `70 added / 86 removed`, net `-16`, within the locked `<= +20` budget; production numstat before this roadmap update: `lib/minga_editor/agent/markdown_highlight.ex 1 2`, `lib/minga_editor/handlers/highlight_handler.ex 2 1`, `lib/minga_editor/highlight_sync.ex 2 4`, `lib/minga_editor/semantic_token_sync.ex 7 11`, `lib/minga_editor/ui/highlight.ex 58 68`.
+- **Test lines added/removed before roadmap evidence:** `89 added / 91 removed`, net `-2`, within the locked `<= +80` budget; test numstat before this roadmap update: `test/minga_editor/agent/markdown_highlight_test.exs 10 14`, `test/minga_editor/handlers/highlight_handler_test.exs 2 1`, `test/minga_editor/handlers/lsp_event_handler_test.exs 1 1`, `test/minga_editor/handlers/session_restore_test.exs 2 1`, `test/minga_editor/highlight_sync_test.exs 7 6`, `test/minga_editor/render_pipeline/content_helpers_test.exs 5 4`, `test/minga_editor/ui/highlight_test.exs 57 61`, `test/minga_editor/ui/prettify_symbols_effect_test.exs 3 2`, `test/minga_editor/user_query_override_test.exs 2 1`.
+- **Concepts added:** 0 runtime or domain concepts. The private accepted-boundary validator is an implementation detail.
+- **Concepts removed:** 2 compatibility concepts: map-shaped Highlight spans and list-resident Highlight storage/query fallback.
+- **Retained contracts:** Tuple residency, stale rejection before payload validation, equal-version replacement, empty `{}` behavior, parser correlation acceptance/rejection, capture-name indexing, internal `_` capture filtering, semantic layer `2` replacement, syntax/semantic merge preservation, layer priority, width ordering, pattern-index tie-breaks, unicode-safe stale byte slicing, markdown fallback behavior, prettify-symbol derivation, and renderer/content fingerprints are unchanged.
+- **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence and found no contract drift. Elixir craftsmanship initially required explicit tuple-of-`Span` documentation, a private tuple alias on the two long specs, and restoration of the markdown helper's semantic type; all were corrected, and the targeted recheck returned `RESOLVED/PASS`. Ponytail required the same private type and semantic spec corrections plus removal of six test-fixture tuple adapters so tests enter through the owner pipeline; the targeted recheck returned `RESOLVED/PASS`. The final reviewer then found five markdown fixtures still bypassing the owner API; those fixtures and the helper were routed through `Highlight.new/1`, `put_names/2`, and `put_spans/3`, reducing the final test delta from net `+17` before review to net `-2`.
+- **Findings resolved:** ES08's mixed Highlight map/list storage compatibility is clean-cut to existing `Span` structs without adding a module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, or second representation.
+- **Discoveries affecting later work:** No replan trigger, owner drift, producer emitting maps, live tuple-input need, semantic merge invariant failure, protocol/frontend dependency, production budget miss, test budget miss, or extra runtime concept was found.
+- **Broad validation:** `make lint` passed Credo, compile, formatting, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' make test` rebuilt native support and passed 10,297 tests, including 58 doctests and 99 properties, with zero failures, one skipped, and 204 excluded.
+- **Final reviewer verdict:** `RESOLVED/PASS` with 0.99 confidence after the sole blocker was corrected. The reviewer confirmed all markdown fixtures now enter through the Highlight owner pipeline, no tuple fixture or direct `%Highlight{}` construction remains, the roadmap budgets match the diff, and the complete ES08 artifact is merge-safe.
+- **needs_replan:** false.

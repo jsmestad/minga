@@ -25,6 +25,7 @@ defmodule MingaEditor.SemanticTokenSync do
   """
 
   alias Minga.Buffer
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -118,13 +119,12 @@ defmodule MingaEditor.SemanticTokenSync do
         )
 
       # Merge semantic spans with existing tree-sitter spans
-      existing_spans = normalize_spans(hl.spans)
+      ts_spans =
+        hl.spans
+        |> Tuple.to_list()
+        |> Enum.reject(fn %Span{} = span -> span.layer == 2 end)
 
-      # Filter out old semantic token spans (layer 2) before merging new ones
-      ts_spans = Enum.reject(existing_spans, fn s -> Map.get(s, :layer, 0) == 2 end)
-      merged = ts_spans ++ spans
-
-      hl = %{hl | spans: List.to_tuple(merged)}
+      hl = Highlight.put_spans(hl, hl.version, ts_spans ++ spans)
 
       highlights = Map.put(state.parser.highlighting.highlights, buf_pid, hl)
 
@@ -167,7 +167,7 @@ defmodule MingaEditor.SemanticTokenSync do
         end
       end)
 
-    hl = %{hl | capture_names: List.to_tuple(new_list)}
+    hl = Highlight.put_names(hl, new_list)
     {hl, name_map}
   end
 
@@ -181,10 +181,6 @@ defmodule MingaEditor.SemanticTokenSync do
     end)
     |> elem(0)
   end
-
-  @spec normalize_spans(tuple() | [map()]) :: [map()]
-  defp normalize_spans(spans) when is_tuple(spans), do: Tuple.to_list(spans)
-  defp normalize_spans(spans) when is_list(spans), do: spans
 
   @spec find_lsp_client(EditorState.t(), pid()) :: pid() | nil
   defp find_lsp_client(_state, buf_pid) do

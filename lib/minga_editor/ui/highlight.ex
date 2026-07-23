@@ -2,12 +2,13 @@ defmodule MingaEditor.UI.Highlight do
   @moduledoc """
   Stores and queries tree-sitter highlight state for a buffer.
 
-  Holds the current highlight spans (byte ranges + capture IDs),
-  capture names, version counter, and theme. Provides `styles_for_line/3`
+  Holds the current highlight spans as a tuple of `Minga.Language.Highlight.Span`
+  structs, plus capture names, version counter, and theme. Provides `styles_for_line/3`
   to split a line into styled segments for rendering.
   """
 
   alias Minga.Core.Face
+  alias Minga.Language.Highlight.Span
   alias Minga.Parser.EventCorrelation
   alias MingaEditor.UI.Face.Registry, as: FaceRegistry
   alias MingaEditor.UI.Theme
@@ -15,10 +16,11 @@ defmodule MingaEditor.UI.Highlight do
   @enforce_keys [:version, :spans, :capture_names, :theme, :face_registry]
   defstruct [:version, :spans, :capture_names, :theme, :face_registry, :parser_correlation]
 
+  @typep span_tuple :: tuple()
   @typedoc "Highlight state for a buffer."
   @type t :: %__MODULE__{
           version: non_neg_integer(),
-          spans: tuple() | [map()],
+          spans: span_tuple(),
           capture_names: tuple(),
           theme: Theme.syntax(),
           face_registry: FaceRegistry.t(),
@@ -135,14 +137,14 @@ defmodule MingaEditor.UI.Highlight do
   Only updates if the incoming version is >= the current version,
   preventing stale async results from overwriting newer ones.
   """
-  @spec put_spans(t(), non_neg_integer(), [MingaEditor.Frontend.Protocol.highlight_span()]) :: t()
+  @spec put_spans(t(), non_neg_integer(), [Span.t()]) :: t()
   def put_spans(%__MODULE__{version: current} = hl, version, _spans)
       when version < current do
     hl
   end
 
   def put_spans(%__MODULE__{} = hl, version, spans) when is_list(spans) do
-    %{hl | version: version, spans: List.to_tuple(spans)}
+    %{hl | version: version, spans: spans |> validate_spans() |> List.to_tuple()}
   end
 
   @doc """
@@ -174,20 +176,15 @@ defmodule MingaEditor.UI.Highlight do
   def scope_at(hl, byte_offset, source_text)
 
   def scope_at(%__MODULE__{spans: spans}, _byte_offset, _source_text)
-      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+      when tuple_size(spans) == 0 do
     :code
   end
 
   def scope_at(%__MODULE__{spans: spans} = hl, byte_offset, source_text)
-      when is_tuple(spans) and is_integer(byte_offset) and byte_offset >= 0 do
+      when is_integer(byte_offset) and byte_offset >= 0 do
     spans
     |> do_scope_at(tuple_size(spans), 0, byte_offset, hl, nil)
     |> classify_scope(hl, source_text, byte_offset)
-  end
-
-  def scope_at(%__MODULE__{spans: spans} = hl, byte_offset, source_text)
-      when is_list(spans) and is_integer(byte_offset) and byte_offset >= 0 do
-    scope_at(%{hl | spans: List.to_tuple(spans)}, byte_offset, source_text)
   end
 
   def scope_at(_hl, _byte_offset, _source_text), do: :code
@@ -198,7 +195,7 @@ defmodule MingaEditor.UI.Highlight do
             start_byte :: non_neg_integer(), end_byte :: non_neg_integer()}
 
   @spec do_scope_at(
-          tuple(),
+          span_tuple(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
@@ -215,7 +212,7 @@ defmodule MingaEditor.UI.Highlight do
     do_scope_at(spans, count, index + 1, byte_offset, hl, winner)
   end
 
-  @spec maybe_scope_winner(boolean(), map(), t(), scope_candidate() | nil) ::
+  @spec maybe_scope_winner(boolean(), Span.t(), t(), scope_candidate() | nil) ::
           scope_candidate() | nil
   defp maybe_scope_winner(false, _span, _hl, winner), do: winner
 
@@ -228,16 +225,14 @@ defmodule MingaEditor.UI.Highlight do
     end
   end
 
-  @spec span_contains?(map(), non_neg_integer()) :: boolean()
-  defp span_contains?(span, byte_offset),
+  @spec span_contains?(Span.t(), non_neg_integer()) :: boolean()
+  defp span_contains?(%Span{} = span, byte_offset),
     do: span.start_byte <= byte_offset and span.end_byte > byte_offset
 
-  @spec scope_entry(map()) :: scope_candidate()
+  @spec scope_entry(Span.t()) :: scope_candidate()
   defp scope_entry(span) do
-    layer = Map.get(span, :layer, 0)
-    width = span.end_byte - span.start_byte
-    pattern_index = Map.get(span, :pattern_index, 0)
-    {layer, width, pattern_index, span.capture_id, span.start_byte, span.end_byte}
+    {span.layer, span.end_byte - span.start_byte, span.pattern_index, span.capture_id,
+     span.start_byte, span.end_byte}
   end
 
   @spec better_scope_candidate(scope_candidate(), scope_candidate() | nil) :: scope_candidate()
@@ -365,14 +360,12 @@ defmodule MingaEditor.UI.Highlight do
   def styles_for_line(hl, line_text, line_start_byte, resolver \\ nil)
 
   def styles_for_line(%__MODULE__{spans: spans}, line_text, _line_start_byte, _resolver)
-      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+      when tuple_size(spans) == 0 do
     [{line_text, Face.new()}]
   end
 
-  # Fast path: tuple spans (production path from Zig)
   def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte, resolver)
-      when is_tuple(spans) and is_binary(line_text) and is_integer(line_start_byte) and
-             line_start_byte >= 0 do
+      when is_binary(line_text) and is_integer(line_start_byte) and line_start_byte >= 0 do
     line_end_byte = line_start_byte + byte_size(line_text)
     span_count = tuple_size(spans)
 
@@ -382,13 +375,6 @@ defmodule MingaEditor.UI.Highlight do
       [] -> [{line_text, Face.new()}]
       _ -> build_segments(line_text, line_start_byte, overlapping, hl, resolver)
     end
-  end
-
-  # Fallback: list spans (used by tests that construct Highlight structs directly)
-  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte, resolver)
-      when is_list(spans) and is_binary(line_text) and is_integer(line_start_byte) and
-             line_start_byte >= 0 do
-    styles_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte, resolver)
   end
 
   @doc """
@@ -407,12 +393,12 @@ defmodule MingaEditor.UI.Highlight do
   def styles_for_visible_lines(hl, lines, resolver \\ nil)
 
   def styles_for_visible_lines(%__MODULE__{spans: spans}, lines, _resolver)
-      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+      when tuple_size(spans) == 0 do
     Enum.map(lines, fn {text, _} -> [{text, Face.new()}] end)
   end
 
   def styles_for_visible_lines(%__MODULE__{spans: spans} = hl, lines, resolver)
-      when is_tuple(spans) and is_list(lines) do
+      when is_list(lines) do
     span_count = tuple_size(spans)
     {results_rev, _watermark} = batch_lines(lines, spans, span_count, hl, resolver, 0, [])
     Enum.reverse(results_rev)
@@ -436,7 +422,7 @@ defmodule MingaEditor.UI.Highlight do
         dirty_rows,
         _resolver
       )
-      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+      when tuple_size(spans) == 0 do
     lines
     |> Enum.with_index()
     |> Enum.map(fn {text, index} ->
@@ -451,7 +437,7 @@ defmodule MingaEditor.UI.Highlight do
         dirty_rows,
         resolver
       )
-      when is_tuple(spans) and is_list(lines) do
+      when is_list(lines) do
     span_count = tuple_size(spans)
 
     batch = {spans, span_count, hl, resolver, dirty_rows}
@@ -464,16 +450,14 @@ defmodule MingaEditor.UI.Highlight do
 
   @doc "Returns true when this highlight state has at least one tree-sitter span."
   @spec has_spans?(t()) :: boolean()
-  def has_spans?(%__MODULE__{spans: spans}) when is_tuple(spans), do: tuple_size(spans) > 0
-  def has_spans?(%__MODULE__{spans: spans}) when is_list(spans), do: spans != []
+  def has_spans?(%__MODULE__{spans: spans}), do: tuple_size(spans) > 0
 
   @doc "Returns byte ranges within a line that are covered by comment captures."
   @spec comment_ranges_for_line(t(), String.t(), non_neg_integer()) :: [
           {non_neg_integer(), non_neg_integer()}
         ]
   def comment_ranges_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
-      when is_tuple(spans) and is_binary(line_text) and is_integer(line_start_byte) and
-             line_start_byte >= 0 do
+      when is_binary(line_text) and is_integer(line_start_byte) and line_start_byte >= 0 do
     line_end_byte = line_start_byte + byte_size(line_text)
     span_count = tuple_size(spans)
 
@@ -484,20 +468,15 @@ defmodule MingaEditor.UI.Highlight do
     |> Enum.reject(fn {start_byte, end_byte} -> end_byte <= start_byte end)
   end
 
-  def comment_ranges_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
-      when is_list(spans) do
-    comment_ranges_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte)
-  end
-
-  @spec comment_span?(t(), map()) :: boolean()
-  defp comment_span?(hl, span) do
+  @spec comment_span?(t(), Span.t()) :: boolean()
+  defp comment_span?(hl, %Span{} = span) do
     case capture_name_at(hl, span.capture_id) do
       "comment" <> _rest -> true
       _ -> false
     end
   end
 
-  @spec span_line_range(map(), non_neg_integer(), non_neg_integer()) ::
+  @spec span_line_range(Span.t(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()}
   defp span_line_range(span, line_start_byte, line_end_byte) do
     {max(span.start_byte, line_start_byte) - line_start_byte,
@@ -508,7 +487,7 @@ defmodule MingaEditor.UI.Highlight do
 
   @spec batch_lines(
           [{String.t(), non_neg_integer()}],
-          tuple(),
+          span_tuple(),
           non_neg_integer(),
           t(),
           style_resolver() | nil,
@@ -534,7 +513,8 @@ defmodule MingaEditor.UI.Highlight do
   end
 
   @typep text_mask_batch ::
-           {tuple(), non_neg_integer(), t(), style_resolver() | nil, MapSet.t(non_neg_integer())}
+           {span_tuple(), non_neg_integer(), t(), style_resolver() | nil,
+            MapSet.t(non_neg_integer())}
 
   @spec batch_text_lines_masked(
           [String.t()],
@@ -574,7 +554,7 @@ defmodule MingaEditor.UI.Highlight do
     batch_text_lines_masked(rest, batch, watermark, next_line_start, index + 1, [segments | acc])
   end
 
-  @spec advance_watermark(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec advance_watermark(span_tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
   defp advance_watermark(_spans, count, idx, _line_start) when idx >= count, do: idx
 
@@ -593,13 +573,13 @@ defmodule MingaEditor.UI.Highlight do
   # Collect spans that overlap [line_start, line_end) starting from start_idx.
   # Stops once spans start past the line.
   @spec collect_overlapping(
-          tuple(),
+          span_tuple(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          [map()]
-        ) :: [map()]
+          [Span.t()]
+        ) :: [Span.t()]
   defp collect_overlapping(_spans, count, idx, _line_start, _line_end, acc) when idx >= count do
     Enum.reverse(acc)
   end
@@ -609,9 +589,15 @@ defmodule MingaEditor.UI.Highlight do
     collect_overlapping_by_span(spans, count, idx, line_start, line_end, acc, span)
   end
 
-  defp collect_overlapping_by_span(_spans, _count, _idx, _line_start, line_end, acc, %{
-         start_byte: start_byte
-       })
+  defp collect_overlapping_by_span(
+         _spans,
+         _count,
+         _idx,
+         _line_start,
+         line_end,
+         acc,
+         %Span{start_byte: start_byte}
+       )
        when start_byte >= line_end do
     Enum.reverse(acc)
   end
@@ -623,9 +609,7 @@ defmodule MingaEditor.UI.Highlight do
          line_start,
          line_end,
          acc,
-         %{
-           end_byte: end_byte
-         } = span
+         %Span{end_byte: end_byte} = span
        )
        when end_byte > line_start do
     collect_overlapping(spans, count, idx + 1, line_start, line_end, [span | acc])
@@ -650,7 +634,7 @@ defmodule MingaEditor.UI.Highlight do
   #   4. Priority: layer DESC, width ASC, pattern_index DESC
   #   5. Emit segments at each style-change boundary
 
-  @spec build_segments(String.t(), non_neg_integer(), [map()], t(), style_resolver() | nil) ::
+  @spec build_segments(String.t(), non_neg_integer(), [Span.t()], t(), style_resolver() | nil) ::
           [styled_segment()]
   defp build_segments(line_text, line_start, spans, hl, resolver) do
     # Filter out internal captures (names starting with _) before the sweep.
@@ -685,9 +669,9 @@ defmodule MingaEditor.UI.Highlight do
 
   defp capture_name_at(_hl, _id), do: nil
 
-  @typep span_event :: {non_neg_integer(), :open | :close, map()}
+  @typep span_event :: {non_neg_integer(), :open | :close, Span.t()}
 
-  @spec spans_to_events([map()], non_neg_integer(), non_neg_integer()) :: [span_event()]
+  @spec spans_to_events([Span.t()], non_neg_integer(), non_neg_integer()) :: [span_event()]
   defp spans_to_events(spans, line_start, line_len) do
     spans
     |> Enum.flat_map(fn span ->
@@ -751,11 +735,7 @@ defmodule MingaEditor.UI.Highlight do
 
     new_pos = max(pos, event_pos)
 
-    layer = Map.get(span, :layer, 0)
-    width = span.end_byte - span.start_byte
-    pidx = Map.get(span, :pattern_index, 0)
-    cid = span.capture_id
-    entry = {layer, width, pidx, cid}
+    entry = {span.layer, span.end_byte - span.start_byte, span.pattern_index, span.capture_id}
 
     active =
       case type do
@@ -805,6 +785,16 @@ defmodule MingaEditor.UI.Highlight do
           FaceRegistry.style_for(hl.face_registry, name)
         end
     end
+  end
+
+  @spec validate_spans([Span.t()]) :: [Span.t()]
+  defp validate_spans(spans) do
+    Enum.each(spans, fn
+      %Span{} -> :ok
+      other -> raise ArgumentError, "expected highlight span struct, got: #{inspect(other)}"
+    end)
+
+    spans
   end
 
   @doc """

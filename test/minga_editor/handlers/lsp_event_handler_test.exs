@@ -481,7 +481,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       highlight = Map.fetch!(new_state.parser.highlighting.highlights, buffer)
       assert Tuple.to_list(highlight.capture_names) == ["@lsp.type.variable"]
-      assert [%{layer: 2}] = Tuple.to_list(highlight.spans)
+      assert [%Minga.Language.Highlight.Span{layer: 2}] = Tuple.to_list(highlight.spans)
     end
 
     test "untracked completion response is processed off-thread, then becomes visible" do

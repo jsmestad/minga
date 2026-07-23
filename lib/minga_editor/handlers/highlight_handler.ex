@@ -14,6 +14,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   while stale or unknown messages are ignored.
   """
 
+  alias Minga.Language.Highlight.Span
   alias Minga.Parser.EventCorrelation
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
@@ -305,7 +306,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     {new_state, []}
   end
 
-  @spec handle_highlight_spans(EditorState.t(), pid(), non_neg_integer(), term()) ::
+  @spec handle_highlight_spans(EditorState.t(), pid(), non_neg_integer(), [Span.t()]) ::
           {EditorState.t(), [highlight_effect()]}
   defp handle_highlight_spans(
          %{parser: %{highlighting: %{highlights: highlights}}} = state,
