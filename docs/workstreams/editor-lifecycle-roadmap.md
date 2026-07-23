@@ -4517,7 +4517,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W111/ES16: Split Mouse state into tagged concern values
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES16
 - **Planning profile:** `ES16Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES16Worker`, no delegation.
@@ -4542,3 +4542,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **needs_replan:** false.
 - **Pre-acceptance reviews:** Correctness `PASS` with 0.96 confidence; Elixir craftsmanship `PASS`; Ponytail found one avoidable keyword-list rebuild, which was removed, with no other cut. The dedicated type-design agent was unavailable because its runtime had no model configured; the correctness and Elixir reviews independently accepted the four tagged values and their invalid-state removal.
 - **Final reviewer verdict:** `PASS` with 0.98 confidence. The reviewer confirmed the four-value clean cutover, complete consumer migration including hover-timeout dispatch, preserved drag/resize/click/hover and stale-LSP behavior, budgets, final validation, roadmap evidence, and merge safety with no findings.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3216
+- **Implementation commit SHA:** `310a528892e8f3b7d8fec2691a1f5b057491ee08`
+- **Merge SHA:** `02c66913918c7ca029903e6e087dd331d49519a2`
+- **Merge evidence:** PR #3216 merged after CI run `30000938197` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES16 is fully resolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** Initial review required explicit post-merge full-resolution evidence. After correction, PR URL, implementation SHA, merge SHA, successful CI run, completion date, and full ES16 resolution are all recorded.
