@@ -4378,7 +4378,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W107/ES09.2: Cut over FileTree content lifecycle tag
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES09.content-lifecycle / ES09.2
 - **Planning profile:** `ES09ContentPlanner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES09ContentWorker`, no delegation.
@@ -4405,3 +4405,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed owner-routed content tags, complete producer/consumer migration, retained hidden/error/loading/render/refresh/filter/watcher/buffer/protocol contracts, stale-field removal, ES10 exclusion, exact roadmap evidence, line budgets, and merge safety.
 - **Discoveries affecting later work:** The full-suite run exposed two stale tests outside the initial focused list: `MingaEditor.FileTree.RefreshTest` still read `file_tree().tree`, and `MingaEditor.RenderModel.UI.BuilderTest` built an emit context without the typed FileTree owner. The mandatory review pass additionally exposed that hidden resident loading/error states needed explicit owner and render regressions to preserve hidden rows. All were migrated without changing the locked owner/API shape. No replan trigger, owner drift, production budget issue, test budget issue, new dependency, protocol/frontend dependency, persisted tab migration need, compatibility need, or ES10 scope dependency was found.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3208
+- **Implementation commit SHA:** `c79bf266642b056a17b3c454927bbaf283e0bca1`
+- **Merge SHA:** `9693f53ff9a48b68455d123d341837cc00fef485`
+- **Merge evidence:** PR #3208 merged after CI run `29980885370` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES09 is fully resolved by W106/ES09.1 plus W107/ES09.2. ES10 remains separately accepted and unresolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR, implementation SHA, merge SHA, CI run, completion date, full ES09 resolution, and deferred ES10 scope were independently confirmed.
