@@ -91,12 +91,15 @@ defmodule MingaEditor.FileTree.Freshness do
   @spec begin_refresh(state(), reference()) :: state()
   def begin_refresh(state, timer_token) when is_reference(timer_token) do
     case FileTreeState.refresh_debounce_elapsed(file_tree_state(state), timer_token) do
-      {:ready, tree, file_tree} ->
+      {:ready, tree, _attempt, file_tree} ->
         state
         |> set_file_tree(file_tree)
         |> schedule_refresh(tree)
 
-      {_status, file_tree} ->
+      {:closed, _attempt, file_tree} ->
+        set_file_tree(state, file_tree)
+
+      {:stale, file_tree} ->
         set_file_tree(state, file_tree)
     end
   end

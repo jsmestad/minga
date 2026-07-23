@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   end
 
   defp complete_current_refresh(state) do
-    request_id = ft(state).refresh.current.token
+    {:admitted, _root, %{token: request_id}} = ft(state).refresh.phase
     outcome = receive_outcome(state.effect_scheduler, request_id, :completed)
     assert :ok = EffectScheduler.claim(state.effect_scheduler, outcome)
     assert {state, %Outcome{status: :completed} = applied} = Refresh.apply(state, outcome)

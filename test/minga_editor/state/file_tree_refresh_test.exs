@@ -5,6 +5,7 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
 
   alias Minga.Project.FileTree
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.FileTree.Refresh
 
   test "one debounce intent is consumed only by its correlated timer" do
     file_tree = open_tree("/tmp/minga-refresh-debounce")
@@ -17,7 +18,7 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
 
     assert {:stale, ^file_tree} = FileTreeState.refresh_debounce_elapsed(file_tree, make_ref())
 
-    assert {:ready, %FileTree{}, elapsed} =
+    assert {:ready, %FileTree{}, 0, elapsed} =
              FileTreeState.refresh_debounce_elapsed(file_tree, timer)
 
     assert {:stale, ^elapsed} = FileTreeState.refresh_debounce_elapsed(elapsed, timer)
@@ -29,11 +30,10 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     timer = make_ref()
 
     tracked = open_tree(root) |> FileTreeState.track_refresh_request(root, request)
-    assert tracked.refresh.current.token == request
+    assert tracked.refresh.phase == {:admitted, Path.expand(root), %{token: request}}
 
     assert {:scheduled, pending} = FileTreeState.request_refresh_debounce(tracked, timer)
-    assert pending.refresh.current == nil
-    assert pending.refresh.debounce == timer
+    assert pending.refresh.phase == {:debounced, timer, 0}
   end
 
   test "an admission retry keeps one correlated pending intent and advances backoff" do
@@ -42,15 +42,56 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     second_timer = make_ref()
 
     assert {1, first} = FileTreeState.track_refresh_retry(file_tree, first_timer)
-    assert first.refresh.debounce == first_timer
-    assert first.refresh.retry_attempt == 1
+    assert first.refresh.phase == {:debounced, first_timer, 1}
 
-    assert {:ready, _tree, elapsed} =
+    assert {:ready, _tree, 1, elapsed} =
              FileTreeState.refresh_debounce_elapsed(first, first_timer)
 
     assert {2, second} = FileTreeState.track_refresh_retry(elapsed, second_timer)
-    assert second.refresh.debounce == second_timer
-    assert second.refresh.retry_attempt == 2
+    assert second.refresh.phase == {:debounced, second_timer, 2}
+  end
+
+  test "refresh phase source transitions accept only intended source tags" do
+    token = make_ref()
+    request = make_ref()
+    root = "/tmp/minga-refresh-source-phase"
+
+    assert {:already_scheduled, %{phase: {:debounced, ^token, 0}}} =
+             Refresh.request_debounce(%Refresh{phase: {:debounced, token, 4}}, make_ref())
+
+    assert {:scheduled, %{phase: {:debounced, ^token, 0}}} =
+             Refresh.request_debounce(
+               %Refresh{phase: {:admitted, Path.expand(root), %{token: request}}},
+               token
+             )
+
+    Enum.each([{:idle, 2}], fn phase ->
+      assert {3, %Refresh{phase: {:debounced, ^token, 3}}} =
+               Refresh.retry_debounce(%Refresh{phase: phase}, token)
+    end)
+
+    Enum.each(
+      [{:debounced, token, 2}, {:admitted, Path.expand(root), %{token: request}}],
+      fn phase ->
+        assert_raise FunctionClauseError, fn ->
+          Refresh.retry_debounce(%Refresh{phase: phase}, token)
+        end
+      end
+    )
+
+    assert %Refresh{phase: {:admitted, expanded_root, %{token: ^request}}} =
+             Refresh.request_admitted(%Refresh{phase: {:idle, 2}}, root, request)
+
+    assert expanded_root == Path.expand(root)
+
+    Enum.each(
+      [{:debounced, token, 2}, {:admitted, Path.expand(root), %{token: request}}],
+      fn phase ->
+        assert_raise FunctionClauseError, fn ->
+          Refresh.request_admitted(%Refresh{phase: phase}, root, request)
+        end
+      end
+    )
   end
 
   test "a current request atomically replaces the tree and clears correlation" do
@@ -176,6 +217,22 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     loading = root |> open_tree() |> FileTreeState.loading()
     loading_replaced = FileTreeState.replace_tree_metadata(loading, metadata_tree)
     assert FileTreeState.content(loading_replaced) == {:loading, metadata_tree}
+  end
+
+  test "hidden loaded content remains resident when refresh phase changes" do
+    root = "/tmp/minga-refresh-hidden-resident"
+    loaded = tree(root, [entry(root, "resident.ex")])
+    timer = make_ref()
+
+    hidden =
+      %FileTreeState{}
+      |> FileTreeState.open(loaded, nil)
+      |> FileTreeState.hide()
+
+    assert {:scheduled, pending} = FileTreeState.request_refresh_debounce(hidden, timer)
+    assert FileTreeState.content(pending) == {:ready, loaded}
+    assert FileTreeState.status(pending) == :hidden
+    assert pending.refresh.phase == {:debounced, timer, 0}
   end
 
   test "failed and canceled terminals clear only the matching request" do
