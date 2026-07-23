@@ -296,7 +296,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
       assert file_ctx.file_tree.project_root == file_tree.project_root
       assert file_ctx.file_tree.tree == nil
-      refute file_ctx.file_tree.focused
+      refute FileTreeState.focused?(file_ctx.file_tree)
       assert FeatureState.empty?(file_ctx.feature_state)
 
       agent_state =
@@ -310,7 +310,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
       assert agent_ctx.file_tree.project_root == file_tree.project_root
       assert agent_ctx.file_tree.tree == nil
-      refute agent_ctx.file_tree.focused
+      refute FileTreeState.focused?(agent_ctx.file_tree)
       assert FeatureState.empty?(agent_ctx.feature_state)
     end
 

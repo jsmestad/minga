@@ -58,7 +58,11 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       frontend: FrontendState.new(port_manager: self()),
       workspace:
         %SessionState{keymap_scope: :file_tree}
-        |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf}),
+        |> SessionState.set_file_tree(%FileTreeState{
+          tree: tree,
+          visibility: :focused,
+          buffer: buf
+        }),
       interaction: Interaction.new()
     }
   end
@@ -193,7 +197,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?q, 0)
       assert ft(state).tree == nil
-      assert ft(state).focused == false
+      refute FileTreeState.focused?(ft(state))
     end
   end
 

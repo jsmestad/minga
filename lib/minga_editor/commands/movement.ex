@@ -672,7 +672,7 @@ defmodule MingaEditor.Commands.Movement do
   # When file tree is focused, navigating right unfocuses the tree
   # and restores the scope based on the active window's content type.
   defp navigate_window(state, :right) do
-    if state.workspace.file_tree.focused do
+    if FileTreeState.focused?(state.workspace.file_tree) do
       state = update_file_tree(state, &FileTreeState.unfocus/1)
       scope = MingaEditor.Session.State.scope_for_active_window(state.workspace)
       %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, scope)}
@@ -734,7 +734,7 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_file_tree(state, :left) do
-    if match?(%Minga.Project.FileTree{}, state.workspace.file_tree.tree) do
+    if FileTreeState.visible?(state.workspace.file_tree) do
       state = update_file_tree(state, &FileTreeState.focus/1)
 
       %{

@@ -42,30 +42,24 @@ defmodule MingaEditor.Input.FileTreeHandler do
           non_neg_integer(),
           non_neg_integer()
         ) :: MingaEditor.Input.Handler.result()
-  defp handle_file_tree_scoped_key(%FileTreeState{help_visible: true}, state, cp, mods) do
+  defp handle_file_tree_scoped_key(%FileTreeState{interaction: :help}, state, cp, mods) do
     {:handled, handle_help_key(state, cp, mods)}
   end
 
-  defp handle_file_tree_scoped_key(%FileTreeState{editing: editing}, state, cp, mods)
-       when editing != nil do
+  defp handle_file_tree_scoped_key(%FileTreeState{interaction: {:editing, _}}, state, cp, mods) do
     {:handled, handle_inline_edit_key(state, cp, mods)}
   end
 
-  defp handle_file_tree_scoped_key(%FileTreeState{filtering: true}, state, cp, mods) do
+  defp handle_file_tree_scoped_key(%FileTreeState{interaction: :filtering}, state, cp, mods) do
     {:handled, handle_filter_key(state, cp, mods)}
   end
 
-  defp handle_file_tree_scoped_key(
-         %FileTreeState{tree: %FileTree{}, focused: true},
-         state,
-         cp,
-         mods
-       ) do
-    handle_file_tree_key(state, cp, mods)
-  end
-
-  defp handle_file_tree_scoped_key(%FileTreeState{}, state, _cp, _mods) do
-    {:passthrough, state}
+  defp handle_file_tree_scoped_key(%FileTreeState{} = file_tree, state, cp, mods) do
+    if FileTreeState.focused?(file_tree) do
+      handle_file_tree_key(state, cp, mods)
+    else
+      {:passthrough, state}
+    end
   end
 
   @impl true
@@ -314,7 +308,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
   end
 
   defp handle_inline_edit_key(state, @backspace, 0) do
-    editing = file_tree_state(state).editing
+    editing = FileTreeState.editing(file_tree_state(state))
 
     if editing.text == "" do
       Commands.FileTree.cancel_editing(state)
@@ -329,7 +323,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
   # Printable characters: append to editing text
   defp handle_inline_edit_key(state, cp, mods) when printable_text_key?(cp, mods) do
     char = <<cp::utf8>>
-    editing = file_tree_state(state).editing
+    editing = FileTreeState.editing(file_tree_state(state))
     new_text = editing.text <> char
     ft = FileTreeState.update_editing_text(file_tree_state(state), new_text)
     set_file_tree(state, ft)

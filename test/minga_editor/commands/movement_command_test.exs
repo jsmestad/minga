@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project.FileTree
   alias Minga.Core.WrapMap
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor.Commands.Movement
@@ -16,6 +17,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -134,6 +136,24 @@ defmodule MingaEditor.Commands.MovementCommandTest do
 
       assert BufferProcess.content(buf) == original
       assert BufferProcess.cursor(buf) == {0, 1}
+    end
+
+    test "window left does not focus a hidden resident file tree" do
+      state = build_state(start_buffer("hello"))
+
+      file_tree =
+        %FileTreeState{} |> FileTreeState.open(FileTree.new("/tmp"), nil) |> FileTreeState.hide()
+
+      workspace =
+        state.workspace
+        |> SessionState.set_file_tree(file_tree)
+        |> SessionState.set_keymap_scope(:editor)
+
+      updated = Movement.execute(%{state | workspace: workspace}, :window_left)
+
+      assert updated.workspace.file_tree == file_tree
+      refute FileTreeState.focused?(updated.workspace.file_tree)
+      assert updated.workspace.keymap_scope == :editor
     end
   end
 

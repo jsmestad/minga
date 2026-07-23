@@ -111,7 +111,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       # Simulate file tree focus change
       ws = input.workspace
-      ft = %{ws.file_tree | focused: true}
+      ft = %{ws.file_tree | visibility: :focused}
       input2 = %{input | workspace: %{ws | file_tree: ft}}
       fp2 = Input.chrome_fingerprint(input2)
 

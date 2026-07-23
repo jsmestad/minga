@@ -3,7 +3,7 @@ defmodule MingaEditor.State.FileTree do
   File tree sub-state: tree data, focus, and backing buffer.
 
   Wraps the file-tree-related fields from EditorState into a single
-  struct with query and mutation helpers. Includes inline editing state
+  struct with query and transition helpers. Includes inline editing state
   for new file, new folder, and rename operations.
   """
 
@@ -17,7 +17,8 @@ defmodule MingaEditor.State.FileTree do
   @typedoc """
   Inline editing state for creating files/folders or renaming entries.
 
-  When non-nil, the user is actively typing a filename in the tree.
+  Present while `interaction` is `{:editing, editing()}`. The `editing/1`
+  query returns `nil` in every other interaction phase.
   The `index` is the visual position in the visible entry list where
   the editing row appears. For new file/folder, this is the insertion
   point. For rename, this is the entry being renamed.
@@ -44,40 +45,40 @@ defmodule MingaEditor.State.FileTree do
   @typedoc "Explicit presentation state for the file tree sidebar."
   @type tree_status :: :hidden | :loading | :empty | :ready | {:error, String.t()}
 
+  @typedoc "Explicit visibility phase for the file tree sidebar."
+  @type visibility :: :hidden | :visible | :focused
+
+  @typedoc "Explicit user interaction phase for the file tree sidebar."
+  @type interaction :: :browse | {:editing, editing()} | :filtering | :help
+
   @typedoc "File tree sub-state."
   @type t :: %__MODULE__{
           tree: FileTree.t() | nil,
-          focused: boolean(),
-          hidden: boolean(),
+          visibility: visibility(),
           buffer: pid() | nil,
-          editing: editing() | nil,
+          interaction: interaction(),
           project_root: String.t() | nil,
           original_root: String.t() | nil,
           tree_status: tree_status(),
           tree_width: pos_integer(),
           refresh: Refresh.t(),
           clipboard_mark: clipboard_mark() | nil,
-          filtering: boolean(),
           filter_request: filter_request() | nil,
-          watchers: Watchers.t(),
-          help_visible: boolean()
+          watchers: Watchers.t()
         }
 
   defstruct tree: nil,
-            focused: false,
-            hidden: false,
+            visibility: :hidden,
             buffer: nil,
-            editing: nil,
+            interaction: :browse,
             project_root: nil,
             original_root: nil,
             tree_status: :hidden,
             tree_width: 30,
             refresh: %Refresh{},
             clipboard_mark: nil,
-            filtering: false,
             filter_request: nil,
-            watchers: %Watchers{},
-            help_visible: false
+            watchers: %Watchers{}
 
   @doc """
   Returns true when the file tree has loaded data.
@@ -91,19 +92,23 @@ defmodule MingaEditor.State.FileTree do
   def loaded?(%__MODULE__{tree: nil}), do: false
   def loaded?(%__MODULE__{}), do: true
 
-  @doc "Returns true when the sidebar is currently visible (loaded and not hidden)."
+  @doc "Returns true when the sidebar is currently visible."
   @spec visible?(t()) :: boolean()
-  def visible?(%__MODULE__{} = ft), do: visible_status?(status(ft))
+  def visible?(%__MODULE__{visibility: visibility}), do: visibility != :hidden
 
   @doc "Returns true when the file tree is open and focused."
   @spec focused?(t()) :: boolean()
-  def focused?(%__MODULE__{tree: %FileTree{}, focused: true}), do: true
+  def focused?(%__MODULE__{tree: %FileTree{}, visibility: :focused}), do: true
   def focused?(%__MODULE__{}), do: false
 
   @doc "Returns true when inline editing is active."
   @spec editing?(t()) :: boolean()
-  def editing?(%__MODULE__{editing: %{}}), do: true
-  def editing?(%__MODULE__{}), do: false
+  def editing?(%__MODULE__{} = ft), do: editing(ft) != nil
+
+  @doc "Returns the active inline editing payload."
+  @spec editing(t()) :: editing() | nil
+  def editing(%__MODULE__{interaction: {:editing, editing}}), do: editing
+  def editing(%__MODULE__{}), do: nil
 
   @doc "Returns the explicit presentation status for the file tree."
   @spec status(t()) :: tree_status()
@@ -113,7 +118,7 @@ defmodule MingaEditor.State.FileTree do
 
   # A loaded tree whose sidebar has been toggled off. The data and watchers stay
   # alive so showing it again is a pure layout change (#2626).
-  def status(%__MODULE__{tree: %FileTree{}, hidden: true}), do: :hidden
+  def status(%__MODULE__{tree: %FileTree{}, visibility: :hidden}), do: :hidden
 
   def status(%__MODULE__{tree: %FileTree{}, tree_status: :hidden} = ft),
     do: classify_tree(ft.tree)
@@ -128,13 +133,15 @@ defmodule MingaEditor.State.FileTree do
   def visible_status?(:hidden), do: false
   def visible_status?(_status), do: true
 
-  @doc "Marks the file tree as focused."
+  @doc "Marks the visible file tree as focused."
   @spec focus(t()) :: t()
-  def focus(%__MODULE__{} = ft), do: %{ft | focused: true}
+  def focus(%__MODULE__{visibility: :visible} = ft), do: %{ft | visibility: :focused}
+  def focus(%__MODULE__{} = ft), do: ft
 
   @doc "Marks the file tree as unfocused."
   @spec unfocus(t()) :: t()
-  def unfocus(%__MODULE__{} = ft), do: %{ft | focused: false}
+  def unfocus(%__MODULE__{visibility: :focused} = ft), do: %{ft | visibility: :visible}
+  def unfocus(%__MODULE__{} = ft), do: ft
 
   @doc """
   Hides the sidebar while keeping the loaded tree, backing buffer, and watchers.
@@ -143,13 +150,11 @@ defmodule MingaEditor.State.FileTree do
   the full tree data so showing it again does not rebuild anything (#2626).
   """
   @spec hide(t()) :: t()
-  def hide(%__MODULE__{} = ft) do
-    %{ft | hidden: true, focused: false, editing: nil, filtering: false, help_visible: false}
-  end
+  def hide(%__MODULE__{} = ft), do: %{ft | visibility: :hidden, interaction: :browse}
 
   @doc "Reveals a previously hidden tree and refocuses it."
   @spec show(t()) :: t()
-  def show(%__MODULE__{} = ft), do: %{ft | hidden: false, focused: true}
+  def show(%__MODULE__{} = ft), do: %{ft | visibility: :focused}
 
   @doc "Returns the tree width, preserving the last sidebar width while state-only payloads are visible."
   @spec width(t()) :: pos_integer()
@@ -164,9 +169,9 @@ defmodule MingaEditor.State.FileTree do
     %{
       ft
       | tree: tree,
-        focused: true,
-        hidden: false,
+        visibility: :focused,
         buffer: buffer,
+        interaction: :browse,
         project_root: tree.root,
         original_root: ft.original_root || tree.root,
         tree_status: classify_tree(tree),
@@ -204,11 +209,9 @@ defmodule MingaEditor.State.FileTree do
   def loading(%__MODULE__{} = ft) do
     %{
       ft
-      | focused: false,
-        editing: nil,
-        filtering: false,
+      | visibility: :visible,
+        interaction: :browse,
         filter_request: nil,
-        help_visible: false,
         tree_status: :loading
     }
   end
@@ -237,10 +240,8 @@ defmodule MingaEditor.State.FileTree do
         original_root: original_root,
         tree_status: :loading,
         tree_width: tree.width,
-        editing: nil,
-        filtering: false,
+        interaction: :browse,
         filter_request: nil,
-        help_visible: false,
         refresh: Refresh.invalidate(ft.refresh),
         watchers: watchers
     }
@@ -366,7 +367,12 @@ defmodule MingaEditor.State.FileTree do
   @doc "Marks the sidebar as failed with a displayable reason."
   @spec error(t(), term()) :: t()
   def error(%__MODULE__{} = ft, reason) do
-    %{ft | focused: false, editing: nil, tree_status: {:error, format_error_reason(reason)}}
+    %{
+      ft
+      | visibility: :visible,
+        interaction: :browse,
+        tree_status: {:error, format_error_reason(reason)}
+    }
   end
 
   @doc "Reports a refresh failure while preserving the open tree interaction state."
@@ -393,16 +399,13 @@ defmodule MingaEditor.State.FileTree do
     %{
       ft
       | tree: nil,
-        focused: false,
-        hidden: false,
+        visibility: :hidden,
         buffer: nil,
-        editing: nil,
+        interaction: :browse,
         tree_status: :hidden,
         clipboard_mark: nil,
-        filtering: false,
         filter_request: nil,
         watchers: watchers,
-        help_visible: false,
         refresh: Refresh.invalidate(ft.refresh)
     }
   end
@@ -420,20 +423,19 @@ defmodule MingaEditor.State.FileTree do
 
     %{
       ft
-      | editing: %{index: index, text: initial_text, type: type, original_name: original},
-        filtering: false,
-        help_visible: false
+      | interaction:
+          {:editing, %{index: index, text: initial_text, type: type, original_name: original}}
     }
   end
 
   @doc "Updates the text being typed in the inline editor."
   @spec update_editing_text(t(), String.t()) :: t()
-  def update_editing_text(%__MODULE__{editing: %{} = editing} = ft, new_text)
+  def update_editing_text(%__MODULE__{interaction: {:editing, editing}} = ft, new_text)
       when is_binary(new_text) do
-    %{ft | editing: %{editing | text: new_text}}
+    %{ft | interaction: {:editing, %{editing | text: new_text}}}
   end
 
-  def update_editing_text(%__MODULE__{editing: nil} = ft, _new_text), do: ft
+  def update_editing_text(%__MODULE__{} = ft, _new_text), do: ft
 
   @doc "Stores a pending file tree clipboard operation."
   @spec mark_clipboard(t(), String.t(), String.t(), boolean(), clipboard_operation()) :: t()
@@ -451,14 +453,14 @@ defmodule MingaEditor.State.FileTree do
   @spec start_filtering(t()) :: t()
   def start_filtering(%__MODULE__{tree: %FileTree{filter: filter} = tree} = ft)
       when filter in [nil, ""] do
-    %{ft | tree: FileTree.begin_filter(tree), filtering: true, editing: nil, help_visible: false}
+    %{ft | tree: FileTree.begin_filter(tree), interaction: :filtering}
   end
 
   def start_filtering(%__MODULE__{tree: %FileTree{filter: filter}} = ft)
       when is_binary(filter) and filter != "" do
     ft
     |> update_filter(filter)
-    |> then(&%{&1 | filtering: true, editing: nil, help_visible: false})
+    |> then(&%{&1 | interaction: :filtering})
   end
 
   def start_filtering(%__MODULE__{} = ft), do: ft
@@ -482,7 +484,7 @@ defmodule MingaEditor.State.FileTree do
       ft
       | tree: tree,
         tree_status: :loading,
-        filtering: disposition == :keep_open,
+        interaction: if(disposition == :keep_open, do: :filtering, else: :browse),
         filter_request: nil
     }
   end
@@ -491,11 +493,30 @@ defmodule MingaEditor.State.FileTree do
 
   @doc "Correlates the latest admitted filter request with its exact root and query."
   @spec track_filter_request(t(), String.t(), String.t(), reference()) :: t()
-  def track_filter_request(%__MODULE__{} = ft, root, filter, token)
+  def track_filter_request(
+        %__MODULE__{
+          tree: %FileTree{root: live_root, filter: live_filter},
+          project_root: project_root
+        } = ft,
+        root,
+        filter,
+        token
+      )
       when is_binary(root) and is_binary(filter) and is_reference(token) do
-    request = %{root: Path.expand(root), filter: filter, token: token}
-    %{ft | filter_request: request, refresh: Refresh.invalidate(ft.refresh)}
+    expanded_root = Path.expand(root)
+
+    if Path.expand(live_root) == expanded_root and live_filter == filter and
+         is_binary(project_root) and Path.expand(project_root) == expanded_root do
+      request = %{root: expanded_root, filter: filter, token: token}
+      %{ft | filter_request: request, refresh: Refresh.invalidate(ft.refresh)}
+    else
+      ft
+    end
   end
+
+  def track_filter_request(%__MODULE__{} = ft, root, filter, token)
+      when is_binary(root) and is_binary(filter) and is_reference(token),
+      do: ft
 
   @doc "Installs a current filter result prepared by a scheduler worker."
   @spec accept_filter_result(t(), String.t(), String.t(), reference(), FilterResult.t()) ::
@@ -531,22 +552,27 @@ defmodule MingaEditor.State.FileTree do
 
   @doc "Accepts the current filter and leaves the narrowed tree visible."
   @spec accept_filter(t()) :: t()
-  def accept_filter(%__MODULE__{} = ft), do: %{ft | filtering: false}
+  def accept_filter(%__MODULE__{interaction: :filtering} = ft), do: %{ft | interaction: :browse}
+  def accept_filter(%__MODULE__{} = ft), do: ft
 
   @doc "Toggles the file tree help overlay."
   @spec toggle_help(t()) :: t()
-  def toggle_help(%__MODULE__{} = ft),
-    do: %{ft | help_visible: not ft.help_visible, filtering: false}
+  def toggle_help(%__MODULE__{interaction: :browse} = ft), do: %{ft | interaction: :help}
+  def toggle_help(%__MODULE__{interaction: :help} = ft), do: %{ft | interaction: :browse}
+  def toggle_help(%__MODULE__{interaction: :filtering} = ft), do: %{ft | interaction: :help}
+  def toggle_help(%__MODULE__{} = ft), do: ft
 
   @doc "Hides the file tree help overlay."
   @spec hide_help(t()) :: t()
-  def hide_help(%__MODULE__{} = ft), do: %{ft | help_visible: false}
+  def hide_help(%__MODULE__{interaction: :help} = ft), do: %{ft | interaction: :browse}
+  def hide_help(%__MODULE__{} = ft), do: ft
 
-  @doc "Cancels inline editing, clearing the editing state back to nil."
+  @doc "Cancels inline editing, clearing the editing state back to browse."
   @spec cancel_editing(t()) :: t()
-  def cancel_editing(%__MODULE__{} = ft) do
-    %{ft | editing: nil}
-  end
+  def cancel_editing(%__MODULE__{interaction: {:editing, _}} = ft),
+    do: %{ft | interaction: :browse}
+
+  def cancel_editing(%__MODULE__{} = ft), do: ft
 
   @doc "Replaces the tree data."
   @spec set_tree(t(), FileTree.t() | nil) :: t()
@@ -556,6 +582,8 @@ defmodule MingaEditor.State.FileTree do
       | tree: nil,
         tree_status: :hidden,
         refresh: Refresh.invalidate(ft.refresh),
+        visibility: :hidden,
+        interaction: :browse,
         filter_request: nil,
         watchers: Watchers.cleanup(ft.watchers, current_tree_roots(ft))
     }

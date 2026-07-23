@@ -450,7 +450,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state = tmp_dir |> build_state() |> FileTreeCommands.filter()
       file_tree = FileTreeState.update_filter(ft(state), "alpha")
 
-      assert file_tree.filtering == true
+      assert file_tree.interaction == :filtering
       assert Enum.map(FileTree.visible_entries(file_tree.tree), & &1.name) == ["alpha.txt"]
     end
 
@@ -459,10 +459,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state = build_state(tmp_dir)
 
       state = FileTreeCommands.toggle_help(state)
-      assert ft(state).help_visible == true
+      assert ft(state).interaction == :help
 
       state = FileTreeCommands.toggle_help(state)
-      assert ft(state).help_visible == false
+      assert ft(state).interaction == :browse
     end
   end
 

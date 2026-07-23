@@ -57,8 +57,8 @@ defmodule MingaEditor.FileTree.Rows do
         from_tree(tree,
           active_path: active_buffer_path(state),
           dirty_paths: dirty_paths(state),
-          editing: file_tree.editing,
-          focused: file_tree.focused,
+          editing: FileTreeState.editing(file_tree),
+          focused: FileTreeState.focused?(file_tree),
           git_status: tree.git_status,
           selected_index: tree.cursor
         )

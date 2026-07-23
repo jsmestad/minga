@@ -366,7 +366,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:file_tree_edit_confirm, text}) do
-    case state.workspace.file_tree.editing do
+    case FileTreeState.editing(state.workspace.file_tree) do
       nil ->
         state
 
