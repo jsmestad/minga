@@ -4313,7 +4313,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W105/ES08: Make Highlight storage tuple-only Span values
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES08
 - **Planning profile:** `ES08Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES08Worker`, no delegation.
@@ -4333,7 +4333,11 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Retained contracts:** Tuple residency, stale rejection before payload validation, equal-version replacement, empty `{}` behavior, parser correlation acceptance/rejection, capture-name indexing, internal `_` capture filtering, semantic layer `2` replacement, syntax/semantic merge preservation, layer priority, width ordering, pattern-index tie-breaks, unicode-safe stale byte slicing, markdown fallback behavior, prettify-symbol derivation, and renderer/content fingerprints are unchanged.
 - **Pre-acceptance reviews:** Correctness returned `PASS/Lean` with 0.99 confidence and found no contract drift. Elixir craftsmanship initially required explicit tuple-of-`Span` documentation, a private tuple alias on the two long specs, and restoration of the markdown helper's semantic type; all were corrected, and the targeted recheck returned `RESOLVED/PASS`. Ponytail required the same private type and semantic spec corrections plus removal of six test-fixture tuple adapters so tests enter through the owner pipeline; the targeted recheck returned `RESOLVED/PASS`. The final reviewer then found five markdown fixtures still bypassing the owner API; those fixtures and the helper were routed through `Highlight.new/1`, `put_names/2`, and `put_spans/3`, reducing the final test delta from net `+17` before review to net `-2`.
 - **Findings resolved:** ES08's mixed Highlight map/list storage compatibility is clean-cut to existing `Span` structs without adding a module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, or second representation.
-- **Discoveries affecting later work:** No replan trigger, owner drift, producer emitting maps, live tuple-input need, semantic merge invariant failure, protocol/frontend dependency, production budget miss, test budget miss, or extra runtime concept was found.
+- **Discoveries affecting later work:** No replan trigger, owner drift, producer emitting maps, live tuple-input need, semantic merge invariant failure, protocol/frontend dependency, production budget miss, test budget miss, or extra runtime concept was found. The first post-rebase CI run exposed three unrelated suite-load test deadlines; PRs #3202 and #3204 replaced scheduler assumptions or widened positive-path allowances without changing production behavior, then the final ES08 run passed.
 - **Broad validation:** `make lint` passed Credo, compile, formatting, and incremental Dialyzer with zero Dialyzer errors; Credo retained two pre-existing buffer-management refactoring opportunities and one registry-test warning. `ERL_FLAGS='+S 2:2' make test` rebuilt native support and passed 10,297 tests, including 58 doctests and 99 properties, with zero failures, one skipped, and 204 excluded.
 - **Final reviewer verdict:** `RESOLVED/PASS` with 0.99 confidence after the sole blocker was corrected. The reviewer confirmed all markdown fixtures now enter through the Highlight owner pipeline, no tuple fixture or direct `%Highlight{}` construction remains, the roadmap budgets match the diff, and the complete ES08 artifact is merge-safe.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3203
+- **Implementation commit SHA:** `5a5154fb012d46f345ac6da7962838cf75af5fb1`.
+- **Merge SHA:** `3c7eb307dd04bf517ffb0ae0f1456d4579196d0a`; **Merge evidence:** PR #3203 merged after CI run `29973063462` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency.
+- **Completion date:** 2026-07-23.
 - **needs_replan:** false.
