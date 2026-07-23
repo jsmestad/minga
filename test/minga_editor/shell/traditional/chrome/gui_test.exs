@@ -45,7 +45,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUITest do
 
       chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
 
-      assert {:buffer, _} = chrome.status_bar_data
+      assert %MingaEditor.StatusBar.Data{content: %MingaEditor.StatusBar.Data.Buffer{}} =
+               chrome.status_bar_data
     end
   end
 end

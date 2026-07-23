@@ -1,103 +1,88 @@
 defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   @moduledoc false
 
+  alias Minga.Language.Devicon
   alias Minga.RenderModel.UI.StatusBar
-  alias Minga.RenderModel.UI.StatusBar.Agent
-  alias Minga.RenderModel.UI.StatusBar.Cursor
-  alias Minga.RenderModel.UI.StatusBar.Data, as: StatusData
-  alias Minga.RenderModel.UI.StatusBar.Diagnostics
+  alias Minga.RenderModel.UI.StatusBar.Agent, as: SemanticStatusAgent
+  alias Minga.RenderModel.UI.StatusBar.Data, as: SemanticStatusData
   alias Minga.RenderModel.UI.StatusBar.File, as: StatusFile
-  alias Minga.RenderModel.UI.StatusBar.Git
-  alias Minga.RenderModel.UI.StatusBar.Indent
-  alias Minga.RenderModel.UI.StatusBar.Language
   alias Minga.RenderModel.UI.StatusBar.Operation, as: StatusOperation
-  alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
   alias MingaEditor.State.Operation, as: EditorOperation
   alias MingaEditor.StatusBar.Data, as: StatusBarData
-  alias Minga.Language.Devicon
+  alias MingaEditor.StatusBar.Data.Agent, as: EditorStatusAgent
+  alias MingaEditor.StatusBar.Data.Buffer, as: EditorStatusBuffer
+  alias MingaEditor.StatusBar.Data.Common, as: EditorStatusCommon
 
   @spec build(StatusBarData.t(), term(), term()) :: StatusBar.t()
   def build(status_bar_data, theme, ctx) do
-    {content_kind, data} = StatusBarData.with_modeline_segments(status_bar_data, theme)
+    %StatusBarData{common: %EditorStatusCommon{} = common, content: content} =
+      StatusBarData.with_modeline_segments(status_bar_data, theme)
+
     chrome_state = ChromeState.from_editor_state(ctx)
 
     %StatusBar{
-      content_kind: content_kind,
-      data: data_model(data),
+      content_kind: content_kind(content),
+      data: data_model(common, content),
       workspace: active_workspace_model(chrome_state),
-      operation: operation_model(Map.get(data, :selected_operation))
+      operation: operation_model(common.selected_operation)
     }
   end
 
-  @spec data_model(map()) :: StatusData.t()
-  defp data_model(data) do
-    {icon, icon_color} = Devicon.icon_and_color(Map.get(data, :filetype, :text))
+  @spec content_kind(EditorStatusBuffer.t() | EditorStatusAgent.t()) :: StatusBar.content_kind()
+  defp content_kind(%EditorStatusBuffer{}), do: :buffer
+  defp content_kind(%EditorStatusAgent{}), do: :agent
 
-    %StatusData{
-      mode: Map.get(data, :mode, :normal),
-      safe_mode?: Map.get(data, :safe_mode, false),
-      dirty?: Map.get(data, :dirty, false),
-      cursor: %Cursor{
-        line: Map.get(data, :cursor_line, 0),
-        col: Map.get(data, :cursor_col, 0),
-        line_count: Map.get(data, :line_count, 1)
-      },
-      diagnostics: %Diagnostics{
-        counts: diagnostic_counts(Map.get(data, :diagnostic_counts)),
-        hint: Map.get(data, :diagnostic_hint)
-      },
-      language: %Language{
-        lsp_status: Map.get(data, :lsp_status, :none),
-        parser_status: Map.get(data, :parser_status, :available)
-      },
-      git: %Git{
-        branch: Map.get(data, :git_branch),
-        diff_summary: Map.get(data, :git_diff_summary)
-      },
-      file: %StatusFile{
-        name: Map.get(data, :file_name, ""),
-        filetype: Map.get(data, :filetype, :text),
-        icon: icon,
-        icon_color: icon_color
-      },
-      # Macro recording is emitted independently and the frontend gives it
-      # first priority. The text projection selects an active structured operation over
-      # an ordinary notice; terminal operation dwell remains frontend-owned.
-      message: projected_message(data),
-      recording: Map.get(data, :macro_recording, false),
-      indent: %Indent{
-        type: Map.get(data, :indent_type, :spaces),
-        size: Map.get(data, :indent_size, 2)
-      },
-      selection: selection_model(Map.get(data, :selection_info)),
-      agent: %Agent{
-        model_name: Map.get(data, :model_name, "Agent"),
-        message_count: Map.get(data, :message_count, 0),
-        session_status: Map.get(data, :session_status),
-        agent_status: Map.get(data, :agent_status),
-        background_count: Map.get(data, :background_subagent_count, 0),
-        background_label: Map.get(data, :active_background_subagent_label),
-        active_tool_name: Map.get(data, :active_tool_name)
-      },
-      modeline_segments: Map.get(data, :modeline_segments),
-      pending_keys: Map.get(data, :pending_keys, "")
+  @spec data_model(EditorStatusCommon.t(), EditorStatusBuffer.t() | EditorStatusAgent.t()) ::
+          SemanticStatusData.t()
+  defp data_model(
+         %EditorStatusCommon{
+           status: %SemanticStatusData{file: %StatusFile{} = file} = status
+         } = common,
+         content
+       ) do
+    {icon, icon_color} = Devicon.icon_and_color(file.filetype)
+
+    %{
+      status
+      | file: %StatusFile{file | icon: icon, icon_color: icon_color},
+        message: projected_message(common),
+        agent: agent_model(status.agent, content)
     }
   end
 
-  @spec projected_message(map()) :: String.t() | nil
-  defp projected_message(%{macro_recording: {true, register}}), do: "recording @#{register}"
+  @spec agent_model(SemanticStatusAgent.t(), EditorStatusBuffer.t() | EditorStatusAgent.t()) ::
+          SemanticStatusAgent.t()
+  defp agent_model(%SemanticStatusAgent{} = agent, %EditorStatusBuffer{}), do: agent
 
-  defp projected_message(%{
+  defp agent_model(%SemanticStatusAgent{} = agent, %EditorStatusAgent{} = content) do
+    %{
+      agent
+      | model_name: content.model_name,
+        session_status: content.session_status,
+        message_count: content.message_count
+    }
+  end
+
+  @spec projected_message(EditorStatusCommon.t()) :: String.t() | nil
+  defp projected_message(%EditorStatusCommon{
+         status: %SemanticStatusData{recording: {true, register}}
+       }),
+       do: "recording @#{register}"
+
+  defp projected_message(%EditorStatusCommon{
          selected_operation: %EditorOperation{status: status, message: message}
        })
        when status in [:pending, :queued, :running],
        do: message
 
-  defp projected_message(%{notice: message}) when is_binary(message), do: message
-  defp projected_message(data), do: Map.get(data, :diagnostic_hint)
+  defp projected_message(%EditorStatusCommon{notice: message}) when is_binary(message),
+    do: message
+
+  defp projected_message(%EditorStatusCommon{status: %SemanticStatusData{} = status}),
+    do: status.diagnostics.hint
 
   @spec operation_model(EditorOperation.t() | nil) :: StatusOperation.t() | nil
   defp operation_model(nil), do: nil
@@ -119,15 +104,6 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   @spec nested_value(struct() | nil, atom()) :: term() | nil
   defp nested_value(nil, _field), do: nil
   defp nested_value(value, field), do: Map.fetch!(value, field)
-
-  @spec diagnostic_counts(term()) :: Diagnostics.counts()
-  defp diagnostic_counts({errors, warnings, info, hints}), do: {errors, warnings, info, hints}
-  defp diagnostic_counts(_counts), do: {0, 0, 0, 0}
-
-  @spec selection_model(StatusBarData.selection_info()) :: Selection.t()
-  defp selection_model({:chars, count}), do: %Selection{mode: :chars, size: count}
-  defp selection_model({:lines, count}), do: %Selection{mode: :lines, size: count}
-  defp selection_model(_selection_info), do: %Selection{}
 
   @spec active_workspace_model(ChromeState.t()) :: StatusWorkspace.t() | nil
   defp active_workspace_model(%ChromeState{} = chrome_state) do

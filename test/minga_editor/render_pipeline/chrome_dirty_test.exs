@@ -302,10 +302,14 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       state2 = TestHelpers.run_pipeline(switched)
       renderer_cache = :sys.get_state(state2.render.renderer).caches
       fp_after = renderer_cache.chrome_prev_fingerprint
-      {:buffer, status_bar_data} = renderer_cache.chrome_prev_result.status_bar_data
+
+      assert %MingaEditor.StatusBar.Data{
+               common: %MingaEditor.StatusBar.Data.Common{status: status},
+               content: %MingaEditor.StatusBar.Data.Buffer{}
+             } = renderer_cache.chrome_prev_result.status_bar_data
 
       assert fp_before != fp_after
-      assert status_bar_data.file_name == "second.ex"
+      assert status.file.name == "second.ex"
     end
   end
 end

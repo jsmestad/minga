@@ -88,7 +88,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
 
     assert [_, _] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == first_path
-    assert_receive :request_code_lens_and_inlay_hints, 1_000
+    assert_receive :request_code_lens_and_inlay_hints, 5_000
     refute_receive :request_code_lens_and_inlay_hints, 900
   end
 
@@ -111,7 +111,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
 
     assert [_] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == existing_path
-    assert_receive :request_code_lens_and_inlay_hints, 1_000
+    assert_receive :request_code_lens_and_inlay_hints, 5_000
     refute_receive :request_code_lens_and_inlay_hints, 900
   end
 

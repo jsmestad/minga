@@ -11,6 +11,12 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.StatusBar.Data
+  alias Minga.RenderModel.UI.StatusBar.Cursor, as: StatusCursor
+  alias Minga.RenderModel.UI.StatusBar.Data, as: SemanticStatusData
+  alias Minga.RenderModel.UI.StatusBar.File, as: StatusFile
+  alias MingaEditor.StatusBar.Data.Agent, as: StatusAgent
+  alias MingaEditor.StatusBar.Data.Buffer, as: StatusBuffer
+  alias MingaEditor.StatusBar.Data.Common
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
@@ -66,24 +72,28 @@ defmodule MingaEditor.StatusBar.DataTest do
       | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
     }
 
-    assert {:buffer, data} = Data.from_state(state)
-    assert data.selected_operation == operation
-    assert data.notice == nil
+    assert %Data{common: %Common{} = common, content: %StatusBuffer{}} = Data.from_state(state)
+    assert common.selected_operation == operation
+    assert common.notice == nil
   end
 
   test "from_state leaves GUI modeline segments detached by default" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
     data = Data.from_state(state)
 
-    assert {:buffer, buffer_data} = data
-    refute Map.has_key?(buffer_data, :modeline_segments)
+    assert %Data{
+             common: %Common{status: %SemanticStatusData{} = status},
+             content: %StatusBuffer{}
+           } = data
+
+    assert status.modeline_segments == nil
   end
 
   describe "pending_keys (showcmd)" do
     test "is empty in a fresh normal-mode state" do
       state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
-      {:buffer, data} = Data.from_state(state)
-      assert data.pending_keys == ""
+      %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
+      assert status.pending_keys == ""
     end
 
     test "echoes an accumulated count from FSM state" do
@@ -108,8 +118,8 @@ defmodule MingaEditor.StatusBar.DataTest do
           end)
         end)
 
-      {:buffer, data} = Data.from_state(state)
-      assert data.pending_keys == "2"
+      %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
+      assert status.pending_keys == "2"
     end
 
     test "prefixes the active register selection" do
@@ -117,8 +127,8 @@ defmodule MingaEditor.StatusBar.DataTest do
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
         |> MingaEditor.Editing.set_active_register("a")
 
-      {:buffer, data} = Data.from_state(state)
-      assert data.pending_keys == "\"a"
+      %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
+      assert status.pending_keys == "\"a"
     end
 
     test "echoes a pending operator in operator-pending mode" do
@@ -140,8 +150,8 @@ defmodule MingaEditor.StatusBar.DataTest do
           }
         end)
 
-      {:buffer, data} = Data.from_state(state)
-      assert data.pending_keys == "d"
+      %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
+      assert status.pending_keys == "d"
     end
 
     test "composes the register prefix with operator-pending FSM state" do
@@ -164,8 +174,8 @@ defmodule MingaEditor.StatusBar.DataTest do
           }
         end)
 
-      {:buffer, data} = Data.from_state(state)
-      assert data.pending_keys == "\"a2d"
+      %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
+      assert status.pending_keys == "\"a2d"
     end
 
     test "clears when the which-key popup is showing" do
@@ -192,21 +202,23 @@ defmodule MingaEditor.StatusBar.DataTest do
         |> WhichKeyWorkflow.begin(%{}, [])
 
       state = WhichKeyWorkflow.reveal(state, state.shell_runtime.state.whichkey.generation)
-      {:buffer, data} = Data.from_state(state)
-      assert data.pending_keys == ""
+      %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
+      assert status.pending_keys == ""
     end
   end
 
   test "with_modeline_segments preserves agent status command output" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
     state = MingaEditor.Shell.Traditional.Workflow.install_agent_status(state, :thinking)
-    {:buffer, data} = Data.from_state(state)
-    data = Map.put(data, :agent_status_command, "sonnet | thinking")
+    %Data{common: %Common{} = common, content: %StatusBuffer{}} = data = Data.from_state(state)
+    data = %{data | common: %{common | agent_status_command: "sonnet | thinking"}}
 
-    assert {:buffer, buffer_data} =
-             Data.with_modeline_segments({:buffer, data}, state.appearance.theme)
+    assert %Data{
+             common: %Common{status: %SemanticStatusData{modeline_segments: segments}},
+             content: %StatusBuffer{}
+           } = Data.with_modeline_segments(data, state.appearance.theme)
 
-    text = modeline_text(buffer_data.modeline_segments)
+    text = modeline_text(segments)
 
     assert String.contains?(text, "sonnet | thinking")
     refute String.contains?(text, "Thinking")
@@ -221,21 +233,69 @@ defmodule MingaEditor.StatusBar.DataTest do
                table,
                :status_bar_data_modeline_test,
                [side: :left],
-               fn ctx -> {" GUI_ONLY ", ctx.info_fg, ctx.bar_bg, [], nil} end,
+               fn ctx ->
+                 text =
+                   if ctx.data.diagnostic_counts == nil, do: " NIL_DIAGS ", else: " ZERO_DIAGS "
+
+                 {text, ctx.info_fg, ctx.bar_bg, [], nil}
+               end,
                :config
              )
 
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
     data = Data.from_state(state)
 
-    assert {:buffer, buffer_data} =
-             Data.with_modeline_segments(data, state.appearance.theme, table)
+    assert %Data{
+             common: %Common{
+               status: %SemanticStatusData{modeline_segments: %{left: left, right: right}}
+             },
+             content: same_content
+           } = Data.with_modeline_segments(data, state.appearance.theme, table)
 
-    assert %{left: left, right: right} = buffer_data.modeline_segments
+    assert same_content == data.content
 
-    assert Enum.any?(left ++ right, fn {_name, text, _fg, _bg, _opts, _target} ->
-             text == " GUI_ONLY "
-           end)
+    assert Enum.find_value(left ++ right, fn
+             {:status_bar_data_modeline_test, text, _fg, _bg, _opts, _target} -> text
+             _segment -> nil
+           end) == " NIL_DIAGS "
+  end
+
+  test "multi-buffer modeline uses typed buffer index and count from common data" do
+    first = start_buffer("first", :text)
+    second = start_buffer("second", :text)
+
+    state =
+      state_with_tab_bar(TabBar.new(Tab.new_file(1, "second.txt")))
+      |> then(fn %{workspace: %SessionState{} = workspace} = state ->
+        %{
+          state
+          | workspace: %SessionState{
+              workspace
+              | buffers: %Buffers{list: [first, second], active_index: 1, active: second},
+                windows: %Windows{
+                  tree: WindowTree.new(1),
+                  map: %{1 => Window.new(1, second, 24, 80)},
+                  active: 1,
+                  next_id: 2
+                }
+            }
+        }
+      end)
+
+    data = Data.from_state(state)
+    modeline_data = Data.to_modeline_data(data)
+
+    assert %Data{common: %Common{buf_index: 2, buf_count: 2}, content: %StatusBuffer{}} = data
+    assert %{buf_index: 2, buf_count: 2} = modeline_data
+
+    segmented = Data.with_modeline_segments(data, state.appearance.theme)
+
+    assert %Data{
+             common: %Common{status: %SemanticStatusData{modeline_segments: segments}},
+             content: %StatusBuffer{}
+           } = segmented
+
+    assert String.contains?(modeline_text(segments), "[2/2]")
   end
 
   test "projects running background subagent count and active label" do
@@ -285,8 +345,8 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     state = state_with_agent_window(tb)
 
-    assert {:agent, data} = Data.from_state(state)
-    assert data.message_count == 1
+    assert %Data{content: %StatusAgent{} = agent} = Data.from_state(state)
+    assert agent.message_count == 1
   end
 
   test "agent status data reuses the same background buffer semantics as buffer status data" do
@@ -297,15 +357,15 @@ defmodule MingaEditor.StatusBar.DataTest do
       |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:thinking)
       |> MingaEditor.Shell.Traditional.Workflow.install_agent_tool("read_file")
 
-    assert {:buffer, buffer_data} = Data.from_state(state)
-    assert {:agent, agent_data} = Data.from_state(with_agent_chat_window(state))
+    assert %Data{common: buffer_common, content: %StatusBuffer{}} = Data.from_state(state)
 
-    common_keys =
-      ~w(active_background_subagent_label active_tool_name agent_status agent_status_command agent_theme_colors background_subagent_count buf_count buf_index cursor_col cursor_line diagnostic_counts diagnostic_hint dirty file_name filetype git_branch git_degraded git_diff_summary indent_size indent_type line_count lsp_status macro_recording merge_conflict_count mode mode_state notice parser_status pending_keys safe_mode selected_operation selection_info workspace_conflict_count workspace_draft_count workspace_label)a
+    assert %Data{common: agent_common, content: %StatusAgent{} = agent_data} =
+             Data.from_state(with_agent_chat_window(state))
 
-    assert buffer_data |> Map.keys() |> Enum.sort() == common_keys
-
-    assert Map.drop(agent_data, [:model_name, :session_status, :message_count]) == buffer_data
+    assert agent_common == %{
+             buffer_common
+             | agent_theme_colors: MingaEditor.UI.Theme.agent_theme(state.appearance.theme)
+           }
 
     assert {agent_data.model_name, agent_data.session_status, agent_data.message_count} ==
              {"unknown", :thinking, 0}
@@ -318,12 +378,26 @@ defmodule MingaEditor.StatusBar.DataTest do
         MingaEditor.State.Launchpad.new(session_file_count: 0, recents: [])
       )
 
-    assert {:buffer, %{file_name: ""}} = Data.from_state(buffer_state)
+    assert %Data{
+             common: %Common{status: %SemanticStatusData{file: %StatusFile{name: ""}}},
+             content: %StatusBuffer{}
+           } = Data.from_state(buffer_state)
 
-    assert {:agent, agent_data} = Data.from_state(with_agent_chat_window(buffer_state))
+    agent_data = Data.from_state(with_agent_chat_window(buffer_state))
 
-    assert {agent_data.file_name, agent_data.cursor_line, agent_data.cursor_col,
-            agent_data.line_count, agent_data.filetype} == {"[no file]", 0, 0, 1, :text}
+    assert %Data{
+             common: %Common{
+               status: %SemanticStatusData{
+                 file: %StatusFile{name: "[no file]", filetype: :text},
+                 cursor: %StatusCursor{line: 0, col: 0, line_count: 1}
+               }
+             },
+             content: %StatusAgent{}
+           } = agent_data
+
+    assert agent_data.common.raw_diagnostic_counts == nil
+    assert agent_data.common.status.diagnostics.counts == {0, 0, 0, 0}
+    assert Data.to_modeline_data(agent_data).diagnostic_counts == nil
   end
 
   test "threads active_tool_name from state into modeline data and clears it on status changes" do
@@ -359,10 +433,10 @@ defmodule MingaEditor.StatusBar.DataTest do
         Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
     }
 
-    {:buffer, data} = Data.from_state(state)
+    %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
 
-    assert data.indent_type == :tabs
-    assert data.indent_size == 4
+    assert status.indent.type == :tabs
+    assert status.indent.size == 4
   end
 
   test "buffer-local indent options override filetype defaults" do
@@ -374,10 +448,10 @@ defmodule MingaEditor.StatusBar.DataTest do
     BufferProcess.set_option(buf, :indent_with, :tabs)
     BufferProcess.set_option(buf, :tab_width, 4)
 
-    {:buffer, data} = Data.from_state(state)
+    %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
 
-    assert data.indent_type == :tabs
-    assert data.indent_size == 4
+    assert status.indent.type == :tabs
+    assert status.indent.size == 4
   end
 
   test "active buffer merge conflict count appears in modeline data" do
@@ -429,9 +503,12 @@ defmodule MingaEditor.StatusBar.DataTest do
         }
       end)
 
-    {:buffer, data} = Data.from_state(state)
+    %Data{common: %Common{status: status}, content: %StatusBuffer{}} =
+      data = Data.from_state(state)
 
-    assert data.selection_info == {:chars, 5}
+    assert status.selection.mode == :chars
+    assert status.selection.size == 5
+    assert Data.to_modeline_data(data).selection_info == {:chars, 5}
   end
 
   test "visual line selection reports selected line count" do
@@ -451,9 +528,12 @@ defmodule MingaEditor.StatusBar.DataTest do
         }
       end)
 
-    {:buffer, data} = Data.from_state(state)
+    %Data{common: %Common{status: status}, content: %StatusBuffer{}} =
+      data = Data.from_state(state)
 
-    assert data.selection_info == {:lines, 3}
+    assert status.selection.mode == :lines
+    assert status.selection.size == 3
+    assert Data.to_modeline_data(data).selection_info == {:lines, 3}
   end
 
   defp state_with_tab_bar(tab_bar) do
@@ -533,7 +613,8 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     buf =
       start_supervised!(
-        {BufferProcess, [content: "", filetype: filetype, events_registry: registry]}
+        {BufferProcess, [content: "", filetype: filetype, events_registry: registry]},
+        id: {:data_test_buffer, System.unique_integer([:positive])}
       )
 
     :ok = BufferProcess.insert_text(buf, content)
