@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.Decorations
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.UI.Theme
   alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
@@ -27,7 +28,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       highlight =
         Highlight.new()
         |> Highlight.put_names(["keyword"])
-        |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 3, capture_id: 0}])
+        |> Highlight.put_spans(1, [Span.new(0, 3, 0)])
 
       after_fp = ContentHelpers.context_fingerprint(%{ctx | highlight: highlight}, true)
 
@@ -38,10 +39,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       highlight_v1 =
         Highlight.new()
         |> Highlight.put_names(["keyword"])
-        |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 3, capture_id: 0}])
+        |> Highlight.put_spans(1, [Span.new(0, 3, 0)])
 
       highlight_v2 =
-        Highlight.put_spans(highlight_v1, 2, [%{start_byte: 4, end_byte: 7, capture_id: 0}])
+        Highlight.put_spans(highlight_v1, 2, [Span.new(4, 7, 0)])
 
       ctx = %Context{
         viewport: Viewport.new(20, 80),
@@ -58,7 +59,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       highlight =
         Highlight.new()
         |> Highlight.put_names(["keyword"])
-        |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 3, capture_id: 0}])
+        |> Highlight.put_spans(1, [Span.new(0, 3, 0)])
 
       themed_highlight = Highlight.new(Theme.get!(:one_light).syntax)
 

@@ -653,8 +653,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
 
   @spec has_spans?(Highlight.t() | nil) :: boolean()
   defp has_spans?(nil), do: false
-  defp has_spans?(%Highlight{spans: spans}) when is_tuple(spans), do: tuple_size(spans) > 0
-  defp has_spans?(%Highlight{spans: spans}) when is_list(spans), do: spans != []
+  defp has_spans?(%Highlight{} = highlight), do: Highlight.has_spans?(highlight)
   defp has_spans?(_), do: false
 
   @spec fence_line?(String.t()) :: boolean()

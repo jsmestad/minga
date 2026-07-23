@@ -2,6 +2,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
   # Uses the application-wide buffer supervisor and event registry while restoring real file buffers.
   use ExUnit.Case, async: false
 
+  alias Minga.Language.Highlight.Span
   alias Minga.Parser.Manager
   alias Minga.Session
   alias Minga.Session.BufferEntry
@@ -49,7 +50,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
         {:minga_highlight, {:highlight_names, second_buffer, ["keyword"]}}
       )
 
-    spans = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+    spans = [Span.new(0, 9, 0)]
 
     {with_spans, _effects} =
       HighlightHandler.handle(

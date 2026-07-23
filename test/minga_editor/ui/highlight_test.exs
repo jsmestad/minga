@@ -2,6 +2,7 @@ defmodule Minga.HighlightTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.Face
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.UI.Highlight
 
   defp assert_segments(result, expected) do
@@ -23,13 +24,9 @@ defmodule Minga.HighlightTest do
   defp highlight_with(attrs) do
     theme = Keyword.get(attrs, :theme, %{})
 
-    %Highlight{
-      version: Keyword.get(attrs, :version, 1),
-      spans: Keyword.get(attrs, :spans, {}),
-      capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
-      theme: theme,
-      face_registry: MingaEditor.UI.Face.Registry.from_syntax(theme)
-    }
+    Highlight.new(theme)
+    |> Highlight.put_names(Keyword.get(attrs, :capture_names, []))
+    |> Highlight.put_spans(Keyword.get(attrs, :version, 1), Keyword.get(attrs, :spans, []))
   end
 
   describe "state construction and versioning" do
@@ -48,8 +45,8 @@ defmodule Minga.HighlightTest do
              |> Highlight.put_names(["keyword", "string"])
              |> Map.fetch!(:capture_names) == {"keyword", "string"}
 
-      spans1 = [%{start_byte: 0, end_byte: 5, capture_id: 0}]
-      spans2 = [%{start_byte: 0, end_byte: 3, capture_id: 1}]
+      spans1 = [Span.new(0, 5, 0)]
+      spans2 = [Span.new(0, 3, 1)]
 
       stored = Highlight.new() |> Highlight.put_spans(1, spans1)
       assert stored.version == 1
@@ -61,6 +58,10 @@ defmodule Minga.HighlightTest do
 
       equal = Highlight.new() |> Highlight.put_spans(5, spans1) |> Highlight.put_spans(5, spans2)
       assert equal.spans == List.to_tuple(spans2)
+
+      assert_raise ArgumentError, fn ->
+        Highlight.new() |> Highlight.put_spans(6, [%{start_byte: 0, end_byte: 1, capture_id: 0}])
+      end
     end
 
     test "line byte offsets count newlines and unicode bytes" do
@@ -79,7 +80,7 @@ defmodule Minga.HighlightTest do
 
       with_span =
         highlight_with(
-          spans: [%{start_byte: 0, end_byte: 10, capture_id: 0}],
+          spans: [Span.new(0, 10, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000]}
         )
@@ -88,7 +89,7 @@ defmodule Minga.HighlightTest do
 
       excluded =
         highlight_with(
-          spans: [%{start_byte: 100, end_byte: 110, capture_id: 0}],
+          spans: [Span.new(100, 110, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000]}
         )
@@ -100,8 +101,8 @@ defmodule Minga.HighlightTest do
       mismatched =
         highlight_with(
           spans: [
-            %{start_byte: 2, end_byte: 5, capture_id: 0},
-            %{start_byte: 10, end_byte: 20, capture_id: 0}
+            Span.new(2, 5, 0),
+            Span.new(10, 20, 0)
           ],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000]}
@@ -114,7 +115,7 @@ defmodule Minga.HighlightTest do
 
       partial =
         highlight_with(
-          spans: [%{start_byte: 0, end_byte: 1, capture_id: 0}],
+          spans: [Span.new(0, 1, 0)],
           capture_names: ["comment"],
           theme: %{"comment" => [fg: 0x888888]}
         )
@@ -124,7 +125,7 @@ defmodule Minga.HighlightTest do
 
       complete =
         highlight_with(
-          spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
+          spans: [Span.new(0, 3, 0)],
           capture_names: ["comment"],
           theme: %{"comment" => [fg: 0x888888]}
         )
@@ -139,7 +140,7 @@ defmodule Minga.HighlightTest do
       cases = [
         {
           highlight_with(
-            spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
+            spans: [Span.new(0, 3, 0)],
             capture_names: ["keyword"],
             theme: %{"keyword" => [fg: 0xFF0000]}
           ),
@@ -149,7 +150,7 @@ defmodule Minga.HighlightTest do
         },
         {
           highlight_with(
-            spans: [%{start_byte: 4, end_byte: 7, capture_id: 0}],
+            spans: [Span.new(4, 7, 0)],
             capture_names: ["string"],
             theme: %{"string" => [fg: 0x00FF00]}
           ),
@@ -160,8 +161,8 @@ defmodule Minga.HighlightTest do
         {
           highlight_with(
             spans: [
-              %{start_byte: 0, end_byte: 3, capture_id: 0},
-              %{start_byte: 4, end_byte: 7, capture_id: 1}
+              Span.new(0, 3, 0),
+              Span.new(4, 7, 1)
             ],
             capture_names: ["keyword", "function"],
             theme: %{"keyword" => [fg: 0xFF0000], "function" => [fg: 0x00FF00]}
@@ -172,7 +173,7 @@ defmodule Minga.HighlightTest do
         },
         {
           highlight_with(
-            spans: [%{start_byte: 0, end_byte: 20, capture_id: 0}],
+            spans: [Span.new(0, 20, 0)],
             capture_names: ["comment"],
             theme: %{"comment" => [fg: 0x888888, italic: true]}
           ),
@@ -182,7 +183,7 @@ defmodule Minga.HighlightTest do
         },
         {
           highlight_with(
-            spans: [%{start_byte: 0, end_byte: 3, capture_id: 99}],
+            spans: [Span.new(0, 3, 99)],
             capture_names: ["keyword"],
             theme: %{"keyword" => [fg: 0xFF0000]}
           ),
@@ -192,7 +193,7 @@ defmodule Minga.HighlightTest do
         },
         {
           highlight_with(
-            spans: [%{start_byte: 8, end_byte: 11, capture_id: 0}],
+            spans: [Span.new(8, 11, 0)],
             capture_names: ["keyword"],
             theme: %{"keyword" => [fg: 0xFF0000]}
           ),
@@ -211,8 +212,8 @@ defmodule Minga.HighlightTest do
       same_width =
         highlight_with(
           spans: [
-            %{start_byte: 0, end_byte: 9, capture_id: 0, pattern_index: 3},
-            %{start_byte: 0, end_byte: 9, capture_id: 1, pattern_index: 10}
+            Span.new(0, 9, 0, 3),
+            Span.new(0, 9, 1, 10)
           ],
           capture_names: ["keyword", "keyword.function"],
           theme: %{"keyword" => [fg: 0xFF0000], "keyword.function" => [fg: 0x00FF00]}
@@ -226,8 +227,8 @@ defmodule Minga.HighlightTest do
       partial =
         highlight_with(
           spans: [
-            %{start_byte: 0, end_byte: 5, capture_id: 0},
-            %{start_byte: 3, end_byte: 8, capture_id: 1}
+            Span.new(0, 5, 0),
+            Span.new(3, 8, 1)
           ],
           capture_names: ["keyword", "string"],
           theme: %{"keyword" => [fg: 0xFF0000], "string" => [fg: 0x00FF00]}
@@ -238,11 +239,10 @@ defmodule Minga.HighlightTest do
 
       injection =
         highlight_with(
-          spans:
-            List.to_tuple([
-              %{start_byte: 0, end_byte: 5, capture_id: 0, pattern_index: 10, layer: 0},
-              %{start_byte: 0, end_byte: 10, capture_id: 1, pattern_index: 1, layer: 1}
-            ]),
+          spans: [
+            Span.new(0, 5, 0, 10, 0),
+            Span.new(0, 10, 1, 1, 1)
+          ],
           capture_names: ["outer.keyword", "injection.string"],
           theme: %{"outer.keyword" => [fg: 0xFF0000], "injection.string" => [fg: 0x00FF00]}
         )
@@ -258,9 +258,9 @@ defmodule Minga.HighlightTest do
       interpolation =
         highlight_with(
           spans: [
-            %{start_byte: 0, end_byte: 2, capture_id: 1, pattern_index: 10},
-            %{start_byte: 0, end_byte: 10, capture_id: 0, pattern_index: 5},
-            %{start_byte: 9, end_byte: 10, capture_id: 1, pattern_index: 10}
+            Span.new(0, 2, 1, 10),
+            Span.new(0, 10, 0, 5),
+            Span.new(9, 10, 1, 10)
           ],
           capture_names: ["embedded", "punctuation.special"],
           theme: %{"embedded" => [fg: 0xAAAAAA], "punctuation.special" => [fg: 0xFF0000]}
@@ -274,13 +274,12 @@ defmodule Minga.HighlightTest do
 
       attributes =
         highlight_with(
-          spans:
-            List.to_tuple([
-              %{start_byte: 0, end_byte: 44, capture_id: 1, pattern_index: 38},
-              %{start_byte: 18, end_byte: 24, capture_id: 0, pattern_index: 5},
-              %{start_byte: 26, end_byte: 33, capture_id: 0, pattern_index: 5},
-              %{start_byte: 35, end_byte: 43, capture_id: 0, pattern_index: 5}
-            ]),
+          spans: [
+            Span.new(0, 44, 1, 38),
+            Span.new(18, 24, 0, 5),
+            Span.new(26, 33, 0, 5),
+            Span.new(35, 43, 0, 5)
+          ],
           capture_names: ["string.special.symbol", "constant"],
           theme: %{"string.special.symbol" => [fg: 0xAA00FF], "constant" => [fg: 0xDA8548]}
         )
@@ -300,12 +299,11 @@ defmodule Minga.HighlightTest do
 
       three_levels =
         highlight_with(
-          spans:
-            List.to_tuple([
-              %{start_byte: 0, end_byte: 20, capture_id: 0, pattern_index: 1},
-              %{start_byte: 5, end_byte: 15, capture_id: 1, pattern_index: 2},
-              %{start_byte: 8, end_byte: 12, capture_id: 2, pattern_index: 3}
-            ]),
+          spans: [
+            Span.new(0, 20, 0, 1),
+            Span.new(5, 15, 1, 2),
+            Span.new(8, 12, 2, 3)
+          ],
           capture_names: ["outer", "middle", "inner"],
           theme: %{
             "outer" => [fg: 0x111111],
@@ -332,11 +330,10 @@ defmodule Minga.HighlightTest do
 
       hl =
         highlight_with(
-          spans:
-            List.to_tuple([
-              %{start_byte: 0, end_byte: 3, capture_id: 0, pattern_index: 1},
-              %{start_byte: 8, end_byte: 13, capture_id: 1, pattern_index: 2}
-            ]),
+          spans: [
+            Span.new(0, 3, 0, 1),
+            Span.new(8, 13, 1, 2)
+          ],
           capture_names: ["keyword", "string"],
           theme: %{"keyword" => [fg: 0xFF0000], "string" => [fg: 0x00FF00]}
         )
@@ -352,7 +349,7 @@ defmodule Minga.HighlightTest do
     test "batch styling carries multi-line spans and watermark state across visible lines" do
       multiline =
         highlight_with(
-          spans: List.to_tuple([%{start_byte: 0, end_byte: 30, capture_id: 0, pattern_index: 1}]),
+          spans: [Span.new(0, 30, 0, 1)],
           capture_names: ["comment"],
           theme: %{"comment" => [fg: 0x888888]}
         )
@@ -366,11 +363,10 @@ defmodule Minga.HighlightTest do
 
       watermark =
         highlight_with(
-          spans:
-            List.to_tuple([
-              %{start_byte: 0, end_byte: 3, capture_id: 0, pattern_index: 1},
-              %{start_byte: 10, end_byte: 15, capture_id: 1, pattern_index: 2}
-            ]),
+          spans: [
+            Span.new(0, 3, 0, 1),
+            Span.new(10, 15, 1, 2)
+          ],
           capture_names: ["keyword", "string"],
           theme: %{"keyword" => [fg: 0xFF0000], "string" => [fg: 0x00FF00]}
         )
@@ -415,8 +411,8 @@ defmodule Minga.HighlightTest do
       #   `key`     -> @property
       #   `"value"` -> @string
       line = ~s(key: "value")
-      key_span = %{start_byte: 0, end_byte: 3, capture_id: 0}
-      value_span = %{start_byte: 5, end_byte: 12, capture_id: 1}
+      key_span = Span.new(0, 3, 0)
+      value_span = Span.new(5, 12, 1)
 
       hl =
         Highlight.from_theme(theme)
@@ -444,7 +440,7 @@ defmodule Minga.HighlightTest do
 
   describe "retheme/2" do
     test "swaps colors to the new theme while preserving spans, version, and capture names" do
-      spans = [%{start_byte: 0, end_byte: 7, capture_id: 0}]
+      spans = [Span.new(0, 7, 0)]
 
       hl =
         Highlight.from_theme(MingaEditor.UI.Theme.get!(:doom_one))

@@ -9,13 +9,9 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
   defp make_highlight(attrs) do
     theme = Keyword.get(attrs, :theme, %{})
 
-    %Highlight{
-      version: Keyword.get(attrs, :version, 1),
-      spans: Keyword.get(attrs, :spans, {}),
-      capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
-      theme: theme,
-      face_registry: MingaEditor.UI.Face.Registry.from_syntax(theme)
-    }
+    Highlight.new(theme)
+    |> Highlight.put_names(Keyword.get(attrs, :capture_names, []))
+    |> Highlight.put_spans(Keyword.get(attrs, :version, 1), Keyword.get(attrs, :spans, []))
   end
 
   @theme_syntax %{
@@ -126,7 +122,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       # The code line "def hello" starts at byte 10 (after "```elixir\n")
       highlight =
         make_highlight(
-          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          spans: [Span.new(10, 13, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
         )
@@ -159,7 +155,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       # With buffer_byte_offset=100, the "def" keyword is at bytes 110-113.
       highlight =
         make_highlight(
-          spans: {%{start_byte: 110, end_byte: 113, capture_id: 0}},
+          spans: [Span.new(110, 113, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
         )
@@ -178,7 +174,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       # A header line should NOT be overridden by tree-sitter
       text = "# My Header"
 
-      highlight = make_highlight(spans: {}, capture_names: [], theme: %{})
+      highlight = make_highlight(spans: [], capture_names: [], theme: %{})
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax, 0)
 
@@ -195,7 +191,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       highlight =
         make_highlight(
-          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          spans: [Span.new(10, 13, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
         )
@@ -212,7 +208,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
     test "falls back when highlight has no spans" do
       text = "**bold**"
 
-      highlight = make_highlight(version: 0, spans: {}, capture_names: [], theme: %{})
+      highlight = make_highlight(version: 0, spans: [], capture_names: [], theme: %{})
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax)
 
@@ -266,7 +262,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       highlight =
         make_highlight(
-          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          spans: [Span.new(10, 13, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
         )
@@ -331,7 +327,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       highlight =
         make_highlight(
-          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          spans: [Span.new(10, 13, 0)],
           capture_names: ["keyword"],
           theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
         )

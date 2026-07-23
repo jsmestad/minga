@@ -6,6 +6,7 @@ defmodule MingaEditor.HighlightSync do
   highlight response events back into editor state.
   """
 
+  alias Minga.Language.Highlight.Span
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
@@ -319,10 +320,7 @@ defmodule MingaEditor.HighlightSync do
   end
 
   @doc "Handles a highlight_spans event for the active buffer."
-  @spec handle_spans(EditorState.t(), non_neg_integer(), [
-          MingaEditor.Frontend.Protocol.highlight_span()
-        ]) ::
-          EditorState.t()
+  @spec handle_spans(EditorState.t(), non_neg_integer(), [Span.t()]) :: EditorState.t()
   def handle_spans(%EditorState{} = state, version, spans) do
     update_active_highlight(state, &Highlight.put_spans(&1, version, spans))
   end

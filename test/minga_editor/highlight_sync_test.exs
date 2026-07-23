@@ -1,6 +1,7 @@
 defmodule MingaEditor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.State.Buffers
   alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
@@ -68,8 +69,8 @@ defmodule MingaEditor.HighlightSyncTest do
   describe "handle_spans/3" do
     test "stores spans with version" do
       spans = [
-        %{start_byte: 0, end_byte: 9, capture_id: 0},
-        %{start_byte: 10, end_byte: 15, capture_id: 1}
+        Span.new(0, 9, 0),
+        Span.new(10, 15, 1)
       ]
 
       state =
@@ -81,8 +82,8 @@ defmodule MingaEditor.HighlightSyncTest do
     end
 
     test "rejects stale spans with older version" do
-      spans1 = [%{start_byte: 0, end_byte: 5, capture_id: 0}]
-      spans2 = [%{start_byte: 0, end_byte: 3, capture_id: 1}]
+      spans1 = [Span.new(0, 5, 0)]
+      spans2 = [Span.new(0, 3, 1)]
 
       state =
         base_state()
@@ -94,8 +95,8 @@ defmodule MingaEditor.HighlightSyncTest do
     end
 
     test "accepts spans with equal version" do
-      spans1 = [%{start_byte: 0, end_byte: 5, capture_id: 0}]
-      spans2 = [%{start_byte: 0, end_byte: 3, capture_id: 1}]
+      spans1 = [Span.new(0, 5, 0)]
+      spans2 = [Span.new(0, 3, 1)]
 
       state =
         base_state()

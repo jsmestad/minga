@@ -2,6 +2,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
   @moduledoc """
   Pure-function tests for `MingaEditor.Handlers.HighlightHandler`.
   """
+  alias Minga.Language.Highlight.Span
 
   use ExUnit.Case, async: true
 
@@ -195,7 +196,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     test "queued parser events cannot recreate removed presentation state" do
       state = base_state()
       buffer = active_buffer(state)
-      spans = [%{start_byte: 0, end_byte: 1, capture_id: 0}]
+      spans = [Span.new(0, 1, 0)]
 
       assert {^state, []} =
                HighlightHandler.handle(

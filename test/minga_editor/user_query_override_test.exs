@@ -7,6 +7,7 @@ defmodule MingaEditor.UserQueryOverrideTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.HighlightSync
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -31,7 +32,7 @@ defmodule MingaEditor.UserQueryOverrideTest do
       state =
         state
         |> HighlightSync.handle_names(["keyword"])
-        |> HighlightSync.handle_spans(1, [%{start_byte: 0, end_byte: 9, capture_id: 0}])
+        |> HighlightSync.handle_spans(1, [Span.new(0, 9, 0)])
 
       refute HighlightSync.get_active_highlight(state).spans == {}
 

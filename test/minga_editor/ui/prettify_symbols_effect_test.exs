@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.PrettifySymbolsEffectTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Language.Highlight.Span
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config
@@ -39,7 +40,7 @@ defmodule MingaEditor.UI.PrettifySymbolsEffectTest do
     highlight =
       Highlight.new()
       |> Highlight.put_names(["operator"])
-      |> Highlight.put_spans(7, [%{start_byte: 0, end_byte: 2, capture_id: 0}])
+      |> Highlight.put_spans(7, [Span.new(0, 2, 0)])
 
     request = PrettifySymbolsEffect.request(buffer, highlight, :elixir)
 
@@ -183,7 +184,7 @@ defmodule MingaEditor.UI.PrettifySymbolsEffectTest do
   defp operator_highlight do
     Highlight.new()
     |> Highlight.put_names(["operator"])
-    |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 2, capture_id: 0}])
+    |> Highlight.put_spans(1, [Span.new(0, 2, 0)])
   end
 
   defp conceal_groups(buffer) do
