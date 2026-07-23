@@ -6,6 +6,8 @@ defmodule MingaEditor.StatusBar.DataSafeModeTest do
 
   alias Minga.Config.Options
   alias MingaEditor.StatusBar.Data
+  alias MingaEditor.StatusBar.Data.Buffer, as: StatusBuffer
+  alias MingaEditor.StatusBar.Data.Common
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: SessionState
@@ -23,10 +25,12 @@ defmodule MingaEditor.StatusBar.DataSafeModeTest do
       shell_runtime: Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
     }
 
-    {:buffer, buffer_data} = Data.from_state(state)
-    modeline_data = Data.to_modeline_data({:buffer, buffer_data})
+    %Data{common: %Common{status: status}, content: %StatusBuffer{}} =
+      data = Data.from_state(state)
 
-    assert buffer_data.safe_mode == true
+    modeline_data = Data.to_modeline_data(data)
+
+    assert status.safe_mode? == true
     assert modeline_data.safe_mode == true
   end
 end

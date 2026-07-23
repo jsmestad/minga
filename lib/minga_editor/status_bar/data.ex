@@ -1,44 +1,47 @@
 defmodule MingaEditor.StatusBar.Data do
   @moduledoc """
-  Tagged-union data struct for the global status bar.
+  Typed editor snapshot for the global status bar.
 
   Computed once per frame from editor state and consumed by the semantic emit
   path, which encodes it as the 0x76 (`gui_status_bar`) structured opcode for
   every live frontend.
-
-  The two variants reflect the two kinds of focused window content:
-  - `{:buffer, t:buffer_data()}` — a normal buffer window
-  - `{:agent, t:agent_data()}` — an agent chat window
   """
 
-  alias Minga.Buffer
-  alias Minga.Diagnostics
+  alias Minga.Buffer, as: BufferAPI
   alias Minga.Config.ModelineSegments
-  alias MingaEditor.Editing
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.Operation
-  alias MingaEditor.State.OperationFeedback
-  alias MingaEditor.Window.Content
   alias Minga.Config.Options
+  alias Minga.Diagnostics
   alias Minga.Git
   alias Minga.Git.MergeConflict
   alias Minga.Git.Repo, as: GitRepo
   alias Minga.LSP.SyncServer
-  alias MingaEditor.Shell.Traditional.Modeline
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
-  alias MingaEditor.Shell.Traditional.Notice
+  alias Minga.RenderModel.UI.StatusBar.Agent, as: SemanticStatusAgent
+  alias Minga.RenderModel.UI.StatusBar.Cursor, as: StatusCursor
+  alias Minga.RenderModel.UI.StatusBar.Data, as: SemanticStatusData
+  alias Minga.RenderModel.UI.StatusBar.Diagnostics, as: StatusDiagnostics
+  alias Minga.RenderModel.UI.StatusBar.File, as: StatusFile
+  alias Minga.RenderModel.UI.StatusBar.Git, as: StatusGit
+  alias Minga.RenderModel.UI.StatusBar.Indent, as: StatusIndent
+  alias Minga.RenderModel.UI.StatusBar.Language, as: StatusLanguage
+  alias Minga.RenderModel.UI.StatusBar.Selection, as: StatusSelection
+  alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaAgent.StatusCommand
-  alias MingaEditor.UI.Theme
+  alias MingaEditor.Editing
   alias MingaEditor.Session.ChromeState
-
-  # ── Types ──────────────────────────────────────────────────────────────────
+  alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.Shell.Traditional.Notice
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.OperationFeedback
+  alias MingaEditor.StatusBar.Data.Agent, as: StatusAgent
+  alias MingaEditor.StatusBar.Data.Buffer, as: StatusBuffer
+  alias MingaEditor.StatusBar.Data.Common
+  alias MingaEditor.UI.Theme
+  alias MingaEditor.Window.Content
 
   @typedoc "Git diff summary: {added, modified, deleted} line counts."
   @type git_diff_summary :: {non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
-
-  @typedoc "LSP connection status."
-  @type lsp_status :: :ready | :initializing | :starting | :error | :none
 
   @typedoc "Parser availability status."
   @type parser_status :: :available | :unavailable | :restarting
@@ -49,111 +52,28 @@ defmodule MingaEditor.StatusBar.Data do
   @typedoc "Visual selection size display information."
   @type selection_info :: {:chars, non_neg_integer()} | {:lines, pos_integer()} | nil
 
-  @typedoc "Data for a focused buffer window."
-  @type buffer_data :: %{
-          optional(:modeline_segments) => Modeline.gui_segments(),
-          mode: Minga.Mode.mode(),
-          mode_state: Minga.Mode.state() | nil,
-          safe_mode: boolean(),
-          cursor_line: non_neg_integer(),
-          cursor_col: non_neg_integer(),
-          line_count: non_neg_integer(),
-          file_name: String.t(),
-          filetype: atom(),
-          dirty: boolean(),
-          git_branch: String.t() | nil,
-          git_diff_summary: git_diff_summary(),
-          git_degraded: boolean(),
-          diagnostic_counts:
-            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
-          diagnostic_hint: String.t() | nil,
-          indent_type: indent_type(),
-          indent_size: pos_integer(),
-          selection_info: selection_info(),
-          lsp_status: lsp_status(),
-          parser_status: parser_status(),
-          buf_index: pos_integer(),
-          buf_count: non_neg_integer(),
-          macro_recording: {true, String.t()} | false,
-          agent_status: AgentState.status(),
-          active_tool_name: String.t() | nil,
-          agent_status_command: String.t() | nil,
-          agent_theme_colors: Theme.Agent.t() | nil,
-          background_subagent_count: non_neg_integer(),
-          active_background_subagent_label: String.t() | nil,
-          notice: String.t() | nil,
-          selected_operation: Operation.t() | nil,
-          pending_keys: String.t(),
-          workspace_label: String.t(),
-          workspace_draft_count: non_neg_integer(),
-          workspace_conflict_count: non_neg_integer(),
-          merge_conflict_count: non_neg_integer()
+  @type t :: %__MODULE__{
+          common: Common.t(),
+          content: StatusBuffer.t() | StatusAgent.t()
         }
 
-  @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
-  @type agent_data :: %{
-          optional(:modeline_segments) => Modeline.gui_segments(),
-          mode: Minga.Mode.mode(),
-          mode_state: Minga.Mode.state() | nil,
-          safe_mode: boolean(),
-          model_name: String.t(),
-          session_status: AgentState.status(),
-          message_count: non_neg_integer(),
-          macro_recording: {true, String.t()} | false,
-          agent_status: AgentState.status(),
-          active_tool_name: String.t() | nil,
-          agent_status_command: String.t() | nil,
-          agent_theme_colors: Theme.Agent.t() | nil,
-          # Background buffer context (same fields as buffer_data)
-          cursor_line: non_neg_integer(),
-          cursor_col: non_neg_integer(),
-          line_count: non_neg_integer(),
-          file_name: String.t(),
-          filetype: atom(),
-          dirty: boolean(),
-          git_branch: String.t() | nil,
-          git_diff_summary: git_diff_summary(),
-          git_degraded: boolean(),
-          diagnostic_counts:
-            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
-          diagnostic_hint: String.t() | nil,
-          indent_type: indent_type(),
-          indent_size: pos_integer(),
-          selection_info: selection_info(),
-          lsp_status: lsp_status(),
-          parser_status: parser_status(),
-          buf_index: pos_integer(),
-          buf_count: non_neg_integer(),
-          background_subagent_count: non_neg_integer(),
-          active_background_subagent_label: String.t() | nil,
-          notice: String.t() | nil,
-          selected_operation: Operation.t() | nil,
-          pending_keys: String.t(),
-          workspace_label: String.t(),
-          workspace_draft_count: non_neg_integer(),
-          workspace_conflict_count: non_neg_integer(),
-          merge_conflict_count: non_neg_integer()
-        }
-
-  @typedoc "Tagged union: buffer or agent variant."
-  @type t :: {:buffer, buffer_data()} | {:agent, agent_data()}
-
-  # ── Public API ─────────────────────────────────────────────────────────────
+  @enforce_keys [:common, :content]
+  defstruct @enforce_keys
 
   @doc """
   Builds the status bar data from the current editor state.
 
-  Inspects the active window's content type and returns the appropriate
-  tagged variant. Called once per render frame before the Chrome stage.
+  Inspects the active window's content type and returns the appropriate typed
+  content marker. Called once per render frame before the Chrome stage.
   """
   @spec from_state(EditorState.t() | map()) :: t()
   def from_state(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
 
     if active_window != nil and Content.agent_chat?(active_window.content) do
-      {:agent, build_agent_data(state)}
+      build_agent_data(state)
     else
-      {:buffer, build_buffer_data(state)}
+      build_buffer_data(state)
     end
   end
 
@@ -162,33 +82,40 @@ defmodule MingaEditor.StatusBar.Data do
   @spec with_modeline_segments(t(), Theme.t(), ModelineSegments.table()) :: t()
   def with_modeline_segments(status_bar_data, theme, modeline_segments_table \\ ModelineSegments)
 
-  def with_modeline_segments({:buffer, data}, theme, modeline_segments_table),
-    do: {:buffer, attach_modeline_segments(data, theme, modeline_segments_table)}
+  def with_modeline_segments(
+        %__MODULE__{common: %Common{status: %SemanticStatusData{} = status} = common} = data,
+        theme,
+        modeline_segments_table
+      ) do
+    segments =
+      Modeline.gui_segments(data_to_modeline_data(common), theme, modeline_segments_table)
 
-  def with_modeline_segments({:agent, data}, theme, modeline_segments_table),
-    do: {:agent, attach_modeline_segments(data, theme, modeline_segments_table)}
+    %{data | common: %{common | status: %{status | modeline_segments: segments}}}
+  end
 
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
-  @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()
-  defp build_buffer_data(state), do: build_buffer_status_data(state, no_buffer_file_name(state))
+  @spec build_buffer_data(EditorState.t() | map()) :: t()
+  defp build_buffer_data(state) do
+    %__MODULE__{
+      common: build_common_data(state, no_buffer_file_name(state)),
+      content: %StatusBuffer{}
+    }
+  end
 
-  @spec build_buffer_status_data(EditorState.t() | map(), String.t()) :: buffer_data()
-  defp build_buffer_status_data(state, no_buffer_file_name) do
+  @spec build_common_data(EditorState.t() | map(), String.t()) :: Common.t()
+  defp build_common_data(state, no_buffer_file_name) do
     buf = state.workspace.buffers.active
-    {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
-    line_count = if buf, do: Buffer.line_count(buf), else: 1
+    {line, col} = if buf, do: BufferAPI.cursor(buf), else: {0, 0}
+    line_count = if buf, do: BufferAPI.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: no_buffer_file_name
-    dirty = buf != nil and Buffer.dirty?(buf)
+    dirty? = buf != nil and BufferAPI.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
     file_path = if buf, do: buffer_file_path(buf), else: nil
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
-    git_degraded = git_degraded?(file_path)
+    git_degraded? = git_degraded?(file_path)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
-
-    # Fetch diagnostic hint for the current cursor line (shown in status bar
-    # center segment when idle, replaces the old cell-grid minibuffer hint)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
 
     mode = Minga.Editing.mode(state)
@@ -200,42 +127,45 @@ defmodule MingaEditor.StatusBar.Data do
     background = background_subagent_summary(state)
     workspace = workspace_modeline_summary(state)
 
-    %{
-      mode: mode,
+    %Common{
+      status: %SemanticStatusData{
+        mode: mode,
+        safe_mode?: Minga.SafeMode.active?(),
+        dirty?: dirty?,
+        cursor: %StatusCursor{line: line, col: col, line_count: line_count},
+        diagnostics: %StatusDiagnostics{
+          counts: diagnostic_counts || {0, 0, 0, 0},
+          hint: diagnostic_hint
+        },
+        language: %StatusLanguage{
+          lsp_status: state.lsp.status,
+          parser_status: parser_status(state)
+        },
+        git: %StatusGit{branch: git_branch, diff_summary: git_diff_summary},
+        file: %StatusFile{name: file_name, filetype: filetype},
+        message: nil,
+        recording: Minga.Editing.macro_recording_status(state),
+        indent: %StatusIndent{type: indent_type, size: indent_size},
+        selection: selection_model(selection_info),
+        agent: %SemanticStatusAgent{
+          agent_status: agent.runtime.status,
+          background_count: background.count,
+          background_label: background.label,
+          active_tool_name: agent.runtime.active_tool_name
+        },
+        pending_keys: pending_keys(state, mode, mode_state)
+      },
+      raw_diagnostic_counts: diagnostic_counts,
       mode_state: mode_state,
-      safe_mode: Minga.SafeMode.active?(),
-      cursor_line: line,
-      cursor_col: col,
-      line_count: line_count,
-      file_name: file_name,
-      filetype: filetype,
-      dirty: dirty,
-      git_branch: git_branch,
-      git_diff_summary: git_diff_summary,
-      git_degraded: git_degraded,
-      diagnostic_counts: diagnostic_counts,
-      diagnostic_hint: diagnostic_hint,
-      indent_type: indent_type,
-      indent_size: indent_size,
-      selection_info: selection_info,
-      lsp_status: state.lsp.status,
-      parser_status: parser_status(state),
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: Enum.count(state.workspace.buffers.list),
-      macro_recording: Minga.Editing.macro_recording_status(state),
-      agent_status: agent.runtime.status,
-      active_tool_name: agent.runtime.active_tool_name,
+      notice: notice_message(state),
+      selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       agent_status_command: agent_status_command_content(state, agent),
       agent_theme_colors:
         if(agent.runtime.status, do: Theme.agent_theme(theme(state)), else: nil),
-      background_subagent_count: background.count,
-      active_background_subagent_label: background.label,
-      notice: notice_message(state),
-      selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
-      pending_keys: pending_keys(state, mode, mode_state),
-      workspace_label: workspace.label,
-      workspace_draft_count: workspace.draft_count,
-      workspace_conflict_count: workspace.conflict_count,
+      git_degraded: git_degraded?,
+      workspace: workspace,
       merge_conflict_count: merge_conflict_count(buf)
     }
   end
@@ -308,21 +238,21 @@ defmodule MingaEditor.StatusBar.Data do
 
   @spec buf_display_name(pid()) :: String.t()
   defp buf_display_name(buf) do
-    Buffer.display_name(buf)
+    BufferAPI.display_name(buf)
   catch
     :exit, _ -> "[no file]"
   end
 
   @spec buffer_filetype(pid()) :: atom()
   defp buffer_filetype(buf) do
-    Buffer.filetype(buf) || :text
+    BufferAPI.filetype(buf) || :text
   catch
     :exit, _ -> :text
   end
 
   @spec buffer_file_path(pid()) :: String.t() | nil
   defp buffer_file_path(buf) do
-    Buffer.file_path(buf)
+    BufferAPI.file_path(buf)
   catch
     :exit, _ -> nil
   end
@@ -338,7 +268,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   @spec buffer_option(pid() | nil, Options.server(), atom(), Options.option_name()) :: term()
   defp buffer_option(buf, options_server, filetype, option) when is_pid(buf) do
-    case Buffer.get_option(buf, option) do
+    case BufferAPI.get_option(buf, option) do
       :error -> Options.get_for_filetype(options_server, option, filetype)
       value -> value
     end
@@ -375,7 +305,7 @@ defmodule MingaEditor.StatusBar.Data do
           Minga.Mode.mode(),
           Minga.Mode.state() | nil,
           pid() | nil,
-          Buffer.position()
+          BufferAPI.position()
         ) ::
           selection_info()
   defp selection_info(
@@ -389,29 +319,39 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp selection_info(:visual, %{visual_type: :char, visual_anchor: anchor}, buf, cursor)
        when is_pid(buf) do
-    {:chars, Buffer.content_range_length(buf, anchor, cursor)}
+    {:chars, BufferAPI.content_range_length(buf, anchor, cursor)}
   catch
     :exit, _ -> nil
   end
 
   defp selection_info(_mode, _mode_state, _buf, _cursor), do: nil
 
+  @spec selection_model(selection_info()) :: StatusSelection.t()
+  defp selection_model({:chars, count}), do: %StatusSelection{mode: :chars, size: count}
+  defp selection_model({:lines, count}), do: %StatusSelection{mode: :lines, size: count}
+  defp selection_model(nil), do: %StatusSelection{}
+
   # ── Agent variant ──────────────────────────────────────────────────────────
 
-  @spec build_agent_data(EditorState.t() | map()) :: agent_data()
+  @spec build_agent_data(EditorState.t() | map()) :: t()
   defp build_agent_data(state) do
     agent = agent_state(state)
     panel = state.workspace.agent_ui.panel
     session = agent_session(state)
 
-    state
-    |> build_buffer_status_data("[no file]")
-    |> Map.merge(%{
-      model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
-      session_status: agent.runtime.status,
-      message_count: agent_message_count(session),
-      agent_theme_colors: Theme.agent_theme(theme(state))
-    })
+    %__MODULE__{
+      common: state |> build_common_data("[no file]") |> apply_agent_modeline_theme(state),
+      content: %StatusAgent{
+        model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
+        session_status: agent.runtime.status,
+        message_count: agent_message_count(session)
+      }
+    }
+  end
+
+  @spec apply_agent_modeline_theme(Common.t(), EditorState.t() | map()) :: Common.t()
+  defp apply_agent_modeline_theme(%Common{} = common, state) do
+    %{common | agent_theme_colors: Theme.agent_theme(theme(state))}
   end
 
   @spec agent_message_count(pid() | nil) :: non_neg_integer()
@@ -478,16 +418,6 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp model_name(_panel_model, _session_model), do: "No model configured"
 
-  @spec attach_modeline_segments(map(), Theme.t(), ModelineSegments.table()) ::
-          buffer_data() | agent_data()
-  defp attach_modeline_segments(data, theme, modeline_segments_table) do
-    Map.put(
-      data,
-      :modeline_segments,
-      Modeline.gui_segments(data_to_modeline_data(data), theme, modeline_segments_table)
-    )
-  end
-
   # ── Git helpers ────────────────────────────────────────────────────────────
 
   @doc "Returns {branch_name | nil, diff_summary | nil} for the status bar."
@@ -530,7 +460,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp merge_conflict_count(buf) when is_pid(buf) do
     case Git.tracking_pid(buf) do
-      nil -> buf |> Buffer.content() |> MergeConflict.parse() |> Enum.count()
+      nil -> buf |> BufferAPI.content() |> MergeConflict.parse() |> Enum.count()
       git_pid -> Git.conflict_count(git_pid)
     end
   catch
@@ -545,7 +475,7 @@ defmodule MingaEditor.StatusBar.Data do
   def diagnostic_modeline_data(buf) when is_pid(buf) do
     path =
       try do
-        Buffer.file_path(buf)
+        BufferAPI.file_path(buf)
       catch
         :exit, _ -> nil
       end
@@ -577,7 +507,7 @@ defmodule MingaEditor.StatusBar.Data do
   def cursor_line_diagnostic_hint(buf, line) when is_pid(buf) do
     file_path =
       try do
-        Buffer.file_path(buf)
+        BufferAPI.file_path(buf)
       catch
         :exit, _ -> nil
       end
@@ -617,65 +547,85 @@ defmodule MingaEditor.StatusBar.Data do
   @doc """
   Converts a `StatusBar.Data.t()` to the map shape expected by `Modeline.render/5`.
 
-  Both variants carry the same buffer fields and produce identical modeline data.
+  Both variants carry the same common fields and produce identical modeline data.
   """
   @spec to_modeline_data(t()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
-  def to_modeline_data({_variant, d}), do: data_to_modeline_data(d)
+  def to_modeline_data(%__MODULE__{common: %Common{} = common}), do: data_to_modeline_data(common)
 
-  @spec data_to_modeline_data(map()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
-  defp data_to_modeline_data(d) do
+  @spec data_to_modeline_data(Common.t()) ::
+          MingaEditor.Shell.Traditional.Modeline.modeline_data()
+  defp data_to_modeline_data(%Common{status: %SemanticStatusData{} = status} = common) do
+    workspace =
+      common.workspace || %StatusWorkspace{id: 0, kind: :manual, label: "Files", icon: ""}
+
+    selection_info = modeline_selection_info(status.selection)
+
     %{
-      mode: d.mode,
-      mode_state: d.mode_state,
-      safe_mode: Map.get(d, :safe_mode, false),
-      file_name: d.file_name,
-      filetype: d.filetype,
-      dirty_marker: if(d.dirty, do: " ● ", else: ""),
-      cursor_line: d.cursor_line,
-      cursor_col: d.cursor_col,
-      line_count: d.line_count,
-      buf_index: d.buf_index,
-      buf_count: d.buf_count,
-      macro_recording: d.macro_recording,
-      agent_status: d.agent_status,
-      active_tool_name: Map.get(d, :active_tool_name),
-      agent_status_command: Map.get(d, :agent_status_command),
-      agent_theme_colors: d.agent_theme_colors,
-      lsp_status: d.lsp_status,
-      parser_status: d.parser_status,
-      git_branch: d.git_branch,
-      git_diff_summary: d.git_diff_summary,
-      git_degraded: Map.get(d, :git_degraded, false),
-      diagnostic_counts: d.diagnostic_counts,
-      indent_type: d.indent_type,
-      indent_size: d.indent_size,
-      selection_info: d.selection_info,
-      background_subagent_count: d.background_subagent_count,
-      active_background_subagent_label: d.active_background_subagent_label,
-      workspace_label: d.workspace_label,
-      workspace_draft_count: d.workspace_draft_count,
-      workspace_conflict_count: d.workspace_conflict_count,
-      merge_conflict_count: d.merge_conflict_count
+      mode: status.mode,
+      mode_state: common.mode_state,
+      safe_mode: status.safe_mode?,
+      file_name: status.file.name,
+      filetype: status.file.filetype,
+      dirty_marker: if(status.dirty?, do: " ● ", else: ""),
+      cursor_line: status.cursor.line,
+      cursor_col: status.cursor.col,
+      line_count: status.cursor.line_count,
+      buf_index: common.buf_index,
+      buf_count: common.buf_count,
+      macro_recording: status.recording,
+      agent_status: status.agent.agent_status,
+      active_tool_name: status.agent.active_tool_name,
+      agent_status_command: common.agent_status_command,
+      agent_theme_colors: common.agent_theme_colors,
+      lsp_status: status.language.lsp_status,
+      parser_status: status.language.parser_status,
+      git_branch: status.git.branch,
+      git_diff_summary: status.git.diff_summary,
+      git_degraded: common.git_degraded,
+      diagnostic_counts: common.raw_diagnostic_counts,
+      indent_type: status.indent.type,
+      indent_size: status.indent.size,
+      selection_info: selection_info,
+      background_subagent_count: status.agent.background_count,
+      active_background_subagent_label: status.agent.background_label,
+      workspace_label: workspace.label,
+      workspace_draft_count: workspace.draft_count,
+      workspace_conflict_count: workspace.conflict_count,
+      merge_conflict_count: common.merge_conflict_count
     }
   end
 
-  @spec workspace_modeline_summary(EditorState.t() | map()) :: %{
-          label: String.t(),
-          draft_count: non_neg_integer(),
-          conflict_count: non_neg_integer()
-        }
+  @spec modeline_selection_info(StatusSelection.t()) :: selection_info()
+  defp modeline_selection_info(%StatusSelection{mode: :chars, size: count}), do: {:chars, count}
+  defp modeline_selection_info(%StatusSelection{mode: :lines, size: count}), do: {:lines, count}
+  defp modeline_selection_info(%StatusSelection{}), do: nil
+
+  @spec workspace_modeline_summary(EditorState.t() | map()) :: StatusWorkspace.t() | nil
   defp workspace_modeline_summary(state) do
     chrome_state = ChromeState.from_editor_state(state)
 
-    active_workspace =
-      Enum.find(chrome_state.workspaces, fn workspace ->
-        workspace.id == chrome_state.active_workspace_id
-      end)
+    chrome_state.workspaces
+    |> Enum.find(fn workspace -> workspace.id == chrome_state.active_workspace_id end)
+    |> workspace_model(chrome_state)
+  end
 
-    %{
-      label: if(active_workspace, do: active_workspace.label, else: "Files"),
+  @spec workspace_model(ChromeState.WorkspaceSummary.t() | nil, ChromeState.t()) ::
+          StatusWorkspace.t() | nil
+  defp workspace_model(nil, _chrome_state), do: nil
+
+  defp workspace_model(%ChromeState.WorkspaceSummary{} = workspace, %ChromeState{} = chrome_state) do
+    %StatusWorkspace{
+      id: workspace.id,
+      kind: workspace.kind,
+      label: workspace.label,
+      icon: workspace.icon,
+      status: workspace.status,
+      attention_count: chrome_state.attention_count,
       draft_count: chrome_state.draft_count,
-      conflict_count: chrome_state.conflict_count
+      conflict_count: chrome_state.conflict_count,
+      running_background_count: workspace.running_background_count,
+      closeable?: workspace.closeable?,
+      attention?: workspace.attention?
     }
   end
 

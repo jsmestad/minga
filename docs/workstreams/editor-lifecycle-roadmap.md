@@ -26,12 +26,12 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17, ES18
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17, ES18, ES21
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **CANDIDATE, craftsmanship:** (none)
-- **CANDIDATE, data shape:** ES09, ES10, ES14, ES16, ES21, ES24
+- **CANDIDATE, data shape:** ES09, ES10, ES14, ES16, ES24
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
 
@@ -42,7 +42,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03
 - **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES24
-- **DRIFTED:** D13, D36, D40, S14, ES21
+- **DRIFTED:** D13, D36, D40, S14
 
 Drift evidence:
 
@@ -51,7 +51,12 @@ Drift evidence:
 - **D40:** Agent-chat prefetch and `WindowCache.boundary_snapshot/1` remain dead, while `DisplayMap` queries and row-rasterization telemetry named by the old aggregate are now live. Split only current dead surfaces.
 - **S14:** Several picker preview callbacks are already optional, while cancel, prompt, effect, and input callbacks remain mandatory. Re-evaluate each remaining callback separately.
 - **ES08:** Parser and semantic-token producers now construct `Minga.Language.Highlight.Span`; only mixed map acceptance in editor highlight storage remains. Relock the remaining conversion boundary.
-- **ES21:** Typed semantic status-bar structs now exist beside the legacy snapshot maps. Relock which projection remains redundant instead of introducing a second typed model.
+
+Implemented evidence:
+
+- **ES21 / W114:** IMPLEMENTED in worktree `refactor-editor-lifecycle-next-76` from locked plan `local://es21-plan-v5.json` and post-review correction `local://es21-review-fix-plan.json` at baseline `73bdfd3f303d1443e665c03d1deeabe5f14aaadc`. Changed files in the current diff: `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/status_bar/data.ex`, `lib/minga_editor/status_bar/data/common.ex`, `lib/minga_editor/status_bar/data/buffer.ex`, `lib/minga_editor/status_bar/data/agent.ex`, `lib/minga_editor/render_model/ui/status_bar_builder.ex`, `test/minga_editor/status_bar/data_test.exs`, `test/minga_editor/status_bar/data_safe_mode_test.exs`, `test/minga_editor/render_model/ui/status_bar_builder_test.exs`, `test/minga_editor/render_pipeline/chrome_test.exs`, `test/minga_editor/shell/traditional/chrome/gui_test.exs`, and `test/minga_editor/render_pipeline/chrome_dirty_test.exs`; `test/minga_editor/frontend/emit/gui_chrome_cache_test.exs` was touched only to apply the safe cut and has no remaining diff. Observable result: `MingaEditor.StatusBar.Data.from_state/1` now returns `%MingaEditor.StatusBar.Data{common: %Common{}, content: %Buffer{} | %Agent{}}`; `Common.raw_diagnostic_counts` preserves raw pathless `nil` for legacy modeline/custom segments while `common.status.diagnostics.counts` remains normalized to `{0, 0, 0, 0}` for semantic status and opcode `0x76`; `StatusBarBuilder.build/3` projects the typed snapshot to the unchanged semantic `%Minga.RenderModel.UI.StatusBar{}`; byte-parity tests keep `0x76` unchanged for buffer and agent snapshots with independent workspace and exact final agent-section assertions. Validation: focused correction tests `35 passed`; focused owner/builder/modeline/encoder/protocol tests `77 passed, 21 excluded`; focused chrome/cache tests `27 passed`; `mix format --check-formatted` passed for the locked file list; `mix compile --warnings-as-errors` passed; `git diff --check` passed; `make lint` passed with Credo clean and Dialyzer `Total errors: 0`; `mix test.llm --max-cases 4` passed with `58 doctests, 98 properties, 9764 tests, 0 failures, 1 skipped, 616 excluded`; default-concurrency `mix test.llm` was also run and exposed unrelated async timeouts/flakes in `agent/ingest`, `commands/agent_commands`, `providers/native_mcp`, and `session_manager`, with each failed location passing when re-run directly; focused Go status tests passed for 3 packages; `go test ./...` passed for 7 packages with 1 no-tests package; `mix swift.build` skipped because `xcodebuild` is unavailable on this Linux workstation. Budgets before roadmap evidence: production net `-13` lines (`lib/minga_editor/render_model/ui/status_bar_builder.ex` `+55/-79`, `lib/minga_editor/status_bar/data.ex` `+183/-233`, untracked value modules `+61`), test net `+173` lines, both within locked limits. Concepts added by the full ES21 implementation: the typed `Data` aggregate plus the new `Common`, `Buffer`, and `Agent` value modules; the post-review correction added exactly one enforced modeline-only `Common.raw_diagnostic_counts` field and no additional module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, parallel shape, wire shape, or frontend/generated path. Concepts removed: unused `MingaEditor.StatusBar.Data.lsp_status/0` alias and obsolete self-copy/test-only assertions. Discoveries: no `NEEDS_REPLAN`; Swift validation surface is unavailable here because Xcode is not installed; default-concurrency `mix test.llm` has unrelated async/resource flakes in this worktree, but low-concurrency full LLM validation and every failed location passed.
+- **ES21 / W114 review evidence:** Correctness initially found the raw diagnostic `nil` normalization regression, then returned `PASS / RESOLVED` after the locked correction and targeted roadmap-truthfulness fix. Ponytail's three test-strengthening findings and two safe cuts were applied; its targeted recheck confirmed the tests are lean and independent after the roadmap correction. Elixir craftsmanship returned `PASS / RESOLVED / LEAN`; the type-design specialist was unavailable because its runtime had no model configured, so the correctness and Elixir passes covered the new struct invariants. Final reviewer verdict: `PASS` with 0.99 confidence.
+- **ES21 / W114 CI stabilization:** The first required CI run passed every job except one unrelated load-sensitive `SessionRestoreTest` assertion whose expected refresh message arrived at the exact 1-second timeout. Both equivalent post-batch refresh assertions now allow 5 seconds while retaining the 900 ms duplicate-message rejection; the focused file passed `7 tests` at the failing CI seed `443303`. This test-only stabilization adds `test/minga_editor/handlers/session_restore_test.exs` to the changed-file ledger without changing ES21 production scope.
 
 Decision inventory:
 
