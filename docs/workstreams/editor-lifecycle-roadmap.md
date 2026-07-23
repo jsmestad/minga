@@ -4344,7 +4344,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W106/ES09.1: Cut over FileTree visibility and interaction tags
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES09.1
 - **Planning profile:** `ES09Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES09Worker`, no delegation.
@@ -4368,3 +4368,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Remaining ES09 scope:** Full content lifecycle tagging that would replace `tree` plus `tree_status` remains explicitly deferred for a fresh follow-up planner after this slice merges. This entry implements only ES09.1 visibility/interaction cutover and must not be read as resolving the full ES09 finding.
 - **Discoveries affecting later work:** No replan trigger, owner drift, production budget issue, test budget issue, new dependency, protocol/frontend dependency, persisted tab migration need, ES10 refresh/watcher dependency, or compatibility need was found.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3206
+- **Implementation commit SHA:** `6f19d72a177170886f43a886128e167c3cd31bc3`
+- **Merge SHA:** `fb1a6ba3a5a37cc682cced8d29915953971e39c3`
+- **Merge evidence:** PR #3206 merged after CI run `29976292781` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES09.1 visibility and interaction state is resolved. The separate `tree` plus `tree_status` content lifecycle concern remains open under ES09 and requires a fresh planner.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR, commit, merge, CI, completion, and deferred-scope evidence were confirmed.
