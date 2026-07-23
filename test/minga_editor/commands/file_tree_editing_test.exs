@@ -504,6 +504,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   defp buffers_for_active_buffer(buffer) when is_pid(buffer), do: Buffers.add(%Buffers{}, buffer)
 
   defp ft(state), do: state.workspace.file_tree
+  defp tree(state), do: state |> ft() |> FileTreeState.tree()
   defp editing(state), do: FileTreeState.editing(ft(state))
 
   defp replace_editing_text(%EditorState{} = state, text) when is_binary(text) do
@@ -521,7 +522,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   end
 
   defp select_entry(%EditorState{} = state, name) when is_binary(name) do
-    tree = ft(state).tree
+    tree = tree(state)
     entries = FileTree.visible_entries(tree)
     index = Enum.find_index(entries, &(&1.name == name))
     assert index != nil, "Expected #{name} to be visible in the file tree"

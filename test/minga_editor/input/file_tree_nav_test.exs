@@ -31,7 +31,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
 
     workspace =
       %SessionState{keymap_scope: :file_tree}
-      |> SessionState.set_file_tree(%FileTreeState{tree: tree, visibility: :focused, buffer: buf})
+      |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, buf))
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -42,17 +42,18 @@ defmodule MingaEditor.Input.FileTreeNavTest do
   end
 
   defp ft(state), do: state.workspace.file_tree
+  defp tree(state), do: state |> ft() |> FileTreeState.tree()
 
   describe "vim navigation in file tree" do
     test "j moves tree cursor down", %{tmp_dir: tmp_dir, sidebar_registry: table} do
       state = make_state(tmp_dir, table)
-      assert ft(state).tree.cursor == 0
+      assert tree(state).cursor == 0
 
       {:handled, state} = handle_file_tree_key(state, ?j, 0)
-      assert ft(state).tree.cursor == 1
+      assert tree(state).cursor == 1
 
       {:handled, state} = handle_file_tree_key(state, ?j, 0)
-      assert ft(state).tree.cursor == 2
+      assert tree(state).cursor == 2
     end
 
     test "k moves tree cursor up", %{tmp_dir: tmp_dir, sidebar_registry: table} do
@@ -60,16 +61,16 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       # Move down first
       {:handled, state} = handle_file_tree_key(state, ?j, 0)
       {:handled, state} = handle_file_tree_key(state, ?j, 0)
-      assert ft(state).tree.cursor == 2
+      assert tree(state).cursor == 2
 
       {:handled, state} = handle_file_tree_key(state, ?k, 0)
-      assert ft(state).tree.cursor == 1
+      assert tree(state).cursor == 1
     end
 
     test "q closes the file tree", %{tmp_dir: tmp_dir, sidebar_registry: table} do
       state = make_state(tmp_dir, table)
       {:handled, state} = handle_file_tree_key(state, ?q, 0)
-      assert ft(state).tree == nil
+      assert tree(state) == nil
       refute FileTreeState.focused?(ft(state))
       assert state.workspace.keymap_scope == :editor
     end
@@ -77,7 +78,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
     test "Escape closes the file tree", %{tmp_dir: tmp_dir, sidebar_registry: table} do
       state = make_state(tmp_dir, table)
       {:handled, state} = handle_file_tree_key(state, 27, 0)
-      assert ft(state).tree == nil
+      assert tree(state) == nil
       assert state.workspace.keymap_scope == :editor
     end
 
@@ -101,7 +102,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
 
     test "tree cursor stays in bounds", %{tmp_dir: tmp_dir, sidebar_registry: table} do
       state = make_state(tmp_dir, table, 3)
-      entries = FileTree.visible_entries(ft(state).tree)
+      entries = FileTree.visible_entries(tree(state))
       max_idx = Enum.count(entries) - 1
 
       # Move down past the end
@@ -111,7 +112,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
           new_acc
         end)
 
-      assert ft(state).tree.cursor <= max_idx
+      assert tree(state).cursor <= max_idx
     end
 
     test "buffer cursor syncs with tree cursor after j/k", %{
@@ -125,7 +126,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       {:handled, state} = handle_file_tree_key(state, ?j, 0)
 
       {buf_line, _col} = BufferProcess.cursor(buf)
-      assert buf_line == ft(state).tree.cursor
+      assert buf_line == tree(state).cursor
     end
   end
 end

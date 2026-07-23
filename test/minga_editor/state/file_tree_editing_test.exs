@@ -12,9 +12,13 @@ defmodule MingaEditor.State.FileTreeEditingTest do
   alias Minga.Project.FileTree
 
   describe "visibility" do
-    test "default state is hidden browse" do
+    test "default state is closed hidden browse" do
       ft = %FileTreeState{}
 
+      assert FileTreeState.content(ft) == :closed
+      assert FileTreeState.status(ft) == :hidden
+      refute FileTreeState.loaded?(ft)
+      assert FileTreeState.tree(ft) == nil
       assert ft.visibility == :hidden
       assert ft.interaction == :browse
       refute FileTreeState.focused?(ft)
@@ -38,19 +42,50 @@ defmodule MingaEditor.State.FileTreeEditingTest do
       assert hidden.interaction == :browse
       assert FileTreeState.status(hidden) == :hidden
       assert FileTreeState.loaded?(hidden)
-      assert hidden.tree == opened.tree
+      assert FileTreeState.content(hidden) == FileTreeState.content(opened)
       assert hidden.buffer == opened.buffer
       assert hidden.watchers == opened.watchers
 
       shown = FileTreeState.show(hidden)
       assert shown.visibility == :focused
-      assert shown.tree == opened.tree
+      assert FileTreeState.content(shown) == FileTreeState.content(opened)
       assert shown.buffer == opened.buffer
       assert shown.watchers == opened.watchers
 
       refocused_hidden = FileTreeState.focus(hidden)
       assert refocused_hidden.visibility == :hidden
       refute FileTreeState.focused?(refocused_hidden)
+    end
+
+    test "loading, error, close, and root scan publish single content tags" do
+      tree = FileTree.new("/tmp") |> FileTree.put_entries([])
+      opened = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+      assert FileTreeState.content(FileTreeState.loading(opened)) == {:loading, tree}
+
+      errored = FileTreeState.error(opened, :enoent)
+      assert FileTreeState.content(errored) == {:error, "no such file or directory", tree}
+      assert FileTreeState.status(errored) == {:error, "no such file or directory"}
+
+      hidden_loading = opened |> FileTreeState.loading() |> FileTreeState.hide()
+      assert FileTreeState.status(hidden_loading) == :hidden
+      assert FileTreeState.content(hidden_loading) == {:loading, tree}
+
+      hidden_error = opened |> FileTreeState.error(:eacces) |> FileTreeState.hide()
+      assert FileTreeState.status(hidden_error) == :hidden
+      assert FileTreeState.content(hidden_error) == {:error, "permission denied", tree}
+
+      assert FileTreeState.status(FileTreeState.loading(%FileTreeState{})) == :loading
+
+      assert FileTreeState.status(FileTreeState.error(%FileTreeState{}, :eacces)) ==
+               {:error, "permission denied"}
+
+      root_scan = FileTreeState.begin_root_scan(opened, FileTree.new("/other"), :reroot)
+      assert {:loading, %FileTree{root: "/other"}} = FileTreeState.content(root_scan)
+
+      closed = FileTreeState.close(opened)
+      assert FileTreeState.content(closed) == :closed
+      assert FileTreeState.tree(closed) == nil
     end
   end
 

@@ -127,7 +127,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {accepted, %Outcome{status: :completed}} =
              Refresh.apply(tracked, Outcome.completed(request, refreshed))
 
-    assert file_tree(accepted).tree == refreshed
+    assert ft_tree(accepted) == refreshed
     assert Minga.Buffer.content(buffer) =~ "fresh.ex"
     assert is_reference(accepted.render.render_correlation.timer)
     Process.cancel_timer(accepted.render.render_correlation.timer)
@@ -137,7 +137,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     state = state_with_tree(root)
     %Frontend{} = frontend = state.frontend
     state = %{state | frontend: %Frontend{frontend | backend: :tui}}
-    request = Refresh.request(file_tree(state).tree, state.extension_surfaces.events_registry)
+    request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
     assert {failed, %Outcome{status: :failed}} =
@@ -154,7 +154,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     tmp_dir: root
   } do
     state = state_with_tree(root)
-    request = Refresh.request(file_tree(state).tree, state.extension_surfaces.events_registry)
+    request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
     assert {canceled, %Outcome{status: :canceled}} =
@@ -175,7 +175,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {closed_state, %Outcome{status: :stale, reason: :stale}} =
              Refresh.apply(closed, Outcome.completed(request, refreshed))
 
-    assert file_tree(closed_state).tree == nil
+    assert ft_tree(closed_state) == nil
     assert closed_state.render.render_correlation.timer == nil
 
     rerooted =
@@ -199,7 +199,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {rerooted_state, %Outcome{status: :stale, reason: :stale}} =
              Refresh.apply(rerooted, Outcome.completed(request, refreshed))
 
-    assert file_tree(rerooted_state).tree.root == Path.expand(new_root)
+    assert ft_tree(rerooted_state).root == Path.expand(new_root)
     assert rerooted_state.render.render_correlation.timer == nil
   end
 
@@ -220,8 +220,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
       )
 
     request_id = file_tree(loading).refresh.current.token
-    assert file_tree(loading).tree.root == Path.expand(new_root)
-    assert file_tree(loading).tree.entries == nil
+    assert ft_tree(loading).root == Path.expand(new_root)
+    assert ft_tree(loading).entries == nil
     assert FileTreeState.status(file_tree(loading)) == :loading
     assert is_reference(request_id)
     assert_receive {:file_tree_scan_started, :project_root, worker}, @timeout
@@ -233,7 +233,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {loaded, %Outcome{status: :completed} = applied} = Refresh.apply(loading, outcome)
     EffectScheduler.finalize(scheduler, applied)
 
-    assert file_tree(loaded).tree == result
+    assert ft_tree(loaded) == result
     Process.cancel_timer(loaded.render.render_correlation.timer)
   end
 
@@ -287,7 +287,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(latest_state, latest_outcome)
 
     EffectScheduler.finalize(scheduler, applied)
-    assert file_tree(loaded).tree == latest_result
+    assert ft_tree(loaded) == latest_result
     Process.cancel_timer(loaded.render.render_correlation.timer)
   end
 
@@ -319,7 +319,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(failing, failed_outcome)
 
     EffectScheduler.finalize(scheduler, finalized_failure)
-    assert file_tree(failed).tree.root == Path.expand(failed_root)
+    assert ft_tree(failed).root == Path.expand(failed_root)
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
     Process.cancel_timer(failed.render.render_correlation.timer)
@@ -362,7 +362,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(recovering, recovered_outcome)
 
     EffectScheduler.finalize(scheduler, finalized_recovery)
-    assert file_tree(recovered).tree == recovered_result
+    assert ft_tree(recovered) == recovered_result
     assert FileTreeState.status(file_tree(recovered)) == :ready
     Process.cancel_timer(recovered.render.render_correlation.timer)
   end
@@ -401,13 +401,13 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     state = state_with_tree(root)
     %Frontend{} = frontend = state.frontend
     state = %{state | frontend: %Frontend{frontend | backend: :tui}}
-    request = Refresh.request(file_tree(state).tree, state.extension_surfaces.events_registry)
+    request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
     assert {failed, %Outcome{status: :failed}} =
              Refresh.apply(tracked, Outcome.failed(request, {:root_unavailable, :enoent}))
 
-    assert file_tree(failed).tree.root == Path.expand(root)
+    assert ft_tree(failed).root == Path.expand(root)
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
     assert file_tree(failed).refresh.current == nil
@@ -494,6 +494,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   end
 
   defp file_tree(state), do: state.workspace.file_tree
+
+  defp ft_tree(state), do: state |> file_tree() |> FileTreeState.tree()
 
   defp start_scheduler(opts \\ []) do
     task_supervisor =

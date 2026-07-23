@@ -269,7 +269,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   end
 
   test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do
-    file_tree_state = %FileTreeState{tree_status: :loading, visibility: :visible}
+    file_tree_state = FileTreeState.loading(%FileTreeState{})
 
     state = base_state(table)
     state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree_state)}
@@ -322,18 +322,17 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     state = base_state(table)
 
-    file_tree = %FileTreeState{
-      tree: ProjectFileTree.new(tmp_dir),
-      tree_status: :ready,
-      visibility: :hidden
-    }
+    file_tree =
+      %FileTreeState{}
+      |> FileTreeState.open(ProjectFileTree.new(tmp_dir) |> ProjectFileTree.put_entries([]), nil)
+      |> FileTreeState.hide()
 
     state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
 
     opened =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "file_tree", "toggle"})
 
-    assert opened.workspace.file_tree.tree != nil
+    assert FileTreeState.tree(opened.workspace.file_tree) != nil
     assert FileTreeState.focused?(opened.workspace.file_tree)
     assert SidebarWorkflow.active_id(opened) == "file_tree"
     assert %{visible?: true, focused?: true} = Sidebar.get(table, "file_tree")
@@ -358,7 +357,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     # the data stays loaded so re-showing is a pure layout change, but the
     # sidebar is no longer visible/focused and its contribution is deregistered.
     hidden_state = hidden.workspace.file_tree
-    assert hidden_state.tree != nil
+    assert FileTreeState.tree(hidden_state) != nil
     refute FileTreeState.visible?(hidden_state)
     refute FileTreeState.focused?(hidden_state)
     assert SidebarWorkflow.active_id(hidden) == nil

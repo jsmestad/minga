@@ -32,21 +32,23 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()
-  def open?(state), do: match?(%FileTreeState{tree: %FileTree{}}, file_tree_state(state))
+  def open?(state), do: match?(%FileTree{}, FileTreeState.tree(file_tree_state(state)))
 
   @doc "Returns true when the path is under the current tree root."
   @spec path_under_tree?(state(), String.t() | nil) :: boolean()
   def path_under_tree?(_state, nil), do: false
 
   def path_under_tree?(state, path) when is_binary(path) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{root: root}} ->
+    file_tree = file_tree_state(state)
+
+    case {FileTreeState.tree(file_tree), file_tree.project_root} do
+      {%FileTree{root: root}, _project_root} ->
         path_under_root?(Path.expand(path), Path.expand(root))
 
-      %FileTreeState{project_root: root} when is_binary(root) ->
+      {nil, root} when is_binary(root) ->
         path_under_root?(Path.expand(path), Path.expand(root))
 
-      %FileTreeState{} ->
+      {_tree, _project_root} ->
         false
     end
   end
@@ -168,8 +170,8 @@ defmodule MingaEditor.FileTree.Freshness do
 
         state =
           state
+          |> sync_buffer(FileTreeState.tree(file_tree))
           |> maybe_synchronize_watchers(effect)
-          |> sync_buffer(file_tree.tree)
           |> MingaEditor.schedule_render(16)
 
         {state, outcome}
@@ -402,13 +404,15 @@ defmodule MingaEditor.FileTree.Freshness do
     do: FileTreeState.refresh_failed(file_tree, reason)
 
   @spec maybe_sync_failed_root(state(), FileTreeState.t(), Refresh.t()) :: state()
-  defp maybe_sync_failed_root(
-         state,
-         %FileTreeState{tree: %FileTree{} = tree},
-         %Refresh{previous_root: previous_root}
-       )
-       when is_binary(previous_root),
-       do: sync_buffer(state, tree)
+  defp maybe_sync_failed_root(state, %FileTreeState{} = file_tree, %Refresh{
+         previous_root: previous_root
+       })
+       when is_binary(previous_root) do
+    case FileTreeState.tree(file_tree) do
+      %FileTree{} = tree -> sync_buffer(state, tree)
+      nil -> state
+    end
+  end
 
   defp maybe_sync_failed_root(state, %FileTreeState{}, %Refresh{}), do: state
 
@@ -419,11 +423,13 @@ defmodule MingaEditor.FileTree.Freshness do
         entry_base_path: entry_base_path,
         entries: entries
       }) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} ->
+    file_tree = file_tree_state(state)
+
+    case FileTreeState.tree(file_tree) do
+      nil ->
         state
 
-      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
+      %FileTree{} = tree ->
         status = GitStatus.from_entries(entries, entry_base_path || git_root, tree.root)
         updated_tree = FileTree.replace_git_status(tree, status)
         file_tree = FileTreeState.replace_tree_metadata(file_tree, updated_tree)
@@ -437,11 +443,13 @@ defmodule MingaEditor.FileTree.Freshness do
   @doc "Refreshes tree git badges from the cached Git.Repo snapshot without shelling out to git."
   @spec refresh_git_status_from_cache(state()) :: state()
   def refresh_git_status_from_cache(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} ->
+    file_tree = file_tree_state(state)
+
+    case FileTreeState.tree(file_tree) do
+      nil ->
         state
 
-      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
+      %FileTree{} = tree ->
         updated_tree =
           Refresh.with_cached_git_status(tree, state.extension_surfaces.events_registry)
 
@@ -459,7 +467,7 @@ defmodule MingaEditor.FileTree.Freshness do
     expanded_root = Path.expand(root)
     file_tree = file_tree_state(state)
 
-    case file_tree.tree do
+    case FileTreeState.tree(file_tree) do
       %FileTree{root: ^expanded_root} ->
         state = set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
         refilter_active_tree(state, opts)
@@ -482,11 +490,13 @@ defmodule MingaEditor.FileTree.Freshness do
   def reroot(state, root, opts \\ []) when is_binary(root) do
     expanded_root = Path.expand(root)
 
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{root: current_root}} when current_root == expanded_root ->
+    file_tree = file_tree_state(state)
+
+    case FileTreeState.tree(file_tree) do
+      %FileTree{root: current_root} when current_root == expanded_root ->
         state
 
-      %FileTreeState{tree: %FileTree{} = old_tree} = file_tree ->
+      %FileTree{} = old_tree ->
         new_tree = FileTree.reroot(old_tree, expanded_root)
         file_tree = FileTreeState.begin_root_scan(file_tree, new_tree, :reroot)
 
@@ -494,7 +504,7 @@ defmodule MingaEditor.FileTree.Freshness do
         |> set_file_tree(file_tree)
         |> schedule_refresh(new_tree, Keyword.put(opts, :previous_root, old_tree.root))
 
-      %FileTreeState{} ->
+      nil ->
         state
     end
   end
@@ -506,7 +516,7 @@ defmodule MingaEditor.FileTree.Freshness do
 
     state
     |> set_file_tree(file_tree)
-    |> schedule_filter(file_tree.tree, opts)
+    |> schedule_filter(FileTreeState.tree(file_tree), opts)
   end
 
   @doc "Starts filter input and reschedules any existing non-empty query."
@@ -515,7 +525,7 @@ defmodule MingaEditor.FileTree.Freshness do
     file_tree = FileTreeState.start_filtering(file_tree_state(state))
     state = set_file_tree(state, file_tree)
 
-    case file_tree.tree do
+    case FileTreeState.tree(file_tree) do
       %FileTree{filter: filter} = tree when is_binary(filter) and filter != "" ->
         schedule_filter(state, tree, opts)
 
@@ -531,7 +541,7 @@ defmodule MingaEditor.FileTree.Freshness do
     file_tree = FileTreeState.clear_filter_loading(file_tree_state(state), disposition)
     state = set_file_tree(state, file_tree)
 
-    case file_tree.tree do
+    case FileTreeState.tree(file_tree) do
       %FileTree{} = tree -> schedule_refresh(state, tree, opts)
       nil -> state
     end
@@ -539,7 +549,7 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @spec refilter_active_tree(state(), keyword()) :: state()
   defp refilter_active_tree(state, opts) do
-    case file_tree_state(state).tree do
+    case FileTreeState.tree(file_tree_state(state)) do
       %FileTree{filter: filter} when is_binary(filter) and filter != "" ->
         update_filter(state, filter, opts)
 

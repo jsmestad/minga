@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
 
   alias MingaEditor.RenderModel.UI.Builder
   alias Minga.RenderModel
+  alias MingaEditor.State.FileTree, as: FileTreeState
 
   describe "build_ui/1" do
     test "module is defined and exports build_ui/1" do
@@ -36,6 +37,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
         capabilities: MingaEditor.Frontend.Capabilities.default(),
         theme: MingaEditor.UI.Theme.get!(:doom_one),
         font_registry: MingaEditor.UI.FontRegistry.new(),
+        file_tree: %FileTreeState{},
         windows: %MingaEditor.State.Windows{map: %{}, active: 1},
         layout: %MingaEditor.Layout{
           terminal: {0, 0, 80, 24},

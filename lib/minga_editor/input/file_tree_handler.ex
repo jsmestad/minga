@@ -85,7 +85,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
         :press,
         click_count
       ) do
-    case file_tree_state(state).tree do
+    case FileTreeState.tree(file_tree_state(state)) do
       %FileTree{} = tree ->
         state = focus_file_tree_for_mouse(state, button)
 
@@ -206,7 +206,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
             state
           end
 
-        case file_tree_state(state).tree do
+        case FileTreeState.tree(file_tree_state(state)) do
           nil -> state
           %FileTree{} -> sync_tree_cursor_from_buffer(state, buf)
         end
@@ -218,7 +218,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec sync_tree_cursor_from_buffer(EditorState.t(), pid()) :: EditorState.t()
   defp sync_tree_cursor_from_buffer(state, buf) do
-    tree = file_tree_state(state).tree
+    tree = FileTreeState.tree(file_tree_state(state))
     {cursor_line, _col} = Buffer.cursor(buf)
 
     update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.select(tree, cursor_line)))
@@ -370,7 +370,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec current_filter_text(EditorState.t()) :: String.t()
   defp current_filter_text(state) do
-    case file_tree_state(state).tree do
+    case FileTreeState.tree(file_tree_state(state)) do
       %FileTree{filter: filter} when is_binary(filter) -> filter
       _ -> ""
     end
@@ -406,9 +406,11 @@ defmodule MingaEditor.Input.FileTreeHandler do
   end
 
   @spec sync_buffer(FileTreeState.t()) :: :ok
-  defp sync_buffer(%FileTreeState{buffer: buffer, tree: %FileTree{} = tree})
-       when is_pid(buffer) do
-    BufferSync.sync(buffer, tree)
+  defp sync_buffer(%FileTreeState{buffer: buffer} = file_tree) when is_pid(buffer) do
+    case FileTreeState.tree(file_tree) do
+      %FileTree{} = tree -> BufferSync.sync(buffer, tree)
+      nil -> :ok
+    end
   catch
     :exit, _reason -> :ok
   end

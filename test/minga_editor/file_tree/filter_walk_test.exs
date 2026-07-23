@@ -104,8 +104,8 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
     assert {state, %Outcome{status: :completed} = applied} = FilterWalk.apply(state, outcome)
     EffectScheduler.finalize(scheduler, applied)
 
-    assert Enum.map(FileTree.visible_entries(file_tree(state).tree), & &1.name) == ["newer.ex"]
-    assert file_tree(state).tree_status == :ready
+    assert Enum.map(FileTree.visible_entries(tree(state)), & &1.name) == ["newer.ex"]
+    assert FileTreeState.status(file_tree(state)) == :ready
     Process.cancel_timer(state.render.render_correlation.timer)
   end
 
@@ -145,7 +145,7 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
     EffectScheduler.finalize(scheduler, applied)
 
     assert FileTreeState.status(file_tree(state)) == :ready
-    assert Enum.map(FileTree.visible_entries(file_tree(state).tree), & &1.name) == ["fixed.ex"]
+    assert Enum.map(FileTree.visible_entries(tree(state)), & &1.name) == ["fixed.ex"]
     Process.cancel_timer(state.render.render_correlation.timer)
   end
 
@@ -193,6 +193,7 @@ defmodule MingaEditor.FileTree.FilterWalkTest do
   end
 
   defp file_tree(state), do: state.workspace.file_tree
+  defp tree(state), do: state |> file_tree() |> FileTreeState.tree()
 
   defp entry(root, name) do
     %{

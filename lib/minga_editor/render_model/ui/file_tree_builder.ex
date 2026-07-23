@@ -21,15 +21,18 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   # Named folders resolved via Devicon.folder_icon_and_color/1
 
   @spec build(Context.t()) :: FileTreeModel.t()
-  def build(%Context{file_tree: %{tree: %FileTree{} = tree} = file_tree} = ctx) do
-    tree = FileTree.ensure_entries(tree)
-    build_for_status(FileTreeState.status(file_tree), tree, file_tree, ctx)
-  end
+  def build(%Context{file_tree: %FileTreeState{} = file_tree} = ctx) do
+    status = FileTreeState.status(file_tree)
 
-  def build(%Context{file_tree: %FileTreeState{} = file_tree}) do
-    case FileTreeState.status(file_tree) do
-      :hidden -> build_hidden(file_tree.project_root)
-      status -> build_state(file_tree, status)
+    case {status, FileTreeState.tree(file_tree)} do
+      {status, %FileTree{} = tree} when status in [:ready, :hidden] ->
+        build_full(FileTree.ensure_entries(tree), file_tree, ctx, status)
+
+      {:hidden, nil} ->
+        build_hidden(file_tree.project_root)
+
+      {status, _tree} ->
+        build_state(file_tree, status)
     end
   end
 
@@ -40,24 +43,6 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   def build(%Context{}) do
     build_hidden(nil)
   end
-
-  # A ready or hidden tree always carries its full row set. Hidden differs only
-  # in the status flag: the data lives in the frame and the frontend decides
-  # whether to render it, so toggling the sidebar is a pure layout change (#2626).
-  @spec build_for_status(
-          FileTreeState.tree_status(),
-          FileTree.t(),
-          FileTreeState.t(),
-          Context.t()
-        ) ::
-          FileTreeModel.t()
-  defp build_for_status(:ready, tree, file_tree, ctx),
-    do: build_full(tree, file_tree, ctx, :ready)
-
-  defp build_for_status(:hidden, tree, file_tree, ctx),
-    do: build_full(tree, file_tree, ctx, :hidden)
-
-  defp build_for_status(status, _tree, file_tree, _ctx), do: build_state(file_tree, status)
 
   @spec build_full(FileTree.t(), FileTreeState.t(), Context.t(), FileTreeModel.status()) ::
           FileTreeModel.t()
@@ -91,7 +76,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     }
   end
 
-  @spec build_state(FileTreeState.t(), FileTreeState.tree_status()) :: FileTreeModel.t()
+  @spec build_state(FileTreeState.t(), FileTreeState.status()) :: FileTreeModel.t()
   defp build_state(%FileTreeState{} = file_tree, status) do
     %FileTreeModel{
       root_path: file_tree.project_root,

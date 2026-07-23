@@ -34,6 +34,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.RenderModel.UI.WorkspacesBuilder
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.RenderModel
 
   @spec build_ui(Context.t(), StatusBarData.t() | nil, term()) ::
@@ -127,9 +128,11 @@ defmodule MingaEditor.RenderModel.UI.Builder do
 
   defp active_buffer_path(_ctx), do: nil
 
-  @spec file_tree_root(Context.t()) :: String.t()
-  defp file_tree_root(%{file_tree: %{tree: %{root: r}}}) when is_binary(r), do: r
-  defp file_tree_root(_ctx), do: ""
+  defp file_tree_root(%{file_tree: %FileTreeState{} = file_tree}),
+    do: file_tree |> FileTreeState.tree() |> file_tree_tree_root()
+
+  defp file_tree_tree_root(%{root: root}) when is_binary(root), do: root
+  defp file_tree_tree_root(_tree), do: ""
 
   @spec build_status_bar(StatusBarData.t() | nil, Context.t()) ::
           Minga.RenderModel.UI.StatusBar.t() | nil

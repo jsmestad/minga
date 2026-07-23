@@ -122,7 +122,7 @@ defmodule MingaEditor.FileTree.FeatureTest do
     state = MingaEditor.Commands.FileTree.toggle(state)
     file_tree = state.workspace.file_tree
 
-    assert file_tree.tree.root == Path.expand(missing_root)
+    assert FileTreeState.tree(file_tree).root == Path.expand(missing_root)
     assert {:error, reason} = FileTreeState.status(file_tree)
     assert reason != ""
   end
@@ -151,10 +151,10 @@ defmodule MingaEditor.FileTree.FeatureTest do
         %{state | workspace: then(state.workspace, &MingaEditor.Session.State.drop_file_tree/1)}
       end)
 
-    assert state.workspace.file_tree.tree == nil
+    assert FileTreeState.tree(state.workspace.file_tree) == nil
 
     state = MingaEditor.Commands.FileTree.toggle(state)
 
-    assert %FileTree{} = state.workspace.file_tree.tree
+    assert %FileTree{} = FileTreeState.tree(state.workspace.file_tree)
   end
 end

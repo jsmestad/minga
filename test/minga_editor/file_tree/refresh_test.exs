@@ -130,7 +130,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert {state, %Outcome{status: :stale} = stale_first} =
              Refresh.apply(state, first_outcome)
 
-    assert state |> file_tree() |> then(& &1.tree) == original
+    assert state |> file_tree() |> FileTreeState.tree() == original
     EffectScheduler.finalize(scheduler, stale_first)
 
     assert_receive {:file_tree_scan_started, :latest_composed, latest_worker}, @timeout
@@ -143,8 +143,8 @@ defmodule MingaEditor.FileTree.RefreshTest do
 
     EffectScheduler.finalize(scheduler, accepted_latest)
     Process.cancel_timer(state.render.render_correlation.timer)
-    assert state |> file_tree() |> then(& &1.tree) == latest_tree
-    refute state |> file_tree() |> then(& &1.tree) == second_tree
+    assert state |> file_tree() |> FileTreeState.tree() == latest_tree
+    refute state |> file_tree() |> FileTreeState.tree() == second_tree
     assert EffectScheduler.stats(scheduler).admitted == 0
     refute EffectScheduler.active?(scheduler, Refresh)
   end

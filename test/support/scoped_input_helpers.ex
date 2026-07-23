@@ -192,11 +192,10 @@ defmodule Minga.Test.ScopedInputHelpers do
     %{
       state
       | workspace:
-          MingaEditor.Session.State.set_file_tree(state.workspace, %FileTreeState{
-            tree: tree,
-            visibility: :focused,
-            buffer: buf
-          })
+          MingaEditor.Session.State.set_file_tree(
+            state.workspace,
+            FileTreeState.open(%FileTreeState{}, tree, buf)
+          )
     }
   end
 
