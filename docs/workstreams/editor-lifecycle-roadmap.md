@@ -25,13 +25,14 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 
 Current accepted inventory:
 
-- **VERIFIED:** L01, L02, L04, L05, L10, L12
-- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17, ES18, ES21
+- **VERIFIED:** L01, L02, L04, L05, L10, L12, ES21
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17, ES18
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **CANDIDATE, craftsmanship:** (none)
-- **CANDIDATE, data shape:** ES09, ES10, ES14, ES16, ES24
+- **READY, data shape:** ES24
+- **CANDIDATE, data shape:** ES09, ES10, ES14, ES16
 
 ### Freshness wave at `6e175b87764145577999a1c04a532960cb89222f`
 
@@ -4624,3 +4625,58 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Findings resolved:** ES18 is fully resolved.
 - **Completion date:** 2026-07-23
 - **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR state, identical implementation and merge trees, successful required CI jobs, completion date, and full ES18 resolution were independently confirmed.
+
+### W114/ES21: Replace raw editor status snapshots with typed values
+
+- **Status:** VERIFIED
+- **Audit ID:** ES21
+- **Planning profile:** `ES21Planner`, editor-lifecycle-planner, medium planning with independent high lock verification.
+- **Implementation profile:** `ES21Worker`, editor-lifecycle-worker, no delegation.
+- **Baseline:** `73bdfd3f303d1443e665c03d1deeabe5f14aaadc`.
+- **Ready provenance:** Locked by `local://es21-plan-v5.json`; post-review correction locked by `local://es21-review-fix-plan.json`.
+- **Observable result:** `MingaEditor.StatusBar.Data.from_state/1` returns one typed `Data` aggregate containing enforced `Common` plus `Buffer` or `Agent` content. The semantic status builder consumes the typed projection. Raw pathless diagnostic `nil` remains available for modeline/custom segments, semantic diagnostics remain normalized, and opcode `0x76` stays byte-identical.
+- **Implementation result:** Added pure `Common`, `Buffer`, and `Agent` status snapshot value modules; migrated all status snapshot producers and consumers; removed the obsolete `lsp_status/0` alias and tuple/map compatibility assertions. The correction added `Common.raw_diagnostic_counts` to preserve the modeline-only raw value without weakening semantic normalization.
+- **Focused validation:** Correction tests passed `35 tests`; owner, builder, modeline, encoder, and protocol tests passed `77 tests` with `21 excluded`; chrome/cache tests passed `27 tests`; the CI stabilization file passed `7 tests` at seed `443303`.
+- **Broad validation:** `make lint` passed with Credo clean and Dialyzer `Total errors: 0`; `mix test.llm --max-cases 4` passed `58 doctests, 98 properties, 9764 tests`, with `0 failures`, `1 skipped`, and `616 excluded`; focused Go status tests and `go test ./...` passed. Swift build validation was unavailable on Linux because `xcodebuild` is not installed. Required CI run `30028945455` passed all jobs.
+- **Production lines added/removed before roadmap evidence:** net `-13`, within the locked limit.
+- **Test lines added/removed before roadmap evidence:** net `+175` after the two-line CI timeout stabilization, within the revised locked limit.
+- **Concepts added:** One typed `Data` aggregate and three focused pure value modules, `Common`, `Buffer`, and `Agent`.
+- **Concepts removed:** Legacy raw tuple/map status snapshot variants, one unused status alias, and obsolete compatibility assertions.
+- **Retained contracts:** Once-per-frame snapshot construction, semantic builder ownership, modeline raw diagnostic behavior, normalized semantic diagnostics, operation/message precedence, stable status/modeline rendering, opcode `0x76`, and all frontend wire consumers.
+- **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the clean typed cutover, explicit content dispatch, raw and normalized diagnostic split, unchanged protocol/frontend behavior, budgets, validation, roadmap evidence, and merge safety.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3223
+- **Implementation commit SHA:** `9ab4d3696e8cc0b94210ddb20a71d8bfbad0d0fc`
+- **Merge SHA:** `ee88b3834909fd95ad097949de44b795602d8000`
+- **Merge evidence:** PR #3223 merged after required CI run `30028945455` passed. The preceding run found one unrelated restore-test message at its exact 1-second deadline; the branch fixed both equivalent assertions to allow 5 seconds while retaining duplicate-message rejection, then reran the failing file at the same seed and passed all required CI jobs.
+- **Findings resolved:** ES21 is fully resolved.
+- **Completion date:** 2026-07-23
+
+### W115/ES24: Give each recorder one explicit lifecycle phase
+
+- **Status:** READY
+- **Audit ID:** ES24
+- **Planning profile:** `ES24Planner`, `ES24Replanner`, `ES24ReplayReplanner`, and `ES24EquivalenceReplanner` at medium; `ES24PlanVerifier`, `ES24FinalVerifier`, `ES24PostMergeVerifier`, `ES24ReplayVerifier`, and `ES24V4FinalVerifier` at high, all read-only.
+- **Implementation profile:** `ES24Worker`, editor-lifecycle-worker, no delegation.
+- **Current baseline:** `ee88b3834909fd95ad097949de44b795602d8000`.
+- **Ready provenance:** Freshness classified `STILL_REPRODUCIBLE`; v2 was initially locked after direct-field and missing-register corrections. The final roadmap reviewer found that a flat `:replaying` phase would lose replay suppression after replayed `q a` starts recording. V3 added replay depth and a post-replay phase; independent verification then found `recording?/1` also had to expose the post recording so replayed `q` can stop it. Final `local://es24-plan-v4.json` incorporates both corrections, and `ES24V4FinalVerifier` returned `LOCKED_CURRENT` at the current baseline with no implementer question.
+- **Observable outcome:** `ChangeRecorder` and `MacroRecorder` each encode lifecycle in one owner-owned `phase`. Replayed keys remain suppressed through replay-time recorder transitions and nested replay. Replay-time macro recording remains visible to command predicates, so replayed `q` can stop the deferred recording exactly as current main does. Macro registers, last-register behavior, pending dot-repeat keys, replay nesting, `last_change`, and status facade values remain unchanged.
+- **Reproduced failure:** `ChangeRecorder` still stores independent `recording`, `keys`, and `replaying` fields; `MacroRecorder` still stores independent `recording` and `replaying` fields. These shapes permit impossible combinations but also carry valid replay-time post-state implicitly. `ChangeTracking` and `MacroReplay` inspect raw flags, while `Commands.execute/2` and `Commands.Macros.replay_last/1` directly write or read `last_register`.
+- **Authoritative owners:** `MingaEditor.ChangeRecorder` owns dot-repeat recorder representation and pure transitions. `MingaEditor.MacroRecorder` owns macro recorder representation, register storage, recording, replay depth, successful replay-register selection, and last-register query. `VimState` only embeds and installs whole recorder values. `ChangeTracking` and `MacroReplay` remain workflow sequencers around `MingaEditor.do_handle_key/3`.
+- **Locked ChangeRecorder shape:** `%MingaEditor.ChangeRecorder{phase: phase(), pending_keys: [key()], last_change: [key()] | nil}`, where `phase()` is `:idle | {:recording, [key()]} | {:replaying, pos_integer(), post_phase()}` and `post_phase()` is `:idle | {:recording, [key()]}`. Remove `recording`, `keys`, and `replaying`. Replay wraps the current phase at depth one, nested replay increments depth, and only the outermost normal-return stop restores the post phase. `recording?/1` exposes top-level or post recording; `replaying?/1` remains true for the wrapper; `record_key/2` is always a no-op while wrapped. Pending keys, stop/cancel behavior, `last_change`, and `replace_count/2` remain unchanged.
+- **Locked MacroRecorder shape:** `%MingaEditor.MacroRecorder{phase: phase(), registers: %{String.t() => [key()]}, last_register: String.t() | nil}`, where `phase()` is `:idle | {:recording, String.t(), [key()]} | {:replaying, pos_integer(), post_phase()}` and `post_phase()` is `:idle | {:recording, String.t(), [key()]}`. Remove `recording` and `replaying`. Replay-time start recording updates only the post phase and `last_register`; `recording?/1` exposes that post recording while `replaying?/1` remains true; `record_key/2` still suppresses every replayed key; replay-time stop recording stores the post keys and changes only the post phase to idle. Nested stops decrement depth, and only the outermost stop restores the post phase. `select_replay_register/2` updates `last_register` only after the macro exists; `last_register/1` is the sole external query.
+- **Required replay equivalence:** Replayed `q a x` must finish with active empty recording `a` and no replayed `x`; `q a q` must stop recording and store `a` as an empty macro; `q a q b` must not treat `b` as a new register selection. Nested successful `@b` may update `last_register` to `b` without clearing outer suppression. Missing nested `@z` must preserve the prior register. Nested dot-repeat cleanup must not clear outer change-replay suppression or replace `last_change`.
+- **Production files and symbols:** Update `lib/minga_editor/change_recorder.ex`, `lib/minga_editor/macro_recorder.ex`, `lib/minga_editor/change_tracking.ex`, `lib/minga_editor/macro_replay.ex`, macro clauses in `lib/minga_editor/commands.ex`, `replay_last/1` in `lib/minga_editor/commands/macros.ex`, and only required specs/docs in `lib/minga_editor/editing.ex`, `lib/minga/editing.ex`, and `lib/minga_editor/vim_state.ex`.
+- **Audited no-edit callsites:** Preserve exact mode, recording, read-only, mode-transition, command, and replay ordering in `lib/minga_editor/key_dispatch.ex`; command production in `lib/minga/mode/normal.ex`; key metadata in `lib/minga/keymap/defaults.ex`; and the stable `{true, register} | false` status path through status data, semantic status building, and GUI encoding.
+- **Direct-field cutover:** No production module outside `ChangeRecorder` may inspect obsolete change-recorder fields. No production module outside `MacroRecorder` may inspect obsolete macro lifecycle fields or read/write `last_register` directly. `MacroReplay` and `ChangeTracking` must check `replaying?/1` before recording state so replay suppression wins even when `recording?/1` exposes a post recording. Commands must select a replay register only after `get_macro/2` succeeds.
+- **Normal-return replay contract:** Preserve start replay, install recorder, reduce through `MingaEditor.do_handle_key/3`, stop replay, install recorder. Replay depth and post phase must unwind only on normal return. Process-crashing or exception-raising cleanup remains outside ES24; do not add `try/after` or supervision changes.
+- **Required owner and facade tests:** Update `test/minga_editor/change_recorder_test.exs`, `test/minga_editor/macro_recorder_test.exs`, and `test/minga_editor/editing_test.exs` for exact idle, recording, replay-depth, post-phase, pending-key, stop/cancel, register storage, `last_change`, last-register query, and stable facade behavior. Assert that recording is visible while wrapped, replaying stays true, key recording remains suppressed, inner stop does not expose post state, and outer stop does.
+- **Required workflow tests:** Add exact new files `test/minga_editor/commands/macro_commands_test.exs` and `test/minga_editor/change_tracking_test.exs`. Cover successful and missing replay selection, replay-last nil/non-nil, `q a x`, `q a q`, `q a q b`, nested successful and missing macro replay while a post recording exists, nested dot-repeat depth, and preservation of `last_change`. Keep `test/conformance/macros_test.exs` as broad `@a`, `@@`, insert-mode, count, empty-macro, and last-line smoke.
+- **Focused validation:** `mix test test/minga_editor/change_recorder_test.exs test/minga_editor/macro_recorder_test.exs test/minga_editor/editing_test.exs`; `mix test test/minga_editor/commands/macro_commands_test.exs test/minga_editor/change_tracking_test.exs`; `mix test test/conformance/macros_test.exs`.
+- **Broad validation:** `mix test`; `mix credo --strict`; exhaustive obsolete-field reference search; project-required formatting, diff, lint, and final acceptance review.
+- **Production-line budget:** Maximum net production increase `<= +50`. Test and roadmap lines are counted separately. If the clean one-phase cutover exceeds the cap, return `NEEDS_REPLAN` rather than adding abstraction or compatibility state.
+- **Non-goals:** No shared recorder abstraction, new process, dependency, behaviour, protocol, registry, configuration, public API, compatibility shim, parallel legacy shape, key-dispatch ordering change, status/render/frontend change, VimState lifecycle redesign, register storage change, `replace_count/2` change, persistence migration, or crash-safe replay exception handling.
+- **Retained constraints:** Preserve current macro toggle behavior during replay, all replayed-key suppression, nested replay semantics, registers, pending keys, `last_change`, last-register selection, command notices, conformance divergences, normal-return cleanup, and stable status facade output.
+- **Dependencies and overlap:** ADR-0002 already fixes ownership. No architecture decision or external dependency remains. ES21 status projection consumes only the stable facade shape and does not overlap this owner area. One PR must migrate every direct reader/writer and fully resolve ES24.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
+- **Completion evidence reserved:** PR URL, implementation commit SHA, merge SHA, focused tests, broad validation, reviewer verdict, findings resolved, discoveries affecting later work, and completion date remain empty until implementation and merge.
