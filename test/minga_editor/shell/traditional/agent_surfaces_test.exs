@@ -28,7 +28,7 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfacesTest do
     assert InlineAsk.active(AgentSurfaces.asks(surfaces), buffer) == current_ask
 
     surfaces = AgentSurfaces.append_ask_response(surfaces, current_session, "current")
-    assert InlineAsk.active(AgentSurfaces.asks(surfaces), buffer).response == "current"
+    assert InlineAsk.response(InlineAsk.active(AgentSurfaces.asks(surfaces), buffer)) == "current"
 
     {canceled, session_pid} = AgentSurfaces.cancel_ask(surfaces, buffer)
     assert session_pid == current_session
@@ -58,7 +58,9 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfacesTest do
 
     updated = AgentSurfaces.append_ask_response(surfaces, first_session, "first")
 
-    assert InlineAsk.active(AgentSurfaces.asks(updated), first_buffer).response == "first"
+    assert InlineAsk.response(InlineAsk.active(AgentSurfaces.asks(updated), first_buffer)) ==
+             "first"
+
     assert InlineAsk.active(AgentSurfaces.asks(updated), second_buffer) == second_ask
     assert AgentSurfaces.append_ask_response(updated, missing_session, "missing") == updated
   end
@@ -86,8 +88,9 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfacesTest do
 
     completed = AgentSurfaces.complete_edit(surfaces, current_session)
 
-    assert %InlineEdit{status: :proposed, session_pid: nil} =
-             InlineEdit.active(AgentSurfaces.edits(completed), buffer)
+    edit = InlineEdit.active(AgentSurfaces.edits(completed), buffer)
+    assert InlineEdit.proposed?(edit)
+    assert InlineEdit.session_pid(edit) == nil
   end
 
   test "session updates replace only the matching edit entry and ignore missing sessions" do
@@ -113,7 +116,7 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfacesTest do
 
     updated = AgentSurfaces.append_edit_proposal(surfaces, first_session, "first")
 
-    assert InlineEdit.active(AgentSurfaces.edits(updated), first_buffer).proposed_rewrite ==
+    assert InlineEdit.rewrite(InlineEdit.active(AgentSurfaces.edits(updated), first_buffer)) ==
              "first"
 
     assert InlineEdit.active(AgentSurfaces.edits(updated), second_buffer) == second_edit

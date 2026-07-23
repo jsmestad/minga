@@ -127,7 +127,7 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfaces do
   @spec matching_ask(InlineAsk.store(), pid()) :: {pid(), InlineAsk.t()} | nil
   defp matching_ask(asks, session_pid) do
     Enum.find(asks, fn
-      {_buffer_pid, %InlineAsk{session_pid: ^session_pid}} -> true
+      {_buffer_pid, %InlineAsk{} = ask} -> InlineAsk.session_pid(ask) == session_pid
       _entry -> false
     end)
   end
@@ -135,7 +135,7 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfaces do
   @spec matching_edit(InlineEdit.store(), pid()) :: {pid(), InlineEdit.t()} | nil
   defp matching_edit(edits, session_pid) do
     Enum.find(edits, fn
-      {_buffer_pid, %InlineEdit{session_pid: ^session_pid}} -> true
+      {_buffer_pid, %InlineEdit{} = edit} -> InlineEdit.session_pid(edit) == session_pid
       _entry -> false
     end)
   end

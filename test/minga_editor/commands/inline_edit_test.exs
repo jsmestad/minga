@@ -55,6 +55,10 @@ defmodule MingaEditor.Commands.InlineEditTest do
     assert {:handled, state} = InlineEditInput.handle_key(state, ?r, 0)
     assert {:handled, state} = InlineEditInput.handle_key(state, ?x, 0)
     assert active_edit(state, buffer).prompt == "rx"
+    assert {:handled, state} = InlineEditInput.handle_key(state, ?j, 0)
+    assert {:handled, state} = InlineEditInput.handle_key(state, ?k, 0)
+    assert {:handled, state} = InlineEditInput.handle_key(state, ?y, 0)
+    assert active_edit(state, buffer).prompt == "rxjky"
 
     assert {:handled, state} = InlineEditInput.handle_key(state, ?n, 0)
     assert active_edit(state, buffer) == nil
@@ -82,8 +86,8 @@ defmodule MingaEditor.Commands.InlineEditTest do
     state = InlineEditEvents.handle_event(state, fake_session, {:text_delta, "Done"})
     state = InlineEditEvents.handle_event(state, fake_session, {:status_changed, :idle})
 
-    assert active_edit(state, buffer).proposed_rewrite == "ONE"
-    assert active_edit(state, buffer).status == :proposed
+    assert InlineEdit.rewrite(active_edit(state, buffer)) == "ONE"
+    assert InlineEdit.proposed?(active_edit(state, buffer))
   end
 
   test "prompt send failure marks edit failed and clears session", %{tmp_dir: root} do
@@ -98,18 +102,17 @@ defmodule MingaEditor.Commands.InlineEditTest do
 
     state = InlineEditEvents.handle_prompt_result(state, session_pid, {:error, :provider_down})
 
-    assert %InlineEdit{
-             status: :error,
-             session_pid: nil,
-             proposed_rewrite: "Failed to rewrite: :provider_down"
-           } = active_edit(state, buffer)
+    edit = active_edit(state, buffer)
+    assert InlineEdit.failed?(edit)
+    assert InlineEdit.session_pid(edit) == nil
+    assert InlineEdit.rewrite(edit) == "Failed to rewrite: :provider_down"
   end
 
   test "accept replaces selected lines and undo restores content", %{tmp_dir: root} do
     {state, buffer} = state_with_file(root, "lib/auth.ex", "one\ntwo\nthree")
     Buffer.move_to(buffer, {1, 0})
     state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
-    edit = %{active_edit(state, buffer) | proposed_rewrite: "ONE\nTWO"} |> InlineEdit.proposed()
+    edit = active_edit(state, buffer) |> InlineEdit.proposed("ONE\nTWO")
 
     state =
       MingaEditor.Shell.Traditional.Workflow.install_inline_edit(state, edit)
@@ -125,7 +128,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
   test "accept handles unicode line endings with byte columns", %{tmp_dir: root} do
     {state, buffer} = state_with_file(root, "lib/unicode.ex", "éé\nthree")
     state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
-    edit = %{active_edit(state, buffer) | proposed_rewrite: "X"} |> InlineEdit.proposed()
+    edit = active_edit(state, buffer) |> InlineEdit.proposed("X")
 
     state =
       MingaEditor.Shell.Traditional.Workflow.install_inline_edit(state, edit)
@@ -137,7 +140,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
   test "accepting an empty proposal deletes the selected non-final line", %{tmp_dir: root} do
     {state, buffer} = state_with_file(root, "lib/delete_line.ex", "one\ntwo")
     state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
-    edit = %{active_edit(state, buffer) | proposed_rewrite: ""} |> InlineEdit.proposed()
+    edit = active_edit(state, buffer) |> InlineEdit.proposed("")
 
     state =
       MingaEditor.Shell.Traditional.Workflow.install_inline_edit(state, edit)
@@ -149,7 +152,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
   test "accept reports read-only buffers without crashing or dismissing", %{tmp_dir: root} do
     {state, buffer} = state_with_file(root, "lib/readonly.ex", "one\ntwo", read_only: true)
     state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
-    edit = %{active_edit(state, buffer) | proposed_rewrite: "ONE"} |> InlineEdit.proposed()
+    edit = active_edit(state, buffer) |> InlineEdit.proposed("ONE")
 
     state =
       MingaEditor.Shell.Traditional.Workflow.install_inline_edit(state, edit)

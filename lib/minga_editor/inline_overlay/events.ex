@@ -2,16 +2,7 @@ defmodule MingaEditor.InlineOverlay.Events do
   @moduledoc """
   Shared event-routing framework for inline overlays (ask and edit).
 
-  Both variants route ephemeral agent session events into per-buffer
-  overlay state in the same way: look up the overlay that owns a session
-  pid, apply a variant-specific transition, and write it back. This
-  module owns that shared plumbing (`session?/3`, `handle_event/4`,
-  `handle_prompt_result/4`, and the session lookup/update). The
-  variant-specific transitions (`apply_event`, the failure message) stay
-  in the adapters and are passed in as callbacks.
-
-  The `spec` map carries the store accessor, focused replacement operation,
-  and the `session?` predicate over the variant's state store.
+  Both variants route ephemeral agent session events into per-buffer overlay state in the same way: look up the overlay that owns a session pid, apply a variant-specific transition, and write it back. This module owns that shared plumbing (`session?/3`, `handle_event/4`, `handle_prompt_result/4`, and the session lookup/update). The variant-specific transitions (`apply_event`, the failure message) stay in the adapters and are passed in as callbacks.
   """
 
   alias MingaAgent.EphemeralSession
@@ -23,11 +14,13 @@ defmodule MingaEditor.InlineOverlay.Events do
   * `:store` reads the variant's per-buffer overlay store off editor state.
   * `:replace` writes one transitioned overlay through its focused owner.
   * `:session?` is true when a session pid belongs to this variant's store.
+  * `:session_pid` reads the current owner session pid from this variant.
   """
   @type spec :: %{
           store: (EditorState.t() -> %{pid() => struct()} | nil),
           replace: (EditorState.t(), struct() -> EditorState.t()),
-          session?: (%{pid() => struct()}, pid() -> boolean())
+          session?: (%{pid() => struct()}, pid() -> boolean()),
+          session_pid: (struct() -> pid() | nil)
         }
 
   @doc "Returns true when a session belongs to an overlay of this variant."
@@ -39,11 +32,7 @@ defmodule MingaEditor.InlineOverlay.Events do
     end
   end
 
-  @doc """
-  Handles an agent event for the overlay that owns `session_pid`.
-
-  `apply_event` is the variant transition `(overlay, session_pid, event -> overlay)`.
-  """
+  @doc "Handles an agent event for the overlay that owns `session_pid`."
   @spec handle_event(EditorState.t(), pid(), term(), spec(), (struct(), pid(), term() -> struct())) ::
           EditorState.t()
   def handle_event(state, session_pid, event, spec, apply_event) when is_pid(session_pid) do
@@ -52,12 +41,7 @@ defmodule MingaEditor.InlineOverlay.Events do
     end)
   end
 
-  @doc """
-  Handles the async result of sending the overlay's prompt.
-
-  On `{:error, reason}` the session is stopped and the overlay is failed
-  via `fail` (`(overlay, reason -> overlay)`).
-  """
+  @doc "Handles the async result of sending the overlay's prompt."
   @spec handle_prompt_result(EditorState.t(), pid(), term(), spec(), (struct(), term() ->
                                                                         struct())) ::
           EditorState.t()
@@ -68,29 +52,25 @@ defmodule MingaEditor.InlineOverlay.Events do
     update_for_session(state, session_pid, spec, fn overlay -> fail.(overlay, reason) end)
   end
 
-  @doc """
-  Looks up the overlay that owns `session_pid`, applies `fun`, writes it back.
-
-  Returns the state unchanged when no overlay owns the session.
-  """
+  @doc "Looks up the overlay that owns `session_pid`, applies `fun`, and writes it back."
   @spec update_for_session(EditorState.t(), pid(), spec(), (struct() -> struct())) ::
           EditorState.t()
   def update_for_session(state, session_pid, spec, fun) do
     case spec.store.(state) do
       store when is_map(store) ->
-        {_buffer_pid, overlay} = find_by_session(store, session_pid)
-
-        if overlay, do: spec.replace.(state, fun.(overlay)), else: state
+        case find_by_session(store, session_pid, spec.session_pid) do
+          {_buffer_pid, overlay} -> spec.replace.(state, fun.(overlay))
+          nil -> state
+        end
 
       _ ->
         state
     end
   end
 
-  @spec find_by_session(%{pid() => struct()}, pid()) :: {pid() | nil, struct() | nil}
-  defp find_by_session(store, session_pid) do
-    Enum.find(store, {nil, nil}, fn {_buffer_pid, overlay} ->
-      overlay.session_pid == session_pid
-    end)
+  @spec find_by_session(%{pid() => struct()}, pid(), (struct() -> pid() | nil)) ::
+          {pid(), struct()} | nil
+  defp find_by_session(store, session_pid, session_pid_fun) do
+    Enum.find(store, fn {_buffer_pid, overlay} -> session_pid_fun.(overlay) == session_pid end)
   end
 end

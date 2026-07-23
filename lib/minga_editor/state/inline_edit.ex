@@ -2,21 +2,16 @@ defmodule MingaEditor.State.InlineEdit do
   @moduledoc """
   Ephemeral inline edit overlays keyed by buffer.
 
-  The shared per-buffer store mechanics (`active/2`, `put/2`, `dismiss/2`,
-  `session?/2`) and prompt-input mechanics (`append_input/2`, `backspace/1`,
-  `scroll/2`) live in `MingaEditor.InlineOverlay.Store` and
-  `MingaEditor.InlineOverlay.Prompt` and are reused here. This module owns
-  only the edit-specific shape and transitions: the selection/original text,
-  the proposed rewrite with its `:stream` vs `:tool` source tracking, and the
-  `:proposed` terminal state.
+  The shared per-buffer store mechanics (`active/2`, `put/2`, `dismiss/2`, `session?/2`) and prompt-input mechanics (`append_input/2`, `backspace/1`, `scroll/2`) live in `MingaEditor.InlineOverlay.Store` and `MingaEditor.InlineOverlay.Prompt` and are reused here. This module owns only the edit-specific shape and transitions: the selection/original text, tagged proposal data, and the `:proposed` terminal state.
   """
 
   alias Minga.Project.FileRef
   alias MingaEditor.InlineOverlay.Prompt
   alias MingaEditor.InlineOverlay.Store
 
-  @type status :: :input | :thinking | :proposed | :error
-  @type proposal_source :: :stream | :tool | nil
+  @type proposal :: :none | {:stream, String.t()} | {:tool, String.t()}
+  @type phase ::
+          :input | {:running, pid(), proposal()} | {:proposed, proposal()} | {:failed, String.t()}
 
   @type t :: %__MODULE__{
           buffer_pid: pid(),
@@ -25,10 +20,7 @@ defmodule MingaEditor.State.InlineEdit do
           selection_range: {non_neg_integer(), non_neg_integer()},
           original_text: String.t(),
           prompt: String.t(),
-          proposed_rewrite: String.t(),
-          proposal_source: proposal_source(),
-          status: status(),
-          session_pid: pid() | nil,
+          phase: phase(),
           scroll: non_neg_integer()
         }
 
@@ -39,10 +31,7 @@ defmodule MingaEditor.State.InlineEdit do
             selection_range: {0, 0},
             original_text: "",
             prompt: "",
-            proposed_rewrite: "",
-            proposal_source: nil,
-            status: :input,
-            session_pid: nil,
+            phase: :input,
             scroll: 0
 
   @type store :: %{pid() => t()}
@@ -85,21 +74,18 @@ defmodule MingaEditor.State.InlineEdit do
     """
   end
 
-  # Store mechanics (active/session?/put/dismiss) and prompt mechanics
-  # (append_input/backspace/scroll) are shared with inline ask; see
-  # MingaEditor.InlineOverlay.Store and MingaEditor.InlineOverlay.Prompt.
-
   @spec active(store(), pid() | nil) :: t() | nil
-  def active(store, buffer_pid), do: Store.active(store, buffer_pid)
+  def active(store, buffer_pid), do: Store.active(store, buffer_pid, __MODULE__)
 
   @spec session?(store(), pid()) :: boolean()
-  def session?(store, session_pid), do: Store.session?(store, session_pid)
+  def session?(store, session_pid), do: Store.session?(store, session_pid, &session_pid/1)
 
   @spec put(store(), t()) :: store()
-  def put(store, edit), do: Store.put(store, edit)
+  def put(store, %__MODULE__{} = edit), do: Store.put(store, edit, __MODULE__)
+  def put(store, _edit) when is_map(store), do: store
 
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
-  def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid)
+  def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid, &session_pid/1)
 
   @spec append_input(t(), String.t()) :: t()
   def append_input(edit, text), do: Prompt.append_input(edit, text)
@@ -110,44 +96,90 @@ defmodule MingaEditor.State.InlineEdit do
   @spec scroll(t(), integer()) :: t()
   def scroll(edit, delta), do: Prompt.scroll(edit, delta)
 
+  @spec phase(t()) :: phase()
+  def phase(%__MODULE__{phase: phase}), do: phase
+
+  @spec input?(t()) :: boolean()
+  def input?(%__MODULE__{} = edit), do: phase(edit) == :input
+
+  @spec running?(t()) :: boolean()
+  def running?(%__MODULE__{} = edit), do: match?({:running, _session, _proposal}, phase(edit))
+
+  @spec proposed?(t()) :: boolean()
+  def proposed?(%__MODULE__{} = edit), do: match?({:proposed, _proposal}, phase(edit))
+
+  @spec failed?(t()) :: boolean()
+  def failed?(%__MODULE__{} = edit), do: match?({:failed, _message}, phase(edit))
+
+  @spec scrollable?(t()) :: boolean()
+  def scrollable?(%__MODULE__{} = edit), do: proposed?(edit) or failed?(edit)
+
+  @spec session_pid(t() | term()) :: pid() | nil
+  def session_pid(%__MODULE__{phase: {:running, session_pid, _proposal}}), do: session_pid
+  def session_pid(_edit), do: nil
+
+  @spec proposal(t()) :: proposal()
+  def proposal(%__MODULE__{phase: {:running, _session_pid, proposal}}), do: proposal
+  def proposal(%__MODULE__{phase: {:proposed, proposal}}), do: proposal
+  def proposal(%__MODULE__{}), do: :none
+
+  @spec rewrite(t()) :: String.t()
+  def rewrite(%__MODULE__{phase: {:failed, message}}), do: message
+  def rewrite(%__MODULE__{} = edit), do: proposal_text(proposal(edit))
+
   @doc "Marks the edit as thinking."
   @spec thinking(t(), pid()) :: t()
   def thinking(%__MODULE__{} = edit, session_pid) when is_pid(session_pid),
-    do: %{
-      edit
-      | status: :thinking,
-        session_pid: session_pid,
-        proposed_rewrite: "",
-        proposal_source: nil,
-        scroll: 0
-    }
-
-  @doc "Refreshes the visible thinking status."
-  @spec mark_thinking(t()) :: t()
-  def mark_thinking(%__MODULE__{} = edit), do: %{edit | status: :thinking}
+    do: %{edit | phase: {:running, session_pid, :none}, scroll: 0}
 
   @doc "Appends proposed replacement text streamed by the assistant."
   @spec append_proposal(t(), String.t()) :: t()
-  def append_proposal(%__MODULE__{proposal_source: :tool} = edit, delta) when is_binary(delta),
-    do: edit
+  def append_proposal(%__MODULE__{phase: {:running, session_pid, :none}} = edit, delta)
+      when is_binary(delta), do: %{edit | phase: {:running, session_pid, {:stream, delta}}}
 
-  def append_proposal(%__MODULE__{proposed_rewrite: proposed} = edit, delta)
+  def append_proposal(
+        %__MODULE__{phase: {:running, session_pid, {:stream, proposed}}} = edit,
+        delta
+      )
       when is_binary(delta),
-      do: %{edit | proposed_rewrite: proposed <> delta, proposal_source: :stream}
+      do: %{edit | phase: {:running, session_pid, {:stream, proposed <> delta}}}
+
+  def append_proposal(
+        %__MODULE__{phase: {:running, _session_pid, {:tool, _proposed}}} = edit,
+        delta
+      )
+      when is_binary(delta), do: edit
+
+  def append_proposal(%__MODULE__{} = edit, delta) when is_binary(delta), do: edit
 
   @doc "Installs proposed replacement text from the constrained rewrite tool."
   @spec install_proposal(t(), String.t()) :: t()
-  def install_proposal(%__MODULE__{} = edit, proposed) when is_binary(proposed),
-    do: %{edit | proposed_rewrite: proposed, proposal_source: :tool}
+  def install_proposal(%__MODULE__{phase: {:running, session_pid, _proposal}} = edit, proposed)
+      when is_binary(proposed), do: %{edit | phase: {:running, session_pid, {:tool, proposed}}}
+
+  def install_proposal(%__MODULE__{} = edit, proposed) when is_binary(proposed), do: edit
 
   @doc "Marks the edit as proposed."
   @spec proposed(t()) :: t()
-  def proposed(%__MODULE__{} = edit), do: %{edit | status: :proposed, session_pid: nil}
+  def proposed(%__MODULE__{phase: {:running, _session_pid, proposal}} = edit),
+    do: %{edit | phase: {:proposed, proposal}}
+
+  def proposed(%__MODULE__{} = edit), do: edit
+
+  @doc "Constructs a proposed streamed rewrite for direct tests."
+  @spec proposed(t(), String.t()) :: t()
+  def proposed(%__MODULE__{} = edit, rewrite) when is_binary(rewrite),
+    do: %{edit | phase: {:proposed, {:stream, rewrite}}}
 
   @doc "Marks the edit as failed."
   @spec fail(t(), String.t()) :: t()
   def fail(%__MODULE__{} = edit, message) when is_binary(message),
-    do: %{edit | status: :error, proposed_rewrite: message, session_pid: nil}
+    do: %{edit | phase: {:failed, message}}
+
+  @spec proposal_text(proposal()) :: String.t()
+  defp proposal_text(:none), do: ""
+  defp proposal_text({:stream, text}), do: text
+  defp proposal_text({:tool, text}), do: text
 
   @spec file_identity(FileRef.t()) :: String.t()
   defp file_identity(%FileRef{kind: :path, relative_path: path}) when is_binary(path), do: path

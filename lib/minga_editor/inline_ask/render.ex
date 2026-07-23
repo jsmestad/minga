@@ -42,7 +42,7 @@ defmodule MingaEditor.InlineAsk.Render do
       prompt_glyph: "? ",
       prompt: & &1.prompt,
       header: &InlineAsk.header/1,
-      input?: &(&1.status == :input),
+      input?: &InlineAsk.input?/1,
       body_lines: &response_lines/2,
       footer: fn _ask -> "╰─ Esc dismiss · Tab promote to workspace" end,
       face: &face/1
@@ -50,13 +50,14 @@ defmodule MingaEditor.InlineAsk.Render do
   end
 
   @spec response_lines(InlineAsk.t(), pos_integer()) :: [{String.t(), atom()}]
-  defp response_lines(%InlineAsk{status: :input}, _content_width), do: []
+  defp response_lines(%InlineAsk{phase: :input}, _content_width), do: []
 
-  defp response_lines(%InlineAsk{status: :thinking}, _content_width),
+  defp response_lines(%InlineAsk{phase: {:running, _session_pid, _response}}, _content_width),
     do: [{"… thinking", :body}]
 
-  defp response_lines(%InlineAsk{response: response, scroll: scroll}, content_width) do
-    response
+  defp response_lines(%InlineAsk{scroll: scroll} = ask, content_width) do
+    ask
+    |> InlineAsk.response()
     |> String.split("\n")
     |> Enum.flat_map(&wrap_line(&1, content_width))
     |> Enum.slice(scroll, 8)

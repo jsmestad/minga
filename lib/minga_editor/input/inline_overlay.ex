@@ -39,6 +39,7 @@ defmodule MingaEditor.Input.InlineOverlay do
           cancel: (EditorState.t(), pid() | nil -> {EditorState.t(), pid() | nil}),
           state_module: module(),
           session_starter: (String.t(), String.t(), keyword() -> {:ok, pid()} | {:error, term()}),
+          session_pid: (struct() -> pid() | nil),
           fail_prefix: String.t()
         }
 
@@ -66,7 +67,7 @@ defmodule MingaEditor.Input.InlineOverlay do
   @doc "Stops the overlay's session and removes it from its store."
   @spec dismiss(state(), struct(), spec()) :: state()
   def dismiss(state, overlay, spec) do
-    MingaAgent.EphemeralSession.stop(overlay.session_pid)
+    MingaAgent.EphemeralSession.stop(spec.session_pid.(overlay))
 
     {state, _session_pid} = spec.cancel.(state, overlay.buffer_pid)
     state

@@ -34,7 +34,7 @@ defmodule MingaEditor.InlineEdit.Render do
       prompt_glyph: "✎ ",
       prompt: & &1.prompt,
       header: &InlineEdit.header/1,
-      input?: &(&1.status == :input),
+      input?: &InlineEdit.input?/1,
       body_lines: &body_lines/2,
       footer: &footer_text/1,
       face: &face/1
@@ -42,18 +42,19 @@ defmodule MingaEditor.InlineEdit.Render do
   end
 
   @spec body_lines(InlineEdit.t(), pos_integer()) :: [{String.t(), atom()}]
-  defp body_lines(%InlineEdit{status: :input}, _content_width), do: []
+  defp body_lines(%InlineEdit{phase: :input}, _content_width), do: []
 
-  defp body_lines(%InlineEdit{status: :thinking}, _content_width),
+  defp body_lines(%InlineEdit{phase: {:running, _session_pid, _proposal}}, _content_width),
     do: [{"… thinking", :body}]
 
   defp body_lines(%InlineEdit{} = edit, content_width) do
     removed = edit.original_text |> String.split("\n") |> Enum.map(&{"- " <> &1, :remove})
 
     added =
-      edit.proposed_rewrite
+      edit
+      |> InlineEdit.rewrite()
       |> String.split("\n")
-      |> Enum.map(&{"+ " <> &1, status_face(edit.status)})
+      |> Enum.map(&{"+ " <> &1, proposal_face(edit)})
 
     (removed ++ added)
     |> Enum.slice(edit.scroll, 10)
@@ -61,14 +62,14 @@ defmodule MingaEditor.InlineEdit.Render do
   end
 
   @spec footer_text(InlineEdit.t()) :: String.t()
-  defp footer_text(%InlineEdit{status: :input}), do: "╰─ Enter submit · Esc cancel"
-  defp footer_text(%InlineEdit{status: :thinking}), do: "╰─ Esc cancel"
-  defp footer_text(%InlineEdit{status: :error}), do: "╰─ n/Esc dismiss"
+  defp footer_text(%InlineEdit{phase: :input}), do: "╰─ Enter submit · Esc cancel"
+  defp footer_text(%InlineEdit{phase: {:running, _session_pid, _proposal}}), do: "╰─ Esc cancel"
+  defp footer_text(%InlineEdit{phase: {:failed, _message}}), do: "╰─ n/Esc dismiss"
   defp footer_text(%InlineEdit{}), do: "╰─ y/Enter accept · n/Esc reject"
 
-  @spec status_face(InlineEdit.status()) :: atom()
-  defp status_face(:error), do: :error
-  defp status_face(_status), do: :add
+  @spec proposal_face(InlineEdit.t()) :: atom()
+  defp proposal_face(%InlineEdit{phase: {:failed, _message}}), do: :error
+  defp proposal_face(%InlineEdit{}), do: :add
 
   @spec face(atom()) :: Face.t()
   defp face(:header), do: Face.new(fg: 0xC792EA, bold: true)

@@ -36,7 +36,8 @@ defmodule MingaEditor.InlineAsk.Events do
     %{
       store: &inline_asks/1,
       replace: &MingaEditor.Shell.Traditional.Workflow.install_inline_ask/2,
-      session?: &InlineAsk.session?/2
+      session?: &InlineAsk.session?/2,
+      session_pid: &InlineAsk.session_pid/1
     }
   end
 
@@ -58,18 +59,12 @@ defmodule MingaEditor.InlineAsk.Events do
   defp apply_event(%InlineAsk{} = ask, _session_pid, {:text_delta, text}),
     do: InlineAsk.append_response(ask, text)
 
-  defp apply_event(%InlineAsk{} = ask, _session_pid, {:status_changed, :thinking}),
-    do: InlineAsk.mark_thinking(ask)
-
-  defp apply_event(%InlineAsk{} = ask, _session_pid, {:status_changed, :tool_executing}),
-    do: InlineAsk.mark_thinking(ask)
-
   defp apply_event(%InlineAsk{} = ask, session_pid, {:status_changed, :idle}) do
     response = EphemeralSession.assistant_response(session_pid)
     EphemeralSession.stop(session_pid)
 
     ask =
-      if response == "" or String.contains?(ask.response, response),
+      if response == "" or String.contains?(InlineAsk.response(ask), response),
         do: ask,
         else: InlineAsk.append_response(ask, response)
 
