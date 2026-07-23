@@ -48,17 +48,16 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     scheduler = start_scheduler()
     state = state_with_tree(root, scheduler)
     state = Freshness.request_refresh(state, 60_000)
-    timer_token = file_tree(state).refresh.debounce
+    {:debounced, timer_token, 0} = file_tree(state).refresh.phase
 
     stale_state = Freshness.begin_refresh(state, make_ref())
     assert stale_state == state
     assert EffectScheduler.stats(scheduler).admitted == 0
 
     scheduled_state = Freshness.begin_refresh(state, timer_token)
-    current = file_tree(scheduled_state).refresh.current
-
+    assert {:admitted, admitted_root, current} = file_tree(scheduled_state).refresh.phase
     assert is_reference(current.token)
-    assert current.root == Path.expand(root)
+    assert admitted_root == Path.expand(root)
     assert EffectScheduler.active?(scheduler, Refresh)
   end
 
@@ -84,14 +83,11 @@ defmodule MingaEditor.FileTree.FreshnessTest do
       |> track(old_request)
       |> Freshness.request_refresh(60_000)
 
-    assert file_tree(state).refresh.current == nil
-    timer_token = file_tree(state).refresh.debounce
+    {:debounced, timer_token, 0} = file_tree(state).refresh.phase
     retrying = Freshness.begin_refresh(state, timer_token)
-    retry_token = file_tree(retrying).refresh.debounce
+    {:debounced, retry_token, 1} = file_tree(retrying).refresh.phase
 
-    assert is_reference(retry_token)
     assert retry_token != timer_token
-    assert file_tree(retrying).refresh.retry_attempt == 1
     assert EffectScheduler.stats(scheduler).admitted == 1
 
     assert :ok = EffectScheduler.cancel(scheduler, blocker.id)
@@ -106,9 +102,32 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert_receive {:file_tree_refresh_timer, ^retry_token}
     admitted = Freshness.begin_refresh(retrying, retry_token)
 
-    assert is_reference(file_tree(admitted).refresh.current.token)
-    assert file_tree(admitted).refresh.retry_attempt == 0
+    {:admitted, _root, %{token: admitted_token}} = file_tree(admitted).refresh.phase
+    assert is_reference(admitted_token)
+
     assert EffectScheduler.active?(scheduler, Refresh)
+  end
+
+  test "clear filter invalidates pending refresh before scheduling the unfiltered scan", %{
+    tmp_dir: root
+  } do
+    scheduler = start_scheduler()
+
+    state =
+      root
+      |> state_with_tree(scheduler)
+      |> Freshness.request_refresh(60_000)
+
+    {:debounced, old_timer, 0} = file_tree(state).refresh.phase
+
+    cleared =
+      Freshness.clear_filter(state, :dismiss,
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :clear_filter, :wait}
+      )
+
+    assert is_reference(refresh_request_token(file_tree(cleared)))
+    assert Freshness.begin_refresh(cleared, old_timer) == cleared
   end
 
   test "accepted completion updates owner, syncs the buffer, then requests rendering", %{
@@ -145,7 +164,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason =~ "unreadable"
-    assert failed |> file_tree() |> then(& &1.refresh.current) == nil
+    assert file_tree(failed).refresh.phase == {:idle, 0}
     assert is_reference(failed.render.render_correlation.timer)
     Process.cancel_timer(failed.render.render_correlation.timer)
   end
@@ -161,7 +180,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(tracked, Outcome.canceled(request, :requested))
 
     assert canceled.render.render_correlation.timer == nil
-    assert canceled |> file_tree() |> then(& &1.refresh.current) == nil
+    assert file_tree(canceled).refresh.phase == {:idle, 0}
   end
 
   test "closed and rerooted completions are stale and never request rendering", %{tmp_dir: root} do
@@ -219,7 +238,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
         synchronize_watchers?: false
       )
 
-    request_id = file_tree(loading).refresh.current.token
+    request_id = refresh_request_token(file_tree(loading))
     assert ft_tree(loading).root == Path.expand(new_root)
     assert ft_tree(loading).entries == nil
     assert FileTreeState.status(file_tree(loading)) == :loading
@@ -254,7 +273,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
         synchronize_watchers?: false
       )
 
-    first_id = file_tree(first_state).refresh.current.token
+    first_id = refresh_request_token(file_tree(first_state))
     assert_receive {:file_tree_scan_started, :first_root, first_worker}, @timeout
 
     latest_state =
@@ -264,7 +283,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
         synchronize_watchers?: false
       )
 
-    latest_id = file_tree(latest_state).refresh.current.token
+    latest_id = refresh_request_token(file_tree(latest_state))
     assert latest_id != first_id
     assert_receive {:file_tree_scan_started, :latest_root, latest_worker}, @timeout
 
@@ -310,7 +329,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
         watcher_context: {self(), :failed_cleanup, :immediate}
       )
 
-    failed_id = file_tree(failing).refresh.current.token
+    failed_id = refresh_request_token(file_tree(failing))
     assert_receive {:file_tree_scan_started, :failed_root, _worker}, @timeout
     failed_outcome = receive_outcome(scheduler, failed_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed_outcome)
@@ -324,7 +343,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert reason != ""
     Process.cancel_timer(failed.render.render_correlation.timer)
 
-    watcher_id = file_tree(failed).watchers.request.token
+    watcher_id = watcher_request_token(file_tree(failed))
 
     assert_receive {:file_tree_watcher_call, :failed_cleanup, :unwatch, first_root, worker},
                    @timeout
@@ -353,7 +372,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
         synchronize_watchers?: false
       )
 
-    recovered_id = file_tree(recovering).refresh.current.token
+    recovered_id = refresh_request_token(file_tree(recovering))
     assert_receive {:file_tree_scan_started, :recovered_root, _worker}, @timeout
     recovered_outcome = receive_outcome(scheduler, recovered_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, recovered_outcome)
@@ -410,7 +429,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert ft_tree(failed).root == Path.expand(root)
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
-    assert file_tree(failed).refresh.current == nil
+    assert file_tree(failed).refresh.phase == {:idle, 0}
     assert is_reference(failed.render.render_correlation.timer)
     Process.cancel_timer(failed.render.render_correlation.timer)
   end
@@ -492,6 +511,14 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     outcome
   end
+
+  defp refresh_request_token(%FileTreeState{
+         refresh: %{phase: {:admitted, _root, %{token: token}}}
+       }),
+       do: token
+
+  defp watcher_request_token(%FileTreeState{watchers: %{phase: {:admitted, %{token: token}}}}),
+    do: token
 
   defp file_tree(state), do: state.workspace.file_tree
 

@@ -274,7 +274,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
 
   defp invalidate_current(state) do
     state = Freshness.request_refresh(state, 60_000)
-    token = file_tree(state).refresh.debounce
+    {:debounced, token, _attempt} = file_tree(state).refresh.phase
 
     then(state, fn state ->
       %{
@@ -284,7 +284,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
               MingaEditor.Session.State.set_file_tree(
                 workspace,
                 (fn file_tree ->
-                   {:ready, _tree, elapsed} =
+                   {:ready, _tree, _attempt, elapsed} =
                      FileTreeState.refresh_debounce_elapsed(file_tree, token)
 
                    elapsed

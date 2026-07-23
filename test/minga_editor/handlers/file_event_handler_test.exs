@@ -180,13 +180,13 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       changed_path = Path.join(tmp_dir, "created.ex")
 
       {scheduled, effects} = FileEventHandler.handle(state, {:file_changed_on_disk, changed_path})
-      token = ft(scheduled).refresh.debounce
+      {:debounced, token, 0} = ft(scheduled).refresh.phase
 
       {repeated, repeated_effects} =
         FileEventHandler.handle(scheduled, {:file_changed_on_disk, changed_path})
 
       assert is_reference(token)
-      assert ft(repeated).refresh.debounce == token
+      assert ft(repeated).refresh.phase == {:debounced, token, 0}
       assert effects == []
       assert repeated_effects == []
     end
@@ -211,7 +211,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           %Minga.Events.FileWrittenEvent{path: changed_path, change_type: :created}
         })
 
-      assert is_reference(ft(scheduled).refresh.debounce)
+      assert match?({:debounced, token, 0} when is_reference(token), ft(scheduled).refresh.phase)
       assert effects == []
     end
 

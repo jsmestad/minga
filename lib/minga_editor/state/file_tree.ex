@@ -314,14 +314,16 @@ defmodule MingaEditor.State.FileTree do
 
   @doc "Consumes a correlated debounce message and focuses the result on the live tree."
   @spec refresh_debounce_elapsed(t(), Refresh.debounce_token()) ::
-          {:ready, FileTree.t(), t()} | {:closed | :stale, t()}
+          {:ready, FileTree.t(), non_neg_integer(), t()}
+          | {:closed, non_neg_integer(), t()}
+          | {:stale, t()}
   def refresh_debounce_elapsed(%__MODULE__{} = ft, token) when is_reference(token) do
     case Refresh.debounce_elapsed(ft.refresh, token) do
       {:stale, refresh} ->
         {:stale, %{ft | refresh: refresh}}
 
-      {:current, refresh} ->
-        refresh_debounce_tree(%{ft | refresh: refresh})
+      {:current, attempt, refresh} ->
+        refresh_debounce_tree(%{ft | refresh: refresh}, attempt)
     end
   end
 
@@ -495,7 +497,8 @@ defmodule MingaEditor.State.FileTree do
           ft
           | content: {:loading, tree},
             interaction: if(disposition == :keep_open, do: :filtering, else: :browse),
-            filter_request: nil
+            filter_request: nil,
+            refresh: Refresh.invalidate(ft.refresh)
         }
 
       nil ->
@@ -585,11 +588,12 @@ defmodule MingaEditor.State.FileTree do
   def set_tree(%__MODULE__{} = ft, nil), do: close(ft)
   def set_tree(%__MODULE__{} = ft, %FileTree{} = tree), do: replace_tree(ft, tree)
 
-  @spec refresh_debounce_tree(t()) :: {:ready, FileTree.t(), t()} | {:closed, t()}
-  defp refresh_debounce_tree(%__MODULE__{} = ft) do
+  @spec refresh_debounce_tree(t(), non_neg_integer()) ::
+          {:ready, FileTree.t(), non_neg_integer(), t()} | {:closed, non_neg_integer(), t()}
+  defp refresh_debounce_tree(%__MODULE__{} = ft, attempt) do
     case tree(ft) do
-      %FileTree{} = tree -> {:ready, tree, ft}
-      nil -> {:closed, ft}
+      %FileTree{} = tree -> {:ready, tree, attempt, ft}
+      nil -> {:closed, attempt, ft}
     end
   end
 
