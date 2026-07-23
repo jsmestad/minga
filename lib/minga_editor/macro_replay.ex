@@ -27,23 +27,20 @@ defmodule MingaEditor.MacroReplay do
         ) :: state()
   def maybe_record_key(state, key, commands) do
     rec = Editing.macro_recorder(state)
-    do_maybe_record_key(state, rec, key, commands)
-  end
+    toggle? = Enum.any?(commands, &match?(:toggle_macro_recording, &1))
 
-  @spec do_maybe_record_key(state(), MacroRecorder.t(), term(), [Mode.command()]) :: state()
-  defp do_maybe_record_key(state, %{replaying: true}, _key, _commands), do: state
-
-  defp do_maybe_record_key(state, rec, key, commands) do
-    case MacroRecorder.recording?(rec) do
-      {true, _reg} ->
-        if Enum.any?(commands, &match?(:toggle_macro_recording, &1)) do
-          state
-        else
-          Editing.set_macro_recorder(state, MacroRecorder.record_key(rec, key))
-        end
-
-      false ->
+    case {MacroRecorder.replaying?(rec), MacroRecorder.recording?(rec), toggle?} do
+      {true, _recording, _toggle?} ->
         state
+
+      {false, false, _toggle?} ->
+        state
+
+      {false, {true, _register}, true} ->
+        state
+
+      {false, {true, _register}, false} ->
+        Editing.set_macro_recorder(state, MacroRecorder.record_key(rec, key))
     end
   end
 

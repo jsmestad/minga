@@ -518,7 +518,6 @@ defmodule MingaEditor.Commands do
     rec =
       Editing.macro_recorder(state)
       |> MacroRecorder.start_recording(register)
-      |> Map.put(:last_register, register)
 
     Editing.set_macro_recorder(state, rec)
   end
@@ -534,7 +533,10 @@ defmodule MingaEditor.Commands do
         )
 
       _keys ->
-        rec = %{Editing.macro_recorder(state) | last_register: register}
+        rec =
+          Editing.macro_recorder(state)
+          |> MacroRecorder.select_replay_register(register)
+
         {Editing.set_macro_recorder(state, rec), {:replay_macro, register}}
     end
   end

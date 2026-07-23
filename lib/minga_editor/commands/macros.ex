@@ -32,11 +32,13 @@ defmodule MingaEditor.Commands.Macros do
 
   @spec replay_last(state()) :: state() | {state(), action()}
   def replay_last(state) do
-    case Editing.macro_recorder(state) do
-      %{last_register: nil} ->
+    rec = Editing.macro_recorder(state)
+
+    case MacroRecorder.last_register(rec) do
+      nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No previous macro")
 
-      %{last_register: reg} ->
+      reg ->
         {state, {:replay_macro, reg}}
     end
   end
