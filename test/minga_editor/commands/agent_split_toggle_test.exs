@@ -335,7 +335,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       new_state = AgentCommands.open_session(state, "sess-42", "tc_auth")
 
-      jump = new_state.workspace.agent_ui.panel.provenance_jump
+      jump = new_state.workspace.agent_ui.panel.transcript.provenance_jump
       assert jump != nil
       # default ids zip with index+1, so the :user message is id 1.
       assert jump.target_message_id == 1
@@ -349,7 +349,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       new_state = AgentCommands.open_session(state, "sess-1")
 
-      assert new_state.workspace.agent_ui.panel.provenance_jump == nil
+      assert new_state.workspace.agent_ui.panel.transcript.provenance_jump == nil
     end
   end
 
@@ -374,12 +374,12 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       new_state = AgentCommands.scope_provenance_return(state)
 
       assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :file
-      assert new_state.workspace.agent_ui.panel.provenance_jump == nil
+      assert new_state.workspace.agent_ui.panel.transcript.provenance_jump == nil
     end
 
     test "is a no-op with a status message when there is no active jump" do
       state = base_state(active: true)
-      assert state.workspace.agent_ui.panel.provenance_jump == nil
+      assert state.workspace.agent_ui.panel.transcript.provenance_jump == nil
 
       new_state = AgentCommands.scope_provenance_return(state)
 

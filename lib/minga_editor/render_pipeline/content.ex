@@ -428,7 +428,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       end
 
     cursor = prompt_cursor(ctx, full_rect)
-    total_lines = Enum.count(state.workspace.agent_ui.panel.cached_line_index)
+    total_lines = Enum.count(state.workspace.agent_ui.panel.transcript.line_index)
     state = update_agent_scroll_metrics(state, total_lines, chat_height)
 
     {WindowContent.new(nil, prompt_models, cursor), cursor, state}

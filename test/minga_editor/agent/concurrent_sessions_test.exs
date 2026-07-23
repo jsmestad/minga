@@ -9,8 +9,10 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaAgent.EventLog.EventRecord
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Registry
@@ -277,13 +279,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
             state,
             (fn panel ->
-               %{
-                 panel
-                 | cached_line_index: [{0, :text}],
-                   cached_display_messages: [stale_message],
-                   cached_display_message_pairs: [{7, stale_message}],
-                   cached_styled_messages: [nil]
-               }
+               display = Transcript.display([stale_message], message_ids: [{7, stale_message}])
+
+               Panel.cache_transcript_display(panel, display, [nil],
+                 styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(%{})
+               )
              end).(state.workspace.agent_ui.panel)
           )
         end)
@@ -291,10 +291,10 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       preserved = AgentLifecycle.sync_transcript(state)
       panel = preserved.workspace.agent_ui.panel
 
-      assert panel.cached_line_index == [{0, :text}]
-      assert panel.cached_display_messages == [stale_message]
-      assert panel.cached_display_message_pairs == [{7, stale_message}]
-      assert panel.cached_styled_messages == [nil]
+      assert panel.transcript.line_index == [{0, :text}]
+      assert panel.transcript.messages == [stale_message]
+      assert panel.transcript.message_pairs == [{7, stale_message}]
+      assert panel.transcript.styled == [nil]
     end
 
     test "cache_messages clears stale semantic transcript cache when the session has no messages" do
@@ -304,15 +304,16 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
             state,
             (fn panel ->
-               %{
-                 panel
-                 | cached_line_index: [{0, :text}],
-                   cached_display_messages: [{:assistant, "stale answer"}],
-                   cached_display_message_pairs: [{7, {:assistant, "stale answer"}}],
-                   cached_styled_messages: [[[{"stale", 0, 0, 0}]]],
+               display =
+                 Transcript.display([{:assistant, "stale answer"}],
                    display_start_index: 3,
-                   provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7)
-               }
+                   message_ids: [{7, {:assistant, "stale answer"}}]
+                 )
+
+               Panel.cache_transcript_display(panel, display, [[[{"stale", 0, 0, 0}]]],
+                 provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7),
+                 styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(%{})
+               )
              end).(state.workspace.agent_ui.panel)
           )
         end)
@@ -320,12 +321,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       cleared = AgentLifecycle.cache_messages(stale_state, [])
       panel = cleared.workspace.agent_ui.panel
 
-      assert panel.cached_line_index == []
-      assert panel.cached_display_messages == []
-      assert panel.cached_display_message_pairs == []
-      assert panel.cached_styled_messages == nil
-      assert panel.display_start_index == 0
-      assert panel.provenance_jump == nil
+      assert panel.transcript.line_index == []
+      assert panel.transcript.messages == []
+      assert panel.transcript.message_pairs == []
+      assert panel.transcript.styled == nil
+      assert panel.transcript.display_start == 0
+      assert panel.transcript.provenance_jump == nil
     end
 
     test "update_styled_cache reuses unchanged displayed message styles" do
@@ -338,7 +339,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
         |> base_state(1)
 
-      fingerprint = Panel.styled_cache_fingerprint(state.appearance.theme.syntax)
+      fingerprint = TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
 
       state =
         state
@@ -346,19 +347,18 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
             state,
             (fn panel ->
-               %{
-                 panel
-                 | cached_display_messages: [message],
-                   cached_styled_messages: cached,
-                   cached_styled_fingerprint: fingerprint
-               }
+               display = Transcript.display([message])
+
+               Panel.cache_transcript_display(panel, display, cached,
+                 styled_fingerprint: fingerprint
+               )
              end).(state.workspace.agent_ui.panel)
           )
         end)
 
       updated = AgentLifecycle.update_styled_cache(state)
 
-      assert updated.workspace.agent_ui.panel.cached_styled_messages == cached
+      assert updated.workspace.agent_ui.panel.transcript.styled == cached
     end
 
     test "update_styled_cache invalidates stale styles when the theme syntax changes" do
@@ -373,7 +373,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       old_theme = state.appearance.theme
       new_theme = %{old_theme | syntax: Map.put(old_theme.syntax, "variable", fg: 0x123456)}
-      fingerprint = Panel.styled_cache_fingerprint(old_theme.syntax)
+      fingerprint = TranscriptProjection.styled_cache_fingerprint(old_theme.syntax)
 
       state =
         state
@@ -382,12 +382,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
             state,
             (fn panel ->
-               %{
-                 panel
-                 | cached_display_messages: [message],
-                   cached_styled_messages: cached,
-                   cached_styled_fingerprint: fingerprint
-               }
+               display = Transcript.display([message])
+
+               Panel.cache_transcript_display(panel, display, cached,
+                 styled_fingerprint: fingerprint
+               )
              end).(state.workspace.agent_ui.panel)
           )
         end)
@@ -395,7 +394,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       updated = AgentLifecycle.update_styled_cache(state)
 
       assert [%{styled_lines: [[{"plain answer", fg, 0, 0}]], markdown_blocks: [block]}] =
-               updated.workspace.agent_ui.panel.cached_styled_messages
+               updated.workspace.agent_ui.panel.transcript.styled
 
       assert fg == 0x123456
       assert [[{"plain answer", ^fg, 0, 0}]] = block.lines
@@ -413,11 +412,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
             state,
             (fn panel ->
-               %{
-                 panel
-                 | cached_display_messages: [message],
-                   cached_styled_messages: nil
-               }
+               Panel.cache_transcript_display(panel, Transcript.display([message]), nil)
              end).(state.workspace.agent_ui.panel)
           )
         end)
@@ -425,7 +420,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       updated = AgentLifecycle.update_styled_cache(state)
 
       assert [%{styled_lines: [[{"unchanged answer", _fg, 0, 0}]], markdown_blocks: [block]}] =
-               updated.workspace.agent_ui.panel.cached_styled_messages
+               updated.workspace.agent_ui.panel.transcript.styled
 
       assert block.kind == :paragraph
     end
@@ -485,13 +480,13 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       agent = TraditionalState.agent(switched.shell_runtime.state)
       drained = TabBar.get_workspace(switched.shell_runtime.state.tab_bar, incoming_workspace.id)
 
-      assert switched.workspace.agent_ui.panel.message_version > 7
-      assert switched.workspace.agent_ui.panel.message_version < 100
-      assert switched.workspace.agent_ui.panel.message_version != 42
-      assert drained.agent_ui.panel.message_version != 42
+      assert switched.workspace.agent_ui.panel.transcript.version > 7
+      assert switched.workspace.agent_ui.panel.transcript.version < 100
+      assert switched.workspace.agent_ui.panel.transcript.version != 42
+      assert drained.agent_ui.panel.transcript.version != 42
 
-      assert drained.agent_ui.panel.message_version ==
-               switched.workspace.agent_ui.panel.message_version
+      assert drained.agent_ui.panel.transcript.version ==
+               switched.workspace.agent_ui.panel.transcript.version
 
       assert drained.pending_catchup_events == []
       assert TraditionalState.modal(switched.shell_runtime.state) == :none
@@ -500,7 +495,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert AgentState.status(agent) == :tool_executing
       assert agent.runtime.active_tool_name == "read_file"
 
-      assert switched.workspace.agent_ui.panel.cached_display_messages == [
+      assert switched.workspace.agent_ui.panel.transcript.messages == [
                {:user, "incoming question"},
                {:assistant, "incoming answer"}
              ]
@@ -535,7 +530,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
             state,
             (fn panel ->
-               %{panel | cached_display_messages: [{:assistant, "stale answer"}]}
+               Panel.cache_transcript_display(
+                 panel,
+                 Transcript.display([{:assistant, "stale answer"}]),
+                 nil
+               )
              end).(state.workspace.agent_ui.panel)
           )
         end)
@@ -550,7 +549,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       assert {:agent_chat, :semantic} = active_window.content
 
-      assert switched.workspace.agent_ui.panel.cached_display_messages == [
+      assert switched.workspace.agent_ui.panel.transcript.messages == [
                {:user, "inspect background session"},
                {:assistant, "unique background answer"}
              ]

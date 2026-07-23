@@ -1,7 +1,9 @@
 defmodule MingaEditor.Input.AgentMouseTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
@@ -81,22 +83,16 @@ defmodule MingaEditor.Input.AgentMouseTest do
   defp seed_agent_transcript(state, ""), do: state
 
   defp seed_agent_transcript(state, agent_content) do
-    line_index =
-      agent_content
-      |> String.split("\n")
-      |> Enum.with_index()
-      |> Enum.map(fn {_line, idx} -> {idx, :assistant} end)
-
-    total_lines = Enum.count(line_index)
+    messages = [{:assistant, agent_content}]
+    display = Transcript.display(messages)
+    total_lines = Enum.count(display.line_index)
 
     MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
       state,
       (fn panel ->
-         %{
-           panel
-           | cached_line_index: line_index,
-             scroll: Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, 8)
-         }
+         panel
+         |> Panel.cache_transcript_display(display, nil)
+         |> Panel.set_scroll(Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, 8))
        end).(state.workspace.agent_ui.panel)
     )
   end

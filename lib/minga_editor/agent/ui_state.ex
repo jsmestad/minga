@@ -11,7 +11,6 @@ defmodule MingaEditor.Agent.UIState do
   Most callers use the functions on this module. Input handlers and
   renderers read the focused UI value from the editor workspace.
   """
-
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Agent.UIState.Compaction
@@ -251,15 +250,16 @@ defmodule MingaEditor.Agent.UIState do
   @doc """
   Clears the chat display without affecting conversation history.
 
-  Sets `display_start_index` to the given message count so the renderer
-  skips all messages before this point. Scrolls to bottom.
+  Sets `transcript.display_start` to the given message count so the renderer skips all messages before this point. Scrolls to bottom.
   """
   @spec clear_display(t(), non_neg_integer()) :: t()
   def clear_display(%__MODULE__{panel: panel} = state, message_count) do
-    %{
-      state
-      | panel: %{panel | display_start_index: message_count, scroll: Minga.Editing.new_scroll()}
-    }
+    panel =
+      panel
+      |> Panel.set_display_start(message_count)
+      |> Panel.set_scroll(Minga.Editing.new_scroll())
+
+    %{state | panel: panel}
   end
 
   # ── Model/provider config ──────────────────────────────────────────────────

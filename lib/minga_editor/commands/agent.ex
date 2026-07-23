@@ -1469,7 +1469,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec display_pair_at(state(), pid(), non_neg_integer()) :: {pos_integer(), Message.t()} | nil
   defp display_pair_at(state, session, msg_idx) do
     pairs =
-      case state.workspace.agent_ui.panel.cached_display_message_pairs do
+      case state.workspace.agent_ui.panel.transcript.message_pairs do
         [] -> Session.messages_with_ids(session)
         cached -> cached
       end
@@ -1583,7 +1583,7 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec scope_provenance_return(state()) :: state()
   def scope_provenance_return(state) do
-    case state.workspace.agent_ui.panel.provenance_jump do
+    case state.workspace.agent_ui.panel.transcript.provenance_jump do
       %ProvenanceJump{origin: {path, line}} ->
         state
         |> then(fn state ->
@@ -1955,7 +1955,7 @@ defmodule MingaEditor.Commands.Agent do
       line_map = cached_or_compute_line_index(panel, messages)
 
       display_msgs =
-        case panel.cached_display_messages do
+        case panel.transcript.messages do
           [] -> messages
           cached -> cached
         end
@@ -2072,13 +2072,11 @@ defmodule MingaEditor.Commands.Agent do
     :exit, _ -> []
   end
 
-  # Returns the cached line index from the panel state if available,
-  # otherwise recomputes from messages. The cache is populated by
-  # AgentLifecycle.sync_transcript/1 on every message update.
+  # Returns the cached line index from the panel state if available, otherwise recomputes from messages.
   @spec cached_or_compute_line_index(Panel.t(), [Message.t()]) ::
           [{non_neg_integer(), Transcript.line_type()}]
   defp cached_or_compute_line_index(panel, messages) do
-    case panel.cached_line_index do
+    case panel.transcript.line_index do
       [] -> Transcript.line_message_index(messages)
       cached -> cached
     end

@@ -14,6 +14,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
@@ -158,16 +159,17 @@ defmodule MingaEditor.AgentLifecycle do
   @spec cache_display_transcript(state(), [term()], Transcript.empty_state()) :: state()
   defp cache_display_transcript(state, messages, empty_state) do
     panel = state.workspace.agent_ui.panel
-    jump = panel.provenance_jump
+    projection = panel.transcript
+    jump = projection.provenance_jump
 
     sync_opts =
       add_session_display_opts([], MingaEditor.Shell.Runtime.active_session(state.shell_runtime))
 
     sync_opts = maybe_put_empty_state(sync_opts, empty_state)
 
-    # A pending provenance jump may need an older, paged-out turn revealed so it
-    # can be landed on. Otherwise keep the panel's current display window.
-    display_start = jump_display_start(jump, panel.display_start_index, sync_opts[:message_ids])
+    # A pending provenance jump may reveal an older, paged-out turn so it can be landed on.
+    # Otherwise keep the current display window.
+    display_start = jump_display_start(jump, projection.display_start, sync_opts[:message_ids])
 
     sync_opts =
       if display_start > 0,
@@ -177,15 +179,14 @@ defmodule MingaEditor.AgentLifecycle do
     result = Transcript.display(messages, sync_opts)
 
     # Compute styled runs for GUI rendering against the displayed transcript.
-    # Reuse unchanged entries only when the style context still matches the
-    # cached fingerprint; theme changes must force a restyle.
-    styled_fingerprint = Panel.styled_cache_fingerprint(state.appearance.theme.syntax)
+    # Reuse unchanged entries only when the style context still matches the cached fingerprint.
+    styled_fingerprint =
+      TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
 
     {previous_messages, previous_styled} =
-      if panel.cached_styled_fingerprint == styled_fingerprint do
-        {panel.cached_display_messages, panel.cached_styled_messages || []}
-      else
-        {[], []}
+      case TranscriptProjection.styled_for(projection, styled_fingerprint) do
+        :stale -> {[], []}
+        {:ok, styled} -> {projection.messages, styled || []}
       end
 
     message_ids = Enum.map(result.display_message_pairs, fn {id, _message} -> id end)
@@ -218,7 +219,7 @@ defmodule MingaEditor.AgentLifecycle do
       state,
       (fn p ->
          Panel.cache_transcript_display(p, result, styled,
-           display_start_index: display_start,
+           display_start: display_start,
            provenance_jump: advance_jump(jump),
            styled_fingerprint: styled_fingerprint
          )
@@ -437,13 +438,16 @@ defmodule MingaEditor.AgentLifecycle do
     with true <- is_pid(session),
          messages when messages != [] <- displayed_messages_for_styling(state, session) do
       panel = state.workspace.agent_ui.panel
-      styled_fingerprint = Panel.styled_cache_fingerprint(state.appearance.theme.syntax)
+
+      styled_fingerprint =
+        TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
+
+      projection = panel.transcript
 
       {previous_messages, previous_styled} =
-        if panel.cached_styled_fingerprint == styled_fingerprint do
-          {panel.cached_display_messages, panel.cached_styled_messages || []}
-        else
-          {[], []}
+        case TranscriptProjection.styled_for(projection, styled_fingerprint) do
+          :stale -> {[], []}
+          {:ok, styled} -> {projection.messages, styled || []}
         end
 
       message_ids = displayed_message_ids_for_styling(state, session)
@@ -477,7 +481,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec displayed_messages_for_styling(state(), pid()) :: [term()]
   defp displayed_messages_for_styling(state, session) do
-    case state.workspace.agent_ui.panel.cached_display_messages do
+    case state.workspace.agent_ui.panel.transcript.messages do
       [] -> safe_messages(session)
       messages -> messages
     end
@@ -487,7 +491,7 @@ defmodule MingaEditor.AgentLifecycle do
   defp displayed_message_ids_for_styling(state, session) do
     panel = state.workspace.agent_ui.panel
 
-    case panel.cached_display_message_pairs do
+    case panel.transcript.message_pairs do
       [] -> session |> AgentSession.messages_with_ids() |> Enum.map(fn {id, _message} -> id end)
       pairs -> Enum.map(pairs, fn {id, _message} -> id end)
     end
@@ -502,9 +506,9 @@ defmodule MingaEditor.AgentLifecycle do
           [term()],
           [pos_integer()],
           [term()],
-          Panel.styled_cache()
+          TranscriptProjection.styled_cache()
         ) ::
-          Panel.styled_cache()
+          TranscriptProjection.styled_cache()
   defp compute_styled_messages(state, messages, message_ids, previous_messages, previous_styled) do
     highlight = nil
     theme_syntax = state.appearance.theme.syntax
@@ -523,7 +527,7 @@ defmodule MingaEditor.AgentLifecycle do
       messages,
       message_ids,
       previous_messages,
-      previous_styled || [],
+      previous_styled,
       0,
       style_context,
       []
@@ -534,11 +538,11 @@ defmodule MingaEditor.AgentLifecycle do
           [term()],
           [pos_integer()],
           [term()],
-          Panel.styled_cache(),
+          TranscriptProjection.styled_cache(),
           non_neg_integer(),
           style_context(),
-          [Panel.rendered_message() | nil]
-        ) :: [Panel.rendered_message() | nil]
+          [TranscriptProjection.rendered_message() | nil]
+        ) :: [TranscriptProjection.rendered_message() | nil]
   defp compute_styled_messages(
          [],
          _message_ids,
@@ -585,8 +589,9 @@ defmodule MingaEditor.AgentLifecycle do
     )
   end
 
-  @spec cached_styled_message(term(), [term()], Panel.styled_cache()) ::
-          {[term()], Panel.styled_cache(), {:ok, Panel.rendered_message() | nil} | :miss}
+  @spec cached_styled_message(term(), [term()], TranscriptProjection.styled_cache()) ::
+          {[term()], TranscriptProjection.styled_cache(),
+           {:ok, TranscriptProjection.rendered_message() | nil} | :miss}
   defp cached_styled_message(message, [previous_message | previous_messages], [
          styled | previous_styled
        ])
@@ -617,7 +622,7 @@ defmodule MingaEditor.AgentLifecycle do
   defp next_message_id([], idx), do: {idx + 1, []}
 
   @spec style_message(term(), non_neg_integer(), pos_integer(), style_context()) ::
-          Panel.rendered_message() | nil
+          TranscriptProjection.rendered_message() | nil
   defp style_message(
          {:assistant, text},
          idx,

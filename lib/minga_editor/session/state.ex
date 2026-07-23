@@ -199,7 +199,7 @@ defmodule MingaEditor.Session.State do
         workspace
 
       {id, window} ->
-        total_lines = Enum.count(workspace.agent_ui.panel.cached_line_index)
+        total_lines = Enum.count(workspace.agent_ui.panel.transcript.line_index)
         updated = Window.scroll_viewport(window, delta, total_lines)
         replace_window(workspace, id, updated)
     end

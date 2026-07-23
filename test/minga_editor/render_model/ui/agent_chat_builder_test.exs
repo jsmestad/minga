@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias Minga.Editing.Scroll
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Frontend.Emit.Context
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias MingaEditor.UI.Theme
@@ -82,7 +83,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
         styled_messages: [
           %{styled_lines: [[{"fallback", 0xBBC2CF, 0, 0}]], markdown_blocks: blocks}
         ],
-        styled_fingerprint: Panel.styled_cache_fingerprint(Theme.Fallback.theme().syntax)
+        styled_fingerprint:
+          TranscriptProjection.styled_cache_fingerprint(Theme.Fallback.theme().syntax)
       )
 
     model =
@@ -100,7 +102,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     panel =
       synced_panel([{:assistant, "cached answer"}],
         styled_messages: [[{"cached answer", 0x98BE65, 0, 0}]],
-        styled_fingerprint: Panel.styled_cache_fingerprint(old_theme.syntax)
+        styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(old_theme.syntax)
       )
 
     model =

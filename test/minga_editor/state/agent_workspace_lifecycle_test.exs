@@ -611,7 +611,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     %{ui | panel: %{ui.panel | visible: true}}
   end
 
-  defp panel_message_version(state), do: state.workspace.agent_ui.panel.message_version
+  defp panel_message_version(state), do: state.workspace.agent_ui.panel.transcript.version
 
   defp stop_session(pid) when is_pid(pid) do
     AgentSession.stop_session_pid(pid)
