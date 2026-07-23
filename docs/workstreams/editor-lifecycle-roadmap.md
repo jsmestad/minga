@@ -4483,7 +4483,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W110/ES14: Put inline ask/edit session lifecycle into tagged phases
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES14
 - **Planning profile:** `ES14Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES14Worker`, no delegation.
@@ -4507,3 +4507,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the phase and proposal sums, session stop/ownership contracts, input/render/command behavior, review corrections, merge-visible new state test, and production/test budgets.
 - **Discoveries affecting later work:** The direct full-suite `mix test` command can fail in a fresh worktree when native parser support is absent; `make test` is the project-documented full-suite wrapper that builds parser support first. Targeted Ponytail recheck found one non-behavioral module-doc rewrap in `lib/minga_editor/inline_edit/events.ex`; it was reverted, leaving production net `+43` under budget. No replan trigger, owner drift, production budget issue, test budget issue, protocol/frontend dependency, persisted migration need, compatibility need, or additional ES14 scope dependency was found.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3214
+- **Implementation commit SHA:** `28a9fb52114e6a49d44f20a4ba41a1d28dbdb3e0`
+- **Merge SHA:** `acac26157c4fecfd5820aececb8d10754b0a7d06`
+- **Merge evidence:** PR #3214 merged after CI run `29996987617` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES14 is fully resolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR, implementation SHA, merge SHA, successful CI run, completion date, and full ES14 resolution were independently confirmed.
