@@ -264,9 +264,10 @@ defmodule MingaEditor.MouseTest do
       assert state.workspace.editing.mode == :visual
       assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
       assert state.workspace.editing.mode_state.visual_type == :line
-      assert state.workspace.mouse.dragging
-      assert state.workspace.mouse.anchor == {0, 0}
-      assert state.workspace.mouse.drag_origin_window == state.workspace.windows.active
+      assert MouseState.dragging?(state.workspace.mouse)
+
+      assert MouseState.active_drag(state.workspace.mouse) ==
+               {:active, {0, 0}, state.workspace.windows.active, 3}
     end
 
     test "triple-click uses folded display-map line mapping" do
@@ -285,9 +286,10 @@ defmodule MingaEditor.MouseTest do
       assert state.workspace.editing.mode == :visual
       assert state.workspace.editing.mode_state.visual_anchor == {3, 0}
       assert state.workspace.editing.mode_state.visual_type == :line
-      assert state.workspace.mouse.dragging
-      assert state.workspace.mouse.anchor == {3, 0}
-      assert state.workspace.mouse.drag_origin_window == state.workspace.windows.active
+      assert MouseState.dragging?(state.workspace.mouse)
+
+      assert MouseState.active_drag(state.workspace.mouse) ==
+               {:active, {3, 0}, state.workspace.windows.active, 3}
     end
 
     test "wrapped visual row offset maps top-screen clicks into the visible continuation row" do
@@ -461,7 +463,7 @@ defmodule MingaEditor.MouseTest do
 
       new_state = mouse(state, 0, 0, :left, :release)
 
-      assert new_state.workspace.mouse.resize_dragging == nil
+      refute MouseState.resizing?(new_state.workspace.mouse)
     end
 
     test "text drag release clears dragging even after the active buffer disappears" do
@@ -474,8 +476,8 @@ defmodule MingaEditor.MouseTest do
 
       new_state = mouse(state, 0, 0, :left, :release)
 
-      refute new_state.workspace.mouse.dragging
-      assert new_state.workspace.mouse.anchor == nil
+      refute MouseState.dragging?(new_state.workspace.mouse)
+      assert MouseState.active_drag(new_state.workspace.mouse) == :idle
     end
   end
 
@@ -504,7 +506,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, drag_row, drag_col, :left, :release)
 
       assert state.workspace.editing.mode == :visual
-      refute state.workspace.mouse.dragging
+      refute MouseState.dragging?(state.workspace.mouse)
     end
 
     test "dragging past the bottom and right edges autoscrolls while extending selection" do
@@ -554,7 +556,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, other_drag_row, other_drag_col, :left, :drag)
 
       assert state.workspace.windows.active == origin_id
-      assert state.workspace.mouse.drag_origin_window == origin_id
+      assert MouseState.active_drag(state.workspace.mouse) == {:active, {0, 0}, origin_id, 1}
       assert state.workspace.editing.mode == :visual
     end
 

@@ -19,6 +19,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Diagnostics
   alias MingaEditor.InlineAsk.Render, as: InlineAskRender
   alias MingaEditor.InlineEdit.Render, as: InlineEditRender
+  alias MingaEditor.State.Mouse
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
@@ -172,7 +173,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @spec extract_hover_row(state()) :: non_neg_integer() | nil
   defp extract_hover_row(state) do
-    case state.workspace.mouse.hover_pos do
+    case Mouse.hover_position(state.workspace.mouse) do
       {row, _col} when is_integer(row) -> row
       _ -> nil
     end

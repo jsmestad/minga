@@ -11,6 +11,7 @@ defmodule MingaEditor.MouseHoverTooltip do
   alias Minga.Diagnostics
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Mouse
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
@@ -23,25 +24,23 @@ defmodule MingaEditor.MouseHoverTooltip do
   (async, will arrive via the lsp_response handler).
   """
   @spec check_hover(state()) :: state()
-  def check_hover(%{workspace: %{mouse: %{hover_pos: nil}}} = state), do: state
   def check_hover(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
-  def check_hover(%{workspace: %{mouse: %{hover_pos: {row, col}}}} = state) do
-    case HitTest.resolve_buffer(state, row, col) do
-      {:buffer, target} ->
-        case check_diagnostic(target.buffer, target.line) do
-          nil ->
-            send_hover_request(state, target.buffer, target.line, target.col, row, col)
+  def check_hover(state) do
+    with {row, col} <- Mouse.hover_position(state.workspace.mouse),
+         {:buffer, target} <- HitTest.resolve_buffer(state, row, col) do
+      case check_diagnostic(target.buffer, target.line) do
+        nil ->
+          send_hover_request(state, target.buffer, target.line, target.col, row, col)
 
-          message ->
-            popup =
-              MingaEditor.HoverPopup.Builder.new(message, row, col, theme: state.appearance.theme)
+        message ->
+          popup =
+            MingaEditor.HoverPopup.Builder.new(message, row, col, theme: state.appearance.theme)
 
-            MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
-        end
-
-      _ ->
-        state
+          MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
+      end
+    else
+      _ -> state
     end
   end
 

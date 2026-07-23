@@ -26,28 +26,36 @@ defmodule MingaEditor.State.Mouse do
   # pointer motion does not thrash the LSP.
   @hover_delay_ms 300
 
-  defstruct dragging: false,
-            anchor: nil,
-            drag_origin_window: nil,
-            resize_dragging: nil,
-            last_press_time: nil,
-            last_press_pos: nil,
-            click_count: 0,
-            drag_click_count: 1,
-            hover_pos: nil,
-            hover_timer: nil
+  defstruct drag: :idle,
+            resize: :idle,
+            clicks: :idle,
+            hover: :idle
+
+  @type drag ::
+          :idle
+          | {:active,
+             %{
+               anchor: {non_neg_integer(), non_neg_integer()},
+               origin_window: MingaEditor.Window.id() | nil,
+               click_count: pos_integer()
+             }}
+  @type resize ::
+          :idle | {:active, {WindowTree.direction() | :agent_separator, non_neg_integer()}}
+  @type clicks ::
+          :idle
+          | {:pressed,
+             %{
+               time: integer(),
+               pos: {integer(), integer()},
+               count: pos_integer()
+             }}
+  @type hover :: :idle | {:active, {integer(), integer()}, reference() | nil}
 
   @type t :: %__MODULE__{
-          dragging: boolean(),
-          anchor: {non_neg_integer(), non_neg_integer()} | nil,
-          drag_origin_window: MingaEditor.Window.id() | nil,
-          resize_dragging: {WindowTree.direction() | :agent_separator, non_neg_integer()} | nil,
-          last_press_time: integer() | nil,
-          last_press_pos: {integer(), integer()} | nil,
-          click_count: non_neg_integer(),
-          drag_click_count: pos_integer(),
-          hover_pos: {integer(), integer()} | nil,
-          hover_timer: reference() | nil
+          drag: drag(),
+          resize: resize(),
+          clicks: clicks(),
+          hover: hover()
         }
 
   @doc "Begins a content drag from the given buffer position."
@@ -62,41 +70,53 @@ defmodule MingaEditor.State.Mouse do
   def start_drag(%__MODULE__{} = mouse, anchor, origin_window) do
     %{
       mouse
-      | dragging: true,
-        anchor: anchor,
-        drag_origin_window: origin_window,
-        drag_click_count: max(mouse.click_count, 1)
+      | drag:
+          {:active,
+           %{
+             anchor: anchor,
+             origin_window: origin_window,
+             click_count: max(click_count(mouse), 1)
+           }}
     }
   end
 
-  @doc "Ends an active drag, clearing the anchor."
   @spec stop_drag(t()) :: t()
-  def stop_drag(%__MODULE__{} = mouse) do
-    %{mouse | dragging: false, anchor: nil, drag_origin_window: nil}
+  def stop_drag(%__MODULE__{} = mouse), do: %{mouse | drag: :idle}
+
+  @spec dragging?(t()) :: boolean()
+  def dragging?(%__MODULE__{drag: {:active, _}}), do: true
+  def dragging?(%__MODULE__{drag: :idle}), do: false
+
+  @spec active_drag(t()) ::
+          {:active, {non_neg_integer(), non_neg_integer()}, MingaEditor.Window.id() | nil,
+           pos_integer()}
+          | :idle
+  def active_drag(%__MODULE__{
+        drag: {:active, %{anchor: anchor, origin_window: origin_window, click_count: click_count}}
+      }) do
+    {:active, anchor, origin_window, click_count}
   end
 
-  @doc "Begins a separator resize drag in the given direction at the given position."
+  def active_drag(%__MODULE__{drag: :idle}), do: :idle
+
   @spec start_resize(t(), WindowTree.direction() | :agent_separator, non_neg_integer()) :: t()
   def start_resize(%__MODULE__{} = mouse, direction, position) do
-    %{mouse | resize_dragging: {direction, position}}
+    %{mouse | resize: {:active, {direction, position}}}
   end
 
-  @doc "Updates the separator position during an active resize drag."
   @spec update_resize(t(), WindowTree.direction() | :agent_separator, non_neg_integer()) :: t()
-  def update_resize(%__MODULE__{} = mouse, direction, new_position) do
-    %{mouse | resize_dragging: {direction, new_position}}
+  def update_resize(%__MODULE__{resize: {:active, _}} = mouse, direction, new_position) do
+    %{mouse | resize: {:active, {direction, new_position}}}
   end
 
-  @doc "Ends a separator resize drag."
+  def update_resize(%__MODULE__{resize: :idle} = mouse, _direction, _new_position), do: mouse
+
   @spec stop_resize(t()) :: t()
-  def stop_resize(%__MODULE__{} = mouse) do
-    %{mouse | resize_dragging: nil}
-  end
+  def stop_resize(%__MODULE__{} = mouse), do: %{mouse | resize: :idle}
 
-  @doc "Returns true if a separator resize drag is active."
   @spec resizing?(t()) :: boolean()
-  def resizing?(%__MODULE__{resize_dragging: {_, _}}), do: true
-  def resizing?(%__MODULE__{}), do: false
+  def resizing?(%__MODULE__{resize: {:active, _}}), do: true
+  def resizing?(%__MODULE__{resize: :idle}), do: false
 
   # ── Multi-click detection ──────────────────────────────────────────────────
 
@@ -106,13 +126,12 @@ defmodule MingaEditor.State.Mouse do
   If `native_click_count > 1`, uses that directly (GUI frontend).
   Otherwise, detects multi-clicks by timing and position (TUI fallback).
 
-  Returns the updated mouse state with `click_count` set.
+  Returns the updated mouse state with the effective click count set.
   """
   @spec record_press(t(), integer(), integer(), pos_integer()) :: t()
   def record_press(%__MODULE__{} = mouse, row, col, native_click_count),
     do: record_press_at(mouse, row, col, native_click_count, 0)
 
-  @doc "Records a mouse press using a timestamp supplied by the input workflow."
   @spec record_press_at(t(), integer(), integer(), pos_integer(), integer()) :: t()
   def record_press_at(%__MODULE__{} = mouse, row, col, native_click_count, now)
       when is_integer(now) do
@@ -125,21 +144,22 @@ defmodule MingaEditor.State.Mouse do
         compute_click_count(mouse, row, col, now)
       end
 
-    %{mouse | last_press_time: now, last_press_pos: {row, col}, click_count: effective_count}
+    %{mouse | clicks: {:pressed, %{time: now, pos: {row, col}, count: effective_count}}}
   end
+
+  @spec click_count(t()) :: non_neg_integer()
+  def click_count(%__MODULE__{clicks: {:pressed, %{count: count}}}), do: count
+  def click_count(%__MODULE__{clicks: :idle}), do: 0
 
   @spec compute_click_count(t(), integer(), integer(), integer()) :: pos_integer()
   defp compute_click_count(
-         %{
-           last_press_time: prev_time,
-           last_press_pos: {prev_row, prev_col},
-           click_count: prev_count
+         %__MODULE__{
+           clicks: {:pressed, %{time: prev_time, pos: {prev_row, prev_col}, count: prev_count}}
          },
          row,
          col,
          now
-       )
-       when is_integer(prev_time) do
+       ) do
     time_ok = now - prev_time <= @double_click_ms
     pos_ok = abs(row - prev_row) <= @click_distance and abs(col - prev_col) <= @click_distance
 
@@ -154,46 +174,51 @@ defmodule MingaEditor.State.Mouse do
     end
   end
 
-  defp compute_click_count(_mouse, _row, _col, _now), do: 1
+  defp compute_click_count(%__MODULE__{clicks: :idle}, _row, _col, _now), do: 1
 
-  @doc "Returns the double-click timing window in milliseconds (for testing)."
   @spec double_click_ms() :: pos_integer()
   def double_click_ms, do: @double_click_ms
 
-  @doc "Returns the hover debounce delay in milliseconds (for testing)."
   @spec hover_delay_ms() :: pos_integer()
   def hover_delay_ms, do: @hover_delay_ms
 
   # ── Hover tracking ─────────────────────────────────────────────────────────
 
-  @doc "Records hover position and returns timer work for the owning workflow."
   @spec set_hover(t(), integer(), integer(), keyword()) :: t()
   def set_hover(%__MODULE__{} = mouse, row, col, _opts \\ []) do
     {mouse, _timer, _schedule?} = prepare_hover(mouse, row, col, backend: :headless)
+
     mouse
   end
 
-  @doc "Prepares hover state without touching the process timer API."
   @spec prepare_hover(t(), integer(), integer(), keyword()) :: {t(), reference() | nil, boolean()}
   def prepare_hover(%__MODULE__{} = mouse, row, col, opts \\ []) do
     {
-      %{mouse | hover_pos: {row, col}, hover_timer: nil},
-      mouse.hover_timer,
+      %{mouse | hover: {:active, {row, col}, nil}},
+      hover_timer(mouse),
       Keyword.get(opts, :backend) != :headless
     }
   end
 
-  @doc "Records a timer reference created by the mouse workflow."
   @spec accept_hover_timer(t(), reference()) :: t()
-  def accept_hover_timer(%__MODULE__{} = mouse, timer) when is_reference(timer),
-    do: %{mouse | hover_timer: timer}
+  def accept_hover_timer(%__MODULE__{hover: {:active, pos, nil}} = mouse, timer)
+      when is_reference(timer),
+      do: %{mouse | hover: {:active, pos, timer}}
 
-  @doc "Clears hover state and returns any timer for the owning workflow to cancel."
+  def accept_hover_timer(%__MODULE__{} = mouse, timer) when is_reference(timer), do: mouse
+
   @spec clear_hover(t()) :: t()
-  def clear_hover(%__MODULE__{} = mouse), do: %{mouse | hover_pos: nil, hover_timer: nil}
+  def clear_hover(%__MODULE__{} = mouse), do: %{mouse | hover: :idle}
 
-  @doc "Prepares hover clearing without touching the process timer API."
   @spec prepare_clear_hover(t()) :: {t(), reference() | nil}
   def prepare_clear_hover(%__MODULE__{} = mouse),
-    do: {%{mouse | hover_pos: nil, hover_timer: nil}, mouse.hover_timer}
+    do: {%{mouse | hover: :idle}, hover_timer(mouse)}
+
+  @spec hover_position(t()) :: {integer(), integer()} | nil
+  def hover_position(%__MODULE__{hover: {:active, pos, _timer}}), do: pos
+  def hover_position(%__MODULE__{hover: :idle}), do: nil
+
+  @spec hover_timer(t()) :: reference() | nil
+  defp hover_timer(%__MODULE__{hover: {:active, _pos, timer}}), do: timer
+  defp hover_timer(%__MODULE__{hover: :idle}), do: nil
 end
