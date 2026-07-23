@@ -59,14 +59,7 @@ defmodule MingaEditor.Commands.InlineEdit do
 
   @doc "Accepts a proposed inline edit into the buffer."
   @spec accept(state(), InlineEdit.t()) :: state()
-  def accept(state, %InlineEdit{status: status}) when status != :proposed do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-      state,
-      "Wait for an inline edit proposal first"
-    )
-  end
-
-  def accept(state, %InlineEdit{} = edit) do
+  def accept(state, %InlineEdit{phase: {:proposed, _proposal}} = edit) do
     if Buffer.read_only?(edit.buffer_pid) do
       MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
         state,
@@ -77,11 +70,18 @@ defmodule MingaEditor.Commands.InlineEdit do
     end
   end
 
+  def accept(state, %InlineEdit{}) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Wait for an inline edit proposal first"
+    )
+  end
+
   @spec apply_accepted_edit(state(), InlineEdit.t()) :: state()
   defp apply_accepted_edit(state, %InlineEdit{} = edit) do
     {first, last} = edit.selection_range
     last_col = last_line_length(edit.buffer_pid, last)
-    replacement = replacement_text(edit.buffer_pid, last, edit.proposed_rewrite)
+    replacement = replacement_text(edit.buffer_pid, last, InlineEdit.rewrite(edit))
     :ok = Buffer.apply_edit(edit.buffer_pid, first, 0, last, last_col, replacement)
     accept_success(state, edit)
   end
@@ -102,7 +102,7 @@ defmodule MingaEditor.Commands.InlineEdit do
   @doc "Dismisses an inline edit without mutating the buffer."
   @spec reject(state(), InlineEdit.t()) :: state()
   def reject(state, %InlineEdit{} = edit) do
-    MingaAgent.EphemeralSession.stop(edit.session_pid)
+    MingaAgent.EphemeralSession.stop(InlineEdit.session_pid(edit))
 
     {state, _session_pid} =
       MingaEditor.Shell.Traditional.Workflow.cancel_inline_edit(state, edit.buffer_pid)

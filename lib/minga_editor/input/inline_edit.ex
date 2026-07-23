@@ -33,34 +33,34 @@ defmodule MingaEditor.Input.InlineEdit do
   defp handle_inline_key(state, edit, 27), do: InlineEditCommand.reject(state, edit)
   defp handle_inline_key(state, edit, ?n), do: InlineEditCommand.reject(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{status: :proposed} = edit, 13),
+  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, 13),
     do: InlineEditCommand.accept(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{status: :proposed} = edit, ?y),
-    do: InlineEditCommand.accept(state, edit)
-
-  defp handle_inline_key(state, %InlineEdit{status: status} = edit, ?j)
-       when status in [:proposed, :error],
-       do: Overlay.update(state, InlineEdit.scroll(edit, 1), spec())
-
-  defp handle_inline_key(state, %InlineEdit{status: status} = edit, ?k)
-       when status in [:proposed, :error],
-       do: Overlay.update(state, InlineEdit.scroll(edit, -1), spec())
-
-  defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 13),
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, 13),
     do: Overlay.submit(state, edit, "Type a rewrite instruction first", spec())
 
-  defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 127),
-    do: Overlay.backspace(state, edit, spec())
+  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, ?y),
+    do: InlineEditCommand.accept(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{status: :input} = edit, 8),
-    do: Overlay.backspace(state, edit, spec())
+  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, codepoint)
+       when codepoint in [?j, ?k],
+       do: Overlay.update(state, InlineEdit.scroll(edit, scroll_delta(codepoint)), spec())
 
-  defp handle_inline_key(state, %InlineEdit{status: :input} = edit, codepoint)
-       when codepoint >= 32,
-       do: Overlay.append_printable(state, edit, codepoint, 0, spec())
+  defp handle_inline_key(state, %InlineEdit{phase: {:failed, _message}} = edit, codepoint)
+       when codepoint in [?j, ?k],
+       do: Overlay.update(state, InlineEdit.scroll(edit, scroll_delta(codepoint)), spec())
+
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, codepoint)
+       when codepoint in [127, 8],
+       do: Overlay.backspace(state, edit, spec())
+
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, codepoint)
+       when codepoint >= 32, do: Overlay.append_printable(state, edit, codepoint, 0, spec())
 
   defp handle_inline_key(state, _edit, _codepoint), do: state
+
+  defp scroll_delta(?j), do: 1
+  defp scroll_delta(?k), do: -1
 
   @spec spec() :: Overlay.spec()
   defp spec do
@@ -72,6 +72,7 @@ defmodule MingaEditor.Input.InlineEdit do
       cancel: &MingaEditor.Shell.Traditional.Workflow.cancel_inline_edit/2,
       state_module: InlineEdit,
       session_starter: &EphemeralSession.rewrite/3,
+      session_pid: &InlineEdit.session_pid/1,
       fail_prefix: "Failed to start inline edit: "
     }
   end

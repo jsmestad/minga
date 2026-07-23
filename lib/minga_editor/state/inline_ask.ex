@@ -4,19 +4,15 @@ defmodule MingaEditor.State.InlineAsk do
 
   Inline asks are presentation state only. They are not persisted and they do not create workspaces until explicitly promoted.
 
-  The shared per-buffer store mechanics (`active/2`, `put/2`, `dismiss/2`,
-  `session?/2`) and prompt-input mechanics (`append_input/2`, `backspace/1`,
-  `scroll/2`) live in `MingaEditor.InlineOverlay.Store` and
-  `MingaEditor.InlineOverlay.Prompt` and are reused here. This module owns
-  only the ask-specific shape and transitions: the read-only response
-  accumulation and the `:answered` terminal state.
+  The shared per-buffer store mechanics (`active/2`, `put/2`, `dismiss/2`, `session?/2`) and prompt-input mechanics (`append_input/2`, `backspace/1`, `scroll/2`) live in `MingaEditor.InlineOverlay.Store` and `MingaEditor.InlineOverlay.Prompt` and are reused here. This module owns only the ask-specific shape and transitions: the read-only response accumulation and the `:answered` terminal state.
   """
 
   alias Minga.Project.FileRef
   alias MingaEditor.InlineOverlay.Prompt
   alias MingaEditor.InlineOverlay.Store
 
-  @type status :: :input | :thinking | :answered | :error
+  @type phase ::
+          :input | {:running, pid(), String.t()} | {:answered, String.t()} | {:failed, String.t()}
 
   @type t :: %__MODULE__{
           buffer_pid: pid(),
@@ -26,9 +22,7 @@ defmodule MingaEditor.State.InlineAsk do
           selection_range: {non_neg_integer(), non_neg_integer()} | nil,
           context_text: String.t(),
           prompt: String.t(),
-          response: String.t(),
-          status: status(),
-          session_pid: pid() | nil,
+          phase: phase(),
           scroll: non_neg_integer()
         }
 
@@ -40,9 +34,7 @@ defmodule MingaEditor.State.InlineAsk do
             selection_range: nil,
             context_text: "",
             prompt: "",
-            response: "",
-            status: :input,
-            session_pid: nil,
+            phase: :input,
             scroll: 0
 
   @type store :: %{pid() => t()}
@@ -107,21 +99,18 @@ defmodule MingaEditor.State.InlineAsk do
   defp file_identity(%FileRef{kind: :path, relative_path: path}) when is_binary(path), do: path
   defp file_identity(%FileRef{display_name: name}), do: name
 
-  # Store mechanics (active/session?/put/dismiss) and prompt mechanics
-  # (append_input/backspace/scroll) are shared with inline edit; see
-  # MingaEditor.InlineOverlay.Store and MingaEditor.InlineOverlay.Prompt.
-
   @spec active(store(), pid() | nil) :: t() | nil
-  def active(store, buffer_pid), do: Store.active(store, buffer_pid)
+  def active(store, buffer_pid), do: Store.active(store, buffer_pid, __MODULE__)
 
   @spec session?(store(), pid()) :: boolean()
-  def session?(store, session_pid), do: Store.session?(store, session_pid)
+  def session?(store, session_pid), do: Store.session?(store, session_pid, &session_pid/1)
 
   @spec put(store(), t()) :: store()
-  def put(store, ask), do: Store.put(store, ask)
+  def put(store, %__MODULE__{} = ask), do: Store.put(store, ask, __MODULE__)
+  def put(store, _ask) when is_map(store), do: store
 
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
-  def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid)
+  def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid, &session_pid/1)
 
   @spec append_input(t(), String.t()) :: t()
   def append_input(ask, text), do: Prompt.append_input(ask, text)
@@ -132,29 +121,58 @@ defmodule MingaEditor.State.InlineAsk do
   @spec scroll(t(), integer()) :: t()
   def scroll(ask, delta), do: Prompt.scroll(ask, delta)
 
+  @spec phase(t()) :: phase()
+  def phase(%__MODULE__{phase: phase}), do: phase
+
+  @spec input?(t()) :: boolean()
+  def input?(%__MODULE__{} = ask), do: phase(ask) == :input
+
+  @spec running?(t()) :: boolean()
+  def running?(%__MODULE__{} = ask), do: match?({:running, _session, _response}, phase(ask))
+
+  @spec answered?(t()) :: boolean()
+  def answered?(%__MODULE__{} = ask), do: match?({:answered, _response}, phase(ask))
+
+  @spec failed?(t()) :: boolean()
+  def failed?(%__MODULE__{} = ask), do: match?({:failed, _message}, phase(ask))
+
+  @spec scrollable?(t()) :: boolean()
+  def scrollable?(%__MODULE__{} = ask), do: answered?(ask) or failed?(ask)
+
+  @spec session_pid(t() | term()) :: pid() | nil
+  def session_pid(%__MODULE__{phase: {:running, session_pid, _response}}), do: session_pid
+  def session_pid(_ask), do: nil
+
+  @spec response(t()) :: String.t()
+  def response(%__MODULE__{phase: {:running, _session_pid, response}}), do: response
+  def response(%__MODULE__{phase: {:answered, response}}), do: response
+  def response(%__MODULE__{phase: {:failed, message}}), do: message
+  def response(%__MODULE__{}), do: ""
+
   @doc "Marks the ask as thinking."
   @spec thinking(t(), pid()) :: t()
   def thinking(%__MODULE__{} = ask, session_pid) when is_pid(session_pid) do
-    %{ask | status: :thinking, session_pid: session_pid, response: "", scroll: 0}
+    %{ask | phase: {:running, session_pid, ""}, scroll: 0}
   end
-
-  @doc "Refreshes the visible status without changing session ownership."
-  @spec mark_thinking(t()) :: t()
-  def mark_thinking(%__MODULE__{} = ask), do: %{ask | status: :thinking}
 
   @doc "Appends response text."
   @spec append_response(t(), String.t()) :: t()
-  def append_response(%__MODULE__{response: response} = ask, delta) when is_binary(delta) do
-    %{ask | response: response <> delta}
+  def append_response(%__MODULE__{phase: {:running, session_pid, response}} = ask, delta)
+      when is_binary(delta) do
+    %{ask | phase: {:running, session_pid, response <> delta}}
   end
+
+  def append_response(%__MODULE__{} = ask, delta) when is_binary(delta), do: ask
 
   @doc "Marks the ask as answered."
   @spec answered(t()) :: t()
-  def answered(%__MODULE__{} = ask), do: %{ask | status: :answered, session_pid: nil}
+  def answered(%__MODULE__{phase: {:running, _session_pid, response}} = ask),
+    do: %{ask | phase: {:answered, response}}
+
+  def answered(%__MODULE__{} = ask), do: ask
 
   @doc "Marks the ask as failed."
   @spec fail(t(), String.t()) :: t()
-  def fail(%__MODULE__{} = ask, message) when is_binary(message) do
-    %{ask | status: :error, response: message, session_pid: nil}
-  end
+  def fail(%__MODULE__{} = ask, message) when is_binary(message),
+    do: %{ask | phase: {:failed, message}}
 end

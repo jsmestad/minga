@@ -43,9 +43,12 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert {:handled, state} = InlineAskInput.handle_key(state, ?w, 0)
     assert {:handled, state} = InlineAskInput.handle_key(state, ?h, 0)
     assert active_ask(state, buffer).prompt == "wh"
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?j, 0)
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?k, 0)
+    assert active_ask(state, buffer).prompt == "whjk"
 
     assert {:handled, state} = InlineAskInput.handle_key(state, 127, 0)
-    assert active_ask(state, buffer).prompt == "w"
+    assert active_ask(state, buffer).prompt == "whj"
 
     assert {:handled, state} = InlineAskInput.handle_key(state, 27, 0)
     assert active_ask(state, buffer) == nil
@@ -63,8 +66,10 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     state = InlineAskEvents.handle_prompt_result(state, session_pid, {:error, :provider_down})
 
-    assert %InlineAsk{status: :error, session_pid: nil, response: "Failed to ask: :provider_down"} =
-             active_ask(state, buffer)
+    ask = active_ask(state, buffer)
+    assert InlineAsk.failed?(ask)
+    assert InlineAsk.session_pid(ask) == nil
+    assert InlineAsk.response(ask) == "Failed to ask: :provider_down"
   end
 
   test "input handler ignores modified printable keys", %{tmp_dir: root} do
@@ -99,7 +104,9 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert_receive {:asked, prompt, ^root, opts}
     assert prompt =~ "Question:\nw"
     assert Keyword.get(opts, :subscriber) == self()
-    assert %InlineAsk{status: :thinking, session_pid: ^parent} = active_ask(state, buffer)
+    ask = active_ask(state, buffer)
+    assert InlineAsk.running?(ask)
+    assert InlineAsk.session_pid(ask) == parent
   end
 
   test "SPC a ? is bound and inline ask is an overlay handler" do
@@ -152,6 +159,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
       state
       |> active_ask(buffer)
       |> InlineAsk.append_input("What is this?")
+      |> InlineAsk.thinking(self())
       |> InlineAsk.append_response("It authenticates users.")
       |> InlineAsk.answered()
 
@@ -161,7 +169,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
       InlineAskCommand.promote(state, ask,
         session_starter: &fake_start_agent_session/1,
         seeder: fn seed_state, seed_ask ->
-          send(parent, {:seeded, seed_ask.prompt, seed_ask.response})
+          send(parent, {:seeded, seed_ask.prompt, InlineAsk.response(seed_ask)})
           seed_state
         end
       )

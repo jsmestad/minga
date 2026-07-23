@@ -60,14 +60,19 @@ defmodule MingaEditor.Commands.InlineAsk do
   @spec promote(state(), InlineAsk.t(), keyword()) :: state()
   def promote(state, ask, opts \\ [])
 
-  def promote(state, %InlineAsk{status: status}, _opts) when status != :answered do
+  def promote(state, %InlineAsk{phase: {:answered, _response}} = ask, opts) do
+    promote_answered(state, ask, opts)
+  end
+
+  def promote(state, %InlineAsk{}, _opts) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
       "Wait for the inline answer before promoting"
     )
   end
 
-  def promote(state, %InlineAsk{} = ask, opts) do
+  @spec promote_answered(state(), InlineAsk.t(), keyword()) :: state()
+  defp promote_answered(state, %InlineAsk{} = ask, opts) do
     session_starter = Keyword.get(opts, :session_starter, &start_promoted_agent_session/1)
     seeder = Keyword.get(opts, :seeder, &seed_agent_session/2)
 
@@ -119,7 +124,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   defp seed_agent_session(state, %InlineAsk{} = ask) do
     case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       session_pid when is_pid(session_pid) ->
-        messages = [{:user, ask.prompt}, {:assistant, ask.response}]
+        messages = [{:user, ask.prompt}, {:assistant, InlineAsk.response(ask)}]
         MingaAgent.Session.seed_messages(session_pid, messages)
         AgentLifecycle.cache_messages(state, MingaAgent.Session.messages(session_pid))
 

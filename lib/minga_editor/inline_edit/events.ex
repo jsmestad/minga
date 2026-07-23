@@ -36,11 +36,11 @@ defmodule MingaEditor.InlineEdit.Events do
     %{
       store: &inline_edits/1,
       replace: &MingaEditor.Shell.Traditional.Workflow.install_inline_edit/2,
-      session?: &InlineEdit.session?/2
+      session?: &InlineEdit.session?/2,
+      session_pid: &InlineEdit.session_pid/1
     }
   end
 
-  @spec inline_edits(state()) :: InlineEdit.store()
   defp inline_edits(%{
          shell_runtime: %MingaEditor.Shell.Runtime{
            state: %MingaEditor.Shell.Traditional.State{} = shell_state
@@ -60,25 +60,18 @@ defmodule MingaEditor.InlineEdit.Events do
          _session_pid,
          {:tool_ended, "produce_rewrite", replacement, :done}
        )
-       when is_binary(replacement),
-       do: InlineEdit.install_proposal(edit, replacement)
+       when is_binary(replacement), do: InlineEdit.install_proposal(edit, replacement)
 
   defp apply_event(%InlineEdit{} = edit, _session_pid, {:text_delta, text}),
     do: InlineEdit.append_proposal(edit, text)
-
-  defp apply_event(%InlineEdit{} = edit, _session_pid, {:status_changed, :thinking}),
-    do: InlineEdit.mark_thinking(edit)
-
-  defp apply_event(%InlineEdit{} = edit, _session_pid, {:status_changed, :tool_executing}),
-    do: InlineEdit.mark_thinking(edit)
 
   defp apply_event(%InlineEdit{} = edit, session_pid, {:status_changed, :idle}) do
     response = EphemeralSession.assistant_response(session_pid)
     EphemeralSession.stop(session_pid)
 
-    edit = maybe_append_assistant_response(edit, response)
-
-    InlineEdit.proposed(edit)
+    edit
+    |> maybe_append_assistant_response(response)
+    |> InlineEdit.proposed()
   end
 
   defp apply_event(%InlineEdit{} = edit, session_pid, {:error, message}) do
@@ -89,11 +82,17 @@ defmodule MingaEditor.InlineEdit.Events do
   defp apply_event(%InlineEdit{} = edit, _session_pid, _event), do: edit
 
   @spec maybe_append_assistant_response(InlineEdit.t(), String.t()) :: InlineEdit.t()
-  defp maybe_append_assistant_response(%InlineEdit{proposal_source: :tool} = edit, _response),
-    do: edit
+  defp maybe_append_assistant_response(
+         %InlineEdit{phase: {:running, _session_pid, {:tool, _replacement}}} = edit,
+         _response
+       ),
+       do: edit
 
-  defp maybe_append_assistant_response(%InlineEdit{proposed_rewrite: proposed} = edit, _response)
-       when proposed != "",
+  defp maybe_append_assistant_response(
+         %InlineEdit{phase: {:running, _session_pid, {:stream, proposal}}} = edit,
+         _response
+       )
+       when proposal != "",
        do: edit
 
   defp maybe_append_assistant_response(%InlineEdit{} = edit, ""), do: edit
