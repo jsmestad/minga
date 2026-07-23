@@ -25,8 +25,8 @@ The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, a
 
 Current accepted inventory:
 
-- **VERIFIED:** L01, L02, L04, L05, L10, L12, ES21
-- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17, ES18, ES24
+- **VERIFIED:** L01, L02, L04, L05, L10, L12, ES21, ES24
+- **IMPLEMENTED:** S34, S35, E02, E03, E05, E08, ES03, ES05, ES07, ES08, ES12, ES17, ES18
 - **CANDIDATE, lifecycle:** L11, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30
 - **CANDIDATE, deletion:** D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40
 - **CANDIDATE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
@@ -42,7 +42,7 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, deletion:** D05, D06, D08, D09, D10, D11, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D39
 - **STILL_REPRODUCIBLE, shrink:** S03, S04, S05, S06, S07, S09, S11, S12, S15, S18, S20, S21, S22, S23, S25, S26, S29, S32, S33
 - **STILL_REPRODUCIBLE, craftsmanship:** E02, E03
-- **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16, ES24
+- **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16
 - **DRIFTED:** D13, D36, D40, S14
 
 Drift evidence:
@@ -4653,7 +4653,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W115/ES24: Give each recorder one explicit lifecycle phase
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES24
 - **Planning profile:** `ES24Planner`, `ES24Replanner`, `ES24ReplayReplanner`, and `ES24EquivalenceReplanner` at medium; `ES24PlanVerifier`, `ES24FinalVerifier`, `ES24PostMergeVerifier`, `ES24ReplayVerifier`, and `ES24V4FinalVerifier` at high, all read-only.
 - **Implementation profile:** `ES24Worker`, editor-lifecycle-worker, no delegation.
@@ -4681,3 +4681,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **needs_replan:** false.
 - **Completion evidence:** Implemented in worktree `refactor-editor-lifecycle-next-77` from locked plan `local://es24-plan-v4.json` at baseline `ee88b3834909fd95ad097949de44b795602d8000`; no commit, push, or PR. Changed files: `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/change_recorder.ex`, `lib/minga_editor/change_tracking.ex`, `lib/minga_editor/commands.ex`, `lib/minga_editor/commands/macros.ex`, `lib/minga_editor/editing.ex`, `lib/minga_editor/macro_recorder.ex`, `lib/minga_editor/macro_replay.ex`, `test/minga_editor/change_recorder_test.exs`, `test/minga_editor/change_tracking_test.exs`, `test/minga_editor/commands/macro_commands_test.exs`, `test/minga_editor/editing_test.exs`, and `test/minga_editor/macro_recorder_test.exs`. Observable result: recorder lifecycle fields are replaced by owner-owned replay-depth/post-phase transitions; foreign production readers/writers use owner APIs; macro and dot-repeat replay keep suppression through `q a x`, `q a q`, `q a q b`, nested macro replay, missing nested macro replay, and nested dot-repeat. Focused validation after review corrections: the five recorder, facade, command, and change-tracking files passed `83 tests`; `mix test --include conformance test/conformance/macros_test.exs` passed `7 tests`; the final command workflow rerun passed `8 tests`. Project-required validation: `make lint` passed changed-file Credo, compile, and incremental Dialyzer; `git diff --check` passed; low-concurrency `ELIXIR_ERL_OPTIONS='+S 4:4' mix test.llm` passed `58 doctests, 98 properties, 9,786 tests`, with `0 failures`, `1 skipped`, and `616 excluded`. Earlier default-concurrency `mix test` and `make test` attempts exposed unrelated load-sensitive agent/session/native-support failures; every observed failed location was isolated where practical, the later required low-concurrency suite passed, and ES24 does not touch those areas. Exhaustive obsolete-field search over `lib/minga_editor`, `lib/minga`, `test/minga_editor`, `test/conformance`, and `test/support` found no obsolete executable recorder field access; surviving hits are owner API calls or unrelated status/render data fields. Production lines added/removed: `143/131`, net `+12`, within the `<= +50` budget. Test lines added/removed: `406/100`, including the new focused workflow files. Concepts added: recorder-local `phase`, replay depth, post-replay phase, `MacroRecorder.select_replay_register/2`, and `MacroRecorder.last_register/1`. Concepts removed: companion `recording`, `keys`, and `replaying` fields on `ChangeRecorder`, companion `recording` and `replaying` fields on `MacroRecorder`, and foreign direct last-register mutation. Retained constraints: no shared abstraction, compatibility shape, new process, dependency, behaviour, protocol, registry, configuration, root forwarding API, key-dispatch ordering change, status facade change, persistence migration, `replace_count/2` change, or crash-safe replay cleanup. Review evidence: the correctness bug hunt returned `PASS / LEAN`; Ponytail returned `LEAN` and its safe identity-helper and duplicate-test cuts were applied; Elixir craftsmanship returned `LEAN` after tightening the `set_change_recorder/2` type and that correction was applied; the type-design specialist was unavailable because its runtime had no configured model. Final acceptance reviewer verdict is reserved for the commit gate. Findings resolved: ES24/W115. Completion date: 2026-07-23. needs_replan: false.
 - **Final acceptance reviewer:** PASS with `0.98` confidence. The reviewer confirmed the full tracked diff plus two new workflow test files satisfies the locked owner phases, replay equivalence, direct-field cutover, stable facade, clean cutover, roadmap truthfulness, and `+12` production-line budget with no mandatory defect.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3225
+- **Implementation commit SHA:** `4fd8d0c11a892df3a256f2ec608895c2d080b2f4`
+- **Merge SHA:** `04a0ade7be3c48c1898ce253a86baa0afbb705f8`
+- **Merge evidence:** PR #3225 merged on 2026-07-23 after all required CI checks passed. Current main contains the same implementation and test tree reviewed at `4fd8d0c11a892df3a256f2ec608895c2d080b2f4`.
