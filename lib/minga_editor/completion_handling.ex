@@ -719,7 +719,8 @@ defmodule MingaEditor.CompletionHandling do
       ) do
     trigger = ModalWorkflow.completion_trigger(state)
 
-    if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and trigger.gen == gen do
+    if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
+         CompletionTrigger.generation(trigger) == gen do
       apply_processed_current(state, mode, payload, trigger_pos)
     else
       # Stale generation or the menu was dismissed/replaced; discard.

@@ -1,188 +1,276 @@
 defmodule MingaEditor.CompletionTriggerTest do
   @moduledoc "Tests for CompletionTrigger: debounce fan-out to multiple LSP clients."
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.CompletionTrigger
 
-  # ── flush_debounce/3 with client list ──────────────────────────────────────
+  describe "new/0" do
+    test "returns only the tagged phase struct and generation" do
+      trigger = CompletionTrigger.new()
 
-  describe "flush_debounce/3" do
-    test "sends completion requests to multiple clients when given a list" do
-      bridge = CompletionTrigger.new()
-      # Buffer needs a file_path for completion requests to be sent
-      {:ok, buf} =
-        BufferProcess.start_link(file_path: "/tmp/test_completion.ex", content: "hello")
-
-      # Use self() as fake clients; send_completion_requests will call
-      # Client.request on each, which will fail (not real LSP clients)
-      # but the bridge state should reflect multiple pending refs.
-      result = CompletionTrigger.flush_debounce(bridge, [self(), self()], buf)
-      # With fake clients the requests will fail, but the function shouldn't crash
-      assert is_map(result)
-      GenServer.stop(buf)
-    end
-
-    test "accepts a single client pid for backward compatibility" do
-      bridge = CompletionTrigger.new()
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-      result = CompletionTrigger.flush_debounce(bridge, self(), buf)
-      assert is_map(result)
-      GenServer.stop(buf)
-    end
-
-    test "schedule_debounced_trigger message contains client list not single pid" do
-      # Verify the debounce message format includes a list of clients.
-      # The message is {:completion_debounce, clients, buffer_pid} where
-      # clients is a list.
-      bridge = CompletionTrigger.new()
-      {:ok, buf} = BufferProcess.start_link(file_path: "/tmp/test_multi.ex", content: "ab")
-      BufferProcess.move_to(buf, {0, 2})
-
-      # Trigger with two identifier chars worth of prefix by inserting "cd"
-      BufferProcess.insert_char(buf, "c")
-      BufferProcess.insert_char(buf, "d")
-
-      # The maybe_trigger path for identifier chars schedules a debounce.
-      # We test that the message payload is the right shape by calling
-      # maybe_trigger with a non-trigger char and multiple clients.
-      # Since SyncServer won't return real clients, test the message format
-      # through the public API contract: flush_debounce accepts [pid()].
-      fake_clients = [spawn(fn -> :ok end), spawn(fn -> :ok end)]
-      result = CompletionTrigger.flush_debounce(bridge, fake_clients, buf)
-      assert is_map(result)
-
-      GenServer.stop(buf)
+      assert trigger == %CompletionTrigger{phase: :idle, gen: 0}
+      assert Map.keys(Map.from_struct(trigger)) |> Enum.sort() == [:gen, :phase]
+      refute CompletionTrigger.active?(trigger)
+      assert CompletionTrigger.generation(trigger) == 0
     end
   end
 
-  # ── dismiss/1 ─────────────────────────────────────────────────────────────
+  describe "flush_debounce/3" do
+    test "sends completion requests to multiple clients and records roles" do
+      trigger = CompletionTrigger.new()
 
-  describe "dismiss/1" do
-    test "clears pending refs, trigger position, and keeps gen" do
-      primary_ref = make_ref()
-      secondary_ref = make_ref()
-      refs = [primary_ref, secondary_ref]
+      {:ok, buf} =
+        BufferProcess.start_link(file_path: "/tmp/test_completion.ex", content: "hello")
 
-      bridge = %{
-        CompletionTrigger.new()
-        | pending_ref: primary_ref,
-          pending_refs: MapSet.new(refs),
-          trigger_position: {5, 10},
-          gen: 4
-      }
+      BufferProcess.move_to(buf, {0, 5})
 
-      result = CompletionTrigger.dismiss(bridge)
+      result = CompletionTrigger.flush_debounce(trigger, [self(), self()], buf)
 
-      assert result == %{
-               bridge
-               | pending_ref: nil,
-                 pending_refs: MapSet.new(),
-                 trigger_position: nil
-             }
+      assert %CompletionTrigger{phase: {:pending, refs_by_role, {0, 0}}, gen: 1} = result
+      assert map_size(refs_by_role) == 2
+      assert [{primary_ref, :primary}] = Enum.filter(refs_by_role, &match?({_ref, :primary}, &1))
 
-      for ref <- refs do
-        assert {^result, :ignore} =
-                 CompletionTrigger.classify_response(result, ref, {:ok, %{"items" => []}}, self())
+      assert [{secondary_ref, :secondary}] =
+               Enum.filter(refs_by_role, &match?({_ref, :secondary}, &1))
+
+      assert_receive {:"$gen_cast",
+                      {:async_request, "textDocument/completion", _params, _caller, ^primary_ref}}
+
+      assert_receive {:"$gen_cast",
+                      {:async_request, "textDocument/completion", _params, _caller,
+                       ^secondary_ref}}
+    end
+
+    test "accepts a single client pid" do
+      trigger = CompletionTrigger.new()
+      {:ok, buf} = BufferProcess.start_link(file_path: "/tmp/test_single.ex", content: "hello")
+
+      result = CompletionTrigger.flush_debounce(trigger, self(), buf)
+
+      assert %CompletionTrigger{phase: {:pending, refs_by_role, {0, 0}}, gen: 1} = result
+      assert [_] = Map.keys(refs_by_role)
+      assert [:primary] == Map.values(refs_by_role)
+    end
+
+    test "preserves the trigger without a file path or LSP clients" do
+      trigger = %CompletionTrigger{phase: :idle, gen: 3}
+      {:ok, pathless_buf} = BufferProcess.start_link(content: "hello")
+
+      {:ok, clientless_buf} =
+        BufferProcess.start_link(file_path: "/tmp/test_no_clients.ex", content: "ab")
+
+      assert CompletionTrigger.flush_debounce(trigger, self(), pathless_buf) == trigger
+      assert {^trigger, nil} = CompletionTrigger.maybe_trigger(trigger, "b", clientless_buf)
+      refute_receive {:"$gen_cast", {:async_request, "textDocument/completion", _, _, _}}
+
+      GenServer.stop(pathless_buf)
+      GenServer.stop(clientless_buf)
+    end
+  end
+
+  describe "maybe_trigger/3" do
+    test "trigger character cancels a debounce and replaces pending refs with newer batches" do
+      {:ok, buf} =
+        BufferProcess.start_link(file_path: "/tmp/test_replace_trigger.ex", content: "ab")
+
+      Minga.LSP.SyncServer.put_clients(buf, [self()])
+      timer = Process.send_after(self(), :old_debounce, 10_000)
+      debounced = %CompletionTrigger{phase: {:debounced, timer, {0, 0}}, gen: 4}
+
+      try do
+        assert {%CompletionTrigger{phase: {:pending, first_roles, _position}, gen: 5} = pending,
+                nil} = CompletionTrigger.maybe_trigger(debounced, ".", buf)
+
+        assert [{first_ref, :primary}] = Map.to_list(first_roles)
+        assert Process.read_timer(timer) == false
+
+        assert_receive {:"$gen_cast",
+                        {:async_request, "textDocument/completion", _params, _caller, ^first_ref}}
+
+        assert {%CompletionTrigger{phase: {:pending, second_roles, _position}, gen: 6}, nil} =
+                 CompletionTrigger.maybe_trigger(pending, ".", buf)
+
+        refute Map.has_key?(second_roles, first_ref)
+        assert [{second_ref, :primary}] = Map.to_list(second_roles)
+
+        assert_receive {:"$gen_cast",
+                        {:async_request, "textDocument/completion", _params, _caller, ^second_ref}}
+      after
+        Minga.LSP.SyncServer.remove_buffer(buf)
+        GenServer.stop(buf)
+      end
+    end
+
+    test "identifier debounce phase sends the existing timer message" do
+      {:ok, buf} = BufferProcess.start_link(file_path: "/tmp/test_debounce.ex", content: "")
+      :ok = BufferProcess.insert_char(buf, "a")
+      :ok = BufferProcess.insert_char(buf, "b")
+      clients = [self()]
+
+      Minga.LSP.SyncServer.put_clients(buf, clients)
+
+      try do
+        {result, completion} = CompletionTrigger.maybe_trigger(CompletionTrigger.new(), "b", buf)
+
+        assert completion == nil
+        assert %CompletionTrigger{phase: {:debounced, timer, {0, 0}}, gen: 0} = result
+        assert is_reference(timer)
+        assert_receive {:completion_debounce, ^clients, ^buf}, 200
+      after
+        Minga.LSP.SyncServer.remove_buffer(buf)
+        GenServer.stop(buf)
       end
     end
   end
 
-  describe "classify_response/4" do
-    test "stale response (ref doesn't match) is ignored" do
-      ref = make_ref()
-      bridge = %{CompletionTrigger.new() | pending_ref: make_ref()}
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-
-      {result_bridge, classification} =
-        CompletionTrigger.classify_response(bridge, ref, {:ok, nil}, buf)
-
-      assert classification == :ignore
-      assert is_map(result_bridge)
-
-      GenServer.stop(buf)
-    end
-
-    test "error response clears pending ref and is ignored" do
-      ref = make_ref()
-      bridge = %{CompletionTrigger.new() | pending_ref: ref}
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-
-      {result_bridge, classification} =
-        CompletionTrigger.classify_response(bridge, ref, {:error, "timeout"}, buf)
-
-      assert classification == :ignore
-      assert result_bridge.pending_ref == nil
-
-      GenServer.stop(buf)
-    end
-
-    test "primary response (ref matches pending_ref) classifies as :primary and carries gen" do
-      ref = make_ref()
-
-      bridge = %{
-        CompletionTrigger.new()
-        | pending_ref: ref,
-          pending_refs: MapSet.new([ref]),
-          trigger_position: {0, 0},
-          gen: 7
-      }
-
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-
-      {result_bridge, classification} =
-        CompletionTrigger.classify_response(bridge, ref, {:ok, %{"items" => []}}, buf)
-
-      assert {:primary, {0, 0}, _prefix, 7} = classification
-      assert result_bridge.pending_ref == nil
-      refute MapSet.member?(result_bridge.pending_refs, ref)
-
-      GenServer.stop(buf)
-    end
-
-    test "secondary server response classifies as :merge and carries gen" do
+  describe "dismiss/1" do
+    test "clears pending refs and keeps gen" do
       primary_ref = make_ref()
       secondary_ref = make_ref()
-      refs = MapSet.new([primary_ref, secondary_ref])
 
-      bridge = %{
-        CompletionTrigger.new()
-        | pending_ref: primary_ref,
-          pending_refs: refs,
-          trigger_position: {0, 0},
-          gen: 3
+      trigger = %CompletionTrigger{
+        phase: {:pending, %{primary_ref => :primary, secondary_ref => :secondary}, {5, 10}},
+        gen: 4
       }
 
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      result = CompletionTrigger.dismiss(trigger)
 
-      lsp_result = %{"items" => [%{"label" => "world", "kind" => 6}]}
+      assert result == %CompletionTrigger{phase: :idle, gen: 4}
 
-      {result_bridge, classification} =
-        CompletionTrigger.classify_response(bridge, secondary_ref, {:ok, lsp_result}, buf)
+      for ref <- [primary_ref, secondary_ref] do
+        assert {^result, :ignore} =
+                 CompletionTrigger.classify_response(result, ref, {:ok, %{"items" => []}}, self())
+      end
+    end
 
-      assert {:merge, {0, 0}, _prefix, 3} = classification
-      refute MapSet.member?(result_bridge.pending_refs, secondary_ref)
+    test "clears a debounced timer phase and keeps gen" do
+      timer = Process.send_after(self(), :dismissed_debounce, 10_000)
+      trigger = %CompletionTrigger{phase: {:debounced, timer, {0, 0}}, gen: 6}
 
-      GenServer.stop(buf)
+      assert CompletionTrigger.dismiss(trigger) == %CompletionTrigger{phase: :idle, gen: 6}
+      assert Process.read_timer(timer) == false
     end
   end
 
-  # ── send + gen bump ───────────────────────────────────────────────────────
+  describe "classify_response/4" do
+    test "stale response is ignored without mutating pending refs" do
+      ref = make_ref()
+      tracked_ref = make_ref()
+      trigger = %CompletionTrigger{phase: {:pending, %{tracked_ref => :primary}, {0, 0}}, gen: 0}
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+      assert {^trigger, :ignore} =
+               CompletionTrigger.classify_response(trigger, ref, {:ok, nil}, buf)
+    end
+
+    test "error response removes only the tracked ref" do
+      primary_ref = make_ref()
+      secondary_ref = make_ref()
+
+      trigger = %CompletionTrigger{
+        phase: {:pending, %{primary_ref => :primary, secondary_ref => :secondary}, {0, 0}},
+        gen: 2
+      }
+
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+      assert {%CompletionTrigger{phase: {:pending, remaining, {0, 0}}, gen: 2} = remaining_trigger,
+              :ignore} =
+               CompletionTrigger.classify_response(trigger, primary_ref, {:error, "timeout"}, buf)
+
+      assert remaining == %{secondary_ref => :secondary}
+
+      assert {%CompletionTrigger{phase: :idle, gen: 2}, :ignore} =
+               CompletionTrigger.classify_response(
+                 remaining_trigger,
+                 secondary_ref,
+                 {:error, "timeout"},
+                 buf
+               )
+
+      unknown_ref = make_ref()
+
+      assert {^trigger, :ignore} =
+               CompletionTrigger.classify_response(trigger, unknown_ref, {:error, "timeout"}, buf)
+    end
+
+    test "primary response classifies as primary and preserves secondary refs" do
+      primary_ref = make_ref()
+      secondary_ref = make_ref()
+
+      trigger = %CompletionTrigger{
+        phase: {:pending, %{primary_ref => :primary, secondary_ref => :secondary}, {0, 0}},
+        gen: 7
+      }
+
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+      assert {%CompletionTrigger{phase: {:pending, remaining, {0, 0}}, gen: 7} =
+                remaining_trigger, {:primary, {0, 0}, _prefix, 7}} =
+               CompletionTrigger.classify_response(
+                 trigger,
+                 primary_ref,
+                 {:ok, %{"items" => []}},
+                 buf
+               )
+
+      assert remaining == %{secondary_ref => :secondary}
+
+      assert {%CompletionTrigger{phase: :idle, gen: 7}, {:merge, {0, 0}, _prefix, 7}} =
+               CompletionTrigger.classify_response(
+                 remaining_trigger,
+                 secondary_ref,
+                 {:ok, %{"items" => []}},
+                 buf
+               )
+    end
+
+    test "secondary response can arrive before primary and preserve primary ref" do
+      primary_ref = make_ref()
+      secondary_ref = make_ref()
+
+      trigger = %CompletionTrigger{
+        phase: {:pending, %{primary_ref => :primary, secondary_ref => :secondary}, {0, 0}},
+        gen: 3
+      }
+
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+      assert {%CompletionTrigger{phase: {:pending, remaining, {0, 0}}, gen: 3},
+              {:merge, {0, 0}, _prefix, 3}} =
+               CompletionTrigger.classify_response(
+                 trigger,
+                 secondary_ref,
+                 {:ok, %{"items" => []}},
+                 buf
+               )
+
+      assert remaining == %{primary_ref => :primary}
+    end
+
+    test "last pending response returns idle" do
+      ref = make_ref()
+      trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}, gen: 9}
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+      assert {%CompletionTrigger{phase: :idle, gen: 9}, {:primary, {0, 0}, _prefix, 9}} =
+               CompletionTrigger.classify_response(trigger, ref, {:ok, %{"items" => []}}, buf)
+    end
+  end
 
   describe "generation bumping" do
     test "each request batch mints a strictly newer generation" do
       {:ok, buf} = BufferProcess.start_link(file_path: "/tmp/test_gen.ex", content: "hello")
       BufferProcess.move_to(buf, {0, 5})
 
-      bridge0 = CompletionTrigger.new()
-      bridge1 = CompletionTrigger.flush_debounce(bridge0, [self()], buf)
-      bridge2 = CompletionTrigger.flush_debounce(bridge1, [self()], buf)
+      trigger0 = CompletionTrigger.new()
+      trigger1 = CompletionTrigger.flush_debounce(trigger0, [self()], buf)
+      trigger2 = CompletionTrigger.flush_debounce(trigger1, [self()], buf)
 
-      assert bridge1.gen == bridge0.gen + 1
-      assert bridge2.gen == bridge1.gen + 1
-
-      GenServer.stop(buf)
+      assert CompletionTrigger.generation(trigger1) == CompletionTrigger.generation(trigger0) + 1
+      assert CompletionTrigger.generation(trigger2) == CompletionTrigger.generation(trigger1) + 1
     end
   end
 end

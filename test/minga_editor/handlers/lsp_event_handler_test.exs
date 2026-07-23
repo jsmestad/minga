@@ -251,8 +251,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     test "completion debounce writes the flushed completion trigger back and sends a request" do
       state = file_buffer_state("foo_bar\n")
       client = start_fake_lsp_client()
-      timer = make_ref()
-      trigger = %{CompletionTrigger.new() | debounce_timer: timer}
+      trigger = %CompletionTrigger{phase: {:debounced, make_ref(), {0, 0}}}
       payload = CompletionPayload.new(1, trigger: trigger)
       state = ModalWorkflow.transition(state, {:completion, payload})
       buffer = state.workspace.buffers.active
@@ -265,9 +264,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert caller == self()
 
       new_trigger = ModalWorkflow.completion_trigger(new_state)
-      assert new_trigger.pending_ref == ref
-      assert MapSet.member?(new_trigger.pending_refs, ref)
-      assert new_trigger.debounce_timer == timer
+      assert %CompletionTrigger{phase: {:pending, refs_by_role, {0, 0}}, gen: 1} = new_trigger
+      assert refs_by_role == %{ref => :primary}
     end
 
     test "completion resolve routes the request and records the pending ref" do
@@ -284,7 +282,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       }
 
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
-      trigger = %{CompletionTrigger.new() | pending_ref: make_ref(), pending_refs: MapSet.new()}
+      trigger = %CompletionTrigger{phase: {:pending, %{make_ref() => :primary}, {0, 0}}}
       payload = CompletionPayload.new(1, completion: completion, trigger: trigger)
       state = ModalWorkflow.transition(state, {:completion, payload})
 
@@ -375,7 +373,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
     test "delayed completion response does not spawn processing or replay after a shell switch" do
       ref = make_ref()
-      trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
+      trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}}
       payload = CompletionPayload.new(1, trigger: trigger)
 
       state =
@@ -430,7 +428,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
 
     test "delayed processed completion does not touch or replay a foreign shell" do
-      trigger = %{CompletionTrigger.new() | gen: 7}
+      trigger = %CompletionTrigger{gen: 7}
       payload = CompletionPayload.new(1, trigger: trigger)
 
       state =
@@ -489,7 +487,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     test "untracked completion response is processed off-thread, then becomes visible" do
       state = buffer_state("hello\n")
       ref = make_ref()
-      trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
+      trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}}
       payload = CompletionPayload.new(1, trigger: trigger)
       state = ModalWorkflow.transition(state, {:completion, payload})
 
@@ -515,8 +513,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert ModalWorkflow.completion(new_state) == nil
 
       new_trigger = ModalWorkflow.completion_trigger(new_state)
-      assert new_trigger.pending_ref == nil
-      assert MapSet.new() == new_trigger.pending_refs
+      assert %CompletionTrigger{phase: :idle} = new_trigger
 
       # Drive the async result the Task sends back, exactly as the Editor's
       # {:completion_processed, ...} handle_info clause does, and confirm the

@@ -122,11 +122,19 @@ defmodule MingaEditor.State.ModalOverlayTest do
   end
 
   test "completion trigger bookkeeping receives active-tab context explicitly" do
-    trigger = %{CompletionTrigger.new() | pending_ref: make_ref()}
+    assert ModalOverlay.put_completion_trigger(:none, CompletionTrigger.new(), 42) == :none
+
+    debounced = %CompletionTrigger{phase: {:debounced, make_ref(), {0, 0}}}
+
+    assert {:completion, %CompletionPayload{owner: 42, trigger: ^debounced}} =
+             ModalOverlay.put_completion_trigger(:none, debounced, 42)
+
+    ref = make_ref()
+    trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}}
     modal = ModalOverlay.put_completion_trigger(:none, trigger, 42)
     assert {:completion, %CompletionPayload{owner: 42, trigger: ^trigger}} = modal
 
-    replacement = %{trigger | pending_ref: nil, debounce_timer: make_ref()}
+    replacement = %CompletionTrigger{phase: {:debounced, make_ref(), {0, 0}}}
     updated = ModalOverlay.put_completion_trigger(modal, replacement, 99)
     assert ModalOverlay.completion_trigger(updated) == replacement
 
