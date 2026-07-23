@@ -185,7 +185,7 @@ defmodule MingaAgent.Session do
   @doc "Returns the provider context that should be inherited by a subagent."
   @spec subagent_context(GenServer.server()) :: subagent_context()
   def subagent_context(session) do
-    GenServer.call(session, :subagent_context)
+    GenServer.call(session, :subagent_context, 15_000)
   end
 
   @doc "Returns the conversation messages."
