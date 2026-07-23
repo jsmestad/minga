@@ -4449,7 +4449,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W109/ES12: Make Effect.Outcome a genuine sum type
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES12
 - **Planning profile:** `ES12Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES12Worker`, no delegation.
@@ -4473,3 +4473,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Final reviewer verdict:** `PASS` with 0.99 confidence after the staged Outcome owner test file resolved the sole packaging blocker. The reviewer confirmed the constructor, OperationQueue invariant, stale payload/key, and terminal predicate coverage is included in the mergeable patch.
 - **Discoveries affecting later work:** Root `mix test extensions/git_porcelain/test/...` still does not load the bundled extension test helper or source modules, matching prior roadmap evidence for extension test invocation limitations; the extension effect slice passes under the documented `MIX_ENV=test mix run -e ...` harness. No replan trigger, owner drift, production budget issue, test budget issue, protocol/frontend dependency, stale production caller, or compatibility need was found.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3212
+- **Implementation commit SHA:** `8202de7dcad3c9f159b6e25a8de95e1ac549af15`
+- **Merge SHA:** `b0b13a1b4d45953ce733c0508d6ce5c44b62a8e1`
+- **Merge evidence:** PR #3212 merged after CI run `29989816179` passed Elixir, Swift macOS, Swift protocol integration, Go TUI, Zig, Dialyzer, lint/format, Neovim conformance, Go TUI boot smoke, and keystroke latency checks.
+- **Findings resolved:** ES12 is fully resolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR, implementation SHA, merge SHA, successful CI run, completion date, and full ES12 resolution were independently confirmed.
