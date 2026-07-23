@@ -64,7 +64,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
         {:tool_update, "tc", "shell", "partial"}
       ])
 
-    assert state.workspace.agent_ui.panel.message_version == 1
+    assert state.workspace.agent_ui.panel.transcript.version == 1
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
@@ -75,8 +75,8 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     state = StreamEventWorkflow.batch(state, [{:text_delta, "Live streamed answer"}])
 
-    assert state.workspace.agent_ui.panel.cached_display_messages != []
-    assert state.workspace.agent_ui.panel.message_version == 1
+    assert state.workspace.agent_ui.panel.transcript.messages != []
+    assert state.workspace.agent_ui.panel.transcript.version == 1
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
@@ -91,8 +91,8 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     state = StreamEventWorkflow.messages_changed(state)
 
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
-    assert state.workspace.agent_ui.panel.cached_display_messages != []
-    assert state.workspace.agent_ui.panel.message_version == 1
+    assert state.workspace.agent_ui.panel.transcript.messages != []
+    assert state.workspace.agent_ui.panel.transcript.version == 1
 
     workspace =
       state.shell_runtime.state
@@ -293,8 +293,8 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     state = SessionEventWorkflow.credentials_status(state, true)
 
     assert state.workspace.agent_ui.panel.credentials_configured
-    assert state.workspace.agent_ui.panel.message_version == panel.message_version
-    assert state.workspace.agent_ui.panel.cached_display_messages == panel.cached_display_messages
+    assert state.workspace.agent_ui.panel.transcript.version == panel.transcript.version
+    assert state.workspace.agent_ui.panel.transcript.messages == panel.transcript.messages
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
@@ -317,7 +317,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert TraditionalState.agent(state.shell_runtime.state).pending_approval == approval
     refute state.workspace.agent_ui.panel.input_focused
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
-    assert state.workspace.agent_ui.panel.cached_display_messages != []
+    assert state.workspace.agent_ui.panel.transcript.messages != []
   end
 
   test "session workflow clears a resolved approval and synchronizes the transcript" do
@@ -328,7 +328,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     state = SessionEventWorkflow.approval_resolved(state, :approved)
 
     assert TraditionalState.agent(state.shell_runtime.state).pending_approval == nil
-    assert state.workspace.agent_ui.panel.cached_display_messages != []
+    assert state.workspace.agent_ui.panel.transcript.messages != []
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 

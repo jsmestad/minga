@@ -2,13 +2,12 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: AgentChatMessageCodec
-  alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.Theme
@@ -54,10 +53,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     inner_width = max(ctx.viewport.cols - 10, 20)
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
-    {full_pairs, full_styled_cache} = full_messages_for_model(panel, session, ctx.theme)
+    full_pairs = panel.transcript.message_pairs
+    full_styled_cache = resolve_styled_cache(panel, ctx.theme)
     pending_approval = TraditionalState.agent(ctx.shell_state).pending_approval
 
-    # Resident transcript (#2654): the display_start_index-scoped conversation for
+    # Resident transcript (#2654): the projection display-start scoped conversation for
     # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
     # builder applies the configured byte-cap suffix bound and records whether
     # older complete messages were omitted.
@@ -108,11 +108,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   # Opaque change token for the resident transcript stream. Flips on structural
-  # change (session switch → new pid; compaction/clear_display → new
-  # display_start_index), which the 0x86 encoder maps to a full store replace.
+  # change (session switch, clear_display window start, or message content mutation).
   @spec transcript_epoch(pid(), MingaEditor.Agent.UIState.Panel.t()) :: non_neg_integer()
   defp transcript_epoch(session, panel) do
-    :erlang.phash2({session, panel.display_start_index})
+    :erlang.phash2({session, panel.transcript.display_start, panel.transcript.version})
   end
 
   @spec display_model_name(String.t()) :: String.t()
@@ -151,41 +150,16 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> ""
   end
 
-  @spec full_messages_for_model(MingaEditor.Agent.UIState.Panel.t(), pid(), Theme.t() | nil) ::
-          {[{pos_integer(), term()}], [term()] | nil}
-  defp full_messages_for_model(panel, session, theme) do
-    pairs = displayed_message_pairs(panel, session)
-    styled_cache = resolve_styled_cache(panel, theme)
-    {pairs, styled_cache}
-  end
-
   @spec resolve_styled_cache(MingaEditor.Agent.UIState.Panel.t(), Theme.t() | nil) ::
           [term()] | nil
   defp resolve_styled_cache(panel, theme) do
-    if panel.cached_styled_fingerprint == styled_cache_fingerprint(theme) do
-      panel.cached_styled_messages
-    else
-      nil
+    case TranscriptProjection.styled_for(
+           panel.transcript,
+           TranscriptProjection.styled_cache_fingerprint(theme)
+         ) do
+      {:ok, styled} -> styled
+      :stale -> nil
     end
-  end
-
-  @spec styled_cache_fingerprint(Theme.t() | nil) :: non_neg_integer()
-  defp styled_cache_fingerprint(nil), do: 0
-
-  defp styled_cache_fingerprint(%Theme{syntax: syntax}),
-    do: Panel.styled_cache_fingerprint(syntax)
-
-  @spec displayed_message_pairs(MingaEditor.Agent.UIState.Panel.t(), pid()) :: [
-          {pos_integer(), term()}
-        ]
-  defp displayed_message_pairs(%{cached_display_message_pairs: pairs}, _session)
-       when is_list(pairs) and pairs != [],
-       do: pairs
-
-  defp displayed_message_pairs(_panel, session) do
-    AgentSession.messages_with_ids(session)
-  catch
-    :exit, _ -> []
   end
 
   # The resident transcript is never windowed, so its enrichments always sit at

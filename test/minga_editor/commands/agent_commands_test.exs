@@ -660,11 +660,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           pinned_ids: MapSet.new([101])
         )
 
-      %{
-        line_index: line_index,
-        display_messages: display_messages,
-        display_message_pairs: display_pairs
-      } =
+      display =
         Transcript.display(messages,
           display_start_index: 2,
           message_ids: message_ids,
@@ -677,13 +673,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
             state,
             (fn ui ->
-               panel = %{
+               panel =
                  ui.panel
-                 | cached_line_index: line_index,
-                   cached_display_messages: display_messages,
-                   cached_display_message_pairs: display_pairs,
-                   scroll: Scroll.new(6)
-               }
+                 |> Panel.cache_transcript_display(display, nil)
+                 |> Panel.set_scroll(Scroll.new(6))
 
                %{ui | panel: panel}
              end).(state.workspace.agent_ui)

@@ -46,7 +46,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       assert MingaEditor.State.RenderCorrelation.scheduled?(state.render.render_correlation)
 
       state = AgentEvents.dispatch(state, {:text_delta, "hello"})
-      assert state.workspace.agent_ui.panel.message_version == 1
+      assert state.workspace.agent_ui.panel.transcript.version == 1
 
       state = AgentEvents.dispatch(state, {:credentials_status, true})
       assert state.workspace.agent_ui.panel.credentials_configured
@@ -62,7 +62,7 @@ defmodule MingaEditor.State.EventRoutingTest do
           {:text_delta, "c"}
         ])
 
-      assert state.workspace.agent_ui.panel.message_version == 1
+      assert state.workspace.agent_ui.panel.transcript.version == 1
       assert MingaEditor.State.RenderCorrelation.scheduled?(state.render.render_correlation)
     end
 

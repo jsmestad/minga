@@ -172,8 +172,8 @@ defmodule MingaEditor.State.SnapshotTest do
 
       restored = SessionState.restore_tab_context(workspace, context)
 
-      assert restored.agent_ui.panel.message_version == 3
-      refute restored.agent_ui.panel.message_version == 9
+      assert restored.agent_ui.panel.transcript.version == 3
+      refute restored.agent_ui.panel.transcript.version == 9
     end
 
     test "ignores legacy raw-map agent UI projection" do
@@ -191,7 +191,7 @@ defmodule MingaEditor.State.SnapshotTest do
           context
         )
 
-      assert restored.agent_ui.panel.message_version == 3
+      assert restored.agent_ui.panel.transcript.version == 3
     end
 
     test "legacy viewport contexts do not restore stale terminal dimensions" do

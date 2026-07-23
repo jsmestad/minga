@@ -14,6 +14,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaEditor.Agent.Transcript
   alias Minga.Editing.Scroll
+  alias MingaEditor.Agent.UIState.TranscriptProjection
 
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
   @type paste_block :: %{text: String.t(), expanded: boolean()}
@@ -30,25 +31,11 @@ defmodule MingaEditor.Agent.UIState.Panel do
           model_name: String.t(),
           thinking_level: String.t(),
           input_focused: boolean(),
-          display_start_index: non_neg_integer(),
+          transcript: TranscriptProjection.t(),
           mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
-          cached_line_index: [{non_neg_integer(), MingaEditor.Agent.Transcript.line_type()}],
-          cached_display_messages: [term()],
-          cached_display_message_pairs: [{pos_integer(), term()}],
-          cached_styled_messages: styled_cache(),
-          cached_styled_fingerprint: non_neg_integer() | nil,
-          message_version: non_neg_integer(),
-          credentials_configured: boolean(),
-          provenance_jump: MingaEditor.Agent.ProvenanceJump.t() | nil
+          credentials_configured: boolean()
         }
-
-  @type rendered_message :: %{
-          styled_lines: MingaEditor.Agent.MarkdownHighlight.styled_lines() | nil,
-          markdown_blocks: [Minga.RenderModel.UI.AgentChat.MarkdownBlock.t()] | nil
-        }
-
-  @type styled_cache :: [rendered_message() | nil] | nil
 
   defstruct visible: false,
             scroll: %Scroll{},
@@ -60,17 +47,10 @@ defmodule MingaEditor.Agent.UIState.Panel do
             model_name: "unknown",
             thinking_level: "medium",
             input_focused: false,
-            display_start_index: 0,
+            transcript: TranscriptProjection.new(),
             mention_completion: nil,
             pasted_blocks: [],
-            cached_line_index: [],
-            cached_display_messages: [],
-            cached_display_message_pairs: [],
-            cached_styled_messages: nil,
-            cached_styled_fingerprint: nil,
-            message_version: 0,
-            credentials_configured: false,
-            provenance_jump: nil
+            credentials_configured: false
 
   @doc "Creates a new panel state with truthful model defaults."
   @spec new() :: t()
@@ -135,57 +115,53 @@ defmodule MingaEditor.Agent.UIState.Panel do
     %{panel | model_name: model}
   end
 
-  @doc "Replaces cached transcript projection data after a transcript sync."
-  @spec cache_transcript_display(t(), Transcript.display_result(), styled_cache(), keyword()) ::
+  @spec cache_transcript_display(
+          t(),
+          Transcript.display_result(),
+          TranscriptProjection.styled_cache(),
+          keyword()
+        ) ::
           t()
-  def cache_transcript_display(%__MODULE__{} = panel, display, styled_messages, opts \\ []) do
+  def cache_transcript_display(
+        %__MODULE__{transcript: projection} = panel,
+        display,
+        styled_messages,
+        opts \\ []
+      ) do
     %{
       panel
-      | cached_line_index: display.line_index,
-        cached_display_messages: display.display_messages,
-        cached_display_message_pairs: display.display_message_pairs,
-        cached_styled_messages: styled_messages,
-        cached_styled_fingerprint:
-          Keyword.get(opts, :styled_fingerprint, panel.cached_styled_fingerprint),
-        display_start_index: Keyword.get(opts, :display_start_index, panel.display_start_index),
-        provenance_jump: Keyword.get(opts, :provenance_jump, panel.provenance_jump)
+      | transcript: TranscriptProjection.cache_display(projection, display, styled_messages, opts)
     }
   end
 
-  @doc "Clears cached transcript projection data when there is no displayable transcript."
   @spec clear_transcript_cache(t()) :: t()
-  def clear_transcript_cache(%__MODULE__{} = panel) do
-    %{
-      panel
-      | cached_line_index: [],
-        cached_display_messages: [],
-        cached_display_message_pairs: [],
-        cached_styled_messages: nil,
-        cached_styled_fingerprint: nil,
-        display_start_index: 0,
-        provenance_jump: nil
-    }
+  def clear_transcript_cache(%__MODULE__{transcript: projection} = panel) do
+    %{panel | transcript: TranscriptProjection.clear(projection)}
   end
 
   @doc "Stores semantic scroll state for the agent transcript panel."
   @spec set_scroll(t(), Scroll.t()) :: t()
   def set_scroll(%__MODULE__{} = panel, %Scroll{} = scroll), do: %{panel | scroll: scroll}
 
-  @doc "Replaces cached styled transcript runs without changing the display window."
-  @spec cache_styled_messages(t(), styled_cache(), non_neg_integer() | nil) :: t()
-  def cache_styled_messages(%__MODULE__{} = panel, styled_messages, styled_fingerprint) do
-    %{
-      panel
-      | cached_styled_messages: styled_messages,
-        cached_styled_fingerprint: styled_fingerprint
-    }
+  @spec set_display_start(t(), non_neg_integer()) :: t()
+  def set_display_start(%__MODULE__{transcript: projection} = panel, display_start) do
+    %{panel | transcript: TranscriptProjection.set_display_start(projection, display_start)}
   end
 
-  @spec styled_cache_fingerprint(map() | nil) :: non_neg_integer()
-  def styled_cache_fingerprint(nil), do: 0
-
-  def styled_cache_fingerprint(theme_syntax) when is_map(theme_syntax),
-    do: :erlang.phash2(theme_syntax)
+  @doc "Replaces cached styled transcript runs without changing the display window."
+  @spec cache_styled_messages(t(), TranscriptProjection.styled_cache(), non_neg_integer() | nil) ::
+          t()
+  def cache_styled_messages(
+        %__MODULE__{transcript: projection} = panel,
+        styled_messages,
+        styled_fingerprint
+      ) do
+    %{
+      panel
+      | transcript:
+          TranscriptProjection.cache_styled(projection, styled_messages, styled_fingerprint)
+    }
+  end
 
   @spec stale_unqualified_model?(String.t(), String.t()) :: boolean()
   defp stale_unqualified_model?(model, default_model)
@@ -207,17 +183,19 @@ defmodule MingaEditor.Agent.UIState.Panel do
 
   @doc "Increments the message version counter. Used to invalidate the GUI fingerprint cache when message content changes (collapse toggles, new messages, etc.)."
   @spec bump_message_version(t()) :: t()
-  def bump_message_version(%__MODULE__{message_version: v} = panel) do
-    %{panel | message_version: v + 1}
+  def bump_message_version(%__MODULE__{transcript: projection} = panel) do
+    %{panel | transcript: TranscriptProjection.bump_version(projection)}
   end
 
   @doc "Arms a pending provenance jump (Enter from a code-provenance popup)."
   @spec set_provenance_jump(t(), MingaEditor.Agent.ProvenanceJump.t() | nil) :: t()
-  def set_provenance_jump(%__MODULE__{} = panel, jump) do
-    %{panel | provenance_jump: jump}
+  def set_provenance_jump(%__MODULE__{transcript: projection} = panel, jump) do
+    %{panel | transcript: TranscriptProjection.set_provenance_jump(projection, jump)}
   end
 
   @doc "Clears any pending provenance jump (e.g. when the user sends a new prompt)."
   @spec clear_provenance_jump(t()) :: t()
-  def clear_provenance_jump(%__MODULE__{} = panel), do: %{panel | provenance_jump: nil}
+  def clear_provenance_jump(%__MODULE__{transcript: projection} = panel) do
+    %{panel | transcript: TranscriptProjection.clear_provenance_jump(projection)}
+  end
 end
