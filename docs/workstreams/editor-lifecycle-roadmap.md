@@ -4587,7 +4587,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W113/ES18: Own agent transcript projection as one nested value
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES18
 - **Planning profile:** `ES18Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `ES18Worker`, no delegation.
@@ -4612,3 +4612,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **needs_replan:** false.
 - **Pre-acceptance reviews:** Correctness and Elixir craftsmanship both found the styled-cache fingerprint could survive replacement without a paired fingerprint; Elixir craftsmanship also found a projection-to-Panel type back-edge. Those blockers were corrected and independently rechecked `RESOLVED/PASS`. Ponytail removed duplicated option normalization and two single-use render helpers, then returned `RESOLVED/LEAN`. The dedicated type-design reviewer was unavailable because its runtime had no model configured; correctness and Elixir reviews covered the owner invariants and type boundary without widening scope.
 - **Final reviewer verdict:** `PASS` with 0.99 confidence. The reviewer confirmed the locked projection shape, complete flat-field consumer migration, render-only projection reads, stable IDs, bounded resident selection, fingerprint-gated incremental styling, accurate budgets and roadmap evidence, and merge safety with no findings.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3220
+- **Implementation commit SHA:** `ac293556efd871472ab400d5e71c1902482e50c6`
+- **Merge SHA:** `9f98b16bac7a49cdf273b9d3eddc95b61d0d25cf`
+- **Merge evidence:** PR #3220 merged after CI run `30014474329` passed all required checks.
+- **Findings resolved:** ES18 is fully resolved.
+- **Completion date:** 2026-07-23
+- **Ledger reviewer verdict:** `PASS` with 0.99 confidence. PR state, identical implementation and merge trees, successful required CI jobs, completion date, and full ES18 resolution were independently confirmed.
