@@ -286,7 +286,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/codeAction", params)
 
-            track_response_request(state, ref, :code_action)
+            track_response_request(state, ref, :code_action, client, buf, {line, col})
         end
     end
   end
@@ -425,7 +425,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/documentSymbol", params)
 
-            track_response_request(state, ref, :document_symbol)
+            track_response_request(state, ref, :document_symbol, client, buf, nil)
         end
     end
   end
@@ -447,7 +447,7 @@ defmodule MingaEditor.LspActions do
         params = %{"query" => query}
         ref = Client.request(client, "workspace/symbol", params)
 
-        track_response_request(state, ref, :workspace_symbol)
+        track_response_request(state, ref, :workspace_symbol, client, buf, nil)
     end
   end
 
@@ -482,7 +482,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/selectionRange", params)
 
-            track_response_request(state, ref, :selection_range)
+            track_response_request(state, ref, :selection_range, client, buf, {line, col})
         end
     end
   end
@@ -1828,7 +1828,13 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  @spec send_lsp_request(state(), pid(), pid(), String.t(), LSPState.response_kind()) :: state()
+  @spec send_lsp_request(
+          state(),
+          pid(),
+          pid(),
+          String.t(),
+          LSPState.current_origin_response_kind()
+        ) :: state()
   defp send_lsp_request(state, client, buffer_pid, method, kind) do
     file_path = Buffer.file_path(buffer_pid)
 
@@ -1847,13 +1853,32 @@ defmodule MingaEditor.LspActions do
 
         ref = Client.request(client, method, params)
 
-        track_response_request(state, ref, kind)
+        track_response_request(state, ref, kind, client, buffer_pid, {line, col})
     end
   end
 
-  @spec track_response_request(state(), reference(), LSPState.response_kind()) :: state()
   defp track_response_request(state, ref, kind) do
     %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
+  end
+
+  defp track_response_request(state, ref, kind, client, buffer, cursor) do
+    version = Buffer.version(buffer)
+
+    lsp =
+      LSPState.track_response_request(
+        state.lsp,
+        ref,
+        kind,
+        client,
+        buffer,
+        version,
+        active_tab_id(state),
+        cursor
+      )
+
+    %{state | lsp: lsp}
+  catch
+    :exit, _ -> state
   end
 
   @spec mark_operation_running(state(), Operation.id(), String.t()) :: state()
@@ -2437,7 +2462,7 @@ defmodule MingaEditor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/incomingCalls", params)
 
-        track_response_request(state, ref, :incoming_calls)
+        track_response_request(state, ref, :incoming_calls, client, buf, nil)
     end
   end
 
@@ -2453,7 +2478,7 @@ defmodule MingaEditor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/outgoingCalls", params)
 
-        track_response_request(state, ref, :outgoing_calls)
+        track_response_request(state, ref, :outgoing_calls, client, buf, nil)
     end
   end
 

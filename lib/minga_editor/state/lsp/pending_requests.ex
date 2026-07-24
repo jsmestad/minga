@@ -9,10 +9,12 @@ defmodule MingaEditor.State.LSP.PendingRequests do
 
   defstruct by_ref: %{}, format_by_buffer: %{}, newest_formats: []
 
-  @type response_kind :: MingaEditor.State.LSP.response_kind()
   @type operation_kind :: :references | :rename
   @type request ::
-          {:response, response_kind()}
+          {:response, MingaEditor.State.LSP.legacy_response_kind()}
+          | {:response, MingaEditor.State.LSP.current_origin_response_kind(), pid(), pid(),
+             non_neg_integer(), MingaEditor.State.Tab.id() | nil,
+             {non_neg_integer(), non_neg_integer()} | nil}
           | {:hover_mouse, non_neg_integer(), non_neg_integer(), pid(), non_neg_integer(),
              non_neg_integer(), non_neg_integer()}
           | {:semantic_tokens, pid()}
@@ -29,9 +31,59 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @spec track_response(t(), reference(), response_kind()) :: {:ok, t()} | {:error, :duplicate_ref}
-  def track_response(%__MODULE__{} = pending, ref, kind) when is_reference(ref) do
+  @spec track_response(t(), reference(), MingaEditor.State.LSP.legacy_response_kind()) ::
+          {:ok, t()} | {:error, :duplicate_ref}
+  def track_response(%__MODULE__{} = pending, ref, kind)
+      when is_reference(ref) and
+             kind in [
+               :completion_resolve,
+               :signature_help,
+               :code_lens,
+               :code_lens_resolve,
+               :inlay_hint
+             ] do
     track_request(pending, ref, {:response, kind})
+  end
+
+  defguardp valid_cursor_guard(cursor)
+            when is_tuple(cursor) and tuple_size(cursor) == 2 and is_integer(elem(cursor, 0)) and
+                   elem(cursor, 0) >= 0 and is_integer(elem(cursor, 1)) and elem(cursor, 1) >= 0
+
+  @spec track_response(
+          t(),
+          reference(),
+          MingaEditor.State.LSP.current_origin_response_kind(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          MingaEditor.State.Tab.id() | nil,
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_response(%__MODULE__{} = pending, ref, kind, client, buffer, version, tab_id, nil)
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             kind in [:document_symbol, :workspace_symbol, :incoming_calls, :outgoing_calls] and
+             version >= 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) do
+    track_request(pending, ref, {:response, kind, client, buffer, version, tab_id, nil})
+  end
+
+  def track_response(%__MODULE__{} = pending, ref, kind, client, buffer, version, tab_id, cursor)
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             kind in [
+               :definition,
+               :peek_definition,
+               :hover,
+               :document_highlight,
+               :code_action,
+               :prepare_rename,
+               :type_definition,
+               :implementation,
+               :selection_range,
+               :prepare_call_hierarchy,
+               :prepare_outgoing_hierarchy
+             ] and
+             version >= 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) and
+             valid_cursor_guard(cursor) do
+    track_request(pending, ref, {:response, kind, client, buffer, version, tab_id, cursor})
   end
 
   @spec track_hover_mouse(
