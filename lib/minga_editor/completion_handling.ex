@@ -25,13 +25,6 @@ defmodule MingaEditor.CompletionHandling do
 
   @resolve_debounce_ms 150
 
-  @doc """
-  Triggers a `completionItem/resolve` request for the selected item.
-
-  Called when C-n/C-p moves the selection. Debounces to avoid flooding
-  the server when navigating rapidly. Only triggers if the selected
-  item doesn't already have documentation and the server supports resolve.
-  """
   @spec maybe_resolve_selected(EditorState.t()) :: EditorState.t()
   def maybe_resolve_selected(%{shell_runtime: %{state: %ShellState{}}} = state) do
     case ModalWorkflow.completion(state) do
@@ -48,21 +41,20 @@ defmodule MingaEditor.CompletionHandling do
   @spec do_maybe_resolve_selected(EditorState.t(), Completion.t()) :: EditorState.t()
   defp do_maybe_resolve_selected(state, completion) do
     item = Completion.selected_item(completion)
-    selected_idx = completion.selected
+    raw_item = if item, do: item.raw
+    gen = CompletionTrigger.generation(ModalWorkflow.completion_trigger(state))
 
-    # Skip if already resolved for this index, or if doc is already present
-    if item == nil or selected_idx == completion.last_resolved_index or
+    if item == nil or raw_item == nil or raw_item == completion.last_resolved_identity or
          item.documentation != "" do
       state
     else
-      # Cancel previous resolve timer
       if completion.resolve_timer do
         Process.cancel_timer(completion.resolve_timer)
       end
 
       timer =
         if state.frontend.backend != :headless do
-          Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
+          Process.send_after(self(), {:completion_resolve, gen, raw_item}, @resolve_debounce_ms)
         end
 
       ModalWorkflow.update_completion(state, fn _ ->
@@ -71,54 +63,56 @@ defmodule MingaEditor.CompletionHandling do
     end
   end
 
-  @doc """
-  Sends the actual `completionItem/resolve` request after debounce.
-
-  Called from MingaEditor.handle_info({:completion_resolve, index}).
-  """
-  @spec flush_resolve(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  def flush_resolve(%{shell_runtime: %{state: %ShellState{}}} = state, index) do
+  @spec flush_resolve(EditorState.t(), non_neg_integer(), map()) :: EditorState.t()
+  def flush_resolve(%{shell_runtime: %{state: %ShellState{}}} = state, gen, raw_item) do
     case ModalWorkflow.completion(state) do
       nil -> state
-      completion -> do_flush_resolve(state, completion, index)
+      completion -> do_flush_resolve(state, completion, gen, raw_item)
     end
   end
 
-  def flush_resolve(state, _index), do: state
+  def flush_resolve(state, _gen, _raw_item), do: state
 
-  @spec do_flush_resolve(EditorState.t(), Completion.t(), non_neg_integer()) :: EditorState.t()
-  defp do_flush_resolve(%{workspace: %{buffers: %{active: buf}}} = state, completion, index) do
-    item = Enum.at(completion.filtered, index)
-
-    if item == nil or item.raw == nil do
-      state
-    else
-      case lsp_client_for(state, buf) do
-        nil ->
-          state
-
-        client ->
-          ref = Client.request(client, "completionItem/resolve", item.raw)
-
-          track_response_request(state, ref, :completion_resolve)
-      end
-    end
-  end
-
-  @doc """
-  Handles a `completionItem/resolve` response.
-
-  Updates the selected completion item's documentation with the
-  resolved content.
-  """
-  @spec handle_resolve_response(EditorState.t(), {:ok, term()} | {:error, term()}) ::
+  @spec do_flush_resolve(EditorState.t(), Completion.t(), non_neg_integer(), map()) ::
           EditorState.t()
-  def handle_resolve_response(state, {:error, _error}), do: state
+  defp do_flush_resolve(
+         %{workspace: %{buffers: %{active: buf}}} = state,
+         completion,
+         gen,
+         raw_item
+       ) do
+    trigger = ModalWorkflow.completion_trigger(state)
+
+    if CompletionTrigger.generation(trigger) == gen and
+         Completion.selected_raw?(completion, raw_item) do
+      flush_resolve_request(state, buf, gen, raw_item)
+    else
+      state
+    end
+  end
+
+  @spec flush_resolve_request(EditorState.t(), pid(), non_neg_integer(), map()) :: EditorState.t()
+  defp flush_resolve_request(state, buf, gen, raw_item) do
+    case {lsp_client_for(state, buf), buffer_value(buf, &Buffer.version/1)} do
+      {client, version} when is_pid(client) and is_integer(version) and version >= 0 ->
+        ref = Client.request(client, "completionItem/resolve", raw_item)
+        track_completion_resolve_request(state, ref, client, buf, version, gen, raw_item)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec handle_resolve_response(EditorState.t(), map(), {:ok, term()} | {:error, term()}) ::
+          EditorState.t()
+  def handle_resolve_response(state, _raw_item, {:error, _error}), do: state
 
   def handle_resolve_response(
         %{shell_runtime: %{state: %ShellState{}}} = state,
+        raw_item,
         {:ok, resolved}
-      ) do
+      )
+      when is_map(raw_item) do
     case ModalWorkflow.completion(state) do
       nil ->
         state
@@ -127,21 +121,13 @@ defmodule MingaEditor.CompletionHandling do
         doc_text = extract_resolve_documentation(resolved)
 
         ModalWorkflow.update_completion(state, fn completion ->
-          completion
-          |> Completion.update_selected_documentation(doc_text)
-          |> Map.put(:last_resolved_index, completion.selected)
+          Completion.update_selected_documentation(completion, raw_item, doc_text)
         end)
     end
   end
 
-  def handle_resolve_response(state, {:ok, _resolved}), do: state
+  def handle_resolve_response(state, _raw_item, {:ok, _resolved}), do: state
 
-  @doc """
-  Accepts the currently selected completion item.
-
-  Routes to insert-text or text-edit depending on the completion type,
-  then dismisses the completion popup.
-  """
   @spec accept(EditorState.t(), Completion.t()) :: EditorState.t()
   def accept(state, completion) do
     case Completion.accept(completion) do
@@ -156,13 +142,6 @@ defmodule MingaEditor.CompletionHandling do
     end
   end
 
-  @doc """
-  Updates or dismisses completion after a key press.
-
-  Called after every key in insert mode. If the mode changed away from
-  insert, dismisses completion. Otherwise updates the filter prefix
-  and possibly triggers new completion.
-  """
   @spec maybe_handle(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   def maybe_handle(
@@ -182,13 +161,6 @@ defmodule MingaEditor.CompletionHandling do
 
   def maybe_handle(state, _was_inserting, _codepoint, _modifiers), do: state
 
-  @doc """
-  Dismisses the active completion popup and resets trigger state.
-
-  No-op when the active modal is something other than `:completion` — the
-  caller may invoke this on every non-insert keypress, so we mustn't
-  displace the picker / prompt / etc.
-  """
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state) do
     if ModalOverlay.match(state.shell_runtime.state.modal, :completion) do
@@ -215,10 +187,66 @@ defmodule MingaEditor.CompletionHandling do
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  @spec track_response_request(EditorState.t(), reference(), LSPState.legacy_response_kind()) ::
+  @spec install_completion_tracking(EditorState.t(), [CompletionTrigger.tracking_fact()]) ::
           EditorState.t()
-  defp track_response_request(state, ref, kind) do
-    %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
+  def install_completion_tracking(state, facts) do
+    Enum.reduce(facts, state, fn {ref, role, client, buffer, version, gen, pos}, state ->
+      %{
+        state
+        | lsp:
+            LSPState.track_completion_result_request(
+              state.lsp,
+              ref,
+              role,
+              client,
+              buffer,
+              version,
+              gen,
+              pos
+            )
+      }
+    end)
+  end
+
+  @spec track_completion_resolve_request(
+          EditorState.t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map()
+        ) :: EditorState.t()
+  defp track_completion_resolve_request(state, ref, client, buffer, version, gen, raw_item) do
+    %{
+      state
+      | lsp:
+          LSPState.track_completion_resolve_request(
+            state.lsp,
+            ref,
+            client,
+            buffer,
+            version,
+            gen,
+            raw_item
+          )
+    }
+  end
+
+  @spec track_signature_help_request(
+          EditorState.t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: EditorState.t()
+  defp track_signature_help_request(state, ref, client, buffer, version, cursor) do
+    %{
+      state
+      | lsp:
+          LSPState.track_signature_help_request(state.lsp, ref, client, buffer, version, cursor)
+    }
   end
 
   @spec accept_text(EditorState.t(), Completion.t(), String.t()) :: EditorState.t()
@@ -312,14 +340,16 @@ defmodule MingaEditor.CompletionHandling do
         state
 
       char ->
-        {new_bridge, _comp} =
+        {new_bridge, facts} =
           CompletionTrigger.maybe_trigger(
             ModalWorkflow.completion_trigger(state),
             char,
             buf
           )
 
-        ModalWorkflow.put_completion_trigger(state, new_bridge)
+        state
+        |> ModalWorkflow.put_completion_trigger(new_bridge)
+        |> install_completion_tracking(facts)
     end
   end
 
@@ -547,78 +577,65 @@ defmodule MingaEditor.CompletionHandling do
     end
   end
 
-  @doc """
-  Handles an LSP completion response off the Editor hot path.
+  @spec handle_completion_result(
+          EditorState.t(),
+          CompletionTrigger.response_role(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()},
+          term()
+        ) :: EditorState.t()
+  def handle_completion_result(state, role, client, buffer, version, gen, trigger_pos, result) do
+    with true <- completion_result_current?(state, client, buffer, version, gen),
+         {:ok, prefix} <- completion_prefix_from_trigger(buffer, trigger_pos),
+         true <- buffer_value(buffer, &Buffer.version/1) == version do
+      mode = if role == :primary, do: :primary, else: :merge
+      start_completion_task(self(), mode, result, trigger_pos, prefix, gen, buffer, version)
+    end
 
-  Only the cheap bookkeeping runs on the Editor: `CompletionTrigger.classify_response/4`
-  matches the response `ref` against the pending request and decides whether it
-  is the primary response, a secondary one to merge, or stale. The expensive
-  work (parsing every item, sorting, and prefix-filtering) is then handed to a
-  Task under `Minga.Eval.TaskSupervisor`, which sends the processed result back
-  as `{:completion_processed, gen, mode, payload, trigger_pos}`. The Editor
-  applies that via `apply_processed/5` with a cheap state assignment.
-
-  This keeps the Editor mailbox responsive even when a server returns 1000+
-  completion items.
-  """
-  @spec handle_response(EditorState.t(), reference(), term()) :: EditorState.t()
-  def handle_response(
-        %{
-          shell_runtime: %{state: %ShellState{}},
-          workspace: %{buffers: %{active: nil}}
-        } = state,
-        _ref,
-        _result
-      ),
-      do: state
-
-  def handle_response(%{shell_runtime: %{state: %ShellState{}}} = state, ref, result) do
-    buffer_pid = state.workspace.buffers.active
-
-    {new_bridge, classification} =
-      CompletionTrigger.classify_response(
-        ModalWorkflow.completion_trigger(state),
-        ref,
-        result,
-        buffer_pid
-      )
-
-    new_state =
-      ModalWorkflow.put_completion_trigger(state, new_bridge)
-
-    dispatch_processing(new_state, classification, result)
-  end
-
-  def handle_response(state, _ref, _result), do: state
-
-  @spec dispatch_processing(EditorState.t(), CompletionTrigger.classification(), term()) ::
-          EditorState.t()
-  defp dispatch_processing(state, :ignore, _result), do: state
-
-  defp dispatch_processing(state, {mode, trigger_pos, prefix, gen}, result) do
-    start_completion_task(self(), mode, result, trigger_pos, prefix, gen)
     state
   end
 
-  # Spawns the parse/sort/filter work in a supervised Task so it never blocks
-  # the Editor GenServer. The Task sends the processed result back to `editor`.
-  #
-  # The Task ALWAYS sends a terminal {:completion_processed, ...} message: on
-  # success with the built menu, on any crash (e.g. a malformed LSP item that
-  # FunctionClauseErrors in parse_item/1) with the `:failed` sentinel. If the
-  # Task cannot even be started, we send `:failed` directly. Either way the
-  # pending modal is never left stuck waiting on a message that never arrives.
+  defp completion_result_current?(
+         %{shell_runtime: %{state: %ShellState{}}} = state,
+         client,
+         buffer,
+         version,
+         gen
+       ) do
+    trigger = ModalWorkflow.completion_trigger(state)
+
+    ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
+      CompletionTrigger.generation(trigger) == gen and state.workspace.buffers.active == buffer and
+      buffer_value(buffer, &Buffer.version/1) == version and
+      client in SyncServer.clients_for_buffer(buffer)
+  end
+
+  defp completion_result_current?(_state, _client, _buffer, _version, _gen), do: false
+
+  @spec completion_prefix_from_trigger(pid(), CompletionTrigger.position()) ::
+          {:ok, String.t()} | :stale
+  defp completion_prefix_from_trigger(buffer, trigger_pos) do
+    {:ok, CompletionTrigger.get_typed_since_trigger(buffer, trigger_pos)}
+  catch
+    :exit, _ -> :stale
+  end
+
   @spec start_completion_task(
           pid(),
           :primary | :merge,
           term(),
           {non_neg_integer(), non_neg_integer()},
           String.t(),
+          non_neg_integer(),
+          pid(),
           non_neg_integer()
         ) :: :ok
-  defp start_completion_task(editor, mode, result, trigger_pos, prefix, gen) do
+  defp start_completion_task(editor, mode, result, trigger_pos, prefix, gen, buffer, version) do
     case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-           run_completion_task(editor, mode, result, trigger_pos, prefix, gen)
+           run_completion_task(editor, mode, result, trigger_pos, prefix, gen, buffer, version)
          end) do
       {:ok, _pid} ->
         :ok
@@ -630,7 +647,7 @@ defmodule MingaEditor.CompletionHandling do
           "Completion Task failed to start (gen=#{gen}, mode=#{mode}): #{inspect(reason)}"
         end)
 
-        send(editor, {:completion_processed, gen, mode, :failed, trigger_pos})
+        send(editor, {:completion_processed, gen, mode, :failed, trigger_pos, buffer, version})
         :ok
     end
   end
@@ -641,9 +658,11 @@ defmodule MingaEditor.CompletionHandling do
           term(),
           {non_neg_integer(), non_neg_integer()},
           String.t(),
+          non_neg_integer(),
+          pid(),
           non_neg_integer()
         ) :: :ok
-  defp run_completion_task(editor, mode, result, trigger_pos, prefix, gen) do
+  defp run_completion_task(editor, mode, result, trigger_pos, prefix, gen, buffer, version) do
     payload =
       try do
         build_processed(mode, result, trigger_pos, prefix)
@@ -663,13 +682,10 @@ defmodule MingaEditor.CompletionHandling do
           :failed
       end
 
-    send(editor, {:completion_processed, gen, mode, payload, trigger_pos})
+    send(editor, {:completion_processed, gen, mode, payload, trigger_pos, buffer, version})
     :ok
   end
 
-  # Primary: build the full sorted+filtered menu in the Task so the Editor only
-  # has to assign it. Merge: parse to items only; the (rare) merge math runs on
-  # the Editor at apply time against the live menu so ordering stays correct.
   @spec build_processed(
           :primary,
           term(),
@@ -689,48 +705,36 @@ defmodule MingaEditor.CompletionHandling do
     Completion.parse_response(result)
   end
 
-  @doc """
-  Applies a completion result that was processed off the Editor in a Task.
-
-  Discards the result unless a completion modal is still open *and* it carries
-  the current request generation (`gen`). This latest-wins guard drops a stale
-  Task result from a request batch that was superseded by newer typing, so an
-  out-of-order or slow Task can never overwrite a fresher menu.
-
-  For a `:primary` result the Task already produced a fully sorted+filtered
-  `Completion`, so the common single-server path is a cheap assignment. If a
-  secondary server's `:merge` result happened to land first, the primary result
-  is unioned into it (rather than replacing it) so no server's items are lost.
-
-  A `:failed` payload (the Task crashed or could not start) clears a still-pending
-  menu so it is not left stuck, while leaving an already-populated menu intact.
-  """
   @spec apply_processed(
           EditorState.t(),
           non_neg_integer(),
           :primary | :merge,
           Completion.t() | [Completion.item()] | :failed,
-          {non_neg_integer(), non_neg_integer()}
+          {non_neg_integer(), non_neg_integer()},
+          pid(),
+          non_neg_integer()
         ) :: EditorState.t()
   def apply_processed(
         %{shell_runtime: %{state: %ShellState{}}} = state,
         gen,
         mode,
         payload,
-        trigger_pos
+        trigger_pos,
+        buffer,
+        version
       ) do
     trigger = ModalWorkflow.completion_trigger(state)
 
     if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
-         CompletionTrigger.generation(trigger) == gen do
+         CompletionTrigger.generation(trigger) == gen and state.workspace.buffers.active == buffer and
+         buffer_value(buffer, &Buffer.version/1) == version do
       apply_processed_current(state, mode, payload, trigger_pos)
     else
-      # Stale generation or the menu was dismissed/replaced; discard.
       state
     end
   end
 
-  def apply_processed(state, _gen, _mode, _payload, _trigger_pos), do: state
+  def apply_processed(state, _gen, _mode, _payload, _trigger_pos, _buffer, _version), do: state
 
   @spec apply_processed_current(
           EditorState.t(),
@@ -738,34 +742,25 @@ defmodule MingaEditor.CompletionHandling do
           Completion.t() | [Completion.item()] | :failed,
           {non_neg_integer(), non_neg_integer()}
         ) :: EditorState.t()
-  defp apply_processed_current(state, _mode, :failed, _trigger_pos) do
-    # Processing failed (crash or Task could not start). Don't leave the modal
-    # stuck waiting on a menu that will never arrive: dismiss it if it is still
-    # pending, but keep an already-populated menu (e.g. primary succeeded and a
-    # secondary merge failed) intact. A dropped completion self-heals on the
-    # next keystroke.
+  defp apply_processed_current(state, :primary, :failed, _trigger_pos) do
     case ModalWorkflow.completion(state) do
       nil -> dismiss(state)
       %Completion{} -> state
     end
   end
 
+  defp apply_processed_current(state, :merge, :failed, _trigger_pos), do: state
+
   defp apply_processed_current(state, :primary, %Completion{items: []}, _trigger_pos) do
-    # No items: matches the old behaviour of leaving the pending menu empty
-    # rather than showing an empty popup.
     state
   end
 
   defp apply_processed_current(state, :primary, %Completion{} = built, _trigger_pos) do
     case ModalWorkflow.completion(state) do
       nil ->
-        # Fast path (single server / primary lands first): just assign the
-        # already-sorted, already-filtered menu the Task produced.
         ModalWorkflow.update_completion(state, fn _ -> built end)
 
       %Completion{} ->
-        # A secondary :merge result landed first; union the primary items in so
-        # neither server's items are dropped.
         merge_completion_items(state, built.items, built.trigger_position)
     end
   end
@@ -784,7 +779,6 @@ defmodule MingaEditor.CompletionHandling do
   defp merge_completion_items(state, new_items, trigger_pos) do
     case ModalWorkflow.completion(state) do
       nil ->
-        # No existing completion; create a new one from the merged items
         completion = Completion.new(new_items, trigger_pos)
 
         prefix =
@@ -794,7 +788,6 @@ defmodule MingaEditor.CompletionHandling do
         open_completion(state, completion)
 
       %Completion{} = existing ->
-        # Merge into existing completion
         merged_items = existing.items ++ new_items
         completion = Completion.new(merged_items, existing.trigger_position)
 
@@ -821,14 +814,6 @@ defmodule MingaEditor.CompletionHandling do
 
   defp codepoint_to_char(_), do: nil
 
-  # ── Signature help ───────────────────────────────────────────────────────
-
-  @doc """
-  Handles a `textDocument/signatureHelp` response.
-
-  Creates a `SignatureHelp` struct from the response and stores it
-  in editor state. Returns state unchanged on error or empty response.
-  """
   @spec handle_signature_help_response(EditorState.t(), {:ok, term()} | {:error, term()}) ::
           EditorState.t()
   def handle_signature_help_response(state, {:error, _}), do: state
@@ -864,11 +849,9 @@ defmodule MingaEditor.CompletionHandling do
       codepoint == ?) ->
         SignatureHelpWorkflow.dismiss(state)
 
-      # Check if the character is a server-declared signature trigger
       char != nil and signature_trigger_char?(state, buf, char) ->
         send_signature_help_request(state, buf)
 
-      # Fallback: ( and , are universal signature triggers
       codepoint in [?(, ?,] ->
         send_signature_help_request(state, buf)
 
@@ -894,28 +877,35 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec send_signature_help_request(EditorState.t(), pid()) :: EditorState.t()
   defp send_signature_help_request(state, buf) do
-    case lsp_client_for(state, buf) do
-      nil ->
+    case {lsp_client_for(state, buf), signature_help_origin(buf)} do
+      {client, {:ok, uri, {line, col}, version}} when is_pid(client) ->
+        params = %{
+          "textDocument" => %{"uri" => uri},
+          "position" => %{"line" => line, "character" => col}
+        }
+
+        ref = Client.request(client, "textDocument/signatureHelp", params)
+        track_signature_help_request(state, ref, client, buf, version, {line, col})
+
+      _ ->
         state
+    end
+  end
 
-      client ->
-        file_path = Buffer.file_path(buf)
+  @spec signature_help_origin(pid()) ::
+          {:ok, String.t(), {non_neg_integer(), non_neg_integer()}, non_neg_integer()} | :stale
+  defp signature_help_origin(buf) do
+    case {
+      buffer_value(buf, &Buffer.file_path/1),
+      buffer_value(buf, &Buffer.cursor/1),
+      buffer_value(buf, &Buffer.version/1)
+    } do
+      {path, {line, col}, version}
+      when is_binary(path) and is_integer(version) and version >= 0 ->
+        {:ok, SyncServer.path_to_uri(path), {line, col}, version}
 
-        if file_path do
-          uri = SyncServer.path_to_uri(file_path)
-          {line, col} = Buffer.cursor(buf)
-
-          params = %{
-            "textDocument" => %{"uri" => uri},
-            "position" => %{"line" => line, "character" => col}
-          }
-
-          ref = Client.request(client, "textDocument/signatureHelp", params)
-
-          track_response_request(state, ref, :signature_help)
-        else
-          state
-        end
+      _ ->
+        :stale
     end
   end
 
@@ -942,6 +932,13 @@ defmodule MingaEditor.CompletionHandling do
       [client | _] -> client
       [] -> nil
     end
+  end
+
+  @spec buffer_value(pid(), (pid() -> term())) :: term() | :stale
+  defp buffer_value(buffer, fun) do
+    fun.(buffer)
+  catch
+    :exit, _ -> :stale
   end
 
   @spec extract_resolve_documentation(map()) :: String.t()

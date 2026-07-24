@@ -15,8 +15,7 @@ defmodule MingaEditor.State.LSP do
   alias MingaEditor.State.LSP.PendingRequests
 
   @type server_status :: :starting | :initializing | :ready | :crashed
-  @type legacy_response_kind ::
-          :completion_resolve | :signature_help | :code_lens | :code_lens_resolve | :inlay_hint
+  @type legacy_response_kind :: :code_lens | :code_lens_resolve | :inlay_hint
   @type current_origin_response_kind ::
           :definition
           | :peek_definition
@@ -170,6 +169,95 @@ defmodule MingaEditor.State.LSP do
       )
 
     %{lsp | pending_requests: pending_requests}
+  end
+
+  @spec track_completion_result_request(
+          t(),
+          reference(),
+          MingaEditor.CompletionTrigger.response_role(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: t()
+  def track_completion_result_request(
+        %__MODULE__{} = lsp,
+        ref,
+        role,
+        client,
+        buffer,
+        version,
+        gen,
+        pos
+      ) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_completion_result(
+        lsp.pending_requests,
+        ref,
+        role,
+        client,
+        buffer,
+        version,
+        gen,
+        pos
+      )
+    )
+  end
+
+  @spec track_completion_resolve_request(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map()
+        ) :: t()
+  def track_completion_resolve_request(
+        %__MODULE__{} = lsp,
+        ref,
+        client,
+        buffer,
+        version,
+        gen,
+        raw_item
+      ) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_completion_resolve(
+        lsp.pending_requests,
+        ref,
+        client,
+        buffer,
+        version,
+        gen,
+        raw_item
+      )
+    )
+  end
+
+  @spec track_signature_help_request(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: t()
+  def track_signature_help_request(%__MODULE__{} = lsp, ref, client, buffer, version, cursor) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_signature_help(
+        lsp.pending_requests,
+        ref,
+        client,
+        buffer,
+        version,
+        cursor
+      )
+    )
   end
 
   @doc "Tracks an Editor-global mouse hover request."
@@ -340,6 +428,10 @@ defmodule MingaEditor.State.LSP do
   def clear_inlay_hint_timer(%__MODULE__{} = lsp) do
     %{lsp | inlay_hint_debounce_timer: nil}
   end
+
+  @spec accept_pending(t(), {:ok, PendingRequests.t()}) :: t()
+  defp accept_pending(%__MODULE__{} = lsp, {:ok, pending_requests}),
+    do: %{lsp | pending_requests: pending_requests}
 
   @doc "Clears the highlight debounce timer reference without cancelling it."
   @spec clear_highlight_timer(t()) :: t()

@@ -10,6 +10,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionHandling
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.Shell.Registry, as: ShellRegistry
@@ -506,21 +507,29 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     test "completion debounce writes the flushed completion trigger back and sends a request" do
       state = file_buffer_state("foo_bar\n")
       client = start_fake_lsp_client()
-      trigger = %CompletionTrigger{phase: {:debounced, make_ref(), {0, 0}}}
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
+      timer = Process.send_after(self(), :unused, 10_000)
+
+      trigger = %CompletionTrigger{
+        phase: {:debounced, timer, [client], buffer, version, {0, 0}},
+        gen: 1
+      }
+
       payload = CompletionPayload.new(1, trigger: trigger)
       state = ModalWorkflow.transition(state, {:completion, payload})
-      buffer = state.workspace.buffers.active
 
-      {new_state, effects} =
-        LspEventHandler.handle(state, {:completion_debounce, [client], buffer})
+      {new_state, effects} = LspEventHandler.handle(state, {:completion_debounce, 1})
 
       assert effects == []
       assert_receive {:lsp_request, "textDocument/completion", _params, caller, ref}
       assert caller == self()
 
       new_trigger = ModalWorkflow.completion_trigger(new_state)
-      assert %CompletionTrigger{phase: {:pending, refs_by_role, {0, 0}}, gen: 1} = new_trigger
-      assert refs_by_role == %{ref => :primary}
+      assert %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1} = new_trigger
+
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) ==
+               {:ok, {:completion_result, :primary, client, buffer, version, 1, {0, 0}}}
     end
 
     test "completion resolve routes the request and records the pending ref" do
@@ -537,11 +546,12 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       }
 
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
-      trigger = %CompletionTrigger{phase: {:pending, %{make_ref() => :primary}, {0, 0}}}
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 2}
       payload = CompletionPayload.new(1, completion: completion, trigger: trigger)
       state = ModalWorkflow.transition(state, {:completion, payload})
+      version = Minga.Buffer.version(buffer)
 
-      {new_state, effects} = LspEventHandler.handle(state, {:completion_resolve, 0})
+      {new_state, effects} = LspEventHandler.handle(state, {:completion_resolve, 2, item})
 
       assert effects == []
 
@@ -551,13 +561,94 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert caller == self()
 
       assert LSPState.fetch_pending_request(new_state.lsp, ref) ==
-               {:ok, {:response, :completion_resolve}}
+               {:ok, {:completion_resolve, client, buffer, version, 2, item}}
+    end
+
+    test "completion resolve sends and tracks nothing when the origin buffer is stale" do
+      state = buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      item = %{"label" => "resolve-me", "sortText" => "resolve-me"}
+      completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 2}
+      payload = CompletionPayload.new(1, completion: completion, trigger: trigger)
+      state = ModalWorkflow.transition(state, {:completion, payload})
+
+      monitor = Process.monitor(buffer)
+      Process.exit(buffer, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^buffer, _}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:completion_resolve, 2, item})
+
+      assert effects == []
+      assert new_state == state
+      refute_receive {:lsp_request, "completionItem/resolve", _, _, _}, 50
+    end
+
+    test "signature help sends and tracks nothing when version capture is stale" do
+      state = file_buffer_state("call(")
+      client = start_fake_lsp_client()
+      buffer = buffer_that_dies_on_version(tmp_lsp_path("signature-stale"))
+      register_lsp_client(buffer, client)
+
+      buffers = Buffers.set_active_override(state.workspace.buffers, buffer)
+
+      workspace =
+        state.workspace
+        |> SessionState.set_buffers(buffers)
+        |> SessionState.transition_mode(:insert)
+
+      state = %{state | workspace: workspace}
+
+      new_state = CompletionHandling.maybe_handle(state, true, ?(, 0)
+
+      assert new_state == state
+      refute_receive {:lsp_request, "textDocument/signatureHelp", _, _, _}, 50
+    end
+
+    test "completion result that dies during prefix extraction is taken without processing" do
+      state = buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = buffer_that_dies_on_content_and_cursor(7)
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
+      payload = CompletionPayload.new(1, trigger: trigger)
+      buffers = Buffers.set_active_override(state.workspace.buffers, buffer)
+      state = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
+
+      state =
+        state
+        |> ModalWorkflow.transition({:completion, payload})
+        |> track_pending_request(
+          ref,
+          {:completion_result, :primary, client, buffer, 7, 1, {0, 0}}
+        )
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"items" => []}}})
+
+      assert effects == [:render_now]
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+      assert_receive {:buffer_content_and_cursor_requested, ^buffer}
+      refute_receive {:completion_processed, _, _, _, _, _, _}, 50
     end
 
     test "tracked signature help response updates state and returns render_now" do
       state = base_state()
       ref = make_ref()
-      state = track_pending_request(state, ref, :signature_help)
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:signature_help, client, buffer, Minga.Buffer.version(buffer),
+           Minga.Buffer.cursor(buffer)}
+        )
 
       response = %{
         "signatures" => [
@@ -611,9 +702,16 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     test "delayed signature help clears pending without touching or replaying a foreign shell" do
       ref = make_ref()
 
+      state = base_state()
+      buffer = state.workspace.buffers.active
+
       state =
-        base_state()
-        |> track_pending_request(ref, :signature_help)
+        state
+        |> track_pending_request(
+          ref,
+          {:signature_help, self(), buffer, Minga.Buffer.version(buffer),
+           Minga.Buffer.cursor(buffer)}
+        )
         |> ShellWorkflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -642,12 +740,18 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
     test "delayed completion response does not spawn processing or replay after a shell switch" do
       ref = make_ref()
-      trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}}
+      state = base_state()
+      buffer = state.workspace.buffers.active
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
       payload = CompletionPayload.new(1, trigger: trigger)
 
       state =
-        base_state()
+        state
         |> ModalWorkflow.transition({:completion, payload})
+        |> track_pending_request(
+          ref,
+          {:completion_result, :primary, self(), buffer, Minga.Buffer.version(buffer), 1, {0, 0}}
+        )
         |> ShellWorkflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -663,9 +767,9 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
 
       assert effects == [:render_now]
-      assert new_state == state
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
-      refute_receive {:completion_processed, _, _, _, _}, 50
+      refute_receive {:completion_processed, _, _, _, _, _, _}, 50
 
       restored = ShellWorkflow.switch(new_state, :traditional)
       assert Runtime.state(restored.shell_runtime).modal == :none
@@ -675,12 +779,22 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       ref = make_ref()
       item = %{"label" => "resolved", "documentation" => "old", "sortText" => "resolved"}
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
-      payload = CompletionPayload.new(1, completion: completion)
+      state = base_state()
+      buffer = state.workspace.buffers.active
+
+      payload =
+        CompletionPayload.new(1,
+          completion: completion,
+          trigger: %CompletionTrigger{gen: 1, phase: {:pending, {0, 0}}}
+        )
 
       state =
-        base_state()
+        state
         |> ModalWorkflow.transition({:completion, payload})
-        |> track_pending_request(ref, :completion_resolve)
+        |> track_pending_request(
+          ref,
+          {:completion_resolve, self(), buffer, Minga.Buffer.version(buffer), 1, item}
+        )
         |> ShellWorkflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -713,7 +827,16 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
           {0, 0}
         )
 
-      new_state = CompletionHandling.apply_processed(state, 7, :primary, processed, {0, 0})
+      new_state =
+        CompletionHandling.apply_processed(
+          state,
+          7,
+          :primary,
+          processed,
+          {0, 0},
+          state.workspace.buffers.active,
+          Minga.Buffer.version(state.workspace.buffers.active)
+        )
 
       assert new_state == state
       restored = ShellWorkflow.switch(new_state, :traditional)
@@ -753,10 +876,10 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert [%Minga.Language.Highlight.Span{layer: 2}] = Tuple.to_list(highlight.spans)
     end
 
-    test "untracked completion response is processed off-thread, then becomes visible" do
+    test "untracked completion response is ignored without trigger-local fallback" do
       state = buffer_state("hello\n")
       ref = make_ref()
-      trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}}
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
       payload = CompletionPayload.new(1, trigger: trigger)
       state = ModalWorkflow.transition(state, {:completion, payload})
 
@@ -775,25 +898,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, completion_result}})
 
       assert effects == [:render_now]
-
-      # The handler only does cheap ref bookkeeping: pending refs are cleared
-      # synchronously, but the parse/sort/filter is deferred to a Task (#2633),
-      # so the menu is not yet visible right after handle/2 returns.
-      assert ModalWorkflow.completion(new_state) == nil
-
-      new_trigger = ModalWorkflow.completion_trigger(new_state)
-      assert %CompletionTrigger{phase: :idle} = new_trigger
-
-      # Drive the async result the Task sends back, exactly as the Editor's
-      # {:completion_processed, ...} handle_info clause does, and confirm the
-      # completion ultimately becomes visible.
-      assert_receive {:completion_processed, gen, mode, processed, trigger_pos}, 5_000
-      applied = CompletionHandling.apply_processed(new_state, gen, mode, processed, trigger_pos)
-
-      completion = ModalWorkflow.completion(applied)
-      assert %Completion{} = completion
-      assert [%{label: "hello_world"}] = completion.filtered
-      assert completion.selected == 0
+      assert new_state == state
+      refute_receive {:completion_processed, _, _, _, _, _, _}, 50
     end
   end
 
@@ -1189,15 +1295,53 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     }
   end
 
-  defp track_pending_request(state, ref, kind)
-       when kind in [
-              :completion_resolve,
-              :signature_help,
-              :code_lens,
-              :code_lens_resolve,
-              :inlay_hint
-            ] do
-    %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
+  defp track_pending_request(
+         state,
+         ref,
+         {:completion_result, role, client, buffer, version, gen, trigger_pos}
+       ) do
+    %{
+      state
+      | lsp:
+          LSPState.track_completion_result_request(
+            state.lsp,
+            ref,
+            role,
+            client,
+            buffer,
+            version,
+            gen,
+            trigger_pos
+          )
+    }
+  end
+
+  defp track_pending_request(
+         state,
+         ref,
+         {:completion_resolve, client, buffer, version, gen, raw_item}
+       ) do
+    %{
+      state
+      | lsp:
+          LSPState.track_completion_resolve_request(
+            state.lsp,
+            ref,
+            client,
+            buffer,
+            version,
+            gen,
+            raw_item
+          )
+    }
+  end
+
+  defp track_pending_request(state, ref, {:signature_help, client, buffer, version, cursor}) do
+    %{
+      state
+      | lsp:
+          LSPState.track_signature_help_request(state.lsp, ref, client, buffer, version, cursor)
+    }
   end
 
   defp track_format(state, ref, buffer, version, opts \\ []) do
@@ -1306,6 +1450,63 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
        frontend: %MingaEditor.State.Frontend{port_manager: self()},
        workspace: workspace
      }, inactive_path, active_path}
+  end
+
+  defp buffer_that_dies_on_version(path) do
+    test = self()
+
+    spawn(fn ->
+      receive do
+        {:"$gen_call", from, :file_path} ->
+          GenServer.reply(from, path)
+          stale_version_buffer_loop(path)
+
+        other ->
+          send(test, {:unexpected_stale_buffer_message, other})
+      end
+    end)
+  end
+
+  defp stale_version_buffer_loop(path) do
+    receive do
+      {:"$gen_call", from, :file_path} ->
+        GenServer.reply(from, path)
+        stale_version_buffer_loop(path)
+
+      {:"$gen_call", from, :cursor} ->
+        GenServer.reply(from, {0, 1})
+        stale_version_buffer_loop(path)
+
+      {:"$gen_call", _from, :version} ->
+        exit(:version_probe)
+    end
+  end
+
+  defp buffer_that_dies_on_content_and_cursor(version) do
+    test = self()
+
+    spawn(fn ->
+      receive do
+        {:"$gen_call", from, :version} ->
+          GenServer.reply(from, version)
+          content_death_buffer_loop(test)
+
+        other ->
+          send(test, {:unexpected_content_death_buffer_message, other})
+      end
+    end)
+  end
+
+  defp content_death_buffer_loop(test) do
+    receive do
+      {:"$gen_call", _from, :content_and_cursor} ->
+        send(test, {:buffer_content_and_cursor_requested, self()})
+        exit(:content_probe)
+
+      other ->
+        send(test, {:unexpected_content_death_buffer_message, other})
+        content_death_buffer_loop(test)
+    end
   end
 
   defp tmp_lsp_path(name) do

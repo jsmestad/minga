@@ -395,26 +395,26 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert new_state.render.layout == nil
     end
 
-    test "generic pending requests are Editor-global across tab switches" do
+    test "L08 legacy pending requests are Editor-global across tab switches" do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
       tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
       ref = make_ref()
 
-      state = %{state | lsp: LSPState.track_response_request(state.lsp, ref, :completion_resolve)}
+      state = %{state | lsp: LSPState.track_response_request(state.lsp, ref, :code_lens)}
 
       {switched, _effects} = EditorState.switch_tab(state, target_id)
 
       assert LSPState.fetch_pending_request(switched.lsp, ref) ==
-               {:ok, {:response, :completion_resolve}}
+               {:ok, {:response, :code_lens}}
 
       refute :lsp_pending in TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
       assert LSPState.fetch_pending_request(switched_back.lsp, ref) ==
-               {:ok, {:response, :completion_resolve}}
+               {:ok, {:response, :code_lens}}
 
       refute :lsp_pending in TabBar.get(switched_back.shell_runtime.state.tab_bar, target_id).context.present_fields
     end

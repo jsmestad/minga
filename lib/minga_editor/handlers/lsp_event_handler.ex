@@ -40,21 +40,22 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   """
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [lsp_effect()]}
 
-  def handle(
-        %{shell_runtime: %{state: %ShellState{}}} = state,
-        {:completion_debounce, clients, buffer_pid}
-      ) do
-    new_bridge =
+  def handle(%{shell_runtime: %{state: %ShellState{}}} = state, {:completion_debounce, gen}) do
+    {new_bridge, facts} =
       CompletionTrigger.flush_debounce(
         MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state),
-        clients,
-        buffer_pid
+        gen
       )
 
-    {MingaEditor.Shell.Traditional.ModalWorkflow.put_completion_trigger(state, new_bridge), []}
+    state =
+      state
+      |> MingaEditor.Shell.Traditional.ModalWorkflow.put_completion_trigger(new_bridge)
+      |> CompletionHandling.install_completion_tracking(facts)
+
+    {state, []}
   end
 
-  def handle(state, {:completion_debounce, _clients, _buffer_pid}), do: {state, []}
+  def handle(state, {:completion_debounce, _gen}), do: {state, []}
 
   def handle(state, {:lsp_response, ref, result}) do
     case LSPState.take_pending_request(state.lsp, ref) do
@@ -63,7 +64,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
         {dispatch_pending_response(request, state, result), [:render_now]}
 
       :error ->
-        {CompletionHandling.handle_response(state, ref, result), [:render_now]}
+        {state, [:render_now]}
     end
   end
 
@@ -77,11 +78,14 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     {LspActions.document_highlight(state), []}
   end
 
-  def handle(%{shell_runtime: %{state: %ShellState{}}} = state, {:completion_resolve, index}) do
-    {CompletionHandling.flush_resolve(state, index), []}
+  def handle(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        {:completion_resolve, gen, raw_item}
+      ) do
+    {CompletionHandling.flush_resolve(state, gen, raw_item), []}
   end
 
-  def handle(state, {:completion_resolve, _index}), do: {state, []}
+  def handle(state, {:completion_resolve, _gen, _raw_item}), do: {state, []}
 
   def handle(state, :request_code_lens_and_inlay_hints) do
     state = LspActions.code_lens(state)
@@ -148,12 +152,41 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     dispatch_lsp_response({kind, operation_id, origin_tab_id}, state, result)
   end
 
-  defp dispatch_pending_response({:response, :completion_resolve}, state, result) do
-    apply_completion_resolve_response(state, result)
+  defp dispatch_pending_response(
+         {:completion_result, role, client, buffer, version, gen, trigger_pos},
+         state,
+         result
+       ) do
+    CompletionHandling.handle_completion_result(
+      state,
+      role,
+      client,
+      buffer,
+      version,
+      gen,
+      trigger_pos,
+      result
+    )
   end
 
-  defp dispatch_pending_response({:response, :signature_help}, state, result) do
-    apply_signature_help_response(state, result)
+  defp dispatch_pending_response(
+         {:completion_resolve, client, buffer, version, gen, raw_item},
+         state,
+         result
+       ) do
+    if completion_resolve_current?(state, client, buffer, version, gen, raw_item),
+      do: apply_completion_resolve_response(state, raw_item, result),
+      else: state
+  end
+
+  defp dispatch_pending_response(
+         {:signature_help, client, buffer, version, cursor},
+         state,
+         result
+       ) do
+    if signature_help_current?(state, client, buffer, version, cursor),
+      do: apply_signature_help_response(state, result),
+      else: state
   end
 
   defp dispatch_pending_response(
@@ -188,14 +221,15 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     state
   end
 
-  @spec apply_completion_resolve_response(EditorState.t(), term()) :: EditorState.t()
+  @spec apply_completion_resolve_response(EditorState.t(), map(), term()) :: EditorState.t()
   defp apply_completion_resolve_response(
          %{shell_runtime: %{state: %ShellState{}}} = state,
+         raw_item,
          result
        ),
-       do: CompletionHandling.handle_resolve_response(state, result)
+       do: CompletionHandling.handle_resolve_response(state, raw_item, result)
 
-  defp apply_completion_resolve_response(state, _result), do: state
+  defp apply_completion_resolve_response(state, _raw_item, _result), do: state
 
   @spec apply_signature_help_response(EditorState.t(), term()) :: EditorState.t()
   defp apply_signature_help_response(%{shell_runtime: %{state: %ShellState{}}} = state, result),
@@ -324,6 +358,48 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp dispatch_current_response(kind, state, result),
     do: dispatch_lsp_response(kind, state, result)
+
+  @spec completion_resolve_current?(
+          EditorState.t(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map()
+        ) :: boolean()
+  defp completion_resolve_current?(state, client, buffer, version, gen, raw_item) do
+    state.workspace.buffers.active == buffer and
+      buffer_value(buffer, &Minga.Buffer.version/1) == version and
+      match?([^client | _], Minga.LSP.SyncServer.clients_for_buffer(buffer)) and
+      MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state)
+      |> CompletionTrigger.generation()
+      |> Kernel.==(gen) and
+      completion_selected_raw?(state, raw_item)
+  end
+
+  @spec completion_selected_raw?(EditorState.t(), map()) :: boolean()
+  defp completion_selected_raw?(%{shell_runtime: %{state: %ShellState{}}} = state, raw_item) do
+    case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
+      nil -> false
+      completion -> Minga.Editing.Completion.selected_raw?(completion, raw_item)
+    end
+  end
+
+  defp completion_selected_raw?(_state, _raw_item), do: false
+
+  @spec signature_help_current?(
+          EditorState.t(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: boolean()
+  defp signature_help_current?(state, client, buffer, version, cursor) do
+    state.workspace.buffers.active == buffer and
+      buffer_value(buffer, &Minga.Buffer.version/1) == version and
+      match?([^client | _], Minga.LSP.SyncServer.clients_for_buffer(buffer)) and
+      buffer_value(buffer, &Minga.Buffer.cursor/1) == cursor
+  end
 
   defp response_current?(state, client, buffer, version, tab_id, cursor) do
     active_tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)

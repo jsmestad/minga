@@ -158,12 +158,11 @@ defmodule MingaEditor.State.ModalOverlay do
        ),
        do: {:completion, CompletionPayload.put_trigger(payload, trigger)}
 
+  defp do_put_completion_trigger(:none, %CompletionTrigger{phase: :idle}, _active_tab_id),
+    do: :none
+
   defp do_put_completion_trigger(:none, trigger, active_tab_id) do
-    if CompletionTrigger.active?(trigger) do
-      {:completion, CompletionPayload.new(active_tab_id, trigger: trigger)}
-    else
-      :none
-    end
+    {:completion, CompletionPayload.new(active_tab_id, trigger: trigger)}
   end
 
   defp do_put_completion_trigger({:picker, %PickerPayload{}} = modal, _trigger, _active_tab_id),

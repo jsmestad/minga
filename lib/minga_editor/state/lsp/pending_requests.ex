@@ -10,11 +10,15 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   defstruct by_ref: %{}, format_by_buffer: %{}, newest_formats: []
 
   @type operation_kind :: :references | :rename
+  @type position :: {non_neg_integer(), non_neg_integer()}
   @type request ::
           {:response, MingaEditor.State.LSP.legacy_response_kind()}
           | {:response, MingaEditor.State.LSP.current_origin_response_kind(), pid(), pid(),
-             non_neg_integer(), MingaEditor.State.Tab.id() | nil,
-             {non_neg_integer(), non_neg_integer()} | nil}
+             non_neg_integer(), MingaEditor.State.Tab.id() | nil, position() | nil}
+          | {:completion_result, MingaEditor.CompletionTrigger.response_role(), pid(), pid(),
+             non_neg_integer(), non_neg_integer(), position()}
+          | {:completion_resolve, pid(), pid(), non_neg_integer(), non_neg_integer(), map()}
+          | {:signature_help, pid(), pid(), non_neg_integer(), position()}
           | {:hover_mouse, non_neg_integer(), non_neg_integer(), pid(), non_neg_integer(),
              non_neg_integer(), non_neg_integer()}
           | {:semantic_tokens, pid()}
@@ -31,23 +35,73 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @spec track_response(t(), reference(), MingaEditor.State.LSP.legacy_response_kind()) ::
-          {:ok, t()} | {:error, :duplicate_ref}
-  def track_response(%__MODULE__{} = pending, ref, kind)
-      when is_reference(ref) and
-             kind in [
-               :completion_resolve,
-               :signature_help,
-               :code_lens,
-               :code_lens_resolve,
-               :inlay_hint
-             ] do
-    track_request(pending, ref, {:response, kind})
-  end
-
   defguardp valid_cursor_guard(cursor)
             when is_tuple(cursor) and tuple_size(cursor) == 2 and is_integer(elem(cursor, 0)) and
                    elem(cursor, 0) >= 0 and is_integer(elem(cursor, 1)) and elem(cursor, 1) >= 0
+
+  @spec track_response(t(), reference(), MingaEditor.State.LSP.legacy_response_kind()) ::
+          {:ok, t()} | {:error, :duplicate_ref}
+  def track_response(%__MODULE__{} = pending, ref, kind)
+      when is_reference(ref) and kind in [:code_lens, :code_lens_resolve, :inlay_hint] do
+    track_request(pending, ref, {:response, kind})
+  end
+
+  @spec track_completion_result(
+          t(),
+          reference(),
+          MingaEditor.CompletionTrigger.response_role(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          position()
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_completion_result(
+        %__MODULE__{} = pending,
+        ref,
+        role,
+        client,
+        buffer,
+        version,
+        gen,
+        pos
+      )
+      when is_reference(ref) and role in [:primary, :secondary] and is_pid(client) and
+             is_pid(buffer) and is_integer(version) and version >= 0 and is_integer(gen) and
+             gen >= 0 and valid_cursor_guard(pos) do
+    track_request(pending, ref, {:completion_result, role, client, buffer, version, gen, pos})
+  end
+
+  @spec track_completion_resolve(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map()
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_completion_resolve(
+        %__MODULE__{} = pending,
+        ref,
+        client,
+        buffer,
+        version,
+        gen,
+        raw_item
+      )
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             version >= 0 and is_integer(gen) and gen >= 0 and is_map(raw_item) do
+    track_request(pending, ref, {:completion_resolve, client, buffer, version, gen, raw_item})
+  end
+
+  @spec track_signature_help(t(), reference(), pid(), pid(), non_neg_integer(), position()) ::
+          {:ok, t()} | {:error, :duplicate_ref}
+  def track_signature_help(%__MODULE__{} = pending, ref, client, buffer, version, cursor)
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             version >= 0 and valid_cursor_guard(cursor) do
+    track_request(pending, ref, {:signature_help, client, buffer, version, cursor})
+  end
 
   @spec track_response(
           t(),
