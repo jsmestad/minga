@@ -27,7 +27,7 @@ Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **IMPLEMENTED:** ES06.
+- **VERIFIED routed follow-on:** ES06.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -4698,7 +4698,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W116/ES06: Cut LSP request correlation over to one typed owner
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES06
 - **Decision:** APPROVE_DIRECT, one typed Editor-global `MingaEditor.State.LSP.PendingRequests` collection owns semantic request authority. Transport correlation and sync ordering stay in Layer 1.
 - **Planning profile:** `ES06RoutePlanner`, editor-lifecycle-planner, read-only.
@@ -4718,8 +4718,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 - **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/completion_handling.ex`, `lib/minga_editor/handlers/lsp_event_handler.ex`, `lib/minga_editor/lsp_actions.ex`, `lib/minga_editor/mouse_hover_tooltip.ex`, `lib/minga_editor/semantic_token_sync.ex`, `lib/minga_editor/session/state.ex`, `lib/minga_editor/state.ex`, `lib/minga_editor/state/lsp.ex`, `lib/minga_editor/state/lsp/pending_requests.ex`, `lib/minga_editor/state/tab/context.ex`, `test/minga_editor/handlers/lsp_event_handler_test.exs`, `test/minga_editor/state/lsp/pending_requests_test.exs`, `test/minga_editor/state/snapshot_test.exs`, and `test/minga_editor/state/tab_switch_test.exs`; deleted `lib/minga_editor/state/lsp/format_operations.ex` and `test/minga_editor/state/lsp/format_operations_test.exs`.
-- **PR URL:** Reserved.
-- **Implementation commit SHA:** Reserved.
-- **Merge SHA:** Reserved.
-- **Merge evidence:** Reserved.
-- **Reviewer evidence:** Initial correctness and Ponytail reviews blocked only on complete line accounting and the provisional cap. Elixir craftsmanship found and the implementation corrected a swallowed duplicate-ref invariant in mouse hover plus an open generic request-kind spec. `ES06BudgetDecision` returned `APPROVE_REVISED_CAP`, retained the clean one-owner cutover, rejected transitional split/rework, and locked exact net caps of `+149` production and `+85` test lines. Targeted rechecks returned `RESOLVED/PASS` for correctness, `RESOLVED/LEAN` for Ponytail, and `RESOLVED/PASS` for Elixir craftsmanship with no residuals. Final acceptance confirmed the implementation and blocked only on stale gross production counts. W116 now records the current complete `+428/-279`, net `+149` accounting, and the targeted final recheck returned `RESOLVED/PASS` with 0.99 confidence.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3228
+- **Implementation commit SHA:** `20b74f42f5990c42d35a849df3de7ba524ea734b`
+- **Merge SHA:** `ddaf4517c03987c3e0b2391f2f941c5961c6f692`
+- **Merge evidence:** PR #3228 merged on 2026-07-24 after required CI run `30123734908` passed all jobs. Current main contains the implementation and tests reviewed at `20b74f42f5990c42d35a849df3de7ba524ea734b`.
+- **Reviewer evidence:** Initial correctness and Ponytail reviews blocked only on complete line accounting and the provisional cap. Elixir craftsmanship found and the implementation corrected a swallowed duplicate-ref invariant in mouse hover plus an open generic request-kind spec. `ES06BudgetDecision` returned `APPROVE_REVISED_CAP`, retained the clean one-owner cutover, rejected transitional split/rework, and locked exact net caps of `+149` production and `+85` test lines. Targeted rechecks returned `RESOLVED/PASS` for correctness, `RESOLVED/LEAN` for Ponytail, and `RESOLVED/PASS` for Elixir craftsmanship with no residuals. Final acceptance confirmed the implementation and blocked only on stale gross production counts. W116 records the complete `+428/-279`, net `+149` accounting, and the targeted final recheck returned `RESOLVED/PASS` with 0.99 confidence.
+- **Findings resolved:** ES06 is fully resolved as the approved ROUTE follow-on.
+- **Completion date:** 2026-07-24
