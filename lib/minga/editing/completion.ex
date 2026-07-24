@@ -23,7 +23,7 @@ defmodule Minga.Editing.Completion do
             trigger_position: {0, 0},
             max_visible: 10,
             resolve_timer: nil,
-            last_resolved_index: -1
+            last_resolved_identity: nil
 
   @typedoc "LSP CompletionItemKind as an atom."
   @type item_kind ::
@@ -85,7 +85,7 @@ defmodule Minga.Editing.Completion do
           trigger_position: {non_neg_integer(), non_neg_integer()},
           max_visible: pos_integer(),
           resolve_timer: reference() | nil,
-          last_resolved_index: integer()
+          last_resolved_identity: map() | nil
         }
 
   # ── Constructor ──────────────────────────────────────────────────────────────
@@ -273,31 +273,48 @@ defmodule Minga.Editing.Completion do
     }
   end
 
+  @doc "Returns true when the selected item's raw identity equals the expected raw item."
+  @spec selected_raw?(t(), map()) :: boolean()
+  def selected_raw?(%__MODULE__{} = completion, raw_item) when is_map(raw_item) do
+    case selected_item(completion) do
+      %{raw: ^raw_item} -> true
+      _ -> false
+    end
+  end
+
   @doc """
-  Updates the documentation for the currently selected item.
+  Updates documentation only when the currently selected item matches the expected raw identity.
 
-  Called when a `completionItem/resolve` response arrives with
-  the full documentation text.
+  Called when a `completionItem/resolve` response arrives with the full documentation text.
   """
-  @spec update_selected_documentation(t(), String.t()) :: t()
-  def update_selected_documentation(%__MODULE__{} = completion, doc_text) do
-    item = selected_item(completion)
-
-    if item do
-      updated = %{item | documentation: doc_text}
-      idx = absolute_selected_index(completion)
-
-      filtered =
-        List.update_at(completion.filtered, idx, fn _ -> updated end)
-
-      %{completion | filtered: filtered}
+  @spec update_selected_documentation(t(), map(), String.t()) :: t()
+  def update_selected_documentation(%__MODULE__{} = completion, raw_item, doc_text)
+      when is_map(raw_item) do
+    if selected_raw?(completion, raw_item) do
+      completion
+      |> update_documentation_for_raw(raw_item, doc_text)
+      |> Map.put(:last_resolved_identity, raw_item)
     else
       completion
     end
   end
 
-  @spec absolute_selected_index(t()) :: non_neg_integer()
-  defp absolute_selected_index(%__MODULE__{selected: sel}), do: sel
+  @spec update_documentation_for_raw(t(), map(), String.t()) :: t()
+  defp update_documentation_for_raw(%__MODULE__{} = completion, raw_item, doc_text) do
+    %{
+      completion
+      | items: update_documentation_items(completion.items, raw_item, doc_text),
+        filtered: update_documentation_items(completion.filtered, raw_item, doc_text)
+    }
+  end
+
+  @spec update_documentation_items([item()], map(), String.t()) :: [item()]
+  defp update_documentation_items(items, raw_item, doc_text) do
+    Enum.map(items, fn
+      %{raw: ^raw_item} = item -> %{item | documentation: doc_text}
+      item -> item
+    end)
+  end
 
   @spec extract_documentation(term()) :: String.t()
   defp extract_documentation(nil), do: ""

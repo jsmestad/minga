@@ -4755,3 +4755,34 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge evidence:** PR #3230 merged on 2026-07-24 after required CI passed. Current main contains the same implementation and test tree reviewed at `8eb1de1476a45ca87056a858435a508f3f9daa37`.
 - **Findings resolved:** L06 is fully resolved as the approved ROUTE follow-on.
 - **Completion date:** 2026-07-24
+
+### W118/L07: Validate completion and signature identity through processing
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** L07
+- **Decision:** APPROVE_REVISED_CAP, one Editor-global `MingaEditor.State.LSP.PendingRequests` owner carries exactly three L07 typed variants for completion result, completion resolve, and signature help. Completion debounce uses the existing completion generation as its only semantic identity.
+- **Planning profile:** `L07RoutePlanner`, editor-lifecycle-planner, read-only; superseded where corrected by `L07PlanVerifier`.
+- **Implementation profile:** `L07RouteWorker`, editor-lifecycle-worker, no delegation.
+- **Baseline:** `39f395e6f5a344dd00e6a93da35e1d53e7338ac2`.
+- **Ready provenance:** Corrected lock from `agent://L07PlanVerifier`; the initial route plan was not locked where it duplicated debounce identity or left trigger-local response classification ambiguous. `agent://L07BudgetDecision` approved the atomic clean cutover with exact hard caps of net `+170` formatted production lines and net `+360` formatted test lines.
+- **Observable result:** Completion debounce messages carry only `{:completion_debounce, gen}` and stale generations send no LSP requests. Completion results are taken once from `PendingRequests`, validated against captured client membership, buffer PID, buffer version, completion generation, and trigger position before async processing, and processed results also reject active-buffer/version drift. Completion resolve uses exact raw LSP item equality for timer, pending request, and response update identity. Signature help responses validate client, buffer, version, and captured cursor before opening or dismissing popup state.
+- **Implementation result:** Added exactly three L07 typed pending variants; removed completion resolve and signature help from the legacy atom API while preserving L08 `:code_lens`, `:code_lens_resolve`, and `:inlay_hint`; deleted trigger-local response ref classification and untracked completion-response fallback; replaced selected-index resolve identity with raw LSP item identity; updated Editor mailbox shapes for debounce, resolve, and processed completion results.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga/editing/completion.ex`, `lib/minga_editor.ex`, `lib/minga_editor/completion_handling.ex`, `lib/minga_editor/completion_trigger.ex`, `lib/minga_editor/handlers/lsp_event_handler.ex`, `lib/minga_editor/state/lsp.ex`, `lib/minga_editor/state/lsp/pending_requests.ex`, `lib/minga_editor/state/modal_overlay.ex`, `test/minga_editor/completion_async_test.exs`, `test/minga_editor/completion_doc_preview_test.exs`, `test/minga_editor/completion_trigger_test.exs`, `test/minga_editor/handlers/lsp_event_handler_test.exs`, `test/minga_editor/state/lsp/pending_requests_test.exs`, and `test/minga_editor/state/tab_switch_test.exs`.
+- **Focused validation:** `make lint` passed; the locked L07 suite across pending requests, trigger, handler, documentation preview, async processing, signature help, and tab switching passed `124 tests`; after the deterministic dead-between-validation regression replaced the weaker early-death setup, `mix test test/minga_editor/handlers/lsp_event_handler_test.exs` passed `44 tests`.
+- **Production lines added/removed before roadmap evidence:** `+637/-477`, net `+160`, within the architecture-approved `+170` cap from `agent://L07BudgetDecision`.
+- **Test lines added/removed before roadmap evidence:** `+509/-379`, net `+130`, within the architecture-approved `+360` cap from `agent://L07BudgetDecision`.
+- **Broad validation:** `git diff --check` and `make lint` passed. Default-concurrency `mix test.llm` exposed an unrelated five-second `MingaAgent.SessionManager.list_sessions/0` timeout in `MingaAgent.Gateway.JsonRpcTest`; that exact test passed alone. `mix test.llm --max-cases 8` exposed a different five-second timeout in the unchanged `MingaAgent.SessionManagerTest` restart path; that exact test also passed alone. No L07-focused test failed.
+- **Pre-acceptance reviews:** Correctness returned `PASS` after deterministic coverage of the buffer-death window; Ponytail returned `RESOLVED/LEAN`; Elixir craftsmanship returned `RESOLVED/PASS`.
+- **Final reviewer:** `PASS`, confidence `0.98`; the one-owner cutover, take-once dispatch, stale/dead-origin rejection, primary/merge behavior, resolve identity, signature validation, L08 preservation, tests, line caps, and qualified validation evidence are accepted.
+- **Concepts added:** L07 completion-result, completion-resolve, and signature-help typed pending request variants; raw LSP completion item resolve identity.
+- **Concepts removed:** CompletionTrigger response-ref authority (`refs_by_role`, classifier, classification role, pending-ref removal), untracked completion-response fallback, legacy completion/signature atom tracking, and selected-index completion resolve identity.
+- **Retained constraints:** One Editor mailbox, one completion generation identity, no debounce token, no new module/process/registry/dependency/behaviour/protocol/configuration/shim/metadata map, no frontend protocol change, async completion processing under the existing task supervisor, and L08 legacy atoms unchanged.
+- **Discoveries affecting later work:** L08 code-lens, codeLens/resolve, and inlay hint remain on the legacy atom variant and still need their own origin-safe stale rejection plus empty-result clearing.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
+- **PR URL:** reserved.
+- **Implementation commit SHA:** reserved.
+- **Merge SHA:** reserved.
+- **Merge evidence:** reserved.
+- **Findings resolved:** L07 implementation plus every mandatory correction from the correctness, Ponytail, and Elixir reviews are applied; final acceptance passed with no findings.
+- **Completion date:** reserved.

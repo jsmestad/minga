@@ -1,35 +1,18 @@
 defmodule MingaEditor.CompletionAsyncTest do
-  @moduledoc """
-  Coverage for processing LSP completion responses off the Editor hot path
-  (ticket #2633).
-
-  The Editor only does cheap ref bookkeeping when a completion response
-  arrives; the parse/sort/filter runs in a Task that sends the processed menu
-  back as `{:completion_processed, gen, mode, payload, trigger_pos}`. These
-  tests prove:
-
-    * (a) the parse/sort/filter does not run on the Editor path — the
-      synchronous handler leaves the menu pending and the built menu only
-      arrives later, as a message, already sorted and filtered;
-    * (b) a stale processed result (older generation) is discarded latest-wins
-      so a superseded Task can never overwrite a fresher menu;
-    * (c) the merge path still unions a secondary server's items into the live
-      menu and re-applies the prefix filter correctly;
-    * (d) end-to-end through the live Editor: a completion response drives the
-      real `handle_info({:completion_processed, ...})` clause and the menu
-      becomes visible — and a malformed item that crashes the Task clears the
-      pending menu instead of leaving it stuck.
-  """
+  @moduledoc "Coverage for processing LSP completion responses off the Editor hot path."
 
   use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionHandling
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
+  alias MingaEditor.State.LSP, as: LSPState
 
   @sync_timeout 15_000
 
@@ -44,7 +27,7 @@ defmodule MingaEditor.CompletionAsyncTest do
 
   defp open_completion_modal(state, completion, gen) do
     owner = state.shell_runtime.state.tab_bar.active_id
-    trigger = %CompletionTrigger{gen: gen}
+    trigger = %CompletionTrigger{gen: gen, phase: {:pending, {0, 0}}}
     payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
     ModalWorkflow.open(state, {:completion, payload})
   end
@@ -55,20 +38,12 @@ defmodule MingaEditor.CompletionAsyncTest do
     test "the synchronous handler leaves the menu pending and the built menu arrives async" do
       ctx = start_editor("hello")
       state = editor_state(ctx)
-
-      # Open a pending completion modal with a primary request in flight. `self()`
-      # is the test process, so the Task will send the processed menu back to us.
-      ref = make_ref()
-
-      trigger = %CompletionTrigger{
-        phase: {:pending, %{ref => :primary}, {0, 0}},
-        gen: 1
-      }
-
+      buffer = state.workspace.buffers.active
+      Minga.LSP.SyncServer.put_clients(buffer, [self()])
+      version = Minga.Buffer.version(buffer)
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
       state = ModalWorkflow.put_completion_trigger(state, trigger)
 
-      # sortText is deliberately out of label order to prove sorting happened in
-      # the Task, not on the Editor.
       result =
         {:ok,
          %{
@@ -78,13 +53,22 @@ defmodule MingaEditor.CompletionAsyncTest do
            ]
          }}
 
-      returned = CompletionHandling.handle_response(state, ref, result)
+      returned =
+        CompletionHandling.handle_completion_result(
+          state,
+          :primary,
+          self(),
+          buffer,
+          version,
+          1,
+          {0, 0},
+          result
+        )
 
-      # The Editor path itself never parsed/built the menu: it is still pending.
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(returned) == nil
 
-      # The built menu arrives later, off-process, already sorted and filtered.
-      assert_receive {:completion_processed, 1, :primary, %Completion{} = built, {0, 0}},
+      assert_receive {:completion_processed, 1, :primary, %Completion{} = built, {0, 0}, ^buffer,
+                      ^version},
                      @sync_timeout
 
       assert labels(built) == ["apple", "banana"]
@@ -95,6 +79,8 @@ defmodule MingaEditor.CompletionAsyncTest do
     test "a result tagged with an older generation never overwrites the live menu" do
       ctx = start_editor("hello")
       state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
 
       existing = completion_from([%{"label" => "keep", "filterText" => "keep"}], {0, 0}, "")
       state = open_completion_modal(state, existing, 5)
@@ -106,37 +92,46 @@ defmodule MingaEditor.CompletionAsyncTest do
           ""
         )
 
-      # Generation 4 is stale relative to the live generation 5: discard it.
-      discarded = CompletionHandling.apply_processed(state, 4, :primary, stale, {0, 0})
+      discarded =
+        CompletionHandling.apply_processed(state, 4, :primary, stale, {0, 0}, buffer, version)
+
       assert labels(MingaEditor.Shell.Traditional.ModalWorkflow.completion(discarded)) == ["keep"]
 
-      # The same result on the live generation 5 is applied (sanity check that the
-      # guard is about the generation, not the payload).
-      applied = CompletionHandling.apply_processed(state, 5, :primary, stale, {0, 0})
+      applied =
+        CompletionHandling.apply_processed(state, 5, :primary, stale, {0, 0}, buffer, version)
 
       assert "stale-sentinel" in labels(
                MingaEditor.Shell.Traditional.ModalWorkflow.completion(applied)
              )
     end
 
-    test "a result is discarded when the completion menu has been dismissed" do
+    test "a result is discarded when the active buffer changed even on the same generation" do
       ctx = start_editor("hello")
       state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
+      existing = completion_from([%{"label" => "keep", "filterText" => "keep"}], {0, 0}, "")
+      state = open_completion_modal(state, existing, 5)
+      other = start_supervised!({BufferProcess, content: "other"}, id: {:buffer, make_ref()})
+      stale = completion_from([%{"label" => "stale", "filterText" => "stale"}], {0, 0}, "")
 
-      # No completion modal is open (modal is :none), so any processed result is stale.
-      built = completion_from([%{"label" => "ghost", "filterText" => "ghost"}], {0, 0}, "")
-      result = CompletionHandling.apply_processed(state, 1, :primary, built, {0, 0})
+      buffers = Buffers.set_active_override(state.workspace.buffers, other)
+      changed = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
 
-      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(result) == nil
+      result =
+        CompletionHandling.apply_processed(changed, 5, :primary, stale, {0, 0}, buffer, version)
+
+      assert labels(MingaEditor.Shell.Traditional.ModalWorkflow.completion(result)) == ["keep"]
     end
   end
 
   describe "(c) merge path still produces correct merged+filtered completions" do
     test "secondary server items are unioned in, sorted, and prefix-filtered" do
       ctx = start_editor("hello")
-      # Cursor at end of "hello" so the prefix typed since trigger {0, 0} is "hello".
       BufferProcess.move_to(ctx.buffer, {0, 5})
       state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
 
       existing =
         completion_from(
@@ -153,11 +148,11 @@ defmodule MingaEditor.CompletionAsyncTest do
           %{"label" => "goodbye", "filterText" => "goodbye", "sortText" => "0"}
         ])
 
-      merged = CompletionHandling.apply_processed(state, 5, :merge, merge_items, {0, 0})
+      merged =
+        CompletionHandling.apply_processed(state, 5, :merge, merge_items, {0, 0}, buffer, version)
+
       completion = MingaEditor.Shell.Traditional.ModalWorkflow.completion(merged)
 
-      # Union of both servers, sorted by sortText, with "goodbye" filtered out by
-      # the "hello" prefix.
       assert labels(completion) == ["helloThere", "helloWorld"]
       refute "goodbye" in labels(completion)
     end
@@ -165,16 +160,15 @@ defmodule MingaEditor.CompletionAsyncTest do
     test "a primary result that lands after a secondary merge unions instead of replacing" do
       ctx = start_editor("hello")
       state = editor_state(ctx)
-
-      # A secondary :merge already populated the menu first.
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
       secondary = completion_from([%{"label" => "from_secondary"}], {0, 0}, "")
       state = open_completion_modal(state, secondary, 5)
+      primary = completion_from([%{"label" => "from_primary"}], {0, 0}, "")
 
-      # The slower primary result lands afterwards; its items must be unioned in.
-      primary =
-        completion_from([%{"label" => "from_primary"}], {0, 0}, "")
+      merged =
+        CompletionHandling.apply_processed(state, 5, :primary, primary, {0, 0}, buffer, version)
 
-      merged = CompletionHandling.apply_processed(state, 5, :primary, primary, {0, 0})
       result_labels = labels(MingaEditor.Shell.Traditional.ModalWorkflow.completion(merged))
 
       assert "from_secondary" in result_labels
@@ -183,28 +177,36 @@ defmodule MingaEditor.CompletionAsyncTest do
   end
 
   describe "(d) end-to-end through the live Editor handle_info" do
-    # Inject a pending completion modal whose bridge expects `ref`, so a real
-    # {:lsp_response, ref, ...} sent to the live Editor drives the whole async
-    # pipeline: handle_info -> CompletionHandling.handle_response -> Task ->
-    # {:completion_processed, ...} -> the Editor's handle_info apply clause.
-    defp inject_pending_completion(ctx, ref) do
+    defp inject_pending_completion(ctx, ref, client) do
       :sys.replace_state(ctx.editor, fn state ->
         owner = state.shell_runtime.state.tab_bar.active_id
-
-        trigger = %CompletionTrigger{
-          phase: {:pending, %{ref => :primary}, {0, 0}},
-          gen: 1
-        }
-
+        buffer = state.workspace.buffers.active
+        version = Minga.Buffer.version(buffer)
+        trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
         payload = CompletionPayload.new(owner, trigger: trigger)
-        ModalWorkflow.open(state, {:completion, payload})
+
+        state
+        |> ModalWorkflow.open({:completion, payload})
+        |> Map.update!(:lsp, fn lsp ->
+          LSPState.track_completion_result_request(
+            lsp,
+            ref,
+            :primary,
+            client,
+            buffer,
+            version,
+            1,
+            {0, 0}
+          )
+        end)
       end)
     end
 
     test "a real LSP completion response routes through handle_info and becomes visible" do
       ctx = start_editor("hello")
       ref = make_ref()
-      inject_pending_completion(ctx, ref)
+      Minga.LSP.SyncServer.put_clients(ctx.buffer, [self()])
+      inject_pending_completion(ctx, ref, self())
 
       result =
         {:ok,
@@ -215,9 +217,6 @@ defmodule MingaEditor.CompletionAsyncTest do
            ]
          }}
 
-      # Drive the real Editor mailbox: this exercises the actual
-      # handle_info({:completion_processed, ...}) dispatch clause, which the
-      # unit tests bypass by calling apply_processed/5 directly.
       send(ctx.editor, {:lsp_response, ref, result})
 
       final =
@@ -232,22 +231,16 @@ defmodule MingaEditor.CompletionAsyncTest do
         )
 
       completion = MingaEditor.Shell.Traditional.ModalWorkflow.completion(final)
-      assert %Completion{} = completion
-      # Sorted in the Task (sortText order), not response order.
       assert Enum.map(completion.filtered, & &1.label) == ["alpha", "zeta"]
     end
 
     test "a malformed item crashes the Task but clears the stuck pending menu" do
       ctx = start_editor("hello")
       ref = make_ref()
-      inject_pending_completion(ctx, ref)
+      Minga.LSP.SyncServer.put_clients(ctx.buffer, [self()])
+      inject_pending_completion(ctx, ref, self())
 
-      # A bare `null` in the items list FunctionClauseErrors in parse_item/1.
-      # The Task must still report (with :failed) so the pending modal is
-      # dismissed rather than left stuck on a never-arriving menu.
-      result = {:ok, %{"items" => [nil]}}
-
-      send(ctx.editor, {:lsp_response, ref, result})
+      send(ctx.editor, {:lsp_response, ref, {:ok, %{"items" => [nil]}}})
 
       _ =
         wait_until(
@@ -266,6 +259,24 @@ defmodule MingaEditor.CompletionAsyncTest do
       final = editor_state(ctx)
       refute ModalOverlay.match(final.shell_runtime.state.modal, :completion)
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(final) == nil
+    end
+
+    test "a malformed secondary merge keeps the primary batch pending" do
+      ctx = start_editor("hello")
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
+
+      owner = state.shell_runtime.state.tab_bar.active_id
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
+      payload = CompletionPayload.new(owner, trigger: trigger)
+      state = ModalWorkflow.open(state, {:completion, payload})
+
+      result =
+        CompletionHandling.apply_processed(state, 1, :merge, :failed, {0, 0}, buffer, version)
+
+      assert ModalOverlay.match(result.shell_runtime.state.modal, :completion)
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(result) == nil
     end
   end
 end

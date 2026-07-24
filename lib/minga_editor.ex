@@ -846,7 +846,7 @@ defmodule MingaEditor do
   end
 
   # LSP/completion timer events routed through a focused handler.
-  def handle_info({:completion_debounce, _clients, _buffer_pid} = msg, state) do
+  def handle_info({:completion_debounce, _gen} = msg, state) do
     {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
@@ -866,7 +866,7 @@ defmodule MingaEditor do
     {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
-  def handle_info({:completion_resolve, _index} = msg, state) do
+  def handle_info({:completion_resolve, _gen, _raw_item} = msg, state) do
     {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
@@ -997,12 +997,16 @@ defmodule MingaEditor do
 
   # ── Async completion processing result ──────────────────────────────────
   # LSP completion responses are parsed/sorted/filtered in a Task off the
-  # Editor hot path (CompletionHandling.handle_response/3). The Task sends this
-  # message back with the processed menu. apply_processed/5 applies it cheaply
-  # and uses the generation token to discard a stale, superseded result
-  # (latest-wins), so large completion sets never block input.
-  def handle_info({:completion_processed, gen, mode, payload, trigger_pos}, state) do
-    new_state = CompletionHandling.apply_processed(state, gen, mode, payload, trigger_pos)
+  # Editor hot path. The Task sends this message back with the processed menu.
+  # apply_processed/7 applies it cheaply and uses the generation and buffer
+  # identity to discard stale, superseded results.
+  def handle_info(
+        {:completion_processed, gen, mode, payload, trigger_pos, buffer, version},
+        state
+      ) do
+    new_state =
+      CompletionHandling.apply_processed(state, gen, mode, payload, trigger_pos, buffer, version)
+
     {:noreply, Renderer.render_or_async(new_state)}
   end
 

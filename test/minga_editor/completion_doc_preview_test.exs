@@ -71,23 +71,38 @@ defmodule MingaEditor.CompletionDocPreviewTest do
 
   # ── Documentation update ─────────────────────────────────────────────────
 
-  describe "update_selected_documentation/2" do
-    test "updates the selected item's documentation" do
-      items = [
-        Completion.parse_item(%{"label" => "a"}),
-        Completion.parse_item(%{"label" => "b"}),
-        Completion.parse_item(%{"label" => "c"})
-      ]
+  describe "update_selected_documentation/3" do
+    test "updates the selected item's documentation for matching raw identity" do
+      raw = %{"label" => "a"}
+      items = [Completion.parse_item(raw), Completion.parse_item(%{"label" => "b"})]
 
       completion = Completion.new(items, {0, 0})
-      updated = Completion.update_selected_documentation(completion, "New docs for a")
-      selected = Completion.selected_item(updated)
-      assert selected.documentation == "New docs for a"
+      updated = Completion.update_selected_documentation(completion, raw, "New docs for a")
+
+      assert Completion.selected_item(updated).documentation == "New docs for a"
+      assert updated.last_resolved_identity == raw
     end
 
-    test "returns unchanged when no selected item" do
-      completion = Completion.new([], {0, 0})
-      result = Completion.update_selected_documentation(completion, "docs")
+    test "keeps resolved documentation after the filtered projection rebuilds" do
+      raw = %{"label" => "apple", "filterText" => "apple"}
+      items = [Completion.parse_item(raw), Completion.parse_item(%{"label" => "banana"})]
+
+      updated =
+        items
+        |> Completion.new({0, 0})
+        |> Completion.update_selected_documentation(raw, "Apple docs")
+        |> Completion.filter("app")
+
+      assert Completion.selected_item(updated).documentation == "Apple docs"
+      assert updated.last_resolved_identity == raw
+    end
+
+    test "returns unchanged when selected raw identity differs" do
+      raw = %{"label" => "a"}
+      completion = Completion.new([Completion.parse_item(raw)], {0, 0})
+
+      result = Completion.update_selected_documentation(completion, %{"label" => "other"}, "docs")
+
       assert result == completion
     end
   end
@@ -125,9 +140,15 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       assert completion_from(result).resolve_timer == nil
     end
 
-    test "skips when already resolved for this index" do
-      items = [Completion.parse_item(%{"label" => "a"})]
-      completion = %{Completion.new(items, {0, 0}) | last_resolved_index: 0}
+    test "skips when already resolved for this raw item" do
+      raw = %{"label" => "a"}
+      items = [Completion.parse_item(raw)]
+
+      completion =
+        items
+        |> Completion.new({0, 0})
+        |> Completion.update_selected_documentation(raw, "")
+
       state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
       assert completion_from(result).resolve_timer == nil
@@ -136,44 +157,45 @@ defmodule MingaEditor.CompletionDocPreviewTest do
 
   # ── Resolve response handling ───────────────────────────────────────────
 
-  describe "handle_resolve_response/2" do
-    test "updates selected item documentation on success" do
-      items = [Completion.parse_item(%{"label" => "a"})]
-      completion = Completion.new(items, {0, 0})
+  describe "handle_resolve_response/3" do
+    test "updates selected item documentation on success for matching raw item" do
+      raw = %{"label" => "a"}
+      completion = Completion.new([Completion.parse_item(raw)], {0, 0})
       state = make_state(completion)
 
       resolved = %{"documentation" => %{"kind" => "markdown", "value" => "Full docs"}}
-      result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
+      result = CompletionHandling.handle_resolve_response(state, raw, {:ok, resolved})
 
       selected = Completion.selected_item(completion_from(result))
       assert selected.documentation == "Full docs"
-      assert completion_from(result).last_resolved_index == 0
+      assert completion_from(result).last_resolved_identity == raw
     end
 
     test "handles plain string documentation in resolve response" do
-      items = [Completion.parse_item(%{"label" => "a"})]
-      completion = Completion.new(items, {0, 0})
+      raw = %{"label" => "a"}
+      completion = Completion.new([Completion.parse_item(raw)], {0, 0})
       state = make_state(completion)
 
       resolved = %{"documentation" => "Plain text docs"}
-      result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
+      result = CompletionHandling.handle_resolve_response(state, raw, {:ok, resolved})
 
       selected = Completion.selected_item(completion_from(result))
       assert selected.documentation == "Plain text docs"
     end
 
     test "returns state unchanged on error" do
-      items = [Completion.parse_item(%{"label" => "a"})]
-      completion = Completion.new(items, {0, 0})
+      raw = %{"label" => "a"}
+      completion = Completion.new([Completion.parse_item(raw)], {0, 0})
       state = make_state(completion)
 
-      result = CompletionHandling.handle_resolve_response(state, {:error, "timeout"})
+      result = CompletionHandling.handle_resolve_response(state, raw, {:error, "timeout"})
       assert result == state
     end
 
     test "returns state unchanged when completion is nil" do
+      raw = %{"label" => "a"}
       state = make_state(nil)
-      result = CompletionHandling.handle_resolve_response(state, {:ok, %{}})
+      result = CompletionHandling.handle_resolve_response(state, raw, {:ok, %{}})
       assert result == state
     end
   end

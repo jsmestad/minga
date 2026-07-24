@@ -136,25 +136,53 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     end
   end
 
-  test "legacy response tracking is constrained to L07 and L08 kinds" do
+  test "L07 response tracking uses typed variants while L08 legacy atoms remain" do
+    client = spawn_process()
+    buffer = spawn_process()
+    raw_item = %{"label" => "a"}
+
     assert {:ok, pending} =
-             PendingRequests.track_response(
+             PendingRequests.track_completion_result(
                PendingRequests.new(),
                make_ref(),
-               :completion_resolve
+               :primary,
+               client,
+               buffer,
+               1,
+               2,
+               {3, 4}
              )
 
-    assert {:ok, pending} = PendingRequests.track_response(pending, make_ref(), :signature_help)
+    assert {:ok, pending} =
+             PendingRequests.track_completion_resolve(
+               pending,
+               make_ref(),
+               client,
+               buffer,
+               1,
+               2,
+               raw_item
+             )
+
+    assert {:ok, pending} =
+             PendingRequests.track_signature_help(pending, make_ref(), client, buffer, 1, {3, 4})
+
     assert {:ok, pending} = PendingRequests.track_response(pending, make_ref(), :code_lens)
 
     assert {:ok, pending} =
              PendingRequests.track_response(pending, make_ref(), :code_lens_resolve)
 
     assert {:ok, _pending} = PendingRequests.track_response(pending, make_ref(), :inlay_hint)
-    kind = String.to_existing_atom("definition")
+
+    completion_resolve = String.to_existing_atom("completion_resolve")
+    signature_help = String.to_existing_atom("signature_help")
 
     assert_raise FunctionClauseError, fn ->
-      PendingRequests.track_response(PendingRequests.new(), make_ref(), kind)
+      PendingRequests.track_response(PendingRequests.new(), make_ref(), completion_resolve)
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      PendingRequests.track_response(PendingRequests.new(), make_ref(), signature_help)
     end
   end
 
@@ -189,22 +217,24 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     end
   end
 
-  test "rejects duplicate refs across response operation and format requests" do
+  test "rejects duplicate refs across L07 L08 response operation and format requests" do
     ref = make_ref()
     operation = operation(spawn_process(), ref)
     pending = PendingRequests.new()
 
     assert {:ok, pending} =
-             PendingRequests.track_response(
+             PendingRequests.track_completion_result(
                pending,
                ref,
-               :definition,
+               :primary,
                self(),
                spawn_process(),
                0,
-               nil,
+               1,
                {0, 0}
              )
+
+    assert PendingRequests.track_response(pending, ref, :code_lens) == {:error, :duplicate_ref}
 
     assert PendingRequests.track_operation(pending, ref, :references, 1, nil) ==
              {:error, :duplicate_ref}
@@ -229,8 +259,7 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
 
     assert {:ok, pending} = PendingRequests.track_operation(pending, other_ref, :rename, 2, 20)
 
-    assert {:ok, pending} =
-             PendingRequests.track_response(pending, response_ref, :completion_resolve)
+    assert {:ok, pending} = PendingRequests.track_response(pending, response_ref, :code_lens)
 
     assert {:ok, pending} = PendingRequests.track_format(pending, format)
 
@@ -238,7 +267,7 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     assert requests == [{:operation, :references, 1, 10}]
     assert PendingRequests.fetch(pending, current_ref) == :error
     assert PendingRequests.fetch(pending, other_ref) == {:ok, {:operation, :rename, 2, 20}}
-    assert PendingRequests.fetch(pending, response_ref) == {:ok, {:response, :completion_resolve}}
+    assert PendingRequests.fetch(pending, response_ref) == {:ok, {:response, :code_lens}}
     assert PendingRequests.fetch_format(pending, format.ref) == {:ok, format}
   end
 
