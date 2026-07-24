@@ -43,7 +43,6 @@ defmodule MingaEditor.Session.State do
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           mouse: Mouse.t(),
-          lsp_pending: %{reference() => atom() | tuple()},
           search: Search.t(),
           editing: VimState.t(),
           feature_state: FeatureState.t(),
@@ -58,7 +57,6 @@ defmodule MingaEditor.Session.State do
             windows: %Windows{},
             file_tree: %FileTreeState{},
             mouse: %Mouse{},
-            lsp_pending: %{},
             search: %Search{},
             editing: VimState.new(),
             feature_state: FeatureState.new(),
@@ -510,25 +508,6 @@ defmodule MingaEditor.Session.State do
   @spec set_search(t(), Search.t()) :: t()
   def set_search(%__MODULE__{} = wspace, search) do
     %{wspace | search: search}
-  end
-
-  @doc "Updates the LSP pending requests map."
-  @spec set_lsp_pending(t(), %{reference() => atom() | tuple()}) :: t()
-
-  def set_lsp_pending(%__MODULE__{} = wspace, pending) do
-    %{wspace | lsp_pending: pending}
-  end
-
-  @doc "Adds one pending LSP request to the workspace correlation table."
-  @spec put_lsp_pending(t(), reference(), atom() | tuple()) :: t()
-  def put_lsp_pending(%__MODULE__{} = workspace, ref, kind) when is_reference(ref) do
-    set_lsp_pending(workspace, Map.put(workspace.lsp_pending, ref, kind))
-  end
-
-  @doc "Removes one pending LSP request from the workspace correlation table."
-  @spec delete_lsp_pending(t(), reference()) :: t()
-  def delete_lsp_pending(%__MODULE__{} = workspace, ref) when is_reference(ref) do
-    set_lsp_pending(workspace, Map.delete(workspace.lsp_pending, ref))
   end
 
   @doc "Replaces the windows sub-struct."

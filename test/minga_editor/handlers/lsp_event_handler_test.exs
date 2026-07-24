@@ -68,16 +68,24 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       active_uri = Minga.LSP.SyncServer.path_to_uri(active_path)
       inactive_uri = Minga.LSP.SyncServer.path_to_uri(inactive_path)
       assert effects == []
-      assert new_state.workspace.lsp_pending != %{}
 
       assert_receive {:lsp_request, "textDocument/codeLens",
-                      %{"textDocument" => %{"uri" => ^active_uri}}, code_lens_caller, _}
+                      %{"textDocument" => %{"uri" => ^active_uri}}, code_lens_caller,
+                      code_lens_ref}
 
       assert_receive {:lsp_request, "textDocument/inlayHint",
-                      %{"textDocument" => %{"uri" => ^active_uri}}, inlay_hint_caller, _}
+                      %{"textDocument" => %{"uri" => ^active_uri}}, inlay_hint_caller,
+                      inlay_hint_ref}
 
       assert code_lens_caller == self()
       assert inlay_hint_caller == self()
+
+      assert LSPState.fetch_pending_request(new_state.lsp, code_lens_ref) ==
+               {:ok, {:response, :code_lens}}
+
+      assert LSPState.fetch_pending_request(new_state.lsp, inlay_hint_ref) ==
+               {:ok, {:response, :inlay_hint}}
+
       refute_receive {:lsp_request, _, %{"textDocument" => %{"uri" => ^inactive_uri}}, _, _}
     end
 
@@ -91,7 +99,10 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert_receive {:lsp_request, "textDocument/references", _params, caller, ref}
       assert caller == self()
-      assert {:references, operation_id, nil} = state.lsp.operation_requests[ref]
+
+      assert {:ok, {:operation, :references, operation_id, nil}} =
+               LSPState.fetch_pending_request(state.lsp, ref)
+
       assert OperationFeedback.selected(state.feedback.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :running
       assert NoticeWorkflow.message(state) == nil
@@ -99,7 +110,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
 
       assert effects == [:render_now]
-      assert state.lsp.operation_requests == %{}
+      assert LSPState.fetch_pending_request(state.lsp, ref) == :error
       assert OperationFeedback.selected(state.feedback.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
 
@@ -117,7 +128,10 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert_receive {:lsp_request, "textDocument/rename", _params, caller, ref}
       assert caller == self()
-      assert {:rename, operation_id, nil} = state.lsp.operation_requests[ref]
+
+      assert {:ok, {:operation, :rename, operation_id, nil}} =
+               LSPState.fetch_pending_request(state.lsp, ref)
+
       assert OperationFeedback.selected(state.feedback.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :running
       assert NoticeWorkflow.message(state) == nil
@@ -125,7 +139,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
       assert effects == [:render_now]
-      assert state.lsp.operation_requests == %{}
+      assert LSPState.fetch_pending_request(state.lsp, ref) == :error
       assert OperationFeedback.selected(state.feedback.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
 
@@ -141,13 +155,15 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = MingaEditor.LspActions.find_references(state)
 
       assert_receive {:lsp_request, "textDocument/references", _params, _caller, ref}
-      {:references, operation_id, nil} = state.lsp.operation_requests[ref]
+
+      {:ok, {:operation, :references, operation_id, nil}} =
+        LSPState.fetch_pending_request(state.lsp, ref)
 
       switched_state = %{state | workspace: base_state().workspace}
       {result, effects} = LspEventHandler.handle(switched_state, {:lsp_response, ref, {:ok, []}})
 
       assert effects == [:render_now]
-      assert result.lsp.operation_requests == %{}
+      assert LSPState.fetch_pending_request(result.lsp, ref) == :error
       assert OperationFeedback.selected(result.feedback.operation_feedback).id == operation_id
       assert OperationFeedback.selected(result.feedback.operation_feedback).status == :success
 
@@ -174,20 +190,16 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       ref = make_ref()
 
-      state =
-        %{
-          state
-          | lsp:
-              (&LSPState.track_operation_request(&1, ref, {:references, operation.id, 999})).(
-                state.lsp
-              )
-        }
+      state = %{
+        state
+        | lsp: LSPState.track_operation_request(state.lsp, ref, :references, operation.id, 999)
+      }
 
       {result, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
       selected = OperationFeedback.selected(result.feedback.operation_feedback)
 
       assert effects == [:render_now]
-      assert result.lsp.operation_requests == %{}
+      assert LSPState.fetch_pending_request(result.lsp, ref) == :error
       assert selected.id == operation.id
       assert selected.status == :stale
       assert selected.message == "References response ignored after tab switch"
@@ -196,11 +208,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     test "tracked atom response deletes pending ref and returns render_now" do
       state = base_state()
       ref = make_ref()
-      state = put_lsp_pending(state, ref, :definition)
+      state = track_pending_request(state, ref, :definition)
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert effects == [:render_now]
     end
 
@@ -210,7 +222,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       ref = make_ref()
 
       state =
-        put_lsp_pending(
+        track_pending_request(
           state,
           ref,
           {:hover_mouse, 12, 34, buffer, 0, 0, Minga.Buffer.version(buffer)}
@@ -218,7 +230,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert effects == [:render_now]
     end
 
@@ -295,13 +307,14 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert caller == self()
 
-      assert new_state.workspace.lsp_pending == %{ref => :completion_resolve}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) ==
+               {:ok, {:response, :completion_resolve}}
     end
 
     test "tracked signature help response updates state and returns render_now" do
       state = base_state()
       ref = make_ref()
-      state = put_lsp_pending(state, ref, :signature_help)
+      state = track_pending_request(state, ref, :signature_help)
 
       response = %{
         "signatures" => [
@@ -313,7 +326,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, response}})
 
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert effects == [:render_now]
 
       assert %SignatureHelp{signatures: [%{label: "foo(arg)"}]} =
@@ -322,7 +335,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
     test "delayed hover response clears pending without touching or replaying a foreign shell" do
       ref = make_ref()
-      state = base_state() |> put_lsp_pending(ref, :hover) |> ShellWorkflow.switch(:fake)
+      state = base_state() |> track_pending_request(ref, :hover) |> ShellWorkflow.switch(:fake)
       foreign_shell_state = Runtime.state(state.shell_runtime)
       message_store = state.render.message_store
       response = {:ok, %{"contents" => %{"kind" => "markdown", "value" => "**hover**"}}}
@@ -330,7 +343,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
 
       assert effects == [:render_now]
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
       assert new_state.render.message_store == message_store
 
@@ -344,7 +357,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       state =
         base_state()
-        |> put_lsp_pending(ref, :signature_help)
+        |> track_pending_request(ref, :signature_help)
         |> ShellWorkflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -363,7 +376,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
 
       assert effects == [:render_now]
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
       assert new_state.render.message_store == message_store
 
@@ -411,7 +424,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state =
         base_state()
         |> ModalWorkflow.transition({:completion, payload})
-        |> put_lsp_pending(ref, :completion_resolve)
+        |> track_pending_request(ref, :completion_resolve)
         |> ShellWorkflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -420,7 +433,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
 
       assert effects == [:render_now]
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
 
       restored = ShellWorkflow.switch(new_state, :traditional)
@@ -471,12 +484,12 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         }
 
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:semantic_tokens, buffer})
+      state = track_pending_request(state, ref, {:semantic_tokens, buffer})
 
       {new_state, effects} =
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => [0, 0, 5, 0, 0]}}})
 
-      assert new_state.workspace.lsp_pending == %{}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert effects == [:render_now]
 
       highlight = Map.fetch!(new_state.parser.highlighting.highlights, buffer)
@@ -874,8 +887,34 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
   end
 
-  defp put_lsp_pending(state, ref, kind) do
-    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
+  defp track_pending_request(state, ref, {:semantic_tokens, buffer}) do
+    %{state | lsp: LSPState.track_semantic_tokens_request(state.lsp, ref, buffer)}
+  end
+
+  defp track_pending_request(
+         state,
+         ref,
+         {:hover_mouse, row, col, buffer, line, buffer_col, version}
+       ) do
+    %{
+      state
+      | lsp:
+          LSPState.track_hover_mouse_request(
+            state.lsp,
+            ref,
+            row,
+            col,
+            buffer,
+            line,
+            buffer_col,
+            version
+          )
+    }
+  end
+
+  defp track_pending_request(state, ref, kind)
+       when kind in [:completion_resolve, :signature_help, :hover, :definition] do
+    %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
   end
 
   defp track_format(state, ref, buffer, version, opts \\ []) do

@@ -3,8 +3,8 @@ defmodule MingaEditor.LspActions do
   LSP request/response handlers for navigation, refactoring, and code intelligence.
 
   Follows the same async pattern as completion: sends a request via
-  `Client.request/3`, stores the reference in `state.workspace.lsp_pending`, and
-  processes the response when it arrives in `MingaEditor.handle_info`.
+  `Client.request/3`, tracks the reference in `state.lsp`, and processes the
+  response when it arrives in `MingaEditor.handle_info`.
 
   Supported LSP methods:
   - textDocument/definition (go to definition)
@@ -160,7 +160,7 @@ defmodule MingaEditor.LspActions do
             ref = Client.request(client, "textDocument/references", params)
 
             state
-            |> track_operation_request(ref, {:references, operation.id, active_tab_id(state)})
+            |> track_operation_request(ref, :references, operation.id, active_tab_id(state))
             |> mark_operation_running(operation.id, "Finding references…")
         end
     end
@@ -286,7 +286,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/codeAction", params)
 
-            put_lsp_pending(state, ref, :code_action)
+            track_response_request(state, ref, :code_action)
         end
     end
   end
@@ -356,7 +356,7 @@ defmodule MingaEditor.LspActions do
             ref = Client.request(client, "textDocument/rename", params)
 
             state
-            |> track_operation_request(ref, {:rename, operation.id, active_tab_id(state)})
+            |> track_operation_request(ref, :rename, operation.id, active_tab_id(state))
             |> mark_operation_running(operation.id, "Renaming…")
         end
     end
@@ -425,7 +425,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/documentSymbol", params)
 
-            put_lsp_pending(state, ref, :document_symbol)
+            track_response_request(state, ref, :document_symbol)
         end
     end
   end
@@ -447,7 +447,7 @@ defmodule MingaEditor.LspActions do
         params = %{"query" => query}
         ref = Client.request(client, "workspace/symbol", params)
 
-        put_lsp_pending(state, ref, :workspace_symbol)
+        track_response_request(state, ref, :workspace_symbol)
     end
   end
 
@@ -482,7 +482,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/selectionRange", params)
 
-            put_lsp_pending(state, ref, :selection_range)
+            track_response_request(state, ref, :selection_range)
         end
     end
   end
@@ -628,7 +628,7 @@ defmodule MingaEditor.LspActions do
     params = %{"textDocument" => %{"uri" => uri}}
     ref = Client.request(client, "textDocument/codeLens", params)
 
-    put_lsp_pending(state, ref, :code_lens)
+    track_response_request(state, ref, :code_lens)
   end
 
   # ── Inlay hints ───────────────────────────────────────────────────────────
@@ -679,7 +679,7 @@ defmodule MingaEditor.LspActions do
 
     ref = Client.request(client, "textDocument/inlayHint", params)
 
-    put_lsp_pending(state, ref, :inlay_hint)
+    track_response_request(state, ref, :inlay_hint)
   end
 
   @inlay_hint_scroll_debounce_ms 200
@@ -1828,7 +1828,7 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  @spec send_lsp_request(state(), pid(), pid(), String.t(), atom()) :: state()
+  @spec send_lsp_request(state(), pid(), pid(), String.t(), LSPState.response_kind()) :: state()
   defp send_lsp_request(state, client, buffer_pid, method, kind) do
     file_path = Buffer.file_path(buffer_pid)
 
@@ -1847,19 +1847,15 @@ defmodule MingaEditor.LspActions do
 
         ref = Client.request(client, method, params)
 
-        %{
-          state
-          | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)
-        }
+        track_response_request(state, ref, kind)
     end
   end
 
-  @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
-  defp put_lsp_pending(state, ref, kind) do
-    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
+  @spec track_response_request(state(), reference(), LSPState.response_kind()) :: state()
+  defp track_response_request(state, ref, kind) do
+    %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
   end
 
-  @spec track_operation_request(state(), reference(), LSPState.operation_request()) :: state()
   @spec mark_operation_running(state(), Operation.id(), String.t()) :: state()
   defp mark_operation_running(state, operation_id, message) do
     operation_feedback =
@@ -1868,8 +1864,15 @@ defmodule MingaEditor.LspActions do
     %{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)}
   end
 
-  defp track_operation_request(state, ref, request) do
-    %{state | lsp: (&LSPState.track_operation_request(&1, ref, request)).(state.lsp)}
+  @spec track_operation_request(
+          state(),
+          reference(),
+          :references | :rename,
+          Operation.id(),
+          pos_integer() | nil
+        ) :: state()
+  defp track_operation_request(state, ref, kind, operation_id, tab_id) do
+    %{state | lsp: LSPState.track_operation_request(state.lsp, ref, kind, operation_id, tab_id)}
   end
 
   @spec active_tab_id(state()) :: pos_integer() | nil
@@ -2210,7 +2213,7 @@ defmodule MingaEditor.LspActions do
         Enum.reduce(unresolved, state, fn lens, st ->
           ref = Client.request(client, "codeLens/resolve", lens)
 
-          put_lsp_pending(st, ref, :code_lens_resolve)
+          track_response_request(st, ref, :code_lens_resolve)
         end)
     end
   end
@@ -2434,7 +2437,7 @@ defmodule MingaEditor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/incomingCalls", params)
 
-        put_lsp_pending(state, ref, :incoming_calls)
+        track_response_request(state, ref, :incoming_calls)
     end
   end
 
@@ -2450,7 +2453,7 @@ defmodule MingaEditor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/outgoingCalls", params)
 
-        put_lsp_pending(state, ref, :outgoing_calls)
+        track_response_request(state, ref, :outgoing_calls)
     end
   end
 

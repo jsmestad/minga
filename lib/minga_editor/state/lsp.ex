@@ -12,10 +12,34 @@ defmodule MingaEditor.State.LSP do
   """
 
   alias MingaEditor.State.LSP.FormatOperation
-  alias MingaEditor.State.LSP.FormatOperations
+  alias MingaEditor.State.LSP.PendingRequests
 
   @type server_status :: :starting | :initializing | :ready | :crashed
-  @type operation_request :: {:references | :rename, pos_integer(), pos_integer() | nil}
+  @type response_kind ::
+          :definition
+          | :peek_definition
+          | :hover
+          | :document_highlight
+          | :code_action
+          | :prepare_rename
+          | :type_definition
+          | :implementation
+          | :document_symbol
+          | :workspace_symbol
+          | :selection_range
+          | :prepare_call_hierarchy
+          | :prepare_outgoing_hierarchy
+          | :code_lens
+          | :code_lens_resolve
+          | :inlay_hint
+          | :incoming_calls
+          | :outgoing_calls
+          | :completion_resolve
+          | :signature_help
+  @type pending_request :: PendingRequests.request()
+  @type operation_request ::
+          {:operation, :references | :rename, MingaEditor.State.Operation.id(),
+           MingaEditor.State.Tab.id() | nil}
 
   @type t :: %__MODULE__{
           status: MingaEditor.Shell.Traditional.Modeline.lsp_status(),
@@ -24,8 +48,7 @@ defmodule MingaEditor.State.LSP do
           inlay_hints: [map()],
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
-          format_operations: FormatOperations.t(),
-          operation_requests: %{reference() => operation_request()},
+          pending_requests: PendingRequests.t(),
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil
@@ -37,8 +60,7 @@ defmodule MingaEditor.State.LSP do
             inlay_hints: [],
             selection_ranges: nil,
             selection_range_index: 0,
-            format_operations: FormatOperations.new(),
-            operation_requests: %{},
+            pending_requests: PendingRequests.new(),
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil
@@ -109,77 +131,135 @@ defmodule MingaEditor.State.LSP do
     %{lsp | selection_range_index: idx - 1}
   end
 
-  # ── Formatting operations ────────────────────────────────────────────────
+  # ── Pending requests and formatting operations ────────────────────────────
+
+  @doc "Tracks an Editor-global LSP response request."
+  @spec track_response_request(t(), reference(), response_kind()) :: t()
+  def track_response_request(%__MODULE__{} = lsp, ref, kind) when is_reference(ref) do
+    {:ok, pending_requests} = PendingRequests.track_response(lsp.pending_requests, ref, kind)
+    %{lsp | pending_requests: pending_requests}
+  end
+
+  @doc "Tracks an Editor-global mouse hover request."
+  @spec track_hover_mouse_request(
+          t(),
+          reference(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def track_hover_mouse_request(
+        %__MODULE__{} = lsp,
+        ref,
+        row,
+        col,
+        buffer,
+        buffer_line,
+        buffer_col,
+        version
+      ) do
+    {:ok, pending_requests} =
+      PendingRequests.track_hover_mouse(
+        lsp.pending_requests,
+        ref,
+        row,
+        col,
+        buffer,
+        buffer_line,
+        buffer_col,
+        version
+      )
+
+    %{lsp | pending_requests: pending_requests}
+  end
+
+  @doc "Tracks an Editor-global semantic token request."
+  @spec track_semantic_tokens_request(t(), reference(), pid()) :: t()
+  def track_semantic_tokens_request(%__MODULE__{} = lsp, ref, buffer) when is_reference(ref) do
+    {:ok, pending_requests} =
+      PendingRequests.track_semantic_tokens(lsp.pending_requests, ref, buffer)
+
+    %{lsp | pending_requests: pending_requests}
+  end
+
+  @doc "Tracks an Editor-global LSP request for a structured operation."
+  @spec track_operation_request(
+          t(),
+          reference(),
+          :references | :rename,
+          MingaEditor.State.Operation.id(),
+          MingaEditor.State.Tab.id() | nil
+        ) :: t()
+  def track_operation_request(%__MODULE__{} = lsp, ref, kind, operation_id, tab_id) do
+    {:ok, pending_requests} =
+      PendingRequests.track_operation(lsp.pending_requests, ref, kind, operation_id, tab_id)
+
+    %{lsp | pending_requests: pending_requests}
+  end
 
   @doc "Tracks an Editor-global formatting operation."
   @spec track_format(t(), FormatOperation.t()) :: t()
   def track_format(%__MODULE__{} = lsp, %FormatOperation{} = operation) do
-    {:ok, operations} = FormatOperations.track(lsp.format_operations, operation)
-    %{lsp | format_operations: operations}
+    {:ok, pending_requests} = PendingRequests.track_format(lsp.pending_requests, operation)
+    %{lsp | pending_requests: pending_requests}
   end
 
-  @doc "Fetches a formatting operation by request reference."
-  @spec fetch_format(t(), reference()) :: {:ok, FormatOperation.t()} | :error
-  def fetch_format(%__MODULE__{} = lsp, ref) when is_reference(ref) do
-    FormatOperations.fetch(lsp.format_operations, ref)
-  end
+  @doc "Takes an Editor-global LSP request by response reference."
+  @spec take_pending_request(t(), reference()) :: {:ok, pending_request(), t()} | :error
+  def take_pending_request(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    case PendingRequests.take(lsp.pending_requests, ref) do
+      {:ok, request, pending_requests} ->
+        {:ok, request, %{lsp | pending_requests: pending_requests}}
 
-  @doc "Returns the formatting operation for one Buffer."
-  @spec format_for_buffer(t(), pid()) :: FormatOperation.t() | nil
-  def format_for_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer) do
-    FormatOperations.for_buffer(lsp.format_operations, buffer)
-  end
-
-  @doc "Returns the newest active formatting operation."
-  @spec newest_format(t()) :: FormatOperation.t() | nil
-  def newest_format(%__MODULE__{} = lsp), do: FormatOperations.newest(lsp.format_operations)
-
-  @doc "Drops a formatting operation by request reference."
-  @spec drop_format(t(), reference()) :: t()
-  def drop_format(%__MODULE__{} = lsp, ref) when is_reference(ref) do
-    %{lsp | format_operations: FormatOperations.drop(lsp.format_operations, ref)}
-  end
-
-  @doc "Returns whether a formatting operation is active."
-  @spec format_active?(t(), reference()) :: boolean()
-  def format_active?(%__MODULE__{} = lsp, ref) when is_reference(ref) do
-    match?({:ok, %FormatOperation{}}, fetch_format(lsp, ref))
-  end
-
-  # ── Correlated operation requests ────────────────────────────────────────
-
-  @doc "Tracks an Editor-global LSP request for a structured operation."
-  @spec track_operation_request(t(), reference(), operation_request()) :: t()
-  def track_operation_request(%__MODULE__{} = lsp, ref, {kind, operation_id, tab_id} = request)
-      when is_reference(ref) and kind in [:references, :rename] and is_integer(operation_id) and
-             operation_id > 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) do
-    %{lsp | operation_requests: Map.put(lsp.operation_requests, ref, request)}
-  end
-
-  @doc "Takes an Editor-global LSP operation request by response reference."
-  @spec take_operation_request(t(), reference()) ::
-          {:ok, operation_request(), t()} | :error
-  def take_operation_request(%__MODULE__{} = lsp, ref) when is_reference(ref) do
-    case Map.pop(lsp.operation_requests, ref) do
-      {nil, _requests} -> :error
-      {request, requests} -> {:ok, request, %{lsp | operation_requests: requests}}
+      :error ->
+        :error
     end
   end
 
   @doc "Takes all structured operation requests originating from one departing tab."
   @spec take_operation_requests_for_tab(t(), pos_integer()) :: {[operation_request()], t()}
-  def take_operation_requests_for_tab(%__MODULE__{} = lsp, tab_id)
-      when is_integer(tab_id) and tab_id > 0 do
-    {requests, retained} =
-      Enum.reduce(lsp.operation_requests, {[], %{}}, fn
-        {_ref, {_kind, _operation_id, ^tab_id} = request}, {requests, retained} ->
-          {[request | requests], retained}
+  def take_operation_requests_for_tab(%__MODULE__{} = lsp, tab_id) do
+    {requests, pending_requests} =
+      PendingRequests.take_operations_for_tab(lsp.pending_requests, tab_id)
 
-        {ref, request}, {requests, retained} ->
-          {requests, Map.put(retained, ref, request)}
-      end)
+    {requests, %{lsp | pending_requests: pending_requests}}
+  end
 
-    {Enum.reverse(requests), %{lsp | operation_requests: retained}}
+  @doc "Fetches an Editor-global LSP pending request by response reference."
+  @spec fetch_pending_request(t(), reference()) :: {:ok, pending_request()} | :error
+  def fetch_pending_request(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    PendingRequests.fetch(lsp.pending_requests, ref)
+  end
+
+  @doc "Fetches a formatting operation by request reference."
+  @spec fetch_format(t(), reference()) :: {:ok, FormatOperation.t()} | :error
+  def fetch_format(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    PendingRequests.fetch_format(lsp.pending_requests, ref)
+  end
+
+  @doc "Returns the formatting operation for one Buffer."
+  @spec format_for_buffer(t(), pid()) :: FormatOperation.t() | nil
+  def format_for_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer) do
+    PendingRequests.format_for_buffer(lsp.pending_requests, buffer)
+  end
+
+  @doc "Returns the newest active formatting operation."
+  @spec newest_format(t()) :: FormatOperation.t() | nil
+  def newest_format(%__MODULE__{} = lsp), do: PendingRequests.newest_format(lsp.pending_requests)
+
+  @doc "Drops a formatting operation by request reference."
+  @spec drop_format(t(), reference()) :: t()
+  def drop_format(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    %{lsp | pending_requests: PendingRequests.drop_format(lsp.pending_requests, ref)}
+  end
+
+  @doc "Returns whether a formatting operation is active."
+  @spec format_active?(t(), reference()) :: boolean()
+  def format_active?(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    PendingRequests.format_active?(lsp.pending_requests, ref)
   end
 
   # ── Highlight debounce timer ─────────────────────────────────────────────

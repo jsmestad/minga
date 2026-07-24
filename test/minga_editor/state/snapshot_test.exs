@@ -67,9 +67,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
     test "captures all per-tab fields" do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
-      pending = %{make_ref() => :signature_help}
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
-      state = %{state | workspace: SessionState.set_lsp_pending(state.workspace, pending)}
 
       highlighting = %Highlighting{highlights: %{buf => Highlight.new()}}
 
@@ -91,7 +89,9 @@ defmodule MingaEditor.State.SnapshotTest do
       refute Map.has_key?(ctx, :viewport)
       refute :viewport in ctx.present_fields
       assert ctx.mouse == state.workspace.mouse
-      assert ctx.lsp_pending == pending
+      refute :lsp_pending in Context.field_names()
+      refute :lsp_pending in ctx.present_fields
+      refute Map.has_key?(Context.to_workspace_map(ctx), :lsp_pending)
       assert ctx.search == state.workspace.search
 
       # PID/process-keyed parser state is not representable in a tab snapshot.
@@ -541,13 +541,11 @@ defmodule MingaEditor.State.SnapshotTest do
 
     test "round-trips through to_workspace_map preserving snapshot fields" do
       {:ok, buf} = BufferProcess.start_link(content: "round-trip")
-      pending = %{make_ref() => {:semantic_tokens, buf}}
 
       ws = %MingaEditor.Session.State{
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
-        keymap_scope: :editor,
-        lsp_pending: pending
+        keymap_scope: :editor
       }
 
       ctx = Context.from_workspace(ws)
@@ -561,7 +559,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.file_tree == ws.file_tree
       assert restored_map.mouse == ws.mouse
       assert restored_map.search == ws.search
-      assert restored_map.lsp_pending == pending
+      refute Map.has_key?(restored_map, :lsp_pending)
 
       refute Map.has_key?(restored_map, :highlight)
       refute Map.has_key?(restored_map, :injection_ranges)

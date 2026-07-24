@@ -222,9 +222,11 @@ defmodule MingaEditor.State.TabSwitchTest do
             state.lsp
             |> LSPState.track_operation_request(
               make_ref(),
-              {:references, references.id, tab_id}
+              :references,
+              references.id,
+              tab_id
             )
-            |> LSPState.track_operation_request(make_ref(), {:rename, rename.id, tab_id})
+            |> LSPState.track_operation_request(make_ref(), :rename, rename.id, tab_id)
       }
 
     {state, references, rename}
@@ -258,12 +260,14 @@ defmodule MingaEditor.State.TabSwitchTest do
       {state, _buf1, _buf2} = state_with_two_file_tabs()
       current_id = state.shell_runtime.state.tab_bar.active_id
       {state, references, rename} = track_tab_operations(state, current_id)
-      requests = state.lsp.operation_requests
+      {requests, lsp_after_take} = LSPState.take_operation_requests_for_tab(state.lsp, current_id)
 
       {unchanged, result} = EditorState.switch_tab(state, 999_999)
 
       assert result == :unchanged
-      assert unchanged.lsp.operation_requests == requests
+
+      assert LSPState.take_operation_requests_for_tab(unchanged.lsp, current_id) ==
+               {requests, lsp_after_take}
 
       assert {:ok, pending_references} =
                OperationFeedback.fetch(unchanged.feedback.operation_feedback, references.id)
@@ -391,50 +395,28 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert new_state.render.layout == nil
     end
 
-    test "tab switch restores the target tab's pending LSP refs" do
-      {state, _buf1, buf2} = state_with_two_file_tabs()
+    test "generic pending requests are Editor-global across tab switches" do
+      {state, _buf1, _buf2} = state_with_two_file_tabs()
       tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
+      ref = make_ref()
 
-      pending_current = %{make_ref() => :completion_resolve}
-      pending_target = %{make_ref() => {:semantic_tokens, buf2}}
-
-      state = %{state | workspace: SessionState.set_lsp_pending(state.workspace, pending_current)}
-      tab2 = TabBar.get(tb, target_id)
-      tab2_context = Context.put_fields(tab2.context, lsp_pending: pending_target)
-
-      state =
-        then(state, fn root ->
-          shell_state =
-            MingaEditor.Shell.Traditional.State.install_tab_bar(
-              MingaEditor.Shell.Runtime.state(root.shell_runtime),
-              TabBar.update_context(tb, target_id, tab2_context)
-            )
-
-          %{
-            root
-            | shell_runtime:
-                MingaEditor.Shell.Runtime.install_traditional_state(
-                  root.shell_runtime,
-                  shell_state
-                )
-          }
-        end)
+      state = %{state | lsp: LSPState.track_response_request(state.lsp, ref, :completion_resolve)}
 
       {switched, _effects} = EditorState.switch_tab(state, target_id)
 
-      assert switched.workspace.lsp_pending == pending_target
+      assert LSPState.fetch_pending_request(switched.lsp, ref) ==
+               {:ok, {:response, :completion_resolve}}
 
-      assert TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.lsp_pending ==
-               pending_current
+      refute :lsp_pending in TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
-      assert switched_back.workspace.lsp_pending == pending_current
+      assert LSPState.fetch_pending_request(switched_back.lsp, ref) ==
+               {:ok, {:response, :completion_resolve}}
 
-      assert TabBar.get(switched_back.shell_runtime.state.tab_bar, target_id).context.lsp_pending ==
-               pending_target
+      refute :lsp_pending in TabBar.get(switched_back.shell_runtime.state.tab_bar, target_id).context.present_fields
     end
 
     test "tab switch retires outgoing references and rename requests" do
@@ -447,7 +429,8 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       {switched, _effects} = EditorState.switch_tab(state, target_id)
 
-      assert switched.lsp.operation_requests == %{}
+      assert LSPState.take_operation_requests_for_tab(switched.lsp, current_id) ==
+               {[], switched.lsp}
 
       assert {:ok, references} =
                OperationFeedback.fetch(
@@ -473,7 +456,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       closed = BufferManagement.execute(state, :force_quit)
 
       assert TabBar.get(closed.shell_runtime.state.tab_bar, current_id) == nil
-      assert closed.lsp.operation_requests == %{}
+      assert LSPState.take_operation_requests_for_tab(closed.lsp, current_id) == {[], closed.lsp}
 
       assert {:ok, closed_references} =
                OperationFeedback.fetch(closed.feedback.operation_feedback, references.id)
@@ -497,7 +480,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       empty = EditorState.enter_empty_state(state)
 
       assert empty.shell_runtime.state.tab_bar.tabs == []
-      assert empty.lsp.operation_requests == %{}
+      assert LSPState.take_operation_requests_for_tab(empty.lsp, first_tab.id) == {[], empty.lsp}
 
       for operation <- [first_references, first_rename, second_references, second_rename] do
         assert {:ok, retired} =

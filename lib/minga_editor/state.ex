@@ -338,7 +338,8 @@ defmodule MingaEditor.State do
     {requests, lsp} = LSPState.take_operation_requests_for_tab(state.lsp, tab_id)
 
     feedback =
-      Enum.reduce(requests, state.feedback, fn {kind, operation_id, ^tab_id}, feedback ->
+      Enum.reduce(requests, state.feedback, fn {:operation, kind, operation_id, ^tab_id},
+                                               feedback ->
         operation_feedback =
           OperationFeedback.finish(
             feedback.operation_feedback,
