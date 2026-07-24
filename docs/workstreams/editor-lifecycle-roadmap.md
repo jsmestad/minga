@@ -27,7 +27,7 @@ Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **VERIFIED routed follow-on:** ES06, L06.
+- **VERIFIED routed follow-on:** ES06, L06, L07.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -4758,7 +4758,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W118/L07: Validate completion and signature identity through processing
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** L07
 - **Decision:** APPROVE_REVISED_CAP, one Editor-global `MingaEditor.State.LSP.PendingRequests` owner carries exactly three L07 typed variants for completion result, completion resolve, and signature help. Completion debounce uses the existing completion generation as its only semantic identity.
 - **Planning profile:** `L07RoutePlanner`, editor-lifecycle-planner, read-only; superseded where corrected by `L07PlanVerifier`.
@@ -4780,9 +4780,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** L08 code-lens, codeLens/resolve, and inlay hint remain on the legacy atom variant and still need their own origin-safe stale rejection plus empty-result clearing.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
-- **PR URL:** reserved.
-- **Implementation commit SHA:** reserved.
-- **Merge SHA:** reserved.
-- **Merge evidence:** reserved.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3232
+- **Implementation commit SHA:** `657db9c5af6d208856808d6e8f8b7125f38af72d`
+- **Merge SHA:** `b3fd6c13e0d21eaec5926dccdeedb839e01645f4`
+- **Merge evidence:** PR #3232 merged on 2026-07-24 after required CI run `30134673953` passed.
 - **Findings resolved:** L07 implementation plus every mandatory correction from the correctness, Ponytail, and Elixir reviews are applied; final acceptance passed with no findings.
-- **Completion date:** reserved.
+- **Completion date:** 2026-07-24
