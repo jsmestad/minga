@@ -27,7 +27,7 @@ Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **IMPLEMENTED:** (none)
+- **IMPLEMENTED:** ES06.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -4695,3 +4695,31 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Implementation commit SHA:** `4fd8d0c11a892df3a256f2ec608895c2d080b2f4`
 - **Merge SHA:** `04a0ade7be3c48c1898ce253a86baa0afbb705f8`
 - **Merge evidence:** PR #3225 merged on 2026-07-23 after all required CI checks passed. Current main contains the same implementation and test tree reviewed at `4fd8d0c11a892df3a256f2ec608895c2d080b2f4`.
+
+### W116/ES06: Cut LSP request correlation over to one typed owner
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** ES06
+- **Decision:** APPROVE_DIRECT, one typed Editor-global `MingaEditor.State.LSP.PendingRequests` collection owns semantic request authority. Transport correlation and sync ordering stay in Layer 1.
+- **Planning profile:** `ES06RoutePlanner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `ES06RouteWorker`, editor-lifecycle-worker, no delegation.
+- **Baseline:** `8f7f74f806e1cbe1fd985c5dbd7c94e5f13a4315`.
+- **Ready provenance:** Initially locked by `local://es06-route-plan.json`. Complete tracked-plus-untracked accounting found that the working clean cutover exceeded the provisional `+50` production-line cap. `ES06BudgetDecision` rejected a transitional split or owner rework and approved exact revised caps of net `+149` production lines and net `+85` test lines in `local://es06-budget-decision.json`. The concrete handler-test-only `LSPState.fetch_pending_request/2` query remains part of the locked State.LSP owner API.
+- **Observable result:** All LSP response refs now live in one source-owned typed `state.lsp.pending_requests` table. `LspEventHandler` takes each response ref once through `LSPState.take_pending_request/2`, dispatches typed response, hover-mouse, semantic-token, operation, and format variants, and preserves completion fallback for untracked responses. Request refs are no longer workspace or tab-snapshot residents.
+- **Implementation result:** Renamed and widened `MingaEditor.State.LSP.FormatOperations` into `MingaEditor.State.LSP.PendingRequests`; replaced `State.LSP` `format_operations` plus `operation_requests` with one `pending_requests` field; migrated completion resolve, signature help, generic LSP actions, references, rename, mouse hover, semantic tokens, and formatting producers to State.LSP owner APIs; preserved format cancellation, timeout, spinner, cancellable hint, stale format rejection, tab-departure operation retirement, active-tab mismatch stale feedback, and late-response completion fallback; removed `Session.State` workspace `lsp_pending` APIs and removed tab snapshot `lsp_pending` residency.
+- **Focused validation:** `mix test.debug test/minga_editor/state/lsp/pending_requests_test.exs` passed `6 tests`; `mix test.debug test/minga_editor/handlers/lsp_event_handler_test.exs` passed `34 tests`; `mix test.debug test/minga_editor/state/tab_switch_test.exs` passed `17 tests`; `mix test.debug test/minga_editor/state/snapshot_test.exs` passed `32 tests`; `mix test.debug test/minga_editor/commands/formatting_lsp_test.exs` passed `3 tests`; `mix test.debug test/minga_editor/input/global_bindings_test.exs` passed `2 tests`.
+- **Broad validation:** `make lint` passed with no Credo issues and Dialyzer `Total errors: 0`; low-concurrency `mix test.llm --max-cases 4` passed `58 doctests, 98 properties, 9,789 tests` with `0 failures`, `1 skipped`, and `616 excluded`. The default-concurrency `mix test.quick --seed 121520` run found one load-sensitive 100 ms timeout in `Minga.Extension.LifecycleContractTest`; the identical command and seed reproduced the same failure on unchanged current main, while the low-concurrency full suite passed all 42 tests in that module.
+- **Production lines added/removed before roadmap evidence:** `+428/-279`, net `+149`, exactly within the architecture-approved revised cap.
+- **Test lines added/removed before roadmap evidence:** `+229/-144`, net `+85`, exactly within the architecture-approved revised cap.
+- **Concepts added:** One typed pure `MingaEditor.State.LSP.PendingRequests` collection with one `by_ref` semantic authority plus format buffer and newest indexes.
+- **Concepts removed:** Obsolete executable `FormatOperations` owner, split `State.LSP.operation_requests` map, workspace `Session.State.lsp_pending`, tab-context `lsp_pending` snapshot residency, and direct producer/consumer access to those maps.
+- **Retained constraints:** Correlation, duplicate-ref rejection, tab operation retirement, active-tab stale feedback, formatting lifecycle finish/cancel behavior, format timeout and late-response fallback, completion fallback, and foreign LSP JSON response terms remain preserved.
+- **Dependencies and overlap:** ES06 remains before L06, L07, L08, and L09; this implementation does not implement those later routed findings or alter transport correlation, sync ordering, frontend behavior, protocol shape, completion debounce identity, decoration semantics, semantic-token layer ownership, or generic root APIs.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/completion_handling.ex`, `lib/minga_editor/handlers/lsp_event_handler.ex`, `lib/minga_editor/lsp_actions.ex`, `lib/minga_editor/mouse_hover_tooltip.ex`, `lib/minga_editor/semantic_token_sync.ex`, `lib/minga_editor/session/state.ex`, `lib/minga_editor/state.ex`, `lib/minga_editor/state/lsp.ex`, `lib/minga_editor/state/lsp/pending_requests.ex`, `lib/minga_editor/state/tab/context.ex`, `test/minga_editor/handlers/lsp_event_handler_test.exs`, `test/minga_editor/state/lsp/pending_requests_test.exs`, `test/minga_editor/state/snapshot_test.exs`, and `test/minga_editor/state/tab_switch_test.exs`; deleted `lib/minga_editor/state/lsp/format_operations.ex` and `test/minga_editor/state/lsp/format_operations_test.exs`.
+- **PR URL:** Reserved.
+- **Implementation commit SHA:** Reserved.
+- **Merge SHA:** Reserved.
+- **Merge evidence:** Reserved.
+- **Reviewer evidence:** Initial correctness and Ponytail reviews blocked only on complete line accounting and the provisional cap. Elixir craftsmanship found and the implementation corrected a swallowed duplicate-ref invariant in mouse hover plus an open generic request-kind spec. `ES06BudgetDecision` returned `APPROVE_REVISED_CAP`, retained the clean one-owner cutover, rejected transitional split/rework, and locked exact net caps of `+149` production and `+85` test lines. Targeted rechecks returned `RESOLVED/PASS` for correctness, `RESOLVED/LEAN` for Ponytail, and `RESOLVED/PASS` for Elixir craftsmanship with no residuals. Final acceptance confirmed the implementation and blocked only on stale gross production counts. W116 now records the current complete `+428/-279`, net `+149` accounting, and the targeted final recheck returned `RESOLVED/PASS` with 0.99 confidence.

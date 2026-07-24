@@ -12,6 +12,7 @@ defmodule MingaEditor.MouseHoverTooltip do
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Mouse
+  alias MingaEditor.State.LSP, as: LSPState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
@@ -27,7 +28,8 @@ defmodule MingaEditor.MouseHoverTooltip do
   def check_hover(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def check_hover(state) do
-    with {row, col} <- Mouse.hover_position(state.workspace.mouse),
+    with {row, col} when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 <-
+           Mouse.hover_position(state.workspace.mouse),
          {:buffer, target} <- HitTest.resolve_buffer(state, row, col) do
       case check_diagnostic(target.buffer, target.line) do
         nil ->
@@ -72,10 +74,11 @@ defmodule MingaEditor.MouseHoverTooltip do
           pid(),
           non_neg_integer(),
           non_neg_integer(),
-          integer(),
-          integer()
+          non_neg_integer(),
+          non_neg_integer()
         ) :: state()
-  defp send_hover_request(state, buf, buf_line, buf_col, row, col) do
+  defp send_hover_request(state, buf, buf_line, buf_col, row, col)
+       when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 do
     with [client | _] <- SyncServer.clients_for_buffer(buf),
          path when is_binary(path) <- Buffer.file_path(buf) do
       uri = SyncServer.path_to_uri(path)
@@ -87,22 +90,24 @@ defmodule MingaEditor.MouseHoverTooltip do
 
       ref = Client.request(client, "textDocument/hover", params)
 
-      put_lsp_pending(
-        state,
-        ref,
-        {:hover_mouse, row, col, buf, buf_line, buf_col, Buffer.version(buf)}
-      )
+      %{
+        state
+        | lsp:
+            LSPState.track_hover_mouse_request(
+              state.lsp,
+              ref,
+              row,
+              col,
+              buf,
+              buf_line,
+              buf_col,
+              Buffer.version(buf)
+            )
+      }
     else
       _ -> state
     end
-  rescue
-    _ -> state
   catch
     :exit, _ -> state
-  end
-
-  @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
-  defp put_lsp_pending(state, ref, kind) do
-    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
   end
 end

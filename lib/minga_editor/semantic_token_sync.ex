@@ -27,6 +27,7 @@ defmodule MingaEditor.SemanticTokenSync do
   alias Minga.Buffer
   alias Minga.Language.Highlight.Span
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.LSP, as: LSPState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
   alias Minga.LSP.SemanticTokens
@@ -35,7 +36,7 @@ defmodule MingaEditor.SemanticTokenSync do
   @doc """
   Requests semantic tokens for the active buffer from the LSP server.
 
-  Returns the updated state with the request tracked in `lsp_pending`.
+  Returns the updated state with the request tracked in `state.lsp`.
   Does nothing if no LSP client is available or the server doesn't
   support semantic tokens.
   """
@@ -51,8 +52,7 @@ defmodule MingaEditor.SemanticTokenSync do
          {_types, _mods} <- safe_legend(client) do
       uri = "file://#{file_path}"
       ref = Client.request_semantic_tokens(client, uri)
-      pending = Map.put(state.workspace.lsp_pending, ref, {:semantic_tokens, buf_pid})
-      %{state | workspace: MingaEditor.Session.State.set_lsp_pending(state.workspace, pending)}
+      %{state | lsp: LSPState.track_semantic_tokens_request(state.lsp, ref, buf_pid)}
     else
       _ -> state
     end

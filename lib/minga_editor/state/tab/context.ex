@@ -26,7 +26,6 @@ defmodule MingaEditor.State.Tab.Context do
     :windows,
     :file_tree,
     :mouse,
-    :lsp_pending,
     :search,
     :editing,
     :feature_state,
@@ -54,7 +53,6 @@ defmodule MingaEditor.State.Tab.Context do
           | :windows
           | :file_tree
           | :mouse
-          | :lsp_pending
           | :search
           | :editing
           | :feature_state
@@ -74,7 +72,6 @@ defmodule MingaEditor.State.Tab.Context do
           windows: Windows.t() | nil,
           file_tree: FileTreeState.t() | nil,
           mouse: Mouse.t() | nil,
-          lsp_pending: %{reference() => atom() | tuple()} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
           feature_state: FeatureState.t() | nil,
@@ -88,7 +85,6 @@ defmodule MingaEditor.State.Tab.Context do
             windows: nil,
             file_tree: nil,
             mouse: nil,
-            lsp_pending: nil,
             search: nil,
             editing: nil,
             feature_state: nil,
@@ -134,7 +130,6 @@ defmodule MingaEditor.State.Tab.Context do
       windows: ws.windows,
       file_tree: ws.file_tree,
       mouse: ws.mouse,
-      lsp_pending: ws.lsp_pending,
       search: ws.search,
       editing: editing,
       feature_state: ws.feature_state,
@@ -296,7 +291,6 @@ defmodule MingaEditor.State.Tab.Context do
       windows: windows,
       file_tree: %FileTreeState{project_root: project_root},
       mouse: %Mouse{},
-      lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
       feature_state: FeatureState.new(),
@@ -385,7 +379,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:windows, %Windows{}), do: true
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
-  defp valid_field?(:lsp_pending, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true
   defp valid_field?(:editing, %VimState{}), do: true
   defp valid_field?(:feature_state, %FeatureState{}), do: true

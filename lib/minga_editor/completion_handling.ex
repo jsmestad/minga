@@ -18,6 +18,7 @@ defmodule MingaEditor.CompletionHandling do
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -99,7 +100,7 @@ defmodule MingaEditor.CompletionHandling do
         client ->
           ref = Client.request(client, "completionItem/resolve", item.raw)
 
-          put_lsp_pending(state, ref, :completion_resolve)
+          track_response_request(state, ref, :completion_resolve)
       end
     end
   end
@@ -214,9 +215,10 @@ defmodule MingaEditor.CompletionHandling do
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  @spec put_lsp_pending(EditorState.t(), reference(), atom() | tuple()) :: EditorState.t()
-  defp put_lsp_pending(state, ref, kind) do
-    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
+  @spec track_response_request(EditorState.t(), reference(), LSPState.response_kind()) ::
+          EditorState.t()
+  defp track_response_request(state, ref, kind) do
+    %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
   end
 
   @spec accept_text(EditorState.t(), Completion.t(), String.t()) :: EditorState.t()
@@ -910,7 +912,7 @@ defmodule MingaEditor.CompletionHandling do
 
           ref = Client.request(client, "textDocument/signatureHelp", params)
 
-          put_lsp_pending(state, ref, :signature_help)
+          track_response_request(state, ref, :signature_help)
         else
           state
         end
