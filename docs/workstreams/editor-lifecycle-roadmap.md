@@ -27,7 +27,7 @@ Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **VERIFIED routed follow-on:** ES06.
+- **VERIFIED routed follow-on:** ES06, L06.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -4728,7 +4728,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W117/L06: Validate ordinary LSP responses against captured origin
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** L06
 - **Decision:** APPROVE_DIRECT, `MingaEditor.State.LSP.PendingRequests` owns the captured current-origin tuple and `LspEventHandler` takes each response once before validating tab, buffer, client, version, and cursor.
 - **Planning profile:** `L06RoutePlanner`, editor-lifecycle-planner, read-only; superseded where corrected by `L06PlanVerifier`.
@@ -4739,7 +4739,7 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Implementation result:** Added the current-origin pending response tuple to `State.LSP.PendingRequests`; exposed the owner API through `State.LSP`; migrated L06 producers in `LspActions` to capture client, buffer, version, active tab, and cursor or nil; kept L07 completion/signature and L08 code-lens/inlay producers on the constrained legacy atom shape; validated current origin in `LspEventHandler` before domain dispatch; logged and ignored any L06 kind that appears in the legacy atom shape.
 - **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/completion_handling.ex`, `lib/minga_editor/handlers/lsp_event_handler.ex`, `lib/minga_editor/lsp_actions.ex`, `lib/minga_editor/state/lsp.ex`, `lib/minga_editor/state/lsp/pending_requests.ex`, `test/minga_editor/handlers/lsp_event_handler_test.exs`, and `test/minga_editor/state/lsp/pending_requests_test.exs`.
 - **Focused validation:** `mix test test/minga_editor/state/lsp/pending_requests_test.exs test/minga_editor/handlers/lsp_event_handler_test.exs` passed `51 tests`; `mix test test/minga_editor/lsp_actions_test.exs test/minga_editor/state/tab_switch_test.exs` passed `35 tests`.
-- **Final validation evidence:** `git diff --check` passed; `make lint` passed; default-concurrency `mix test.llm` failed deterministically at seed `599416` only in unchanged `MingaAgent.SessionManagerTest stop_session_by_pid/2` because its 5s `GenServer.call` timed out under `max_cases: 64`; the exact test passed alone in `1.7s`; current main default `mix test.llm` passed `9,789 tests`; corrected branch `mix test.llm --max-cases 8` passed `58 doctests`, `98 properties`, `9,800 tests`, `0 failures`, `1 skipped`, and `616 excluded`. Final acceptance remains reserved.
+- **Final validation evidence:** `git diff --check` passed; `make lint` passed; default-concurrency `mix test.llm` failed deterministically at seed `599416` only in unchanged `MingaAgent.SessionManagerTest stop_session_by_pid/2` because its 5s `GenServer.call` timed out under `max_cases: 64`; the exact test passed alone in `1.7s`; the then-current main default `mix test.llm` passed `9,789 tests`; the implementation branch `mix test.llm --max-cases 8` passed `58 doctests`, `98 properties`, `9,800 tests`, `0 failures`, `1 skipped`, and `616 excluded`. Required CI run `30129511677` passed before merge.
 - **Production lines added/removed before roadmap evidence:** `+168/-26`, net `+142`, exactly within the final corrected cap from `agent://L06CorrectedBudget`.
 - **Test lines added/removed before roadmap evidence:** `+463/-8`, net `+455`; tests are outside the production cap.
 - **Reviewer evidence:** Initial correctness review found the nil-cursor owner invariant and producer-exit blockers; Elixir found the two required spec narrowings; Ponytail returned LEAN. After fixes, targeted rechecks returned RESOLVED/PASS for correctness, RESOLVED/PASS for Elixir, and RESOLVED/LEAN for Ponytail. `agent://L06BudgetDecision` first approved `+134` with mandatory safe cuts, and `agent://L06CorrectedBudget` approved the final exact `+168/-26`, net `+142` production budget with no remaining cuts. Final acceptance returned PASS with `0.98` confidence, confirming L06 producer/consumer closure, meaningful tests, exact `+142` cap, truthful roadmap, and the max_cases 64 `SessionManager` timeout is not an L06 blocker given the unchanged path, exact focused pass, full max_cases 8 pass, and current-main default pass. Merge fields remain reserved.
@@ -4749,4 +4749,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting L07/L08:** L07 completion resolve and signature help remain on the legacy atom variant and still need their own generation, item, and cursor policy. L08 code-lens, codeLens/resolve, and inlay hint remain on legacy atom variants and still need origin-safe stale rejection plus empty-result clearing.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3230
+- **Implementation commit SHA:** `8eb1de1476a45ca87056a858435a508f3f9daa37`.
+- **Merge SHA:** `0d0d2b30c2d76e0b44f60d5ef6eb7c36b9c2ed49`.
+- **Merge evidence:** PR #3230 merged on 2026-07-24 after required CI passed. Current main contains the same implementation and test tree reviewed at `8eb1de1476a45ca87056a858435a508f3f9daa37`.
+- **Findings resolved:** L06 is fully resolved as the approved ROUTE follow-on.
 - **Completion date:** 2026-07-24
