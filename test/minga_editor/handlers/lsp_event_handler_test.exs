@@ -89,6 +89,70 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       refute_receive {:lsp_request, _, %{"textDocument" => %{"uri" => ^inactive_uri}}, _, _}
     end
 
+    test "L06 producers capture current origin identity while L08 producers stay legacy" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+
+      cursor_kinds = [
+        {&MingaEditor.LspActions.goto_definition/1, "textDocument/definition", :definition},
+        {&MingaEditor.LspActions.hover/1, "textDocument/hover", :hover},
+        {&MingaEditor.LspActions.prepare_rename/1, "textDocument/prepareRename", :prepare_rename},
+        {&MingaEditor.LspActions.selection_range/1, "textDocument/selectionRange",
+         :selection_range},
+        {&MingaEditor.LspActions.document_highlight/1, "textDocument/documentHighlight",
+         :document_highlight}
+      ]
+
+      state =
+        Enum.reduce(cursor_kinds, state, fn {producer, method, kind}, state ->
+          state = producer.(state)
+          assert_receive {:lsp_request, ^method, _params, _caller, ref}
+
+          assert LSPState.fetch_pending_request(state.lsp, ref) ==
+                   {:ok,
+                    {:response, kind, client, buffer, Minga.Buffer.version(buffer), nil,
+                     Minga.Buffer.cursor(buffer)}}
+
+          state
+        end)
+
+      nil_cursor_kinds = [
+        {&MingaEditor.LspActions.document_symbols/1, "textDocument/documentSymbol",
+         :document_symbol},
+        {&MingaEditor.LspActions.workspace_symbols(&1, "query"), "workspace/symbol",
+         :workspace_symbol}
+      ]
+
+      Enum.each(nil_cursor_kinds, fn {producer, method, kind} ->
+        state = producer.(state)
+        assert_receive {:lsp_request, ^method, _params, _caller, ref}
+
+        assert LSPState.fetch_pending_request(state.lsp, ref) ==
+                 {:ok, {:response, kind, client, buffer, Minga.Buffer.version(buffer), nil, nil}}
+      end)
+
+      state = MingaEditor.LspActions.code_lens(state)
+      assert_receive {:lsp_request, "textDocument/codeLens", _params, _caller, ref}
+      assert LSPState.fetch_pending_request(state.lsp, ref) == {:ok, {:response, :code_lens}}
+    end
+
+    test "producer tracking ignores a response ref when origin buffer dies before version capture" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      monitor = Process.monitor(buffer)
+      Process.exit(buffer, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^buffer, _}
+
+      new_state = MingaEditor.LspActions.workspace_symbols(state, "query")
+
+      assert_receive {:lsp_request, "workspace/symbol", _params, _caller, ref}
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+    end
+
     test "references uses one structured identity from request through no-result response" do
       state = file_buffer_state("hello\n")
       client = start_fake_lsp_client()
@@ -205,15 +269,194 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert selected.message == "References response ignored after tab switch"
     end
 
-    test "tracked atom response deletes pending ref and returns render_now" do
+    test "tracked current-origin response deletes pending ref and returns render_now" do
       state = base_state()
       ref = make_ref()
-      state = track_pending_request(state, ref, :definition)
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:response, :definition, client, buffer, Minga.Buffer.version(buffer), nil,
+           Minga.Buffer.cursor(buffer)}
+        )
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
       assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert effects == [:render_now]
+    end
+
+    test "definition response for no active buffer is taken and ignored without crashing" do
+      state = file_buffer_state("origin\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:response, :definition, client, buffer, Minga.Buffer.version(buffer), nil,
+           Minga.Buffer.cursor(buffer)}
+        )
+
+      state = %{state | workspace: %{state.workspace | buffers: %Buffers{}}}
+
+      {result, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, lsp_location(buffer, 1, 0)}})
+
+      assert effects == [:render_now]
+      assert LSPState.fetch_pending_request(result.lsp, ref) == :error
+      assert result.workspace.buffers.active == nil
+      assert result.workspace.buffers.list == []
+    end
+
+    test "stale definition origins are taken without moving the current buffer" do
+      state = file_buffer_state("origin\nline two\n")
+      origin = state.workspace.buffers.active
+
+      other =
+        start_supervised!({BufferProcess, content: "other\nline two\n"},
+          id: {:buffer, make_ref()}
+        )
+
+      client = start_fake_lsp_client()
+      other_client = start_fake_lsp_client()
+      register_lsp_client(origin, client)
+
+      cases = [
+        {:buffer,
+         %{
+           state
+           | workspace: %{
+               state.workspace
+               | buffers: %Buffers{active: other, list: [origin, other], active_index: 1}
+             }
+         }, client, Minga.Buffer.version(origin), nil, {0, 0}},
+        {:tab, state, client, Minga.Buffer.version(origin), 123, {0, 0}},
+        {:client, state, other_client, Minga.Buffer.version(origin), nil, {0, 0}},
+        {:version, state, client, Minga.Buffer.version(origin) + 1, nil, {0, 0}},
+        {:cursor, state, client, Minga.Buffer.version(origin), nil, {1, 0}}
+      ]
+
+      for {stale_by, stale_state, tracked_client, version, tab_id, cursor} <- cases do
+        ref = make_ref()
+
+        state =
+          track_pending_request(
+            stale_state,
+            ref,
+            {:response, :definition, tracked_client, origin, version, tab_id, cursor}
+          )
+
+        {result, effects} =
+          LspEventHandler.handle(state, {:lsp_response, ref, {:ok, lsp_location(origin, 1, 0)}})
+
+        assert effects == [:render_now]
+        assert LSPState.fetch_pending_request(result.lsp, ref) == :error
+
+        assert Minga.Buffer.cursor(result.workspace.buffers.active) == {0, 0},
+               "stale #{stale_by} moved the active buffer"
+      end
+    end
+
+    test "dead origin buffer is stale during validation" do
+      state = file_buffer_state("origin\nline two\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:response, :definition, client, buffer, Minga.Buffer.version(buffer), nil,
+           Minga.Buffer.cursor(buffer)}
+        )
+
+      response = {:ok, lsp_location(buffer, 1, 0)}
+      monitor = Process.monitor(buffer)
+      Process.exit(buffer, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^buffer, _}
+
+      {result, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert LSPState.fetch_pending_request(result.lsp, ref) == :error
+    end
+
+    test "accepted current-origin definition and document symbol responses still dispatch" do
+      state = file_buffer_state("origin\nline two\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:response, :definition, client, buffer, Minga.Buffer.version(buffer), nil,
+           Minga.Buffer.cursor(buffer)}
+        )
+
+      {state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, lsp_location(buffer, 1, 0)}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.cursor(buffer) == {1, 0}
+      assert LSPState.fetch_pending_request(state.lsp, ref) == :error
+
+      ref = make_ref()
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:response, :document_symbol, client, buffer, Minga.Buffer.version(buffer), nil, nil}
+        )
+
+      {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
+
+      assert effects == [:render_now]
+      assert NoticeWorkflow.message(state) == "No symbols found"
+      assert LSPState.fetch_pending_request(state.lsp, ref) == :error
+    end
+
+    test "accepted document highlights install only for current origin" do
+      state = file_buffer_state("origin\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+
+      state =
+        track_pending_request(
+          state,
+          ref,
+          {:response, :document_highlight, client, buffer, Minga.Buffer.version(buffer), nil,
+           Minga.Buffer.cursor(buffer)}
+        )
+
+      highlight = %{
+        "range" => %{
+          "start" => %{"line" => 0, "character" => 0},
+          "end" => %{"line" => 0, "character" => 6}
+        },
+        "kind" => 1
+      }
+
+      {result, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, [highlight]}})
+
+      assert effects == [:render_now]
+      assert [_] = result.workspace.document_highlights
+      assert LSPState.fetch_pending_request(result.lsp, ref) == :error
     end
 
     test "identity-keyed hover_mouse response returns render_now without crashing" do
@@ -335,7 +578,20 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
     test "delayed hover response clears pending without touching or replaying a foreign shell" do
       ref = make_ref()
-      state = base_state() |> track_pending_request(ref, :hover) |> ShellWorkflow.switch(:fake)
+      state = base_state()
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+
+      state =
+        state
+        |> track_pending_request(
+          ref,
+          {:response, :hover, client, buffer, Minga.Buffer.version(buffer), nil,
+           Minga.Buffer.cursor(buffer)}
+        )
+        |> ShellWorkflow.switch(:fake)
+
       foreign_shell_state = Runtime.state(state.shell_runtime)
       message_store = state.render.message_store
       response = {:ok, %{"contents" => %{"kind" => "markdown", "value" => "**hover**"}}}
@@ -912,8 +1168,35 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     }
   end
 
+  defp track_pending_request(
+         state,
+         ref,
+         {:response, kind, client, buffer, version, tab_id, cursor}
+       ) do
+    %{
+      state
+      | lsp:
+          LSPState.track_response_request(
+            state.lsp,
+            ref,
+            kind,
+            client,
+            buffer,
+            version,
+            tab_id,
+            cursor
+          )
+    }
+  end
+
   defp track_pending_request(state, ref, kind)
-       when kind in [:completion_resolve, :signature_help, :hover, :definition] do
+       when kind in [
+              :completion_resolve,
+              :signature_help,
+              :code_lens,
+              :code_lens_resolve,
+              :inlay_hint
+            ] do
     %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
   end
 
@@ -931,6 +1214,13 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       )
 
     %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
+  end
+
+  defp lsp_location(buffer, line, col) do
+    %{
+      "uri" => Minga.LSP.SyncServer.path_to_uri(Minga.Buffer.file_path(buffer)),
+      "range" => %{"start" => %{"line" => line, "character" => col}}
+    }
   end
 
   defp base_state do
@@ -1050,7 +1340,12 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   defp fake_lsp_client_loop(parent) do
     receive do
       {:"$gen_call", from, :capabilities} ->
-        GenServer.reply(from, %{"codeLensProvider" => true, "inlayHintProvider" => true})
+        GenServer.reply(from, %{
+          "codeLensProvider" => true,
+          "inlayHintProvider" => true,
+          "documentHighlightProvider" => true
+        })
+
         fake_lsp_client_loop(parent)
 
       {:"$gen_call", from, :semantic_token_legend} ->

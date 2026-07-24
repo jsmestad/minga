@@ -156,8 +156,14 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     apply_signature_help_response(state, result)
   end
 
-  defp dispatch_pending_response({:response, :hover}, state, result) do
-    apply_traditional_lsp_response(:hover, state, result)
+  defp dispatch_pending_response(
+         {:response, kind, client, buffer, version, tab_id, cursor},
+         state,
+         result
+       ) do
+    if response_current?(state, client, buffer, version, tab_id, cursor),
+      do: dispatch_current_response(kind, state, result),
+      else: state
   end
 
   defp dispatch_pending_response(
@@ -172,8 +178,14 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     SemanticTokenSync.handle_response(state, buf_pid, result)
   end
 
-  defp dispatch_pending_response({:response, kind}, state, result) do
+  defp dispatch_pending_response({:response, kind}, state, result)
+       when kind in [:code_lens, :code_lens_resolve, :inlay_hint] do
     dispatch_lsp_response(kind, state, result)
+  end
+
+  defp dispatch_pending_response({:response, kind}, state, _result) do
+    Minga.Log.debug(:lsp, "Ignored legacy LSP response kind: #{inspect(kind)}")
+    state
   end
 
   @spec apply_completion_resolve_response(EditorState.t(), term()) :: EditorState.t()
@@ -305,6 +317,27 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   defp dispatch_lsp_response(kind, state, _result) do
     Minga.Log.debug(:lsp, "Unhandled LSP response kind: #{inspect(kind)}")
     state
+  end
+
+  defp dispatch_current_response(:hover, state, result),
+    do: apply_traditional_lsp_response(:hover, state, result)
+
+  defp dispatch_current_response(kind, state, result),
+    do: dispatch_lsp_response(kind, state, result)
+
+  defp response_current?(state, client, buffer, version, tab_id, cursor) do
+    active_tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
+
+    tab_id == if(active_tab, do: active_tab.id) and state.workspace.buffers.active == buffer and
+      match?([^client | _], Minga.LSP.SyncServer.clients_for_buffer(buffer)) and
+      buffer_value(buffer, &Minga.Buffer.version/1) == version and
+      (is_nil(cursor) or buffer_value(buffer, &Minga.Buffer.cursor/1) == cursor)
+  end
+
+  defp buffer_value(buffer, fun) do
+    fun.(buffer)
+  catch
+    :exit, _ -> :stale
   end
 
   @spec operation_response_current?(

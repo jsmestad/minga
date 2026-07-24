@@ -15,7 +15,9 @@ defmodule MingaEditor.State.LSP do
   alias MingaEditor.State.LSP.PendingRequests
 
   @type server_status :: :starting | :initializing | :ready | :crashed
-  @type response_kind ::
+  @type legacy_response_kind ::
+          :completion_resolve | :signature_help | :code_lens | :code_lens_resolve | :inlay_hint
+  @type current_origin_response_kind ::
           :definition
           | :peek_definition
           | :hover
@@ -29,13 +31,9 @@ defmodule MingaEditor.State.LSP do
           | :selection_range
           | :prepare_call_hierarchy
           | :prepare_outgoing_hierarchy
-          | :code_lens
-          | :code_lens_resolve
-          | :inlay_hint
           | :incoming_calls
           | :outgoing_calls
-          | :completion_resolve
-          | :signature_help
+  @type response_kind :: legacy_response_kind() | current_origin_response_kind()
   @type pending_request :: PendingRequests.request()
   @type operation_request ::
           {:operation, :references | :rename, MingaEditor.State.Operation.id(),
@@ -132,11 +130,45 @@ defmodule MingaEditor.State.LSP do
   end
 
   # ── Pending requests and formatting operations ────────────────────────────
-
-  @doc "Tracks an Editor-global LSP response request."
-  @spec track_response_request(t(), reference(), response_kind()) :: t()
+  @spec track_response_request(t(), reference(), legacy_response_kind()) :: t()
   def track_response_request(%__MODULE__{} = lsp, ref, kind) when is_reference(ref) do
     {:ok, pending_requests} = PendingRequests.track_response(lsp.pending_requests, ref, kind)
+    %{lsp | pending_requests: pending_requests}
+  end
+
+  @spec track_response_request(
+          t(),
+          reference(),
+          current_origin_response_kind(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          MingaEditor.State.Tab.id() | nil,
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: t()
+  def track_response_request(
+        %__MODULE__{} = lsp,
+        ref,
+        kind,
+        client,
+        buffer,
+        version,
+        tab_id,
+        cursor
+      )
+      when is_reference(ref) do
+    {:ok, pending_requests} =
+      PendingRequests.track_response(
+        lsp.pending_requests,
+        ref,
+        kind,
+        client,
+        buffer,
+        version,
+        tab_id,
+        cursor
+      )
+
     %{lsp | pending_requests: pending_requests}
   end
 

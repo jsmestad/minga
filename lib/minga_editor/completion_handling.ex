@@ -215,7 +215,7 @@ defmodule MingaEditor.CompletionHandling do
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  @spec track_response_request(EditorState.t(), reference(), LSPState.response_kind()) ::
+  @spec track_response_request(EditorState.t(), reference(), LSPState.legacy_response_kind()) ::
           EditorState.t()
   defp track_response_request(state, ref, kind) do
     %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
