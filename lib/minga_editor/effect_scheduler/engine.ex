@@ -2,8 +2,8 @@ defmodule MingaEditor.EffectScheduler.Engine do
   @moduledoc "Lifecycle, admission-policy, and worker coordination for `EffectScheduler`."
 
   alias MingaEditor.Effect.Outcome
-  alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler.Lane
   alias MingaEditor.EffectScheduler.State
 
   @type admission_error ::
@@ -115,17 +115,11 @@ defmodule MingaEditor.EffectScheduler.Engine do
   @doc "Returns bounded scheduler statistics."
   @spec stats(State.t()) :: map()
   def stats(%State{} = state) do
-    running =
-      Enum.count(state.lanes, fn
-        {_resource, %{running: %{task: %Task{}}}} -> true
-        _lane -> false
-      end)
-
     queued = Enum.sum(Enum.map(state.lanes, fn {_resource, lane} -> :queue.len(lane.queue) end))
 
     %{
       resources: map_size(state.lanes),
-      running: running,
+      running: map_size(state.tasks),
       queued: queued,
       pending: map_size(state.pending),
       admitted: MapSet.size(state.admitted),
@@ -178,21 +172,19 @@ defmodule MingaEditor.EffectScheduler.Engine do
       {nil, _tasks} ->
         state
 
-      {resource, tasks} ->
+      {{resource, request_id, _task}, tasks} ->
         Process.demonitor(task_ref, [:flush])
-        state = %{state | tasks: tasks} |> clear_running_timer(resource)
-        finish_running(state, resource, outcome_from_result(state, resource, result))
+
+        state
+        |> Map.put(:tasks, tasks)
+        |> clear_timer(request_id)
+        |> finish_running(resource, outcome_from_result(state, resource, result))
     end
   end
 
   @doc "Processes an owner or worker DOWN message."
   @spec process_down(State.t(), reference(), pid(), term()) :: State.t()
-  def process_down(
-        %State{owner_monitor: ref, owner: owner} = state,
-        ref,
-        owner,
-        _reason
-      ) do
+  def process_down(%State{owner_monitor: ref, owner: owner} = state, ref, owner, _reason) do
     state = shutdown_all(state, :owner_shutdown)
     %{state | owner: nil, owner_monitor: nil}
   end
@@ -202,10 +194,13 @@ defmodule MingaEditor.EffectScheduler.Engine do
       {nil, _tasks} ->
         state
 
-      {resource, tasks} ->
-        state = %{state | tasks: tasks} |> clear_running_timer(resource)
+      {{resource, request_id, _task}, tasks} ->
         request = running_request(state, resource)
-        finish_running(state, resource, Outcome.failed(request, {:worker_exit, reason}))
+
+        state
+        |> Map.put(:tasks, tasks)
+        |> clear_timer(request_id)
+        |> finish_running(resource, Outcome.failed(request, {:worker_exit, reason}))
     end
   end
 
@@ -218,146 +213,35 @@ defmodule MingaEditor.EffectScheduler.Engine do
   defp handoff_outcome(outcome, {:error, reason}), do: Outcome.failed(outcome.request, reason)
 
   @spec admit(State.t(), Request.t()) :: {admission(), State.t()}
-  defp admit(state, %Request{id: request_id} = request) do
+  defp admit(state, %Request{id: request_id, resource: resource} = request) do
     if MapSet.member?(state.admitted, request_id) do
       {{:error, :already_admitted}, state}
     else
-      admit_available(state, request)
-    end
-  end
+      {reply, lane, actions} =
+        Lane.admit(Map.get(state.lanes, resource), request, capacity_available?(state))
 
-  @spec admit_available(State.t(), Request.t()) :: {admission(), State.t()}
-  defp admit_available(state, %Request{resource: resource, policy: policy} = request) do
-    case Map.get(state.lanes, resource) do
-      nil ->
-        admit_new_lane(state, resource, policy, request)
+      state = put_lane_or_delete(state, resource, lane)
 
-      %{policy: existing_policy} when existing_policy != policy ->
-        {{:error, :policy_mismatch}, state}
+      case reply do
+        {:ok, ^request_id, _disposition} ->
+          state = state |> admit_request(request) |> apply_actions(actions)
+          {reply, state}
 
-      %{running: nil} ->
-        admit_idle_lane(state, resource, request)
-
-      %{policy: %Policy{mode: :fifo}} = lane ->
-        admit_fifo(state, resource, lane, request)
-
-      %{policy: %Policy{mode: :latest_wins}} = lane ->
-        state = supersede_lane(state, resource, lane)
-        state = admit_request(state, request)
-        state = start_request(state, resource, request)
-        {{:ok, request.id, :running}, state}
-
-      %{policy: %Policy{mode: :coalescing}} = lane ->
-        admit_coalescing(state, resource, lane, request)
-    end
-  end
-
-  @spec admit_idle_lane(State.t(), Request.resource(), Request.t()) ::
-          {admission(), State.t()}
-  defp admit_idle_lane(state, resource, request) do
-    if capacity_available?(state) do
-      state = state |> admit_request(request) |> start_request(resource, request)
-      {{:ok, request.id, :running}, state}
-    else
-      {{:error, :scheduler_full}, state}
-    end
-  end
-
-  @spec admit_new_lane(State.t(), Request.resource(), Policy.t(), Request.t()) ::
-          {admission(), State.t()}
-  defp admit_new_lane(state, resource, policy, request) do
-    if capacity_available?(state) do
-      lane = %{policy: policy, running: nil, queue: :queue.new()}
-
-      state =
-        state
-        |> admit_request(request)
-        |> put_lane(resource, lane)
-        |> start_request(resource, request)
-
-      {{:ok, request.id, :running}, state}
-    else
-      {{:error, :scheduler_full}, state}
-    end
-  end
-
-  @spec admit_fifo(State.t(), Request.resource(), State.lane(), Request.t()) ::
-          {admission(), State.t()}
-  defp admit_fifo(state, resource, lane, request) do
-    case {:queue.len(lane.queue) < lane.policy.max_queued, capacity_available?(state)} do
-      {false, _capacity} ->
-        {{:error, :queue_full}, state}
-
-      {true, false} ->
-        {{:error, :scheduler_full}, state}
-
-      {true, true} ->
-        queue = :queue.in(request, lane.queue)
-
-        state =
-          state
-          |> admit_request(request)
-          |> put_lane(resource, %{lane | queue: queue})
-          |> notify_queued_lifecycle(queue)
-
-        {{:ok, request.id, :queued}, state}
-    end
-  end
-
-  @spec admit_coalescing(State.t(), Request.resource(), State.lane(), Request.t()) ::
-          {admission(), State.t()}
-  defp admit_coalescing(state, resource, lane, request) do
-    queue_length = :queue.len(lane.queue)
-
-    case {queue_length < lane.policy.max_queued, capacity_available?(state)} do
-      {true, false} ->
-        {{:error, :scheduler_full}, state}
-
-      {true, true} ->
-        queue = :queue.in(request, lane.queue)
-
-        state =
-          state
-          |> admit_request(request)
-          |> put_lane(resource, %{lane | queue: queue})
-          |> notify_queued_lifecycle(queue)
-
-        {{:ok, request.id, :queued}, state}
-
-      {false, _capacity} ->
-        queued = :queue.to_list(lane.queue)
-        older = :queue.get_r(lane.queue)
-        request = Request.coalesce(older, request)
-        queue = queued |> List.replace_at(-1, request) |> :queue.from_list()
-
-        state =
-          state
-          |> put_lane(resource, %{lane | queue: queue})
-          |> terminalize_direct(Outcome.stale(Outcome.canceled(older, :coalesced), :coalesced))
-          |> admit_request(request)
-          |> notify_queued_lifecycle(queue)
-
-        {{:ok, request.id, :queued}, state}
+        {:error, _reason} ->
+          {reply, state}
+      end
     end
   end
 
   @spec start_request(State.t(), Request.resource(), Request.t()) :: State.t()
   defp start_request(state, resource, request) do
     notify_lifecycle(state.owner, Outcome.running(request))
-    lane = Map.fetch!(state.lanes, resource)
-
-    state =
-      put_lane(state, resource, %{lane | running: %{task: nil, request: request, timer: nil}})
 
     case start_task(state.task_supervisor, request) do
       {:ok, task} ->
-        lane = Map.fetch!(state.lanes, resource)
-        lane = %{lane | running: %{task: task, request: request, timer: nil}}
-
         state
-        |> put_lane(resource, lane)
-        |> put_in([Access.key(:tasks), task.ref], resource)
-        |> arm_timeout(resource, request, task.ref)
+        |> put_in([Access.key(:tasks), task.ref], {resource, request.id, task})
+        |> arm_timeout(request)
 
       {:error, reason} ->
         deliver_result(state, Outcome.failed(request, {:start_failed, reason}))
@@ -387,59 +271,44 @@ defmodule MingaEditor.EffectScheduler.Engine do
   @spec timeout_running(State.t(), Request.id()) :: State.t()
   defp timeout_running(state, request_id) do
     case Enum.find(state.lanes, fn {_resource, lane} ->
-           match?(%{request: %{id: ^request_id}}, lane.running)
+           match?(%Request{id: ^request_id}, lane.running)
          end) do
-      {resource, %{running: running} = lane} ->
-        state = stop_running_task(state, running)
-        state = put_lane(state, resource, %{lane | running: %{running | task: nil, timer: nil}})
-        finish_running(state, resource, Outcome.failed(running.request, :timeout))
+      {resource, %Lane{running: request}} ->
+        state = stop_request(state, request)
+        finish_running(state, resource, Outcome.failed(request, :timeout))
 
       nil ->
         state
     end
   end
 
-  @spec arm_timeout(State.t(), Request.resource(), Request.t(), reference()) :: State.t()
-  defp arm_timeout(state, _resource, %Request{timeout_ms: nil}, _task_ref), do: state
+  @spec arm_timeout(State.t(), Request.t()) :: State.t()
+  defp arm_timeout(state, %Request{timeout_ms: nil}), do: state
 
-  defp arm_timeout(state, resource, %Request{timeout_ms: timeout_ms, id: request_id}, _task_ref) do
+  defp arm_timeout(state, %Request{timeout_ms: timeout_ms, id: request_id}) do
     timer_ref = Process.send_after(self(), {:effect_timeout, request_id}, timeout_ms)
-    lane = Map.fetch!(state.lanes, resource)
-    running = Map.fetch!(lane, :running)
-
-    put_lane(state, resource, %{lane | running: %{running | timer: timer_ref}})
-    |> Map.update!(:timers, &Map.put(&1, timer_ref, request_id))
+    %{state | timers: Map.put(state.timers, timer_ref, request_id)}
   end
 
-  @spec clear_running_timer(State.t(), Request.resource()) :: State.t()
-  defp clear_running_timer(state, resource) do
-    case Map.get(state.lanes, resource) do
-      %{running: %{timer: timer}} = lane when is_reference(timer) ->
-        cancel_timer(state, timer)
-        |> put_lane(resource, %{lane | running: %{lane.running | timer: nil}})
-
-      _lane ->
-        state
+  @spec clear_timer(State.t(), Request.id()) :: State.t()
+  defp clear_timer(state, request_id) do
+    case Enum.find_value(state.timers, fn
+           {timer_ref, ^request_id} -> timer_ref
+           {_timer_ref, _other_request_id} -> nil
+         end) do
+      nil -> state
+      timer_ref -> cancel_timer(state, timer_ref)
     end
   end
 
-  @spec cancel_timer(State.t(), reference() | nil) :: State.t()
-  defp cancel_timer(state, nil), do: state
-
+  @spec cancel_timer(State.t(), reference()) :: State.t()
   defp cancel_timer(state, timer_ref) do
     _ = Process.cancel_timer(timer_ref)
     %{state | timers: Map.delete(state.timers, timer_ref)}
   end
 
   @spec finish_running(State.t(), Request.resource(), Outcome.t()) :: State.t()
-  defp finish_running(state, resource, outcome) do
-    lane = Map.fetch!(state.lanes, resource)
-    running = Map.fetch!(lane, :running)
-
-    state
-    |> put_lane(resource, %{lane | running: %{running | task: nil, timer: nil}})
-    |> deliver_result(outcome)
-  end
+  defp finish_running(state, _resource, outcome), do: deliver_result(state, outcome)
 
   @spec start_next(State.t(), Request.resource()) :: State.t()
   defp start_next(state, resource) do
@@ -447,127 +316,45 @@ defmodule MingaEditor.EffectScheduler.Engine do
       nil ->
         state
 
-      %{running: nil, queue: queue} = lane ->
-        case :queue.out(queue) do
-          {:empty, _queue} ->
-            %{state | lanes: Map.delete(state.lanes, resource)}
-
-          {{:value, request}, rest} ->
-            state
-            |> put_lane(resource, %{lane | queue: rest})
-            |> notify_queued_lifecycle(rest)
-            |> start_request(resource, request)
+      %Lane{running: nil} = lane ->
+        case Lane.finish_current(lane) do
+          {:empty, actions} -> state |> delete_lane(resource) |> apply_actions(actions)
+          {%Lane{} = lane, actions} -> state |> put_lane(resource, lane) |> apply_actions(actions)
         end
 
-      _lane ->
+      %Lane{} ->
         state
     end
-  end
-
-  @spec supersede_lane(State.t(), Request.resource(), State.lane()) :: State.t()
-  defp supersede_lane(state, resource, lane) do
-    state = stop_running_task(state, lane.running)
-    requests = current_request(lane.running) ++ :queue.to_list(lane.queue)
-    state = put_lane(state, resource, %{lane | running: nil, queue: :queue.new()})
-
-    Enum.reduce(requests, state, fn request, acc ->
-      terminalize_direct(acc, Outcome.canceled(request, :superseded))
-    end)
-  end
-
-  @spec stop_running_task(State.t(), State.running() | nil) :: State.t()
-  defp stop_running_task(state, %{task: %Task{} = task, timer: timer}) do
-    _shutdown_result = Task.shutdown(task, :brutal_kill)
-    Process.demonitor(task.ref, [:flush])
-    state = %{state | tasks: Map.delete(state.tasks, task.ref)}
-    cancel_timer(state, timer)
-  end
-
-  defp stop_running_task(state, %{timer: timer}), do: cancel_timer(state, timer)
-  defp stop_running_task(state, _running), do: state
-
-  @spec current_request(State.running() | nil) :: [Request.t()]
-  defp current_request(%{request: request}), do: [request]
-  defp current_request(nil), do: []
-
-  @spec cancel_running_without_advance(State.t(), Request.resource(), State.lane(), term()) ::
-          State.t()
-  defp cancel_running_without_advance(
-         state,
-         resource,
-         %{running: %{task: %Task{} = _task} = running} = lane,
-         reason
-       ) do
-    state = stop_running_task(state, running)
-
-    state
-    |> put_lane(resource, %{lane | running: %{running | task: nil, timer: nil}})
-    |> deliver_result(Outcome.canceled(running.request, reason))
   end
 
   @spec request_id_for_operation(State.t(), MingaEditor.State.Operation.id()) ::
           Request.id() | nil
   defp request_id_for_operation(state, operation_id) do
     Enum.find_value(state.lanes, fn {_resource, lane} ->
-      case lane.running do
-        %{request: %Request{operation_id: ^operation_id, id: request_id}} -> request_id
-        _running -> queued_request_id_for_operation(lane.queue, operation_id)
-      end
-    end)
-  end
-
-  @spec queued_request_id_for_operation(
-          :queue.queue(Request.t()),
-          MingaEditor.State.Operation.id()
-        ) ::
-          Request.id() | nil
-  defp queued_request_id_for_operation(queue, operation_id) do
-    queue
-    |> :queue.to_list()
-    |> Enum.find_value(fn
-      %Request{operation_id: ^operation_id, id: request_id} -> request_id
-      %Request{} -> nil
+      Lane.request_id_for_operation(lane, operation_id)
     end)
   end
 
   @spec cancel_request(State.t(), Request.id()) :: {:ok, State.t()} | :not_found
   defp cancel_request(state, request_id) do
+    if Map.has_key?(state.pending, request_id) do
+      :not_found
+    else
+      cancel_request_in_lanes(state, request_id)
+    end
+  end
+
+  @spec cancel_request_in_lanes(State.t(), Request.id()) :: {:ok, State.t()} | :not_found
+  defp cancel_request_in_lanes(state, request_id) do
     Enum.reduce_while(state.lanes, :not_found, fn {resource, lane}, _acc ->
-      case cancel_in_lane(state, resource, lane, request_id) do
-        :not_found -> {:cont, :not_found}
-        {:ok, new_state} -> {:halt, {:ok, new_state}}
+      case Lane.cancel_request(lane, request_id) do
+        :not_found ->
+          {:cont, :not_found}
+
+        {:ok, lane, actions} ->
+          {:halt, {:ok, state |> put_lane(resource, lane) |> apply_actions(actions)}}
       end
     end)
-  end
-
-  @spec cancel_in_lane(State.t(), Request.resource(), State.lane(), Request.id()) ::
-          {:ok, State.t()} | :not_found
-  defp cancel_in_lane(
-         state,
-         resource,
-         %{running: %{task: %Task{}, request: %{id: request_id}}} = lane,
-         request_id
-       ) do
-    {:ok, cancel_running_without_advance(state, resource, lane, :requested)}
-  end
-
-  defp cancel_in_lane(state, resource, lane, request_id) do
-    queued = :queue.to_list(lane.queue)
-
-    case Enum.split_with(queued, &(&1.id == request_id)) do
-      {[], _rest} ->
-        :not_found
-
-      {[request], rest} ->
-        queue = :queue.from_list(rest)
-
-        state =
-          state
-          |> put_lane(resource, %{lane | queue: queue})
-          |> notify_queued_lifecycle(queue)
-
-        {:ok, deliver_result(state, Outcome.canceled(request, :requested))}
-    end
   end
 
   @spec cancel_matching(State.t(), (Request.t() -> boolean()), term(), boolean()) :: State.t()
@@ -589,75 +376,15 @@ defmodule MingaEditor.EffectScheduler.Engine do
           {State.t(), [Request.resource()]}
   defp cancel_matching_lanes(state, match?, reason, notify_owner?) do
     Enum.reduce(state.lanes, {state, []}, fn {resource, lane}, {acc, resources} ->
-      {acc, running, canceled_running} = cancel_matching_running(acc, lane.running, match?)
-      {queue, canceled_queued} = split_matching_queue(lane.queue, match?)
-      changed? = canceled_running != [] or canceled_queued != []
-
-      acc =
-        acc
-        |> put_lane(resource, %{lane | running: running, queue: queue})
-        |> maybe_notify_queued_lifecycle(queue, changed?)
-
-      acc =
-        Enum.reduce(canceled_running ++ canceled_queued, acc, fn request, inner_acc ->
-          terminalize_canceled_request(inner_acc, request, reason, notify_owner?)
-        end)
-
+      {lane, actions, changed?} = Lane.cancel_matching(lane, match?, reason)
+      acc = acc |> put_lane(resource, lane) |> apply_actions(actions, notify_owner?)
       if changed?, do: {acc, [resource | resources]}, else: {acc, resources}
     end)
   end
 
-  @spec cancel_matching_running(
-          State.t(),
-          State.running() | nil,
-          (Request.t() -> boolean())
-        ) :: {State.t(), State.running() | nil, [Request.t()]}
-  defp cancel_matching_running(state, %{request: request} = running, match?) do
-    if match?.(request) do
-      {stop_running_task(state, running), nil, [request]}
-    else
-      {state, running, []}
-    end
-  end
-
-  defp cancel_matching_running(state, nil, _match?), do: {state, nil, []}
-
-  @spec split_matching_queue(:queue.queue(Request.t()), (Request.t() -> boolean())) ::
-          {:queue.queue(Request.t()), [Request.t()]}
-  defp split_matching_queue(queue, match?) do
-    {canceled, retained} = queue |> :queue.to_list() |> Enum.split_with(match?)
-    {:queue.from_list(retained), canceled}
-  end
-
-  @spec maybe_notify_queued_lifecycle(State.t(), :queue.queue(Request.t()), boolean()) ::
-          State.t()
-  defp maybe_notify_queued_lifecycle(state, queue, true),
-    do: notify_queued_lifecycle(state, queue)
-
-  defp maybe_notify_queued_lifecycle(state, _queue, false), do: state
-
-  @spec terminalize_canceled_request(State.t(), Request.t(), term(), boolean()) :: State.t()
-  defp terminalize_canceled_request(state, request, reason, notify_owner?) do
-    outcome = Outcome.canceled(request, reason)
-
-    state =
-      state
-      |> release_current(request)
-      |> Map.put(:pending, Map.delete(state.pending, request.id))
-      |> Map.put(:claimed, MapSet.delete(state.claimed, request.id))
-
-    if MapSet.member?(state.admitted, request.id) do
-      if notify_owner?, do: notify_lifecycle(state.owner, outcome)
-      notify_terminal(state.observer, outcome)
-      release_admission(state, request.id)
-    else
-      state
-    end
-  end
-
   @spec running_request(State.t(), Request.resource()) :: Request.t()
   defp running_request(state, resource) do
-    state.lanes |> Map.fetch!(resource) |> Map.fetch!(:running) |> Map.fetch!(:request)
+    state.lanes |> Map.fetch!(resource) |> Map.fetch!(:running)
   end
 
   @spec take_candidate(State.t(), Outcome.t()) :: {:ok, State.t()} | :not_found
@@ -705,6 +432,26 @@ defmodule MingaEditor.EffectScheduler.Engine do
     end
   end
 
+  @spec terminalize_canceled_request(State.t(), Request.t(), term(), boolean()) :: State.t()
+  defp terminalize_canceled_request(state, request, reason, notify_owner?) do
+    outcome = Outcome.canceled(request, reason)
+    request_id = request.id
+
+    state =
+      state
+      |> release_current(request)
+      |> Map.put(:pending, Map.delete(state.pending, request_id))
+      |> Map.put(:claimed, MapSet.delete(state.claimed, request_id))
+
+    if MapSet.member?(state.admitted, request_id) do
+      if notify_owner?, do: notify_lifecycle(state.owner, outcome)
+      notify_terminal(state.observer, outcome)
+      release_admission(state, request_id)
+    else
+      state
+    end
+  end
+
   @spec admit_request(State.t(), Request.t()) :: State.t()
   defp admit_request(state, %Request{id: request_id}) do
     %{state | admitted: MapSet.put(state.admitted, request_id)}
@@ -719,24 +466,65 @@ defmodule MingaEditor.EffectScheduler.Engine do
   defp capacity_available?(state), do: MapSet.size(state.admitted) < state.max_admitted
 
   @spec release_current(State.t(), Request.t()) :: State.t()
-  defp release_current(state, %Request{resource: resource, id: request_id}) do
+  defp release_current(state, %Request{resource: resource} = request) do
     case Map.get(state.lanes, resource) do
-      %{running: %{request: %{id: ^request_id}}} = lane ->
-        put_lane(state, resource, %{lane | running: nil})
+      %Lane{} = lane ->
+        case Lane.finalize_current(lane, request) do
+          {:empty, actions} -> state |> delete_lane(resource) |> apply_actions(actions)
+          {%Lane{} = lane, actions} -> state |> put_lane(resource, lane) |> apply_actions(actions)
+        end
 
-      _lane ->
+      nil ->
         state
     end
   end
 
-  @spec notify_queued_lifecycle(State.t(), :queue.queue(Request.t())) :: State.t()
-  defp notify_queued_lifecycle(%State{} = state, queue) do
-    requests = :queue.to_list(queue)
-    total = Enum.count(requests)
+  @spec apply_actions(State.t(), [Lane.action()], boolean()) :: State.t()
+  defp apply_actions(state, actions, notify_owner? \\ true) do
+    Enum.reduce(actions, state, fn
+      {:start, request}, acc ->
+        start_request(acc, request.resource, request)
 
-    requests
-    |> Enum.with_index(1)
-    |> Enum.each(fn {request, position} ->
+      {:stop, request}, acc ->
+        stop_request(acc, request)
+
+      {:candidate, request, {:canceled, reason}}, acc ->
+        deliver_result(acc, Outcome.canceled(request, reason))
+
+      {:terminal, request, {:canceled, reason}}, acc ->
+        terminalize_canceled_request(acc, request, reason, notify_owner?)
+
+      {:terminal, request, {:stale, reason}}, acc ->
+        terminalize_direct(acc, Outcome.stale(Outcome.canceled(request, reason), reason))
+
+      {:queue, positions}, acc ->
+        notify_queued_lifecycle(acc, positions)
+    end)
+  end
+
+  @spec stop_request(State.t(), Request.t()) :: State.t()
+  defp stop_request(state, %Request{id: request_id}) do
+    case Enum.find(state.tasks, fn
+           {_task_ref, {_resource, ^request_id, _task}} -> true
+           _entry -> false
+         end) do
+      {task_ref, {_resource, ^request_id, %Task{} = task}} ->
+        _shutdown_result = Task.shutdown(task, :brutal_kill)
+        Process.demonitor(task_ref, [:flush])
+
+        state
+        |> Map.put(:tasks, Map.delete(state.tasks, task_ref))
+        |> clear_timer(request_id)
+
+      nil ->
+        clear_timer(state, request_id)
+    end
+  end
+
+  @spec notify_queued_lifecycle(State.t(), [{Request.t(), pos_integer(), non_neg_integer()}]) ::
+          State.t()
+  defp notify_queued_lifecycle(%State{} = state, positions) do
+    Enum.each(positions, fn {request, position, total} ->
       notify_lifecycle(state.owner, Outcome.queued(request, position, total))
     end)
 
@@ -759,10 +547,16 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
   defp notify_terminal(_observer, _outcome), do: :ok
 
-  @spec put_lane(State.t(), Request.resource(), State.lane()) :: State.t()
-  defp put_lane(state, resource, lane) do
-    %{state | lanes: Map.put(state.lanes, resource, lane)}
-  end
+  @spec put_lane(State.t(), Request.resource(), Lane.t()) :: State.t()
+  defp put_lane(state, resource, %Lane{} = lane),
+    do: %{state | lanes: Map.put(state.lanes, resource, lane)}
+
+  @spec put_lane_or_delete(State.t(), Request.resource(), Lane.t() | nil) :: State.t()
+  defp put_lane_or_delete(state, resource, nil), do: delete_lane(state, resource)
+  defp put_lane_or_delete(state, resource, %Lane{} = lane), do: put_lane(state, resource, lane)
+
+  @spec delete_lane(State.t(), Request.resource()) :: State.t()
+  defp delete_lane(state, resource), do: %{state | lanes: Map.delete(state.lanes, resource)}
 
   @spec handler_active?(State.t(), module()) :: boolean()
   defp handler_active?(state, handler) do
@@ -771,18 +565,8 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
   @spec request_active?(State.t(), (Request.t() -> boolean())) :: boolean()
   defp request_active?(state, match?) do
-    Enum.any?(state.lanes, fn {_resource, lane} ->
-      running_matches?(lane.running, match?) or queued_matches?(lane.queue, match?)
-    end) or Enum.any?(state.pending, fn {_id, outcome} -> match?.(outcome.request) end)
-  end
-
-  @spec running_matches?(State.running() | nil, (Request.t() -> boolean())) :: boolean()
-  defp running_matches?(%{request: request}, match?), do: match?.(request)
-  defp running_matches?(_running, _match?), do: false
-
-  @spec queued_matches?(:queue.queue(Request.t()), (Request.t() -> boolean())) :: boolean()
-  defp queued_matches?(queue, match?) do
-    queue |> :queue.to_list() |> Enum.any?(match?)
+    Enum.any?(state.lanes, fn {_resource, lane} -> Lane.active?(lane, match?) end) or
+      Enum.any?(state.pending, fn {_id, outcome} -> match?.(outcome.request) end)
   end
 
   @spec shutdown_all(State.t(), term()) :: State.t()
@@ -795,18 +579,12 @@ defmodule MingaEditor.EffectScheduler.Engine do
       |> Enum.concat(Enum.map(state.pending, fn {_id, outcome} -> outcome.request end))
       |> Map.new(fn request -> {request.id, request} end)
 
-    Enum.each(state.lanes, fn
-      {_resource, %{running: %{task: %Task{} = task, timer: timer}}} ->
-        _shutdown_result = Task.shutdown(task, :brutal_kill)
-        Process.demonitor(task.ref, [:flush])
-        cancel_timer_ref(timer)
-
-      {_resource, %{running: %{timer: timer}}} ->
-        cancel_timer_ref(timer)
-
-      _lane ->
-        :ok
+    Enum.each(state.tasks, fn {_task_ref, {_resource, _request_id, %Task{} = task}} ->
+      _shutdown_result = Task.shutdown(task, :brutal_kill)
+      Process.demonitor(task.ref, [:flush])
     end)
+
+    Enum.each(state.timers, fn {timer_ref, _request_id} -> cancel_timer_ref(timer_ref) end)
 
     Enum.each(state.admitted, fn request_id ->
       case Map.fetch(requests, request_id) do
@@ -825,6 +603,10 @@ defmodule MingaEditor.EffectScheduler.Engine do
         timers: %{}
     }
   end
+
+  @spec current_request(Request.t() | nil) :: [Request.t()]
+  defp current_request(%Request{} = request), do: [request]
+  defp current_request(nil), do: []
 
   @spec cancel_timer_ref(reference() | nil) :: :ok
   defp cancel_timer_ref(nil), do: :ok
