@@ -29,6 +29,27 @@ defmodule MingaEditor.Frontend.FrameTransactionTest do
              "opcode 0x71 outside a frame"
   end
 
+  test "rejects retired cell-grid clear inside a frame" do
+    assert {:error, {:retired_render_command, 0x12}} =
+             FrameTransaction.validate([
+               Protocol.encode_begin_frame(12, 0),
+               <<0x12>>,
+               Protocol.encode_commit_frame(12)
+             ])
+
+    assert FrameTransaction.format_error({:retired_render_command, 0x12}) ==
+             "retired render opcode 0x12 inside a frame"
+  end
+
+  test "rejects retired batch_end inside a frame" do
+    assert {:error, {:retired_render_command, 0x13}} =
+             FrameTransaction.validate([
+               Protocol.encode_begin_frame(12, 0),
+               <<0x13, 0::32>>,
+               Protocol.encode_commit_frame(12)
+             ])
+  end
+
   test "rejects a mismatched frame commit" do
     assert {:error, {:commit_seq_mismatch, 12, 13}} =
              FrameTransaction.validate([

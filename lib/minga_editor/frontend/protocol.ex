@@ -10,10 +10,10 @@ defmodule MingaEditor.Frontend.Protocol do
 
   | Opcode | Name        | Payload                                                     |
   |--------|-------------|-------------------------------------------------------------|
-  | 0x01   | key_press   | `codepoint::32, modifiers::8[, seq::32]`                    |
+  | 0x01   | key_press   | `codepoint::32, modifiers::8, seq::32`                      |
   | 0x02   | resize      | `width::16, height::16`                                     |
-  | 0x03   | ready       | `width::16, height::16[, caps..., protocol_version::16]`    |
-  | 0x04   | mouse_event | `row::16-signed, col::16-signed, button::8, mods::8, type::8` |
+  | 0x03   | ready       | `width::16, height::16, caps..., protocol_version::16`      |
+  | 0x04   | mouse_event | `row::16-signed, col::16-signed, button::8, mods::8, type::8, click_count::8` |
 
   The extended `ready` handshake carries the frontend's compiled-in
   `protocol_version`; the BEAM rejects a mismatch with `protocol_error` (0x18).
@@ -130,7 +130,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   Stamped by the frontend at input decode for end-to-end keystroke latency
   instrumentation (ticket #2215). The BEAM echoes the latest processed sequence
-  back on `commit_frame`. `0` means "no correlation" (legacy frontends that omit it).
+  back on `commit_frame`. `0` means "no correlation".
   """
   @type input_seq :: non_neg_integer()
 
@@ -164,7 +164,6 @@ defmodule MingaEditor.Frontend.Protocol do
   @type input_event ::
           {:key_press, codepoint :: non_neg_integer(), modifiers(), input_seq()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
-          | {:ready, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t(),
              protocol_version :: non_neg_integer()}
           | {:capabilities_updated, Capabilities.t()}
@@ -473,15 +472,8 @@ defmodule MingaEditor.Frontend.Protocol do
 
   @doc "Decodes an input event from a binary payload."
   @spec decode_event(binary()) :: {:ok, input_event()} | {:error, :unknown_opcode | :malformed}
-  # New form carries a u32 input correlation sequence (ticket #2215) appended
-  # after modifiers so latency samples can be resolved at the frame boundary.
   def decode_event(<<@op_key_press, codepoint::32, modifiers::8, seq::32>>) do
     {:ok, {:key_press, codepoint, modifiers, seq}}
-  end
-
-  # Legacy form without a sequence; treat as uncorrelated (seq 0).
-  def decode_event(<<@op_key_press, codepoint::32, modifiers::8>>) do
-    {:ok, {:key_press, codepoint, modifiers, 0}}
   end
 
   def decode_event(<<@op_resize, width::16, height::16>>) do
@@ -510,9 +502,9 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok, {:ready, width, height, caps, 0}}
   end
 
-  # Short ready (backward compat with old frontends).
+  # Short unversioned ready is decoded only so Manager can reject it explicitly.
   def decode_event(<<@op_ready, width::16, height::16>>) do
-    {:ok, {:ready, width, height}}
+    {:ok, {:ready, width, height, Capabilities.default(), 0}}
   end
 
   # Capabilities updated event (sent after async capability detection).
@@ -532,15 +524,6 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok,
      {:mouse_event, row, col, decode_mouse_button(button), mods,
       decode_mouse_event_type(event_type), click_count}}
-  end
-
-  # 8-byte mouse event without click_count (backward compat with old frontends)
-  def decode_event(
-        <<@op_mouse_event, row::16-signed, col::16-signed, button::8, mods::8, event_type::8>>
-      ) do
-    {:ok,
-     {:mouse_event, row, col, decode_mouse_button(button), mods,
-      decode_mouse_event_type(event_type), 1}}
   end
 
   # Paste event: opcode(1) + text_len(2, big-endian) + text(text_len)
@@ -565,15 +548,6 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok,
      {:frame_rejected, generation, frame_seq, last_applied, decode_rejection_reason(reason),
       decode_rejection_disposition(disposition)}}
-  end
-
-  # Compatibility for a protocol-version-11 status already draining on reconnect.
-  def decode_event(
-        <<@op_frame_rejected, generation::32, frame_seq::32, last_applied::32, reason::8>>
-      ) do
-    {:ok,
-     {:frame_rejected, generation, frame_seq, last_applied, decode_rejection_reason(reason),
-      :retryable_recovery}}
   end
 
   def decode_event(

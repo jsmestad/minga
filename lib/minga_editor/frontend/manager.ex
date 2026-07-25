@@ -210,11 +210,6 @@ defmodule MingaEditor.Frontend.Manager do
       {:ok, {:ready, width, height, caps, protocol_version}} ->
         handle_ready(state, width, height, caps, protocol_version)
 
-      {:ok, {:ready, width, height}} ->
-        new_state = %{state | ready: true, terminal_size: {width, height}}
-        broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
-        {:noreply, new_state}
-
       {:ok, {:capabilities_updated, caps}} ->
         new_state = %{state | capabilities: caps}
         broadcast(new_state.subscribers, {:minga_input, {:capabilities_updated, caps}})

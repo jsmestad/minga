@@ -7,8 +7,6 @@ defmodule MingaEditor.Frontend.Capabilities do
   commands on terminals without image support, using native floating windows
   on GUIs, using native floating windows, etc.
 
-  Frontends that send the short 5-byte `ready` format get `default/0` caps
-  (TUI, RGB, wcwidth, no images, emulated floats, monospace).
   """
 
   alias Minga.Core.WidthOracle
