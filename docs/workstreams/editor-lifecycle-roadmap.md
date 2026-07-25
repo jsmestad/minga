@@ -5223,3 +5223,27 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** Changing `WorkspaceSymbolSource` made existing changed-file lint evaluate its pre-existing synchronous LSP request; the existing synchronous behavior was retained with the same local Credo disable pattern used elsewhere. Root-level extension test execution does not compile bundled extension picker source modules directly, so the new root-level extension regression explicitly requires the source file before exercising it.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
+
+### W135/D11: Remove dead GUI adapter last-window FPS cache
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** D11
+- **Decision:** APPROVE_DIRECT, remove only the refreshed write-only `last_window_fps` cache field while retaining the live GUI adapter window cache fields and frame decision logic.
+- **Planning profile:** `D11Refresh`, editor-lifecycle-planner, locked READY at baseline `0b22c1f192cc6fe6a7b2c18e0dc7d7b28a8b81f7`.
+- **Implementation profile:** `D11WorkerNext`, editor-lifecycle-worker, no delegation.
+- **Baseline:** `0b22c1f192cc6fe6a7b2c18e0dc7d7b28a8b81f7`.
+- **Failure reproduction:** After adding the locked internal-shape assertion, `mix test test/minga/frontend/adapter/gui_test.exs` failed before the production deletion because `Map.from_struct(encoded.caches)` still contained `:last_window_fps`, with `%{1 => 99138094}` in the first encoded window cache. The retained live fields `last_window_content_fps` and `last_window_overlay_fps` were already populated by the same encode path.
+- **Observable result:** `%Minga.Frontend.Adapter.GUI.Caches{}` no longer defines `last_window_fps`, and `Minga.Frontend.Adapter.GUI` no longer writes that redundant content fingerprint during full or pending-delta window cache updates. Full, overlay, viewport-delta, rows-delta, row snapshot, content-epoch, and pending-delta cache behavior remains on the retained `last_window_content_fps`, `last_window_overlay_fps`, `last_window_content_epochs`, `last_window_row_keys`, `last_window_rows`, and `pending_window_delta_ids` fields.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga/frontend/adapter/gui.ex`, `lib/minga/frontend/adapter/gui/caches.ex`, and `test/minga/frontend/adapter/gui_test.exs`.
+- **Focused validation:** `mix test test/minga/frontend/adapter/gui_test.exs` passed `8 tests`; `mix test test/minga_editor/frontend/emit_test.exs test/minga_editor/frontend/emit/keyframe_side_channel_test.exs` passed `17 tests`; `mix test test/minga_editor/render_pipeline/resident_incremental_test.exs test/minga_editor/renderer/buffer_changes_test.exs` passed `15 tests, 4 excluded`.
+- **Broad validation:** `mix format --check-formatted lib/minga/frontend/adapter/gui/caches.ex lib/minga/frontend/adapter/gui.ex test/minga/frontend/adapter/gui_test.exs` passed; `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with `Total errors: 0`; `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed `58 doctests, 98 properties, 9852 tests, 0 failures, 1 skipped, 616 excluded`; `git diff --check` produced no output.
+- **Residue check:** Focused search under `lib` and `test` found no production `last_window_fps` definition, producer, or consumer. The only remaining `last_window_fps` match is the new GUI adapter regression that asserts the internal cache struct has no such key.
+- **Production lines added/removed before roadmap evidence:** `lib/` diff is `+2/-6`, net `-4`, satisfying the locked production net cap of `<= 0`.
+- **Test lines added/removed before roadmap evidence:** `test/` diff is `+3/-1`, net `+2`, limited to replacing the dead-field assertion with live retained cache assertions and the required absence regression.
+- **Concepts added:** None. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, data representation, executable concept, frontend path, fallback, wrapper, or replacement abstraction was added.
+- **Concepts removed:** Removed the dead `last_window_fps` GUI adapter cache field and its two private producer writes.
+- **Retained constraints:** `last_window_content_fps`, `last_window_overlay_fps`, `last_window_content_epochs`, `last_window_row_keys`, `last_window_rows`, `pending_window_delta_ids`, nested renderer `adapter_gui_caches`, emit side-channel dedupe, frame acknowledgement lineage, recovery fields, and WindowCache resident/snapshot fields remain unchanged.
+- **Discoveries affecting later work:** No replan trigger, owner drift, public API change, protocol/frontend wire change, frame-logic change, compatibility need, production budget miss, or additional dead D11 field was found.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
+- **Completion date:** 2026-07-25

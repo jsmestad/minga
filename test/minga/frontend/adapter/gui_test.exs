@@ -41,7 +41,9 @@ defmodule Minga.Frontend.Adapter.GUITest do
       assert encoded.metrics.window.row_bytes > 0
       assert encoded.metrics.metal_ui_bytes > 0
       assert encoded.metrics.chrome_bytes > 0
-      assert encoded.caches.last_window_fps[1] != nil
+      refute Map.has_key?(Map.from_struct(encoded.caches), :last_window_fps)
+      assert encoded.caches.last_window_content_fps[1] != nil
+      assert encoded.caches.last_window_overlay_fps[1] != nil
       assert encoded.caches.last_gutter_separator_fp != nil
       assert encoded.caches.last_theme_fp != nil
     end
