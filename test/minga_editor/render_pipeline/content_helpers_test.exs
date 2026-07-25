@@ -8,6 +8,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.UI.Highlight
+  alias MingaEditor.State.Highlighting
   alias MingaEditor.Viewport
 
   @search_colors %MingaEditor.UI.Theme.Search{
@@ -185,6 +186,39 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         })
 
       assert ctx.width_oracle == oracle
+    end
+
+    test "composes semantic layer without mutating parser or LSP owners and honors face overrides" do
+      editor = TestHelpers.base_state()
+      state = MingaEditor.RenderPipeline.Input.from_editor_state(editor)
+      buffer = state.workspace.buffers.active
+      window = state.workspace.windows.map[state.workspace.windows.active]
+
+      parser =
+        Highlight.new(%{"keyword" => [fg: 0xFF0000], "@lsp.type.variable" => [fg: 0x00FF00]})
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [Span.new(0, 5, 0)])
+
+      semantic = {0, {"@lsp.type.variable"}, {Span.new(0, 5, 0, 0, 2)}}
+
+      override =
+        Highlight.new(%{"keyword" => [fg: 0xFF0000], "@lsp.type.variable" => [fg: 0x123456]}).face_registry
+
+      state = %{
+        state
+        | highlighting: Highlighting.put_highlight(state.highlighting, buffer, parser),
+          semantic_tokens: %{buffer => semantic},
+          face_override_registries: %{buffer => override}
+      }
+
+      ctx = ContentHelpers.window_highlight(state, window)
+
+      assert [{"hello", face}] =
+               Highlight.styles_for_visible_lines(ctx, [{"hello", 0}]) |> List.first()
+
+      assert face.fg == 0x123456
+      assert state.highlighting.highlights[buffer] == parser
+      assert state.semantic_tokens[buffer] == semantic
     end
   end
 

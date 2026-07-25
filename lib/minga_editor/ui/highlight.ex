@@ -147,6 +147,48 @@ defmodule MingaEditor.UI.Highlight do
     %{hl | version: version, spans: spans |> validate_spans() |> List.to_tuple()}
   end
 
+  @spec compose_semantic_layer(t(), {non_neg_integer(), tuple(), tuple()} | {tuple(), tuple()}) ::
+          t()
+  def compose_semantic_layer(%__MODULE__{} = hl, {_version, names, spans}),
+    do: compose_semantic_layer(hl, {names, spans})
+
+  def compose_semantic_layer(%__MODULE__{} = hl, {names, spans})
+      when is_tuple(names) and is_tuple(spans) do
+    {capture_names, name_to_id} =
+      merge_capture_names(Tuple.to_list(hl.capture_names), Tuple.to_list(names))
+
+    semantic_spans =
+      Enum.map(Tuple.to_list(spans), fn %Span{capture_id: id} = span ->
+        %{span | capture_id: Map.fetch!(name_to_id, elem(names, id))}
+      end)
+
+    %{
+      hl
+      | capture_names: List.to_tuple(capture_names),
+        spans:
+          List.to_tuple(Enum.sort_by(Tuple.to_list(hl.spans) ++ semantic_spans, & &1.start_byte))
+    }
+  end
+
+  defp merge_capture_names(parser_names, semantic_names) do
+    name_to_id = parser_names |> Enum.with_index() |> Map.new()
+
+    {names, ids, _next_id} =
+      Enum.reduce(
+        semantic_names,
+        {Enum.reverse(parser_names), name_to_id, length(parser_names)},
+        fn name, {names, ids, next_id} ->
+          if Map.has_key?(ids, name) do
+            {names, ids, next_id}
+          else
+            {[name | names], Map.put(ids, name, next_id), next_id + 1}
+          end
+        end
+      )
+
+    {Enum.reverse(names), ids}
+  end
+
   @doc """
   Computes the byte offset for a given line index within a list of lines.
 

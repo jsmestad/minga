@@ -1,205 +1,133 @@
 defmodule MingaEditor.SemanticTokenSync do
-  @moduledoc """
-  Synchronizes LSP semantic tokens with the highlight pipeline.
-
-  Requests semantic tokens from the LSP server for the active buffer,
-  decodes the response, and merges the resulting spans into the
-  Highlight struct so they participate in the innermost-wins sweep
-  at layer 2 (above tree-sitter).
-
-  ## Lifecycle
-
-  1. When a buffer opens or changes, `request_tokens/1` sends
-     `textDocument/semanticTokens/full` to the LSP server.
-  2. The response arrives as `{:lsp_response, ref, result}`.
-  3. `handle_response/2` decodes the delta-encoded tokens and merges
-     them into the buffer's Highlight state.
-  4. The next render frame picks up the updated spans.
-
-  ## Integration with highlight sweep
-
-  Semantic token spans are stored alongside tree-sitter spans in the
-  Highlight struct. The sweep's `(layer DESC, width ASC, pattern_index DESC)`
-  priority ensures semantic tokens (layer 2) override tree-sitter (layer 0)
-  and injections (layer 1) when they overlap.
-  """
+  @moduledoc "Requests LSP semantic tokens, validates response identity, and stores accepted semantic layers."
 
   alias Minga.Buffer
-  alias Minga.Language.Highlight.Span
+  alias Minga.LSP.Client
+  alias Minga.LSP.SemanticTokens
+  alias Minga.LSP.SyncServer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
-  alias Minga.LSP.Client
-  alias Minga.LSP.SyncServer
-  alias Minga.LSP.SemanticTokens
-  alias MingaEditor.UI.Highlight
 
-  @doc """
-  Requests semantic tokens for the active buffer from the LSP server.
-
-  Returns the updated state with the request tracked in `state.lsp`.
-  Does nothing if no LSP client is available or the server doesn't
-  support semantic tokens.
-  """
+  @doc "Requests semantic tokens for the active buffer from the LSP server."
   @spec request_tokens(EditorState.t()) :: EditorState.t()
   def request_tokens(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
-  def request_tokens(%EditorState{} = state) do
-    buf_pid = state.workspace.buffers.active
-    file_path = Buffer.file_path(buf_pid)
+  def request_tokens(%EditorState{workspace: %{buffers: %{active: buffer}}} = state),
+    do: request_tokens_for_buffer(state, buffer)
 
-    with true <- is_binary(file_path),
-         client when is_pid(client) <- find_lsp_client(state, buf_pid),
-         {_types, _mods} <- safe_legend(client) do
-      uri = "file://#{file_path}"
-      ref = Client.request_semantic_tokens(client, uri)
-      %{state | lsp: LSPState.track_semantic_tokens_request(state.lsp, ref, buf_pid)}
+  @doc "Requests semantic tokens for a buffer and captures request-time identity."
+  @spec request_tokens_for_buffer(EditorState.t(), pid()) :: EditorState.t()
+  def request_tokens_for_buffer(%EditorState{} = state, buffer) when is_pid(buffer) do
+    state = %{state | lsp: LSPState.clear_semantic_tokens(state.lsp, buffer)}
+
+    with {:ok, path, version} <- buffer_request_identity(buffer),
+         client when is_pid(client) <- current_client(buffer),
+         {_types, _mods} = legend <- safe_legend(client),
+         encoding when encoding in [:utf8, :utf16, :utf32] <- safe_encoding(client) do
+      ref = Client.request_semantic_tokens(client, SyncServer.path_to_uri(path))
+
+      %{
+        state
+        | lsp:
+            LSPState.track_semantic_tokens_request(
+              state.lsp,
+              ref,
+              client,
+              buffer,
+              version,
+              encoding,
+              legend
+            )
+      }
     else
       _ -> state
     end
   end
 
-  @doc """
-  Handles a semantic token response from the LSP server.
+  @doc "Handles a semantic token response using captured request identity."
+  @spec handle_response(
+          EditorState.t(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          Minga.LSP.PositionEncoding.encoding(),
+          {[String.t()], [String.t()]},
+          {:ok, map()} | {:error, term()} | term()
+        ) :: EditorState.t()
+  def handle_response(state, _client, _buffer, _version, _encoding, _legend, {:error, _}),
+    do: state
 
-  Decodes the delta-encoded token data and merges the resulting spans
-  into the buffer's Highlight state. The capture names for semantic
-  token types are dynamically added to the Highlight struct.
-  """
-  @spec handle_response(EditorState.t(), pid(), {:ok, map()} | {:error, term()}) ::
-          EditorState.t()
-  def handle_response(state, _buf_pid, {:error, _error}), do: state
-  def handle_response(state, _buf_pid, {:ok, nil}), do: state
+  def handle_response(state, _client, _buffer, _version, _encoding, _legend, {:ok, nil}),
+    do: state
 
-  def handle_response(state, buf_pid, {:ok, %{"data" => data}}) when is_list(data) do
-    client = find_lsp_client(state, buf_pid)
+  def handle_response(
+        state,
+        client,
+        buffer,
+        version,
+        encoding,
+        {types, mods},
+        {:ok, %{"data" => data}}
+      )
+      when is_list(data) do
+    if valid_data?(data) and current_client(buffer) == client do
+      accept_tokens(state, buffer, version, encoding, SemanticTokens.decode(data, types, mods))
+    else
+      state
+    end
+  end
 
-    case safe_legend(client) do
-      {token_types, token_modifiers} ->
-        tokens = SemanticTokens.decode(data, token_types, token_modifiers)
-        merge_tokens(state, buf_pid, tokens)
+  def handle_response(state, _client, _buffer, _version, _encoding, _legend, _other), do: state
+
+  defp accept_tokens(state, buffer, version, encoding, tokens) do
+    case safe_content_with_version(buffer) do
+      {:ok, content, ^version} ->
+        {names, name_to_id} = semantic_names(tokens)
+        lines = String.split(content, "\n", trim: false)
+        line_tuple = List.to_tuple(lines)
+
+        spans =
+          SemanticTokens.to_spans(
+            tokens,
+            build_line_offsets(lines),
+            &Map.fetch!(name_to_id, &1),
+            &line_text(line_tuple, &1),
+            encoding
+          )
+
+        %{state | lsp: LSPState.accept_semantic_tokens(state.lsp, buffer, version, names, spans)}
 
       _ ->
         state
     end
   end
 
-  def handle_response(state, _buf_pid, _other), do: state
-
-  # ── Private ──────────────────────────────────────────────────────────
-
-  @spec merge_tokens(EditorState.t(), pid(), [SemanticTokens.token()]) :: EditorState.t()
-  defp merge_tokens(state, buf_pid, tokens) do
-    hl = Map.get(state.parser.highlighting.highlights, buf_pid)
-
-    if hl == nil do
-      state
-    else
-      # Build capture name → ID mapping, adding new names as needed
-      {hl, name_to_id} = ensure_capture_names(hl, tokens)
-
-      # Build line byte offset map from buffer content
-      content = Buffer.content(buf_pid)
-      line_byte_offsets = build_line_offsets(content)
-
-      # Get line text lookup
-      lines = String.split(content, "\n", trim: false)
-      line_text_fn = fn line_num -> Enum.at(lines, line_num, "") end
-
-      # Get encoding from LSP client
-      encoding = get_encoding(state, buf_pid)
-
-      # Convert tokens to spans
-      spans =
-        SemanticTokens.to_spans(
-          tokens,
-          line_byte_offsets,
-          fn name -> Map.get(name_to_id, name, 0) end,
-          line_text_fn,
-          encoding
-        )
-
-      # Merge semantic spans with existing tree-sitter spans
-      ts_spans =
-        hl.spans
-        |> Tuple.to_list()
-        |> Enum.reject(fn %Span{} = span -> span.layer == 2 end)
-
-      hl = Highlight.put_spans(hl, hl.version, ts_spans ++ spans)
-
-      highlights = Map.put(state.parser.highlighting.highlights, buf_pid, hl)
-
-      %{
-        state
-        | parser:
-            MingaEditor.State.Parser.accept_highlighting(
-              state.parser,
-              MingaEditor.State.Highlighting.set_highlights(
-                state.parser.highlighting,
-                highlights
-              )
-            )
-      }
-    end
-  end
-
-  @spec ensure_capture_names(Highlight.t(), [SemanticTokens.token()]) ::
-          {Highlight.t(), %{String.t() => non_neg_integer()}}
-  defp ensure_capture_names(hl, tokens) do
-    # Collect all composite capture names needed by tokens
-    needed_names =
+  defp semantic_names(tokens) do
+    names =
       tokens
-      |> Enum.map(fn token ->
-        SemanticTokens.composite_capture_name(token.type, token.modifiers)
-      end)
+      |> Enum.map(&SemanticTokens.composite_capture_name(&1.type, &1.modifiers))
       |> Enum.uniq()
 
-    existing_list = Tuple.to_list(hl.capture_names)
-    existing_map = existing_list |> Enum.with_index() |> Map.new()
-
-    # Add any missing names
-    {new_list, name_map} =
-      Enum.reduce(needed_names, {existing_list, existing_map}, fn name, {names, map} ->
-        if Map.has_key?(map, name) do
-          {names, map}
-        else
-          idx = Enum.count(names)
-          {Enum.concat(names, [name]), Map.put(map, name, idx)}
-        end
-      end)
-
-    hl = Highlight.put_names(hl, new_list)
-    {hl, name_map}
+    {names, names |> Enum.with_index() |> Map.new()}
   end
 
-  @spec build_line_offsets(String.t()) :: %{non_neg_integer() => non_neg_integer()}
-  defp build_line_offsets(content) do
-    content
-    |> String.split("\n", trim: false)
-    |> Enum.reduce({%{}, 0, 0}, fn line, {map, line_num, byte_offset} ->
-      map = Map.put(map, line_num, byte_offset)
-      {map, line_num + 1, byte_offset + byte_size(line) + 1}
-    end)
-    |> elem(0)
+  defp buffer_request_identity(buffer) do
+    with path when is_binary(path) <- Buffer.file_path(buffer),
+         version when is_integer(version) and version >= 0 <- Buffer.version(buffer) do
+      {:ok, path, version}
+    else
+      _ -> :error
+    end
+  catch
+    :exit, _ -> :error
   end
 
-  @spec find_lsp_client(EditorState.t(), pid()) :: pid() | nil
-  defp find_lsp_client(_state, buf_pid) do
-    case SyncServer.clients_for_buffer(buf_pid) do
+  defp current_client(buffer) do
+    case SyncServer.clients_for_buffer(buffer) do
       [client | _] when is_pid(client) -> client
       _ -> nil
     end
   end
-
-  @spec get_encoding(EditorState.t(), pid()) :: Minga.LSP.PositionEncoding.encoding()
-  defp get_encoding(state, buf_pid) do
-    case find_lsp_client(state, buf_pid) do
-      nil -> :utf16
-      client -> safe_encoding(client)
-    end
-  end
-
-  @spec safe_legend(pid() | nil) :: {[String.t()], [String.t()]} | nil
-  defp safe_legend(nil), do: nil
 
   defp safe_legend(client) do
     Client.semantic_token_legend(client)
@@ -207,10 +135,31 @@ defmodule MingaEditor.SemanticTokenSync do
     :exit, _ -> nil
   end
 
-  @spec safe_encoding(pid()) :: Minga.LSP.PositionEncoding.encoding()
   defp safe_encoding(client) do
     Client.encoding(client)
   catch
-    :exit, _ -> :utf16
+    :exit, _ -> nil
+  end
+
+  defp safe_content_with_version(buffer) do
+    with {content, version} when is_binary(content) and is_integer(version) <-
+           Buffer.content_with_version(buffer),
+         do: {:ok, content, version}
+  catch
+    :exit, _ -> :error
+  end
+
+  defp valid_data?(data),
+    do: rem(length(data), 5) == 0 and Enum.all?(data, &(is_integer(&1) and &1 >= 0))
+
+  defp line_text(lines, line) when line < tuple_size(lines), do: elem(lines, line)
+  defp line_text(_lines, _line), do: ""
+
+  defp build_line_offsets(lines) do
+    lines
+    |> Enum.reduce({%{}, 0, 0}, fn line, {map, line_num, byte_offset} ->
+      {Map.put(map, line_num, byte_offset), line_num + 1, byte_offset + byte_size(line) + 1}
+    end)
+    |> elem(0)
   end
 end

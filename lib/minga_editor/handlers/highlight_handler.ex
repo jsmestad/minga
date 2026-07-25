@@ -31,7 +31,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
           | {:render, pos_integer()}
           | {:log_message, String.t()}
           | {:log, atom(), :debug | :info | :warning | :error, String.t()}
-          | {:request_semantic_tokens}
+          | {:request_semantic_tokens, pid()}
           | {:conceal_spans, pid(), [map()]}
           | {:prettify_symbols, pid()}
           | {:evict_parser_trees_timer}
@@ -55,7 +55,11 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   def handle(state, :setup_highlight) do
     new_state = HighlightSync.setup_for_buffer(state)
-    {new_state, [{:request_semantic_tokens}]}
+
+    case new_state.workspace.buffers.active do
+      buffer when is_pid(buffer) -> {new_state, [{:request_semantic_tokens, buffer}]}
+      nil -> {new_state, []}
+    end
   end
 
   # ── correlated buffer events ─────────────────────────────────────────────
@@ -222,8 +226,8 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     state
   end
 
-  defp apply_effect(state, {:request_semantic_tokens}),
-    do: SemanticTokenSync.request_tokens(state)
+  defp apply_effect(state, {:request_semantic_tokens, buffer}),
+    do: SemanticTokenSync.request_tokens_for_buffer(state, buffer)
 
   defp apply_effect(state, {:conceal_spans, pid, spans}) do
     HighlightEvents.handle_conceal_spans(state, pid, spans)
@@ -320,7 +324,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   defp handle_highlight_spans(state, pid, version, spans)
        when pid == state.workspace.buffers.active do
     new_state = HighlightSync.handle_spans(state, version, spans)
-    {new_state, [{:prettify_symbols, pid}, :render]}
+    {new_state, [{:request_semantic_tokens, pid}, {:prettify_symbols, pid}, :render]}
   end
 
   defp handle_highlight_spans(state, pid, version, spans) do
@@ -328,7 +332,11 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     updated = MingaEditor.UI.Highlight.put_spans(existing, version, spans)
     state_with_hl = HighlightSync.put_highlight(state, pid, updated)
 
-    effects = if buffer_visible_in_window?(state_with_hl, pid), do: [:render], else: []
+    effects =
+      if buffer_visible_in_window?(state_with_hl, pid),
+        do: [{:request_semantic_tokens, pid}, :render],
+        else: []
+
     {state_with_hl, effects}
   end
 

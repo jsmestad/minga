@@ -20,6 +20,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.LSP, as: LSPState
 
   @typedoc "Effects that the file event handler may return."
   @type file_effect ::
@@ -186,6 +187,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_buffer_changed(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}
   defp handle_buffer_changed(state, buffer) do
+    state = %{state | lsp: LSPState.clear_semantic_tokens(state.lsp, buffer)}
+
     if FileTreeFreshness.buffer_under_tree?(state, buffer) do
       {state, [{:render, 16}]}
     else

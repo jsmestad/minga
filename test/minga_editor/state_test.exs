@@ -9,6 +9,7 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Tab
@@ -505,7 +506,11 @@ defmodule MingaEditor.StateTest do
             state.remote
             |> Remote.put_buffer("server-a", "/remote/one.ex", buf1)
             |> Remote.put_buffer("server-b", "/remote/one.ex", buf1)
-            |> Remote.put_buffer("server-a", "/remote/two.ex", buf2)
+            |> Remote.put_buffer("server-a", "/remote/two.ex", buf2),
+          lsp:
+            state.lsp
+            |> LSPState.accept_semantic_tokens(buf1, 0, ["@lsp.type.variable"], [])
+            |> LSPState.accept_semantic_tokens(buf2, 0, ["@lsp.type.variable"], [])
       }
 
       removed_inactive = EditorState.remove_buffer(state, buf1)
@@ -513,6 +518,8 @@ defmodule MingaEditor.StateTest do
       assert buf2 in removed_inactive.workspace.buffers.list
       refute Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf1)
       assert Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf2)
+      refute Map.has_key?(removed_inactive.lsp.semantic_tokens, buf1)
+      assert Map.has_key?(removed_inactive.lsp.semantic_tokens, buf2)
       refute Remote.buffer(removed_inactive.remote, "server-a", "/remote/one.ex")
       refute Remote.buffer(removed_inactive.remote, "server-b", "/remote/one.ex")
       assert Remote.buffer(removed_inactive.remote, "server-a", "/remote/two.ex") == buf2
@@ -527,6 +534,7 @@ defmodule MingaEditor.StateTest do
       assert Remote.buffer(removed_active.remote, "server-a", "/remote/one.ex") == buf1
       assert Remote.buffer(removed_active.remote, "server-b", "/remote/one.ex") == buf1
       refute Remote.buffer(removed_active.remote, "server-a", "/remote/two.ex")
+      refute Map.has_key?(removed_active.lsp.semantic_tokens, buf2)
     end
   end
 

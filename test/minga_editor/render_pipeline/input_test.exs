@@ -24,6 +24,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.UI.Panel.MessageStore
+  alias MingaEditor.State.LSP, as: LSPState
 
   setup do
     state = TestHelpers.base_state()
@@ -45,6 +46,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert input.terminal_viewport == state.frontend.terminal_viewport
       assert input.workspace.editing == state.workspace.editing
       assert input.highlighting == state.parser.highlighting
+      assert input.semantic_tokens == state.lsp.semantic_tokens
       assert input.workspace.file_tree == state.workspace.file_tree
       assert input.workspace.agent_ui == state.workspace.agent_ui
       assert input.workspace.document_highlights == state.workspace.document_highlights
@@ -201,6 +203,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       assert intent.revision == 7
       assert intent.frame.highlighting == state.parser.highlighting
+      assert intent.frame.semantic_tokens == state.lsp.semantic_tokens
 
       assert Enum.all?(intent.windows, fn {_id, window} ->
                match?(%MingaEditor.RenderPipeline.WindowIntent{}, window)
@@ -220,8 +223,22 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       %{scheduler: scheduler, worker: worker} = start_git_syncing_activity()
       state = %{state | effect_scheduler: scheduler}
 
+      state =
+        %{
+          state
+          | lsp:
+              LSPState.accept_semantic_tokens(
+                state.lsp,
+                state.workspace.buffers.active,
+                0,
+                ["@lsp.type.variable"],
+                []
+              )
+        }
+
       intent = Intent.from_editor_state(state, 7)
       assert intent.frame.git_syncing
+      assert intent.frame.semantic_tokens == state.lsp.semantic_tokens
       refute Map.has_key?(Map.from_struct(intent.frame), :effect_scheduler)
 
       renderer_state =
@@ -229,6 +246,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       {_renderer_state, materialized} = BufferChanges.prepare(renderer_state, intent)
       assert materialized.git_syncing
+      assert materialized.semantic_tokens == state.lsp.semantic_tokens
       refute Map.has_key?(Map.from_struct(materialized), :effect_scheduler)
       assert Context.from_editor_state(materialized).git_syncing
 
