@@ -1,22 +1,29 @@
 defmodule MingaEditor.Input.InterruptTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias Minga.Mode
+  alias Minga.Project.FileTree
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
+  alias MingaEditor.BottomPanel
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.HoverPopup
   alias MingaEditor.Input
   alias MingaEditor.Input.Interrupt
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Feedback
   alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
   alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ExtensionSurfaces
+  alias MingaEditor.State.Feedback
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
@@ -25,16 +32,18 @@ defmodule MingaEditor.Input.InterruptTest do
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Picker
   alias MingaEditor.State.Prompt, as: PromptState
+  alias MingaEditor.State.Windows
   alias MingaEditor.VimState
+  alias MingaEditor.Window
 
   @ctrl_g 7
   @modal_variants [:picker, :prompt, :completion, :conflict]
 
   defp base_state(opts \\ []) do
     buf_opts = Keyword.get(opts, :buffer_opts, content: "hello\nworld")
-    buf = start_supervised!({BufferProcess, buf_opts})
+    buf = start_supervised!({BufferProcess, buf_opts}, id: {:interrupt_buffer, make_ref()})
 
-    %EditorState{
+    state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         editing: VimState.new(),
@@ -46,6 +55,32 @@ defmodule MingaEditor.Input.InterruptTest do
       },
       interaction: %MingaEditor.State.Interaction{}
     }
+
+    case Keyword.fetch(opts, :sidebar_registry) do
+      {:ok, table} -> %{state | extension_surfaces: %ExtensionSurfaces{sidebar_registry: table}}
+      :error -> state
+    end
+  end
+
+  defp install_shell_state(state, shell_state) do
+    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  end
+
+  defp install_bottom_panel(state, panel) do
+    shell_state = TraditionalState.install_bottom_panel(Runtime.state(state.shell_runtime), panel)
+    install_shell_state(state, shell_state)
+  end
+
+  defp with_active_buffer_window(state) do
+    window = Window.new(1, state.workspace.buffers.active, 24, 80)
+    windows = %Windows{map: %{1 => window}, active: 1, next_id: 2}
+    %{state | workspace: %{state.workspace | windows: windows}}
+  end
+
+  defp with_active_agent_window(state) do
+    window = Window.new_agent_chat(1, 24, 80)
+    windows = %Windows{map: %{1 => window}, active: 1, next_id: 2}
+    %{state | workspace: %{state.workspace | windows: windows}}
   end
 
   @spec open_modal_variant(EditorState.t(), ModalOverlay.variant()) :: EditorState.t()
@@ -168,6 +203,143 @@ defmodule MingaEditor.Input.InterruptTest do
       assert state.workspace.keymap_scope == :editor
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
+    end
+
+    test "derives :editor from an active buffer window despite stale owner scopes" do
+      for stale_scope <- [:file_tree, :git_status, :agent] do
+        state =
+          base_state()
+          |> with_active_buffer_window()
+          |> then(fn state ->
+            %{state | workspace: SessionState.set_keymap_scope(state.workspace, stale_scope)}
+          end)
+
+        assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+        assert new_state.workspace.keymap_scope == :editor
+      end
+    end
+
+    test "derives :agent from an active agent chat window" do
+      state =
+        base_state()
+        |> with_active_agent_window()
+        |> then(fn state ->
+          %{state | workspace: SessionState.set_keymap_scope(state.workspace, :editor)}
+        end)
+
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+      assert new_state.workspace.keymap_scope == :agent
+    end
+  end
+
+  describe "focus owner reset" do
+    test "blurs focused bottom panel without hiding or changing panel settings" do
+      panel = %BottomPanel{visible: true, focused: true, filter: :warnings, height_percent: 45}
+      state = base_state() |> install_bottom_panel(panel)
+
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+      new_panel = Runtime.state(new_state.shell_runtime).bottom_panel
+      assert new_panel.visible == true
+      assert new_panel.filter == :warnings
+      assert new_panel.height_percent == 45
+      refute BottomPanel.focused?(new_panel)
+    end
+
+    test "normalizes hidden bottom panel focus without showing it" do
+      panel = %BottomPanel{visible: false, focused: true}
+      state = base_state() |> install_bottom_panel(panel)
+
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+
+      assert %BottomPanel{visible: false, focused: false} =
+               Runtime.state(new_state.shell_runtime).bottom_panel
+    end
+
+    test "blurs focused agent prompt without clearing draft text" do
+      prompt =
+        start_supervised!({BufferProcess, content: "draft"}, id: {:prompt_buffer, make_ref()})
+
+      agent_ui = UIState.new() |> UIState.attach_prompt_buffer(prompt)
+      agent_ui = %{agent_ui | panel: %{agent_ui.panel | visible: true, input_focused: true}}
+
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(base_state(), agent_ui)
+
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+      assert new_state.workspace.agent_ui.panel.visible == true
+      assert new_state.workspace.agent_ui.panel.input_focused == false
+      assert BufferProcess.content(new_state.workspace.agent_ui.panel.prompt_buffer) == "draft"
+    end
+
+    test "unfocuses file tree and normalizes local interactions" do
+      for interaction <- [
+            :browse,
+            :help,
+            :filtering,
+            {:editing, %{index: 0, text: "x", type: :rename, original_name: "old"}}
+          ] do
+        file_tree =
+          %FileTreeState{}
+          |> FileTreeState.open(FileTree.new(File.cwd!(), width: 24), nil)
+          |> Map.put(:interaction, interaction)
+
+        state = base_state()
+        state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
+
+        assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+        assert FileTreeState.visible?(new_state.workspace.file_tree)
+        refute FileTreeState.focused?(new_state.workspace.file_tree)
+        assert new_state.workspace.file_tree.interaction == :browse
+      end
+    end
+
+    test "does not make hidden file tree visible" do
+      file_tree = %FileTreeState{}
+      state = base_state()
+      state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
+
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+      refute FileTreeState.visible?(new_state.workspace.file_tree)
+    end
+
+    test "clears registered sidebar focus while preserving visibility" do
+      table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+      start_supervised!({Sidebar, name: table})
+
+      assert :ok =
+               Sidebar.register(table, {:extension, :alpha}, %{
+                 id: "outline",
+                 display_name: "Outline",
+                 visible?: true,
+                 focused?: true
+               })
+
+      state =
+        base_state(sidebar_registry: table)
+        |> SidebarWorkflow.select("outline")
+
+      assert SidebarWorkflow.active_id(state) == "outline"
+
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+      assert Sidebar.get(table, "outline").visible?
+      refute Sidebar.get(table, "outline").focused?
+      assert SidebarWorkflow.active_id(new_state) == nil
+    end
+
+    test "cancels pending TUI space leader timer" do
+      timer = Process.send_after(self(), :stale_space_leader, 10_000)
+
+      state = base_state()
+      shell_state = Runtime.state(state.shell_runtime)
+      {generation, shell_state} = TraditionalState.begin_space_leader(shell_state)
+      shell_state = TraditionalState.install_space_leader_timer(shell_state, generation, timer)
+      state = install_shell_state(state, shell_state)
+
+      assert TraditionalState.space_leader_pending?(Runtime.state(state.shell_runtime))
+      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+      shell_state = Runtime.state(new_state.shell_runtime)
+      refute TraditionalState.space_leader_pending?(shell_state)
+      assert TraditionalState.space_leader_timer(shell_state) == nil
+      assert Process.read_timer(timer) == false
     end
   end
 
