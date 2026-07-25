@@ -13,7 +13,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Buffer
-  alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -43,6 +42,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
         []
 
       client ->
+        # credo:disable-for-next-line Minga.Credo.NoBlockingEditorCallCheck
         case Client.request_sync(client, "workspace/symbol", %{"query" => ""}, 5_000) do
           {:ok, symbols} when is_list(symbols) ->
             Enum.map(symbols, &format_symbol/1)
@@ -136,30 +136,15 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
 
   @spec open_or_switch_to_file(EditorState.t(), String.t()) :: EditorState.t()
   defp open_or_switch_to_file(state, file_path) do
-    idx =
-      Enum.find_index(state.workspace.buffers.list, fn buf ->
-        try do
-          Buffer.file_path(buf) == file_path
-        catch
-          :exit, _ -> false
-        end
-      end)
+    case MingaEditor.Handlers.BufferRegistry.open_or_activate_path(state, file_path) do
+      {:ok, new_state, _pid, _status} ->
+        new_state
 
-    case idx do
-      nil ->
-        case Commands.start_buffer(file_path, state.interaction.options_server) do
-          {:ok, pid} ->
-            Commands.add_buffer(state, pid)
-
-          {:error, _} ->
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-              state,
-              "Could not open #{file_path}"
-            )
-        end
-
-      i ->
-        MingaEditor.BufferActivation.activate(state, i)
+      {:error, _} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Could not open #{file_path}"
+        )
     end
   end
 

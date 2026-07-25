@@ -26,6 +26,13 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   @typedoc "Editor state (same as `MingaEditor.state()`)."
   @type state :: EditorState.t()
+  @type open_or_activate_status :: :opened | :activated | :switched_tab
+  @type open_or_activate_option ::
+          {:existing_target, :buffer | :tab}
+          | {:options_server, GenServer.server() | nil}
+          | {:start_opts, keyword()}
+  @type open_or_activate_result ::
+          {:ok, state(), pid(), open_or_activate_status()} | {:error, term()}
 
   # ── Public functions ──────────────────────────────────────────────────
 
@@ -108,6 +115,28 @@ defmodule MingaEditor.Handlers.BufferRegistry do
       nil -> start_and_register_file(state, abs_path)
     end
   end
+
+  @spec open_or_activate_path(state(), String.t(), [open_or_activate_option()]) ::
+          open_or_activate_result()
+  def open_or_activate_path(state, abs_path, opts \\ [])
+
+  def open_or_activate_path(%EditorState{} = state, abs_path, opts)
+      when is_binary(abs_path) and is_list(opts) do
+    with {:ok, opts} <- validate_open_or_activate_options(opts) do
+      state = ShellWorkflow.ensure_available(state)
+      existing_target = Keyword.get(opts, :existing_target, :buffer)
+      options_server = Keyword.get(opts, :options_server, state.interaction.options_server)
+      start_opts = Keyword.get(opts, :start_opts, [])
+
+      case find_buffer_by_path(state, abs_path) do
+        nil -> open_new_path_buffer(state, abs_path, options_server, start_opts)
+        idx -> activate_path_buffer(state, idx, existing_target)
+      end
+    end
+  end
+
+  def open_or_activate_path(%EditorState{}, abs_path, _opts) when is_binary(abs_path),
+    do: {:error, {:invalid_options, :not_a_keyword_list}}
 
   @spec start_and_register_file(state(), String.t()) :: {:ok, state()} | {:error, term()}
   def start_and_register_file(state, abs_path) do
@@ -222,6 +251,82 @@ defmodule MingaEditor.Handlers.BufferRegistry do
         state
     end
   end
+
+  @spec open_new_path_buffer(state(), String.t(), term(), keyword()) :: open_or_activate_result()
+  defp open_new_path_buffer(state, abs_path, options_server, start_opts) do
+    case Commands.start_buffer(abs_path, options_server, start_opts) do
+      {:ok, pid} -> {:ok, add_buffer(state, pid), pid, :opened}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec activate_path_buffer(state(), non_neg_integer(), :buffer | :tab) ::
+          open_or_activate_result()
+  defp activate_path_buffer(state, idx, :tab) do
+    pid = Enum.at(state.workspace.buffers.list, idx)
+    {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
+
+    case tab do
+      %Tab{id: tab_id} -> {:ok, TabWorkflow.switch(state, tab_id), pid, :switched_tab}
+      _ -> activate_path_buffer(state, idx, :buffer)
+    end
+  end
+
+  defp activate_path_buffer(state, idx, :buffer) do
+    pid = Enum.at(state.workspace.buffers.list, idx)
+    {:ok, MingaEditor.BufferActivation.activate(state, idx), pid, :activated}
+  end
+
+  @spec validate_open_or_activate_options(list()) ::
+          {:ok, [open_or_activate_option()]} | {:error, term()}
+  defp validate_open_or_activate_options(opts) do
+    if Keyword.keyword?(opts) do
+      do_validate_open_or_activate_options(opts)
+    else
+      {:error, {:invalid_options, :not_a_keyword_list}}
+    end
+  end
+
+  @spec do_validate_open_or_activate_options(keyword()) ::
+          {:ok, [open_or_activate_option()]} | {:error, term()}
+  defp do_validate_open_or_activate_options(opts) do
+    with :ok <- validate_open_or_activate_keys(opts),
+         :ok <- validate_open_or_activate_values(opts) do
+      {:ok, opts}
+    end
+  end
+
+  @spec validate_open_or_activate_keys(keyword()) :: :ok | {:error, term()}
+  defp validate_open_or_activate_keys(opts) do
+    case Keyword.keys(opts) -- [:existing_target, :options_server, :start_opts] do
+      [] -> :ok
+      [key | _] -> {:error, {:invalid_option, key}}
+    end
+  end
+
+  @spec validate_open_or_activate_values(keyword()) :: :ok | {:error, term()}
+  defp validate_open_or_activate_values(opts) do
+    cond do
+      Keyword.get(opts, :existing_target, :buffer) not in [:buffer, :tab] ->
+        {:error, {:invalid_option, :existing_target}}
+
+      not valid_options_server?(Keyword.get(opts, :options_server, nil)) ->
+        {:error, {:invalid_option, :options_server}}
+
+      not Keyword.keyword?(Keyword.get(opts, :start_opts, [])) ->
+        {:error, {:invalid_option, :start_opts}}
+
+      true ->
+        :ok
+    end
+  end
+
+  @spec valid_options_server?(GenServer.server() | nil | term()) :: boolean()
+  defp valid_options_server?(nil), do: true
+  defp valid_options_server?(server) when is_pid(server) or is_atom(server), do: true
+  defp valid_options_server?({:global, _name}), do: true
+  defp valid_options_server?({:via, module, _name}) when is_atom(module), do: true
+  defp valid_options_server?(_server), do: false
 
   @spec prepare_buffer_metadata(
           state(),

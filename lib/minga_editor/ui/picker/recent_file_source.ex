@@ -63,19 +63,13 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
   defp open_recent_file(root, rel_path, state) do
     abs_path = Path.join(root, rel_path)
 
-    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
-      nil ->
-        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
-          {:ok, pid} ->
-            MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
+    case MingaEditor.Handlers.BufferRegistry.open_or_activate_path(state, abs_path) do
+      {:ok, new_state, _pid, _status} ->
+        new_state
 
-          {:error, reason} ->
-            Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
-            state
-        end
-
-      idx ->
-        MingaEditor.BufferActivation.activate(state, idx)
+      {:error, reason} ->
+        Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
+        state
     end
   end
 
