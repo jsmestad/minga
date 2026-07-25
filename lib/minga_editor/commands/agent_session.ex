@@ -189,6 +189,7 @@ defmodule MingaEditor.Commands.AgentSession do
           |> AgentLifecycle.cache_messages(messages)
           |> EventReplay.replay_active(events)
           |> apply_remote_snapshot(snapshot)
+          |> then(&MingaEditor.WorkspaceWorkflow.persist_changes(state, &1))
 
         NoticeWorkflow.publish(
           state,

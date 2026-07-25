@@ -596,20 +596,30 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          events: events,
          latest_event_id: latest_event_id
        }} ->
+        committable_cursor = if events == [], do: latest_event_id
+
         if active_workspace?(tb, workspace_id) do
-          tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
+          tb = set_workspace_remote_state(tb, workspace, pid, :connected)
 
           state = install_tab_bar(state, tb)
 
-          state
-          |> maybe_rebuild_agent_from_workspace(workspace_id)
-          |> sync_reconnected_buffer(messages)
-          |> EventReplay.replay_active(events)
-          |> apply_reconnected_snapshot(snapshot)
+          state =
+            state
+            |> maybe_rebuild_agent_from_workspace(workspace_id)
+            |> sync_reconnected_buffer(messages)
+            |> EventReplay.replay_active(events)
+            |> apply_reconnected_snapshot(snapshot)
+
+          current_tb = state.shell_runtime.state.tab_bar
+
+          install_tab_bar(
+            state,
+            set_workspace_remote_state(current_tb, workspace, pid, :connected, latest_event_id)
+          )
         else
           tb =
             tb
-            |> set_workspace_remote_state(workspace, pid, :connected, latest_event_id)
+            |> set_workspace_remote_state(workspace, pid, :connected, committable_cursor)
             |> TabBar.set_workspace_pending_catchup_events(workspace_id, events)
 
           install_tab_bar(state, tb)

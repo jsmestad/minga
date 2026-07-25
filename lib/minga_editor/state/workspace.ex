@@ -206,6 +206,22 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Clears queued remote catch-up events after they have been replayed."
   @spec clear_pending_catchup_events(t()) :: t()
+  def clear_pending_catchup_events(%__MODULE__{payload: %Agent{} = payload} = workspace) do
+    case {payload.remote_session,
+          Enum.reduce(payload.pending_catchup_events, nil, fn event, _last -> event end)} do
+      {%RemoteSession{} = remote_session, %{id: event_id}}
+      when is_integer(event_id) and event_id >= 0 ->
+        set_remote_session(
+          workspace,
+          RemoteSession.set_last_seen_event_id(remote_session, event_id)
+        )
+
+      _event ->
+        workspace
+    end
+    |> set_pending_catchup_events([])
+  end
+
   def clear_pending_catchup_events(%__MODULE__{} = workspace) do
     set_pending_catchup_events(workspace, [])
   end
@@ -359,7 +375,7 @@ defmodule MingaEditor.State.Workspace do
   @spec to_persisted_map(t()) :: map()
   def to_persisted_map(%__MODULE__{} = workspace) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "id" => workspace.id,
       "kind" => Atom.to_string(workspace.kind),
       "label" => workspace.label,
@@ -369,7 +385,21 @@ defmodule MingaEditor.State.Workspace do
       "files" => Enum.map(workspace.files, &file_ref_to_map/1),
       "review" => review_to_map(workspace.review)
     }
+    |> maybe_put_remote_session(workspace)
   end
+
+  defp maybe_put_remote_session(
+         map,
+         %__MODULE__{payload: %Agent{remote_session: %RemoteSession{} = remote_session}}
+       ) do
+    Map.put(
+      map,
+      "remote_session",
+      Map.take(remote_session, [:server_name, :session_id, :last_seen_event_id])
+    )
+  end
+
+  defp maybe_put_remote_session(map, %__MODULE__{}), do: map
 
   @doc "Restores a workspace from persisted JSON data, ignoring unknown fields and using defaults for missing fields."
   @spec from_persisted_map(map(), String.t()) :: {:ok, t()} | {:error, term()}
@@ -389,20 +419,22 @@ defmodule MingaEditor.State.Workspace do
         project_root: root
     }
 
-    {:ok, restored_persisted_payload(workspace)}
+    {:ok, restored_persisted_payload(workspace, Map.get(data, "remote_session"))}
   end
 
   def from_persisted_map(_data, _project_root), do: {:error, :invalid_workspace_json}
 
-  @spec restored_persisted_payload(t()) :: t()
-  defp restored_persisted_payload(%__MODULE__{payload: %Agent{} = payload} = workspace) do
+  defp restored_persisted_payload(
+         %__MODULE__{payload: %Agent{} = payload} = workspace,
+         remote_session
+       ) do
     %{
       workspace
       | payload: %{
           payload
           | session: nil,
             agent_status: :stopped,
-            remote_session: nil,
+            remote_session: persisted_remote_session(remote_session),
             agent_ui: UIState.new(),
             project_view: nil,
             pending_catchup_events: []
@@ -410,7 +442,18 @@ defmodule MingaEditor.State.Workspace do
     }
   end
 
-  defp restored_persisted_payload(%__MODULE__{} = workspace), do: workspace
+  defp restored_persisted_payload(%__MODULE__{} = workspace, _remote_session), do: workspace
+
+  defp persisted_remote_session(
+         %{"server_name" => server_name, "session_id" => session_id} = data
+       )
+       when is_binary(server_name) and is_binary(session_id) do
+    event_id = Map.get(data, "last_seen_event_id")
+    event_id = if is_integer(event_id) and event_id >= 0, do: event_id, else: 0
+    RemoteSession.new(server_name, session_id, :disconnected, event_id)
+  end
+
+  defp persisted_remote_session(_remote_session), do: nil
 
   @spec apply_review_transition(WorkspaceReview.t(), atom(), term()) ::
           {:ok, WorkspaceReview.t()} | {:error, term()}

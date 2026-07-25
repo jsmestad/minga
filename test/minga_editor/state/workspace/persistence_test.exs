@@ -3,6 +3,7 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
 
   import ExUnit.CaptureLog
 
+  alias MingaAgent.EventLog.EventRecord
   alias Minga.Project.FileRef
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Entry
@@ -18,6 +19,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+  alias MingaEditor.State.Workspace.RemoteSession
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Workspace.Manual, as: WorkspaceManual
   alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.WorkspaceReview
@@ -83,6 +86,194 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert restored.review.state == :needs_review
     refute restored.review.in_progress?
     assert Enum.any?(restored.review.changed_files, &FileRef.equal?(&1, file_ref))
+  end
+
+  test "round-trips remote session identity and replay cursor without live status", %{
+    tmp_dir: dir
+  } do
+    workspace =
+      4
+      |> Workspace.new_agent("Remote Agent", nil, dir)
+      |> Workspace.put_remote_session("home", "session-1", :connected, 42)
+      |> Workspace.set_agent_status(:thinking)
+      |> Workspace.set_project_view(:live_project_view)
+      |> Workspace.set_pending_catchup_events([:live_event])
+
+    assert :ok = Persistence.write(workspace, dir)
+    json = Persistence.path_for(dir, 4) |> File.read!() |> JSON.decode!()
+
+    assert json["schema_version"] == 2
+
+    assert json["remote_session"] == %{
+             "server_name" => "home",
+             "session_id" => "session-1",
+             "last_seen_event_id" => 42
+           }
+
+    for key <-
+          ~w(payload session agent_status agent_ui project_view pending_catchup_events connection_status) do
+      refute Map.has_key?(json, key)
+      refute Map.has_key?(json["remote_session"], key)
+    end
+
+    assert {:ok, restored} = Persistence.read(Persistence.path_for(dir, 4), dir)
+
+    assert %WorkspaceAgent{
+             session: nil,
+             agent_status: :stopped,
+             project_view: nil,
+             pending_catchup_events: [],
+             remote_session: %RemoteSession{
+               server_name: "home",
+               session_id: "session-1",
+               last_seen_event_id: 42,
+               connection_status: :disconnected
+             },
+             agent_ui: %UIState{}
+           } = restored.payload
+  end
+
+  test "inactive remote catch-up persists only the committed cursor before activation", %{
+    tmp_dir: dir
+  } do
+    initial = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+    {tab_bar, workspace} = TabBar.add_workspace(initial, "Remote Agent")
+
+    committed =
+      workspace
+      |> Workspace.put_remote_session("home", "session-1", :disconnected, 41)
+      |> Workspace.set_pending_catchup_events([])
+
+    assert :ok = Persistence.write(committed, dir)
+
+    catchup = [%{EventRecord.new("session-1", :message_changed, %{}) | id: 42}]
+
+    reconnected =
+      committed
+      |> Workspace.set_session(self())
+      |> Workspace.set_remote_connection_status(:connected)
+      |> Workspace.set_pending_catchup_events(catchup)
+
+    current = TabBar.accept_workspace(tab_bar, reconnected)
+
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(tab_bar, current)
+
+    json = Persistence.path_for(dir, workspace.id) |> File.read!() |> JSON.decode!()
+
+    assert json["remote_session"] == %{
+             "server_name" => "home",
+             "session_id" => "session-1",
+             "last_seen_event_id" => 41
+           }
+
+    refute Map.has_key?(json, "pending_catchup_events")
+    refute Map.has_key?(json["remote_session"], "connection_status")
+
+    assert {:ok, restored} = Persistence.read(Persistence.path_for(dir, workspace.id), dir)
+
+    assert %WorkspaceAgent{
+             pending_catchup_events: [],
+             remote_session: %RemoteSession{
+               connection_status: :disconnected,
+               last_seen_event_id: 41
+             }
+           } = restored.payload
+  end
+
+  test "empty inactive catch-up can commit the delivered cursor immediately", %{tmp_dir: dir} do
+    initial = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+    {tab_bar, workspace} = TabBar.add_workspace(initial, "Remote Agent")
+
+    committed = Workspace.put_remote_session(workspace, "home", "session-1", :disconnected, 41)
+    assert :ok = Persistence.write(committed, dir)
+
+    reconnected =
+      committed
+      |> Workspace.set_session(self())
+      |> Workspace.set_remote_connection_status(:connected)
+      |> Workspace.put_remote_session("home", "session-1", :connected, 42)
+      |> Workspace.set_pending_catchup_events([])
+
+    current = TabBar.accept_workspace(tab_bar, reconnected)
+
+    assert :ok = WorkspaceWorkflow.persist_tab_bar_changes(tab_bar, current)
+
+    assert {:ok, restored} = Persistence.read(Persistence.path_for(dir, workspace.id), dir)
+    assert restored.payload.remote_session.last_seen_event_id == 42
+    assert restored.payload.pending_catchup_events == []
+  end
+
+  test "restores schema v1 workspaces and ignores invalid remote data for manual workspaces", %{
+    tmp_dir: dir
+  } do
+    agent = Workspace.new_agent(5, "Legacy", nil, dir) |> Workspace.to_persisted_map()
+    manual = Workspace.new_manual(dir) |> Workspace.to_persisted_map()
+    File.mkdir_p!(Path.dirname(Persistence.path_for(dir, 5)))
+
+    File.write!(Persistence.path_for(dir, 5), JSON.encode!(Map.put(agent, "schema_version", 1)))
+
+    File.write!(
+      Persistence.path_for(dir, 0),
+      JSON.encode!(Map.put(manual, "remote_session", %{"server_name" => "home"}))
+    )
+
+    assert {:ok, restored_agent} = Persistence.read(Persistence.path_for(dir, 5), dir)
+    assert %WorkspaceAgent{remote_session: nil} = restored_agent.payload
+
+    assert {:ok, restored_manual} = Persistence.read(Persistence.path_for(dir, 0), dir)
+    assert %WorkspaceManual{} = restored_manual.payload
+  end
+
+  test "restores remote session disconnected and coerces invalid cursors to zero", %{tmp_dir: dir} do
+    data =
+      6
+      |> Workspace.new_agent("Remote", nil, dir)
+      |> Workspace.to_persisted_map()
+      |> Map.put("remote_session", %{
+        "server_name" => "home",
+        "session_id" => "session-1",
+        "connection_status" => "connected",
+        "last_seen_event_id" => -1
+      })
+
+    File.mkdir_p!(Path.dirname(Persistence.path_for(dir, 6)))
+    File.write!(Persistence.path_for(dir, 6), JSON.encode!(data))
+
+    assert {:ok, restored} = Persistence.read(Persistence.path_for(dir, 6), dir)
+
+    assert %WorkspaceAgent{
+             remote_session: %RemoteSession{
+               server_name: "home",
+               session_id: "session-1",
+               connection_status: :disconnected,
+               last_seen_event_id: 0
+             }
+           } = restored.payload
+  end
+
+  test "invalid persisted remote session identity restores nil for agent workspaces", %{
+    tmp_dir: dir
+  } do
+    base = 7 |> Workspace.new_agent("Remote", nil, dir) |> Workspace.to_persisted_map()
+    File.mkdir_p!(Path.dirname(Persistence.path_for(dir, 7)))
+
+    invalid_remote_sessions = [
+      {"non-map", "remote-session"},
+      {"missing server_name", %{"session_id" => "session-1"}},
+      {"missing session_id", %{"server_name" => "home"}},
+      {"non-binary server_name", %{"server_name" => 123, "session_id" => "session-1"}},
+      {"non-binary session_id", %{"server_name" => "home", "session_id" => 123}}
+    ]
+
+    for {{description, remote_session}, offset} <- Enum.with_index(invalid_remote_sessions) do
+      id = 7 + offset
+      path = Persistence.path_for(dir, id)
+      data = base |> Map.put("id", id) |> Map.put("remote_session", remote_session)
+      File.write!(path, JSON.encode!(data))
+
+      assert {:ok, restored} = Persistence.read(path, dir), description
+      assert %WorkspaceAgent{remote_session: nil} = restored.payload
+    end
   end
 
   test "reads legacy workspace JSON with active_file and omits it when re-serializing", %{
@@ -214,16 +405,38 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
   end
 
   test "startup tab bar restores persisted workspaces from the project root", %{tmp_dir: dir} do
-    workspace = Workspace.new_agent(3, "Persisted Agent", nil, dir)
+    workspace =
+      3
+      |> Workspace.new_agent("Persisted Agent", nil, dir)
+      |> Workspace.put_remote_session("home", "session-1", :connected, 42)
+
     assert :ok = Persistence.write(workspace, dir)
 
     tab_bar = Startup.initial_tab_bar(nil, :editor, dir)
 
     assert %Workspace{
              label: "Persisted Agent",
-             payload: %WorkspaceAgent{session: nil, agent_status: :stopped}
+             payload: %WorkspaceAgent{
+               session: nil,
+               agent_status: :stopped,
+               remote_session: %RemoteSession{
+                 server_name: "home",
+                 session_id: "session-1",
+                 last_seen_event_id: 42,
+                 connection_status: :disconnected
+               }
+             }
            } =
              TabBar.get_workspace(tab_bar, 3)
+
+    assert %Tab{
+             payload: %TabAgent{
+               session: nil,
+               server_name: "home",
+               remote_session_id: "session-1",
+               connection_status: :disconnected
+             }
+           } = Enum.find(tab_bar.tabs, &(&1.kind == :agent and &1.group_id == 3))
 
     assert TabBar.get_workspace(tab_bar, 0)
     assert tab_bar.next_workspace_id == 4
