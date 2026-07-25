@@ -21,6 +21,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace.Persistence
@@ -428,7 +429,14 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   describe "set_tab_session/3 delegates to shell" do
     test "Traditional: associates session pid with tab" do
-      state = state_with_file_tab()
+      state = %EditorState{
+        shell_runtime:
+          Runtime.new(Runtime.default_entry(), %TraditionalState{
+            tab_bar: TabBar.new(Tab.new_agent(1, "Agent"))
+          }),
+        workspace: %SessionState{}
+      }
+
       session_pid = spawn(fn -> :ok end)
       tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
 
@@ -446,7 +454,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
         end)
 
       updated_tab = MingaEditor.Shell.Runtime.active_tab(new_state.shell_runtime)
-      assert updated_tab.session == session_pid
+      assert %Agent{session: ^session_pid} = updated_tab.payload
     end
 
     test "no tab bar: set_tab_session is no-op" do

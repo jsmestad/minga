@@ -375,7 +375,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
-      assert TabBar.active(new_state.shell_runtime.state.tab_bar).file_ref == new_ref
+      assert TabBar.active(new_state.shell_runtime.state.tab_bar).payload.file_ref == new_ref
 
       assert WorkspaceModel.has_file?(
                TabBar.get_workspace(new_state.shell_runtime.state.tab_bar, 0),
@@ -474,7 +474,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       {new_state, _effects} = FileEventHandler.handle(state, event)
       updated_tb = new_state.shell_runtime.state.tab_bar
 
-      assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
+      assert TabBar.get(updated_tb, inactive_tab.id).payload.file_ref == new_ref
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), new_ref)
       refute WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_ref)
     end

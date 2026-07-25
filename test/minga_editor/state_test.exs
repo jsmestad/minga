@@ -13,6 +13,7 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
@@ -330,7 +331,6 @@ defmodule MingaEditor.StateTest do
 
       agent_tab =
         Tab.new_agent(3, "Agent")
-        |> Tab.set_file_ref(agent_ref)
         |> Tab.set_context(%{
           buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}
         })
@@ -375,9 +375,9 @@ defmodule MingaEditor.StateTest do
 
       updated_tb = updated_state.shell_runtime.state.tab_bar
 
-      assert TabBar.get(updated_tb, matching_tab.id).file_ref == target_ref
-      assert TabBar.get(updated_tb, list_only_tab.id).file_ref == old_list_ref
-      assert TabBar.get(updated_tb, agent_tab.id).file_ref == agent_ref
+      assert TabBar.get(updated_tb, matching_tab.id).payload.file_ref == target_ref
+      assert TabBar.get(updated_tb, list_only_tab.id).payload.file_ref == old_list_ref
+      assert %Agent{} = TabBar.get(updated_tb, agent_tab.id).payload
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), target_ref)
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_list_ref)
 
@@ -461,8 +461,8 @@ defmodule MingaEditor.StateTest do
       updated_state = MingaEditor.BufferFileIdentity.rebind(state, target_buffer, path)
       updated_tb = updated_state.shell_runtime.state.tab_bar
 
-      assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
-      assert TabBar.get(updated_tb, active_tab.id).file_ref == active_ref
+      assert TabBar.get(updated_tb, inactive_tab.id).payload.file_ref == new_ref
+      assert TabBar.get(updated_tb, active_tab.id).payload.file_ref == active_ref
       assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), new_ref)
       refute WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_ref)
     end

@@ -30,6 +30,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.State.Frontend
   alias MingaEditor.State.Interaction
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -992,7 +993,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
       assert manual_workspace.payload == source_workspace.payload
-      assert TabBar.active(tab_bar).session == session
+      assert %TabAgent{session: ^session} = TabBar.active(tab_bar).payload
     end
 
     test "switching back to the source file tab restores file content" do
@@ -1054,13 +1055,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "creating from an existing agent workspace preserves the source tab context" do
       state = active_agent_workspace_state()
       old_tab = TabBar.active(state.shell_runtime.state.tab_bar)
-      old_session = old_tab.session
+      old_session = old_tab.payload.session
 
       new_state = AgentCommands.new_agent_session(state)
       tab_bar = new_state.shell_runtime.state.tab_bar
       updated_old_tab = TabBar.get(tab_bar, old_tab.id)
       old_context = TabContext.to_workspace_map(updated_old_tab.context)
-      new_session = TabBar.active(tab_bar).session
+      new_session = TabBar.active(tab_bar).payload.session
 
       assert old_context.buffers.active == nil
       assert old_session != nil
@@ -1092,7 +1093,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
-  test "detach remote session command disconnects workspace payload and flat agent tab" do
+  test "detach remote session command disconnects workspace payload and agent tab payload" do
     test_pid = self()
 
     Process.put(:minga_editor_remote_detach, fn remote_node, session_id ->
@@ -1133,7 +1134,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     tab_bar = result.shell_runtime.state.tab_bar
     workspace = TabBar.get_workspace(tab_bar, workspace_id)
     assert workspace.payload.remote_session.connection_status == :disconnected
-    assert TabBar.get(tab_bar, 1).connection_status == :disconnected
+    assert TabBar.get(tab_bar, 1).payload.connection_status == :disconnected
   end
 
   # ── cycle_agent_tabs ─────────────────────────────────────────────────────

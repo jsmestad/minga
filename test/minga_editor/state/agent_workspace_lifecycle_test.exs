@@ -17,6 +17,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -265,7 +266,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace.files == [file_ref]
     assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
-    assert TabBar.active(tab_bar).session == new_session
+    assert TabBar.active(tab_bar).payload.session == new_session
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
   end
 
@@ -298,8 +299,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace.files == [file_ref]
     assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
-    assert agent_tab.session == new_session
-    refute Enum.any?(tab_bar.tabs, &(&1.session == old_session))
+    assert agent_tab.payload.session == new_session
+    refute Enum.any?(tab_bar.tabs, &match?(%Tab{payload: %TabAgent{session: ^old_session}}, &1))
     refute Enum.any?(tab_bar.workspaces, &(workspace_session(&1) == old_session))
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
   end
@@ -382,12 +383,12 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert TabBar.get_workspace(tab_bar, workspace_id) == nil
     assert agent_tab.group_id == 0
-    assert agent_tab.session == nil
-    assert agent_tab.server_name == nil
-    assert agent_tab.remote_session_id == nil
-    assert agent_tab.connection_status == nil
-    assert agent_tab.agent_status == nil
-    refute agent_tab.attention
+    assert agent_tab.payload.session == nil
+    assert agent_tab.payload.server_name == nil
+    assert agent_tab.payload.remote_session_id == nil
+    assert agent_tab.payload.connection_status == nil
+    assert agent_tab.payload.agent_status == nil
+    refute agent_tab.payload.attention
   end
 
   test "closing the agent tab preserves workspace files draft and remote metadata" do

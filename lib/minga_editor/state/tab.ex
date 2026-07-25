@@ -14,7 +14,8 @@ defmodule MingaEditor.State.Tab do
 
   alias Minga.Project.FileRef
   alias MingaEditor.FeatureState
-  alias MingaEditor.State.Tab.Context
+  alias MingaEditor.State.Tab.{Agent, Context, File}
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaAgent.Subagent.Handle
 
@@ -34,59 +35,41 @@ defmodule MingaEditor.State.Tab do
   @typedoc "Legacy context map accepted at migration boundaries."
   @type legacy_context :: Context.legacy()
 
-  @typedoc "Agent tab status (nil for file tabs)."
-  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
+  @typedoc "Agent tab status."
+  @type agent_status :: Workspace.agent_status()
 
   @typedoc "Remote connection status for a tab backed by a remote session."
-  @type connection_status :: :connected | :disconnected | :ended | :unavailable | nil
+  @type connection_status :: RemoteSession.connection_status() | nil
 
   @typedoc "Workspace id. 0 = manual workspace."
   @type group_id :: non_neg_integer()
 
-  @typedoc "A tab."
-  @type t :: %__MODULE__{
-          id: id(),
-          kind: kind(),
-          label: String.t(),
-          context: context(),
-          session: pid() | nil,
-          agent_status: agent_status(),
-          server_name: String.t() | nil,
-          remote_session_id: String.t() | nil,
-          connection_status: connection_status(),
-          attention: boolean(),
-          group_id: group_id(),
-          file_ref: FileRef.t() | nil,
-          background_subagent: MingaAgent.Subagent.Handle.t() | nil,
-          pinned?: boolean()
-        }
+  @type file :: %__MODULE__{kind: :file, payload: File.t()}
 
-  @enforce_keys [:id, :kind]
+  @type agent :: %__MODULE__{kind: :agent, payload: Agent.t()}
+
+  @typedoc "A tab."
+  @type t :: file() | agent()
+
+  @enforce_keys [:id, :kind, :payload]
   defstruct id: nil,
             kind: nil,
             label: "",
             context: Context.empty(),
-            session: nil,
-            agent_status: nil,
-            server_name: nil,
-            remote_session_id: nil,
-            connection_status: nil,
-            attention: false,
             group_id: 0,
-            file_ref: nil,
-            background_subagent: nil,
-            pinned?: false
+            pinned?: false,
+            payload: nil
 
   @doc "Creates a new file tab."
-  @spec new_file(id(), String.t()) :: t()
+  @spec new_file(id(), String.t()) :: file()
   def new_file(id, label \\ "") when is_integer(id) and id > 0 do
-    %__MODULE__{id: id, kind: :file, label: label}
+    %__MODULE__{id: id, kind: :file, label: label, payload: %File{}}
   end
 
   @doc "Creates a new agent tab."
-  @spec new_agent(id(), String.t()) :: t()
+  @spec new_agent(id(), String.t()) :: agent()
   def new_agent(id, label \\ "Agent") when is_integer(id) and id > 0 do
-    %__MODULE__{id: id, kind: :agent, label: label}
+    %__MODULE__{id: id, kind: :agent, label: label, payload: %Agent{}}
   end
 
   @doc "Updates the tab's label."
@@ -119,46 +102,56 @@ defmodule MingaEditor.State.Tab do
 
   @doc "Returns true if this is a file tab."
   @spec file?(t()) :: boolean()
-  def file?(%__MODULE__{kind: :file}), do: true
+  def file?(%__MODULE__{kind: :file, payload: %File{}}), do: true
   def file?(%__MODULE__{}), do: false
 
   @doc "Returns true if this is an agent tab."
   @spec agent?(t()) :: boolean()
-  def agent?(%__MODULE__{kind: :agent}), do: true
+  def agent?(%__MODULE__{kind: :agent, payload: %Agent{}}), do: true
   def agent?(%__MODULE__{}), do: false
 
   @doc "Sets the session pid for an agent tab."
-  @spec set_session(t(), pid() | nil) :: t()
-  def set_session(%__MODULE__{} = tab, pid) do
-    %{tab | session: pid}
+  @spec set_session(agent(), pid() | nil) :: agent()
+  def set_session(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, pid) do
+    %{tab | payload: %Agent{payload | session: pid}}
   end
+
+  def set_session(%__MODULE__{payload: %File{}} = tab, _pid), do: tab
 
   @doc "Refreshes any session pid references after a managed restart."
   @spec refresh_session_pid(t(), pid(), pid()) :: t()
-  def refresh_session_pid(%__MODULE__{} = tab, old_pid, new_pid)
+  def refresh_session_pid(%__MODULE__{kind: :agent, payload: %Agent{}} = tab, old_pid, new_pid)
       when is_pid(old_pid) and is_pid(new_pid) do
     tab
     |> refresh_tab_session(old_pid, new_pid)
     |> refresh_background_subagent(old_pid, new_pid)
   end
 
+  def refresh_session_pid(%__MODULE__{payload: %File{}} = tab, old_pid, new_pid)
+      when is_pid(old_pid) and is_pid(new_pid),
+      do: tab
+
   @spec refresh_tab_session(t(), pid(), pid()) :: t()
-  defp refresh_tab_session(%__MODULE__{session: session} = tab, old_pid, new_pid)
+  defp refresh_tab_session(
+         %__MODULE__{payload: %Agent{session: session} = payload} = tab,
+         old_pid,
+         new_pid
+       )
        when session == old_pid do
-    %{tab | session: new_pid}
+    %{tab | payload: %Agent{payload | session: new_pid}}
   end
 
   defp refresh_tab_session(%__MODULE__{} = tab, _old_pid, _new_pid), do: tab
 
   @spec refresh_background_subagent(t(), pid(), pid()) :: t()
   defp refresh_background_subagent(
-         %__MODULE__{background_subagent: %Handle{} = handle} = tab,
+         %__MODULE__{payload: %Agent{background_subagent: %Handle{} = handle} = payload} = tab,
          old_pid,
          new_pid
        ) do
     handle = refresh_background_subagent_pid(handle, old_pid, new_pid)
     handle = refresh_background_subagent_parent_pid(handle, old_pid, new_pid)
-    %{tab | background_subagent: handle}
+    %{tab | payload: %Agent{payload | background_subagent: handle}}
   end
 
   defp refresh_background_subagent(%__MODULE__{} = tab, _old_pid, _new_pid), do: tab
@@ -185,38 +178,60 @@ defmodule MingaEditor.State.Tab do
 
   @doc "Marks the tab as backed by a remote agent session."
   @spec set_remote_session(t(), String.t(), String.t(), pid()) :: t()
-  def set_remote_session(%__MODULE__{} = tab, server_name, session_id, pid)
+  def set_remote_session(
+        %__MODULE__{kind: :agent, payload: %Agent{}} = tab,
+        server_name,
+        session_id,
+        pid
+      )
       when is_binary(server_name) and is_binary(session_id) and is_pid(pid) do
     tab
     |> set_remote_projection(RemoteSession.new(server_name, session_id, :connected))
     |> set_session(pid)
   end
 
+  def set_remote_session(%__MODULE__{payload: %File{}} = tab, server_name, session_id, pid)
+      when is_binary(server_name) and is_binary(session_id) and is_pid(pid),
+      do: tab
+
   @doc "Projects workspace-owned remote metadata onto this tab for display."
   @spec set_remote_projection(t(), RemoteSession.t()) :: t()
-  def set_remote_projection(%__MODULE__{} = tab, %RemoteSession{} = remote_session) do
+  def set_remote_projection(
+        %__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab,
+        %RemoteSession{} = remote_session
+      ) do
     %{
       tab
-      | server_name: remote_session.server_name,
-        remote_session_id: remote_session.session_id,
-        connection_status: remote_session.connection_status
+      | payload: %Agent{
+          payload
+          | server_name: remote_session.server_name,
+            remote_session_id: remote_session.session_id,
+            connection_status: remote_session.connection_status
+        }
     }
   end
+
+  def set_remote_projection(%__MODULE__{payload: %File{}} = tab, %RemoteSession{}), do: tab
 
   @doc "Clears projected remote metadata from this tab."
   @spec clear_remote_projection(t()) :: t()
-  def clear_remote_projection(%__MODULE__{} = tab) do
+  def clear_remote_projection(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab) do
     %{
       tab
-      | server_name: nil,
-        remote_session_id: nil,
-        connection_status: nil
+      | payload: %Agent{
+          payload
+          | server_name: nil,
+            remote_session_id: nil,
+            connection_status: nil
+        }
     }
   end
 
+  def clear_remote_projection(%__MODULE__{payload: %File{}} = tab), do: tab
+
   @doc "Clears agent lifecycle projection data from this tab."
   @spec clear_agent_projection(t()) :: t()
-  def clear_agent_projection(%__MODULE__{} = tab) do
+  def clear_agent_projection(%__MODULE__{kind: :agent, payload: %Agent{}} = tab) do
     tab
     |> set_session(nil)
     |> clear_remote_projection()
@@ -224,26 +239,35 @@ defmodule MingaEditor.State.Tab do
     |> set_attention(false)
   end
 
+  def clear_agent_projection(%__MODULE__{payload: %File{}} = tab), do: tab
+
   @doc "Updates remote connection status for the tab."
   @spec set_connection_status(t(), connection_status()) :: t()
-  def set_connection_status(%__MODULE__{} = tab, status)
+  def set_connection_status(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, status)
       when status in [:connected, :disconnected, :ended, :unavailable, nil] do
-    %{tab | connection_status: status}
+    %{tab | payload: %Agent{payload | connection_status: status}}
   end
+
+  def set_connection_status(%__MODULE__{payload: %File{}} = tab, status)
+      when status in [:connected, :disconnected, :ended, :unavailable, nil],
+      do: tab
 
   @doc "Returns true when this tab is backed by a remote session."
   @spec remote?(t()) :: boolean()
-  def remote?(%__MODULE__{server_name: server_name}) when is_binary(server_name), do: true
+  def remote?(%__MODULE__{kind: :agent, payload: %Agent{server_name: server_name}})
+      when is_binary(server_name),
+      do: true
+
   def remote?(%__MODULE__{}), do: false
 
   @doc "Returns the display label including any remote server prefix."
   @spec display_label(t()) :: String.t()
-  def display_label(%__MODULE__{label: "", server_name: nil}), do: "[No Name]"
+  def display_label(%__MODULE__{label: "", payload: %Agent{server_name: nil}}), do: "[No Name]"
+  def display_label(%__MODULE__{label: "", payload: %File{}}), do: "[No Name]"
 
   def display_label(%__MODULE__{
         label: label,
-        server_name: server_name,
-        connection_status: status
+        payload: %Agent{server_name: server_name, connection_status: status}
       })
       when is_binary(server_name) do
     "[#{server_name}] #{base_label(label)}#{status_suffix(status)}"
@@ -263,15 +287,20 @@ defmodule MingaEditor.State.Tab do
 
   @doc "Sets the agent status on a tab (for tab bar rendering)."
   @spec set_agent_status(t(), agent_status()) :: t()
-  def set_agent_status(%__MODULE__{} = tab, status) do
-    %{tab | agent_status: status}
+  def set_agent_status(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, status) do
+    %{tab | payload: %Agent{payload | agent_status: status}}
   end
+
+  def set_agent_status(%__MODULE__{payload: %File{}} = tab, _status), do: tab
 
   @doc "Sets the attention flag (agent needs user input)."
   @spec set_attention(t(), boolean()) :: t()
-  def set_attention(%__MODULE__{} = tab, value) when is_boolean(value) do
-    %{tab | attention: value}
+  def set_attention(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, value)
+      when is_boolean(value) do
+    %{tab | payload: %Agent{payload | attention: value}}
   end
+
+  def set_attention(%__MODULE__{payload: %File{}} = tab, value) when is_boolean(value), do: tab
 
   @doc "Sets whether this tab is pinned in the tab strip."
   @spec set_pinned(t(), boolean()) :: t()
@@ -293,32 +322,60 @@ defmodule MingaEditor.State.Tab do
 
   @doc "Sets the logical file identity for a file tab."
   @spec set_file_ref(t(), FileRef.t() | nil) :: t()
-  def set_file_ref(%__MODULE__{} = tab, %FileRef{} = file_ref), do: %{tab | file_ref: file_ref}
-  def set_file_ref(%__MODULE__{} = tab, nil), do: %{tab | file_ref: nil}
+  def set_file_ref(
+        %__MODULE__{kind: :file, payload: %File{} = payload} = tab,
+        %FileRef{} = file_ref
+      ),
+      do: %{tab | payload: %File{payload | file_ref: file_ref}}
+
+  def set_file_ref(%__MODULE__{kind: :file, payload: %File{} = payload} = tab, nil),
+    do: %{tab | payload: %File{payload | file_ref: nil}}
+
+  def set_file_ref(%__MODULE__{payload: %Agent{}} = tab, value)
+      when is_nil(value) or is_struct(value, FileRef),
+      do: tab
 
   @doc "Marks this tab as the UI projection of a background sub-agent."
-  @spec mark_background_subagent(t(), MingaAgent.Subagent.Handle.t()) :: t()
-  def mark_background_subagent(%__MODULE__{} = tab, %MingaAgent.Subagent.Handle{} = handle) do
-    %{tab | background_subagent: handle}
+  @spec mark_background_subagent(t(), Handle.t()) :: t()
+  def mark_background_subagent(
+        %__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab,
+        %Handle{} = handle
+      ) do
+    %{tab | payload: %Agent{payload | background_subagent: handle}}
   end
+
+  def mark_background_subagent(%__MODULE__{payload: %File{}} = tab, %Handle{}), do: tab
 
   @doc "Returns true when this tab projects a background sub-agent."
   @spec background_subagent?(t()) :: boolean()
-  def background_subagent?(%__MODULE__{background_subagent: %MingaAgent.Subagent.Handle{}}),
-    do: true
+  def background_subagent?(%__MODULE__{
+        kind: :agent,
+        payload: %Agent{background_subagent: %Handle{}}
+      }),
+      do: true
 
   def background_subagent?(%__MODULE__{}), do: false
 
   @doc "Removes a dead buffer pid from this tab's context and logical file projection."
   @spec scrub_buffer(t(), pid()) :: t()
   def scrub_buffer(%__MODULE__{context: context} = tab, pid) do
-    file_ref = retire_buffer_file_ref(tab.file_ref, pid)
-    %{tab | context: Context.scrub_buffer(context, pid), file_ref: file_ref}
+    tab
+    |> scrub_buffer_file_ref(pid)
+    |> set_context(Context.scrub_buffer(context, pid))
   end
 
-  @spec retire_buffer_file_ref(FileRef.t() | nil, pid()) :: FileRef.t() | nil
-  defp retire_buffer_file_ref(%FileRef{kind: :buffer, buffer_pid: pid}, pid), do: nil
-  defp retire_buffer_file_ref(file_ref, _pid), do: file_ref
+  @spec scrub_buffer_file_ref(t(), pid()) :: t()
+  defp scrub_buffer_file_ref(
+         %__MODULE__{
+           kind: :file,
+           payload: %File{file_ref: %FileRef{kind: :buffer, buffer_pid: pid}} = payload
+         } = tab,
+         pid
+       ) do
+    %{tab | payload: %File{payload | file_ref: nil}}
+  end
+
+  defp scrub_buffer_file_ref(%__MODULE__{} = tab, _pid), do: tab
 
   @spec update_context_feature_state(t(), (FeatureState.t() -> FeatureState.t())) :: t()
   defp update_context_feature_state(%__MODULE__{context: %Context{} = context} = tab, fun) do

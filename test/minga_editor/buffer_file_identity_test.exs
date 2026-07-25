@@ -54,14 +54,14 @@ defmodule MingaEditor.BufferFileIdentityTest do
     rebound_tab_bar = rebound.shell_runtime.state.tab_bar
     {:ok, expected} = FileRef.from_path(root, path)
 
-    assert Enum.all?(rebound_tab_bar.tabs, &FileRef.equal?(&1.file_ref, expected))
+    assert Enum.all?(rebound_tab_bar.tabs, &FileRef.equal?(&1.payload.file_ref, expected))
 
     assert Enum.any?(
              TabBar.get_workspace(rebound_tab_bar, 0).files,
              &FileRef.equal?(&1, expected)
            )
 
-    assert Enum.all?(tab_bar.tabs, &FileRef.equal?(&1.file_ref, buffer_ref))
+    assert Enum.all?(tab_bar.tabs, &FileRef.equal?(&1.payload.file_ref, buffer_ref))
   end
 
   test "falls back to buffer identity when the path is outside the project", %{tmp_dir: root} do
@@ -76,7 +76,7 @@ defmodule MingaEditor.BufferFileIdentityTest do
     rebound = BufferFileIdentity.rebind(state, self(), "/outside/project.ex")
 
     assert %FileRef{kind: :buffer, buffer_pid: buffer_pid} =
-             TabBar.active(rebound.shell_runtime.state.tab_bar).file_ref
+             TabBar.active(rebound.shell_runtime.state.tab_bar).payload.file_ref
 
     assert buffer_pid == self()
   end

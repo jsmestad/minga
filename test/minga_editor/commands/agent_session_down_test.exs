@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Session
@@ -229,9 +230,12 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
 
       remote_tab =
-        Enum.find(result.shell_runtime.state.tab_bar.tabs, &(&1.session == session_pid))
+        Enum.find(
+          result.shell_runtime.state.tab_bar.tabs,
+          &match?(%Tab{payload: %Agent{session: ^session_pid}}, &1)
+        )
 
-      assert remote_tab.connection_status == :disconnected
+      assert remote_tab.payload.connection_status == :disconnected
       assert result.shell_runtime.state.notice.message == "[home] disconnected, reconnecting..."
     end
   end

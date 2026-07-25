@@ -8,6 +8,8 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.Scoped
@@ -137,7 +139,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       assert Enum.any?(
                new_state.shell_runtime.state.tab_bar.tabs,
-               &(&1.kind == :agent and &1.session == session)
+               &match?(%Tab{kind: :agent, payload: %Agent{session: ^session}}, &1)
              )
     end
 

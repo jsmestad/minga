@@ -13,6 +13,7 @@ defmodule MingaEditor.Session.ChromeState do
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
@@ -111,7 +112,7 @@ defmodule MingaEditor.Session.ChromeState do
       icon: manual_workspace_icon(manual_workspace),
       color: manual_workspace_color(manual_workspace),
       status: :idle,
-      attention?: Enum.any?(manual_tabs, & &1.attention),
+      attention?: Enum.any?(manual_tabs, &tab_attention?/1),
       tab_count: Enum.count(manual_tabs),
       draft_count: workspace_draft_count(manual_workspace),
       conflict_count: workspace_conflict_count(manual_workspace),
@@ -199,7 +200,7 @@ defmodule MingaEditor.Session.ChromeState do
       icon: group.icon || "cpu",
       color: group.color,
       status: workspace_agent_status(group),
-      attention?: Enum.any?(tabs, & &1.attention),
+      attention?: Enum.any?(tabs, &tab_attention?/1),
       tab_count: Enum.count(tabs),
       draft_count: workspace_draft_count(group),
       conflict_count: workspace_conflict_count(group),
@@ -274,12 +275,16 @@ defmodule MingaEditor.Session.ChromeState do
       icon: tab_icon(tab, path),
       dirty?: buffer_dirty?(buffer),
       draft_state: :none,
-      attention?: tab.attention,
+      attention?: tab_attention?(tab),
       pinned?: tab.pinned?,
       ephemeral?: ephemeral_tab?(tab, buffer, path),
       tint_color: tab_tint_color(tab, workspace)
     )
   end
+
+  @spec tab_attention?(Tab.t()) :: boolean()
+  defp tab_attention?(%Tab{kind: :agent, payload: %TabAgent{attention: attention}}), do: attention
+  defp tab_attention?(%Tab{}), do: false
 
   # A file tab whose buffer is a normal editable buffer with no backing file
   # (e.g. Untitled-1). Non-file buffer types (:nofile, :nowrite, :prompt,

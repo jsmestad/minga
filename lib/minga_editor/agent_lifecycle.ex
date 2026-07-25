@@ -27,6 +27,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   @type state :: EditorState.t()
   @typep style_context :: %{
@@ -41,7 +42,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @doc "Rebuilds the active agent presentation from its authoritative session snapshot."
   @spec rebuild_agent_from_session(state(), Tab.t()) :: state()
-  def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
+  def rebuild_agent_from_session(state, %Tab{kind: :agent, payload: %Agent{session: session_pid}})
       when is_pid(session_pid) do
     case safe_editor_snapshot(session_pid) do
       nil ->

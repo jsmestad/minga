@@ -15,6 +15,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.Commands.Agent
 
@@ -78,9 +79,9 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     |> Enum.map(&tab_to_candidate(&1, &1.id == tb.active_id))
   end
 
-  @spec tab_to_candidate(Tab.t(), boolean()) :: Item.t()
-  defp tab_to_candidate(tab, is_active) do
-    case session_metadata(tab.session) do
+  @spec tab_to_candidate(Tab.agent(), boolean()) :: Item.t()
+  defp tab_to_candidate(%Tab{kind: :agent, payload: %TabAgent{session: session}} = tab, is_active) do
+    case session_metadata(session) do
       {:ok, meta} ->
         %Item{
           id: {meta.id, {:tab, tab.id}},

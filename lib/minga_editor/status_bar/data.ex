@@ -34,6 +34,8 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.OperationFeedback
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.StatusBar.Data.Agent, as: StatusAgent
   alias MingaEditor.StatusBar.Data.Buffer, as: StatusBuffer
   alias MingaEditor.StatusBar.Data.Common
@@ -646,8 +648,8 @@ defmodule MingaEditor.StatusBar.Data do
           label: String.t() | nil
         }
   defp background_subagent_summary(%MingaEditor.State.TabBar{} = tb) do
-    tabs = Enum.filter(tb.tabs, &MingaEditor.State.Tab.background_subagent?/1)
-    running = Enum.filter(tabs, &(&1.agent_status in [:thinking, :tool_executing]))
+    tabs = Enum.filter(tb.tabs, &Tab.background_subagent?/1)
+    running = Enum.filter(tabs, &background_subagent_running?/1)
     active = Enum.find(tabs, &(&1.id == tb.active_id))
     selected = active || List.first(running) || List.first(tabs)
 
@@ -659,12 +661,17 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp background_subagent_summary(_state), do: %{count: 0, label: nil}
 
-  @spec background_subagent_label(MingaEditor.State.Tab.t() | nil) :: String.t() | nil
-  defp background_subagent_label(%MingaEditor.State.Tab{
-         background_subagent: %MingaAgent.Subagent.Handle{} = handle
+  defp background_subagent_label(%Tab{
+         payload: %TabAgent{background_subagent: %MingaAgent.Subagent.Handle{} = handle}
        }) do
     MingaAgent.Subagent.Handle.label(handle)
   end
 
   defp background_subagent_label(_tab), do: nil
+
+  @spec background_subagent_running?(Tab.t()) :: boolean()
+  defp background_subagent_running?(%Tab{payload: %TabAgent{agent_status: status}}),
+    do: status in [:thinking, :tool_executing]
+
+  defp background_subagent_running?(%Tab{}), do: false
 end

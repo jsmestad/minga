@@ -2,37 +2,25 @@ defmodule MingaEditor.State.TabTest do
   use ExUnit.Case, async: true
 
   alias Minga.Project.FileRef
+  alias MingaEditor.State.Workspace.RemoteSession
+  alias MingaAgent.Subagent.Handle
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
+  alias MingaEditor.State.Tab.Agent
+  alias MingaEditor.State.Tab.File
   alias MingaEditor.VimState
 
-  describe "new_file/2" do
-    test "creates a file tab with default label" do
-      tab = Tab.new_file(1)
-      assert tab.id == 1
-      assert tab.kind == :file
-      assert tab.label == ""
-      assert Context.empty?(tab.context)
-    end
+  describe "constructors" do
+    test "create typed file and agent tabs" do
+      file = Tab.new_file(1)
+      agent = Tab.new_agent(2, "Fix the bug")
 
-    test "creates a file tab with a label" do
-      tab = Tab.new_file(1, "main.ex")
-      assert tab.label == "main.ex"
-    end
-  end
+      assert {file.id, file.kind, file.label, file.payload} == {1, :file, "", %File{}}
+      assert Context.empty?(file.context)
 
-  describe "new_agent/2" do
-    test "creates an agent tab with default label" do
-      tab = Tab.new_agent(2)
-      assert tab.id == 2
-      assert tab.kind == :agent
-      assert tab.label == "Agent"
-    end
-
-    test "creates an agent tab with custom label" do
-      tab = Tab.new_agent(2, "Fix the bug")
-      assert tab.label == "Fix the bug"
+      assert {agent.id, agent.kind, agent.label, agent.payload} ==
+               {2, :agent, "Fix the bug", %Agent{}}
     end
   end
 
@@ -87,61 +75,59 @@ defmodule MingaEditor.State.TabTest do
   end
 
   describe "file?/1 and agent?/1" do
-    test "file tab is file, not agent" do
-      tab = Tab.new_file(1)
-      assert Tab.file?(tab)
-      refute Tab.agent?(tab)
-    end
-
-    test "agent tab is agent, not file" do
-      tab = Tab.new_agent(1)
-      assert Tab.agent?(tab)
-      refute Tab.file?(tab)
+    test "identify only the matching payload variant" do
+      assert Tab.file?(Tab.new_file(1))
+      refute Tab.agent?(Tab.new_file(1))
+      assert Tab.agent?(Tab.new_agent(2))
+      refute Tab.file?(Tab.new_agent(2))
     end
   end
 
-  describe "set_file_ref/2" do
-    test "stores and clears a logical file ref" do
+  describe "variant-only transitions" do
+    test "change only their owner variant" do
       {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+      remote = RemoteSession.new("srv", "session-1", :connected)
+      handle = Handle.new(session_id: "sub-1", pid: self(), task: "work")
 
-      tab = Tab.new_file(1, "user.ex") |> Tab.set_file_ref(file_ref)
-      assert tab.file_ref == file_ref
+      cases = [
+        {:agent, &Tab.set_session(&1, self()),
+         &match?(%Agent{session: pid} when pid == self(), &1.payload)},
+        {:agent, &Tab.refresh_session_pid(&1, self(), self()), &match?(%Agent{}, &1.payload)},
+        {:agent, &Tab.set_remote_session(&1, "srv", "session-1", self()),
+         &match?(
+           %Agent{server_name: "srv", remote_session_id: "session-1", session: pid}
+           when pid == self(),
+           &1.payload
+         )},
+        {:agent, &Tab.set_remote_projection(&1, remote),
+         &match?(%Agent{server_name: "srv", remote_session_id: "session-1"}, &1.payload)},
+        {:agent, &Tab.clear_remote_projection(Tab.set_remote_projection(&1, remote)),
+         &match?(%Agent{server_name: nil, remote_session_id: nil}, &1.payload)},
+        {:agent,
+         &Tab.clear_agent_projection(
+           &1
+           |> Tab.set_session(self())
+           |> Tab.set_agent_status(:thinking)
+           |> Tab.set_attention(true)
+         ), &match?(%Agent{session: nil, agent_status: nil, attention: false}, &1.payload)},
+        {:agent, &Tab.set_connection_status(&1, :disconnected),
+         &match?(%Agent{connection_status: :disconnected}, &1.payload)},
+        {:agent, &Tab.set_agent_status(&1, :thinking),
+         &match?(%Agent{agent_status: :thinking}, &1.payload)},
+        {:agent, &Tab.set_attention(&1, true), &match?(%Agent{attention: true}, &1.payload)},
+        {:agent, &Tab.mark_background_subagent(&1, handle),
+         &match?(%Agent{background_subagent: ^handle}, &1.payload)},
+        {:file, &Tab.set_file_ref(&1, file_ref), &match?(%File{file_ref: ^file_ref}, &1.payload)}
+      ]
 
-      assert Tab.set_file_ref(tab, nil).file_ref == nil
-    end
+      for {owner, transition, changed?} <- cases do
+        file = Tab.new_file(1)
+        agent = Tab.new_agent(2)
+        assert changed?.(transition.(if owner == :file, do: file, else: agent))
 
-    test "swaps logical file refs without disturbing other fields" do
-      {:ok, old_ref} = FileRef.from_path("/tmp/minga", "lib/old.ex")
-      {:ok, new_ref} = FileRef.from_path("/tmp/minga", "lib/new.ex")
-      context = %Context{editing: VimState.new(), keymap_scope: :editor}
-
-      tab =
-        Tab.new_file(1, "old.ex")
-        |> Tab.set_context(context)
-        |> Tab.set_group(7)
-        |> Tab.set_file_ref(old_ref)
-
-      updated = Tab.set_file_ref(tab, new_ref)
-
-      assert updated.file_ref == new_ref
-      assert updated.context == context
-      assert updated.group_id == 7
-    end
-  end
-
-  describe "set_attention/2" do
-    test "sets the attention flag to true" do
-      tab = Tab.new_agent(1) |> Tab.set_attention(true)
-      assert tab.attention == true
-    end
-
-    test "clears the attention flag" do
-      tab = Tab.new_agent(1) |> Tab.set_attention(true) |> Tab.set_attention(false)
-      assert tab.attention == false
-    end
-
-    test "defaults to false" do
-      assert Tab.new_agent(1).attention == false
+        assert transition.(if owner == :file, do: agent, else: file) ==
+                 if(owner == :file, do: agent, else: file)
+      end
     end
   end
 

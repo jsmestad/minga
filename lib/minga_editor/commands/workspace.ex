@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias MingaAgent.ProjectView
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Tab.File, as: TabFile
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
@@ -261,7 +262,7 @@ defmodule MingaEditor.Commands.Workspace do
     file_tree = state.workspace.file_tree
 
     case TabBar.active(tb) do
-      %{kind: :file, file_ref: %FileRef{} = file_ref} -> {:ok, file_ref}
+      %{kind: :file, payload: %TabFile{file_ref: %FileRef{} = file_ref}} -> {:ok, file_ref}
       %{kind: :file} -> active_buffer_file_ref(active, file_tree.project_root)
       _tab -> {:error, "Move and copy file require a file tab"}
     end

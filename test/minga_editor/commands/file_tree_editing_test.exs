@@ -188,7 +188,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert Buffer.dirty?(buffer)
       assert File.read!(renamed) == "content"
       refute File.exists?(file)
-      assert TabBar.active(state.shell_runtime.state.tab_bar).file_ref == new_ref
+      assert TabBar.active(state.shell_runtime.state.tab_bar).payload.file_ref == new_ref
 
       assert WorkspaceModel.has_file?(
                TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
@@ -278,7 +278,9 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert editing(state) == nil
       assert Buffer.file_path(target_buffer) == renamed
       assert TabBar.active(state.shell_runtime.state.tab_bar).id == active_tab.id
-      assert TabBar.get(state.shell_runtime.state.tab_bar, inactive_tab.id).file_ref == new_ref
+
+      assert TabBar.get(state.shell_runtime.state.tab_bar, inactive_tab.id).payload.file_ref ==
+               new_ref
 
       assert WorkspaceModel.has_file?(
                TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),

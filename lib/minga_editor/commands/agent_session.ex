@@ -21,6 +21,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
@@ -88,7 +89,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec clear_tab_sessions(TabBar.t(), pid()) :: TabBar.t()
   defp clear_tab_sessions(%TabBar{} = tb, session) do
     Enum.reduce(tb.tabs, tb, fn
-      %Tab{id: tab_id, session: ^session}, acc ->
+      %Tab{id: tab_id, payload: %Agent{session: ^session}}, acc ->
         TabBar.set_tab_session(acc, tab_id, nil)
 
       _tab, acc ->
@@ -400,7 +401,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp assign_session_to_tab(state, _pid), do: state
 
   @spec sessionless_agent?(Tab.t()) :: boolean()
-  defp sessionless_agent?(%Tab{kind: :agent, session: nil}), do: true
+  defp sessionless_agent?(%Tab{kind: :agent, payload: %Agent{session: nil}}), do: true
   defp sessionless_agent?(%Tab{}), do: false
 
   @spec start_and_subscribe(state(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -651,7 +652,7 @@ defmodule MingaEditor.Commands.AgentSession do
          session
        ) do
     case TabBar.find_by_session(tb, session) do
-      %Tab{remote_session_id: session_id} when is_binary(session_id) ->
+      %Tab{payload: %Agent{remote_session_id: session_id}} when is_binary(session_id) ->
         case detach_remote_session_by_id(node(session), session_id) do
           :ok ->
             state
@@ -725,7 +726,7 @@ defmodule MingaEditor.Commands.AgentSession do
          session
        ) do
     case TabBar.find_by_session(tb, session) do
-      %Tab{remote_session_id: session_id} when is_binary(session_id) ->
+      %Tab{payload: %Agent{remote_session_id: session_id}} when is_binary(session_id) ->
         case stop_remote_session_by_id(node(session), session_id) do
           :ok ->
             state

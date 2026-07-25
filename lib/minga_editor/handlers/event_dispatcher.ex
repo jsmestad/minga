@@ -30,6 +30,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
@@ -788,7 +789,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   defp active_remote_server?(%EditorState{} = state, server_name) do
     case Runtime.active_tab(state.shell_runtime) do
-      %Tab{server_name: ^server_name} -> true
+      %Tab{payload: %Agent{server_name: ^server_name}} -> true
       _ -> false
     end
   end
