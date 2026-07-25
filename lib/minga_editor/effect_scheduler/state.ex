@@ -2,18 +2,11 @@ defmodule MingaEditor.EffectScheduler.State do
   @moduledoc "Typed process state for the editor-owned slow-effect scheduler."
 
   alias MingaEditor.Effect.Outcome
-  alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler.Lane
 
-  @typedoc "A running request and its supervised worker, if the worker started."
-  @type running :: %{task: Task.t() | nil, request: Request.t(), timer: reference() | nil}
-
-  @typedoc "One resource lane with a stable scheduling policy."
-  @type lane :: %{
-          policy: Policy.t(),
-          running: running() | nil,
-          queue: :queue.queue(Request.t())
-        }
+  @typedoc "Scheduler-owned worker identity kept outside lane values."
+  @type task_entry :: {Request.resource(), Request.id(), Task.t()}
 
   @enforce_keys [
     :task_supervisor,
@@ -49,8 +42,8 @@ defmodule MingaEditor.EffectScheduler.State do
           observer: pid() | nil,
           max_admitted: pos_integer(),
           admitted: MapSet.t(Request.id()),
-          lanes: %{optional(Request.resource()) => lane()},
-          tasks: %{optional(reference()) => Request.resource()},
+          lanes: %{optional(Request.resource()) => Lane.t()},
+          tasks: %{optional(reference()) => task_entry()},
           timers: %{optional(reference()) => Request.id()},
           pending: %{optional(Request.id()) => Outcome.t()},
           claimed: MapSet.t(Request.id())

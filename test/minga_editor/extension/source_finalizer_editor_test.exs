@@ -235,8 +235,14 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     scheduler = state.effect_scheduler
     scheduler_state = :sys.get_state(scheduler)
     lane = Map.fetch!(scheduler_state.lanes, {:picker_fetch, Remote.Picker})
-    assert lane.running.request.source == source
-    picker_worker = lane.running.task.pid
+    assert lane.running.source == source
+
+    {_task_ref, {_resource, _request_id, picker_task}} =
+      Enum.find(scheduler_state.tasks, fn {_task_ref, {_resource, request_id, _task}} ->
+        request_id == lane.running.id
+      end)
+
+    picker_worker = picker_task.pid
     picker_monitor = Process.monitor(picker_worker)
 
     unrelated_source = {:extension, :unrelated_effect}
@@ -443,8 +449,14 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     scheduler = state.effect_scheduler
     scheduler_state = :sys.get_state(scheduler)
     lane = Map.fetch!(scheduler_state.lanes, {:picker_fetch, Remote.Picker})
-    assert lane.running.request.source == source
-    picker_worker = lane.running.task.pid
+    assert lane.running.source == source
+
+    {_task_ref, {_resource, _request_id, picker_task}} =
+      Enum.find(scheduler_state.tasks, fn {_task_ref, {_resource, request_id, _task}} ->
+        request_id == lane.running.id
+      end)
+
+    picker_worker = picker_task.pid
 
     {scheduler, picker_worker, Process.monitor(picker_worker)}
   end

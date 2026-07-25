@@ -135,8 +135,8 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, first)
     assert_receive {:effect_started, :timed_out, _worker, [:timed_out]}
 
-    [%{running: %{task: first_task}}] =
-      scheduler |> :sys.get_state() |> Map.fetch!(:lanes) |> Map.values()
+    [{_, {_, _, first_task}}] =
+      scheduler |> :sys.get_state() |> Map.fetch!(:tasks) |> Map.to_list()
 
     assert {:ok, _, :queued} = EffectScheduler.schedule(scheduler, second)
     send(scheduler, {:effect_timeout, first.id})
@@ -321,8 +321,8 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, request)
     assert_receive {:effect_started, :delayed, _worker, [:delayed]}
 
-    [%{running: %{task: task}}] =
-      scheduler |> :sys.get_state() |> Map.fetch!(:lanes) |> Map.values()
+    [{_, {_, _, task}}] =
+      scheduler |> :sys.get_state() |> Map.fetch!(:tasks) |> Map.to_list()
 
     assert :ok = EffectScheduler.cancel_source(scheduler, source)
     assert :ok = EffectScheduler.cancel_source(scheduler, source)
@@ -479,6 +479,45 @@ defmodule MingaEditor.EffectSchedulerTest do
     EffectScheduler.finalize(scheduler, second_outcome)
     assert_terminal_direct(follow_up.id, :completed, nil)
     assert_terminal_direct(second.id, :completed, nil)
+  end
+
+  test "same-resource handoff starts follow-up before queued successor" do
+    scheduler = start_scheduler(attach?: false)
+    owner = start_owner_proxy()
+    :ok = EffectScheduler.attach(scheduler, owner)
+    policy = Policy.fifo(2)
+    first = EffectProbe.request(self(), :first_handoff, :resource, policy, {:return, :resolved})
+    queued = EffectProbe.request(self(), :queued_handoff, :resource, policy, {:return, :queued})
+
+    follow_up =
+      EffectProbe.request(self(), :follow_up_handoff, :resource, policy, {:return, :follow_up})
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_owner_lifecycle(first.id, :running)
+    assert EffectScheduler.schedule(scheduler, queued) == {:ok, queued.id, :queued}
+    assert_owner_lifecycle(queued.id, :queued)
+    first_outcome = receive_owner_candidate(scheduler, first.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, first_outcome)
+
+    assert EffectScheduler.finalize_and_schedule(scheduler, first_outcome, follow_up) ==
+             {:ok, follow_up.id, :running}
+
+    queued_id = queued.id
+
+    refute_received {:owner_message,
+                     {:effect_lifecycle, %Outcome{request: %{id: ^queued_id}, value: :running}}}
+
+    follow_up_outcome = receive_owner_candidate(scheduler, follow_up.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, follow_up_outcome)
+    EffectScheduler.finalize(scheduler, follow_up_outcome)
+    assert_owner_lifecycle(queued.id, :running)
+
+    queued_outcome = receive_owner_candidate(scheduler, queued.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, queued_outcome)
+    EffectScheduler.finalize(scheduler, queued_outcome)
+    assert_terminal_direct(first.id, :completed, nil)
+    assert_terminal_direct(follow_up.id, :completed, nil)
+    assert_terminal_direct(queued.id, :completed, nil)
   end
 
   test "same-resource follow-up starts immediately on a zero-queue FIFO lane" do
