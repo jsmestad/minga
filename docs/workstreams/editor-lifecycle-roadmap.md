@@ -27,7 +27,7 @@ Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **VERIFIED routed follow-on:** ES06, L06, L07, L08, L09.
+- **VERIFIED routed follow-on:** ES06, ES20, L06, L07, L08, L09.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -4876,7 +4876,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W122/ES20-B: Cut Tab display routing authority to typed payloads
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES20-B
 - **Decision:** APPROVE_DIRECT, Tab now keeps common identity/chrome on `%MingaEditor.State.Tab{}` and stores kind-specific projection data in `%MingaEditor.State.Tab.File{}` or `%MingaEditor.State.Tab.Agent{}` without frontend or persistence contract changes.
 - **Planning profile:** `ES20BPlanner`, editor-lifecycle-planner, locked at baseline `ca75377319d60060f7e8662d0f50ef6ab510232a` with project-rule corrections to omit empty enforce keys and preserve the complete workspace-derived agent-status union.
@@ -4895,4 +4895,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** Unconstrained `make test.llm` can still expose unrelated async timing flakes in agent provider/session tests: this pass observed timeouts in `MingaAgent.RuntimeTest` and `MingaAgent.SessionManagerTest`; the exact failed examples passed individually, and the constrained `test.llm` run passed.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3240
+- **Implementation commit SHA:** `b2d95c6e8e32a441d3858a2a7962a6288f9a67a0`
+- **Merge SHA:** `d3189e84695e072a99c14cbdb761eb1864a11669`
+- **Merge evidence:** PR #3240 merged after required CI run `30150241822` passed; current main contains the reviewed implementation, tests, and roadmap evidence.
+- **Reviewer verdict:** PASS with `0.98` confidence after correctness PASS, Elixir craftsmanship PASS, and Ponytail LEAN.
+- **Findings resolved:** ES20 is fully resolved across ES20-A Workspace authority and ES20-B Tab projection payload cutovers.
 - **Completion date:** 2026-07-25
