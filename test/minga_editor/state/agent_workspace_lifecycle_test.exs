@@ -26,7 +26,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
-  test "switching file tabs in a workspace preserves workspace agent UI" do
+  test "switching file tabs in a workspace preserves active agent UI without mirroring" do
     state = state_with_agent_workspace_tabs()
 
     state =
@@ -39,13 +39,72 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert prompt_text(state.workspace.agent_ui) == "draft one"
 
-    assert prompt_text(
-             workspace_agent_ui(TabBar.active_workspace(state.shell_runtime.state.tab_bar))
-           ) ==
-             "draft one"
+    assert workspace_payload(TabBar.active_workspace(state.shell_runtime.state.tab_bar)).agent_ui ==
+             nil
+
+    state = MingaEditor.TabWorkflow.switch(state, 1)
+
+    assert prompt_text(state.workspace.agent_ui) == "draft one"
+
+    assert workspace_payload(TabBar.active_workspace(state.shell_runtime.state.tab_bar)).agent_ui ==
+             nil
   end
 
-  test "switching to a workspace without agent UI clears the live mirror" do
+  test "opening a new file from the active agent tab preserves prompt and transcript when switching back" do
+    {:ok, _session_id, session} = SessionManager.start_session([])
+    on_exit(fn -> stop_session(session) end)
+
+    {state, _workspace_id, _file_ref, agent_tab_id} =
+      state_with_active_remote_agent_workspace(session)
+
+    {:ok, new_buffer} = BufferProcess.start_link(content: "new file")
+
+    ui =
+      state.workspace.agent_ui
+      |> put_prompt("agent draft")
+      |> put_transcript_projection("kept transcript", 7)
+
+    state = %{state | workspace: MingaEditor.Session.State.set_agent_ui(state.workspace, ui)}
+    opened = MingaEditor.Handlers.BufferRegistry.add_buffer(state, new_buffer, context: :open)
+
+    assert prompt_text(opened.workspace.agent_ui) == "agent draft"
+    assert opened.workspace.agent_ui.panel.transcript.messages == ["kept transcript"]
+
+    restored = MingaEditor.TabWorkflow.switch(opened, agent_tab_id)
+
+    assert prompt_text(restored.workspace.agent_ui) == "agent draft"
+    assert restored.workspace.agent_ui.panel.transcript.version == 7
+  end
+
+  test "unchanged agent tab switches no-op before stashing outgoing UI" do
+    state = state_with_agent_workspace_tabs() |> MingaEditor.TabWorkflow.switch(2)
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        (&put_prompt(&1, "active draft")).(state.workspace.agent_ui)
+      )
+
+    active_tab_id = TabBar.active(state.shell_runtime.state.tab_bar).id
+
+    without_workspace_agent_ui_stash(fn ->
+      state = MingaEditor.TabWorkflow.switch(state, active_tab_id)
+
+      assert prompt_text(state.workspace.agent_ui) == "active draft"
+
+      assert workspace_payload(TabBar.active_workspace(state.shell_runtime.state.tab_bar)).agent_ui ==
+               nil
+
+      state = MingaEditor.TabWorkflow.switch(state, 999)
+
+      assert prompt_text(state.workspace.agent_ui) == "active draft"
+
+      assert workspace_payload(TabBar.active_workspace(state.shell_runtime.state.tab_bar)).agent_ui ==
+               nil
+    end)
+  end
+
+  test "switching to a manual workspace clears active agent UI and stashes the outgoing workspace UI" do
     state = state_with_tabs()
     ui_two = put_prompt(UIState.new(), "workspace two")
     {tab_bar, workspace_two} = TabBar.add_workspace(state.shell_runtime.state.tab_bar, "Agent")
@@ -84,6 +143,12 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = MingaEditor.TabWorkflow.switch(state, 1)
 
     assert prompt_text(state.workspace.agent_ui) == ""
+
+    assert prompt_text(
+             workspace_agent_ui(
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_two.id)
+             )
+           ) == "workspace two"
   end
 
   test "closing a workspace clears stale agent UI after tabs migrate to manual" do
@@ -126,6 +191,96 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == 0
     assert prompt_text(state.workspace.agent_ui) == ""
+  end
+
+  test "closing an inactive workspace preserves active session UI when the active payload is transferred" do
+    state = state_with_agent_workspace_tabs() |> MingaEditor.TabWorkflow.switch(2)
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        (&put_prompt(&1, "active draft")).(state.workspace.agent_ui)
+      )
+
+    {tab_bar, inactive_workspace} =
+      TabBar.add_workspace(state.shell_runtime.state.tab_bar, "Agent")
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
+    {shell_state, workspace} =
+      Traditional.handle_gui_action(
+        state.shell_runtime.state,
+        state.workspace,
+        {:workspace_close, inactive_workspace.id}
+      )
+
+    state = %{
+      state
+      | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state),
+        workspace: workspace
+    }
+
+    assert prompt_text(state.workspace.agent_ui) == "active draft"
+
+    assert workspace_payload(TabBar.active_workspace(state.shell_runtime.state.tab_bar)).agent_ui ==
+             nil
+  end
+
+  test "workspace close fallback transfers active workspace UI and clears the payload" do
+    state = state_with_agent_workspace_tabs() |> MingaEditor.TabWorkflow.switch(2)
+    active_workspace_id = TabBar.active_workspace_id(state.shell_runtime.state.tab_bar)
+    stale_ui = put_prompt(UIState.new(), "fallback transfer")
+
+    {tab_bar, inactive_workspace} =
+      state.shell_runtime.state.tab_bar
+      |> TabBar.set_workspace_agent_ui(active_workspace_id, stale_ui)
+      |> TabBar.add_workspace("Agent")
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
+    {shell_state, workspace} =
+      Traditional.handle_gui_action(
+        state.shell_runtime.state,
+        state.workspace,
+        {:workspace_close, inactive_workspace.id}
+      )
+
+    state = %{
+      state
+      | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state),
+        workspace: workspace
+    }
+
+    assert prompt_text(state.workspace.agent_ui) == "fallback transfer"
+
+    assert workspace_payload(TabBar.active_workspace(state.shell_runtime.state.tab_bar)).agent_ui ==
+             nil
   end
 
   @tag :tmp_dir
@@ -262,6 +417,16 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert prompt_text(state.workspace.agent_ui) == "workspace two"
 
+    assert prompt_text(
+             workspace_agent_ui(
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_one_id)
+             )
+           ) == "workspace one"
+
+    assert workspace_payload(
+             TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_two.id)
+           ).agent_ui == nil
+
     assert MingaEditor.Shell.Runtime.active_session(state.shell_runtime) ==
              session_two
   end
@@ -285,7 +450,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     workspace = TabBar.get_workspace(tab_bar, workspace_id)
     assert workspace_payload(workspace).session == new_session
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).agent_ui == nil
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
     assert TabBar.active(tab_bar).payload.session == new_session
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
@@ -318,7 +483,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.active_workspace_id(tab_bar) == workspace_id
     assert workspace_payload(workspace).session == new_session
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).agent_ui == nil
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
     assert agent_tab.payload.session == new_session
     refute Enum.any?(tab_bar.tabs, &match?(%Tab{payload: %TabAgent{session: ^old_session}}, &1))
@@ -326,7 +491,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
   end
 
-  test "GUI workspace close stops the owned session and refreshes the live mirror" do
+  test "GUI workspace close stops the owned session and refreshes the active session UI" do
     {:ok, _session_id, session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(session) end)
     ref = Process.monitor(session)
@@ -356,7 +521,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace_payload(workspace).session == nil
     assert workspace_payload(workspace).agent_status == :idle
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).agent_ui == nil
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
 
     state = MingaEditor.TabWorkflow.switch(state, 2)
@@ -426,7 +591,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.get(tab_bar, agent_tab_id) == nil
     assert workspace_payload(workspace).session == session
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).agent_ui == nil
     assert workspace_payload(workspace).remote_session.server_name == "home"
     assert workspace_payload(workspace).remote_session.session_id == "session-1"
     assert workspace_payload(workspace).remote_session.connection_status == :connected
@@ -463,7 +628,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace_payload(workspace).session == nil
     assert workspace_payload(workspace).agent_status == :idle
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).agent_ui == nil
     assert workspace_payload(workspace).remote_session.server_name == "home"
     assert workspace_payload(workspace).remote_session.session_id == session_id
     assert workspace_payload(workspace).remote_session.connection_status == :connected
@@ -484,7 +649,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert workspace_payload(workspace).session == nil
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).agent_ui == nil
   end
 
   defp state_with_agent_workspace_tabs do
@@ -526,7 +691,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
       |> TabBar.set_workspace_session(workspace.id, session)
       |> TabBar.add_workspace_file(workspace.id, file_ref)
-      |> TabBar.set_workspace_agent_ui(workspace.id, ui)
+      |> TabBar.set_workspace_agent_ui(workspace.id, nil)
       |> TabBar.switch_to(agent_tab.id)
 
     state =
@@ -635,10 +800,37 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   defp workspace_session(%Workspace{payload: %WorkspaceAgent{session: session}}), do: session
   defp workspace_session(%Workspace{}), do: nil
 
+  defp without_workspace_agent_ui_stash(fun) when is_function(fun, 0) do
+    :erlang.trace(self(), true, [:call])
+    :erlang.trace_pattern({TabBar, :set_workspace_agent_ui, 3}, true, [:local])
+
+    try do
+      fun.()
+      refute_received {:trace, _pid, :call, {TabBar, :set_workspace_agent_ui, _args}}
+    after
+      :erlang.trace_pattern({TabBar, :set_workspace_agent_ui, 3}, false, [:local])
+      :erlang.trace(self(), false, [:call])
+      flush_trace_messages()
+    end
+  end
+
+  defp flush_trace_messages do
+    receive do
+      {:trace, _pid, :call, {TabBar, :set_workspace_agent_ui, _args}} -> flush_trace_messages()
+    after
+      0 -> :ok
+    end
+  end
+
   defp put_prompt(%UIState{} = ui, text) do
     ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
     BufferProcess.replace_content(ui.panel.prompt_buffer, text)
     ui
+  end
+
+  defp put_transcript_projection(%UIState{} = ui, message, version) do
+    transcript = %{ui.panel.transcript | messages: [message], version: version}
+    %{ui | panel: %{ui.panel | transcript: transcript}}
   end
 
   defp show_panel(%UIState{} = ui) do

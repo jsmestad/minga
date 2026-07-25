@@ -137,8 +137,8 @@ defmodule MingaEditor.Shell.Traditional do
       ) do
     stop_workspace_session(TabBar.get_workspace(tb, ws_id))
     tab_bar = TabBar.remove_workspace(tb, ws_id)
+    {tab_bar, workspace} = sync_workspace_agent_ui(tab_bar, workspace)
     shell_state = ShellState.install_tab_bar(shell_state, tab_bar)
-    workspace = sync_workspace_agent_ui(tab_bar, workspace)
     {shell_state, workspace}
   end
 
@@ -729,13 +729,12 @@ defmodule MingaEditor.Shell.Traditional do
 
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, metadata.label)
+
     tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
 
-    # Leave agent UI view: reset to editor scope and window content type
-    workspace =
-      workspace
-      |> SessionState.set_agent_ui(UIState.new())
-      |> SessionState.set_keymap_scope(:editor)
+    # Leave agent view: switch to editor scope and window content type while
+    # keeping the active Session-owned agent UI available for same-workspace return.
+    workspace = SessionState.set_keymap_scope(workspace, :editor)
 
     workspace =
       SessionState.activate_buffer(workspace, workspace.buffers, replace_window_content?: true)
@@ -858,15 +857,19 @@ defmodule MingaEditor.Shell.Traditional do
 
   defp buffer_label(_), do: "[unknown]"
 
-  @spec sync_workspace_agent_ui(TabBar.t(), SessionState.t()) :: SessionState.t()
+  @spec sync_workspace_agent_ui(TabBar.t(), SessionState.t()) :: {TabBar.t(), SessionState.t()}
   defp sync_workspace_agent_ui(%TabBar{} = tab_bar, %SessionState{} = workspace) do
-    agent_ui =
-      case TabBar.active_workspace(tab_bar) do
-        %Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}} -> agent_ui
-        _ -> UIState.new()
-      end
+    case TabBar.active_workspace(tab_bar) do
+      %Workspace{id: workspace_id, payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}} ->
+        tab_bar = TabBar.set_workspace_agent_ui(tab_bar, workspace_id, nil)
+        {tab_bar, SessionState.set_agent_ui(workspace, agent_ui)}
 
-    SessionState.set_agent_ui(workspace, agent_ui)
+      %Workspace{payload: %WorkspaceAgent{agent_ui: nil}} ->
+        {tab_bar, workspace}
+
+      _workspace ->
+        {tab_bar, SessionState.set_agent_ui(workspace, UIState.new())}
+    end
   end
 
   @spec stop_workspace_session(Workspace.t() | nil) :: :ok
