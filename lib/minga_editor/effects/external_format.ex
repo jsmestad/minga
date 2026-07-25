@@ -14,11 +14,9 @@ defmodule MingaEditor.Effects.ExternalFormat do
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
   alias MingaEditor.Effects.ExternalFormatResult
+  alias MingaEditor.Effects.Feedback, as: EffectFeedback
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
-
-  alias MingaEditor.State.OperationQueue
   @enforce_keys [:buffer, :formatter]
   defstruct [:buffer, :formatter]
 
@@ -62,22 +60,15 @@ defmodule MingaEditor.Effects.ExternalFormat do
   def apply(
         state,
         %Outcome{
-          value: {:queued, %OperationQueue{position: position, total: total}},
+          value: {:queued, queue},
           request: %{operation_id: id}
         } = outcome
       ) do
-    {:ok, feedback} =
-      Feedback.queue_operation(state.feedback, id, "Format queued", position, total)
-
-    state = %{state | feedback: feedback}
-
-    {state, outcome}
+    {EffectFeedback.queued(state, id, "Format queued", queue), outcome}
   end
 
   def apply(state, %Outcome{value: :running, request: %{operation_id: id}} = outcome) do
-    state = %{state | feedback: Feedback.run_operation(state.feedback, id, "Formatting…")}
-
-    {state, outcome}
+    {EffectFeedback.running(state, id, "Formatting…"), outcome}
   end
 
   def apply(
@@ -91,10 +82,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
         state,
         %Outcome{value: {:failed, :timeout}, request: %{operation_id: id}} = outcome
       ) do
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :timeout, "Format timed out")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :timeout, "Format timed out"), outcome}
   end
 
   def apply(
@@ -104,37 +92,22 @@ defmodule MingaEditor.Effects.ExternalFormat do
     message = format_failure_message(reason)
     Minga.Log.warning(:editor, message)
 
-    {%{state | feedback: Feedback.finish_operation(state.feedback, id, :error, message)}, outcome}
+    {EffectFeedback.finished(state, id, :error, message), outcome}
   end
 
   def apply(
         state,
         %Outcome{value: {:canceled, :superseded}, request: %{operation_id: id}} = outcome
       ) do
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :stale, "Format replaced")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :stale, "Format replaced"), outcome}
   end
 
   def apply(state, %Outcome{value: {:canceled, _reason}, request: %{operation_id: id}} = outcome) do
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :canceled, "Format canceled")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :canceled, "Format canceled"), outcome}
   end
 
   def apply(state, %Outcome{value: {:stale, _reason}, request: %{operation_id: id}} = outcome) do
-    {%{
-       state
-       | feedback:
-           Feedback.finish_operation(
-             state.feedback,
-             id,
-             :stale,
-             "Buffer changed, format skipped"
-           )
-     }, outcome}
+    {EffectFeedback.finished(state, id, :stale, "Buffer changed, format skipped"), outcome}
   end
 
   @impl true
@@ -147,35 +120,40 @@ defmodule MingaEditor.Effects.ExternalFormat do
     case replace_if_current(result) do
       :ok ->
         Minga.Log.info(:editor, "Formatted: #{result.file_name}")
-        {finish(state, outcome, :success, "Formatted"), outcome}
+
+        {EffectFeedback.finished(state, outcome.request.operation_id, :success, "Formatted"),
+         outcome}
 
       {:error, :stale} ->
         outcome = Outcome.stale(outcome, :buffer_version_changed)
-        {finish(state, outcome, :stale, "Buffer changed, format skipped"), outcome}
+
+        {EffectFeedback.finished(
+           state,
+           outcome.request.operation_id,
+           :stale,
+           "Buffer changed, format skipped"
+         ), outcome}
 
       {:error, :read_only} ->
         outcome = Outcome.failed(outcome.request, :read_only)
-        {finish(state, outcome, :error, "Buffer is read-only, format skipped"), outcome}
+
+        {EffectFeedback.finished(
+           state,
+           outcome.request.operation_id,
+           :error,
+           "Buffer is read-only, format skipped"
+         ), outcome}
 
       {:error, :not_alive} ->
         outcome = Outcome.failed(outcome.request, :buffer_closed)
-        {finish(state, outcome, :error, "Buffer closed, format skipped"), outcome}
-    end
-  end
 
-  @spec finish(EditorState.t(), Outcome.t(), Operation.terminal_status(), String.t()) ::
-          EditorState.t()
-  defp finish(state, outcome, status, message) do
-    %{
-      state
-      | feedback:
-          Feedback.finish_operation(
-            state.feedback,
-            outcome.request.operation_id,
-            status,
-            message
-          )
-    }
+        {EffectFeedback.finished(
+           state,
+           outcome.request.operation_id,
+           :error,
+           "Buffer closed, format skipped"
+         ), outcome}
+    end
   end
 
   @spec replace_if_current(ExternalFormatResult.t()) ::
