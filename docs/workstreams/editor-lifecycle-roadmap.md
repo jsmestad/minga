@@ -4966,7 +4966,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W125/ES19: Cut active/inactive agent UI mirror to transfer semantics
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES19
 - **Decision:** APPROVE_DIRECT, `Session.State` owns active agent UI and the agent Workspace payload owns inactive agent UI; activation/deactivation transfer authority replaces active workspace mirroring.
 - **Planning profile:** `ES19Planner`, editor-lifecycle-planner, locked READY route refreshed by `ES19Freshness` at baseline `35cb4f7c8e2edc8abec0e45257353fb6bc26cb80`.
@@ -4986,3 +4986,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** The public `TabBar.set_workspace_agent_ui/3` spec and doc still described only non-nil projection even though `Workspace.set_agent_ui/2` already accepted `nil`; ES19 aligned that existing owner API documentation with transfer semantics. Direct agent-tab file opens are same-workspace transitions, not agent-view deactivation; resetting `Session.State.agent_ui` there destroys the only live UI after ES19 removes active mirroring.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3246
+- **Implementation commit SHA:** `dde5d9b952df135f3ced3897d2fbd6671c1674f5`
+- **Merge SHA:** `b3f552749a65b1c8e2dfbed1a5ff3e731782f303`
+- **CI run:** https://github.com/jsmestad/minga/actions/runs/30160516991, passed.
+- **Reviewer verdict:** PASS with 0.99 confidence after the direct agent-tab file transition correction.
+- **Findings resolved:** ES19 is complete. Active agent UI has one Session owner, inactive agent UI has one Workspace owner, and authority transfers without foreground mirroring or same-workspace UI loss.
+- **Completion date:** 2026-07-25
