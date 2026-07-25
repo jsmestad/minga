@@ -23,6 +23,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.ModalOverlay.Completion, as: ModalCompletion
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -70,7 +71,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   defp attach_agent_workspaces(%TabBar{} = tb) do
     Enum.reduce(tb.tabs, tb, fn
-      %Tab{kind: :agent, id: tab_id, label: label, session: session}, acc when is_pid(session) ->
+      %Tab{kind: :agent, id: tab_id, label: label, session: session}, acc
+      when is_pid(session) ->
         {acc, workspace} = TabBar.add_workspace(acc, label, session)
         TabBar.move_tab_to_workspace(acc, tab_id, workspace.id)
 
@@ -483,12 +485,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert switched.workspace.agent_ui.panel.transcript.version > 7
       assert switched.workspace.agent_ui.panel.transcript.version < 100
       assert switched.workspace.agent_ui.panel.transcript.version != 42
-      assert drained.agent_ui.panel.transcript.version != 42
+      assert %WorkspaceAgent{agent_ui: drained_ui, pending_catchup_events: []} = drained.payload
+      assert drained_ui.panel.transcript.version != 42
 
-      assert drained.agent_ui.panel.transcript.version ==
+      assert drained_ui.panel.transcript.version ==
                switched.workspace.agent_ui.panel.transcript.version
 
-      assert drained.pending_catchup_events == []
       assert TraditionalState.modal(switched.shell_runtime.state) == :none
       assert agent.spinner_timer != nil
       assert agent.spinner_timer != outgoing_spinner

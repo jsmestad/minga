@@ -20,6 +20,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
   import Bitwise
 
@@ -568,7 +569,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @spec active_project_view(state()) :: ProjectView.t() | nil
   defp active_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}}) do
     case TabBar.active_workspace(tab_bar) do
-      %{project_view: %ProjectView{} = project_view} -> project_view
+      %{payload: %WorkspaceAgent{project_view: %ProjectView{} = project_view}} -> project_view
       _workspace -> nil
     end
   end

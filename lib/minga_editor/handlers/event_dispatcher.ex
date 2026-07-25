@@ -30,6 +30,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Face
@@ -505,7 +506,9 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec reconnect_remote_workspace(EditorState.t(), Workspace.t(), node()) :: EditorState.t()
   defp reconnect_remote_workspace(
          state,
-         %Workspace{remote_session: %RemoteSession{session_id: session_id}} = workspace,
+         %Workspace{
+           payload: %WorkspaceAgent{remote_session: %RemoteSession{session_id: session_id}}
+         } = workspace,
          remote_node
        ) do
     case remote_session_pid(remote_node, session_id) do
@@ -576,7 +579,9 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          %Workspace{
            id: workspace_id,
-           remote_session: %RemoteSession{session_id: session_id, last_seen_event_id: last_seen}
+           payload: %WorkspaceAgent{
+             remote_session: %RemoteSession{session_id: session_id, last_seen_event_id: last_seen}
+           }
          } = workspace,
          remote_node,
          pid
@@ -649,10 +654,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   defp mark_remote_workspace_status(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         %Workspace{} = workspace,
+         %Workspace{payload: %WorkspaceAgent{session: session}} = workspace,
          status
        ) do
-    install_tab_bar(state, set_workspace_remote_state(tb, workspace, workspace.session, status))
+    install_tab_bar(
+      state,
+      set_workspace_remote_state(tb, workspace, session, status)
+    )
   end
 
   defp mark_remote_workspace_status(state, %Workspace{}, _status), do: state
@@ -703,7 +711,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec maybe_set_remote_last_seen_event_id(Workspace.t(), non_neg_integer() | nil) ::
           Workspace.t()
   defp maybe_set_remote_last_seen_event_id(
-         %Workspace{remote_session: %RemoteSession{} = remote_session} = workspace,
+         %Workspace{payload: %WorkspaceAgent{remote_session: %RemoteSession{} = remote_session}} =
+           workspace,
          event_id
        )
        when is_integer(event_id) and event_id >= 0 do

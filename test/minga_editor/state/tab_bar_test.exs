@@ -457,7 +457,7 @@ defmodule MingaEditor.State.TabBarTest do
       agent_workspaces = Enum.filter(tb.workspaces, &(&1.kind == :agent))
       assert Enum.map(agent_workspaces, & &1.label) == ["Agent 1", "Agent 2"]
       assert {group1.id, group2.id} == {1, 2}
-      assert group2.session == self()
+      assert group2.payload.session == self()
     end
   end
 
@@ -579,7 +579,7 @@ defmodule MingaEditor.State.TabBarTest do
       {tb, group} = TabBar.add_workspace(tb, "Agent")
       tb = TabBar.set_workspace_agent_status(tb, group.id, :error)
 
-      assert TabBar.get_workspace(tb, group.id).agent_status == :error
+      assert TabBar.get_workspace(tb, group.id).payload.agent_status == :error
     end
   end
 

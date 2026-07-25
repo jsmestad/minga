@@ -16,6 +16,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   alias MingaEditor.State.Git, as: GitState
   alias MingaEditor.State.Parser, as: ParserState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace
@@ -470,7 +471,9 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       Enum.each(tab_bar.workspaces, fn %Workspace{} = owner ->
         refute Enum.any?(owner.files, &FileRef.equal?(&1, file_ref))
-        assert is_nil(owner.agent_ui) or owner.agent_ui.panel.prompt_buffer == nil
+
+        assert match?(%WorkspaceAgent{agent_ui: %{panel: %{prompt_buffer: nil}}}, owner.payload) or
+                 owner.kind == :manual
       end)
     end
   end

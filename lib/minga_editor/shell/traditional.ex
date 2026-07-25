@@ -31,6 +31,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.State.Windows
@@ -515,7 +516,7 @@ defmodule MingaEditor.Shell.Traditional do
           TabBar.t()
   defp update_restarted_session_workspaces(%TabBar{} = tb, old_pid, new_pid, status) do
     Enum.reduce(tb.workspaces, tb, fn
-      %Workspace{session: ^old_pid} = workspace, acc ->
+      %Workspace{payload: %WorkspaceAgent{session: ^old_pid}} = workspace, acc ->
         workspace =
           workspace
           |> Workspace.refresh_session_pid(old_pid, new_pid)
@@ -626,7 +627,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   def active_session(%ShellState{tab_bar: tb}) do
     case TabBar.active_workspace(tb) do
-      %Workspace{session: pid} when is_pid(pid) -> pid
+      %Workspace{payload: %WorkspaceAgent{session: pid}} when is_pid(pid) -> pid
       _ -> nil
     end
   end
@@ -878,7 +879,7 @@ defmodule MingaEditor.Shell.Traditional do
   defp sync_workspace_agent_ui(%TabBar{} = tab_bar, %SessionState{} = workspace) do
     agent_ui =
       case TabBar.active_workspace(tab_bar) do
-        %Workspace{agent_ui: %UIState{} = agent_ui} -> agent_ui
+        %Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}} -> agent_ui
         _ -> UIState.new()
       end
 
@@ -886,7 +887,8 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @spec stop_workspace_session(Workspace.t() | nil) :: :ok
-  defp stop_workspace_session(%Workspace{session: session}) when is_pid(session) do
+  defp stop_workspace_session(%Workspace{payload: %WorkspaceAgent{session: session}})
+       when is_pid(session) do
     AgentSession.stop_session_pid(session)
     :ok
   end

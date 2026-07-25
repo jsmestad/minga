@@ -166,8 +166,8 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       result = BufferManagement.handle_agent_session_down(state, session_pid, :normal)
       workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace_id)
 
-      assert workspace.session == nil
-      assert workspace.agent_status == :error
+      assert workspace.payload.session == nil
+      assert workspace.payload.agent_status == :error
       assert workspace.review.state == :needs_review
       assert WorkspaceReview.pending?(workspace.review)
 
@@ -189,8 +189,8 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace_id)
 
       assert_receive {:project_view_close_called, ^dir}
-      assert workspace.session == nil
-      assert workspace.agent_status == :error
+      assert workspace.payload.session == nil
+      assert workspace.payload.agent_status == :error
       assert workspace.review.state == :needs_review
       assert workspace.review.last_error == :close_failed
       assert WorkspaceReview.pending?(workspace.review)
@@ -212,8 +212,8 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
       workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, workspace_id)
 
-      assert workspace.session == nil
-      assert workspace.agent_status == :error
+      assert workspace.payload.session == nil
+      assert workspace.payload.agent_status == :error
       assert workspace.review.state == :needs_review
       assert workspace.review.last_error == :diff_failed
       assert WorkspaceReview.pending?(workspace.review)

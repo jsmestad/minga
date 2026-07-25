@@ -333,15 +333,14 @@ defmodule MingaEditor.StatusBar.DataTest do
     {:ok, session} = MetadataSession.start_link(message_count: 4, turn_count: 1)
 
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
+    {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
 
     tb =
       tb
+      |> TabBar.accept_tab(Tab.set_group(agent_tab, workspace.id))
       |> TabBar.switch_to(agent_tab.id)
       |> TabBar.set_tab_session(agent_tab.id, session)
-
-    workspace_id = TabBar.active_workspace_id(tb)
-    tb = TabBar.set_workspace_session(tb, workspace_id, session)
 
     state = state_with_agent_window(tb)
 

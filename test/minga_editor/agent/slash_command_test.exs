@@ -10,6 +10,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
   alias MingaEditor.VimState
 
   @moduletag :tmp_dir
@@ -212,12 +214,15 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       session = Keyword.get(opts, :session)
 
       tab =
-        MingaEditor.State.Tab.new_agent(1, "Agent") |> MingaEditor.State.Tab.set_session(session)
+        1
+        |> Tab.new_agent("Agent")
+        |> Tab.set_group(1)
+        |> Tab.set_session(session)
 
-      tab_bar =
+      {tab_bar, _workspace} =
         tab
-        |> MingaEditor.State.TabBar.new()
-        |> MingaEditor.State.TabBar.set_workspace_session(0, session)
+        |> TabBar.new()
+        |> TabBar.add_workspace("Agent", session)
 
       %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},

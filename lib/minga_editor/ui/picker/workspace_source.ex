@@ -12,6 +12,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   alias MingaEditor.UI.Picker.Item
 
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
 
   @impl true
@@ -82,26 +83,32 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   defp group_icon(%Workspace{}), do: "\u{F0256}"
 
   @spec agent_status_text(Workspace.t()) :: String.t()
-  defp agent_status_text(%Workspace{agent_status: :thinking}),
-    do: " \u{21BB} thinking"
+  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :thinking}}),
+    do: " ↻ thinking"
 
-  defp agent_status_text(%Workspace{agent_status: :tool_executing}),
-    do: " \u{2699} executing"
+  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :tool_executing}}),
+    do: " ⚙ executing"
 
-  defp agent_status_text(%Workspace{agent_status: :plan}), do: " ✎ plan"
-  defp agent_status_text(%Workspace{agent_status: :error}), do: " \u{26A0} error"
-  defp agent_status_text(%Workspace{agent_status: :idle}), do: " \u{2713} idle"
-  defp agent_status_text(_), do: ""
+  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :plan}}), do: " ✎ plan"
+
+  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :error}}),
+    do: " ⚠ error"
+
+  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :idle}}), do: " ✓ idle"
+  defp agent_status_text(%Workspace{}), do: ""
 
   @spec status_annotation(Workspace.t()) :: String.t() | nil
-  defp status_annotation(%Workspace{agent_status: :thinking}),
-    do: "\u{21BB} thinking"
+  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :thinking}}),
+    do: "↻ thinking"
 
-  defp status_annotation(%Workspace{agent_status: :tool_executing}),
-    do: "\u{2699} executing"
+  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :tool_executing}}),
+    do: "⚙ executing"
 
-  defp status_annotation(%Workspace{agent_status: :plan}), do: "✎ plan"
-  defp status_annotation(%Workspace{agent_status: :error}), do: "\u{26A0} error"
-  defp status_annotation(%Workspace{agent_status: :idle}), do: "\u{2713} idle"
-  defp status_annotation(_), do: nil
+  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :plan}}), do: "✎ plan"
+
+  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :error}}),
+    do: "⚠ error"
+
+  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :idle}}), do: "✓ idle"
+  defp status_annotation(%Workspace{}), do: nil
 end

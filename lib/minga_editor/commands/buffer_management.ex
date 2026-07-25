@@ -32,6 +32,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
@@ -1296,7 +1297,7 @@ defmodule MingaEditor.Commands.BufferManagement do
          reason
        ) do
     case TabBar.find_workspace_by_session(tb, session_pid) do
-      %WorkspaceModel{project_view: %ProjectView{} = view} = workspace ->
+      %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} = workspace ->
         handle_project_view_workspace_session_down(
           state,
           tb,
@@ -1323,6 +1324,10 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
+  @spec workspace_session?(WorkspaceModel.t(), pid()) :: boolean()
+  defp workspace_session?(%WorkspaceModel{payload: %WorkspaceAgent{session: pid}}, pid), do: true
+  defp workspace_session?(%WorkspaceModel{}, _pid), do: false
+
   @spec handle_standard_workspace_session_down(
           state(),
           TabBar.t(),
@@ -1331,7 +1336,9 @@ defmodule MingaEditor.Commands.BufferManagement do
           term()
         ) :: state()
   defp handle_standard_workspace_session_down(state, tb, workspace, session_pid, reason) do
-    owned? = Enum.any?(tb.tabs, &(&1.session == session_pid)) or workspace.session == session_pid
+    owned? =
+      Enum.any?(tb.tabs, &(&1.session == session_pid)) or
+        workspace_session?(workspace, session_pid)
 
     if owned? do
       tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
@@ -1529,7 +1536,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec project_view_changed_files(WorkspaceModel.t()) ::
           {:ok, [ProjectFileRef.t()]} | {:error, term()}
-  defp project_view_changed_files(%WorkspaceModel{project_view: %ProjectView{} = view}) do
+  defp project_view_changed_files(%WorkspaceModel{
+         payload: %WorkspaceAgent{project_view: %ProjectView{} = view}
+       }) do
     with {:ok, entries} <- safe_project_view_diff(view) do
       {:ok, diff_entries_to_file_refs(view.project_root, entries)}
     end
@@ -1759,12 +1768,14 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     session_pid =
       case workspace do
-        %WorkspaceModel{session: workspace_session} -> workspace_session
+        %WorkspaceModel{payload: %WorkspaceAgent{session: workspace_session}} -> workspace_session
         _ -> Runtime.active_session(state.shell_runtime)
       end
 
     case {session_pid, workspace} do
-      {nil, %WorkspaceModel{project_view: %ProjectView{} = workspace_view} = workspace} ->
+      {nil,
+       %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = workspace_view}} =
+           workspace} ->
         close_agent_tab_without_session(state, tb, workspace, workspace_view)
 
       {nil, _workspace} ->
@@ -1778,7 +1789,9 @@ defmodule MingaEditor.Commands.BufferManagement do
         |> remove_current_tab()
         |> restore_active_tab_context()
 
-      {session_pid, %WorkspaceModel{project_view: %ProjectView{} = workspace_view} = workspace} ->
+      {session_pid,
+       %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = workspace_view}} =
+           workspace} ->
         state
         |> cleanup_agent_session()
         |> handle_project_view_workspace_session_down(

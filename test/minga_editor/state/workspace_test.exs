@@ -4,6 +4,8 @@ defmodule MingaEditor.State.WorkspaceTest do
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+  alias MingaEditor.State.Workspace.Manual, as: WorkspaceManual
 
   describe "new_manual/1" do
     test "uses the project root basename as the default label" do
@@ -13,17 +15,15 @@ defmodule MingaEditor.State.WorkspaceTest do
       assert workspace.kind == :manual
       assert workspace.label == "minga"
       assert workspace.icon == "folder"
-      assert workspace.session == nil
-      assert workspace.agent_status == nil
       assert workspace.custom_name == nil
       assert workspace.files == []
-      assert workspace.agent_ui == nil
-      assert workspace.project_view == nil
+      assert %WorkspaceManual{} = workspace.payload
       assert workspace.review.state == :clean
     end
 
     test "falls back to Files when no project root is recognized" do
       assert Workspace.new_manual(nil).label == "Files"
+      assert %WorkspaceManual{} = Workspace.new_manual(nil).payload
     end
   end
 
@@ -35,19 +35,21 @@ defmodule MingaEditor.State.WorkspaceTest do
       assert workspace.kind == :agent
       assert workspace.label == "Claude"
       assert workspace.icon == "cpu"
-      assert workspace.agent_status == :idle
-      assert workspace.session == nil
-      assert workspace.custom_name == nil
-      assert is_integer(workspace.color)
-      assert workspace.files == []
-      assert %UIState{} = workspace.agent_ui
-      assert workspace.project_view == nil
+
+      assert %WorkspaceAgent{
+               agent_status: :idle,
+               session: nil,
+               agent_ui: %UIState{},
+               project_view: nil,
+               pending_catchup_events: []
+             } = workspace.payload
+
       assert workspace.review.state == :clean
     end
 
     test "stores session pid" do
       workspace = Workspace.new_agent(2, "Agent 2", self())
-      assert workspace.session == self()
+      assert workspace.payload.session == self()
     end
 
     test "colors cycle through 6-color palette" do
@@ -60,7 +62,19 @@ defmodule MingaEditor.State.WorkspaceTest do
   describe "set_agent_status/2" do
     test "updates status" do
       workspace = Workspace.new_agent(1, "x") |> Workspace.set_agent_status(:thinking)
-      assert workspace.agent_status == :thinking
+      assert workspace.payload.agent_status == :thinking
+    end
+
+    test "does not put agent lifecycle state on manual payloads" do
+      workspace = Workspace.new_manual(nil)
+
+      assert Workspace.set_agent_status(workspace, :thinking) == workspace
+      assert Workspace.set_session(workspace, self()) == workspace
+      assert Workspace.set_agent_ui(workspace, UIState.new()) == workspace
+      assert Workspace.set_project_view(workspace, :project_view) == workspace
+      assert Workspace.put_remote_session(workspace, "home", "session-1") == workspace
+      assert Workspace.set_pending_catchup_events(workspace, [:event]) == workspace
+      assert %WorkspaceManual{} = workspace.payload
     end
   end
 

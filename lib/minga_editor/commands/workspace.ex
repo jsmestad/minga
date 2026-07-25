@@ -20,6 +20,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.WorkspaceWorkflow
 
@@ -305,7 +306,7 @@ defmodule MingaEditor.Commands.Workspace do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
-      %WorkspaceModel{project_view: %ProjectView{}} = workspace ->
+      %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{}}} = workspace ->
         close_project_view_workspace(state, tb, workspace, workspace_id)
 
       %WorkspaceModel{} = workspace ->
@@ -420,7 +421,8 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec workspace_session_alive?(WorkspaceModel.t()) :: boolean()
-  defp workspace_session_alive?(%WorkspaceModel{session: session}) when is_pid(session) do
+  defp workspace_session_alive?(%WorkspaceModel{payload: %WorkspaceAgent{session: session}})
+       when is_pid(session) do
     Process.alive?(session)
   end
 
@@ -545,7 +547,9 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec project_view_changed_files(WorkspaceModel.t()) ::
           {:ok, [FileRef.t()]} | {:error, term()}
-  defp project_view_changed_files(%WorkspaceModel{project_view: %ProjectView{} = view}) do
+  defp project_view_changed_files(%WorkspaceModel{
+         payload: %WorkspaceAgent{project_view: %ProjectView{} = view}
+       }) do
     with {:ok, entries} <- safe_project_view_diff(view) do
       {:ok, diff_entries_to_file_refs(view.project_root, entries)}
     end
@@ -596,7 +600,10 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec promote_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
-  defp promote_workspace(%WorkspaceModel{project_view: %ProjectView{} = view} = workspace) do
+  defp promote_workspace(
+         %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} =
+           workspace
+       ) do
     case safe_project_view_promote(view) do
       :ok ->
         WorkspaceModel.transition_review(workspace, :promote_succeeded)
@@ -631,7 +638,10 @@ defmodule MingaEditor.Commands.Workspace do
   defp conflict_path(_conflict), do: nil
 
   @spec discard_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
-  defp discard_workspace(%WorkspaceModel{project_view: %ProjectView{} = view} = workspace) do
+  defp discard_workspace(
+         %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} =
+           workspace
+       ) do
     with :ok <- safe_project_view_discard(view) do
       WorkspaceModel.transition_review(workspace, :discard)
     end
@@ -641,7 +651,8 @@ defmodule MingaEditor.Commands.Workspace do
     do: WorkspaceModel.transition_review(workspace, :discard)
 
   @spec stop_workspace_session(WorkspaceModel.t() | nil) :: :ok
-  defp stop_workspace_session(%WorkspaceModel{session: session}) when is_pid(session) do
+  defp stop_workspace_session(%WorkspaceModel{payload: %WorkspaceAgent{session: session}})
+       when is_pid(session) do
     AgentSession.stop_session_pid(session)
     :ok
   end

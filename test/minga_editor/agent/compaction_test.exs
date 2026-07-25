@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.CompactionTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
   test "request is zero-queue FIFO keyed by session pid" do
     session = fake_session()
@@ -90,8 +91,9 @@ defmodule MingaEditor.Agent.CompactionTest do
       updated.shell_runtime.state.tab_bar
       |> TabBar.find_workspace_by_session(background_session)
 
-    assert background.agent_ui.view.compaction.execution == :idle
-    assert background.agent_ui.view.toast.message == "Auto-compact failed: :provider_error"
+    assert %WorkspaceAgent{agent_ui: background_ui} = background.payload
+    assert background_ui.view.compaction.execution == :idle
+    assert background_ui.view.toast.message == "Auto-compact failed: :provider_error"
     assert MingaEditor.Shell.Runtime.active_session(updated.shell_runtime) == active_session
   end
 
