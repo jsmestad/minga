@@ -90,10 +90,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
   def on_select(_item, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec target_item(Workspace.t(), operation(), non_neg_integer(), FileRef.t()) :: Item.t()
   defp target_item(
          %Workspace{} = workspace,

@@ -22,10 +22,6 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   def title, do: "Diagnostics"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{buffers: %{active: buf}}) when is_pid(buf) do
     buf
@@ -84,10 +80,6 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
         state
     end
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 
   @spec severity_icon(Diagnostics.Diagnostic.severity()) :: String.t()
   defp severity_icon(:error), do: "E"

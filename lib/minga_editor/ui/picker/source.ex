@@ -11,7 +11,7 @@ defmodule MingaEditor.UI.Picker.Source do
   - `candidates/1` — returns the list of picker items given some context
   - `on_select/2` — called when the user selects an item; returns new editor state
   - `on_bulk_select/2` — optionally called when the user confirms explicitly marked items
-  - `on_cancel/1` — called when the user cancels; returns new editor state
+  - `on_cancel/1` — optionally called when the user cancels; defaults to returning the editor state unchanged
   - `preview?/0` — legacy live-navigation preview flag (default: false)
   - `live_preview?/0` — whether navigating the picker should temporarily run `on_select/2` for the highlighted item (default: `preview?/0` for backwards compatibility)
   - `gui_preview?/0` — whether the GUI preview pane should be shown for this source (default: false)
@@ -33,8 +33,6 @@ defmodule MingaEditor.UI.Picker.Source do
         @impl true
         def on_select(item, state), do: state
 
-        @impl true
-        def on_cancel(state), do: state
       end
   """
 
@@ -182,6 +180,7 @@ defmodule MingaEditor.UI.Picker.Source do
   @callback enrich([Picker.item()]) :: [Picker.item()]
 
   @optional_callbacks [
+    on_cancel: 1,
     preview?: 0,
     live_preview?: 0,
     gui_preview?: 0,
@@ -257,7 +256,11 @@ defmodule MingaEditor.UI.Picker.Source do
         ) ::
           MingaEditor.State.t()
   def on_cancel(module, state, source \\ nil) do
-    invoke_state(module, :on_cancel, [state], source, state)
+    if exported?(module, :on_cancel, 1) do
+      invoke_state(module, :on_cancel, [state], source, state)
+    else
+      state
+    end
   end
 
   @doc "Returns whether a source module should live-preview the highlighted item."

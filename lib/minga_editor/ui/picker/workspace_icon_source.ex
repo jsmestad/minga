@@ -104,8 +104,4 @@ defmodule MingaEditor.UI.Picker.WorkspaceIconSource do
   end
 
   def on_select(_, state), do: state
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 end

@@ -24,10 +24,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   def title, do: "Sessions"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{tab_bar: %TabBar{} = tb} = ctx) do
     disk = disk_candidates(ctx)
@@ -65,10 +61,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
         state
     end
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
 

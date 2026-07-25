@@ -56,10 +56,6 @@ defmodule MingaEditor.UI.Picker.CodeActionSource do
     apply_code_action(state, action)
   end
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec apply_code_action(term(), map()) :: term()

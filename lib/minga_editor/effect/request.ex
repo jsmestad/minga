@@ -117,6 +117,11 @@ defmodule MingaEditor.Effect.Request do
         %__MODULE__{handler: handler, effect: older} = old_request,
         %__MODULE__{handler: handler, effect: newer} = new_request
       ) do
-    %{new_request | effect: handler.coalesce(older, newer), resource: old_request.resource}
+    chosen_effect =
+      if function_exported?(handler, :coalesce, 2),
+        do: handler.coalesce(older, newer),
+        else: newer
+
+    %{new_request | effect: chosen_effect, resource: old_request.resource}
   end
 end

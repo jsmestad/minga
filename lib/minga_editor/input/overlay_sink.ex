@@ -23,15 +23,6 @@ defmodule MingaEditor.Input.OverlaySink do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   @impl true
-  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
-          MingaEditor.Input.Handler.result()
-  def handle_key(state, _codepoint, _modifiers) do
-    # Keyboard handling stays with the surface's existing key bindings; the sink
-    # only governs mouse routing, so keys pass through untouched.
-    {:passthrough, state}
-  end
-
-  @impl true
   @spec handle_mouse(
           state(),
           integer(),

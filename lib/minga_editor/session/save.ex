@@ -69,10 +69,6 @@ defmodule MingaEditor.Session.Save do
   end
 
   @impl true
-  @spec coalesce(t(), t()) :: t()
-  def coalesce(%__MODULE__{}, %__MODULE__{} = newer), do: newer
-
-  @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
   def apply(%EditorState{} = state, %Outcome{value: {:failed, reason}} = outcome) do
     Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")

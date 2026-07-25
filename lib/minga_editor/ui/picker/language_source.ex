@@ -37,10 +37,6 @@ defmodule MingaEditor.UI.Picker.LanguageSource do
     BufferManagement.apply_filetype_change(state, filetype)
   end
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec format_candidate(Language.t(), atom()) :: Item.t()

@@ -48,8 +48,4 @@ defmodule MingaEditor.UI.Picker.CommandHelpSource do
   def on_select(%Item{id: command_name}, state) do
     Help.execute(state, {:describe_command_named, command_name})
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 end

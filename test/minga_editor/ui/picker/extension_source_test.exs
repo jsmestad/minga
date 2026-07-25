@@ -8,11 +8,4 @@ defmodule MingaEditor.UI.Picker.ExtensionSourceTest do
       assert ExtensionSource.title() == "Extension"
     end
   end
-
-  describe "on_cancel/1" do
-    test "returns state unchanged" do
-      state = %{foo: :bar}
-      assert ExtensionSource.on_cancel(state) == state
-    end
-  end
 end

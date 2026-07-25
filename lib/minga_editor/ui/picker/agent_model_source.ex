@@ -22,10 +22,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   def title, do: "Agent Model"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec layout() :: MingaEditor.UI.Picker.Source.layout()
   def layout, do: :centered
 
@@ -45,10 +41,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   def on_select(%Item{id: model_id}, state) when is_binary(model_id) do
     MingaEditor.Commands.Agent.set_model(state, model_id)
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
 

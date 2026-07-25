@@ -442,13 +442,26 @@ defmodule MingaEditor.Input.Router do
           non_neg_integer()
         ) :: MingaEditor.Input.Handler.result()
   defp invoke_key_handler({handler, source}, state, codepoint, modifiers) do
+    Code.ensure_loaded!(handler)
+
     InvocationContext.with_source(source, fn ->
-      handler.handle_key(state, codepoint, modifiers)
+      call_key_handler(handler, state, codepoint, modifiers)
     end)
   end
 
   defp invoke_key_handler(handler, state, codepoint, modifiers) when is_atom(handler) do
-    handler.handle_key(state, codepoint, modifiers)
+    Code.ensure_loaded!(handler)
+    call_key_handler(handler, state, codepoint, modifiers)
+  end
+
+  @spec call_key_handler(module(), EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp call_key_handler(handler, state, codepoint, modifiers) do
+    if function_exported?(handler, :handle_key, 3) do
+      handler.handle_key(state, codepoint, modifiers)
+    else
+      {:passthrough, state}
+    end
   end
 
   @spec record_keystroke(EditorState.t(), non_neg_integer(), non_neg_integer(), atom()) ::

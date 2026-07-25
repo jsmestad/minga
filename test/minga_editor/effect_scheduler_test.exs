@@ -6,6 +6,7 @@ defmodule MingaEditor.EffectSchedulerTest do
   alias Minga.Project.Root
   alias Minga.Project.WorkspaceSnapshot
   alias Minga.Test.EffectOwner
+  alias Minga.Test.LatestWinsEffectProbe
   alias Minga.Test.EffectProbe
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
@@ -628,6 +629,29 @@ defmodule MingaEditor.EffectSchedulerTest do
     finalize_once(scheduler, first_outcome)
     assert_receive {:effect_started, 3, third_worker, [2, 3]}
     send(third_worker, {:release_effect, 3})
+    finalize_once(scheduler, receive_candidate(scheduler, third.id, :completed))
+  end
+
+  test "bounded coalescing defaults missing effect coalesce to the newer request" do
+    scheduler = start_scheduler()
+    policy = Policy.coalescing(1)
+    first = LatestWinsEffectProbe.request(self(), :first, :resource, policy)
+    second = LatestWinsEffectProbe.request(self(), :second, :resource, policy)
+    third = LatestWinsEffectProbe.request(self(), :third, :resource, policy)
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_receive {:latest_wins_effect_started, :first, first_worker}
+    assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+    assert EffectScheduler.schedule(scheduler, third) == {:ok, third.id, :queued}
+
+    assert_terminal_direct(second.id, :stale, :coalesced)
+
+    send(first_worker, {:release_latest_wins_effect, :first})
+    first_outcome = receive_candidate(scheduler, first.id, :completed)
+    refute_received {:latest_wins_effect_started, :third, _worker}
+    finalize_once(scheduler, first_outcome)
+    assert_receive {:latest_wins_effect_started, :third, third_worker}
+    send(third_worker, {:release_latest_wins_effect, :third})
     finalize_once(scheduler, receive_candidate(scheduler, third.id, :completed))
   end
 

@@ -62,8 +62,4 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
         state
     end
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 end

@@ -47,10 +47,6 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
 
   def on_select(_item, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec switch_to_workspace(term(), TabBar.t(), non_neg_integer()) :: term()
   defp switch_to_workspace(state, tab_bar, workspace_id) do
     case TabBar.tabs_in_workspace(tab_bar, workspace_id) do

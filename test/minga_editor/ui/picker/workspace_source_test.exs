@@ -135,11 +135,4 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       assert WorkspaceSource.on_select(%Item{id: 0, label: "Manual"}, state) == state
     end
   end
-
-  describe "on_cancel/1" do
-    test "returns state unchanged" do
-      state = %{shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}}
-      assert WorkspaceSource.on_cancel(state) == state
-    end
-  end
 end

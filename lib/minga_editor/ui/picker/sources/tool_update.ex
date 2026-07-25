@@ -42,8 +42,4 @@ defmodule MingaEditor.UI.Picker.Sources.ToolUpdate do
         )
     end
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 end

@@ -45,10 +45,6 @@ defmodule MingaEditor.UI.Picker.HelpSource do
 
   def on_select(_item, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec cached_candidates([module_exports()]) :: [Item.t()]
   defp cached_candidates(entries) do
     case :persistent_term.get(@cache_key, :missing) do

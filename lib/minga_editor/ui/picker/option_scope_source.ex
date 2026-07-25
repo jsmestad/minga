@@ -54,10 +54,6 @@ defmodule MingaEditor.UI.Picker.OptionScopeSource do
 
   def on_select(_, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec record_command_execution(map()) :: :ok

@@ -19,10 +19,6 @@ defmodule MingaEditor.UI.Picker.Sources.Tool do
   def title, do: "Manage Tools"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec layout() :: :centered
   def layout, do: :centered
 
@@ -107,10 +103,6 @@ defmodule MingaEditor.UI.Picker.Sources.Tool do
         )
     end
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 
   @impl true
   @spec actions(Item.t()) :: [MingaEditor.UI.Picker.Source.action_entry()]

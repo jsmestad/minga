@@ -15,10 +15,6 @@ defmodule MingaEditor.UI.Picker.RemoteFileSource do
   def title, do: "Remote files"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{
         picker_ui: %{context: %{server_name: server_name, node: remote_node, root: root}}
@@ -36,10 +32,6 @@ defmodule MingaEditor.UI.Picker.RemoteFileSource do
   def on_select(%Item{id: {:remote_file, server_name, path}}, state) do
     RemoteFiles.open_remote_file(state, server_name, path)
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 
   @spec format_candidate(String.t(), String.t(), String.t()) :: Item.t()
   defp format_candidate(server_name, root, path) do
