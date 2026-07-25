@@ -42,6 +42,59 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
+  defmodule SuccessorSubmitHandler do
+    @behaviour MingaEditor.UI.Prompt.Handler
+
+    @impl true
+    def label, do: "Original: "
+
+    @impl true
+    def on_submit(text, state) do
+      Process.put(:successor_submit_legacy_called, text)
+      PromptUI.open(state, RenameHandler, label: "Next: ", default: text)
+    end
+
+    @impl true
+    def on_submit(text, state, context) do
+      Process.put(:successor_submit_context, context)
+
+      Process.put(
+        :successor_submit_modal_before_open,
+        MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
+      )
+
+      PromptUI.open(state, RenameHandler, label: "Next: ", default: "#{context.prefix}:#{text}")
+    end
+  end
+
+  defmodule SuccessorCancelHandler do
+    @behaviour MingaEditor.UI.Prompt.Handler
+
+    @impl true
+    def label, do: "Cancel: "
+
+    @impl true
+    def on_submit(_text, state), do: state
+
+    @impl true
+    def on_cancel(state) do
+      Process.put(:successor_cancel_legacy_called, true)
+      state
+    end
+
+    @impl true
+    def on_cancel(state, context) do
+      Process.put(:successor_cancel_context, context)
+
+      Process.put(
+        :successor_cancel_modal_before_open,
+        MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
+      )
+
+      PromptUI.open(state, RenameHandler, label: "Next: ", default: context.reason)
+    end
+  end
+
   @escape 27
   @enter 13
   @backspace 127
@@ -237,6 +290,31 @@ defmodule MingaEditor.PromptUITest do
       assert Process.get(:submitted) == ""
       refute PromptUI.open?(state)
     end
+
+    test "Enter closes before context-aware submit and preserves successor prompt" do
+      state =
+        base_state()
+        |> PromptUI.open(SuccessorSubmitHandler, default: "value", context: %{prefix: "ctx"})
+
+      {state, nil} = PromptUI.handle_key(state, @enter, 0)
+      pui = prompt_state(state)
+
+      assert Process.get(:successor_submit_context) == %{prefix: "ctx"}
+      assert Process.get(:successor_submit_modal_before_open) == :none
+      refute Process.get(:successor_submit_legacy_called)
+      assert pui.handler == RenameHandler
+      assert pui.label == "Next: "
+      assert pui.text == "ctx:value"
+    end
+
+    test "ProjectRemoveConfirm uses captured context after prompt is closed" do
+      state =
+        MingaEditor.UI.Prompt.ProjectRemoveConfirm.on_submit("yes", base_state(), %{
+          path: "/tmp/project"
+        })
+
+      assert state.shell_runtime.state.notice.message == "Removed project: /tmp/project"
+    end
   end
 
   describe "handle_key/3 — cancel" do
@@ -254,6 +332,22 @@ defmodule MingaEditor.PromptUITest do
 
       assert actual == PromptUI.close(opened)
       refute PromptUI.open?(actual)
+    end
+
+    test "Escape dismisses before context-aware cancel and preserves successor prompt" do
+      state =
+        base_state()
+        |> PromptUI.open(SuccessorCancelHandler, default: "draft", context: %{reason: "retry"})
+
+      {state, nil} = PromptUI.handle_key(state, @escape, 0)
+      pui = prompt_state(state)
+
+      assert Process.get(:successor_cancel_context) == %{reason: "retry"}
+      assert Process.get(:successor_cancel_modal_before_open) == :none
+      refute Process.get(:successor_cancel_legacy_called)
+      assert pui.handler == RenameHandler
+      assert pui.label == "Next: "
+      assert pui.text == "retry"
     end
   end
 

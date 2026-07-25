@@ -24,6 +24,7 @@ defmodule MingaEditor.PromptUI do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Prompt, as: PromptState
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
 
   @escape 27
   @enter 13
@@ -69,19 +70,14 @@ defmodule MingaEditor.PromptUI do
       context: context
     }
 
-    MingaEditor.Shell.Traditional.ModalWorkflow.open(
-      state,
-      {:prompt, PromptPayload.new(prompt_state)}
-    )
+    ModalWorkflow.open(state, {:prompt, PromptPayload.new(prompt_state)})
   end
 
   @doc """
   Closes the prompt without calling any handler callback.
   """
   @spec close(state()) :: state()
-  def close(state) do
-    MingaEditor.Shell.Traditional.ModalWorkflow.dismiss(state)
-  end
+  def close(state), do: ModalWorkflow.dismiss(state)
 
   @doc """
   Returns true if a prompt is currently open.
@@ -101,11 +97,10 @@ defmodule MingaEditor.PromptUI do
 
     case key do
       @escape ->
-        {state |> do_cancel(prompt) |> close(), nil}
+        {do_cancel(state, prompt), nil}
 
       @enter ->
-        new_state = prompt.handler.on_submit(prompt.text, state)
-        {close(new_state), nil}
+        {do_submit(state, prompt), nil}
 
       @tab ->
         {do_tab(state, prompt), nil}
@@ -152,10 +147,7 @@ defmodule MingaEditor.PromptUI do
     {:prompt, payload} = state.shell_runtime.state.modal
     new_pui = fun.(payload.prompt_ui)
 
-    MingaEditor.Shell.Traditional.ModalWorkflow.transition(
-      state,
-      {:prompt, PromptPayload.put_prompt_ui(payload, new_pui)}
-    )
+    ModalWorkflow.transition(state, {:prompt, PromptPayload.put_prompt_ui(payload, new_pui)})
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -168,10 +160,26 @@ defmodule MingaEditor.PromptUI do
     end
   end
 
-  @spec do_cancel(state(), PromptState.t()) :: state()
-  defp do_cancel(state, %{handler: handler}) do
-    if function_exported?(handler, :on_cancel, 1), do: handler.on_cancel(state), else: state
+  @spec do_submit(state(), PromptState.t()) :: state()
+  defp do_submit(state, %{text: text, handler: handler, context: context}) do
+    state = ModalWorkflow.close(state)
+
+    if function_exported?(handler, :on_submit, 3),
+      do: handler.on_submit(text, state, context),
+      else: handler.on_submit(text, state)
   end
+
+  @spec do_cancel(state(), PromptState.t()) :: state()
+  defp do_cancel(state, %{handler: handler, context: context}) do
+    state = ModalWorkflow.dismiss(state)
+
+    {function_exported?(handler, :on_cancel, 2), function_exported?(handler, :on_cancel, 1)}
+    |> call_cancel(handler, state, context)
+  end
+
+  defp call_cancel({true, _}, handler, state, context), do: handler.on_cancel(state, context)
+  defp call_cancel({false, true}, handler, state, _context), do: handler.on_cancel(state)
+  defp call_cancel({false, false}, _handler, state, _context), do: state
 
   @spec do_tab(state(), PromptState.t()) :: state()
   defp do_tab(state, prompt) do
