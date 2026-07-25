@@ -12,11 +12,10 @@ defmodule MingaEditor.Effects.GitMutation do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
+  alias MingaEditor.Effects.Feedback, as: EffectFeedback
   alias MingaEditor.Effects.GitMutationResult
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
-  alias MingaEditor.State.OperationQueue
 
   @max_queued 16
 
@@ -89,29 +88,20 @@ defmodule MingaEditor.Effects.GitMutation do
   def apply(
         state,
         %Outcome{
-          value: {:queued, %OperationQueue{position: position, total: total}},
+          value: {:queued, queue},
           request: %{operation_id: id, effect: effect}
         } = outcome
       ) do
     message = "Queued: #{effect.pending_message}"
 
-    {:ok, feedback} = Feedback.queue_operation(state.feedback, id, message, position, total)
-
-    state = %{state | feedback: feedback}
-
-    {state, outcome}
+    {EffectFeedback.queued(state, id, message, queue), outcome}
   end
 
   def apply(
         state,
         %Outcome{value: :running, request: %{operation_id: id, effect: effect}} = outcome
       ) do
-    state = %{
-      state
-      | feedback: Feedback.run_operation(state.feedback, id, effect.pending_message)
-    }
-
-    {state, outcome}
+    {EffectFeedback.running(state, id, effect.pending_message), outcome}
   end
 
   def apply(
@@ -124,10 +114,7 @@ defmodule MingaEditor.Effects.GitMutation do
       ) do
     MingaEditor.refresh_git_repo(result.git_root)
 
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :success, result.message)
-     }, outcome}
+    {EffectFeedback.finished(state, id, :success, result.message), outcome}
   end
 
   def apply(
@@ -137,10 +124,7 @@ defmodule MingaEditor.Effects.GitMutation do
       ) do
     MingaEditor.refresh_git_repo(effect.git_root)
 
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :timeout, "Git action timed out")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :timeout, "Git action timed out"), outcome}
   end
 
   def apply(
@@ -152,7 +136,7 @@ defmodule MingaEditor.Effects.GitMutation do
     message = failure_message(reason)
     Minga.Log.error(:editor, message)
 
-    {%{state | feedback: Feedback.finish_operation(state.feedback, id, :error, message)}, outcome}
+    {EffectFeedback.finished(state, id, :error, message), outcome}
   end
 
   def apply(
@@ -160,24 +144,15 @@ defmodule MingaEditor.Effects.GitMutation do
         %Outcome{value: {:canceled, reason}, request: %{operation_id: id}} = outcome
       )
       when reason in [:superseded, :coalesced] do
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :stale, "Git action skipped")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :stale, "Git action skipped"), outcome}
   end
 
   def apply(state, %Outcome{value: {:canceled, _reason}, request: %{operation_id: id}} = outcome) do
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :canceled, "Git action canceled")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :canceled, "Git action canceled"), outcome}
   end
 
   def apply(state, %Outcome{value: {:stale, _reason}, request: %{operation_id: id}} = outcome) do
-    {%{
-       state
-       | feedback: Feedback.finish_operation(state.feedback, id, :stale, "Git action skipped")
-     }, outcome}
+    {EffectFeedback.finished(state, id, :stale, "Git action skipped"), outcome}
   end
 
   @impl true

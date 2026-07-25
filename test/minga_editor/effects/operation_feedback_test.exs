@@ -4,11 +4,30 @@ defmodule MingaEditor.Effects.OperationFeedbackTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effects.ExternalFormat
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
+
+  test "ExternalFormat translates queued and running lifecycle feedback" do
+    {state, operation} = start_operation(:external_format, "Format")
+    request = ExternalFormat.request(self(), "cat", operation.id)
+
+    {state, _outcome} = ExternalFormat.apply(state, Outcome.queued(request, 1, 2))
+    operation = feedback(state, operation.id)
+    assert operation.status == :queued
+    assert operation.message == "Format queued"
+    assert operation.queue.position == 1
+    assert operation.queue.total == 2
+
+    {state, _outcome} = ExternalFormat.apply(state, Outcome.running(request))
+    operation = feedback(state, operation.id)
+    assert operation.status == :running
+    assert operation.message == "Formatting…"
+    assert operation.queue == nil
+  end
 
   test "GitMutation translates queued and running lifecycle feedback" do
     {state, operation} = start_operation(:git_stage, "Stage")
