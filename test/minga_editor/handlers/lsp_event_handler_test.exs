@@ -75,22 +75,32 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
                       code_lens_ref}
 
       assert_receive {:lsp_request, "textDocument/inlayHint",
-                      %{"textDocument" => %{"uri" => ^active_uri}}, inlay_hint_caller,
-                      inlay_hint_ref}
+                      %{
+                        "textDocument" => %{"uri" => ^active_uri},
+                        "range" => %{
+                          "start" => %{"line" => request_top},
+                          "end" => %{"line" => request_end}
+                        }
+                      }, inlay_hint_caller, inlay_hint_ref}
 
       assert code_lens_caller == self()
       assert inlay_hint_caller == self()
+      version = Minga.Buffer.version(active_buffer)
+      request_rows = request_end - request_top
+      assert {request_top, request_rows} == {7, 9}
 
       assert LSPState.fetch_pending_request(new_state.lsp, code_lens_ref) ==
-               {:ok, {:response, :code_lens}}
+               {:ok, {:response, :code_lens, active_client, active_buffer, version, nil, nil}}
 
       assert LSPState.fetch_pending_request(new_state.lsp, inlay_hint_ref) ==
-               {:ok, {:response, :inlay_hint}}
+               {:ok,
+                {:inlay_hint, active_client, active_buffer, version, nil, request_top,
+                 request_rows}}
 
       refute_receive {:lsp_request, _, %{"textDocument" => %{"uri" => ^inactive_uri}}, _, _}
     end
 
-    test "L06 producers capture current origin identity while L08 producers stay legacy" do
+    test "L06 and L08 producers capture current origin identity" do
       state = file_buffer_state("hello\n")
       client = start_fake_lsp_client()
       buffer = state.workspace.buffers.active
@@ -119,24 +129,21 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
           state
         end)
 
-      nil_cursor_kinds = [
-        {&MingaEditor.LspActions.document_symbols/1, "textDocument/documentSymbol",
-         :document_symbol},
-        {&MingaEditor.LspActions.workspace_symbols(&1, "query"), "workspace/symbol",
-         :workspace_symbol}
-      ]
-
-      Enum.each(nil_cursor_kinds, fn {producer, method, kind} ->
-        state = producer.(state)
-        assert_receive {:lsp_request, ^method, _params, _caller, ref}
-
-        assert LSPState.fetch_pending_request(state.lsp, ref) ==
-                 {:ok, {:response, kind, client, buffer, Minga.Buffer.version(buffer), nil, nil}}
-      end)
-
       state = MingaEditor.LspActions.code_lens(state)
       assert_receive {:lsp_request, "textDocument/codeLens", _params, _caller, ref}
-      assert LSPState.fetch_pending_request(state.lsp, ref) == {:ok, {:response, :code_lens}}
+
+      assert LSPState.fetch_pending_request(state.lsp, ref) ==
+               {:ok,
+                {:response, :code_lens, client, buffer, Minga.Buffer.version(buffer), nil, nil}}
+
+      state = MingaEditor.LspActions.inlay_hints(state)
+      assert_receive {:lsp_request, "textDocument/inlayHint", params, _caller, ref}
+      rows = params["range"]["end"]["line"] - params["range"]["start"]["line"]
+
+      assert LSPState.fetch_pending_request(state.lsp, ref) ==
+               {:ok,
+                {:inlay_hint, client, buffer, Minga.Buffer.version(buffer), nil,
+                 params["range"]["start"]["line"], rows}}
     end
 
     test "producer tracking ignores a response ref when origin buffer dies before version capture" do
@@ -152,6 +159,217 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert_receive {:lsp_request, "workspace/symbol", _params, _caller, ref}
       assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+    end
+
+    test "L08 producer sends nothing when origin buffer dies before capture completes" do
+      path = tmp_lsp_path("dead-code-lens")
+      File.write!(path, "dead\n")
+      on_exit(fn -> File.rm(path) end)
+      buffer = buffer_that_dies_on_version(path)
+      state = %{file_buffer_state("live\n") | workspace: workspace_for(buffer)}
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+
+      assert MingaEditor.LspActions.code_lens(state) == state
+      refute_receive {:lsp_request, "textDocument/codeLens", _params, _caller, _ref}
+    end
+
+    test "L08 stale responses are taken once without touching presentation" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+
+      lsp =
+        state.lsp
+        |> LSPState.track_response_request(
+          ref,
+          :code_lens,
+          client,
+          buffer,
+          Minga.Buffer.version(buffer),
+          nil,
+          nil
+        )
+        |> LSPState.set_code_lenses([%{line: 0, title: "old"}])
+
+      other = start_supervised!({BufferProcess, content: "other"}, id: {:buffer, make_ref()})
+
+      stale = %{
+        state
+        | workspace: %{state.workspace | buffers: %Buffers{active: other, list: [other]}},
+          lsp: lsp
+      }
+
+      {result, effects} =
+        LspEventHandler.handle(stale, {:lsp_response, ref, {:ok, [code_lens_response("new")]}})
+
+      assert effects == [:render_now]
+      assert LSPState.fetch_pending_request(result.lsp, ref) == :error
+      assert result.lsp.code_lenses == [%{line: 0, title: "old"}]
+    end
+
+    test "inlay stale viewport top or rows is taken once without clearing hints" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+
+      for {top, rows} <- [{1, 24}, {0, 25}] do
+        ref = make_ref()
+
+        lsp =
+          state.lsp
+          |> LSPState.track_inlay_hint_request(
+            ref,
+            client,
+            buffer,
+            Minga.Buffer.version(buffer),
+            nil,
+            top,
+            rows
+          )
+          |> LSPState.set_inlay_hints([
+            %{line: 0, col: 0, label: "old", padding_left: false, padding_right: false}
+          ])
+
+        {result, effects} =
+          LspEventHandler.handle(
+            %{state | lsp: lsp},
+            {:lsp_response, ref, {:ok, [inlay_hint_response("new")]}}
+          )
+
+        assert effects == [:render_now]
+        assert LSPState.fetch_pending_request(result.lsp, ref) == :error
+        assert [%{label: "old"}] = result.lsp.inlay_hints
+      end
+    end
+
+    test "correlated L08 error nil and invalid shapes apply retained or clearing semantics" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      version = Minga.Buffer.version(buffer)
+      code_error_ref = make_ref()
+      code_nil_ref = make_ref()
+      code_invalid_ref = make_ref()
+      inlay_invalid_ref = make_ref()
+
+      viewport =
+        MingaEditor.Session.State.current_viewport(
+          state.workspace,
+          state.frontend.terminal_viewport
+        )
+
+      lsp =
+        state.lsp
+        |> LSPState.set_code_lenses([%{line: 0, title: "old"}])
+        |> LSPState.set_inlay_hints([
+          %{line: 0, col: 0, label: "old", padding_left: false, padding_right: false}
+        ])
+        |> LSPState.track_response_request(
+          code_error_ref,
+          :code_lens,
+          client,
+          buffer,
+          version,
+          nil,
+          nil
+        )
+        |> LSPState.track_response_request(
+          code_nil_ref,
+          :code_lens,
+          client,
+          buffer,
+          version,
+          nil,
+          nil
+        )
+        |> LSPState.track_response_request(
+          code_invalid_ref,
+          :code_lens,
+          client,
+          buffer,
+          version,
+          nil,
+          nil
+        )
+        |> LSPState.track_inlay_hint_request(
+          inlay_invalid_ref,
+          client,
+          buffer,
+          version,
+          nil,
+          viewport.top,
+          viewport.rows
+        )
+
+      {after_error, _effects} =
+        LspEventHandler.handle(
+          %{state | lsp: lsp},
+          {:lsp_response, code_error_ref, {:error, "fail"}}
+        )
+
+      assert after_error.lsp.code_lenses == [%{line: 0, title: "old"}]
+
+      {after_invalid_code, _effects} =
+        LspEventHandler.handle(
+          after_error,
+          {:lsp_response, code_invalid_ref, {:ok, %{"bad" => true}}}
+        )
+
+      assert after_invalid_code.lsp.code_lenses == [%{line: 0, title: "old"}]
+
+      {after_invalid_inlay, _effects} =
+        LspEventHandler.handle(
+          after_invalid_code,
+          {:lsp_response, inlay_invalid_ref, {:ok, %{"bad" => true}}}
+        )
+
+      assert [%{label: "old"}] = after_invalid_inlay.lsp.inlay_hints
+
+      {after_nil, _effects} =
+        LspEventHandler.handle(after_invalid_inlay, {:lsp_response, code_nil_ref, {:ok, nil}})
+
+      assert after_nil.lsp.code_lenses == []
+    end
+
+    test "unresolved code lens resolve inherits accepted initial origin" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+
+      state = %{
+        state
+        | lsp:
+            LSPState.track_response_request(
+              state.lsp,
+              ref,
+              :code_lens,
+              client,
+              buffer,
+              Minga.Buffer.version(buffer),
+              nil,
+              nil
+            )
+      }
+
+      {result, _effects} =
+        LspEventHandler.handle(
+          state,
+          {:lsp_response, ref, {:ok, [unresolved_code_lens_response()]}}
+        )
+
+      assert_receive {:lsp_request, "codeLens/resolve", _params, _caller, resolve_ref}
+
+      assert LSPState.fetch_pending_request(result.lsp, resolve_ref) ==
+               {:ok,
+                {:response, :code_lens_resolve, client, buffer, Minga.Buffer.version(buffer), nil,
+                 nil}}
     end
 
     test "references uses one structured identity from request through no-result response" do
@@ -1360,6 +1578,21 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
   end
 
+  defp code_lens_response(title) do
+    %{
+      "range" => %{"start" => %{"line" => 0, "character" => 0}},
+      "command" => %{"title" => title}
+    }
+  end
+
+  defp unresolved_code_lens_response do
+    %{"range" => %{"start" => %{"line" => 0, "character" => 0}}, "data" => %{"id" => 1}}
+  end
+
+  defp inlay_hint_response(label) do
+    %{"position" => %{"line" => 0, "character" => 0}, "label" => label}
+  end
+
   defp lsp_location(buffer, line, col) do
     %{
       "uri" => Minga.LSP.SyncServer.path_to_uri(Minga.Buffer.file_path(buffer)),
@@ -1437,17 +1670,26 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         id: {:buffer, make_ref()}
       )
 
+    active_viewport = %{MingaEditor.Viewport.new(9, 80, 0) | top: 7}
+    terminal_viewport = %{MingaEditor.Viewport.new(3, 80) | top: 2}
+    workspace = workspace_for(active_buffer)
+    active_window = Window.set_viewport(workspace.windows.map[1], active_viewport)
+
     workspace = %{
-      workspace_for(active_buffer)
+      workspace
       | buffers: %Buffers{
           active: active_buffer,
           list: [inactive_buffer, active_buffer],
           active_index: 1
-        }
+        },
+        windows: %{workspace.windows | map: %{1 => active_window}}
     }
 
     {%EditorState{
-       frontend: %MingaEditor.State.Frontend{port_manager: self()},
+       frontend: %MingaEditor.State.Frontend{
+         port_manager: self(),
+         terminal_viewport: terminal_viewport
+       },
        workspace: workspace
      }, inactive_path, active_path}
   end

@@ -4786,3 +4786,33 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Merge evidence:** PR #3232 merged on 2026-07-24 after required CI run `30134673953` passed.
 - **Findings resolved:** L07 implementation plus every mandatory correction from the correctness, Ponytail, and Elixir reviews are applied; final acceptance passed with no findings.
 - **Completion date:** 2026-07-24
+
+### W119/L08: Validate code lens and inlay decorations against captured origin
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** L08
+- **Decision:** APPROVE_REVISED_CAP, one clean cutover from legacy L08 atoms to captured current-origin code-lens tracking plus one viewport-bearing inlay-hint variant.
+- **Planning profile:** `L08RoutePlanner`, editor-lifecycle-planner, read-only; superseded by corrected lock from `agent://L08PlanVerifier`.
+- **Implementation profile:** `L08RouteWorker`, editor-lifecycle-worker, no delegation.
+- **Baseline:** `a01f7e7128a95924575f472662996af89a1463ab`.
+- **Ready provenance:** Corrected lock from `agent://L08PlanVerifier`; budget approval from `agent://L08BudgetDecision` raised the hard formatted caps to net `+120` production lines across the five named production files and net `+300` test lines across the four named test files.
+- **Observable result:** Code-lens, codeLens/resolve, and inlay-hint responses are taken once and accepted only when the captured client, active buffer, buffer version, active tab, and, for inlay hints, effective viewport top and rows still match. Dead capture sends and tracks nothing. Accepted empty initial code-lens and inlay responses clear their `State.LSP` stores and buffer decoration groups; failed or invalid responses retain presentation.
+- **Implementation result:** Removed the L08 legacy atom tracking API and handler dispatch; reused the L06 current-origin tuple for code lens and codeLens/resolve with nil cursor; added exactly one `{:inlay_hint, client, buffer, version, tab_id, viewport_top, viewport_rows}` variant; made initial producers capture file path, version, tab, and the effective inlay viewport before sending; made codeLens/resolve inherit the accepted initial origin; removed empty decoration early returns.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/handlers/lsp_event_handler.ex`, `lib/minga_editor/lsp_actions.ex`, `lib/minga_editor/lsp_decorations.ex`, `lib/minga_editor/state/lsp.ex`, `lib/minga_editor/state/lsp/pending_requests.ex`, `test/minga_editor/handlers/lsp_event_handler_test.exs`, `test/minga_editor/lsp_actions_test.exs`, `test/minga_editor/state/lsp/pending_requests_test.exs`, and `test/minga_editor/state/tab_switch_test.exs`.
+- **Focused validation:** Mandatory review corrections applied; residual resolve-title guard correction applied; final test-strength corrections applied; `mix test test/minga_editor/handlers/lsp_event_handler_test.exs` passed `49 tests`; full locked suite `mix test test/minga_editor/state/lsp/pending_requests_test.exs test/minga_editor/handlers/lsp_event_handler_test.exs test/minga_editor/lsp_actions_test.exs test/minga_editor/state/tab_switch_test.exs test/minga_editor/handlers/file_event_handler_test.exs test/minga_editor/handlers/session_restore_test.exs` passed `121 tests`; `make lint` passed after the production residuals.
+- **Broad validation:** `git diff --check` and `make lint` passed; `mix test.llm --max-cases 8` passed `58 doctests, 98 properties, 9,804 tests, 0 failures, 1 skipped, 616 excluded`. A preceding `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` run hit the unchanged load-sensitive `MingaAgent.SessionManagerTest` five-second call timeout; the same command passed on current main, and the isolated test plus the bounded-concurrency broad run passed on this branch.
+- **Reviewer verdict:** Initial correctness and Elixir reviews found response-shape totality and resolve-title blockers; all were corrected. Ponytail returned LEAN. Final acceptance found two test-strength blockers for effective-viewport selection and independent top/rows staleness; both were corrected, and targeted re-review returned PASS with `0.99` confidence.
+- **Production lines added/removed before roadmap evidence:** `+225/-106`, net `+119`, within the revised `+120` cap from `agent://L08BudgetDecision`.
+- **Test lines added/removed before roadmap evidence:** `+409/-111`, net `+298`, within the revised `+300` cap from `agent://L08BudgetDecision`.
+- **Concepts added:** L08 inlay-hint viewport identity with top and rows; code-lens origin inheritance for resolve requests.
+- **Concepts removed:** L08 legacy atom pending requests, legacy handler dispatch, send-before-version L08 producer paths, and empty-list decoration retention.
+- **Retained constraints:** No new module, process, registry, dependency, behaviour, protocol, configuration, public API, compatibility shim, metadata map, generation, URI/path pending field, code-lens ordinal, result cache, decoration id, or store owner change.
+- **Discoveries affecting later work:** None; L08 closes the LSP code-lens and inlay decoration stale/empty gap without changing diagnostics, semantic tokens, parser highlighting, completion/signature identity, transport, or frontend protocol behavior.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
+- **PR URL:** RESERVED
+- **Implementation commit SHA:** RESERVED
+- **Merge SHA:** RESERVED
+- **Merge evidence:** RESERVED
+- **Findings resolved:** L08 is implemented as the approved ROUTE follow-on.
+- **Completion date:** 2026-07-24

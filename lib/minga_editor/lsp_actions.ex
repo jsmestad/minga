@@ -615,20 +615,19 @@ defmodule MingaEditor.LspActions do
   defp request_code_lens_for_capability(state, _client, false, _buf), do: state
 
   defp request_code_lens_for_capability(state, client, true, buf) do
-    request_code_lens_for_path(state, client, Buffer.file_path(buf))
-  end
+    case capture_lsp_origin(state, buf) do
+      {:ok, path, version, tab_id} ->
+        uri = SyncServer.path_to_uri(path)
+        params = %{"textDocument" => %{"uri" => uri}}
+        ref = Client.request(client, "textDocument/codeLens", params)
+        track_response_request(state, ref, :code_lens, client, buf, version, tab_id, nil)
 
-  @spec request_code_lens_for_path(state(), pid(), String.t() | nil) :: state()
-  defp request_code_lens_for_path(state, _client, nil) do
-    NoticeWorkflow.publish(state, "Buffer has no file path")
-  end
+      :no_file ->
+        NoticeWorkflow.publish(state, "Buffer has no file path")
 
-  defp request_code_lens_for_path(state, client, path) do
-    uri = SyncServer.path_to_uri(path)
-    params = %{"textDocument" => %{"uri" => uri}}
-    ref = Client.request(client, "textDocument/codeLens", params)
-
-    track_response_request(state, ref, :code_lens)
+      :stale ->
+        state
+    end
   end
 
   # ── Inlay hints ───────────────────────────────────────────────────────────
@@ -659,27 +658,29 @@ defmodule MingaEditor.LspActions do
   defp request_inlay_hints_for_capability(state, _client, false, _buf), do: state
 
   defp request_inlay_hints_for_capability(state, client, true, buf) do
-    request_inlay_hints_for_path(state, client, Buffer.file_path(buf))
-  end
+    case capture_lsp_origin(state, buf) do
+      {:ok, path, version, tab_id} ->
+        viewport = effective_viewport(state)
+        top = viewport.top
+        rows = viewport.rows
+        uri = SyncServer.path_to_uri(path)
 
-  @spec request_inlay_hints_for_path(state(), pid(), String.t() | nil) :: state()
-  defp request_inlay_hints_for_path(state, _client, nil), do: state
+        params = %{
+          "textDocument" => %{"uri" => uri},
+          "range" => %{
+            "start" => %{"line" => top, "character" => 0},
+            "end" => %{"line" => top + rows, "character" => 0}
+          }
+        }
 
-  defp request_inlay_hints_for_path(state, client, path) do
-    uri = SyncServer.path_to_uri(path)
-    vp = state.frontend.terminal_viewport
+        ref = Client.request(client, "textDocument/inlayHint", params)
 
-    params = %{
-      "textDocument" => %{"uri" => uri},
-      "range" => %{
-        "start" => %{"line" => vp.top, "character" => 0},
-        "end" => %{"line" => vp.top + vp.rows, "character" => 0}
-      }
-    }
+        %{state | lsp: LSPState.remember_inlay_viewport(state.lsp, top)}
+        |> track_inlay_hint_request(ref, client, buf, version, tab_id, top, rows)
 
-    ref = Client.request(client, "textDocument/inlayHint", params)
-
-    track_response_request(state, ref, :inlay_hint)
+      _ ->
+        state
+    end
   end
 
   @inlay_hint_scroll_debounce_ms 200
@@ -720,14 +721,15 @@ defmodule MingaEditor.LspActions do
   defp cancel_timer(nil), do: :ok
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
-  # Returns the viewport top for the active window. Proper Editor state uses the
-  # active window transition boundary; render-shaped maps carry the frontend viewport directly.
-  @spec effective_viewport_top(state()) :: non_neg_integer()
-  defp effective_viewport_top(%EditorState{} = state) do
-    MingaEditor.Session.State.current_viewport(state.workspace, state.frontend.terminal_viewport).top
+  @spec effective_viewport(state()) :: MingaEditor.Viewport.t()
+  defp effective_viewport(%EditorState{} = state) do
+    MingaEditor.Session.State.current_viewport(state.workspace, state.frontend.terminal_viewport)
   end
 
-  defp effective_viewport_top(state), do: state.frontend.terminal_viewport.top
+  defp effective_viewport(state), do: state.frontend.terminal_viewport
+
+  @spec effective_viewport_top(state()) :: non_neg_integer()
+  defp effective_viewport_top(state), do: effective_viewport(state).top
 
   # ── Response handlers ──────────────────────────────────────────────────────
 
@@ -1586,27 +1588,29 @@ defmodule MingaEditor.LspActions do
     PickerUI.open(state, LocationSource, %{locations: items, title: "Outgoing Calls"})
   end
 
-  # ── Code lens response ────────────────────────────────────────────────────
-
   @doc "Handles a textDocument/codeLens response (stores for rendering)."
   @spec handle_code_lens_response(state(), {:ok, term()} | {:error, term()}) :: state()
-  def handle_code_lens_response(state, {:error, _}) do
+  def handle_code_lens_response(state, result), do: handle_code_lens_response(state, result, nil)
+
+  @spec handle_code_lens_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          {pid(), pid(), non_neg_integer(), MingaEditor.State.Tab.id() | nil} | nil
+        ) :: state()
+  def handle_code_lens_response(state, {:error, _}, _origin) do
     Log.debug(:lsp, "Code lens request failed")
     state
   end
 
-  def handle_code_lens_response(state, {:ok, nil}), do: state
-  def handle_code_lens_response(state, {:ok, []}), do: state
+  def handle_code_lens_response(state, {:ok, nil}, _origin), do: clear_code_lenses(state)
+  def handle_code_lens_response(state, {:ok, []}, _origin), do: clear_code_lenses(state)
 
-  def handle_code_lens_response(state, {:ok, lenses}) when is_list(lenses) do
-    # Separate resolved lenses (have command) from unresolved ones (need codeLens/resolve)
+  def handle_code_lens_response(state, {:ok, lenses}, origin) when is_list(lenses) do
     {resolved, unresolved} =
       Enum.split_with(lenses, fn lens -> lens["command"] != nil end)
 
-    # Send resolve requests for lenses that have no command
-    state = resolve_code_lenses(state, unresolved)
+    state = resolve_code_lenses(state, unresolved, origin)
 
-    # Store resolved lenses for rendering
     parsed =
       Enum.map(resolved, fn lens ->
         range = lens["range"]
@@ -1623,6 +1627,13 @@ defmodule MingaEditor.LspActions do
     LspDecorations.apply_code_lenses(state)
   end
 
+  def handle_code_lens_response(state, {:ok, _}, _origin), do: state
+
+  defp clear_code_lenses(state) do
+    %{state | lsp: LSPState.set_code_lenses(state.lsp, [])}
+    |> LspDecorations.apply_code_lenses()
+  end
+
   # ── Inlay hint response ──────────────────────────────────────────────────
 
   @doc "Handles a textDocument/inlayHint response (stores for rendering)."
@@ -1632,8 +1643,8 @@ defmodule MingaEditor.LspActions do
     state
   end
 
-  def handle_inlay_hint_response(state, {:ok, nil}), do: state
-  def handle_inlay_hint_response(state, {:ok, []}), do: state
+  def handle_inlay_hint_response(state, {:ok, nil}), do: clear_inlay_hints(state)
+  def handle_inlay_hint_response(state, {:ok, []}), do: clear_inlay_hints(state)
 
   def handle_inlay_hint_response(state, {:ok, hints}) when is_list(hints) do
     parsed =
@@ -1662,6 +1673,13 @@ defmodule MingaEditor.LspActions do
       %{state | lsp: (&LSPState.set_inlay_hints(&1, parsed)).(state.lsp)}
 
     LspDecorations.apply_inlay_hints(state)
+  end
+
+  def handle_inlay_hint_response(state, {:ok, _}), do: state
+
+  defp clear_inlay_hints(state) do
+    %{state | lsp: LSPState.set_inlay_hints(state.lsp, [])}
+    |> LspDecorations.apply_inlay_hints()
   end
 
   # ── WorkspaceEdit application ─────────────────────────────────────────────
@@ -1857,13 +1875,43 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  defp track_response_request(state, ref, kind) do
-    %{state | lsp: LSPState.track_response_request(state.lsp, ref, kind)}
+  defp track_inlay_hint_request(
+         state,
+         ref,
+         client,
+         buffer,
+         version,
+         tab_id,
+         viewport_top,
+         viewport_rows
+       ) do
+    %{
+      state
+      | lsp:
+          LSPState.track_inlay_hint_request(
+            state.lsp,
+            ref,
+            client,
+            buffer,
+            version,
+            tab_id,
+            viewport_top,
+            viewport_rows
+          )
+    }
   end
 
   defp track_response_request(state, ref, kind, client, buffer, cursor) do
-    version = Buffer.version(buffer)
+    case capture_lsp_origin(state, buffer) do
+      {:ok, _path, version, tab_id} ->
+        track_response_request(state, ref, kind, client, buffer, version, tab_id, cursor)
 
+      _ ->
+        state
+    end
+  end
+
+  defp track_response_request(state, ref, kind, client, buffer, version, tab_id, cursor) do
     lsp =
       LSPState.track_response_request(
         state.lsp,
@@ -1872,13 +1920,20 @@ defmodule MingaEditor.LspActions do
         client,
         buffer,
         version,
-        active_tab_id(state),
+        tab_id,
         cursor
       )
 
     %{state | lsp: lsp}
+  end
+
+  defp capture_lsp_origin(state, buffer) do
+    case Buffer.file_path(buffer) do
+      nil -> :no_file
+      path -> {:ok, path, Buffer.version(buffer), active_tab_id(state)}
+    end
   catch
-    :exit, _ -> state
+    :exit, _ -> :stale
   end
 
   @spec mark_operation_running(state(), Operation.id(), String.t()) :: state()
@@ -2223,24 +2278,14 @@ defmodule MingaEditor.LspActions do
   defp severity_to_lsp(:info), do: 3
   defp severity_to_lsp(:hint), do: 4
 
-  # Sends codeLens/resolve requests for lenses that have no command yet.
-  @spec resolve_code_lenses(state(), [map()]) :: state()
-  defp resolve_code_lenses(state, []), do: state
+  defp resolve_code_lenses(state, [], _origin), do: state
+  defp resolve_code_lenses(state, _unresolved, nil), do: state
 
-  defp resolve_code_lenses(state, unresolved) do
-    buf = state.workspace.buffers.active
-
-    case lsp_client_for(state, buf) do
-      nil ->
-        state
-
-      client ->
-        Enum.reduce(unresolved, state, fn lens, st ->
-          ref = Client.request(client, "codeLens/resolve", lens)
-
-          track_response_request(st, ref, :code_lens_resolve)
-        end)
-    end
+  defp resolve_code_lenses(state, unresolved, {client, buffer, version, tab_id}) do
+    Enum.reduce(unresolved, state, fn lens, st ->
+      ref = Client.request(client, "codeLens/resolve", lens)
+      track_response_request(st, ref, :code_lens_resolve, client, buffer, version, tab_id, nil)
+    end)
   end
 
   @doc "Handles a codeLens/resolve response, merging the resolved lens into the existing list."
@@ -2256,10 +2301,7 @@ defmodule MingaEditor.LspActions do
     command = lens["command"]
 
     case command do
-      nil ->
-        state
-
-      %{"title" => title} ->
+      %{"title" => title} when is_binary(title) ->
         range = lens["range"]
         {line, _col} = extract_position(range["start"])
         entry = %{line: line, title: title, data: lens}
@@ -2268,6 +2310,9 @@ defmodule MingaEditor.LspActions do
           %{state | lsp: (&LSPState.append_code_lens(&1, entry)).(state.lsp)}
 
         LspDecorations.apply_code_lenses(state)
+
+      _ ->
+        state
     end
   end
 

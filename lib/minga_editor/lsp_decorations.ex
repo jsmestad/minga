@@ -24,7 +24,6 @@ defmodule MingaEditor.LspDecorations do
   """
   @spec apply_code_lenses(state()) :: state()
   def apply_code_lenses(%{workspace: %{buffers: %{active: nil}}} = state), do: state
-  def apply_code_lenses(%{lsp: %{code_lenses: []}} = state), do: state
 
   def apply_code_lenses(
         %{workspace: %{buffers: %{active: buf}}, lsp: %{code_lenses: lenses}} = state
@@ -55,7 +54,6 @@ defmodule MingaEditor.LspDecorations do
   """
   @spec apply_inlay_hints(state()) :: state()
   def apply_inlay_hints(%{workspace: %{buffers: %{active: nil}}} = state), do: state
-  def apply_inlay_hints(%{lsp: %{inlay_hints: []}} = state), do: state
 
   def apply_inlay_hints(
         %{workspace: %{buffers: %{active: buf}}, lsp: %{inlay_hints: hints}} = state
