@@ -58,6 +58,19 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.active_index(tb) == 0
       assert tb.next_id == 2
     end
+
+    test "new_empty/1 represents no active tab with nil" do
+      tb = TabBar.new_empty()
+
+      assert tb.tabs == []
+      assert tb.active_id == nil
+      assert tb.next_id == 1
+      assert TabBar.active(tb) == nil
+      assert TabBar.active_index(tb) == nil
+      assert TabBar.count(tb) == 0
+      assert TabBar.active_workspace_id(tb) == 0
+      assert TabBar.visible_file_tabs(tb) == []
+    end
   end
 
   describe "add/3" do
@@ -88,6 +101,47 @@ defmodule MingaEditor.State.TabBarTest do
       {_tb, t3} = TabBar.add(tb, :file, "c")
 
       assert {t2.id, t3.id} == {2, 3}
+    end
+
+    test "first tab opened from empty state uses id 1 and becomes active" do
+      {tb, new_tab} = TabBar.new_empty() |> TabBar.add(:file, "main.ex")
+
+      assert new_tab.id == 1
+      assert tb.active_id == 1
+      assert TabBar.active(tb) == new_tab
+      assert tb.next_id == 2
+      assert Enum.map(tb.tabs, & &1.id) == [1]
+    end
+
+    test "insert from empty creates first real id without activating" do
+      {tb, new_tab} = TabBar.new_empty() |> TabBar.insert(:agent, "Agent")
+
+      assert new_tab.id == 1
+      assert tb.tabs == [new_tab]
+      assert tb.active_id == nil
+      assert TabBar.active(tb) == nil
+      assert tb.next_id == 2
+    end
+  end
+
+  describe "remove_file_tabs/1" do
+    test "clears active id when no tabs remain" do
+      tb = TabBar.new(file_tab(1, "a.ex")) |> TabBar.remove_file_tabs()
+
+      assert tb.tabs == []
+      assert tb.active_id == nil
+      assert TabBar.active(tb) == nil
+      assert tb.next_id == 2
+    end
+
+    test "activates only a remaining real tab" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "agent")
+      tb = TabBar.switch_to(tb, 1) |> TabBar.remove_file_tabs()
+
+      assert Enum.map(tb.tabs, & &1.id) == [agent.id]
+      assert tb.active_id == agent.id
+      assert Enum.all?(tb.tabs, &(&1.kind == :agent))
     end
   end
 
@@ -167,6 +221,14 @@ defmodule MingaEditor.State.TabBarTest do
                "b",
                "c"
              ]
+    end
+
+    test "current-active owner operations no-op when empty" do
+      tb = TabBar.new_empty()
+
+      assert TabBar.toggle_active_pin(tb) == tb
+      assert TabBar.move_active_tab_left(tb) == tb
+      assert TabBar.move_active_tab_right(tb) == tb
     end
 
     test "reorder_tab keeps tabs in their pinned bucket" do
@@ -324,6 +386,18 @@ defmodule MingaEditor.State.TabBarTest do
 
       assert TabBar.get(tb, 1).context.editing == editing
       assert TabBar.get(tb, 1).label == "new"
+    end
+
+    test "snapshot_and_switch accepts no outgoing tab" do
+      context = %{keymap_scope: :agent, buffers: %Buffers{}}
+      {tb, tab} = TabBar.new_empty() |> TabBar.insert(:agent, "Agent")
+      tb = TabBar.update_context(tb, tab.id, context)
+
+      switched = TabBar.snapshot_and_switch(tb, nil, %{keymap_scope: :editor}, tab.id)
+
+      assert switched.active_id == tab.id
+      assert TabBar.active(switched).context.keymap_scope == :agent
+      assert Enum.map(switched.tabs, & &1.id) == [tab.id]
     end
 
     test "retargets file tabs and ignores agent or missing tab ids" do
@@ -581,6 +655,14 @@ defmodule MingaEditor.State.TabBarTest do
       assert projected.remote_session_id == "session-1"
     end
 
+    test "restore_workspaces preserves nil active id when nothing is restored" do
+      tb = TabBar.new_empty() |> TabBar.restore_workspaces([], "/tmp/minga")
+
+      assert tb.tabs == []
+      assert tb.active_id == nil
+      assert TabBar.active(tb) == nil
+    end
+
     test "restore_workspaces projects restored workspace lifecycle onto restored tabs" do
       session = self()
 
@@ -600,6 +682,19 @@ defmodule MingaEditor.State.TabBarTest do
       assert projected.agent_status == :thinking
       assert projected.server_name == "home"
       assert projected.remote_session_id == "restored-session"
+    end
+
+    test "restore_workspaces preserves nil active id when empty input gains workspace tabs" do
+      workspace = Workspace.new_agent(5, "Restored", self())
+
+      tb =
+        TabBar.new_empty()
+        |> TabBar.restore_workspaces([workspace], "/tmp/minga")
+
+      assert [%Tab{id: restored_id, kind: :agent, group_id: 5}] = tb.tabs
+      assert tb.active_id == nil
+      assert TabBar.active(tb) == nil
+      assert tb.next_id == restored_id + 1
     end
   end
 

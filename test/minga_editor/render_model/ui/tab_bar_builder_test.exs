@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilderTest do
   alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.State.TabBar, as: TabBarState
 
   describe "build/1" do
     test "returns hidden tab bar when shell has no gui_payload" do
@@ -19,6 +20,13 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilderTest do
       model = TabBarBuilder.build(ctx)
 
       assert %TabBar{visible?: false, active_tab_id: nil, tabs: []} = model
+    end
+
+    test "empty TabBar projects nil active tab and no tab models" do
+      ctx = build_minimal_context(tab_bar: TabBarState.new_empty("/tmp/project"))
+      model = TabBarBuilder.build(ctx)
+
+      assert %TabBar{visible?: true, active_tab_id: nil, tabs: []} = model
     end
   end
 

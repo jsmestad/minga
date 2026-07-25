@@ -58,10 +58,8 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
         switch_to_restored_workspace(state, tab_bar, workspace_id)
 
       [_tab | _] ->
-        MingaEditor.TabWorkflow.switch(
-          state,
-          TabBar.switch_to_workspace(tab_bar, workspace_id).active_id
-        )
+        target_id = TabBar.switch_to_workspace(tab_bar, workspace_id).active_id
+        if is_nil(target_id), do: state, else: MingaEditor.TabWorkflow.switch(state, target_id)
     end
   end
 

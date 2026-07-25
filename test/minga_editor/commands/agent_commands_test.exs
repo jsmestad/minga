@@ -996,6 +996,39 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert %TabAgent{session: ^session} = TabBar.active(tab_bar).payload
     end
 
+    test "new_agent_session from empty tab bar activates first real tab through workflow" do
+      state = base_state()
+      tab_bar = TabBar.new_empty("/tmp/minga-empty-launchpad")
+
+      shell_state =
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
+          Runtime.state(state.shell_runtime),
+          tab_bar
+        )
+
+      state = %{
+        state
+        | workspace: WorkspaceState.enter_empty_state(state.workspace),
+          shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      new_state = AgentCommands.new_agent_session(state)
+      tab_bar = new_state.shell_runtime.state.tab_bar
+      active_tab = TabBar.active(tab_bar)
+      {_window_id, active_window} = WorkspaceState.find_agent_chat_window(new_state.workspace)
+      active_workspace = TabBar.active_workspace(tab_bar)
+
+      assert tab_bar.active_id == 1
+      assert tab_bar.next_id == 2
+      assert active_tab.kind == :agent
+      assert Runtime.active_tab_kind(new_state.shell_runtime) == :agent
+      assert new_state.workspace.buffers.active == nil
+      assert MingaEditor.Window.Content.agent_chat?(active_window.content)
+      assert %WorkspaceAgent{session: session} = active_workspace.payload
+      assert is_pid(session)
+      assert %TabAgent{session: ^session} = active_tab.payload
+    end
+
     test "switching back to the source file tab restores file content" do
       state = source_workspace_state()
       file_tab_id = state.shell_runtime.state.tab_bar.active_id

@@ -335,7 +335,9 @@ defmodule MingaEditor.State do
   end
 
   @doc "Retires tab-scoped LSP correlations and their operation feedback atomically."
-  @spec retire_lsp_operations_for_tab(t(), Tab.id()) :: t()
+  @spec retire_lsp_operations_for_tab(t(), Tab.id() | nil) :: t()
+  def retire_lsp_operations_for_tab(%__MODULE__{} = state, nil), do: state
+
   def retire_lsp_operations_for_tab(%__MODULE__{} = state, tab_id) do
     {requests, lsp} = LSPState.take_operation_requests_for_tab(state.lsp, tab_id)
 
@@ -399,7 +401,7 @@ defmodule MingaEditor.State do
     end
   end
 
-  @spec switch_existing_tab(t(), TabBar.t(), Tab.id(), Tab.t() | nil) ::
+  @spec switch_existing_tab(t(), TabBar.t(), Tab.id() | nil, Tab.t() | nil) ::
           {t(), tab_switch_result()}
   defp switch_existing_tab(%__MODULE__{} = state, _tab_bar, _current_id, nil),
     do: {state, :unchanged}

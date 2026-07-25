@@ -676,7 +676,7 @@ defmodule MingaEditor.Commands.Workspace do
   # No-op if the active tab didn't change.
   @spec switch_via_workspace(state(), TabBar.t()) :: state()
   defp switch_via_workspace(state, %TabBar{active_id: new_id}) do
-    if new_id == state.shell_runtime.state.tab_bar.active_id do
+    if is_nil(new_id) or new_id == state.shell_runtime.state.tab_bar.active_id do
       state
     else
       MingaEditor.TabWorkflow.switch(state, new_id)

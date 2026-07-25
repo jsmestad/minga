@@ -13,6 +13,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.Commands.Workspace, as: WorkspaceCommands
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -29,6 +30,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
 
   alias MingaEditor.State.Highlighting
   alias MingaEditor.UI.Highlight
@@ -278,6 +280,147 @@ defmodule MingaEditor.State.TabSwitchTest do
                OperationFeedback.fetch(unchanged.feedback.operation_feedback, rename.id)
 
       assert pending_rename.status == :pending
+    end
+
+    test "switching from nil-active inserted tab activates through root transition" do
+      state = base_state()
+      agent_window = Window.new_agent_chat(1, 24, 80)
+
+      agent_context = %{
+        keymap_scope: :agent,
+        buffers: %Buffers{},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => agent_window},
+          active: 1,
+          next_id: 2
+        }
+      }
+
+      {tab_bar, tab} = TabBar.new_empty() |> TabBar.insert(:agent, "Agent")
+      tab_bar = TabBar.update_context(tab_bar, tab.id, agent_context)
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
+      {switched, result} = EditorState.switch_tab(state, tab.id)
+
+      assert {:switched, %Tab{id: id}} = result
+      assert id == tab.id
+      assert switched.shell_runtime.state.tab_bar.active_id == tab.id
+      assert switched.workspace.keymap_scope == :agent
+      assert switched.workspace.buffers.active == nil
+
+      assert MingaEditor.Window.Content.agent_chat?(
+               switched.workspace.windows.map[switched.workspace.windows.active].content
+             )
+    end
+
+    test "nil outgoing tab does not retire nil-scoped operations" do
+      state = base_state()
+      ref = make_ref()
+
+      {feedback, operation} =
+        OperationFeedback.start(
+          state.feedback.operation_feedback,
+          :lsp_references,
+          "lsp:references:launchpad",
+          "Finding references…",
+          cancelable?: false,
+          replace?: false
+        )
+
+      state = %{
+        state
+        | feedback: Feedback.accept_operation_feedback(state.feedback, feedback),
+          lsp: LSPState.track_operation_request(state.lsp, ref, :references, operation.id, nil)
+      }
+
+      {tab_bar, tab} = TabBar.new_empty() |> TabBar.insert(:agent, "Agent")
+
+      tab_bar =
+        TabBar.update_context(tab_bar, tab.id, %{keymap_scope: :agent, buffers: %Buffers{}})
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
+      {switched, {:switched, %Tab{id: switched_id}}} = EditorState.switch_tab(state, tab.id)
+      assert switched_id == tab.id
+
+      assert {:ok, {:operation, :references, operation_id, nil}} =
+               LSPState.fetch_pending_request(switched.lsp, ref)
+
+      assert operation_id == operation.id
+
+      assert {:ok, pending_operation} =
+               OperationFeedback.fetch(switched.feedback.operation_feedback, operation.id)
+
+      assert pending_operation.status == :pending
+    end
+
+    test "restored workspace tabs keep root active until explicit workspace switch" do
+      workspace_one = WorkspaceModel.new_agent(5, "One", self())
+      workspace_two = WorkspaceModel.new_agent(6, "Two", self())
+
+      tab_bar =
+        TabBar.new_empty()
+        |> TabBar.restore_workspaces([workspace_one, workspace_two], "/tmp/minga")
+
+      state =
+        base_state()
+        |> then(fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
+      assert TabBar.active_workspace_id(tab_bar) == 0
+
+      new_state = WorkspaceCommands.workspace_next(state)
+
+      assert new_state.shell_runtime.state.tab_bar.active_id != nil
+      assert TabBar.active_workspace_id(new_state.shell_runtime.state.tab_bar) == workspace_one.id
     end
 
     test "file-to-file preserves both tab contexts" do

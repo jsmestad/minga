@@ -442,6 +442,32 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert tab_bar.next_workspace_id == 4
   end
 
+  test "empty startup restores persisted agent tabs without activating them", %{tmp_dir: dir} do
+    workspace = Workspace.new_agent(3, "Persisted Agent", nil, dir)
+    assert :ok = Persistence.write(workspace, dir)
+
+    state =
+      Startup.build_initial_state(
+        backend: :headless,
+        port_manager: nil,
+        parser_manager: nil,
+        project_root: dir,
+        infer_project_root: false
+      )
+
+    tab_bar = state.shell_runtime.state.tab_bar
+    assert [%Tab{id: restored_id, kind: :agent, group_id: 3}] = tab_bar.tabs
+    assert tab_bar.active_id == nil
+    refute TabBar.active(tab_bar)
+    assert state.workspace.launchpad
+    assert state.workspace.file_tree.project_root == dir
+    assert %Workspace{kind: :manual, project_root: ^dir} = TabBar.get_workspace(tab_bar, 0)
+
+    activated = MingaEditor.TabWorkflow.switch(state, restored_id)
+
+    assert activated.shell_runtime.state.tab_bar.active_id == restored_id
+  end
+
   test "restored agent workspaces get sessionless tabs so they can be navigated", %{tmp_dir: dir} do
     workspace = Workspace.new_agent(3, "Persisted Agent", nil, dir)
     assert :ok = Persistence.write(workspace, dir)
