@@ -18,8 +18,8 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
-  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Session
 
@@ -50,13 +50,44 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
   defp tab_bar_with_session(session_pid) do
     {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
-    TabBar.set_tab_session(tb, agent_tab.id, session_pid)
+    {tb, workspace} = TabBar.add_workspace(tb, "Agent")
+
+    tb
+    |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
+    |> TabBar.set_workspace_session(workspace.id, session_pid)
+  end
+
+  defp tab_bar_with_orphan_session(session_pid) do
+    {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
+
+    workspace =
+      Workspace.new_agent(99, "Orphan", session_pid) |> Workspace.set_agent_status(:thinking)
+
+    TabBar.accept_tab(tb, Tab.project_agent_lifecycle(agent_tab, workspace))
+  end
+
+  defp tab_bar_with_orphan_remote_session(session_pid) do
+    {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
+
+    workspace =
+      Workspace.new_agent(99, "Orphan", session_pid)
+      |> Workspace.put_remote_session("home", "session-1", :connected, 0)
+
+    TabBar.accept_tab(tb, Tab.project_agent_lifecycle(agent_tab, workspace))
   end
 
   defp tab_bar_with_remote_session(session_pid) do
     {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
+    {tb, workspace} = TabBar.add_workspace(tb, "Agent", session_pid)
 
-    TabBar.set_tab_remote_session(tb, agent_tab.id, "home", "session-1", session_pid)
+    workspace =
+      workspace
+      |> Workspace.set_session(session_pid)
+      |> Workspace.put_remote_session("home", "session-1", :connected, 0)
+
+    tb
+    |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
+    |> TabBar.accept_workspace(workspace)
   end
 
   defp workspace_state_with_project_view(session_pid, project_view) do
@@ -107,6 +138,20 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       state = build_state(tab_bar_with_session(session_pid))
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
+
+      assert result.shell_runtime.state.notice.message ==
+               "Agent session crashed (SPC a n to restart)"
+    end
+
+    test "clears orphan tab-only sessions when the session crashes" do
+      session_pid = spawn(fn -> :ok end)
+      state = build_state(tab_bar_with_orphan_session(session_pid))
+
+      result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
+
+      tab = TabBar.get(result.shell_runtime.state.tab_bar, 2)
+      assert tab.payload.session == nil
+      assert tab.payload.agent_status == :error
 
       assert result.shell_runtime.state.notice.message ==
                "Agent session crashed (SPC a n to restart)"
@@ -229,12 +274,26 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
 
-      remote_tab =
-        Enum.find(
-          result.shell_runtime.state.tab_bar.tabs,
-          &match?(%Tab{payload: %Agent{session: ^session_pid}}, &1)
-        )
+      tab_bar = result.shell_runtime.state.tab_bar
+      remote_workspace = TabBar.find_workspace_by_session(tab_bar, session_pid)
+      remote_tab = TabBar.find_by_session(tab_bar, session_pid)
 
+      assert remote_workspace.payload.session == session_pid
+      assert remote_workspace.payload.remote_session.connection_status == :disconnected
+      assert remote_tab.payload.connection_status == :disconnected
+      assert result.shell_runtime.state.notice.message == "[home] disconnected, reconnecting..."
+    end
+
+    test "marks orphan remote tabs disconnected on noconnection" do
+      session_pid = spawn(fn -> :ok end)
+      state = build_state(tab_bar_with_orphan_remote_session(session_pid))
+
+      result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
+
+      tab_bar = result.shell_runtime.state.tab_bar
+      remote_tab = TabBar.find_by_session(tab_bar, session_pid)
+
+      assert TabBar.find_workspace_by_session(tab_bar, session_pid) == nil
       assert remote_tab.payload.connection_status == :disconnected
       assert result.shell_runtime.state.notice.message == "[home] disconnected, reconnecting..."
     end

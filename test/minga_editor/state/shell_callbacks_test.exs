@@ -429,11 +429,13 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   describe "set_tab_session/3 delegates to shell" do
     test "Traditional: associates session pid with tab" do
+      tab = Tab.new_agent(1, "Agent")
+      tb = TabBar.new(tab)
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, tab.id, workspace.id)
+
       state = %EditorState{
-        shell_runtime:
-          Runtime.new(Runtime.default_entry(), %TraditionalState{
-            tab_bar: TabBar.new(Tab.new_agent(1, "Agent"))
-          }),
+        shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb}),
         workspace: %SessionState{}
       }
 

@@ -1581,9 +1581,57 @@ defmodule MingaEditor.Commands.BufferManagement do
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session_pid
        ) do
+    case TabBar.find_workspace_by_session(tb, session_pid) do
+      %WorkspaceModel{
+        id: workspace_id,
+        payload: %WorkspaceModel.Agent{
+          remote_session: %WorkspaceModel.RemoteSession{server_name: server_name}
+        }
+      } ->
+        tb = TabBar.set_workspace_remote_connection_status(tb, workspace_id, :disconnected)
+
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(state.shell_runtime),
+            tb
+          )
+
+        %{
+          state
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(
+                state.shell_runtime,
+                shell_state
+              )
+        }
+        |> TraditionalWorkflow.install_agent_spinner_stop()
+        |> TraditionalWorkflow.install_agent_error("Disconnected from #{server_name}")
+        |> NoticeWorkflow.publish("[#{server_name}] disconnected, reconnecting...")
+
+      %WorkspaceModel{payload: %WorkspaceModel.Agent{remote_session: nil}} ->
+        handle_orphaned_remote_tab_disconnected(state, tb, session_pid)
+
+      nil ->
+        handle_orphaned_remote_tab_disconnected(state, tb, session_pid)
+    end
+  end
+
+  defp handle_remote_session_disconnected(state, session_pid) do
+    {state, handled?} = update_active_shell_remote_disconnected(state, session_pid)
+
+    if handled? do
+      finish_remote_session_disconnected(state)
+    else
+      handle_stashed_remote_session_disconnected(state, session_pid)
+    end
+  end
+
+  @spec handle_orphaned_remote_tab_disconnected(state(), TabBar.t(), pid()) :: state()
+  defp handle_orphaned_remote_tab_disconnected(state, tb, session_pid) do
     case TabBar.find_by_session(tb, session_pid) do
-      %Tab{id: tab_id, payload: %Agent{server_name: server_name}} when is_binary(server_name) ->
-        tb = TabBar.set_tab_connection_status(tb, tab_id, :disconnected)
+      %Tab{payload: %Agent{server_name: server_name, remote_session_id: session_id}} = tab
+      when is_binary(server_name) and is_binary(session_id) ->
+        tb = TabBar.accept_tab(tb, Tab.mark_orphan_remote_disconnected(tab))
 
         shell_state =
           MingaEditor.Shell.Traditional.State.install_tab_bar(
@@ -1605,16 +1653,6 @@ defmodule MingaEditor.Commands.BufferManagement do
 
       _ ->
         handle_stashed_remote_session_disconnected(state, session_pid)
-    end
-  end
-
-  defp handle_remote_session_disconnected(state, session_pid) do
-    {state, handled?} = update_active_shell_remote_disconnected(state, session_pid)
-
-    if handled? do
-      finish_remote_session_disconnected(state)
-    else
-      handle_stashed_remote_session_disconnected(state, session_pid)
     end
   end
 
@@ -1670,8 +1708,8 @@ defmodule MingaEditor.Commands.BufferManagement do
       else: shell_state
   end
 
-  # Shared state cleanup for agent sessions: stops spinner, clears agent state session,
-  # clears Tab.session/agent_status, and removes the agent workspace.
+  # Shared state cleanup for agent sessions: stops spinner, clears Workspace-owned session
+  # state, clears orphan tab projections, and removes the agent workspace.
   @spec scrub_agent_tab_state(state(), pid(), Tab.agent_status()) :: state()
   defp scrub_agent_tab_state(state, session, tab_status) do
     state = TraditionalWorkflow.install_agent_spinner_stop(state)
@@ -1695,7 +1733,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  # Clears session pid and sets agent_status on all tabs that reference
+  # Clears the workspace-owned session and marks orphan tabs that still reference
   # the given session pid.
   @spec clear_session_from_tabs(state(), pid(), Tab.agent_status()) :: state()
   defp clear_session_from_tabs(
@@ -1703,16 +1741,22 @@ defmodule MingaEditor.Commands.BufferManagement do
          session_pid,
          status
        ) do
-    updated_tb =
-      Enum.reduce(tb.tabs, tb, fn tab, acc ->
-        if tab_session?(tab, session_pid) do
-          acc
-          |> TabBar.set_tab_session(tab.id, nil)
-          |> TabBar.set_tab_agent_status(tab.id, status)
-        else
-          acc
-        end
+    owned_workspace_ids =
+      Enum.flat_map(tb.workspaces, fn
+        %WorkspaceModel{id: workspace_id, payload: %WorkspaceModel.Agent{session: ^session_pid}} ->
+          [workspace_id]
+
+        _workspace ->
+          []
       end)
+
+    updated_tb =
+      Enum.reduce(owned_workspace_ids, tb, fn workspace_id, acc ->
+        acc
+        |> TabBar.clear_workspace_session(workspace_id)
+        |> TabBar.set_workspace_agent_status(workspace_id, status)
+      end)
+      |> mark_orphan_session_down(session_pid, status, owned_workspace_ids)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(
@@ -1725,6 +1769,28 @@ defmodule MingaEditor.Commands.BufferManagement do
       | shell_runtime:
           MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
     }
+  end
+
+  @spec mark_orphan_session_down(TabBar.t(), pid(), Tab.agent_status(), [non_neg_integer()]) ::
+          TabBar.t()
+  defp mark_orphan_session_down(
+         %TabBar{tabs: tabs} = tb,
+         session_pid,
+         status,
+         owned_workspace_ids
+       ) do
+    Enum.reduce(tabs, tb, fn
+      %Tab{kind: :agent, group_id: workspace_id, payload: %Agent{session: ^session_pid}} = tab,
+      acc ->
+        if workspace_id in owned_workspace_ids do
+          acc
+        else
+          TabBar.accept_tab(acc, Tab.mark_orphan_session_down(tab, status))
+        end
+
+      _tab, acc ->
+        acc
+    end)
   end
 
   @spec tab_session?(Tab.t(), pid()) :: boolean()

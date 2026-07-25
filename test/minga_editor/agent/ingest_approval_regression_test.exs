@@ -155,7 +155,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   # Builds a minimal traditional-shell Editor state whose active agent session is
   # `session` and whose agent has the given pending approval.
   defp editor_state_with(session, approval) do
-    agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
+    agent_tab = Tab.new_agent(1, "Agent")
     tb = TabBar.new(agent_tab)
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session)
     tb = TabBar.move_tab_to_workspace(tb, 1, ws.id) |> Map.put(:active_id, 1)

@@ -143,8 +143,16 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
     test "switches to a restored pending workspace with no tabs" do
       buf = start_buffer("a")
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, workspace} = TabBar.add_workspace(tb, "Restored review")
-      tb = put_workspace(tb, workspace.id, &Workspace.set_review(&1, review(:needs_review)))
+      {tb, workspace} = TabBar.add_workspace(tb, "Restored review", self())
+
+      tb =
+        put_workspace(tb, workspace.id, fn workspace ->
+          workspace
+          |> Workspace.set_review(review(:needs_review))
+          |> Workspace.set_agent_status(:thinking)
+          |> Workspace.put_remote_session("home", "session-1", :connected)
+        end)
+
       state = editor_state(tb, buf)
 
       switched =
@@ -156,6 +164,10 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
       assert TabBar.active_workspace_id(switched.shell_runtime.state.tab_bar) == workspace.id
       assert [tab] = TabBar.tabs_in_workspace(switched.shell_runtime.state.tab_bar, workspace.id)
       assert tab.kind == :agent
+      assert tab.payload.session == self()
+      assert tab.payload.agent_status == :thinking
+      assert tab.payload.server_name == "home"
+      assert tab.payload.remote_session_id == "session-1"
     end
 
     test "switches to the selected workspace" do

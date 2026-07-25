@@ -501,9 +501,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     tab_bar =
       tab_bar
-      |> TabBar.set_tab_session(agent_tab.id, session)
       |> TabBar.move_tab_to_workspace(1, workspace.id)
       |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
+      |> TabBar.set_workspace_session(workspace.id, session)
       |> TabBar.add_workspace_file(workspace.id, file_ref)
       |> TabBar.set_workspace_agent_ui(workspace.id, ui)
       |> TabBar.switch_to(agent_tab.id)
@@ -548,10 +548,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       |> TabBar.get_workspace(workspace_id)
       |> Workspace.put_remote_session("home", remote_session_id, :connected)
 
-    tab_bar =
-      tab_bar
-      |> TabBar.accept_workspace(workspace)
-      |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+    tab_bar = TabBar.accept_workspace(tab_bar, workspace)
 
     state =
       then(state, fn root ->

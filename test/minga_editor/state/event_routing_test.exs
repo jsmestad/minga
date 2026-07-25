@@ -14,7 +14,7 @@ defmodule MingaEditor.State.EventRoutingTest do
   defp make_state(opts \\ []) do
     session = opts[:session] || spawn(fn -> :timer.sleep(:infinity) end)
 
-    agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
+    agent_tab = Tab.new_agent(1, "Agent")
     {tb, workspace} = agent_tab |> TabBar.new() |> TabBar.add_workspace("Agent", session)
     tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 

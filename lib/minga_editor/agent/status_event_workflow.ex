@@ -240,12 +240,6 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
           tab_bar
       end
 
-    tab_bar =
-      case TabBar.find_by_session(tab_bar, session) do
-        %Tab{id: tab_id} -> TabBar.set_tab_agent_status(tab_bar, tab_id, status)
-        nil -> tab_bar
-      end
-
     install_tab_bar(state, tab_bar)
   end
 

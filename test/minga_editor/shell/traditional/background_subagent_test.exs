@@ -37,6 +37,8 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
              tab.payload
 
     assert session == self()
+    workspace = TabBar.find_workspace_by_session(shell_state.tab_bar, self())
+    assert workspace.payload.agent_status == :thinking
     assert tab.label == "session-2: write tests"
     assert tab.context.keymap_scope == :agent
     refute Map.has_key?(tab.context, :viewport)

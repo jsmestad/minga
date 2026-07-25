@@ -74,18 +74,15 @@ defmodule MingaEditor.Shell.Traditional do
       label = MingaAgent.Subagent.Handle.label(handle)
       {tb, tab} = TabBar.insert(tb, :agent, label)
 
-      tab =
-        tab
-        |> Tab.set_session(handle.pid)
-        |> Tab.set_agent_status(:thinking)
-        |> Tab.mark_background_subagent(handle)
-
+      tab = Tab.mark_background_subagent(tab, handle)
       {tb, agent_workspace} = TabBar.add_workspace(tb, label, handle.pid)
+      agent_workspace = Workspace.set_agent_status(agent_workspace, :thinking)
 
       tb =
         tb
         |> TabBar.accept_tab(tab)
         |> TabBar.move_tab_to_workspace(tab.id, agent_workspace.id)
+        |> TabBar.accept_workspace(agent_workspace)
 
       context = background_agent_context(workspace, viewport)
       tb = TabBar.update_context(tb, tab.id, context)
@@ -402,19 +399,9 @@ defmodule MingaEditor.Shell.Traditional do
         session_pid,
         {:status_changed, status}
       ) do
-    # Update workspace and legacy tab status badges.
     tb =
       case TabBar.find_workspace_by_session(tb, session_pid) do
-        %Workspace{id: id} ->
-          TabBar.set_workspace_agent_status(tb, id, status)
-
-        nil ->
-          tb
-      end
-
-    tb =
-      case TabBar.find_by_session(tb, session_pid) do
-        %Tab{id: id} -> TabBar.set_tab_agent_status(tb, id, status)
+        %Workspace{id: id} -> TabBar.set_workspace_agent_status(tb, id, status)
         nil -> tb
       end
 
@@ -498,16 +485,13 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @spec update_restarted_session_tabs(TabBar.t(), pid(), pid(), Tab.agent_status()) :: TabBar.t()
-  defp update_restarted_session_tabs(%TabBar{} = tb, old_pid, new_pid, status) do
+  defp update_restarted_session_tabs(%TabBar{} = tb, old_pid, new_pid, _status) do
     Enum.reduce(tb.tabs, tb, fn
-      %Tab{id: id, payload: %TabAgent{session: ^old_pid}}, acc ->
-        TabBar.refresh_tab_session(acc, id, old_pid, new_pid, status)
+      %Tab{payload: %TabAgent{background_subagent: %Handle{pid: ^old_pid}}} = tab, acc ->
+        TabBar.accept_tab(acc, Tab.refresh_session_pid(tab, old_pid, new_pid))
 
-      %Tab{id: id, payload: %TabAgent{background_subagent: %Handle{pid: ^old_pid}}}, acc ->
-        TabBar.refresh_tab_session(acc, id, old_pid, new_pid, status)
-
-      %Tab{id: id, payload: %TabAgent{background_subagent: %Handle{parent_pid: ^old_pid}}}, acc ->
-        TabBar.refresh_tab_session(acc, id, old_pid, new_pid, status)
+      %Tab{payload: %TabAgent{background_subagent: %Handle{parent_pid: ^old_pid}}} = tab, acc ->
+        TabBar.accept_tab(acc, Tab.refresh_session_pid(tab, old_pid, new_pid))
 
       _tab, acc ->
         acc
@@ -617,10 +601,7 @@ defmodule MingaEditor.Shell.Traditional do
           tb
       end
 
-    ShellState.install_tab_bar(
-      shell_state,
-      MingaEditor.State.TabBar.set_tab_session(tb, tab_id, session_pid)
-    )
+    ShellState.install_tab_bar(shell_state, tb)
   end
 
   @impl true

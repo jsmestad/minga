@@ -87,7 +87,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       }
     }
 
-    agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(default_session)
+    agent_tab = Tab.new_agent(1, "Agent")
     {tb, workspace} = agent_tab |> TabBar.new() |> TabBar.add_workspace("Agent", default_session)
 
     tb =
@@ -1123,9 +1123,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     state =
       install_tab_bar(
         state,
-        tab_bar
-        |> TabBar.accept_workspace(workspace)
-        |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+        TabBar.accept_workspace(tab_bar, workspace)
       )
 
     result = MingaEditor.Commands.execute(state, :detach_remote_session)

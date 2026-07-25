@@ -7,6 +7,8 @@ defmodule MingaEditor.State.TabBarTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.VimState
 
   defp file_tab(id, label \\ ""), do: Tab.new_file(id, label)
@@ -443,11 +445,14 @@ defmodule MingaEditor.State.TabBarTest do
   describe "attention by tab or session" do
     test "detects attention and updates by matching session" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      refute TabBar.any_attention?(tb)
-
       {tb, agent} = TabBar.add(tb, :agent, "Agent")
-      tb = TabBar.set_tab_session(tb, agent.id, self())
-      tb = TabBar.set_attention_by_session(tb, self(), true)
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent")
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(agent.id, workspace.id)
+        |> TabBar.set_workspace_session(workspace.id, self())
+        |> TabBar.set_attention_by_session(self(), true)
 
       assert TabBar.any_attention?(tb)
       assert %Agent{attention: true} = TabBar.get(tb, agent.id).payload
@@ -456,6 +461,145 @@ defmodule MingaEditor.State.TabBarTest do
     test "returns unchanged when no session matches" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       assert TabBar.set_attention_by_session(tb, self(), true) == tb
+    end
+  end
+
+  describe "workspace agent projection" do
+    test "projects workspace status and session only to matching agent tabs" do
+      session = self()
+      other_session = spawn(fn -> :ok end)
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      {tb, other_agent} = TabBar.add(tb, :agent, "Other")
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent")
+      {tb, other_workspace} = TabBar.add_workspace(tb, "Other", other_session)
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(agent.id, workspace.id)
+        |> TabBar.move_tab_to_workspace(other_agent.id, other_workspace.id)
+        |> TabBar.accept_workspace(other_workspace)
+        |> TabBar.set_workspace_session(workspace.id, session)
+        |> TabBar.set_workspace_agent_status(workspace.id, :thinking)
+
+      assert TabBar.get(tb, agent.id).payload.session == session
+      assert TabBar.get(tb, agent.id).payload.agent_status == :thinking
+      assert TabBar.get(tb, other_agent.id).payload.session == other_session
+      assert TabBar.get(tb, other_agent.id).payload.agent_status == :idle
+    end
+
+    test "projects remote connection changes while preserving remote identity" do
+      session = self()
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+
+      workspace =
+        workspace
+        |> Workspace.set_remote_session(RemoteSession.new("home", "session-1", :connected))
+        |> Workspace.set_session(session)
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(agent.id, workspace.id)
+        |> TabBar.accept_workspace(workspace)
+        |> TabBar.set_workspace_remote_connection_status(workspace.id, :disconnected)
+
+      projected = TabBar.get(tb, agent.id).payload
+      assert projected.server_name == "home"
+      assert projected.remote_session_id == "session-1"
+      assert projected.connection_status == :disconnected
+
+      assert TabBar.get_workspace(tb, workspace.id).payload.remote_session.connection_status ==
+               :disconnected
+    end
+
+    test "clearing workspace session preserves remote metadata and projects nil session" do
+      session = self()
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+
+      workspace =
+        workspace
+        |> Workspace.set_remote_session(RemoteSession.new("home", "session-1", :connected))
+        |> Workspace.set_session(session)
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(agent.id, workspace.id)
+        |> TabBar.accept_workspace(workspace)
+        |> TabBar.clear_workspace_session(workspace.id)
+
+      assert TabBar.get_workspace(tb, workspace.id).payload.remote_session.session_id ==
+               "session-1"
+
+      assert TabBar.get(tb, agent.id).payload.session == nil
+      assert TabBar.get(tb, agent.id).payload.agent_status == :idle
+    end
+
+    test "accept_workspace projects only the stored workspace identity" do
+      session = self()
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      {tb, workspace} = TabBar.add_workspace(tb, "Stored")
+
+      accepted =
+        Workspace.new_agent(workspace.id + 100, "Foreign", session)
+        |> Workspace.set_agent_status(:thinking)
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(agent.id, accepted.id)
+        |> TabBar.accept_workspace(accepted)
+
+      assert TabBar.get_workspace(tb, accepted.id) == nil
+      assert TabBar.get(tb, agent.id).payload.session == nil
+      assert TabBar.get(tb, agent.id).payload.agent_status == nil
+    end
+
+    test "moving an agent tab to a workspace projects the stored workspace lifecycle" do
+      session = self()
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+
+      workspace =
+        workspace
+        |> Workspace.set_agent_status(:thinking)
+        |> Workspace.set_remote_session(RemoteSession.new("home", "session-1", :connected))
+
+      tb =
+        tb
+        |> TabBar.accept_workspace(workspace)
+        |> TabBar.move_tab_to_workspace(agent.id, workspace.id)
+
+      projected = TabBar.get(tb, agent.id).payload
+      assert projected.session == session
+      assert projected.agent_status == :thinking
+      assert projected.server_name == "home"
+      assert projected.remote_session_id == "session-1"
+    end
+
+    test "restore_workspaces projects restored workspace lifecycle onto restored tabs" do
+      session = self()
+
+      workspace =
+        Workspace.new_agent(5, "Restored", session)
+        |> Workspace.set_agent_status(:thinking)
+        |> Workspace.set_remote_session(RemoteSession.new("home", "restored-session", :connected))
+
+      tb =
+        TabBar.new(file_tab(1, "a.ex"))
+        |> TabBar.restore_workspaces([workspace], "/tmp/minga")
+
+      assert [restored_tab] = TabBar.tabs_in_workspace(tb, workspace.id)
+      projected = restored_tab.payload
+      assert restored_tab.kind == :agent
+      assert projected.session == session
+      assert projected.agent_status == :thinking
+      assert projected.server_name == "home"
+      assert projected.remote_session_id == "restored-session"
     end
   end
 

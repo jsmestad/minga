@@ -403,41 +403,6 @@ defmodule MingaEditor.State.TabBar do
     replace_matching_tab(tab_bar, tab_id, fn _current -> accepted end)
   end
 
-  @doc "Records an agent status on the identified tab."
-  @spec set_tab_agent_status(t(), Tab.id(), Tab.agent_status()) :: t()
-  def set_tab_agent_status(%__MODULE__{} = tab_bar, tab_id, status) do
-    replace_matching_tab(tab_bar, tab_id, &Tab.set_agent_status(&1, status))
-  end
-
-  @doc "Binds or clears the session owned by the identified tab."
-  @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
-  def set_tab_session(%__MODULE__{} = tab_bar, tab_id, session) do
-    replace_matching_tab(tab_bar, tab_id, &Tab.set_session(&1, session))
-  end
-
-  @doc "Refreshes a restarted session identity and status on the identified tab."
-  @spec refresh_tab_session(t(), Tab.id(), pid(), pid(), Tab.agent_status()) :: t()
-  def refresh_tab_session(%__MODULE__{} = tab_bar, tab_id, old_pid, new_pid, status) do
-    replace_matching_tab(tab_bar, tab_id, fn tab ->
-      tab = Tab.refresh_session_pid(tab, old_pid, new_pid)
-      if is_nil(status), do: tab, else: Tab.set_agent_status(tab, status)
-    end)
-  end
-
-  @doc "Records a remote session identity on the identified tab."
-  @spec set_tab_remote_session(t(), Tab.id(), String.t(), String.t(), pid()) :: t()
-  def set_tab_remote_session(tab_bar, tab_id, server_name, session_id, remote_pid) do
-    replace_matching_tab(tab_bar, tab_id, fn tab ->
-      Tab.set_remote_session(tab, server_name, session_id, remote_pid)
-    end)
-  end
-
-  @doc "Records remote connection status on the identified tab."
-  @spec set_tab_connection_status(t(), Tab.id(), Tab.connection_status()) :: t()
-  def set_tab_connection_status(tab_bar, tab_id, status) do
-    replace_matching_tab(tab_bar, tab_id, &Tab.set_connection_status(&1, status))
-  end
-
   @doc "Retargets one tab and its workspace to a concrete file identity."
   @spec retarget_tab_file(t(), Tab.id(), FileRef.t()) :: t()
   def retarget_tab_file(%__MODULE__{} = tab_bar, tab_id, %FileRef{} = file_ref) do
@@ -624,86 +589,38 @@ defmodule MingaEditor.State.TabBar do
   @spec set_remote_connection_status(t(), String.t(), Tab.connection_status()) :: t()
   def set_remote_connection_status(%__MODULE__{} = tb, server_name, status)
       when is_binary(server_name) and status in [:connected, :disconnected, :ended, :unavailable] do
-    tb
-    |> set_server_workspace_connection_status(server_name, status)
-    |> set_projected_tab_remote_connection_status(server_name, status)
-  end
-
-  @spec set_server_workspace_connection_status(t(), String.t(), Workspace.connection_status()) ::
-          t()
-  defp set_server_workspace_connection_status(%__MODULE__{} = tb, server_name, status) do
     Enum.reduce(remote_workspaces_for_server(tb, server_name), tb, fn %Workspace{id: id}, acc ->
-      replace_matching_workspace(acc, id, &Workspace.set_remote_connection_status(&1, status))
+      set_workspace_remote_connection_status(acc, id, status)
     end)
   end
 
-  @spec set_projected_tab_remote_connection_status(t(), String.t(), Tab.connection_status()) ::
-          t()
-  defp set_projected_tab_remote_connection_status(
-         %__MODULE__{tabs: tabs} = tb,
-         server_name,
-         status
-       ) do
-    new_tabs =
-      Enum.map(tabs, fn
-        %Tab{kind: :agent, payload: %Agent{server_name: ^server_name}} = tab ->
-          Tab.set_connection_status(tab, status)
-
-        tab ->
-          tab
-      end)
-
-    %{tb | tabs: new_tabs}
-  end
-
-  @doc "Synchronizes any agent-tab projection from workspace-owned lifecycle and remote metadata."
-  @spec sync_workspace_agent_tab_projection(t(), non_neg_integer()) :: t()
-  def sync_workspace_agent_tab_projection(%__MODULE__{} = tb, workspace_id)
-      when is_integer(workspace_id) do
+  @spec project_workspace_agent_tabs(t(), non_neg_integer()) :: t()
+  defp project_workspace_agent_tabs(%__MODULE__{} = tb, workspace_id)
+       when is_integer(workspace_id) do
     case get_workspace(tb, workspace_id) do
-      %Workspace{} = workspace -> sync_workspace_agent_tab_projection(tb, workspace)
+      %Workspace{} = workspace -> project_workspace_agent_tabs(tb, workspace)
       nil -> tb
     end
   end
 
-  @spec sync_workspace_agent_tab_projection(t(), Workspace.agent() | Workspace.manual()) :: t()
-  def sync_workspace_agent_tab_projection(%__MODULE__{} = tb, %Workspace{
-        payload: %Workspace.Manual{}
-      }),
-      do: tb
+  @spec project_workspace_agent_tabs(t(), Workspace.agent() | Workspace.manual()) :: t()
+  defp project_workspace_agent_tabs(%__MODULE__{} = tb, %Workspace{payload: %Workspace.Manual{}}),
+    do: tb
 
-  def sync_workspace_agent_tab_projection(
-        %__MODULE__{tabs: tabs} = tb,
-        %Workspace{
-          payload: %WorkspaceAgent{}
-        } = workspace
-      ) do
-    new_tabs =
+  defp project_workspace_agent_tabs(
+         %__MODULE__{tabs: tabs} = tb,
+         %Workspace{payload: %WorkspaceAgent{}} = workspace
+       ) do
+    tabs =
       Enum.map(tabs, fn
         %Tab{payload: %Agent{}, group_id: workspace_id} = tab when workspace_id == workspace.id ->
-          project_workspace_onto_agent_tab(tab, workspace)
+          Tab.project_agent_lifecycle(tab, workspace)
 
         tab ->
           tab
       end)
 
-    %{tb | tabs: new_tabs}
-  end
-
-  @spec project_workspace_onto_agent_tab(Tab.agent(), Workspace.agent()) :: Tab.agent()
-  defp project_workspace_onto_agent_tab(%Tab{payload: %Agent{}} = tab, %Workspace{
-         payload: %WorkspaceAgent{} = payload
-       }) do
-    tab = Tab.set_session(tab, payload.session)
-    tab = Tab.set_agent_status(tab, payload.agent_status)
-
-    case payload.remote_session do
-      %MingaEditor.State.Workspace.RemoteSession{} = remote_session ->
-        Tab.set_remote_projection(tab, remote_session)
-
-      nil ->
-        Tab.clear_remote_projection(tab)
-    end
+    %{tb | tabs: tabs}
   end
 
   @doc "Sets the attention flag on the tab matching the given session pid."
@@ -1004,7 +921,9 @@ defmodule MingaEditor.State.TabBar do
   @doc "Moves a tab to a different workspace."
   @spec move_tab_to_workspace(t(), Tab.id(), non_neg_integer()) :: t()
   def move_tab_to_workspace(%__MODULE__{} = tb, tab_id, workspace_id) do
-    replace_matching_tab(tb, tab_id, &Tab.set_group(&1, workspace_id))
+    tb
+    |> replace_matching_tab(tab_id, &Tab.set_group(&1, workspace_id))
+    |> project_workspace_agent_tabs(workspace_id)
   end
 
   @doc """
@@ -1106,7 +1025,13 @@ defmodule MingaEditor.State.TabBar do
   @doc "Accepts a concrete workspace only at its existing stable identity."
   @spec accept_workspace(t(), Workspace.t()) :: t()
   def accept_workspace(%__MODULE__{} = tab_bar, %Workspace{id: workspace_id} = accepted) do
-    replace_matching_workspace(tab_bar, workspace_id, fn _current -> accepted end)
+    if get_workspace(tab_bar, workspace_id) do
+      tab_bar
+      |> replace_matching_workspace(workspace_id, fn _current -> accepted end)
+      |> project_workspace_agent_tabs(workspace_id)
+    else
+      tab_bar
+    end
   end
 
   @doc "Renames the identified workspace."
@@ -1124,19 +1049,25 @@ defmodule MingaEditor.State.TabBar do
   @doc "Records agent status on the identified workspace."
   @spec set_workspace_agent_status(t(), non_neg_integer(), Tab.agent_status()) :: t()
   def set_workspace_agent_status(tab_bar, workspace_id, status) do
-    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_agent_status(&1, status))
+    tab_bar
+    |> replace_matching_workspace(workspace_id, &Workspace.set_agent_status(&1, status))
+    |> project_workspace_agent_tabs(workspace_id)
   end
 
   @doc "Binds or clears the identified workspace session."
   @spec set_workspace_session(t(), non_neg_integer(), pid() | nil) :: t()
   def set_workspace_session(tab_bar, workspace_id, session) do
-    replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_session(&1, session))
+    tab_bar
+    |> replace_matching_workspace(workspace_id, &Workspace.set_session(&1, session))
+    |> project_workspace_agent_tabs(workspace_id)
   end
 
   @doc "Clears session state from the identified workspace."
   @spec clear_workspace_session(t(), non_neg_integer()) :: t()
   def clear_workspace_session(tab_bar, workspace_id) do
-    replace_matching_workspace(tab_bar, workspace_id, &Workspace.clear_session/1)
+    tab_bar
+    |> replace_matching_workspace(workspace_id, &Workspace.clear_session/1)
+    |> project_workspace_agent_tabs(workspace_id)
   end
 
   @doc "Records the agent UI projection on the identified workspace."
@@ -1181,11 +1112,12 @@ defmodule MingaEditor.State.TabBar do
   @spec set_workspace_remote_connection_status(t(), non_neg_integer(), Tab.connection_status()) ::
           t()
   def set_workspace_remote_connection_status(tab_bar, workspace_id, status) do
-    replace_matching_workspace(
-      tab_bar,
+    tab_bar
+    |> replace_matching_workspace(
       workspace_id,
       &Workspace.set_remote_connection_status(&1, status)
     )
+    |> project_workspace_agent_tabs(workspace_id)
   end
 
   @doc "Retargets one file identity in the identified workspace."
@@ -1210,13 +1142,17 @@ defmodule MingaEditor.State.TabBar do
     workspaces = ensure_manual_workspace(workspaces, project_root)
     {tabs, next_id} = ensure_restored_workspace_tabs(tb.tabs, tb.next_id, workspaces)
 
-    %{
+    tb = %{
       tb
       | tabs: tabs,
         next_id: next_id,
         workspaces: workspaces,
         next_workspace_id: next_restored_workspace_id(workspaces)
     }
+
+    Enum.reduce(workspaces, tb, fn %Workspace{id: workspace_id}, acc ->
+      project_workspace_agent_tabs(acc, workspace_id)
+    end)
   end
 
   @doc "Returns true if any agent workspaces exist."
