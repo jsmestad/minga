@@ -124,6 +124,19 @@ Ten independent read-only `archie` reviews at `xhigh` resolved all 28 routed fin
 | ES19 | `APPROVE_DIRECT` | `Session.State` owns active agent UI and the agent Workspace payload owns inactive agent UI; transfer authority on activation instead of mirroring. |
 | ES20 | `APPROVE_DIRECT` | Add kind-specific payloads inside existing Tab and Workspace owners. Do not share one payload type or create a generalized tagged-state abstraction. |
 
+#### L03 worktree implementation evidence at `fix-editor-route-l03`
+
+- **Status:** IMPLEMENTED in worktree, not yet PR-verified or merged.
+- **Outcome:** `MingaEditor.Handlers.BufferRegistry.buffer_inventory/1` now derives the ordered active-workspace plus inactive file-tab buffer pid inventory. Dirty confirmation, `:wqa`, and lifecycle tracking consume that owner, while `MingaEditor.State.remove_buffer/2` remains the retirement boundary.
+- **Failing-before proof:** After adding the locked regressions and before production changes, `mix test.debug test/minga_editor/state/buffer_lifecycle_test.exs test/minga_editor/commands/buffer_management_save_quit_test.exs` failed because `BufferRegistry.buffer_inventory/1` was undefined, `:quit_all` did not publish the dirty confirmation for an inactive-tab-only dirty buffer, and `:wqa` left the inactive file unchanged.
+- **Focused validation:** `mix test.debug test/minga_editor/state/buffer_lifecycle_test.exs test/minga_editor/commands/buffer_management_save_quit_test.exs` passed with 20 tests. `mix test.debug test/minga_editor/commands/buffer_management_kill_test.exs` passed with 5 tests.
+- **Broad validation:** `make lint` passed. `ERL_FLAGS='+S 2:2' mix test.llm` passed with 58 doctests, 98 properties, 9,857 tests, 0 failures, 1 skipped, and 616 excluded.
+- **Diff check:** `git diff --check` passed.
+- **Production lines added/removed:** 32 added / 18 removed, net +14.
+- **Test lines added/removed:** 177 added / 0 removed, net +177.
+- **Concepts added/removed:** Added one BufferRegistry-owned ordered live-plus-tab buffer inventory. Removed the duplicate private tab tracking predicate in favor of the shared inventory. No module, process, dependency, protocol, configuration, persistence shape, retirement path, or save-result contract was added.
+- **Completion date:** 2026-07-25.
+
 Dependency order from the decisions is mandatory: ES06 before L06, L06 before L07 and L08, and L06 before L09; ES20 before L18 and ES19; L17 before L18; ES19 before ES02, ES02 before S30, and S30 before ES01. Same-owner work remains serialized even where no hard dependency exists.
 
 Retained constraints:

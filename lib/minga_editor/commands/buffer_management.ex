@@ -25,6 +25,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Commands.Search, as: SearchCommands
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
   alias MingaEditor.PickerUI
   alias MingaEditor.SemanticTokenSync
@@ -1992,7 +1993,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec any_buffer_dirty?(state()) :: boolean()
   defp any_buffer_dirty?(state) do
-    Enum.any?(state.workspace.buffers.list, fn pid ->
+    Enum.any?(BufferRegistry.buffer_inventory(state), fn pid ->
       try do
         Buffer.dirty?(pid)
       catch
@@ -2193,7 +2194,8 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec save_all_buffers(state()) :: save_result()
-  defp save_all_buffers(state), do: save_all_buffers(state, state.workspace.buffers.list)
+  defp save_all_buffers(state),
+    do: save_all_buffers(state, BufferRegistry.buffer_inventory(state))
 
   @spec save_all_buffers(state(), [pid()]) :: save_result()
   defp save_all_buffers(state, []), do: {:ok, state}

@@ -8,6 +8,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -325,6 +326,45 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
   end
 
+  describe "buffer inventory" do
+    test "returns workspace buffers first, then inactive file-tab buffers without active stale context" do
+      buf_a = start_buffer("a")
+      buf_b = start_buffer("b")
+      buf_c = start_buffer("c")
+      stale = start_buffer("stale")
+
+      state = state_for_buffer(buf_a, list: [buf_a, buf_b])
+      {state, tab_b} = state_with_inactive_tab_buffer(state, buf_c)
+
+      tb =
+        state.shell_runtime.state.tab_bar
+        |> TabBar.update_context(1, %{
+          buffers: %Buffers{active: stale, list: [stale], active_index: 0}
+        })
+        |> TabBar.update_context(tab_b.id, %{
+          buffers: %Buffers{active: buf_b, list: [buf_b, buf_c], active_index: 0},
+          editing: VimState.new(),
+          viewport: Viewport.new(24, 80)
+        })
+
+      state = install_tab_bar(state, tb)
+
+      assert BufferRegistry.buffer_inventory(state) == [buf_a, buf_b, buf_c]
+    end
+
+    test "buffer_tracked?/2 includes inactive-tab-only buffers" do
+      active = start_buffer("active")
+      inactive = start_buffer("inactive")
+      unrelated = start_buffer("unrelated")
+
+      state = state_for_buffer(active)
+      {state, _tab} = state_with_inactive_tab_buffer(state, inactive)
+
+      assert BufferRegistry.buffer_tracked?(state, inactive)
+      refute BufferRegistry.buffer_tracked?(state, unrelated)
+    end
+  end
+
   describe "remove_buffer/2" do
     test "closing active, only, inactive, and special buffers updates buffers and monitor refs" do
       state = base_state()
@@ -590,5 +630,19 @@ defmodule MingaEditor.State.BufferLifecycleTest do
              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
        }
      end), tab_b}
+  end
+
+  defp install_tab_bar(state, %TabBar{} = tb) do
+    shell_state =
+      TraditionalState.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tb
+      )
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

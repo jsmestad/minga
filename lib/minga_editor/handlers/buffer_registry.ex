@@ -203,9 +203,15 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     Enum.reduce(pids, state, &monitor_buffer(&2, &1))
   end
 
+  @spec buffer_inventory(state()) :: [pid()]
+  def buffer_inventory(%EditorState{} = state) do
+    active_pids = Enum.filter(state.workspace.buffers.list, &is_pid/1)
+    Enum.uniq(active_pids ++ inactive_file_tab_buffer_pids(state, active_tab_id(state)))
+  end
+
   @spec buffer_tracked?(state(), pid()) :: boolean()
   def buffer_tracked?(state, pid) when is_pid(pid) do
-    pid in state.workspace.buffers.list or buffer_tracked_in_tabs?(state, pid)
+    pid in buffer_inventory(state)
   end
 
   # Like register_buffer but adds the buffer in the background without
@@ -378,7 +384,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   defp find_file_tab_by_live_path(tab_bar, workspace_id, path) do
     tab_bar
     |> TabBar.visible_file_tabs(workspace_id)
-    |> Enum.find(fn tab -> Enum.any?(tab_buffer_list(tab), &buffer_path_matches?(&1, path)) end)
+    |> Enum.find(&tab_path_matches?(&1, path))
   end
 
   @spec file_ref_for_path(state(), String.t()) :: FileRef.t()
@@ -414,22 +420,21 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
-  @spec buffer_tracked_in_tabs?(state(), pid()) :: boolean()
-  defp buffer_tracked_in_tabs?(%{shell_runtime: %{state: %{tab_bar: %{tabs: tabs}}}}, pid) do
-    Enum.any?(tabs, fn tab -> pid in tab_buffer_list(tab) end)
+  @spec inactive_file_tab_buffer_pids(state(), Tab.id() | nil) :: [pid()]
+  defp inactive_file_tab_buffer_pids(_state, nil), do: []
+
+  defp inactive_file_tab_buffer_pids(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: tabs}}}},
+         active_tab_id
+       ) do
+    Enum.flat_map(tabs, fn
+      %Tab{id: ^active_tab_id} -> []
+      %Tab{kind: :file, context: context} -> TabContext.buffer_pids(context)
+      _tab -> []
+    end)
   end
 
-  defp buffer_tracked_in_tabs?(_state, _pid), do: false
-
-  @spec tab_buffer_list(MingaEditor.State.Tab.t() | term()) :: [pid()]
-  defp tab_buffer_list(%MingaEditor.State.Tab{context: context}) when is_map(context) do
-    case TabContext.to_workspace_map(context) do
-      %{buffers: %Buffers{list: buffers}} -> Enum.filter(buffers, &is_pid/1)
-      _ -> []
-    end
-  end
-
-  defp tab_buffer_list(_tab), do: []
+  defp inactive_file_tab_buffer_pids(_state, _active_tab_id), do: []
 
   @spec active_buffer_matches_file_ref?(state(), FileRef.t()) :: boolean()
   defp active_buffer_matches_file_ref?(
@@ -444,6 +449,13 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   end
 
   defp active_buffer_matches_file_ref?(_state, _file_ref), do: false
+
+  @spec tab_path_matches?(Tab.t(), String.t()) :: boolean()
+  defp tab_path_matches?(%Tab{context: context}, path) do
+    Enum.any?(TabContext.buffer_pids(context), &buffer_path_matches?(&1, path))
+  end
+
+  defp tab_path_matches?(_tab, _path), do: false
 
   @spec buffer_path_matches?(pid(), String.t()) :: boolean()
   defp buffer_path_matches?(pid, path) do
