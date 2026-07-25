@@ -1,6 +1,7 @@
 defmodule MingaEditor.Commands.AgentCodeBlockTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Parser.Manager
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -10,7 +11,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.VimState
 
-  defp base_state do
+  defp base_state(opts \\ []) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
@@ -25,7 +26,9 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
             %MingaEditor.Shell.Traditional.State{},
             %AgentState{}
           )
-        )
+        ),
+      parser:
+        MingaEditor.State.Parser.new(Keyword.get(opts, :parser_manager, Minga.Parser.Manager))
     }
   end
 
@@ -66,13 +69,44 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
       assert BufferProcess.filetype(buf) == :elixir
     end
 
-    test "handles unknown language tags gracefully" do
-      state = base_state()
-      new_state = AgentCommands.open_code_block(state, "brainfuck", "+++[>+<-]")
+    test "supported language initializes active parser presentation", %{test: test} do
+      manager =
+        start_supervised!(
+          {Manager,
+           name: Module.concat(__MODULE__, "Parser#{test}"), parser_path: "/missing/minga-parser"}
+        )
+
+      content = "defmodule Foo do\n  def bar, do: :ok\nend"
+
+      new_state =
+        AgentCommands.open_code_block(base_state(parser_manager: manager), "elixir", content)
+
+      buf = new_state.workspace.buffers.active
+
+      assert BufferProcess.content(buf) == content
+      assert BufferProcess.filetype(buf) == :elixir
+      assert is_integer(Manager.buffer_id(buf, manager))
+      assert Map.has_key?(new_state.parser.highlighting.highlights, buf)
+    end
+
+    test "handles unknown language tags without parser registration", %{test: test} do
+      manager =
+        start_supervised!(
+          {Manager,
+           name: Module.concat(__MODULE__, "Parser#{test}"), parser_path: "/missing/minga-parser"}
+        )
+
+      new_state =
+        AgentCommands.open_code_block(
+          base_state(parser_manager: manager),
+          "brainfuck",
+          "+++[>+<-]"
+        )
 
       buf = new_state.workspace.buffers.active
       assert is_pid(buf)
       assert BufferProcess.content(buf) == "+++[>+<-]"
+      assert Manager.buffer_id(buf, manager) == nil
     end
 
     test "maps common aliases (js -> javascript, py -> python)" do

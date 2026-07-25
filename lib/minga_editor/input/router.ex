@@ -160,14 +160,12 @@ defmodule MingaEditor.Input.Router do
   Universal post-action housekeeping shared by all input paths (keyboard,
   mouse, GUI actions).
 
-  Runs highlight reset, selection range cleanup, document highlight scheduling,
-  inlay hint scheduling, and render. Call after any action that
-  mutates editor state.
+  Runs selection range cleanup, document highlight scheduling, inlay hint
+  scheduling, and render. Call after any action that mutates editor state.
   """
   @spec post_action_housekeeping(EditorState.t(), snapshot()) :: EditorState.t()
   def post_action_housekeeping(state, snapshot) do
     state
-    |> MingaEditor.do_maybe_reset_highlight(snapshot.old_buffer)
     |> maybe_clear_selection_ranges(snapshot.old_mode)
     |> maybe_schedule_document_highlight(snapshot.old_buffer, snapshot.old_cursor)
     |> LspActions.schedule_inlay_hints_on_scroll()

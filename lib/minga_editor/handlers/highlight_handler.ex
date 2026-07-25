@@ -14,9 +14,11 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   while stale or unknown messages are ignored.
   """
 
+  alias Minga.Buffer
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Language.Highlight.Span
   alias Minga.Parser.EventCorrelation
-  alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
@@ -230,7 +232,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     do: SemanticTokenSync.request_tokens_for_buffer(state, buffer)
 
   defp apply_effect(state, {:conceal_spans, pid, spans}) do
-    HighlightEvents.handle_conceal_spans(state, pid, spans)
+    apply_conceal_spans(pid, spans)
     state
   end
 
@@ -274,11 +276,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
        when not is_map_key(highlights, pid),
        do: {state, []}
 
-  defp handle_highlight_names(state, pid, names) when pid == state.workspace.buffers.active do
-    new_state = HighlightEvents.handle_names(state, names)
-    {new_state, []}
-  end
-
   defp handle_highlight_names(state, pid, names) do
     existing = HighlightSync.get_highlight(state, pid)
     updated = MingaEditor.UI.Highlight.put_names(existing, names)
@@ -321,23 +318,27 @@ defmodule MingaEditor.Handlers.HighlightHandler do
        when not is_map_key(highlights, pid),
        do: {state, []}
 
-  defp handle_highlight_spans(state, pid, version, spans)
-       when pid == state.workspace.buffers.active do
-    new_state = HighlightSync.handle_spans(state, version, spans)
-    {new_state, [{:request_semantic_tokens, pid}, {:prettify_symbols, pid}, :render]}
-  end
-
   defp handle_highlight_spans(state, pid, version, spans) do
     existing = HighlightSync.get_highlight(state, pid)
     updated = MingaEditor.UI.Highlight.put_spans(existing, version, spans)
     state_with_hl = HighlightSync.put_highlight(state, pid, updated)
 
-    effects =
-      if buffer_visible_in_window?(state_with_hl, pid),
-        do: [{:request_semantic_tokens, pid}, :render],
-        else: []
+    effects = highlight_span_effects(state_with_hl, pid)
 
     {state_with_hl, effects}
+  end
+
+  @spec highlight_span_effects(EditorState.t(), pid()) :: [highlight_effect()]
+  defp highlight_span_effects(%EditorState{workspace: %{buffers: %{active: pid}}}, pid) do
+    [{:request_semantic_tokens, pid}, {:prettify_symbols, pid}, :render]
+  end
+
+  defp highlight_span_effects(%EditorState{} = state, pid) do
+    if buffer_visible_in_window?(state, pid) do
+      [{:request_semantic_tokens, pid}, :render]
+    else
+      []
+    end
   end
 
   @spec handle_conceal_spans(EditorState.t(), pid(), [map()]) ::
@@ -438,6 +439,66 @@ defmodule MingaEditor.Handlers.HighlightHandler do
       }
 
     {new_state, []}
+  end
+
+  @spec apply_conceal_spans(pid(), [map()]) :: :ok
+  defp apply_conceal_spans(buf, spans) when is_pid(buf) do
+    content = Buffer.content(buf)
+    lines = String.split(content, "\n")
+
+    Buffer.batch_decorations(buf, fn decs ->
+      decs
+      |> Decorations.remove_conceal_group(:ts_conceal)
+      |> add_conceal_spans(spans, lines)
+    end)
+
+    :ok
+  end
+
+  @spec add_conceal_spans(Decorations.t(), [map()], [String.t()]) :: Decorations.t()
+  defp add_conceal_spans(decs, spans, lines) do
+    Enum.reduce(spans, decs, fn span, acc ->
+      {start_line, start_col} = byte_to_position(lines, span.start_byte)
+      {end_line, end_col} = byte_to_position(lines, span.end_byte)
+      replacement = if span.replacement == "", do: nil, else: span.replacement
+
+      {_id, new_decs} =
+        Decorations.add_conceal(acc, {start_line, start_col}, {end_line, end_col},
+          replacement: replacement,
+          replacement_style: %Face{name: "_"},
+          group: :ts_conceal,
+          priority: 5
+        )
+
+      new_decs
+    end)
+  end
+
+  @spec byte_to_position([String.t()], non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp byte_to_position(lines, byte_offset) do
+    do_byte_to_position(lines, byte_offset, 0)
+  end
+
+  @spec do_byte_to_position([String.t()], non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp do_byte_to_position([], _remaining, line_idx), do: {max(line_idx - 1, 0), 0}
+
+  defp do_byte_to_position([line | rest], remaining, line_idx) do
+    line_bytes = byte_size(line) + 1
+
+    if remaining < line_bytes do
+      col = grapheme_col(line, remaining)
+      {line_idx, col}
+    else
+      do_byte_to_position(rest, remaining - line_bytes, line_idx + 1)
+    end
+  end
+
+  @spec grapheme_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp grapheme_col(line, byte_offset) do
+    prefix = binary_part(line, 0, min(byte_offset, byte_size(line)))
+    String.length(prefix)
   end
 
   @spec handle_parser_restarted(EditorState.t()) :: {EditorState.t(), [highlight_effect()]}

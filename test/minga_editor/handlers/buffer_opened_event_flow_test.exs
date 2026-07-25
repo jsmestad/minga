@@ -5,6 +5,7 @@ defmodule MingaEditor.Handlers.BufferOpenedEventFlowTest do
 
   alias Minga.Buffer
   alias Minga.Events
+  alias Minga.Parser.Manager
   alias MingaEditor.Commands
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Handlers.GuiActionHandler
@@ -29,6 +30,27 @@ defmodule MingaEditor.Handlers.BufferOpenedEventFlowTest do
       refute_receive {:minga_event, :buffer_opened,
                       %Events.BufferEvent{buffer: ^pid, path: ^path}},
                      50
+    end
+
+    test "BufferRegistry add initializes parser presentation without router housekeeping" do
+      manager_name = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
+
+      manager =
+        start_supervised!({Manager, name: manager_name, parser_path: "/missing/minga-parser"})
+
+      state = TestHelpers.base_state(parser_manager: manager)
+
+      {:ok, buffer} =
+        Minga.Buffer.Process.start_link(
+          content: "defmodule DirectAdd do\nend\n",
+          filetype: :elixir
+        )
+
+      new_state = BufferRegistry.add_buffer(state, buffer)
+
+      assert is_integer(Manager.buffer_id(buffer, manager))
+      assert Map.has_key?(new_state.parser.highlighting.highlights, buffer)
+      refute_receive :setup_highlight
     end
 
     test "GUI foreground open emits one creation event and no registration event", %{

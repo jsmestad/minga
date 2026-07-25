@@ -1,6 +1,7 @@
 defmodule MingaEditor.BufferActivation do
   @moduledoc "Focused workflow for activating a buffer and synchronizing shell presentation."
 
+  alias MingaEditor.HighlightSync
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
@@ -15,6 +16,8 @@ defmodule MingaEditor.BufferActivation do
   @spec activate(state(), SessionState.buffer_activation()) :: state()
   @spec activate(state(), SessionState.buffer_activation(), [option()]) :: state()
   def activate(%EditorState{} = state, activation, opts \\ []) when is_list(opts) do
+    old_buffer = state.workspace.buffers.active
+
     state = %{
       state
       | workspace:
@@ -23,11 +26,14 @@ defmodule MingaEditor.BufferActivation do
           )
     }
 
-    if Keyword.get(opts, :notify_shell?, true) do
-      synchronize_shell(state)
-    else
-      state
-    end
+    state =
+      if Keyword.get(opts, :notify_shell?, true) do
+        synchronize_shell(state)
+      else
+        state
+      end
+
+    HighlightSync.ensure_active_buffer_presentation(state, old_buffer)
   end
 
   @doc "Refreshes shell presentation after the active buffer changes identity in place."

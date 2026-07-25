@@ -12,6 +12,7 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Remote.EventReplay
+  alias MingaEditor.HighlightSync
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ModalWorkflow
@@ -36,11 +37,16 @@ defmodule MingaEditor.TabWorkflow do
 
       :accepted ->
         candidate = stash_active_workspace_agent_ui(state)
+        old_buffer = candidate.workspace.buffers.active
 
         {transitioned, {:switched, %Tab{} = target}} =
           EditorState.switch_tab(candidate, target_id)
 
-        transitioned = finish_switch(transitioned, target)
+        transitioned =
+          transitioned
+          |> finish_switch(target)
+          |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
+
         WorkspaceWorkflow.persist_changes(candidate, transitioned)
     end
   end
@@ -48,9 +54,12 @@ defmodule MingaEditor.TabWorkflow do
   @doc "Restores a context and synchronizes its workspace-backed agent presentation."
   @spec restore_context(EditorState.t(), Tab.context() | Tab.legacy_context()) :: EditorState.t()
   def restore_context(%EditorState{} = state, context) when is_map(context) do
+    old_buffer = state.workspace.buffers.active
+
     state
     |> EditorState.restore_tab_context(context)
     |> sync_active_workspace_agent_ui()
+    |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
   end
 
   @doc "Transfers the active workspace agent presentation and replays pending foreground catch-up events."

@@ -27,6 +27,7 @@ defmodule MingaEditor.Commands.Agent do
   alias Minga.Buffer
   alias Minga.Clipboard
   alias MingaEditor.Commands
+  alias MingaEditor.HighlightSync
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.AgentSubStates
 
@@ -370,6 +371,8 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_workspace_return_target(state(), UIState.View.return_target()) :: state()
   defp restore_workspace_return_target(state, return_target) do
+    old_buffer = state.workspace.buffers.active
+
     workspace =
       state.workspace
       |> SessionState.set_keymap_scope(return_target.keymap_scope)
@@ -378,6 +381,7 @@ defmodule MingaEditor.Commands.Agent do
       |> restore_return_target_buffer(return_target.active_buffer)
 
     %{state | workspace: workspace}
+    |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
   end
 
   @spec restore_return_target_buffer(SessionState.t(), pid() | nil) :: SessionState.t()

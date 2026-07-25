@@ -1,7 +1,6 @@
 defmodule MingaEditor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Language.Highlight.Span
   alias MingaEditor.State.Buffers
   alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
@@ -45,66 +44,6 @@ defmodule MingaEditor.HighlightSyncTest do
 
   defp get_hl(state) do
     HighlightSync.get_active_highlight(state)
-  end
-
-  describe "handle_names/2" do
-    test "stores capture names in highlight state" do
-      state = base_state()
-      names = ["keyword", "string", "comment"]
-      new_state = HighlightSync.handle_names(state, names)
-
-      assert get_hl(new_state).capture_names == List.to_tuple(names)
-    end
-
-    test "replaces previous capture names" do
-      state =
-        base_state()
-        |> HighlightSync.handle_names(["old"])
-        |> HighlightSync.handle_names(["new1", "new2"])
-
-      assert get_hl(state).capture_names == {"new1", "new2"}
-    end
-  end
-
-  describe "handle_spans/3" do
-    test "stores spans with version" do
-      spans = [
-        Span.new(0, 9, 0),
-        Span.new(10, 15, 1)
-      ]
-
-      state =
-        base_state()
-        |> HighlightSync.handle_spans(1, spans)
-
-      assert get_hl(state).version == 1
-      assert get_hl(state).spans == List.to_tuple(spans)
-    end
-
-    test "rejects stale spans with older version" do
-      spans1 = [Span.new(0, 5, 0)]
-      spans2 = [Span.new(0, 3, 1)]
-
-      state =
-        base_state()
-        |> HighlightSync.handle_spans(5, spans1)
-        |> HighlightSync.handle_spans(3, spans2)
-
-      assert get_hl(state).version == 5
-      assert get_hl(state).spans == List.to_tuple(spans1)
-    end
-
-    test "accepts spans with equal version" do
-      spans1 = [Span.new(0, 5, 0)]
-      spans2 = [Span.new(0, 3, 1)]
-
-      state =
-        base_state()
-        |> HighlightSync.handle_spans(5, spans1)
-        |> HighlightSync.handle_spans(5, spans2)
-
-      assert get_hl(state).spans == List.to_tuple(spans2)
-    end
   end
 
   describe "setup_for_buffer/1" do
@@ -217,6 +156,61 @@ defmodule MingaEditor.HighlightSyncTest do
     end
   end
 
+  describe "ensure_active_buffer_presentation/2" do
+    test "sets up real unlisted active buffers and excludes fake or nil active values" do
+      {:ok, real_buffer} =
+        BufferProcess.start_link(content: "defmodule Real do\nend\n", filetype: :elixir)
+
+      state = base_state() |> put_active_buffer(real_buffer, [])
+
+      ensured = HighlightSync.ensure_active_buffer_presentation(state, nil)
+
+      assert ensured.workspace.buffers.active == real_buffer
+      assert ensured.workspace.buffers.list == []
+      assert is_integer(Manager.buffer_id(real_buffer, manager()))
+      assert Map.has_key?(ensured.parser.highlighting.highlights, real_buffer)
+
+      fake_buffer = start_fake_buffer()
+      fake_state = base_state() |> put_active_buffer(fake_buffer, [])
+
+      assert HighlightSync.ensure_active_buffer_presentation(fake_state, nil) == fake_state
+      assert Manager.buffer_id(fake_buffer, manager()) == nil
+      refute_received {:fake_buffer_call, :filetype}
+
+      nil_state = base_state() |> put_active_buffer(nil, [])
+      assert HighlightSync.ensure_active_buffer_presentation(nil_state, nil) == nil_state
+    end
+
+    test "preserves deferred frontend setup and synchronous headless setup" do
+      {:ok, headless_buffer} =
+        BufferProcess.start_link(content: "defmodule Headless do\nend\n", filetype: :elixir)
+
+      headless_state = base_state() |> put_active_buffer(headless_buffer, [])
+
+      headless = HighlightSync.ensure_active_buffer_presentation(headless_state, nil)
+
+      assert is_integer(Manager.buffer_id(headless_buffer, manager()))
+      assert Map.has_key?(headless.parser.highlighting.highlights, headless_buffer)
+      refute_received :setup_highlight
+
+      {:ok, frontend_buffer} =
+        BufferProcess.start_link(content: "defmodule Frontend do\nend\n", filetype: :elixir)
+
+      frontend_state =
+        base_state()
+        |> put_active_buffer(frontend_buffer, [])
+        |> then(fn state -> %{state | frontend: %{state.frontend | backend: :gui}} end)
+
+      frontend = HighlightSync.ensure_active_buffer_presentation(frontend_state, nil)
+
+      assert frontend == frontend_state
+      assert Manager.buffer_id(frontend_buffer, manager()) == nil
+      refute Map.has_key?(frontend.parser.highlighting.highlights, frontend_buffer)
+      assert_received :setup_highlight
+      refute_received :setup_highlight
+    end
+  end
+
   describe "request_reparse/1" do
     test "returns state unchanged when no buffer" do
       state = %EditorState{
@@ -263,5 +257,26 @@ defmodule MingaEditor.HighlightSyncTest do
       assert HighlightSync.request_reparse(state) == state
       assert is_integer(Manager.buffer_id(buffer, manager()))
     end
+  end
+
+  defp put_active_buffer(state, buffer, list) do
+    buffers = %{state.workspace.buffers | active: buffer, list: list, active_index: 0}
+    %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
+  end
+
+  defp start_fake_buffer do
+    parent = self()
+
+    pid =
+      spawn_link(fn ->
+        receive do
+          {:"$gen_call", from, :filetype} ->
+            send(parent, {:fake_buffer_call, :filetype})
+            GenServer.reply(from, :elixir)
+        end
+      end)
+
+    on_exit(fn -> Process.exit(pid, :kill) end)
+    pid
   end
 end

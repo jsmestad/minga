@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias Minga.Buffer
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
+  alias MingaEditor.HighlightSync
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Shell.Entry
@@ -325,6 +326,7 @@ defmodule MingaEditor.Commands.AgentSession do
   def open_code_block(state, language, content) do
     name = buffer_name_for_language(language)
     filetype = filetype_from_language(language)
+    old_buffer = state.workspace.buffers.active
 
     case Buffer.start_link(
            content: content,
@@ -336,8 +338,9 @@ defmodule MingaEditor.Commands.AgentSession do
         buffers = MingaEditor.State.Buffers.set_active_override(state.workspace.buffers, buf)
         workspace = MingaEditor.Session.State.set_buffers(state.workspace, buffers)
 
-        state = %{state | workspace: workspace}
-        maybe_log_code_block_opened(state, language)
+        %{state | workspace: workspace}
+        |> maybe_log_code_block_opened(language)
+        |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
 
       {:error, reason} ->
         NoticeWorkflow.publish(

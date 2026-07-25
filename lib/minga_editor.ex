@@ -28,7 +28,6 @@ defmodule MingaEditor do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Extension.SourceFinalizer
   alias MingaEditor.FileWatcherHelpers
-  alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
   alias MingaEditor.KeyDispatch
   alias MingaEditor.Layout
@@ -1435,12 +1434,6 @@ defmodule MingaEditor do
   @doc false
   @spec do_handle_key(state(), non_neg_integer(), non_neg_integer()) :: state()
   defdelegate do_handle_key(state, codepoint, modifiers), to: KeyDispatch, as: :handle_key
-
-  @doc false
-  @spec do_maybe_reset_highlight(state(), pid() | nil) :: state()
-  defdelegate do_maybe_reset_highlight(state, old_buffer),
-    to: HighlightEvents,
-    as: :maybe_reset_highlight
 
   @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()

@@ -33,7 +33,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
-  alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
   alias MingaEditor.Input.Observatory
@@ -1826,8 +1825,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buffer_pid)
 
     Minga.Log.info(:editor, "Opened: #{file_path}")
-
-    state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
 
     if state.frontend.backend != :headless do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)

@@ -39,6 +39,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @doc "Applies the pure buffer-registration transition and creates its requested monitor."
   @spec add_buffer(state(), pid(), keyword()) :: state()
   def add_buffer(%EditorState{} = state, pid, opts \\ []) when is_pid(pid) and is_list(opts) do
+    old_buffer = state.workspace.buffers.active
     state = ShellWorkflow.ensure_available(state)
     context = Keyword.get(opts, :context, state.buffer_lifecycle.buffer_add_context)
     metadata = prepare_buffer_metadata(state, pid, context)
@@ -55,7 +56,10 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     transitioned =
       EditorState.install_buffer_shell_transition(transitioned, runtime, workspace)
 
-    next_state = WorkspaceWorkflow.persist_changes(state, transitioned)
+    next_state =
+      state
+      |> WorkspaceWorkflow.persist_changes(transitioned)
+      |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
 
     log_buffer_shell_transition(state, next_state, metadata)
 
@@ -234,8 +238,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   def register_buffer(state, buffer_pid, file_path, opts \\ []) do
     state = Commands.add_buffer(state, buffer_pid)
     Minga.Log.info(:editor, "Opened: #{file_path}")
-
-    state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
 
     if state.frontend.backend != :headless and Keyword.get(opts, :schedule_lsp_refresh?, true) do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
