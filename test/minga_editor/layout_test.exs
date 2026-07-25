@@ -97,7 +97,7 @@ defmodule MingaEditor.LayoutTest do
     agentic = %{base | panel: %{base.panel | visible: true}}
     agent_ctx = %{keymap_scope: :agent}
 
-    file_tab = %MingaEditor.State.Tab{id: 1, kind: :file, label: "scratch"}
+    file_tab = MingaEditor.State.Tab.new_file(1, "scratch")
     tb = state.shell_runtime.state.tab_bar || TabBar.new(file_tab)
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)

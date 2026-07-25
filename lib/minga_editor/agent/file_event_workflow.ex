@@ -23,6 +23,7 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.File
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -438,7 +439,8 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   end
 
   @spec tab_file_ref(Tab.t(), EditorState.t()) :: FileRef.t() | nil
-  defp tab_file_ref(%Tab{file_ref: %FileRef{} = file_ref}, _state), do: file_ref
+  defp tab_file_ref(%Tab{kind: :file, payload: %File{file_ref: %FileRef{} = file_ref}}, _state),
+    do: file_ref
 
   defp tab_file_ref(%Tab{context: context}, state) do
     with %{buffers: %Buffers{active: buffer}} when is_pid(buffer) <-

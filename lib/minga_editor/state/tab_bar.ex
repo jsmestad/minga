@@ -17,6 +17,7 @@ defmodule MingaEditor.State.TabBar do
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.{Agent, File}
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
@@ -334,25 +335,26 @@ defmodule MingaEditor.State.TabBar do
   new session to, avoiding ambiguity when multiple agent tabs exist.
   Falls back to the active tab if it's an agent tab.
   """
-  @spec find_sessionless_agent(t()) :: Tab.t() | nil
+  @spec find_sessionless_agent(t()) :: Tab.agent() | nil
   def find_sessionless_agent(%__MODULE__{tabs: tabs, active_id: active_id}) do
     # Prefer the active tab if it's an agent without a session.
     active = Enum.find(tabs, &(&1.id == active_id))
 
-    if active && active.kind == :agent && active.session == nil do
+    if match?(%Tab{kind: :agent, payload: %Agent{session: nil}}, active) do
       active
     else
-      Enum.find(tabs, fn tab ->
-        tab.kind == :agent and tab.session == nil
+      Enum.find(tabs, fn
+        %Tab{kind: :agent, payload: %Agent{session: nil}} -> true
+        _tab -> false
       end)
     end
   end
 
   @doc "Returns the agent tab whose session matches the given pid, or nil."
-  @spec find_by_session(t(), pid()) :: Tab.t() | nil
+  @spec find_by_session(t(), pid()) :: Tab.agent() | nil
   def find_by_session(%__MODULE__{tabs: tabs}, session_pid) when is_pid(session_pid) do
     Enum.find(tabs, fn
-      %Tab{kind: :agent, session: ^session_pid} -> true
+      %Tab{kind: :agent, payload: %Agent{session: ^session_pid}} -> true
       _ -> false
     end)
   end
@@ -370,7 +372,10 @@ defmodule MingaEditor.State.TabBar do
 
   @spec tab_matches_buffer?(Tab.t(), pid()) :: boolean()
   defp tab_matches_buffer?(
-         %Tab{kind: :file, file_ref: %FileRef{kind: :buffer, buffer_pid: buffer_pid}},
+         %Tab{
+           kind: :file,
+           payload: %File{file_ref: %FileRef{kind: :buffer, buffer_pid: buffer_pid}}
+         },
          buffer_pid
        ),
        do: true
@@ -381,10 +386,10 @@ defmodule MingaEditor.State.TabBar do
 
   defp tab_matches_buffer?(%Tab{}, _buffer_pid), do: false
 
-  @spec retarget_matching_workspace(t(), Tab.t(), FileRef.t()) :: t()
+  @spec retarget_matching_workspace(t(), Tab.file(), FileRef.t()) :: t()
   defp retarget_matching_workspace(
          %__MODULE__{} = tab_bar,
-         %Tab{group_id: workspace_id, file_ref: old_file_ref},
+         %Tab{group_id: workspace_id, payload: %File{file_ref: old_file_ref}},
          %FileRef{} = file_ref
        ) do
     replace_matching_workspace(tab_bar, workspace_id, fn workspace ->
@@ -437,10 +442,13 @@ defmodule MingaEditor.State.TabBar do
   @spec retarget_tab_file(t(), Tab.id(), FileRef.t()) :: t()
   def retarget_tab_file(%__MODULE__{} = tab_bar, tab_id, %FileRef{} = file_ref) do
     case get(tab_bar, tab_id) do
-      %Tab{} = tab ->
+      %Tab{payload: %File{}} = tab ->
         tab_bar
         |> replace_matching_tab(tab_id, &Tab.set_file_ref(&1, file_ref))
         |> retarget_matching_workspace(tab, file_ref)
+
+      %Tab{payload: %Agent{}} ->
+        tab_bar
 
       nil ->
         tab_bar
@@ -572,16 +580,25 @@ defmodule MingaEditor.State.TabBar do
   @doc "Returns true if any tab has its attention flag set."
   @spec any_attention?(t()) :: boolean()
   def any_attention?(%__MODULE__{tabs: tabs}) do
-    Enum.any?(tabs, & &1.attention)
+    Enum.any?(tabs, fn
+      %Tab{kind: :agent, payload: %Agent{attention: true}} -> true
+      _tab -> false
+    end)
   end
 
   @doc "Returns the remote agent tab for a server/session id pair."
-  @spec find_by_remote_session(t(), String.t(), String.t()) :: Tab.t() | nil
+  @spec find_by_remote_session(t(), String.t(), String.t()) :: Tab.agent() | nil
   def find_by_remote_session(%__MODULE__{tabs: tabs}, server_name, session_id)
       when is_binary(server_name) and is_binary(session_id) do
     Enum.find(tabs, fn
-      %Tab{kind: :agent, server_name: ^server_name, remote_session_id: ^session_id} -> true
-      _ -> false
+      %Tab{
+        kind: :agent,
+        payload: %Agent{server_name: ^server_name, remote_session_id: ^session_id}
+      } ->
+        true
+
+      _ ->
+        false
     end)
   end
 
@@ -629,8 +646,11 @@ defmodule MingaEditor.State.TabBar do
        ) do
     new_tabs =
       Enum.map(tabs, fn
-        %Tab{server_name: ^server_name} = tab -> Tab.set_connection_status(tab, status)
-        tab -> tab
+        %Tab{kind: :agent, payload: %Agent{server_name: ^server_name}} = tab ->
+          Tab.set_connection_status(tab, status)
+
+        tab ->
+          tab
       end)
 
     %{tb | tabs: new_tabs}
@@ -660,7 +680,7 @@ defmodule MingaEditor.State.TabBar do
       ) do
     new_tabs =
       Enum.map(tabs, fn
-        %Tab{kind: :agent, group_id: workspace_id} = tab when workspace_id == workspace.id ->
+        %Tab{payload: %Agent{}, group_id: workspace_id} = tab when workspace_id == workspace.id ->
           project_workspace_onto_agent_tab(tab, workspace)
 
         tab ->
@@ -670,8 +690,8 @@ defmodule MingaEditor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
-  @spec project_workspace_onto_agent_tab(Tab.t(), Workspace.agent()) :: Tab.t()
-  defp project_workspace_onto_agent_tab(%Tab{} = tab, %Workspace{
+  @spec project_workspace_onto_agent_tab(Tab.agent(), Workspace.agent()) :: Tab.agent()
+  defp project_workspace_onto_agent_tab(%Tab{payload: %Agent{}} = tab, %Workspace{
          payload: %WorkspaceAgent{} = payload
        }) do
     tab = Tab.set_session(tab, payload.session)
@@ -753,13 +773,13 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc "Returns visible file tabs for the active workspace."
-  @spec visible_file_tabs(t()) :: [Tab.t()]
+  @spec visible_file_tabs(t()) :: [Tab.file()]
   def visible_file_tabs(%__MODULE__{} = tb) do
     visible_file_tabs(tb, active_workspace_id(tb))
   end
 
   @doc "Returns visible file tabs for the given workspace id. Agent chat tabs are excluded."
-  @spec visible_file_tabs(t(), non_neg_integer()) :: [Tab.t()]
+  @spec visible_file_tabs(t(), non_neg_integer()) :: [Tab.file()]
   def visible_file_tabs(%__MODULE__{tabs: tabs}, workspace_id)
       when is_integer(workspace_id) and workspace_id >= 0 do
     tabs
@@ -777,7 +797,7 @@ defmodule MingaEditor.State.TabBar do
   defp visible_agent_tab?(%Tab{}, _workspace_id), do: false
 
   @doc "Finds the file tab in a workspace that represents the given file reference."
-  @spec find_file_tab_in_workspace(t(), non_neg_integer(), FileRef.t()) :: Tab.t() | nil
+  @spec find_file_tab_in_workspace(t(), non_neg_integer(), FileRef.t()) :: Tab.file() | nil
   def find_file_tab_in_workspace(%__MODULE__{} = tb, workspace_id, %FileRef{} = file_ref)
       when is_integer(workspace_id) and workspace_id >= 0 do
     tb
@@ -899,7 +919,9 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @spec tab_file_ref(Tab.t()) :: FileRef.t() | nil
-  defp tab_file_ref(%Tab{file_ref: %FileRef{} = file_ref}), do: file_ref
+  defp tab_file_ref(%Tab{kind: :file, payload: %File{file_ref: %FileRef{} = file_ref}}),
+    do: file_ref
+
   defp tab_file_ref(%Tab{}), do: nil
 
   @spec cycle_visible_file_tab(t(), 1 | -1) :: t()

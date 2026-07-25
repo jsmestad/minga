@@ -31,6 +31,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
@@ -1241,7 +1242,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     {state, active_tab} = Workflow.resolve_active_tab(state)
 
     case active_tab do
-      %Tab{kind: :agent, session: ^new_pid} = tab ->
+      %Tab{kind: :agent, payload: %Agent{session: ^new_pid}} = tab ->
         MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
 
       _ ->
@@ -1337,7 +1338,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         ) :: state()
   defp handle_standard_workspace_session_down(state, tb, workspace, session_pid, reason) do
     owned? =
-      Enum.any?(tb.tabs, &(&1.session == session_pid)) or
+      Enum.any?(tb.tabs, &tab_session?(&1, session_pid)) or
         workspace_session?(workspace, session_pid)
 
     if owned? do
@@ -1512,7 +1513,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec handle_tab_only_session_down(state(), TabBar.t(), pid(), term()) :: state()
   defp handle_tab_only_session_down(state, tb, session_pid, reason) do
-    owned? = Enum.any?(tb.tabs, &(&1.session == session_pid))
+    owned? = Enum.any?(tb.tabs, &tab_session?(&1, session_pid))
 
     if owned? do
       tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
@@ -1581,7 +1582,7 @@ defmodule MingaEditor.Commands.BufferManagement do
          session_pid
        ) do
     case TabBar.find_by_session(tb, session_pid) do
-      %Tab{id: tab_id, server_name: server_name} when is_binary(server_name) ->
+      %Tab{id: tab_id, payload: %Agent{server_name: server_name}} when is_binary(server_name) ->
         tb = TabBar.set_tab_connection_status(tb, tab_id, :disconnected)
 
         shell_state =
@@ -1704,7 +1705,7 @@ defmodule MingaEditor.Commands.BufferManagement do
        ) do
     updated_tb =
       Enum.reduce(tb.tabs, tb, fn tab, acc ->
-        if tab.session == session_pid do
+        if tab_session?(tab, session_pid) do
           acc
           |> TabBar.set_tab_session(tab.id, nil)
           |> TabBar.set_tab_agent_status(tab.id, status)
@@ -1725,6 +1726,10 @@ defmodule MingaEditor.Commands.BufferManagement do
           MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
     }
   end
+
+  @spec tab_session?(Tab.t(), pid()) :: boolean()
+  defp tab_session?(%Tab{kind: :agent, payload: %Agent{session: pid}}, pid), do: true
+  defp tab_session?(%Tab{}, _pid), do: false
 
   @spec clear_session_from_workspace(state(), non_neg_integer(), Tab.agent_status()) :: state()
   defp clear_session_from_workspace(

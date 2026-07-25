@@ -57,7 +57,7 @@ defmodule MingaEditor.Session.ChromeStateTest do
       tb =
         tb
         |> TabBar.set_workspace_agent_status(group.id, :thinking)
-        |> TabBar.set_tab_attention(3, true)
+        |> TabBar.set_tab_attention(2, true)
         |> TabBar.switch_to(1)
 
       chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))

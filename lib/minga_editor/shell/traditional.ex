@@ -30,6 +30,8 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
+  alias MingaEditor.State.Tab.File, as: TabFile
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
@@ -498,13 +500,13 @@ defmodule MingaEditor.Shell.Traditional do
   @spec update_restarted_session_tabs(TabBar.t(), pid(), pid(), Tab.agent_status()) :: TabBar.t()
   defp update_restarted_session_tabs(%TabBar{} = tb, old_pid, new_pid, status) do
     Enum.reduce(tb.tabs, tb, fn
-      %Tab{id: id, session: ^old_pid}, acc ->
+      %Tab{id: id, payload: %TabAgent{session: ^old_pid}}, acc ->
         TabBar.refresh_tab_session(acc, id, old_pid, new_pid, status)
 
-      %Tab{id: id, background_subagent: %Handle{pid: ^old_pid}}, acc ->
+      %Tab{id: id, payload: %TabAgent{background_subagent: %Handle{pid: ^old_pid}}}, acc ->
         TabBar.refresh_tab_session(acc, id, old_pid, new_pid, status)
 
-      %Tab{id: id, background_subagent: %Handle{parent_pid: ^old_pid}}, acc ->
+      %Tab{id: id, payload: %TabAgent{background_subagent: %Handle{parent_pid: ^old_pid}}}, acc ->
         TabBar.refresh_tab_session(acc, id, old_pid, new_pid, status)
 
       _tab, acc ->
@@ -675,7 +677,7 @@ defmodule MingaEditor.Shell.Traditional do
     tb
     |> TabBar.visible_file_tabs()
     |> Enum.find(fn
-      %Tab{file_ref: %FileRef{} = tab_ref} -> FileRef.equal?(tab_ref, file_ref)
+      %Tab{payload: %TabFile{file_ref: %FileRef{} = tab_ref}} -> FileRef.equal?(tab_ref, file_ref)
       %Tab{} -> false
     end)
   end

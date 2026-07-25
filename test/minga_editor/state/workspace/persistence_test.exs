@@ -13,6 +13,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
+  alias MingaEditor.State.Tab.File, as: TabFile
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
@@ -234,7 +236,7 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     tab_bar = Startup.initial_tab_bar(nil, :editor, dir)
     agent_tab = Enum.find(tab_bar.tabs, &(&1.kind == :agent and &1.group_id == 3))
 
-    assert %Tab{label: "Persisted Agent", session: nil} = agent_tab
+    assert %Tab{label: "Persisted Agent", payload: %TabAgent{session: nil}} = agent_tab
 
     assert TabBar.switch_to_workspace(tab_bar, 3).active_id == agent_tab.id
   end
@@ -329,7 +331,10 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     restored_workspace = TabBar.get_workspace(restored_tab_bar, workspace.id)
     assert restored_workspace.files == []
 
-    refute Enum.any?(restored_tab_bar.tabs, &match?(%Tab{file_ref: ^file_ref}, &1))
+    refute Enum.any?(
+             restored_tab_bar.tabs,
+             &match?(%Tab{payload: %TabFile{file_ref: ^file_ref}}, &1)
+           )
 
     send(retired, :stop)
   end

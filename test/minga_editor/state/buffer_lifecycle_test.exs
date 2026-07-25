@@ -16,6 +16,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   alias MingaEditor.State.Git, as: GitState
   alias MingaEditor.State.Parser, as: ParserState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.File, as: TabFile
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -466,7 +467,11 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       Enum.each(tab_bar.tabs, fn tab ->
         refute retired in tab.context.buffers.list
         refute Map.has_key?(Map.from_struct(tab.context), :agent_ui)
-        assert tab.file_ref == nil
+
+        refute match?(
+                 %Tab{payload: %TabFile{file_ref: %FileRef{kind: :buffer, buffer_pid: ^retired}}},
+                 tab
+               )
       end)
 
       Enum.each(tab_bar.workspaces, fn %Workspace{} = owner ->

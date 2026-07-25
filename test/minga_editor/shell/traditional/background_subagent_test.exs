@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.Viewport
@@ -31,9 +32,11 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
 
     tab = TabBar.find_by_session(shell_state.tab_bar, self())
     assert tab.kind == :agent
-    assert tab.session == self()
-    assert tab.agent_status == :thinking
-    assert tab.background_subagent == handle
+
+    assert %Agent{session: session, agent_status: :thinking, background_subagent: ^handle} =
+             tab.payload
+
+    assert session == self()
     assert tab.label == "session-2: write tests"
     assert tab.context.keymap_scope == :agent
     refute Map.has_key?(tab.context, :viewport)
@@ -88,7 +91,11 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
       )
 
     assert TabBar.count(shell_state.tab_bar) == 2
-    assert Enum.count(shell_state.tab_bar.tabs, &(&1.session == self())) == 1
+
+    assert Enum.count(
+             shell_state.tab_bar.tabs,
+             &match?(%Tab{payload: %Agent{session: session}} when session == self(), &1)
+           ) == 1
   end
 
   defp background_handle(opts) do

@@ -61,7 +61,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, metadata)
 
       active_tab = TabBar.active(new_shell.tab_bar)
-      assert active_tab.file_ref == expected_ref
+      assert active_tab.payload.file_ref == expected_ref
       assert Workspace.has_file?(TabBar.get_workspace(new_shell.tab_bar, 0), expected_ref)
     end
 
@@ -78,7 +78,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       active_tab = TabBar.active(new_shell.tab_bar)
       workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
 
-      assert active_tab.file_ref == expected_ref
+      assert active_tab.payload.file_ref == expected_ref
       assert Workspace.has_file?(workspace, expected_ref)
     end
 
@@ -99,7 +99,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       active_tab = TabBar.active(new_shell.tab_bar)
       workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
 
-      assert active_tab.file_ref == expected_ref
+      assert active_tab.payload.file_ref == expected_ref
       assert Workspace.has_file?(workspace, expected_ref)
     end
   end

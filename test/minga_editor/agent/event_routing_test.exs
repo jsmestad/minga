@@ -100,7 +100,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :thinking})
 
       # Background tab's badge updates...
-      assert tab(ss2.tab_bar, 2).agent_status == :thinking
+      assert tab(ss2.tab_bar, 2).payload.agent_status == :thinking
 
       # ...but the active rendering cache is untouched (it routes through
       # Agent.Events for the foreground path, not through this callback).
@@ -118,8 +118,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       {ss2, _ws} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :idle})
 
-      assert tab(ss2.tab_bar, 2).attention == true
-      assert tab(ss2.tab_bar, 1).attention == false
+      assert tab(ss2.tab_bar, 2).payload.attention == true
+      assert tab(ss2.tab_bar, 1).payload.attention == false
     end
 
     test "background :approval_pending raises attention on the owning tab", %{
@@ -131,8 +131,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       {ss2, _ws} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:approval_pending, approval})
 
-      assert tab(ss2.tab_bar, 2).attention == true
-      assert tab(ss2.tab_bar, 1).attention == false
+      assert tab(ss2.tab_bar, 2).payload.attention == true
+      assert tab(ss2.tab_bar, 1).payload.attention == false
     end
 
     test "background :error raises attention on the owning tab", %{
@@ -141,8 +141,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
 
-      assert tab(ss2.tab_bar, 2).attention == true
-      assert tab(ss2.tab_bar, 1).attention == false
+      assert tab(ss2.tab_bar, 2).payload.attention == true
+      assert tab(ss2.tab_bar, 1).payload.attention == false
     end
 
     test "background :text_delta does not mutate state at all", %{

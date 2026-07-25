@@ -22,6 +22,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.ModalOverlay.Completion, as: ModalCompletion
@@ -71,7 +72,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   defp attach_agent_workspaces(%TabBar{} = tb) do
     Enum.reduce(tb.tabs, tb, fn
-      %Tab{kind: :agent, id: tab_id, label: label, session: session}, acc
+      %Tab{kind: :agent, id: tab_id, label: label, payload: %TabAgent{session: session}}, acc
       when is_pid(session) ->
         {acc, workspace} = TabBar.add_workspace(acc, label, session)
         TabBar.move_tab_to_workspace(acc, tab_id, workspace.id)
@@ -197,7 +198,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert GenServer.call(streaming, :status) == :idle
 
       tab_one = Enum.find(switched.shell_runtime.state.tab_bar.tabs, &(&1.id == 1))
-      assert tab_one.session == streaming
+      assert tab_one.payload.session == streaming
 
       # Switching back restores the streaming session as the active one.
       back = MingaEditor.TabWorkflow.switch(switched, 1)

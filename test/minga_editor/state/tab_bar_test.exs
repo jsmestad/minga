@@ -5,6 +5,7 @@ defmodule MingaEditor.State.TabBarTest do
   alias Minga.Project.FileRef
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   alias MingaEditor.VimState
 
@@ -322,6 +323,16 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.get(tb, 1).context.editing == editing
       assert TabBar.get(tb, 1).label == "new"
     end
+
+    test "retargets file tabs and ignores agent or missing tab ids" do
+      {:ok, ref} = FileRef.from_path("/tmp/minga", "lib/new.ex")
+      tb = tab_bar(file: "file.ex", agent: "Agent")
+
+      retargeted = TabBar.retarget_tab_file(tb, 1, ref)
+      assert TabBar.get(retargeted, 1).payload.file_ref == ref
+      assert TabBar.retarget_tab_file(tb, 2, ref) == tb
+      assert TabBar.retarget_tab_file(tb, 999, ref) == tb
+    end
   end
 
   describe "kind queries" do
@@ -439,7 +450,7 @@ defmodule MingaEditor.State.TabBarTest do
       tb = TabBar.set_attention_by_session(tb, self(), true)
 
       assert TabBar.any_attention?(tb)
-      assert TabBar.get(tb, agent.id).attention == true
+      assert %Agent{attention: true} = TabBar.get(tb, agent.id).payload
     end
 
     test "returns unchanged when no session matches" do
