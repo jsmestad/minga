@@ -1420,7 +1420,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp manual_render_windows(%Intent{} = intent) do
     Map.new(intent.windows, fn {id, %WindowIntent{} = window} ->
-      {id, WindowIntent.materialize(id, window, MingaEditor.Renderer.WindowCache.reset())}
+      {id, Window.materialize(id, window, MingaEditor.Renderer.WindowCache.reset())}
     end)
   end
 

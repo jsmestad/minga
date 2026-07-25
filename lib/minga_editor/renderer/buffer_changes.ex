@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
   alias MingaEditor.State.Windows
   alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.ResidentWindowState
+  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Renderer.State
 
   @doc "Reconciles lifecycle, consumes changed buffers once, and materializes pipeline input."
@@ -217,7 +218,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
     map =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
         cache = materialize_cache(state, id)
-        {id, WindowIntent.materialize(id, carrier, cache)}
+        {id, RenderWindow.materialize(id, carrier, cache)}
       end)
 
     windows =

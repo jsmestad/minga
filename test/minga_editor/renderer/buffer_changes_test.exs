@@ -1,12 +1,9 @@
 defmodule MingaEditor.Renderer.BufferChangesTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderPipeline.Intent
-  alias MingaEditor.Renderer.BufferChanges
-  alias MingaEditor.Renderer.ObservedBuffers
-  alias MingaEditor.Renderer.State
+  alias MingaEditor.RenderPipeline.{Intent, TestHelpers, WindowIntent}
+  alias MingaEditor.Renderer.{BufferChanges, ObservedBuffers, RenderWindow, State, WindowCache}
   alias MingaEditor.Shell.Traditional.ClickRegions
-  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
@@ -213,12 +210,43 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
       BufferChanges.prepare(State.new([]), invalid_intent)
     end
 
-    fields =
+    window_intent_fields =
       ~w(authoritative_scroll_seq content cursor fold_map fold_ranges popup_meta scroll_detach_cursor scroll_echo_top scroll_velocity viewport)a
 
-    assert Enum.all?(bounded.windows, fn {_id, carrier} ->
-             Map.keys(Map.from_struct(carrier)) |> Enum.sort() == fields
+    render_window_fields = [:id, :render_cache | window_intent_fields] |> Enum.sort()
+
+    assert Enum.all?(bounded.windows, fn {id, carrier} ->
+             render_window = RenderWindow.materialize(id, carrier, WindowCache.reset())
+
+             Map.keys(Map.from_struct(carrier)) |> Enum.sort() == window_intent_fields and
+               Map.keys(Map.from_struct(render_window)) |> Enum.sort() == render_window_fields and
+               :pinned not in Map.keys(Map.from_struct(render_window)) and
+               :textobject_positions not in Map.keys(Map.from_struct(render_window)) and
+               :document_symbols not in Map.keys(Map.from_struct(render_window))
            end)
+
+    assert_raise ArgumentError, fn -> struct!(WindowIntent, content: {:empty, :semantic}) end
+    assert_raise ArgumentError, fn -> struct!(RenderWindow, id: 1) end
+  end
+
+  test "materialization preserves window intent values with resident renderer cache" do
+    buffer = start_supervised!({Minga.Buffer, content: "one"})
+    intent = intent(buffer, 0)
+    {state, _input} = BufferChanges.prepare(State.new([]), intent)
+    identity = Minga.RenderModel.Window.LineIdentity.new(1, 42)
+    cache = WindowCache.put_lineage(state.resident_windows[1].render_cache, buffer, identity, 7)
+    state = put_in(state.resident_windows[1].render_cache, cache)
+    {_state, input} = BufferChanges.prepare(state, intent)
+    carrier = Map.fetch!(intent.windows, 1)
+    render_window = Map.fetch!(input.windows.map, 1)
+
+    assert render_window.render_cache ==
+             WindowCache.with_fetch_version(cache, state.resident_windows[1].last_version)
+
+    assert WindowCache.line_identity(render_window.render_cache) == identity
+
+    assert Map.take(Map.from_struct(render_window), Map.keys(Map.from_struct(carrier))) ==
+             Map.from_struct(carrier)
   end
 
   defp trace_buffer_calls(buffer, fun) do
