@@ -4848,7 +4848,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W121/ES20-A: Cut Workspace agent lifecycle authority to a typed payload
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** ES20-A
 - **Decision:** APPROVE_REVISED_CAP, Workspace is the sole authority for workspace-scoped agent session, remote metadata, agent UI projection, ProjectView, and pending catch-up events while Tab remains the unchanged flat display/routing projection for ES20-B.
 - **Planning profile:** `ES20APlanner`, editor-lifecycle-planner, read-only; split locked by `ES20BudgetDecision`; final exact readable cap approved by `ES20AFinalBudget`.
@@ -4867,3 +4867,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** ES20-B remains required to cut Tab to typed payloads; Tab is still flat by design in ES20-A. The initial `+160` production cap was invalid after the final reviewer required every common Workspace formatting hunk restored; architecture review approved the readable corrected diff at exact caps of `+187` production and `+38` tests with no headroom. `make lint` reports the restored baseline `Buffer.dirty?/1` boolean `case` as a Credo refactoring opportunity but the command exits successfully, and the lock explicitly required reverting that unrelated if/else rewrite.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3238
+- **Implementation commit SHA:** `c5359ede0540d0d9d4d5b5a3e323c81826ba33c9`
+- **Merge SHA:** `541bbcabb33c7cee6a5e5409796f889c50530558`
+- **Merge evidence:** PR #3238 merged after required CI run `30147333977` passed; current main contains the reviewed implementation, tests, and roadmap evidence.
+- **Findings resolved:** ES20-A is complete. ES20 remains open until ES20-B removes the flat Tab projection authority.
+- **Completion date:** 2026-07-25
