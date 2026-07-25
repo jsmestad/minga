@@ -235,12 +235,6 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | scroll: Minga.Editing.scroll_to_top(panel.scroll)}}
   end
 
-  @doc "Re-engages auto-scroll. Delegates to `Minga.Editing.pin_to_bottom/1`."
-  @spec engage_auto_scroll(t()) :: t()
-  def engage_auto_scroll(%__MODULE__{panel: panel} = state) do
-    %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}
-  end
-
   @doc "Records whether prompt input owns focus; buffer attachment belongs to PromptBuffer."
   @spec set_input_focused(t(), boolean()) :: t()
   def set_input_focused(%__MODULE__{panel: panel} = state, focused?) when is_boolean(focused?) do

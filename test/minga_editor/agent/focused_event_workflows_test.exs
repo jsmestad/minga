@@ -31,13 +31,16 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaAgent.Session
   alias MingaEditor.Test.FakeShell
 
-  test "status workflow synchronizes owner state before installing a render" do
-    state = event_state()
+  test "status workflow preserves an unpinned transcript before installing a render" do
+    state =
+      event_state()
+      |> TraditionalWorkflow.install_agent_ui(UIState.new() |> UIState.scroll_down(7))
 
     state = StatusEventWorkflow.status_changed(state, :thinking)
 
     assert TraditionalState.agent(state.shell_runtime.state).runtime.status == :thinking
-    assert state.workspace.agent_ui.panel.scroll.pinned
+    refute state.workspace.agent_ui.panel.scroll.pinned
+    assert state.workspace.agent_ui.panel.scroll.offset == 7
     assert state.workspace.agent_ui.view.activity.started_at
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
