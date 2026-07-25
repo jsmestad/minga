@@ -176,7 +176,52 @@ defmodule MingaEditor.CompletionAsyncTest do
     end
   end
 
-  describe "(d) end-to-end through the live Editor handle_info" do
+  describe "(d) dismissal clears completion request ownership" do
+    test "dismiss drops primary and secondary completion refs while preserving unrelated refs" do
+      ctx = start_editor("hello")
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
+      completion = completion_from([%{"label" => "hello", "filterText" => "hello"}], {0, 0}, "")
+      state = open_completion_modal(state, completion, 1)
+      primary_ref = make_ref()
+      secondary_ref = make_ref()
+      signature_ref = make_ref()
+
+      lsp =
+        state.lsp
+        |> LSPState.track_completion_result_request(
+          primary_ref,
+          :primary,
+          self(),
+          buffer,
+          version,
+          1,
+          {0, 0}
+        )
+        |> LSPState.track_completion_result_request(
+          secondary_ref,
+          :secondary,
+          self(),
+          buffer,
+          version,
+          1,
+          {0, 0}
+        )
+        |> LSPState.track_signature_help_request(signature_ref, self(), buffer, version, {0, 0})
+
+      result = CompletionHandling.dismiss(%{state | lsp: lsp})
+
+      refute ModalOverlay.match(result.shell_runtime.state.modal, :completion)
+      assert LSPState.fetch_pending_request(result.lsp, primary_ref) == :error
+      assert LSPState.fetch_pending_request(result.lsp, secondary_ref) == :error
+
+      assert LSPState.fetch_pending_request(result.lsp, signature_ref) ==
+               {:ok, {:signature_help, self(), buffer, version, {0, 0}}}
+    end
+  end
+
+  describe "(e) end-to-end through the live Editor handle_info" do
     defp inject_pending_completion(ctx, ref, client) do
       :sys.replace_state(ctx.editor, fn state ->
         owner = state.shell_runtime.state.tab_bar.active_id
