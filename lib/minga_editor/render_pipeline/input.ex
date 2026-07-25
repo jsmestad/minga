@@ -81,7 +81,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
     windows =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
-        {id, WindowIntent.materialize(id, carrier, MingaEditor.Renderer.WindowCache.reset())}
+        {id, RenderWindow.materialize(id, carrier, MingaEditor.Renderer.WindowCache.reset())}
       end)
 
     from_intent(

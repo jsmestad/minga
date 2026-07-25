@@ -1,7 +1,6 @@
 defmodule MingaEditor.RenderPipeline.WindowIntent do
   @moduledoc "Cache-free editor-owned per-window render carrier."
 
-  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Window
 
   @fields [
@@ -16,19 +15,19 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
     :scroll_echo_top,
     :authoritative_scroll_seq
   ]
-  @enforce_keys [:content, :viewport]
+  @enforce_keys @fields
   defstruct @fields
 
   @type t :: %__MODULE__{
           content: MingaEditor.Window.Content.t(),
           viewport: MingaEditor.Viewport.t(),
           cursor: Minga.Buffer.position(),
-          fold_map: term(),
-          fold_ranges: list(),
-          popup_meta: term(),
-          scroll_velocity: term(),
+          fold_map: MingaEditor.FoldMap.t(),
+          fold_ranges: [Minga.Editing.Fold.Range.t()],
+          popup_meta: MingaEditor.UI.Popup.Active.t() | nil,
+          scroll_velocity: MingaEditor.Window.ScrollVelocity.t(),
           scroll_detach_cursor: Minga.Buffer.position() | nil,
-          scroll_echo_top: non_neg_integer() | nil,
+          scroll_echo_top: integer() | nil,
           authoritative_scroll_seq: non_neg_integer()
         }
 
@@ -45,24 +44,6 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
       scroll_detach_cursor: window.scroll_detach_cursor,
       scroll_echo_top: window.scroll_echo_top,
       authoritative_scroll_seq: window.authoritative_scroll_seq
-    }
-  end
-
-  @spec materialize(Window.id(), t(), MingaEditor.Renderer.WindowCache.t()) :: RenderWindow.t()
-  def materialize(id, %__MODULE__{} = carrier, cache) do
-    %RenderWindow{
-      id: id,
-      content: carrier.content,
-      viewport: carrier.viewport,
-      cursor: carrier.cursor,
-      fold_map: carrier.fold_map,
-      fold_ranges: carrier.fold_ranges,
-      popup_meta: carrier.popup_meta,
-      render_cache: cache,
-      scroll_velocity: carrier.scroll_velocity,
-      scroll_detach_cursor: carrier.scroll_detach_cursor,
-      scroll_echo_top: carrier.scroll_echo_top,
-      authoritative_scroll_seq: carrier.authoritative_scroll_seq
     }
   end
 end

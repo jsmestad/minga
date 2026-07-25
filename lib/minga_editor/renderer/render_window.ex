@@ -27,9 +27,9 @@ defmodule MingaEditor.Renderer.RenderWindow do
   alias Minga.Buffer
   alias MingaEditor.FoldMap
   alias Minga.Editing.Fold.Range, as: FoldRange
-  alias Minga.Language.Symbol
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
+  alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.Renderer.WindowCache, as: RenderCache
   alias MingaEditor.Window.ScrollVelocity
   alias MingaEditor.UI.Popup.Active, as: PopupActive
@@ -39,16 +39,28 @@ defmodule MingaEditor.Renderer.RenderWindow do
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
 
+  @fields [
+    :id,
+    :content,
+    :viewport,
+    :cursor,
+    :fold_map,
+    :fold_ranges,
+    :popup_meta,
+    :render_cache,
+    :scroll_velocity,
+    :scroll_detach_cursor,
+    :scroll_echo_top,
+    :authoritative_scroll_seq
+  ]
+
   @type t :: %__MODULE__{
           id: id(),
           content: Content.t(),
           viewport: Viewport.t(),
           cursor: Buffer.position(),
-          pinned: boolean(),
           fold_map: FoldMap.t(),
           fold_ranges: [FoldRange.t()],
-          textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
-          document_symbols: [Symbol.t()],
           popup_meta: PopupActive.t() | nil,
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
@@ -57,24 +69,26 @@ defmodule MingaEditor.Renderer.RenderWindow do
           authoritative_scroll_seq: non_neg_integer()
         }
 
-  @enforce_keys [:id, :content, :viewport]
-  defstruct [
-    :id,
-    :content,
-    :viewport,
-    cursor: {0, 0},
-    pinned: false,
-    fold_map: %FoldMap{folds: []},
-    fold_ranges: [],
-    textobject_positions: %{},
-    document_symbols: [],
-    popup_meta: nil,
-    render_cache: %RenderCache{},
-    scroll_velocity: %ScrollVelocity{},
-    scroll_detach_cursor: nil,
-    scroll_echo_top: nil,
-    authoritative_scroll_seq: 0
-  ]
+  @enforce_keys @fields
+  defstruct @fields
+
+  @spec materialize(MingaEditor.Window.id(), WindowIntent.t(), RenderCache.t()) :: t()
+  def materialize(id, %WindowIntent{} = carrier, %RenderCache{} = cache) do
+    %__MODULE__{
+      id: id,
+      content: carrier.content,
+      viewport: carrier.viewport,
+      cursor: carrier.cursor,
+      fold_map: carrier.fold_map,
+      fold_ranges: carrier.fold_ranges,
+      popup_meta: carrier.popup_meta,
+      render_cache: cache,
+      scroll_velocity: carrier.scroll_velocity,
+      scroll_detach_cursor: carrier.scroll_detach_cursor,
+      scroll_echo_top: carrier.scroll_echo_top,
+      authoritative_scroll_seq: carrier.authoritative_scroll_seq
+    }
+  end
 
   # ── Viewport ────────────────────────────────────────────────────────────────
 

@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.Window
   alias MingaEditor.State.Launchpad
@@ -27,7 +28,7 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
   end
 
   defp render_window(window) do
-    WindowIntent.materialize(window.id, WindowIntent.from_window(window), WindowCache.reset())
+    RenderWindow.materialize(window.id, WindowIntent.from_window(window), WindowCache.reset())
   end
 
   defp launchpad(opts) do
