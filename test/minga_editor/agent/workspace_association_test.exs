@@ -8,6 +8,7 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
 
   defp fake_session_pid do
@@ -25,9 +26,9 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
   defp build_agent_scenario do
     fake_session = fake_session_pid()
 
-    tab1 = %Tab{id: 1, kind: :file, label: "editor.ex", group_id: 0}
-    tab2 = %Tab{id: 2, kind: :file, label: "main.ex", group_id: 0}
-    tab3 = %Tab{id: 3, kind: :agent, label: "Agent", group_id: 0}
+    tab1 = Tab.new_file(1, "editor.ex")
+    tab2 = Tab.new_file(2, "main.ex")
+    tab3 = Tab.new_agent(3, "Agent")
     tab3 = Tab.set_session(tab3, fake_session)
 
     tb = %TabBar{tabs: [tab1, tab2, tab3], active_id: 3, next_id: 4}
@@ -73,7 +74,7 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
       fake_session = fake_session_pid()
 
       {tb, ws} = TabBar.add_workspace(tb, "Research", fake_session)
-      assert ws.session == fake_session
+      assert %WorkspaceAgent{session: ^fake_session} = ws.payload
       assert TabBar.find_workspace_by_session(tb, fake_session) == ws
     end
 
@@ -99,10 +100,10 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
       {tb, _session, ws} = build_agent_scenario()
 
       tb = TabBar.set_workspace_agent_status(tb, ws.id, :thinking)
-      assert TabBar.get_workspace(tb, ws.id).agent_status == :thinking
+      assert %WorkspaceAgent{agent_status: :thinking} = TabBar.get_workspace(tb, ws.id).payload
 
       tb = TabBar.set_workspace_agent_status(tb, ws.id, :idle)
-      assert TabBar.get_workspace(tb, ws.id).agent_status == :idle
+      assert %WorkspaceAgent{agent_status: :idle} = TabBar.get_workspace(tb, ws.id).payload
     end
 
     test "disclosure tier progresses with agent count" do

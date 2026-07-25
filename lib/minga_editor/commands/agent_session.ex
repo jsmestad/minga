@@ -22,6 +22,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
 
   @type state :: EditorState.t()
@@ -98,7 +99,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec clear_workspace_sessions(TabBar.t(), pid()) :: TabBar.t()
   defp clear_workspace_sessions(%TabBar{} = tb, session) do
     Enum.reduce(tb.workspaces, tb, fn
-      %Workspace{id: workspace_id, session: ^session}, acc ->
+      %Workspace{id: workspace_id, payload: %WorkspaceAgent{session: ^session}}, acc ->
         TabBar.clear_workspace_session(acc, workspace_id)
 
       _workspace, acc ->
@@ -676,9 +677,12 @@ defmodule MingaEditor.Commands.AgentSession do
   defp detach_remote_session(state, _session), do: state
 
   @spec detach_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
-  defp detach_remote_session_by_id(remote_node, session_id) do
-    SessionClient.detach(remote_node, session_id)
-  end
+  defp detach_remote_session_by_id(remote_node, session_id),
+    do:
+      Process.get(:minga_editor_remote_detach, &SessionClient.detach/2).(
+        remote_node,
+        session_id
+      )
 
   @spec mark_remote_session_disconnected(state(), String.t()) :: state()
   defp mark_remote_session_disconnected(
@@ -687,8 +691,14 @@ defmodule MingaEditor.Commands.AgentSession do
        ) do
     tb =
       Enum.reduce(tb.workspaces, tb, fn
-        %Workspace{id: workspace_id, remote_session: %{session_id: ^session_id}}, acc ->
-          TabBar.set_workspace_remote_connection_status(acc, workspace_id, :disconnected)
+        %Workspace{
+          id: workspace_id,
+          payload: %WorkspaceAgent{remote_session: %{session_id: ^session_id}}
+        },
+        acc ->
+          acc
+          |> TabBar.set_workspace_remote_connection_status(workspace_id, :disconnected)
+          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
         _workspace, acc ->
           acc
@@ -935,8 +945,11 @@ defmodule MingaEditor.Commands.AgentSession do
   defp sync_state_to_workspace(state, %TabBar{} = tb, workspace_id) do
     agent_ui =
       case TabBar.get_workspace(tb, workspace_id) do
-        %Workspace{agent_ui: %MingaEditor.Agent.UIState{} = agent_ui} -> agent_ui
-        _ -> MingaEditor.Agent.UIState.new()
+        %Workspace{payload: %WorkspaceAgent{agent_ui: %MingaEditor.Agent.UIState{} = agent_ui}} ->
+          agent_ui
+
+        _ ->
+          MingaEditor.Agent.UIState.new()
       end
 
     state = MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
@@ -962,12 +975,24 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp maybe_update_bound_workspace_project_view(state, _session_pid, _project_view), do: state
 
+  @spec workspace_project_view(Workspace.t()) :: ProjectView.t() | nil
+  defp workspace_project_view(%Workspace{
+         payload: %WorkspaceAgent{project_view: %ProjectView{} = project_view}
+       }),
+       do: project_view
+
+  defp workspace_project_view(%Workspace{}), do: nil
+
+  @spec workspace_session(Workspace.t()) :: pid() | nil
+  defp workspace_session(%Workspace{payload: %WorkspaceAgent{session: session}}), do: session
+  defp workspace_session(%Workspace{}), do: nil
+
   @spec session_project_view(state()) :: {ProjectView.t() | nil, boolean()}
   defp session_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     case TabBar.active_workspace(tb) do
       %Workspace{kind: :agent} = workspace ->
         if MingaEditor.WorkspaceWorkflow.project_view_active?(workspace) do
-          {workspace.project_view, false}
+          {workspace_project_view(workspace), false}
         else
           project_view_from_root(state)
         end
@@ -1016,7 +1041,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp maybe_update_workspace_project_view(state, %Workspace{} = workspace, project_view) do
     state
     |> update_workspace_project_view(workspace.id, project_view)
-    |> maybe_refresh_provider_project_view(workspace.session, project_view)
+    |> maybe_refresh_provider_project_view(workspace_session(workspace), project_view)
   end
 
   @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::

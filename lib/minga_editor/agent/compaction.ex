@@ -1,4 +1,6 @@
 defmodule MingaEditor.Agent.Compaction do
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+
   @moduledoc """
   Typed agent-session compaction owned by the agent presentation domain.
 
@@ -190,7 +192,7 @@ defmodule MingaEditor.Agent.Compaction do
     tab_bar = state.shell_runtime.state.tab_bar
 
     workspace = TabBar.get_workspace(tab_bar, workspace_id)
-    workspace = Workspace.set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
+    workspace = Workspace.set_agent_ui(workspace, fun.(background_agent_ui(workspace)))
     tab_bar = TabBar.accept_workspace(tab_bar, workspace)
 
     shell_state =
@@ -205,6 +207,12 @@ defmodule MingaEditor.Agent.Compaction do
           MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
     }
   end
+
+  @spec background_agent_ui(Workspace.t() | nil) :: UIState.t()
+  defp background_agent_ui(%Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}}),
+    do: agent_ui
+
+  defp background_agent_ui(_workspace), do: UIState.new()
 
   @spec background_workspace(EditorState.t(), pid()) :: Workspace.t() | nil
   defp background_workspace(state, session) do

@@ -14,6 +14,7 @@ defmodule MingaEditor.Session.ChromeState do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias Minga.Language.Devicon
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -197,7 +198,7 @@ defmodule MingaEditor.Session.ChromeState do
       label: group.label,
       icon: group.icon || "cpu",
       color: group.color,
-      status: group.agent_status,
+      status: workspace_agent_status(group),
       attention?: Enum.any?(tabs, & &1.attention),
       tab_count: Enum.count(tabs),
       draft_count: workspace_draft_count(group),
@@ -229,8 +230,14 @@ defmodule MingaEditor.Session.ChromeState do
 
   defp workspace_conflict_count(_workspace), do: 0
 
+  @spec workspace_agent_status(Workspace.t()) :: Workspace.agent_status()
+  defp workspace_agent_status(%Workspace{payload: %WorkspaceAgent{agent_status: status}}),
+    do: status
+
+  defp workspace_agent_status(%Workspace{}), do: nil
+
   @spec running_background_count(Workspace.t()) :: non_neg_integer()
-  defp running_background_count(%Workspace{agent_status: status})
+  defp running_background_count(%Workspace{payload: %WorkspaceAgent{agent_status: status}})
        when status in [:plan, :thinking, :tool_executing],
        do: 1
 

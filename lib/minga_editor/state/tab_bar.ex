@@ -18,6 +18,7 @@ defmodule MingaEditor.State.TabBar do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
   @typedoc "Tab bar state."
   @type t :: %__MODULE__{
@@ -645,8 +646,18 @@ defmodule MingaEditor.State.TabBar do
     end
   end
 
-  @spec sync_workspace_agent_tab_projection(t(), Workspace.t()) :: t()
-  def sync_workspace_agent_tab_projection(%__MODULE__{tabs: tabs} = tb, %Workspace{} = workspace) do
+  @spec sync_workspace_agent_tab_projection(t(), Workspace.agent() | Workspace.manual()) :: t()
+  def sync_workspace_agent_tab_projection(%__MODULE__{} = tb, %Workspace{
+        payload: %Workspace.Manual{}
+      }),
+      do: tb
+
+  def sync_workspace_agent_tab_projection(
+        %__MODULE__{tabs: tabs} = tb,
+        %Workspace{
+          payload: %WorkspaceAgent{}
+        } = workspace
+      ) do
     new_tabs =
       Enum.map(tabs, fn
         %Tab{kind: :agent, group_id: workspace_id} = tab when workspace_id == workspace.id ->
@@ -659,12 +670,14 @@ defmodule MingaEditor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
-  @spec project_workspace_onto_agent_tab(Tab.t(), Workspace.t()) :: Tab.t()
-  defp project_workspace_onto_agent_tab(%Tab{} = tab, %Workspace{} = workspace) do
-    tab = Tab.set_session(tab, workspace.session)
-    tab = Tab.set_agent_status(tab, workspace.agent_status)
+  @spec project_workspace_onto_agent_tab(Tab.t(), Workspace.agent()) :: Tab.t()
+  defp project_workspace_onto_agent_tab(%Tab{} = tab, %Workspace{
+         payload: %WorkspaceAgent{} = payload
+       }) do
+    tab = Tab.set_session(tab, payload.session)
+    tab = Tab.set_agent_status(tab, payload.agent_status)
 
-    case workspace.remote_session do
+    case payload.remote_session do
       %MingaEditor.State.Workspace.RemoteSession{} = remote_session ->
         Tab.set_remote_projection(tab, remote_session)
 
@@ -1044,7 +1057,7 @@ defmodule MingaEditor.State.TabBar do
   def find_workspace_by_session(%__MODULE__{workspaces: workspaces}, session_pid)
       when is_pid(session_pid) do
     Enum.find(workspaces, fn
-      %Workspace{session: ^session_pid} -> true
+      %Workspace{payload: %WorkspaceAgent{session: ^session_pid}} -> true
       _ -> false
     end)
   end

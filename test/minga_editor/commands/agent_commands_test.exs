@@ -10,7 +10,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   in a separate file.
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session
@@ -30,6 +30,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.State.Frontend
   alias MingaEditor.State.Interaction
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -85,14 +86,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       }
     }
 
-    # Active workspace owns the session pid; the tab field is a legacy mirror only.
     agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(default_session)
+    {tb, workspace} = agent_tab |> TabBar.new() |> TabBar.add_workspace("Agent", default_session)
 
     tb =
-      agent_tab
-      |> TabBar.new()
-      |> TabBar.set_workspace_session(0, default_session)
-      |> TabBar.set_workspace_agent_ui(0, agentic)
+      tb
+      |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
+      |> TabBar.set_workspace_agent_ui(workspace.id, agentic)
 
     %EditorState{
       frontend: %Frontend{port_manager: nil},
@@ -122,6 +122,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     }
   end
 
+  defp install_tab_bar(state, tab_bar) do
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(state.shell_runtime.state, tab_bar)
+
+    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  end
+
   defp source_workspace_state do
     state = base_state(session: nil)
     source_ref = FileRef.from_buffer(state.workspace.buffers.active)
@@ -136,38 +143,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       |> TabBar.new()
       |> TabBar.add_workspace_file(0, source_ref)
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tab_bar
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    install_tab_bar(state, tab_bar)
   end
 
   defp source_workspace_with_background_agent_tab do
     state = source_workspace_state()
     {tab_bar, _agent_tab} = TabBar.insert(state.shell_runtime.state.tab_bar, :agent, "Agent")
 
-    then(state, fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tab_bar
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-      }
-    end)
+    install_tab_bar(state, tab_bar)
   end
 
   defp active_agent_workspace_state do
@@ -1002,13 +985,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert active_workspace.kind == :agent
       assert active_workspace.files == []
-      assert is_pid(active_workspace.session)
+      assert %WorkspaceAgent{session: session} = active_workspace.payload
+      assert is_pid(session)
       assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
       assert new_state.workspace.buffers.active == nil
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
-      assert manual_workspace.session == source_workspace.session
-      assert TabBar.active(tab_bar).session == active_workspace.session
+      assert manual_workspace.payload == source_workspace.payload
+      assert TabBar.active(tab_bar).session == session
     end
 
     test "switching back to the source file tab restores file content" do
@@ -1102,10 +1086,54 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert TabBar.active_workspace_id(tab_bar) == 0
       manual_workspace = TabBar.get_workspace(tab_bar, 0)
       assert manual_workspace.files == source_workspace.files
-      assert manual_workspace.session == source_workspace.session
-      assert [%{files: [], session: session}] = agent_workspaces
+      assert manual_workspace.payload == source_workspace.payload
+      assert [%{files: [], payload: %WorkspaceAgent{session: session}}] = agent_workspaces
       assert is_pid(session)
     end
+  end
+
+  test "detach remote session command disconnects workspace payload and flat agent tab" do
+    test_pid = self()
+
+    Process.put(:minga_editor_remote_detach, fn remote_node, session_id ->
+      send(test_pid, {:detach, remote_node, session_id})
+      :ok
+    end)
+
+    on_exit(fn -> Process.delete(:minga_editor_remote_detach) end)
+
+    state = base_state(session: nil)
+    session_id = "session-1"
+
+    remote_pid =
+      :erlang.binary_to_term(<<131, 103, 100, 0, 11, "remote@stub", 0, 0, 0, 1, 0, 0, 0, 0, 1>>)
+
+    tab_bar = state.shell_runtime.state.tab_bar
+    workspace_id = TabBar.active_workspace_id(tab_bar)
+
+    workspace =
+      tab_bar
+      |> TabBar.get_workspace(workspace_id)
+      |> MingaEditor.State.Workspace.set_session(remote_pid)
+      |> MingaEditor.State.Workspace.set_remote_session(
+        MingaEditor.State.Workspace.RemoteSession.new("remote", session_id, :connected, 0)
+      )
+
+    state =
+      install_tab_bar(
+        state,
+        tab_bar
+        |> TabBar.accept_workspace(workspace)
+        |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+      )
+
+    result = MingaEditor.Commands.execute(state, :detach_remote_session)
+
+    assert_receive {:detach, :remote@stub, ^session_id}
+    tab_bar = result.shell_runtime.state.tab_bar
+    workspace = TabBar.get_workspace(tab_bar, workspace_id)
+    assert workspace.payload.remote_session.connection_status == :disconnected
+    assert TabBar.get(tab_bar, 1).connection_status == :disconnected
   end
 
   # ── cycle_agent_tabs ─────────────────────────────────────────────────────

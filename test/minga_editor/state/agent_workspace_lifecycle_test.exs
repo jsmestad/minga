@@ -17,6 +17,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace
@@ -36,7 +37,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert prompt_text(state.workspace.agent_ui) == "draft one"
 
-    assert prompt_text(TabBar.active_workspace(state.shell_runtime.state.tab_bar).agent_ui) ==
+    assert prompt_text(
+             workspace_agent_ui(TabBar.active_workspace(state.shell_runtime.state.tab_bar))
+           ) ==
              "draft one"
   end
 
@@ -163,14 +166,16 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     first_version = panel_message_version(state)
 
     assert first_version == initial_version + 1
-    assert drained_workspace.pending_catchup_events == []
+    assert workspace_payload(drained_workspace).pending_catchup_events == []
 
     state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
     state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
 
     assert panel_message_version(state) == first_version
 
-    assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id).pending_catchup_events ==
+    assert workspace_payload(
+             TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id)
+           ).pending_catchup_events ==
              []
   end
 
@@ -256,9 +261,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     tab_bar = state.shell_runtime.state.tab_bar
     assert TabBar.active_workspace_id(tab_bar) == workspace_id
     workspace = TabBar.get_workspace(tab_bar, workspace_id)
-    assert workspace.session == new_session
+    assert workspace_payload(workspace).session == new_session
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace.agent_ui) == "restart draft"
+    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
     assert TabBar.active(tab_bar).session == new_session
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
@@ -289,13 +294,13 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert TabBar.active(tab_bar).kind == :file
     assert TabBar.active_workspace_id(tab_bar) == workspace_id
-    assert workspace.session == new_session
+    assert workspace_payload(workspace).session == new_session
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace.agent_ui) == "restart draft"
+    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
     assert agent_tab.session == new_session
     refute Enum.any?(tab_bar.tabs, &(&1.session == old_session))
-    refute Enum.any?(tab_bar.workspaces, &(&1.session == old_session))
+    refute Enum.any?(tab_bar.workspaces, &(workspace_session(&1) == old_session))
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
   end
 
@@ -326,10 +331,10 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = BufferManagement.handle_agent_session_down(state, session, :shutdown)
     workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_id)
 
-    assert workspace.session == nil
-    assert workspace.agent_status == :idle
+    assert workspace_payload(workspace).session == nil
+    assert workspace_payload(workspace).agent_status == :idle
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace.agent_ui) == "restart draft"
+    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
 
     state = MingaEditor.TabWorkflow.switch(state, 2)
@@ -355,7 +360,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = MingaEditor.Commands.Workspace.workspace_close(state)
     workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_id)
 
-    assert workspace.session == session
+    assert workspace_payload(workspace).session == session
     assert workspace.files == [file_ref]
 
     assert state.shell_runtime.state.notice.message ==
@@ -397,12 +402,12 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     workspace = TabBar.get_workspace(tab_bar, workspace_id)
 
     assert TabBar.get(tab_bar, agent_tab_id) == nil
-    assert workspace.session == session
+    assert workspace_payload(workspace).session == session
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace.agent_ui) == "restart draft"
-    assert workspace.remote_session.server_name == "home"
-    assert workspace.remote_session.session_id == "session-1"
-    assert workspace.remote_session.connection_status == :connected
+    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).remote_session.server_name == "home"
+    assert workspace_payload(workspace).remote_session.session_id == "session-1"
+    assert workspace_payload(workspace).remote_session.connection_status == :connected
   end
 
   test "stop_current_session from file tab after closing remote agent tab routes through workspace metadata" do
@@ -424,8 +429,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.get(tab_bar, agent_tab_id) == nil
     assert TabBar.active(tab_bar).kind == :file
     assert TabBar.active_workspace_id(tab_bar) == workspace_id
-    assert workspace.session == session
-    assert workspace.remote_session.session_id == session_id
+    assert workspace_payload(workspace).session == session
+    assert workspace_payload(workspace).remote_session.session_id == session_id
 
     state = AgentSession.stop_current_session(state)
     assert_receive {:DOWN, ^ref, :process, ^session, _reason}
@@ -433,13 +438,13 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = BufferManagement.handle_agent_session_down(state, session, :normal)
     workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_id)
 
-    assert workspace.session == nil
-    assert workspace.agent_status == :idle
+    assert workspace_payload(workspace).session == nil
+    assert workspace_payload(workspace).agent_status == :idle
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace.agent_ui) == "restart draft"
-    assert workspace.remote_session.server_name == "home"
-    assert workspace.remote_session.session_id == session_id
-    assert workspace.remote_session.connection_status == :connected
+    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
+    assert workspace_payload(workspace).remote_session.server_name == "home"
+    assert workspace_payload(workspace).remote_session.session_id == session_id
+    assert workspace_payload(workspace).remote_session.connection_status == :connected
     refute Enum.any?(state.shell_runtime.state.tab_bar.tabs, &(&1.kind == :agent))
   end
 
@@ -455,9 +460,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = BufferManagement.handle_agent_session_down(state, session, :shutdown)
     workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_id)
 
-    assert workspace.session == nil
+    assert workspace_payload(workspace).session == nil
     assert workspace.files == [file_ref]
-    assert prompt_text(workspace.agent_ui) == "restart draft"
+    assert prompt_text(workspace_agent_ui(workspace)) == "restart draft"
   end
 
   defp state_with_agent_workspace_tabs do
@@ -600,6 +605,16 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         )
     }
   end
+
+  defp workspace_payload(%Workspace{payload: %WorkspaceAgent{} = payload}), do: payload
+
+  defp workspace_agent_ui(%Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}}),
+    do: agent_ui
+
+  defp workspace_agent_ui(%Workspace{}), do: UIState.new()
+
+  defp workspace_session(%Workspace{payload: %WorkspaceAgent{session: session}}), do: session
+  defp workspace_session(%Workspace{}), do: nil
 
   defp put_prompt(%UIState{} = ui, text) do
     ui = MingaEditor.Agent.PromptBuffer.ensure(ui)

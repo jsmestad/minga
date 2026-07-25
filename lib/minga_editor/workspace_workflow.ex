@@ -15,19 +15,24 @@ defmodule MingaEditor.WorkspaceWorkflow do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Workspace.Persistence
 
   @doc "Releases backend-owned resources for a workspace ProjectView."
   @spec close_project_view(Workspace.t()) :: :ok | {:error, term()}
-  def close_project_view(%Workspace{project_view: %ProjectView{} = project_view}),
-    do: ProjectView.close(project_view)
+  def close_project_view(%Workspace{
+        payload: %WorkspaceAgent{project_view: %ProjectView{} = project_view}
+      }),
+      do: ProjectView.close(project_view)
 
   def close_project_view(%Workspace{}), do: :ok
 
   @doc "Returns whether a workspace ProjectView backend is still available."
   @spec project_view_active?(Workspace.t()) :: boolean()
-  def project_view_active?(%Workspace{project_view: %ProjectView{} = project_view}),
-    do: ProjectView.active?(project_view)
+  def project_view_active?(%Workspace{
+        payload: %WorkspaceAgent{project_view: %ProjectView{} = project_view}
+      }),
+      do: ProjectView.active?(project_view)
 
   def project_view_active?(%Workspace{}), do: false
 

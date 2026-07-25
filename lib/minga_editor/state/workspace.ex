@@ -8,7 +8,7 @@ defmodule MingaEditor.State.Workspace do
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.State.Workspace.RemoteSession
+  alias MingaEditor.State.Workspace.{Agent, Manual, RemoteSession}
   alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
@@ -32,44 +32,29 @@ defmodule MingaEditor.State.Workspace do
   @typedoc "Workspace icon identifier."
   @type icon :: String.t()
 
-  @typedoc "A workspace domain object."
-  @type t :: %__MODULE__{
-          id: non_neg_integer(),
-          kind: kind(),
-          label: String.t(),
-          icon: icon(),
-          color: non_neg_integer(),
-          agent_status: agent_status(),
-          session: pid() | nil,
-          remote_session: RemoteSession.t() | nil,
-          custom_name: String.t() | nil,
-          files: [FileRef.t()],
-          agent_ui: UIState.t() | nil,
-          project_view: ProjectView.t() | nil,
-          review: WorkspaceReview.t(),
-          project_root: String.t() | nil,
-          pending_catchup_events: [MingaAgent.EventLog.EventRecord.t()]
-        }
+  @typedoc "Manual workspace domain object."
+  @type manual :: %__MODULE__{kind: :manual, payload: Manual.t()}
 
-  @enforce_keys [:id, :kind]
+  @typedoc "Agent workspace domain object."
+  @type agent :: %__MODULE__{kind: :agent, payload: Agent.t()}
+
+  @typedoc "A workspace domain object."
+  @type t :: manual() | agent()
+
+  @enforce_keys [:id, :kind, :payload]
   defstruct id: nil,
             kind: nil,
             label: "Workspace",
             icon: "folder",
             color: 0x51AFEF,
-            agent_status: :idle,
-            session: nil,
-            remote_session: nil,
             custom_name: nil,
             files: [],
-            agent_ui: nil,
-            project_view: nil,
             review: WorkspaceReview.new(),
             project_root: nil,
-            pending_catchup_events: []
+            payload: nil
 
   @doc "Creates the manual project workspace."
-  @spec new_manual(String.t() | nil) :: t()
+  @spec new_manual(String.t() | nil) :: manual()
   def new_manual(project_root) do
     %__MODULE__{
       id: 0,
@@ -77,15 +62,13 @@ defmodule MingaEditor.State.Workspace do
       label: manual_label(project_root),
       icon: "folder",
       color: 0x51AFEF,
-      agent_status: nil,
-      session: nil,
-      remote_session: nil,
-      project_root: normalize_project_root(project_root)
+      project_root: normalize_project_root(project_root),
+      payload: %Manual{}
     }
   end
 
   @doc "Creates a new agent workspace with a unique id."
-  @spec new_agent(pos_integer(), String.t(), pid() | nil, String.t() | nil) :: t()
+  @spec new_agent(pos_integer(), String.t(), pid() | nil, String.t() | nil) :: agent()
   def new_agent(id, label, session \\ nil, project_root \\ nil) when is_integer(id) and id > 0 do
     %__MODULE__{
       id: id,
@@ -93,46 +76,65 @@ defmodule MingaEditor.State.Workspace do
       label: label,
       icon: "cpu",
       color: agent_color(id),
-      agent_status: :idle,
-      session: session,
-      agent_ui: UIState.new(),
-      project_root: normalize_project_root(project_root)
+      project_root: normalize_project_root(project_root),
+      payload: %Agent{session: session, agent_ui: UIState.new()}
     }
   end
 
   @doc "Sets the agent status on the workspace."
   @spec set_agent_status(t(), agent_status()) :: t()
-  def set_agent_status(%__MODULE__{} = workspace, status) do
-    %{workspace | agent_status: status}
+  def set_agent_status(%__MODULE__{payload: %Agent{} = payload} = workspace, status) do
+    %{workspace | payload: %{payload | agent_status: status}}
+  end
+
+  def set_agent_status(%__MODULE__{payload: %Manual{}} = workspace, _status) do
+    workspace
   end
 
   @doc "Sets the workspace-owned agent UI projection."
   @spec set_agent_ui(t(), UIState.t() | nil) :: t()
-  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
-    struct!(workspace, agent_ui: agent_ui)
+  def set_agent_ui(%__MODULE__{payload: %Agent{} = payload} = workspace, %UIState{} = agent_ui) do
+    %{workspace | payload: %{payload | agent_ui: agent_ui}}
   end
 
-  def set_agent_ui(%__MODULE__{} = workspace, nil) do
-    struct!(workspace, agent_ui: nil)
+  def set_agent_ui(%__MODULE__{payload: %Agent{} = payload} = workspace, nil) do
+    %{workspace | payload: %{payload | agent_ui: nil}}
+  end
+
+  def set_agent_ui(%__MODULE__{payload: %Manual{}} = workspace, _agent_ui) do
+    workspace
   end
 
   @doc "Sets the ProjectView owned by the workspace."
   @spec set_project_view(t(), ProjectView.t() | nil) :: t()
-  def set_project_view(%__MODULE__{} = workspace, project_view) do
-    %{workspace | project_view: project_view}
+  def set_project_view(%__MODULE__{payload: %Agent{} = payload} = workspace, project_view) do
+    %{workspace | payload: %{payload | project_view: project_view}}
+  end
+
+  def set_project_view(%__MODULE__{payload: %Manual{}} = workspace, _project_view) do
+    workspace
   end
 
   @doc "Sets the session owned by the workspace."
   @spec set_session(t(), pid() | nil) :: t()
-  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
-    %{workspace | session: session}
+  def set_session(%__MODULE__{payload: %Agent{} = payload} = workspace, session)
+      when is_pid(session) or is_nil(session) do
+    %{workspace | payload: %{payload | session: session}}
+  end
+
+  def set_session(%__MODULE__{payload: %Manual{}} = workspace, _session) do
+    workspace
   end
 
   @doc "Refreshes the workspace session pid after a managed restart."
   @spec refresh_session_pid(t(), pid(), pid()) :: t()
-  def refresh_session_pid(%__MODULE__{session: session} = workspace, old_pid, new_pid)
+  def refresh_session_pid(
+        %__MODULE__{payload: %Agent{session: session} = payload} = workspace,
+        old_pid,
+        new_pid
+      )
       when session == old_pid and is_pid(new_pid) do
-    %{workspace | session: new_pid}
+    %{workspace | payload: %{payload | session: new_pid}}
   end
 
   def refresh_session_pid(%__MODULE__{} = workspace, _old_pid, _new_pid), do: workspace
@@ -147,12 +149,19 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Sets durable remote metadata on the workspace."
   @spec set_remote_session(t(), RemoteSession.t() | nil) :: t()
-  def set_remote_session(%__MODULE__{} = workspace, %RemoteSession{} = remote_session) do
-    %{workspace | remote_session: remote_session}
+  def set_remote_session(
+        %__MODULE__{payload: %Agent{} = payload} = workspace,
+        %RemoteSession{} = remote_session
+      ) do
+    %{workspace | payload: %{payload | remote_session: remote_session}}
   end
 
-  def set_remote_session(%__MODULE__{} = workspace, nil) do
-    %{workspace | remote_session: nil}
+  def set_remote_session(%__MODULE__{payload: %Agent{} = payload} = workspace, nil) do
+    %{workspace | payload: %{payload | remote_session: nil}}
+  end
+
+  def set_remote_session(%__MODULE__{payload: %Manual{}} = workspace, _remote_session) do
+    workspace
   end
 
   @doc "Sets durable remote metadata from its fields."
@@ -174,7 +183,8 @@ defmodule MingaEditor.State.Workspace do
   @doc "Updates durable remote connection status when the workspace has remote metadata."
   @spec set_remote_connection_status(t(), connection_status()) :: t()
   def set_remote_connection_status(
-        %__MODULE__{remote_session: %RemoteSession{} = remote_session} = workspace,
+        %__MODULE__{payload: %Agent{remote_session: %RemoteSession{} = remote_session}} =
+          workspace,
         status
       ) do
     set_remote_session(workspace, RemoteSession.set_connection_status(remote_session, status))
@@ -184,8 +194,14 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Sets queued remote catch-up events waiting for the workspace to become active."
   @spec set_pending_catchup_events(t(), [MingaAgent.EventLog.EventRecord.t()]) :: t()
-  def set_pending_catchup_events(%__MODULE__{} = workspace, events) when is_list(events) do
-    %{workspace | pending_catchup_events: events}
+  def set_pending_catchup_events(%__MODULE__{payload: %Agent{} = payload} = workspace, events)
+      when is_list(events) do
+    %{workspace | payload: %{payload | pending_catchup_events: events}}
+  end
+
+  def set_pending_catchup_events(%__MODULE__{payload: %Manual{}} = workspace, events)
+      when is_list(events) do
+    workspace
   end
 
   @doc "Clears queued remote catch-up events after they have been replayed."
@@ -202,12 +218,15 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Returns true when the workspace has durable remote metadata."
   @spec remote?(t()) :: boolean()
-  def remote?(%__MODULE__{remote_session: %RemoteSession{}}), do: true
+  def remote?(%__MODULE__{payload: %Agent{remote_session: %RemoteSession{}}}), do: true
   def remote?(%__MODULE__{}), do: false
 
   @doc "Returns true when the workspace belongs to the named remote server."
   @spec remote_server?(t(), String.t()) :: boolean()
-  def remote_server?(%__MODULE__{remote_session: %RemoteSession{} = remote_session}, server_name) do
+  def remote_server?(
+        %__MODULE__{payload: %Agent{remote_session: %RemoteSession{} = remote_session}},
+        server_name
+      ) do
     remote_session.server_name == server_name
   end
 
@@ -216,7 +235,7 @@ defmodule MingaEditor.State.Workspace do
   @doc "Returns true when the workspace represents the remote server/session pair."
   @spec matches_remote_session?(t(), String.t(), String.t()) :: boolean()
   def matches_remote_session?(
-        %__MODULE__{remote_session: %RemoteSession{} = remote_session},
+        %__MODULE__{payload: %Agent{remote_session: %RemoteSession{} = remote_session}},
         server_name,
         session_id
       ) do
@@ -312,17 +331,22 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Retires every workspace-owned reference to a dead buffer process."
   @spec retire_buffer(t(), pid()) :: t()
-  def retire_buffer(%__MODULE__{} = workspace, buffer_pid) when is_pid(buffer_pid) do
+  def retire_buffer(
+        %__MODULE__{payload: %Agent{agent_ui: %UIState{} = agent_ui} = payload} = workspace,
+        buffer_pid
+      )
+      when is_pid(buffer_pid) do
     files = Enum.reject(workspace.files, &buffer_ref?(&1, buffer_pid))
 
-    agent_ui =
-      case workspace.agent_ui do
-        %UIState{} = agent_ui -> UIState.retire_prompt_buffer(agent_ui, buffer_pid)
-        nil -> nil
-      end
+    %{
+      workspace
+      | files: files,
+        payload: %{payload | agent_ui: UIState.retire_prompt_buffer(agent_ui, buffer_pid)}
+    }
+  end
 
-    workspace = %__MODULE__{workspace | files: files}
-    set_agent_ui(workspace, agent_ui)
+  def retire_buffer(%__MODULE__{} = workspace, buffer_pid) when is_pid(buffer_pid) do
+    %{workspace | files: Enum.reject(workspace.files, &buffer_ref?(&1, buffer_pid))}
   end
 
   @doc "Returns true when the workspace already contains the file membership."
@@ -354,22 +378,39 @@ defmodule MingaEditor.State.Workspace do
     kind = persisted_kind(Map.get(data, "kind"), Map.get(data, "id", 0))
     workspace = default_persisted_workspace(kind, persisted_id(Map.get(data, "id")), root)
 
-    {:ok,
-     %{
-       workspace
-       | label: persisted_string(Map.get(data, "label"), workspace.label),
-         custom_name: persisted_nullable_string(Map.get(data, "custom_name")),
-         icon: persisted_string(Map.get(data, "icon"), workspace.icon),
-         color: persisted_color(Map.get(data, "color"), workspace.color),
-         files: persisted_file_refs(Map.get(data, "files"), root),
-         review: persisted_review(Map.get(data, "review"), root),
-         session: nil,
-         agent_status: :stopped,
-         project_root: root
-     }}
+    workspace = %{
+      workspace
+      | label: persisted_string(Map.get(data, "label"), workspace.label),
+        custom_name: persisted_nullable_string(Map.get(data, "custom_name")),
+        icon: persisted_string(Map.get(data, "icon"), workspace.icon),
+        color: persisted_color(Map.get(data, "color"), workspace.color),
+        files: persisted_file_refs(Map.get(data, "files"), root),
+        review: persisted_review(Map.get(data, "review"), root),
+        project_root: root
+    }
+
+    {:ok, restored_persisted_payload(workspace)}
   end
 
   def from_persisted_map(_data, _project_root), do: {:error, :invalid_workspace_json}
+
+  @spec restored_persisted_payload(t()) :: t()
+  defp restored_persisted_payload(%__MODULE__{payload: %Agent{} = payload} = workspace) do
+    %{
+      workspace
+      | payload: %{
+          payload
+          | session: nil,
+            agent_status: :stopped,
+            remote_session: nil,
+            agent_ui: UIState.new(),
+            project_view: nil,
+            pending_catchup_events: []
+        }
+    }
+  end
+
+  defp restored_persisted_payload(%__MODULE__{} = workspace), do: workspace
 
   @spec apply_review_transition(WorkspaceReview.t(), atom(), term()) ::
           {:ok, WorkspaceReview.t()} | {:error, term()}

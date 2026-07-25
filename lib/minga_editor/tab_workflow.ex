@@ -1,4 +1,6 @@
 defmodule MingaEditor.TabWorkflow do
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+
   @moduledoc """
   External and presentation workflow around pure root tab transitions.
 
@@ -81,7 +83,7 @@ defmodule MingaEditor.TabWorkflow do
   defp active_workspace_agent_ui(state, tab_bar) do
     agent_ui =
       case TabBar.active_workspace(tab_bar) do
-        %Workspace{agent_ui: %UIState{} = agent_ui} -> agent_ui
+        %Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}} -> agent_ui
         _missing -> UIState.new()
       end
 
@@ -98,7 +100,10 @@ defmodule MingaEditor.TabWorkflow do
   @spec replay_pending_events(EditorState.t(), TabBar.t()) :: EditorState.t()
   defp replay_pending_events(state, tab_bar) do
     case TabBar.active_workspace(tab_bar) do
-      %Workspace{id: workspace_id, pending_catchup_events: [_ | _] = events} ->
+      %Workspace{
+        id: workspace_id,
+        payload: %WorkspaceAgent{pending_catchup_events: [_ | _] = events}
+      } ->
         state = EventReplay.replay_active(state, events)
         clear_replayed_events(state, workspace_id)
 

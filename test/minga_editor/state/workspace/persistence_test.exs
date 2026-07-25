@@ -15,6 +15,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+  alias MingaEditor.State.Workspace.Manual, as: WorkspaceManual
   alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.WorkspaceWorkflow
@@ -40,9 +42,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert restored.kind == :manual
     assert restored.label == "Project"
     assert restored.custom_name == "Project"
-    assert restored.session == nil
-    assert restored.agent_status == :stopped
     assert Enum.any?(restored.files, &FileRef.equal?(&1, file_ref))
+    assert %WorkspaceManual{} = restored.payload
   end
 
   test "round-trips an agent workspace with custom metadata and review state", %{tmp_dir: dir} do
@@ -58,6 +59,13 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
       |> Workspace.set_review(review)
 
     assert :ok = Persistence.write(workspace, dir)
+    json = Persistence.path_for(dir, 2) |> File.read!() |> JSON.decode!()
+
+    for key <-
+          ~w(payload session agent_status remote_session agent_ui project_view pending_catchup_events) do
+      refute Map.has_key?(json, key)
+    end
+
     assert {:ok, restored} = Persistence.read(Persistence.path_for(dir, 2), dir)
 
     assert restored.id == 2
@@ -65,8 +73,11 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     assert restored.label == "Investigate parser"
     assert restored.custom_name == "Investigate parser"
     assert restored.icon == "sparkles"
-    assert restored.session == nil
-    assert restored.agent_status == :stopped
+
+    assert %WorkspaceAgent{session: nil, agent_status: :stopped, project_view: nil} =
+             restored.payload
+
+    assert %MingaEditor.Agent.UIState{} = restored.payload.agent_ui
     assert restored.review.state == :needs_review
     refute restored.review.in_progress?
     assert Enum.any?(restored.review.changed_files, &FileRef.equal?(&1, file_ref))
@@ -206,7 +217,10 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
 
     tab_bar = Startup.initial_tab_bar(nil, :editor, dir)
 
-    assert %Workspace{label: "Persisted Agent", session: nil, agent_status: :stopped} =
+    assert %Workspace{
+             label: "Persisted Agent",
+             payload: %WorkspaceAgent{session: nil, agent_status: :stopped}
+           } =
              TabBar.get_workspace(tab_bar, 3)
 
     assert TabBar.get_workspace(tab_bar, 0)
@@ -221,6 +235,7 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     agent_tab = Enum.find(tab_bar.tabs, &(&1.kind == :agent and &1.group_id == 3))
 
     assert %Tab{label: "Persisted Agent", session: nil} = agent_tab
+
     assert TabBar.switch_to_workspace(tab_bar, 3).active_id == agent_tab.id
   end
 
@@ -313,7 +328,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
     restored_tab_bar = Runtime.state(restored_runtime).tab_bar
     restored_workspace = TabBar.get_workspace(restored_tab_bar, workspace.id)
     assert restored_workspace.files == []
-    refute Enum.any?(restored_tab_bar.tabs, &(&1.file_ref == file_ref))
+
+    refute Enum.any?(restored_tab_bar.tabs, &match?(%Tab{file_ref: ^file_ref}, &1))
 
     send(retired, :stop)
   end
@@ -353,8 +369,8 @@ defmodule MingaEditor.State.Workspace.PersistenceTest do
 
     assert {:ok, restored} = Persistence.read(path, dir)
     assert restored.label == "Renamed"
-    assert restored.agent_status == :stopped
-    assert restored.project_view == nil
+    assert %WorkspaceAgent{agent_status: :stopped, project_view: nil} = restored.payload
+    assert %MingaEditor.Agent.UIState{} = restored.payload.agent_ui
   end
 
   test "no project root disables persistence without changing in-memory behavior" do

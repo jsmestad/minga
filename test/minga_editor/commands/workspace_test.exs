@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Windows
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.PendingReviewsSource
@@ -387,7 +388,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1)
 
       assert workspace != nil
-      assert workspace.session == session_pid
+      assert %WorkspaceAgent{session: ^session_pid} = workspace.payload
       assert workspace.review.state == :needs_review
       assert workspace.review.changed_files == [changed_file]
 
@@ -496,7 +497,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert workspace != nil
       assert workspace.review.state == :needs_review
       assert workspace.review.last_error == :close_failed
-      assert workspace.agent_status == :error
+      assert %WorkspaceAgent{agent_status: :error} = workspace.payload
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Workspace close failed: :close_failed"

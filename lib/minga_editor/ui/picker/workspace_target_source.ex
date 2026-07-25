@@ -15,6 +15,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   alias MingaEditor.PickerUI
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -251,7 +252,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   @spec promote_then_move(map(), term()) :: term()
   defp promote_then_move(context, state) do
     with {:ok, tab_bar, source, _destination} <- fetch_transfer_workspaces(state, context),
-         %ProjectView{} = view <- source.project_view,
+         %ProjectView{} = view <- workspace_project_view(source),
          :ok <- safe_project_view_promote(view) do
       tab_bar =
         TabBar.set_workspace_review(tab_bar, source.id, WorkspaceReview.clean(source.review))
@@ -281,7 +282,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   defp record_promote_conflict(state, context, details) do
     with {:ok, tab_bar, %Workspace{} = source, _destination} <-
            fetch_transfer_workspaces(state, context),
-         %ProjectView{} = view <- source.project_view,
+         %ProjectView{} = view <- workspace_project_view(source),
          {:ok, review} <- promote_conflict_review(source, view, details) do
       tab_bar = TabBar.set_workspace_review(tab_bar, source.id, review)
 
@@ -316,11 +317,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
     end
   end
 
+  @spec workspace_project_view(Workspace.t()) :: ProjectView.t() | nil
+  defp workspace_project_view(%Workspace{
+         payload: %WorkspaceAgent{project_view: %ProjectView{} = project_view}
+       }),
+       do: project_view
+
+  defp workspace_project_view(%Workspace{}), do: nil
+
   @spec refresh_agent_source_review(TabBar.t(), Workspace.t()) ::
           {:ok, TabBar.t(), Workspace.t(), [FileRef.t()]} | {:error, term()}
   defp refresh_agent_source_review(
          tab_bar,
-         %Workspace{project_view: %ProjectView{} = view} = source
+         %Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} = source
        ) do
     with {:ok, fresh_files} <- project_view_changed_files(view) do
       review = sync_review_from_diff(source.review, fresh_files)
@@ -419,7 +428,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
   @spec maybe_discard_file_drafts(Workspace.t(), FileRef.t(), boolean()) :: :ok | {:error, term()}
   defp maybe_discard_file_drafts(%Workspace{} = source, %FileRef{} = file_ref, true) do
-    case {source.project_view, file_ref} do
+    case {workspace_project_view(source), file_ref} do
       {%ProjectView{} = view, %FileRef{kind: :path, relative_path: relative_path}}
       when is_binary(relative_path) ->
         safe_project_view_discard_file(view, relative_path)
