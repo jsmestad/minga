@@ -195,8 +195,19 @@ defmodule MingaEditor.Handlers.LspEventHandler do
          result
        ) do
     if response_current?(state, client, buffer, version, tab_id, cursor),
-      do: dispatch_current_response(kind, state, result),
+      do: dispatch_current_response(kind, state, result, {client, buffer, version, tab_id}),
       else: state
+  end
+
+  defp dispatch_pending_response(
+         {:inlay_hint, client, buffer, version, tab_id, viewport_top, viewport_rows},
+         state,
+         result
+       ) do
+    if response_current?(state, client, buffer, version, tab_id, nil) and
+         inlay_viewport_current?(state, viewport_top, viewport_rows),
+       do: dispatch_lsp_response(:inlay_hint, state, result),
+       else: state
   end
 
   defp dispatch_pending_response(
@@ -209,16 +220,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp dispatch_pending_response({:semantic_tokens, buf_pid}, state, result) do
     SemanticTokenSync.handle_response(state, buf_pid, result)
-  end
-
-  defp dispatch_pending_response({:response, kind}, state, result)
-       when kind in [:code_lens, :code_lens_resolve, :inlay_hint] do
-    dispatch_lsp_response(kind, state, result)
-  end
-
-  defp dispatch_pending_response({:response, kind}, state, _result) do
-    Minga.Log.debug(:lsp, "Ignored legacy LSP response kind: #{inspect(kind)}")
-    state
   end
 
   @spec apply_completion_resolve_response(EditorState.t(), map(), term()) :: EditorState.t()
@@ -353,10 +354,13 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     state
   end
 
-  defp dispatch_current_response(:hover, state, result),
+  defp dispatch_current_response(:hover, state, result, _origin),
     do: apply_traditional_lsp_response(:hover, state, result)
 
-  defp dispatch_current_response(kind, state, result),
+  defp dispatch_current_response(:code_lens, state, result, origin),
+    do: LspActions.handle_code_lens_response(state, result, origin)
+
+  defp dispatch_current_response(kind, state, result, _origin),
     do: dispatch_lsp_response(kind, state, result)
 
   @spec completion_resolve_current?(
@@ -408,6 +412,16 @@ defmodule MingaEditor.Handlers.LspEventHandler do
       match?([^client | _], Minga.LSP.SyncServer.clients_for_buffer(buffer)) and
       buffer_value(buffer, &Minga.Buffer.version/1) == version and
       (is_nil(cursor) or buffer_value(buffer, &Minga.Buffer.cursor/1) == cursor)
+  end
+
+  defp inlay_viewport_current?(state, top, rows) do
+    viewport =
+      MingaEditor.Session.State.current_viewport(
+        state.workspace,
+        state.frontend.terminal_viewport
+      )
+
+    viewport.top == top and viewport.rows == rows
   end
 
   defp buffer_value(buffer, fun) do

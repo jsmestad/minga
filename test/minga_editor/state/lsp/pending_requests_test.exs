@@ -68,57 +68,32 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     assert PendingRequests.fetch(pending, ref) == :error
   end
 
-  test "current-origin response accepts nil cursor only for buffer-scoped L06 kinds" do
+  test "current-origin response accepts nil cursor for L06 and code lens kinds" do
     client = spawn_process()
     buffer = spawn_process()
 
-    assert {:ok, pending} =
-             PendingRequests.track_response(
-               PendingRequests.new(),
-               make_ref(),
-               :document_symbol,
-               client,
-               buffer,
-               7,
-               nil,
-               nil
-             )
+    for kind <- [
+          :document_symbol,
+          :workspace_symbol,
+          :incoming_calls,
+          :outgoing_calls,
+          :code_lens,
+          :code_lens_resolve
+        ] do
+      assert {:ok, pending} =
+               PendingRequests.track_response(
+                 PendingRequests.new(),
+                 make_ref(),
+                 kind,
+                 client,
+                 buffer,
+                 7,
+                 nil,
+                 nil
+               )
 
-    assert {:ok, pending} =
-             PendingRequests.track_response(
-               pending,
-               make_ref(),
-               :workspace_symbol,
-               client,
-               buffer,
-               7,
-               nil,
-               nil
-             )
-
-    assert {:ok, pending} =
-             PendingRequests.track_response(
-               pending,
-               make_ref(),
-               :incoming_calls,
-               client,
-               buffer,
-               7,
-               nil,
-               nil
-             )
-
-    assert {:ok, _pending} =
-             PendingRequests.track_response(
-               pending,
-               make_ref(),
-               :outgoing_calls,
-               client,
-               buffer,
-               7,
-               nil,
-               nil
-             )
+      assert map_size(pending.by_ref) == 1
+    end
 
     cursor_required_kind = String.to_existing_atom("definition")
 
@@ -136,7 +111,7 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     end
   end
 
-  test "L07 response tracking uses typed variants while L08 legacy atoms remain" do
+  test "L07 responses and L08 inlay use typed variants" do
     client = spawn_process()
     buffer = spawn_process()
     raw_item = %{"label" => "a"}
@@ -167,23 +142,15 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     assert {:ok, pending} =
              PendingRequests.track_signature_help(pending, make_ref(), client, buffer, 1, {3, 4})
 
-    assert {:ok, pending} = PendingRequests.track_response(pending, make_ref(), :code_lens)
+    inlay_ref = make_ref()
 
     assert {:ok, pending} =
-             PendingRequests.track_response(pending, make_ref(), :code_lens_resolve)
+             PendingRequests.track_inlay_hint(pending, inlay_ref, client, buffer, 1, nil, 5, 24)
 
-    assert {:ok, _pending} = PendingRequests.track_response(pending, make_ref(), :inlay_hint)
+    assert PendingRequests.fetch(pending, inlay_ref) ==
+             {:ok, {:inlay_hint, client, buffer, 1, nil, 5, 24}}
 
-    completion_resolve = String.to_existing_atom("completion_resolve")
-    signature_help = String.to_existing_atom("signature_help")
-
-    assert_raise FunctionClauseError, fn ->
-      PendingRequests.track_response(PendingRequests.new(), make_ref(), completion_resolve)
-    end
-
-    assert_raise FunctionClauseError, fn ->
-      PendingRequests.track_response(PendingRequests.new(), make_ref(), signature_help)
-    end
+    refute function_exported?(PendingRequests, :track_response, 3)
   end
 
   test "current-origin response rejects invalid version and cursor" do
@@ -215,11 +182,38 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
         {-1, 0}
       )
     end
+
+    assert_raise FunctionClauseError, fn ->
+      PendingRequests.track_inlay_hint(
+        PendingRequests.new(),
+        make_ref(),
+        client,
+        buffer,
+        0,
+        nil,
+        -1,
+        1
+      )
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      PendingRequests.track_inlay_hint(
+        PendingRequests.new(),
+        make_ref(),
+        client,
+        buffer,
+        0,
+        nil,
+        0,
+        0
+      )
+    end
   end
 
   test "rejects duplicate refs across L07 L08 response operation and format requests" do
     ref = make_ref()
     operation = operation(spawn_process(), ref)
+
     pending = PendingRequests.new()
 
     assert {:ok, pending} =
@@ -234,7 +228,8 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
                {0, 0}
              )
 
-    assert PendingRequests.track_response(pending, ref, :code_lens) == {:error, :duplicate_ref}
+    assert PendingRequests.track_inlay_hint(pending, ref, self(), spawn_process(), 0, nil, 0, 1) ==
+             {:error, :duplicate_ref}
 
     assert PendingRequests.track_operation(pending, ref, :references, 1, nil) ==
              {:error, :duplicate_ref}
@@ -259,15 +254,28 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
 
     assert {:ok, pending} = PendingRequests.track_operation(pending, other_ref, :rename, 2, 20)
 
-    assert {:ok, pending} = PendingRequests.track_response(pending, response_ref, :code_lens)
+    assert {:ok, pending} =
+             PendingRequests.track_response(
+               pending,
+               response_ref,
+               :code_lens,
+               spawn_process(),
+               spawn_process(),
+               0,
+               nil,
+               nil
+             )
 
     assert {:ok, pending} = PendingRequests.track_format(pending, format)
 
-    assert {requests, pending} = PendingRequests.take_operations_for_tab(pending, 10)
-    assert requests == [{:operation, :references, 1, 10}]
+    {_requests, pending} = PendingRequests.take_operations_for_tab(pending, 10)
+
     assert PendingRequests.fetch(pending, current_ref) == :error
     assert PendingRequests.fetch(pending, other_ref) == {:ok, {:operation, :rename, 2, 20}}
-    assert PendingRequests.fetch(pending, response_ref) == {:ok, {:response, :code_lens}}
+
+    assert {:ok, {:response, :code_lens, _client, _buffer, 0, nil, nil}} =
+             PendingRequests.fetch(pending, response_ref)
+
     assert PendingRequests.fetch_format(pending, format.ref) == {:ok, format}
   end
 

@@ -15,7 +15,6 @@ defmodule MingaEditor.State.LSP do
   alias MingaEditor.State.LSP.PendingRequests
 
   @type server_status :: :starting | :initializing | :ready | :crashed
-  @type legacy_response_kind :: :code_lens | :code_lens_resolve | :inlay_hint
   @type current_origin_response_kind ::
           :definition
           | :peek_definition
@@ -32,7 +31,8 @@ defmodule MingaEditor.State.LSP do
           | :prepare_outgoing_hierarchy
           | :incoming_calls
           | :outgoing_calls
-  @type response_kind :: legacy_response_kind() | current_origin_response_kind()
+          | :code_lens
+          | :code_lens_resolve
   @type pending_request :: PendingRequests.request()
   @type operation_request ::
           {:operation, :references | :rename, MingaEditor.State.Operation.id(),
@@ -129,11 +129,6 @@ defmodule MingaEditor.State.LSP do
   end
 
   # ── Pending requests and formatting operations ────────────────────────────
-  @spec track_response_request(t(), reference(), legacy_response_kind()) :: t()
-  def track_response_request(%__MODULE__{} = lsp, ref, kind) when is_reference(ref) do
-    {:ok, pending_requests} = PendingRequests.track_response(lsp.pending_requests, ref, kind)
-    %{lsp | pending_requests: pending_requests}
-  end
 
   @spec track_response_request(
           t(),
@@ -169,6 +164,41 @@ defmodule MingaEditor.State.LSP do
       )
 
     %{lsp | pending_requests: pending_requests}
+  end
+
+  @spec track_inlay_hint_request(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          MingaEditor.State.Tab.id() | nil,
+          non_neg_integer(),
+          pos_integer()
+        ) :: t()
+  def track_inlay_hint_request(
+        %__MODULE__{} = lsp,
+        ref,
+        client,
+        buffer,
+        version,
+        tab_id,
+        viewport_top,
+        viewport_rows
+      ) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_inlay_hint(
+        lsp.pending_requests,
+        ref,
+        client,
+        buffer,
+        version,
+        tab_id,
+        viewport_top,
+        viewport_rows
+      )
+    )
   end
 
   @spec track_completion_result_request(

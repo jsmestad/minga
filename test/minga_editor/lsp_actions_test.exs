@@ -3,6 +3,7 @@ defmodule MingaEditor.LspActionsTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Decorations
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.HoverPopup
   alias MingaEditor.LspActions
@@ -227,11 +228,19 @@ defmodule MingaEditor.LspActionsTest do
       assert [%{title: "1 reference", line: 0}] = result.lsp.code_lenses
     end
 
-    test "code lens response leaves state unchanged for empty or failed responses" do
-      for response <- [{:error, "timeout"}, {:ok, nil}, {:ok, []}] do
-        state = fake_state()
-        assert LspActions.handle_code_lens_response(state, response) == state
-      end
+    test "code lens response clears accepted empty results and preserves failed presentation" do
+      buffer = start_buffer!("def hello do\n  :ok\nend")
+      state = fake_state_with_buffer(buffer)
+      state = LspActions.handle_code_lens_response(state, {:ok, [code_lens("old")]})
+      assert Decorations.virtual_texts_for_line(Minga.Buffer.decorations(buffer), 0) != []
+
+      failed = LspActions.handle_code_lens_response(state, {:error, "timeout"})
+      assert failed.lsp.code_lenses == state.lsp.code_lenses
+      assert Decorations.virtual_texts_for_line(Minga.Buffer.decorations(buffer), 0) != []
+
+      cleared = LspActions.handle_code_lens_response(state, {:ok, []})
+      assert cleared.lsp.code_lenses == []
+      assert Decorations.virtual_texts_for_line(Minga.Buffer.decorations(buffer), 0) == []
     end
 
     test "resolve response merges commands and preserves existing lenses on ignored responses" do
@@ -256,6 +265,16 @@ defmodule MingaEditor.LspActionsTest do
 
       state = fake_state()
       assert LspActions.handle_code_lens_resolve_response(state, {:ok, nil}) == state
+
+      ignored_resolves = [
+        put_in(code_lens("ignored")["command"], %{"command" => "refs"}),
+        put_in(code_lens("ignored")["command"], %{"title" => 42})
+      ]
+
+      for ignored <- ignored_resolves do
+        assert LspActions.handle_code_lens_resolve_response(existing_state, {:ok, ignored}) ==
+                 existing_state
+      end
     end
   end
 
@@ -294,13 +313,19 @@ defmodule MingaEditor.LspActionsTest do
       assert second.label == ": int"
     end
 
-    test "leaves existing hints unchanged for empty or failed responses" do
-      for response <- [{:error, "fail"}, {:ok, nil}, {:ok, []}] do
-        state = fake_state()
-        lsp = MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}])
-        state = %{state | lsp: lsp}
-        assert LspActions.handle_inlay_hint_response(state, response) == state
-      end
+    test "clears accepted empty hints and preserves failed presentation" do
+      buffer = start_buffer!("x = 1 + 2")
+      state = fake_state_with_buffer(buffer)
+      state = LspActions.handle_inlay_hint_response(state, {:ok, [inlay_hint(": int")]})
+      assert Decorations.virtual_texts_for_line(Minga.Buffer.decorations(buffer), 0) != []
+
+      failed = LspActions.handle_inlay_hint_response(state, {:error, "fail"})
+      assert failed.lsp.inlay_hints == state.lsp.inlay_hints
+      assert Decorations.virtual_texts_for_line(Minga.Buffer.decorations(buffer), 0) != []
+
+      cleared = LspActions.handle_inlay_hint_response(state, {:ok, nil})
+      assert cleared.lsp.inlay_hints == []
+      assert Decorations.virtual_texts_for_line(Minga.Buffer.decorations(buffer), 0) == []
     end
 
     test "schedules hints only when a Zig viewport changes, replacing existing timers" do
@@ -418,6 +443,10 @@ defmodule MingaEditor.LspActionsTest do
       "range" => range(0, 0, 5),
       "command" => %{"title" => title, "command" => "refs"}
     }
+  end
+
+  defp inlay_hint(label) do
+    %{"position" => %{"line" => 0, "character" => 2}, "label" => label, "kind" => 1}
   end
 
   defp start_buffer!(content) do

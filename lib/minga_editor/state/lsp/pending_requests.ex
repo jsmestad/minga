@@ -12,9 +12,10 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   @type operation_kind :: :references | :rename
   @type position :: {non_neg_integer(), non_neg_integer()}
   @type request ::
-          {:response, MingaEditor.State.LSP.legacy_response_kind()}
-          | {:response, MingaEditor.State.LSP.current_origin_response_kind(), pid(), pid(),
-             non_neg_integer(), MingaEditor.State.Tab.id() | nil, position() | nil}
+          {:response, MingaEditor.State.LSP.current_origin_response_kind(), pid(), pid(),
+           non_neg_integer(), MingaEditor.State.Tab.id() | nil, position() | nil}
+          | {:inlay_hint, pid(), pid(), non_neg_integer(), MingaEditor.State.Tab.id() | nil,
+             non_neg_integer(), pos_integer()}
           | {:completion_result, MingaEditor.CompletionTrigger.response_role(), pid(), pid(),
              non_neg_integer(), non_neg_integer(), position()}
           | {:completion_resolve, pid(), pid(), non_neg_integer(), non_neg_integer(), map()}
@@ -38,13 +39,6 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   defguardp valid_cursor_guard(cursor)
             when is_tuple(cursor) and tuple_size(cursor) == 2 and is_integer(elem(cursor, 0)) and
                    elem(cursor, 0) >= 0 and is_integer(elem(cursor, 1)) and elem(cursor, 1) >= 0
-
-  @spec track_response(t(), reference(), MingaEditor.State.LSP.legacy_response_kind()) ::
-          {:ok, t()} | {:error, :duplicate_ref}
-  def track_response(%__MODULE__{} = pending, ref, kind)
-      when is_reference(ref) and kind in [:code_lens, :code_lens_resolve, :inlay_hint] do
-    track_request(pending, ref, {:response, kind})
-  end
 
   @spec track_completion_result(
           t(),
@@ -115,7 +109,14 @@ defmodule MingaEditor.State.LSP.PendingRequests do
         ) :: {:ok, t()} | {:error, :duplicate_ref}
   def track_response(%__MODULE__{} = pending, ref, kind, client, buffer, version, tab_id, nil)
       when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
-             kind in [:document_symbol, :workspace_symbol, :incoming_calls, :outgoing_calls] and
+             kind in [
+               :document_symbol,
+               :workspace_symbol,
+               :incoming_calls,
+               :outgoing_calls,
+               :code_lens,
+               :code_lens_resolve
+             ] and
              version >= 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) do
     track_request(pending, ref, {:response, kind, client, buffer, version, tab_id, nil})
   end
@@ -138,6 +139,37 @@ defmodule MingaEditor.State.LSP.PendingRequests do
              version >= 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) and
              valid_cursor_guard(cursor) do
     track_request(pending, ref, {:response, kind, client, buffer, version, tab_id, cursor})
+  end
+
+  @spec track_inlay_hint(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          MingaEditor.State.Tab.id() | nil,
+          non_neg_integer(),
+          pos_integer()
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_inlay_hint(
+        %__MODULE__{} = pending,
+        ref,
+        client,
+        buffer,
+        version,
+        tab_id,
+        viewport_top,
+        viewport_rows
+      )
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             version >= 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) and
+             is_integer(viewport_top) and viewport_top >= 0 and is_integer(viewport_rows) and
+             viewport_rows > 0 do
+    track_request(
+      pending,
+      ref,
+      {:inlay_hint, client, buffer, version, tab_id, viewport_top, viewport_rows}
+    )
   end
 
   @spec track_hover_mouse(

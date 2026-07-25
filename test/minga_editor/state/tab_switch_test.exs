@@ -395,26 +395,45 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert new_state.render.layout == nil
     end
 
-    test "L08 legacy pending requests are Editor-global across tab switches" do
-      {state, _buf1, _buf2} = state_with_two_file_tabs()
+    test "L08 current-origin requests are Editor-global across tab switches" do
+      {state, buf1, _buf2} = state_with_two_file_tabs()
       tb = state.shell_runtime.state.tab_bar
       current_id = tb.active_id
-      target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
-      ref = make_ref()
+      target_id = Enum.find(tb.tabs, &(&1.id != current_id)).id
+      client = self()
+      code_ref = make_ref()
+      inlay_ref = make_ref()
 
-      state = %{state | lsp: LSPState.track_response_request(state.lsp, ref, :code_lens)}
+      state = %{
+        state
+        | lsp:
+            state.lsp
+            |> LSPState.track_response_request(
+              code_ref,
+              :code_lens,
+              client,
+              buf1,
+              0,
+              current_id,
+              nil
+            )
+            |> LSPState.track_inlay_hint_request(inlay_ref, client, buf1, 0, current_id, 0, 24)
+      }
 
       {switched, _effects} = EditorState.switch_tab(state, target_id)
 
-      assert LSPState.fetch_pending_request(switched.lsp, ref) ==
-               {:ok, {:response, :code_lens}}
+      assert {:ok, {:response, :code_lens, ^client, ^buf1, 0, ^current_id, nil}} =
+               LSPState.fetch_pending_request(switched.lsp, code_ref)
+
+      assert {:ok, {:inlay_hint, ^client, ^buf1, 0, ^current_id, 0, 24}} =
+               LSPState.fetch_pending_request(switched.lsp, inlay_ref)
 
       refute :lsp_pending in TabBar.get(switched.shell_runtime.state.tab_bar, current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab(switched, current_id)
 
-      assert LSPState.fetch_pending_request(switched_back.lsp, ref) ==
-               {:ok, {:response, :code_lens}}
+      assert {:ok, {:response, :code_lens, ^client, ^buf1, 0, ^current_id, nil}} =
+               LSPState.fetch_pending_request(switched_back.lsp, code_ref)
 
       refute :lsp_pending in TabBar.get(switched_back.shell_runtime.state.tab_bar, target_id).context.present_fields
     end
