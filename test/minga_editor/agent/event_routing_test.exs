@@ -80,15 +80,21 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       session_a = fake_session_pid()
       session_b = fake_session_pid()
 
-      tabs = [
-        Tab.new_agent(1, "A") |> Tab.set_session(session_a),
-        Tab.new_agent(2, "B") |> Tab.set_session(session_b)
-      ]
+      tb = tab_bar([Tab.new_agent(1, "A"), Tab.new_agent(2, "B")], 1)
+      {tb, workspace_a} = TabBar.add_workspace(tb, "A")
+      {tb, workspace_b} = TabBar.add_workspace(tb, "B")
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(1, workspace_a.id)
+        |> TabBar.move_tab_to_workspace(2, workspace_b.id)
+        |> TabBar.set_workspace_session(workspace_a.id, session_a)
+        |> TabBar.set_workspace_session(workspace_b.id, session_b)
 
       shell_state =
         TraditionalState.install_tab_bar(
           TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
-          tab_bar(tabs, 1)
+          tb
         )
 
       %{shell_state: shell_state, session_a: session_a, session_b: session_b}
@@ -316,7 +322,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       session = fake_session_pid()
       tab1 = Tab.new_file(1, "user.ex") |> Tab.set_file_ref(lib_ref)
       tab2 = Tab.new_file(2, "user.ex") |> Tab.set_file_ref(test_ref)
-      agent_tab = Tab.new_agent(3, "Agent") |> Tab.set_session(session)
+      agent_tab = Tab.new_agent(3, "Agent")
 
       tb = TabBar.new(tab1, root)
       tb = %{tb | tabs: [tab1, tab2, agent_tab], active_id: 3, next_id: 4}
@@ -363,7 +369,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       session = fake_session_pid()
       tab1 = Tab.new_file(1, "user.ex") |> Tab.set_file_ref(lib_ref)
       tab2 = Tab.new_file(2, "user.ex") |> Tab.set_file_ref(test_ref)
-      agent_tab = Tab.new_agent(3, "Agent") |> Tab.set_session(session)
+      agent_tab = Tab.new_agent(3, "Agent")
 
       tb = TabBar.new(tab1, root)
       tb = %{tb | tabs: [tab1, tab2, agent_tab], active_id: 3, next_id: 4}
@@ -416,7 +422,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         Tab.new_file(1, "initial.ex")
         |> Tab.set_context(%{buffers: %Buffers{active: buffer, list: [buffer], active_index: 0}})
 
-      agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(session)
+      agent_tab = Tab.new_agent(2, "Agent")
 
       tb = TabBar.new(file_tab, root)
       tb = %{tb | tabs: [file_tab, agent_tab], active_id: 2, next_id: 3}
@@ -452,7 +458,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       session = fake_session_pid()
 
       file_tab = Tab.new_file(1, "initial.ex")
-      agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(session)
+      agent_tab = Tab.new_agent(2, "Agent")
 
       tb = TabBar.new(file_tab, root)
       tb = %{tb | tabs: [file_tab, agent_tab], active_id: 2, next_id: 3}

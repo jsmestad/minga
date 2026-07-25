@@ -82,6 +82,14 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     end)
   end
 
+  defp agent_tab(id, label, session) do
+    workspace = MingaEditor.State.Workspace.new_agent(id, label, session)
+
+    id
+    |> Tab.new_agent(label)
+    |> Tab.project_agent_lifecycle(workspace)
+  end
+
   defp agent_tab_context do
     rows = 24
     cols = 80
@@ -107,8 +115,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, session_b} = StubServer.start_link()
 
       tabs = [
-        Tab.new_agent(1, "Agent A") |> Tab.set_session(session_a),
-        Tab.new_agent(2, "Agent B") |> Tab.set_session(session_b)
+        agent_tab(1, "Agent A", session_a),
+        agent_tab(2, "Agent B", session_b)
       ]
 
       state_a = base_state(tabs, 1)
@@ -123,8 +131,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, session_b} = StubServer.start_link()
 
       tabs = [
-        Tab.new_agent(1, "Agent A") |> Tab.set_session(session_a),
-        Tab.new_agent(2, "Agent B") |> Tab.set_session(session_b)
+        agent_tab(1, "Agent A", session_a),
+        agent_tab(2, "Agent B", session_b)
       ]
 
       state = base_state(tabs, 1)
@@ -181,8 +189,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, idle} = StubServer.start_link()
 
       tabs = [
-        Tab.new_agent(1, "Streaming") |> Tab.set_session(streaming),
-        Tab.new_agent(2, "Idle") |> Tab.set_session(idle)
+        agent_tab(1, "Streaming", streaming),
+        agent_tab(2, "Idle", idle)
       ]
 
       state = base_state(tabs, 1)
@@ -215,8 +223,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         StubServer.start_link(status: :tool_executing, active_tool_name: "read_file")
 
       tabs = [
-        Tab.new_agent(1, "A") |> Tab.set_session(session_a),
-        Tab.new_agent(2, "B") |> Tab.set_session(session_b)
+        agent_tab(1, "A", session_a),
+        agent_tab(2, "B", session_b)
       ]
 
       state = base_state(tabs, 1)
@@ -247,7 +255,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       ref = Process.monitor(dead_session)
       assert_receive {:DOWN, ^ref, :process, ^dead_session, _reason}
 
-      tab = Tab.new_agent(1, "A") |> Tab.set_session(dead_session)
+      tab = agent_tab(1, "A", dead_session)
 
       state =
         [tab]
@@ -276,7 +284,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       stale_message = {:assistant, "keep visible until cleanup"}
 
       state =
-        [Tab.new_agent(1, "Agent") |> Tab.set_session(pid)]
+        [agent_tab(1, "Agent", pid)]
         |> base_state(1)
         |> then(fn state ->
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
@@ -339,7 +347,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, session} = StubServer.start_link(messages: [message])
 
       state =
-        [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
+        [agent_tab(1, "Agent", session)]
         |> base_state(1)
 
       fingerprint = TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
@@ -371,7 +379,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, session} = StubServer.start_link(messages: [message])
 
       state =
-        [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
+        [agent_tab(1, "Agent", session)]
         |> base_state(1)
 
       old_theme = state.appearance.theme
@@ -409,7 +417,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, session} = StubServer.start_link(messages: [message])
 
       state =
-        [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
+        [agent_tab(1, "Agent", session)]
         |> base_state(1)
         |> then(fn state ->
           MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
@@ -440,8 +448,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       tabs = [
         Tab.new_file(1, "main.ex"),
-        Tab.new_agent(2, "Incoming")
-        |> Tab.set_session(incoming_session)
+        agent_tab(2, "Incoming", incoming_session)
         |> Tab.set_context(agent_tab_context(stale_context_ui))
       ]
 
@@ -521,8 +528,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       tabs = [
         Tab.new_file(1, "main.ex"),
-        Tab.new_agent(2, "Background")
-        |> Tab.set_session(background_session)
+        agent_tab(2, "Background", background_session)
         |> Tab.set_context(agent_tab_context())
       ]
 

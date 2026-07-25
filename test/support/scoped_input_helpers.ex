@@ -110,12 +110,10 @@ defmodule Minga.Test.ScopedInputHelpers do
     {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent", session)
     workspace = Workspace.set_agent_ui(workspace, agent_ui)
 
-    agent_tab = agent_tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
-
     tab_bar =
       tab_bar
       |> TabBar.accept_workspace(workspace)
-      |> TabBar.accept_tab(agent_tab)
+      |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
 
     workspace_state = %{state.workspace | agent_ui: agent_ui, keymap_scope: :agent}
 

@@ -213,16 +213,16 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     defp mock_state(opts \\ []) do
       session = Keyword.get(opts, :session)
 
-      tab =
+      {tab_bar, workspace} =
         1
         |> Tab.new_agent("Agent")
-        |> Tab.set_group(1)
-        |> Tab.set_session(session)
-
-      {tab_bar, _workspace} =
-        tab
         |> TabBar.new()
         |> TabBar.add_workspace("Agent", session)
+
+      tab_bar =
+        tab_bar
+        |> TabBar.move_tab_to_workspace(1, workspace.id)
+        |> Map.put(:active_id, 1)
 
       %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},

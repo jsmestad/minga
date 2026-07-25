@@ -704,9 +704,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       |> Workspace.set_remote_connection_status(status)
       |> maybe_set_remote_last_seen_event_id(latest_event_id)
 
-    tb
-    |> TabBar.accept_workspace(workspace)
-    |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+    TabBar.accept_workspace(tb, workspace)
   end
 
   @spec maybe_set_remote_last_seen_event_id(Workspace.t(), non_neg_integer() | nil) ::

@@ -104,8 +104,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       tb =
         tb
-        |> TabBar.set_tab_session(at.id, session_pid)
         |> TabBar.move_tab_to_workspace(at.id, agent_workspace.id)
+        |> TabBar.set_workspace_session(agent_workspace.id, session_pid)
         |> TabBar.set_workspace_agent_ui(agent_workspace.id, agentic)
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)
@@ -150,8 +150,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       tb =
         tb
-        |> TabBar.set_tab_session(at.id, session_pid)
         |> TabBar.move_tab_to_workspace(at.id, agent_workspace.id)
+        |> TabBar.set_workspace_session(agent_workspace.id, session_pid)
         |> TabBar.set_workspace_agent_ui(agent_workspace.id, agentic)
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)

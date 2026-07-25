@@ -110,38 +110,16 @@ defmodule MingaEditor.State.Tab do
   def agent?(%__MODULE__{kind: :agent, payload: %Agent{}}), do: true
   def agent?(%__MODULE__{}), do: false
 
-  @doc "Sets the session pid for an agent tab."
-  @spec set_session(agent(), pid() | nil) :: agent()
-  def set_session(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, pid) do
-    %{tab | payload: %Agent{payload | session: pid}}
-  end
-
-  def set_session(%__MODULE__{payload: %File{}} = tab, _pid), do: tab
-
-  @doc "Refreshes any session pid references after a managed restart."
+  @doc "Refreshes any background-subagent pid references after a managed restart."
   @spec refresh_session_pid(t(), pid(), pid()) :: t()
   def refresh_session_pid(%__MODULE__{kind: :agent, payload: %Agent{}} = tab, old_pid, new_pid)
       when is_pid(old_pid) and is_pid(new_pid) do
-    tab
-    |> refresh_tab_session(old_pid, new_pid)
-    |> refresh_background_subagent(old_pid, new_pid)
+    refresh_background_subagent(tab, old_pid, new_pid)
   end
 
   def refresh_session_pid(%__MODULE__{payload: %File{}} = tab, old_pid, new_pid)
       when is_pid(old_pid) and is_pid(new_pid),
       do: tab
-
-  @spec refresh_tab_session(t(), pid(), pid()) :: t()
-  defp refresh_tab_session(
-         %__MODULE__{payload: %Agent{session: session} = payload} = tab,
-         old_pid,
-         new_pid
-       )
-       when session == old_pid do
-    %{tab | payload: %Agent{payload | session: new_pid}}
-  end
-
-  defp refresh_tab_session(%__MODULE__{} = tab, _old_pid, _new_pid), do: tab
 
   @spec refresh_background_subagent(t(), pid(), pid()) :: t()
   defp refresh_background_subagent(
@@ -176,81 +154,80 @@ defmodule MingaEditor.State.Tab do
 
   defp refresh_background_subagent_parent_pid(%Handle{} = handle, _old_pid, _new_pid), do: handle
 
-  @doc "Marks the tab as backed by a remote agent session."
-  @spec set_remote_session(t(), String.t(), String.t(), pid()) :: t()
-  def set_remote_session(
-        %__MODULE__{kind: :agent, payload: %Agent{}} = tab,
-        server_name,
-        session_id,
-        pid
-      )
-      when is_binary(server_name) and is_binary(session_id) and is_pid(pid) do
-    tab
-    |> set_remote_projection(RemoteSession.new(server_name, session_id, :connected))
-    |> set_session(pid)
+  @doc "Projects workspace-owned lifecycle and remote metadata onto this tab for display."
+  @spec project_agent_lifecycle(agent(), Workspace.agent()) :: agent()
+  def project_agent_lifecycle(
+        %__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab,
+        %Workspace{payload: %Workspace.Agent{} = workspace_agent}
+      ) do
+    remote_projection =
+      case workspace_agent.remote_session do
+        %RemoteSession{} = remote_session ->
+          [
+            server_name: remote_session.server_name,
+            remote_session_id: remote_session.session_id,
+            connection_status: remote_session.connection_status
+          ]
+
+        nil ->
+          [server_name: nil, remote_session_id: nil, connection_status: nil]
+      end
+
+    %{
+      tab
+      | payload:
+          struct!(
+            payload,
+            [
+              session: workspace_agent.session,
+              agent_status: workspace_agent.agent_status
+            ] ++ remote_projection
+          )
+    }
   end
 
-  def set_remote_session(%__MODULE__{payload: %File{}} = tab, server_name, session_id, pid)
-      when is_binary(server_name) and is_binary(session_id) and is_pid(pid),
-      do: tab
+  @doc "Marks an orphaned remote tab projection as disconnected."
+  @spec mark_orphan_remote_disconnected(agent()) :: agent()
+  def mark_orphan_remote_disconnected(
+        %__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab
+      ) do
+    %{tab | payload: %Agent{payload | connection_status: :disconnected}}
+  end
 
-  @doc "Projects workspace-owned remote metadata onto this tab for display."
-  @spec set_remote_projection(t(), RemoteSession.t()) :: t()
-  def set_remote_projection(
+  @doc "Clears lifecycle fields for an orphaned agent tab after its session exits."
+  @spec mark_orphan_session_down(agent(), agent_status()) :: agent()
+  def mark_orphan_session_down(
         %__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab,
-        %RemoteSession{} = remote_session
+        status
       ) do
     %{
       tab
       | payload: %Agent{
           payload
-          | server_name: remote_session.server_name,
-            remote_session_id: remote_session.session_id,
-            connection_status: remote_session.connection_status
+          | session: nil,
+            agent_status: status
         }
     }
   end
 
-  def set_remote_projection(%__MODULE__{payload: %File{}} = tab, %RemoteSession{}), do: tab
-
-  @doc "Clears projected remote metadata from this tab."
-  @spec clear_remote_projection(t()) :: t()
-  def clear_remote_projection(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab) do
+  @doc "Clears agent lifecycle projection data from this tab."
+  @spec clear_agent_projection(t()) :: t()
+  def clear_agent_projection(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab) do
     %{
       tab
       | payload: %Agent{
           payload
-          | server_name: nil,
+          | session: nil,
+            agent_status: nil,
+            server_name: nil,
             remote_session_id: nil,
-            connection_status: nil
+            connection_status: nil,
+            attention: false
         }
     }
   end
 
-  def clear_remote_projection(%__MODULE__{payload: %File{}} = tab), do: tab
-
-  @doc "Clears agent lifecycle projection data from this tab."
-  @spec clear_agent_projection(t()) :: t()
-  def clear_agent_projection(%__MODULE__{kind: :agent, payload: %Agent{}} = tab) do
-    tab
-    |> set_session(nil)
-    |> clear_remote_projection()
-    |> set_agent_status(nil)
-    |> set_attention(false)
-  end
-
   def clear_agent_projection(%__MODULE__{payload: %File{}} = tab), do: tab
-
-  @doc "Updates remote connection status for the tab."
-  @spec set_connection_status(t(), connection_status()) :: t()
-  def set_connection_status(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, status)
-      when status in [:connected, :disconnected, :ended, :unavailable, nil] do
-    %{tab | payload: %Agent{payload | connection_status: status}}
-  end
-
-  def set_connection_status(%__MODULE__{payload: %File{}} = tab, status)
-      when status in [:connected, :disconnected, :ended, :unavailable, nil],
-      do: tab
 
   @doc "Returns true when this tab is backed by a remote session."
   @spec remote?(t()) :: boolean()
@@ -284,14 +261,6 @@ defmodule MingaEditor.State.Tab do
   defp status_suffix(:ended), do: " [ended]"
   defp status_suffix(:unavailable), do: " [unavailable]"
   defp status_suffix(_status), do: ""
-
-  @doc "Sets the agent status on a tab (for tab bar rendering)."
-  @spec set_agent_status(t(), agent_status()) :: t()
-  def set_agent_status(%__MODULE__{kind: :agent, payload: %Agent{} = payload} = tab, status) do
-    %{tab | payload: %Agent{payload | agent_status: status}}
-  end
-
-  def set_agent_status(%__MODULE__{payload: %File{}} = tab, _status), do: tab
 
   @doc "Sets the attention flag (agent needs user input)."
   @spec set_attention(t(), boolean()) :: t()

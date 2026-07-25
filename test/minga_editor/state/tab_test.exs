@@ -9,6 +9,7 @@ defmodule MingaEditor.State.TabTest do
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.Tab.File
+  alias MingaEditor.State.Workspace
   alias MingaEditor.VimState
 
   describe "constructors" do
@@ -87,33 +88,51 @@ defmodule MingaEditor.State.TabTest do
     test "change only their owner variant" do
       {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
       remote = RemoteSession.new("srv", "session-1", :connected)
+
+      workspace =
+        Workspace.new_agent(2, "Agent", self()) |> Workspace.set_remote_session(remote)
+
+      projected_agent = Tab.project_agent_lifecycle(Tab.new_agent(2), workspace)
+      orphan_remote = Tab.mark_orphan_remote_disconnected(projected_agent)
+      orphan_down = Tab.mark_orphan_session_down(projected_agent, :error)
       handle = Handle.new(session_id: "sub-1", pid: self(), task: "work")
 
       cases = [
-        {:agent, &Tab.set_session(&1, self()),
-         &match?(%Agent{session: pid} when pid == self(), &1.payload)},
         {:agent, &Tab.refresh_session_pid(&1, self(), self()), &match?(%Agent{}, &1.payload)},
-        {:agent, &Tab.set_remote_session(&1, "srv", "session-1", self()),
+        {:agent,
+         fn
+           %Tab{payload: %Agent{}} -> projected_agent
+           tab -> tab
+         end,
          &match?(
-           %Agent{server_name: "srv", remote_session_id: "session-1", session: pid}
+           %Agent{
+             server_name: "srv",
+             remote_session_id: "session-1",
+             session: pid,
+             agent_status: :idle
+           }
            when pid == self(),
            &1.payload
          )},
-        {:agent, &Tab.set_remote_projection(&1, remote),
-         &match?(%Agent{server_name: "srv", remote_session_id: "session-1"}, &1.payload)},
-        {:agent, &Tab.clear_remote_projection(Tab.set_remote_projection(&1, remote)),
-         &match?(%Agent{server_name: nil, remote_session_id: nil}, &1.payload)},
         {:agent,
-         &Tab.clear_agent_projection(
-           &1
-           |> Tab.set_session(self())
-           |> Tab.set_agent_status(:thinking)
-           |> Tab.set_attention(true)
-         ), &match?(%Agent{session: nil, agent_status: nil, attention: false}, &1.payload)},
-        {:agent, &Tab.set_connection_status(&1, :disconnected),
-         &match?(%Agent{connection_status: :disconnected}, &1.payload)},
-        {:agent, &Tab.set_agent_status(&1, :thinking),
-         &match?(%Agent{agent_status: :thinking}, &1.payload)},
+         fn
+           %Tab{payload: %Agent{}} -> orphan_remote
+           tab -> tab
+         end, &match?(%Agent{connection_status: :disconnected}, &1.payload)},
+        {:agent,
+         fn
+           %Tab{payload: %Agent{}} -> orphan_down
+           tab -> tab
+         end, &match?(%Agent{session: nil, agent_status: :error}, &1.payload)},
+        {:agent,
+         fn
+           %Tab{payload: %Agent{} = payload} = tab ->
+             tab = %Tab{tab | payload: %Agent{payload | session: self(), agent_status: :thinking}}
+             Tab.clear_agent_projection(Tab.set_attention(tab, true))
+
+           tab ->
+             tab
+         end, &match?(%Agent{session: nil, agent_status: nil, attention: false}, &1.payload)},
         {:agent, &Tab.set_attention(&1, true), &match?(%Agent{attention: true}, &1.payload)},
         {:agent, &Tab.mark_background_subagent(&1, handle),
          &match?(%Agent{background_subagent: ^handle}, &1.payload)},

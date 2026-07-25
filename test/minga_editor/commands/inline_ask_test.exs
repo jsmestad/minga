@@ -242,8 +242,8 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     tb =
       tb
-      |> TabBar.set_tab_session(active_tab.id, session_pid)
       |> TabBar.move_tab_to_workspace(active_tab.id, workspace.id)
+      |> TabBar.set_workspace_session(workspace.id, session_pid)
 
     then(state, fn root ->
       shell_state =

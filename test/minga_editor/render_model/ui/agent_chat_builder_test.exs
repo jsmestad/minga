@@ -355,7 +355,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   defp maybe_set_panel_scroll(panel, scroll), do: Panel.set_scroll(panel, scroll)
 
   defp context(session, panel, opts \\ []) do
-    tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
+    tab = Tab.new_agent(1, "Agent")
     {tab_bar, workspace} = TabBar.add_workspace(TabBar.new(tab), "Agent", session)
     tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
     window = Window.new_agent_chat(1, 24, 80)

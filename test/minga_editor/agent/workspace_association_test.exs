@@ -29,7 +29,6 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
     tab1 = Tab.new_file(1, "editor.ex")
     tab2 = Tab.new_file(2, "main.ex")
     tab3 = Tab.new_agent(3, "Agent")
-    tab3 = Tab.set_session(tab3, fake_session)
 
     tb = %TabBar{tabs: [tab1, tab2, tab3], active_id: 3, next_id: 4}
 

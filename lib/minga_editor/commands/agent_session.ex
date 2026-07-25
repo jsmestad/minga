@@ -69,7 +69,7 @@ defmodule MingaEditor.Commands.AgentSession do
          %EditorState{shell_runtime: %Runtime{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session
        ) do
-    tb = tb |> clear_tab_sessions(session) |> clear_workspace_sessions(session)
+    tb = clear_workspace_sessions(tb, session)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(
@@ -85,17 +85,6 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp clear_restart_session(state, _session), do: state
-
-  @spec clear_tab_sessions(TabBar.t(), pid()) :: TabBar.t()
-  defp clear_tab_sessions(%TabBar{} = tb, session) do
-    Enum.reduce(tb.tabs, tb, fn
-      %Tab{id: tab_id, payload: %Agent{session: ^session}}, acc ->
-        TabBar.set_tab_session(acc, tab_id, nil)
-
-      _tab, acc ->
-        acc
-    end)
-  end
 
   @spec clear_workspace_sessions(TabBar.t(), pid()) :: TabBar.t()
   defp clear_workspace_sessions(%TabBar{} = tb, session) do
@@ -188,10 +177,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
         state =
           state
-          |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
-          |> rebuild_agent_from_tab(tab_id)
           |> ensure_agent_workspace(remote_pid, nil)
-          |> AgentLifecycle.cache_messages(messages)
           |> set_remote_workspace(
             server_name,
             session_id,
@@ -199,6 +185,8 @@ defmodule MingaEditor.Commands.AgentSession do
             :connected,
             latest_event_id
           )
+          |> rebuild_agent_from_tab(tab_id)
+          |> AgentLifecycle.cache_messages(messages)
           |> EventReplay.replay_active(events)
           |> apply_remote_snapshot(snapshot)
 
@@ -400,10 +388,6 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp assign_session_to_tab(state, _pid), do: state
 
-  @spec sessionless_agent?(Tab.t()) :: boolean()
-  defp sessionless_agent?(%Tab{kind: :agent, payload: %Agent{session: nil}}), do: true
-  defp sessionless_agent?(%Tab{}), do: false
-
   @spec start_and_subscribe(state(), keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(state, opts) do
     start_result =
@@ -525,31 +509,6 @@ defmodule MingaEditor.Commands.AgentSession do
     {state, 0}
   end
 
-  @spec set_remote_tab(state(), Tab.id(), String.t(), String.t(), pid()) :: state()
-  defp set_remote_tab(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         tab_id,
-         server_name,
-         session_id,
-         remote_pid
-       ) do
-    tb = TabBar.set_tab_remote_session(tb, tab_id, server_name, session_id, remote_pid)
-
-    shell_state =
-      MingaEditor.Shell.Traditional.State.install_tab_bar(
-        MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        tb
-      )
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
-  end
-
-  defp set_remote_tab(state, _tab_id, _server_name, _session_id, _remote_pid), do: state
-
   @spec set_remote_workspace(
           state(),
           String.t(),
@@ -575,10 +534,7 @@ defmodule MingaEditor.Commands.AgentSession do
           |> Workspace.set_session(remote_pid)
           |> Workspace.put_remote_session(server_name, session_id, status, latest_event_id)
 
-        tb =
-          tb
-          |> TabBar.accept_workspace(workspace)
-          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+        tb = TabBar.accept_workspace(tb, workspace)
 
         shell_state =
           MingaEditor.Shell.Traditional.State.install_tab_bar(
@@ -697,9 +653,7 @@ defmodule MingaEditor.Commands.AgentSession do
           payload: %WorkspaceAgent{remote_session: %{session_id: ^session_id}}
         },
         acc ->
-          acc
-          |> TabBar.set_workspace_remote_connection_status(workspace_id, :disconnected)
-          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+          TabBar.set_workspace_remote_connection_status(acc, workspace_id, :disconnected)
 
         _workspace, acc ->
           acc
@@ -862,10 +816,7 @@ defmodule MingaEditor.Commands.AgentSession do
           |> Workspace.set_session(session_pid)
           |> Workspace.set_agent_ui(agent_ui)
 
-        tb =
-          tb
-          |> bind_session_to_workspace_agent_tab(workspace_id, session_pid)
-          |> TabBar.accept_workspace(workspace)
+        tb = TabBar.accept_workspace(tb, workspace)
 
         sync_state_to_workspace(state, tb, workspace_id)
 
@@ -899,21 +850,6 @@ defmodule MingaEditor.Commands.AgentSession do
       %Workspace{kind: :agent} = workspace -> workspace
       _workspace -> nil
     end
-  end
-
-  @spec bind_session_to_workspace_agent_tab(TabBar.t(), non_neg_integer(), pid()) :: TabBar.t()
-  defp bind_session_to_workspace_agent_tab(%TabBar{} = tb, workspace_id, session_pid) do
-    case sessionless_agent_in_workspace(tb, workspace_id) do
-      %Tab{id: tab_id} -> TabBar.set_tab_session(tb, tab_id, session_pid)
-      nil -> tb
-    end
-  end
-
-  @spec sessionless_agent_in_workspace(TabBar.t(), non_neg_integer()) :: Tab.t() | nil
-  defp sessionless_agent_in_workspace(%TabBar{} = tb, workspace_id) do
-    tb
-    |> TabBar.tabs_in_workspace(workspace_id)
-    |> Enum.find(&sessionless_agent?/1)
   end
 
   @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()

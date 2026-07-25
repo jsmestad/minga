@@ -25,6 +25,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -307,8 +308,10 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     tab1 =
       tab1
-      |> Tab.set_session(handle1.pid)
-      |> Tab.set_agent_status(:thinking)
+      |> Tab.project_agent_lifecycle(
+        Workspace.new_agent(tab1.id, tab1.label, handle1.pid)
+        |> Workspace.set_agent_status(:thinking)
+      )
       |> Tab.mark_background_subagent(handle1)
 
     tb = TabBar.accept_tab(tb, tab1)
@@ -316,8 +319,10 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     tab2 =
       tab2
-      |> Tab.set_session(handle2.pid)
-      |> Tab.set_agent_status(:idle)
+      |> Tab.project_agent_lifecycle(
+        Workspace.new_agent(tab2.id, tab2.label, handle2.pid)
+        |> Workspace.set_agent_status(:idle)
+      )
       |> Tab.mark_background_subagent(handle2)
 
     tb = TabBar.accept_tab(tb, tab2)
@@ -340,7 +345,7 @@ defmodule MingaEditor.StatusBar.DataTest do
       tb
       |> TabBar.accept_tab(Tab.set_group(agent_tab, workspace.id))
       |> TabBar.switch_to(agent_tab.id)
-      |> TabBar.set_tab_session(agent_tab.id, session)
+      |> TabBar.set_workspace_session(workspace.id, session)
 
     state = state_with_agent_window(tb)
 
