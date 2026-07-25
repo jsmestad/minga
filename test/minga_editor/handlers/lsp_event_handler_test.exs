@@ -1061,37 +1061,82 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert Runtime.state(restored.shell_runtime).modal == :none
     end
 
-    test "tracked semantic token response updates highlights and returns render_now" do
+    test "tracked semantic token response updates LSP semantic layer and returns render_now" do
       state = file_buffer_state("hello\n")
       buffer = state.workspace.buffers.active
       client = start_fake_lsp_client()
-
       register_lsp_client(buffer, client)
 
-      state =
-        %{
-          state
-          | parser:
-              MingaEditor.State.Parser.accept_highlighting(
-                state.parser,
-                (fn highlighting ->
-                   Highlighting.put_highlight(highlighting, buffer, Highlight.new())
-                 end).(state.parser.highlighting)
-              )
-        }
-
+      state = put_parser_highlight(state, buffer, ["variable"], [])
       ref = make_ref()
-      state = track_pending_request(state, ref, {:semantic_tokens, buffer})
+      state = track_pending_request(state, ref, semantic_request(client, buffer))
 
       {new_state, effects} =
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => [0, 0, 5, 0, 0]}}})
 
       assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
       assert effects == [:render_now]
+      assert Map.fetch!(new_state.parser.highlighting.highlights, buffer).spans == {}
+      assert {0, names, spans} = Map.fetch!(new_state.lsp.semantic_tokens, buffer)
+      assert names == {"@lsp.type.variable"}
+      assert [%Minga.Language.Highlight.Span{layer: 2}] = Tuple.to_list(spans)
+    end
 
-      highlight = Map.fetch!(new_state.parser.highlighting.highlights, buffer)
-      assert Tuple.to_list(highlight.capture_names) == ["@lsp.type.variable"]
-      assert [%Minga.Language.Highlight.Span{layer: 2}] = Tuple.to_list(highlight.spans)
+    test "stale semantic token responses are taken without accepting a layer" do
+      state = file_buffer_state("hello\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      state = put_parser_highlight(state, buffer, ["variable"], [])
+      parser_highlight = Map.fetch!(state.parser.highlighting.highlights, buffer)
+      ref = make_ref()
+      state = track_pending_request(state, ref, semantic_request(client, buffer))
+
+      :ok = BufferProcess.insert_text(buffer, "!")
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => [0, 0, 5, 0, 0]}}})
+
+      assert effects == [:render_now]
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+      refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
+      assert Map.fetch!(new_state.parser.highlighting.highlights, buffer) == parser_highlight
+    end
+
+    test "semantic token response from superseded current client is ignored" do
+      state = file_buffer_state("hello\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      replacement = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      ref = make_ref()
+      state = track_pending_request(state, ref, semantic_request(client, buffer))
+      Minga.LSP.SyncServer.put_clients(buffer, [replacement, client])
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => [0, 0, 5, 0, 0]}}})
+
+      assert effects == [:render_now]
+      refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
+    end
+
+    test "malformed semantic token response is ignored without crashing" do
+      state = file_buffer_state("hello\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+
+      for data <- [[0, "bad", 5], [0, 0, -1, 0, 0]] do
+        ref = make_ref()
+        state = track_pending_request(state, ref, semantic_request(client, buffer))
+
+        {new_state, effects} =
+          LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => data}}})
+
+        assert effects == [:render_now]
+        assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+        refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
+      end
     end
 
     test "untracked completion response is ignored without trigger-local fallback" do
@@ -1467,8 +1512,24 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
   end
 
-  defp track_pending_request(state, ref, {:semantic_tokens, buffer}) do
-    %{state | lsp: LSPState.track_semantic_tokens_request(state.lsp, ref, buffer)}
+  defp track_pending_request(
+         state,
+         ref,
+         {:semantic_tokens, client, buffer, version, encoding, legend}
+       ) do
+    %{
+      state
+      | lsp:
+          LSPState.track_semantic_tokens_request(
+            state.lsp,
+            ref,
+            client,
+            buffer,
+            version,
+            encoding,
+            legend
+          )
+    }
   end
 
   defp track_pending_request(
@@ -1559,6 +1620,25 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state
       | lsp:
           LSPState.track_signature_help_request(state.lsp, ref, client, buffer, version, cursor)
+    }
+  end
+
+  defp semantic_request(client, buffer),
+    do:
+      {:semantic_tokens, client, buffer, Minga.Buffer.version(buffer), :utf16, {["variable"], []}}
+
+  defp put_parser_highlight(state, buffer, names, spans) do
+    %{
+      state
+      | parser:
+          MingaEditor.State.Parser.accept_highlighting(
+            state.parser,
+            Highlighting.put_highlight(
+              state.parser.highlighting,
+              buffer,
+              Highlight.new() |> Highlight.put_names(names) |> Highlight.put_spans(1, spans)
+            )
+          )
     }
   end
 

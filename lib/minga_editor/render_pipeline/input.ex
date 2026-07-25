@@ -2,47 +2,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   @moduledoc """
   Narrow rendering contract between the Editor GenServer and the render pipeline.
 
-  Bundles exactly the fields that the pipeline stages read from EditorState,
-  excluding Editor-owned process and correlation fields the pipeline never touches (`render_correlation`, buffer monitors, session lifecycle, and similar state).
-
-  The Editor builds this before calling `RenderPipeline.run/1`. Pipeline stages
-  read from Input and never reach back into EditorState. `Renderer.Server` returns a focused receipt that the Editor integrates atomically.
-
-  ## Structural compatibility
-
-  Pipeline modules pattern-match on `state.workspace.X` throughout. Input keeps
-  a `workspace` field (a plain map, not a SessionState struct) so those
-  pattern-matches work unchanged. Top-level fields (`theme`, `capabilities`,
-  `shell`, `shell_state`, etc.) are directly on Input, matching EditorState's
-  shape.
-
-  ## Field sources
-
-  **From `state` (top-level):**
-  `theme`, `capabilities`, `shell_id`, `shell`, `shell_state`, `port_manager`,
-  `message_store`, `notifications`, `face_override_registries`, `highlighting`,
-  `editing_model`, `backend`, `layout`, `focus_tree`
-
-  `git_syncing` is computed once from `state.effect_scheduler` through
-  `EffectScheduler.active_activity?/2`; the scheduler process itself is excluded.
-
-  `font_registry` is renderer-owned state. Editor-created snapshots carry a
-  fresh fallback registry; `Renderer.Server` injects its long-lived registry
-  before it runs the pipeline.
-
-  **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
-  `windows`, `buffers`, `file_tree` (FileTree feature state), `agent_ui`,
-  `editing`, `document_highlights`, `cmd_hover_link`, `mouse`, `search`,
-  `keymap_scope`, `launchpad`
-
-  Every `Session.State` field must be either snapshotted here or listed in
-  the explicit exclusions pinned by
-  `test/minga_editor/render_pipeline/input_launchpad_test.exs` — a field in
-  neither silently disappears on the async render path (#2689).
-
-  Note: completion lives on `state.shell_runtime.state.modal` after #1426; the
-  fingerprint includes the modal sum type, so completion changes are
-  picked up there.
+  Input snapshots exactly the Editor and workspace fields that pipeline stages read, including parser highlighting and LSP semantic layers, while excluding Editor-owned process, cache, and correlation state. Pipeline modules keep their existing `state.workspace.X` access through the plain `workspace` map.
   """
 
   alias MingaEditor.Agent.UIState
@@ -91,6 +51,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :highlighting,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
+    semantic_tokens: %{},
     git_syncing: false,
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
     terminal_viewport: Viewport.new(24, 80),
@@ -164,6 +125,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           git_syncing: boolean(),
           status_bar_data: StatusBarData.t() | nil,
           highlighting: Highlighting.t(),
+          semantic_tokens: %{pid() => MingaEditor.State.LSP.semantic_layer()},
           caches: Caches.t(),
           terminal_viewport: Viewport.t(),
           last_input_seq: non_neg_integer(),
@@ -203,6 +165,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       git_syncing: EffectScheduler.active_activity?(state.effect_scheduler, :git_syncing),
       status_bar_data: safe_status_bar_data(state),
       highlighting: state.parser.highlighting,
+      semantic_tokens: state.lsp.semantic_tokens,
       terminal_viewport: state.frontend.terminal_viewport,
       last_input_seq: state.frontend.last_input_seq,
       line_spacing:

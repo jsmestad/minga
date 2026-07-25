@@ -1,7 +1,4 @@
 defmodule MingaEditor.Handlers.HighlightHandlerTest do
-  @moduledoc """
-  Pure-function tests for `MingaEditor.Handlers.HighlightHandler`.
-  """
   alias Minga.Language.Highlight.Span
 
   use ExUnit.Case, async: true
@@ -48,8 +45,9 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
   describe "setup and parser lifecycle" do
     test "setup, parser status, eviction, and catch-all messages return the expected effects" do
-      {_, setup_effects} = HighlightHandler.handle(base_state(), :setup_highlight)
-      assert {:request_semantic_tokens} in setup_effects
+      state = base_state()
+      {_, setup_effects} = HighlightHandler.handle(state, :setup_highlight)
+      assert setup_effects == [{:request_semantic_tokens, active_buffer(state)}]
 
       {crashed, effects} =
         HighlightHandler.handle(base_state(), {:minga_highlight, :parser_crashed})
@@ -189,7 +187,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
          {:buffer_event, buffer, %{current_correlation | version: 1}, {:highlight_spans, []}}}
 
       {accepted, effects} = HighlightHandler.handle(state, current_event)
-      assert :render in effects
+      assert effects == [{:request_semantic_tokens, buffer}, {:prettify_symbols, buffer}, :render]
       assert HighlightSync.get_highlight(accepted, buffer).parser_correlation.version == 1
     end
 
@@ -243,8 +241,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {_, effects} =
         HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, buf, []}})
 
-      assert :render in effects
-      assert Enum.any?(effects, &match?({:prettify_symbols, _}, &1))
+      assert effects == [{:request_semantic_tokens, buf}, {:prettify_symbols, buf}, :render]
 
       spans = [%{start_byte: 0, end_byte: 5, replacement: ""}]
 
@@ -252,6 +249,15 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
         HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, buf, spans}})
 
       assert {:conceal_spans, buf, spans} in effects
+
+      {visible_state, visible_buf} = state_with_visible_other_buffer(base_state())
+      visible_state = with_highlight(visible_state, visible_buf)
+
+      assert {_, [{:request_semantic_tokens, ^visible_buf}, :render]} =
+               HighlightHandler.handle(
+                 visible_state,
+                 {:minga_highlight, {:highlight_spans, visible_buf, []}}
+               )
 
       {state, other_buf} = state_with_other_buffer(base_state())
       state = with_highlight(state, other_buf)
@@ -334,6 +340,19 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
   defp state_with_other_buffer(state) do
     {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
     {state, other_buf}
+  end
+
+  defp state_with_visible_other_buffer(state) do
+    {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
+    window = Window.new(2, other_buf, 24, 80)
+
+    windows = %{
+      state.workspace.windows
+      | map: Map.put(state.workspace.windows.map, 2, window),
+        next_id: 3
+    }
+
+    {%{state | workspace: %{state.workspace | windows: windows}}, other_buf}
   end
 
   defp mark_parser_restarting(state) do

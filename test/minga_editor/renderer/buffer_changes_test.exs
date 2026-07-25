@@ -162,6 +162,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :message_store,
                :notifications,
                :port_manager,
+               :semantic_tokens,
                :shell,
                :shell_id,
                :shell_identity,

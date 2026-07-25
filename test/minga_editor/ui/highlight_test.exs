@@ -70,6 +70,36 @@ defmodule Minga.HighlightTest do
       assert Highlight.byte_offset_for_line(["ab", "cde", "f"], 2) == 7
       assert Highlight.byte_offset_for_line(["café", "x"], 1) == 6
     end
+
+    test "semantic layer composition is pure and deduplicates capture names" do
+      parser =
+        highlight_with(
+          spans: [Span.new(0, 3, 0), Span.new(4, 9, 1), Span.new(100, 103, 0)],
+          capture_names: ["keyword", "@lsp.type.variable"],
+          theme: %{"keyword" => [fg: 0xFF0000], "@lsp.type.variable" => [fg: 0x00FF00]}
+        )
+
+      semantic =
+        {0, {"@lsp.type.variable", "@lsp.type.function"},
+         {Span.new(0, 3, 0, 0, 2), Span.new(4, 7, 1, 0, 2), Span.new(10, 13, 1, 0, 2)}}
+
+      composed = Highlight.compose_semantic_layer(parser, semantic)
+
+      assert composed.capture_names == {"keyword", "@lsp.type.variable", "@lsp.type.function"}
+      assert Enum.map(Tuple.to_list(composed.spans), & &1.capture_id) == [0, 1, 1, 2, 2, 0]
+      assert parser.capture_names == {"keyword", "@lsp.type.variable"}
+      assert tuple_size(parser.spans) == 3
+
+      assert_segments(
+        Highlight.styles_for_visible_lines(composed, [{"def name", 0}]) |> List.first(),
+        [
+          {"def", fg: 0x00FF00},
+          {" ", []},
+          {"nam", []},
+          {"e", fg: 0x00FF00}
+        ]
+      )
+    end
   end
 
   describe "styles_for_line/3" do

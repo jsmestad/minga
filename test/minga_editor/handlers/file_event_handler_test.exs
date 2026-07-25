@@ -1,11 +1,4 @@
 defmodule MingaEditor.Handlers.FileEventHandlerTest do
-  @moduledoc """
-  Pure-function tests for `MingaEditor.Handlers.FileEventHandler`.
-
-  Uses `RenderPipeline.TestHelpers.base_state/1` to construct state
-  without starting a GenServer.
-  """
-
   use ExUnit.Case, async: true
 
   @moduletag :tmp_dir
@@ -23,6 +16,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
@@ -267,8 +261,9 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         tmp_dir
         |> state_with_tree()
         |> put_active_buffer(buffer)
+        |> seed_semantic_tokens(buffer)
 
-      {_state, effects} =
+      {new_state, effects} =
         FileEventHandler.handle(state, {
           :minga_event,
           :buffer_changed,
@@ -276,6 +271,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         })
 
       assert effects == [{:render, 16}]
+      refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
     end
 
     test "buffer changes outside the tree root do not render the tree", %{tmp_dir: tmp_dir} do
@@ -284,9 +280,9 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       File.write!(file_path, "alpha")
       {:ok, buffer} = BufferProcess.start_link(file_path: file_path)
 
-      state = state_with_tree(tmp_dir)
+      state = state_with_tree(tmp_dir) |> seed_semantic_tokens(buffer)
 
-      {_state, effects} =
+      {new_state, effects} =
         FileEventHandler.handle(state, {
           :minga_event,
           :buffer_changed,
@@ -294,6 +290,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         })
 
       assert effects == []
+      refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
     end
 
     test "project rebuild immediately publishes the new root loading state", %{tmp_dir: tmp_dir} do
@@ -528,6 +525,13 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert new_state == state
       assert effects == []
     end
+  end
+
+  defp seed_semantic_tokens(state, buffer) do
+    %{
+      state
+      | lsp: LSPState.accept_semantic_tokens(state.lsp, buffer, 0, ["@lsp.type.variable"], [])
+    }
   end
 
   defp ft(state), do: state.workspace.file_tree

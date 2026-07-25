@@ -218,8 +218,12 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     apply_traditional_lsp_response(request, state, result)
   end
 
-  defp dispatch_pending_response({:semantic_tokens, buf_pid}, state, result) do
-    SemanticTokenSync.handle_response(state, buf_pid, result)
+  defp dispatch_pending_response(
+         {:semantic_tokens, client, buffer, version, encoding, legend},
+         state,
+         result
+       ) do
+    SemanticTokenSync.handle_response(state, client, buffer, version, encoding, legend, result)
   end
 
   @spec apply_completion_resolve_response(EditorState.t(), map(), term()) :: EditorState.t()

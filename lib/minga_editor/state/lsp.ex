@@ -34,6 +34,8 @@ defmodule MingaEditor.State.LSP do
           | :code_lens
           | :code_lens_resolve
   @type pending_request :: PendingRequests.request()
+  @type semantic_layer ::
+          {buffer_version :: non_neg_integer(), capture_names :: tuple(), spans :: tuple()}
   @type operation_request ::
           {:operation, :references | :rename, MingaEditor.State.Operation.id(),
            MingaEditor.State.Tab.id() | nil}
@@ -46,6 +48,7 @@ defmodule MingaEditor.State.LSP do
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
           pending_requests: PendingRequests.t(),
+          semantic_tokens: %{pid() => semantic_layer()},
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil
@@ -58,6 +61,7 @@ defmodule MingaEditor.State.LSP do
             selection_ranges: nil,
             selection_range_index: 0,
             pending_requests: PendingRequests.new(),
+            semantic_tokens: %{},
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil
@@ -326,14 +330,54 @@ defmodule MingaEditor.State.LSP do
     %{lsp | pending_requests: pending_requests}
   end
 
-  @doc "Tracks an Editor-global semantic token request."
-  @spec track_semantic_tokens_request(t(), reference(), pid()) :: t()
-  def track_semantic_tokens_request(%__MODULE__{} = lsp, ref, buffer) when is_reference(ref) do
-    {:ok, pending_requests} =
-      PendingRequests.track_semantic_tokens(lsp.pending_requests, ref, buffer)
-
-    %{lsp | pending_requests: pending_requests}
+  @spec track_semantic_tokens_request(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          Minga.LSP.PositionEncoding.encoding(),
+          {[String.t()], [String.t()]}
+        ) :: t()
+  def track_semantic_tokens_request(lsp, ref, client, buffer, version, encoding, legend) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_semantic_tokens(
+        lsp.pending_requests,
+        ref,
+        client,
+        buffer,
+        version,
+        encoding,
+        legend
+      )
+    )
   end
+
+  @spec accept_semantic_tokens(t(), pid(), non_neg_integer(), [String.t()], [
+          Minga.Language.Highlight.Span.t()
+        ]) :: t()
+  def accept_semantic_tokens(%__MODULE__{} = lsp, buffer, version, names, spans)
+      when is_pid(buffer) and is_integer(version) and version >= 0 and is_list(names) and
+             is_list(spans) do
+    %{
+      lsp
+      | semantic_tokens:
+          Map.put(
+            lsp.semantic_tokens,
+            buffer,
+            {version, List.to_tuple(names), List.to_tuple(spans)}
+          )
+    }
+  end
+
+  @spec clear_semantic_tokens(t(), pid()) :: t()
+  def clear_semantic_tokens(%__MODULE__{} = lsp, buffer) when is_pid(buffer),
+    do: %{lsp | semantic_tokens: Map.delete(lsp.semantic_tokens, buffer)}
+
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer),
+    do: clear_semantic_tokens(lsp, buffer)
 
   @doc "Tracks an Editor-global LSP request for a structured operation."
   @spec track_operation_request(

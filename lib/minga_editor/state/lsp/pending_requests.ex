@@ -22,7 +22,8 @@ defmodule MingaEditor.State.LSP.PendingRequests do
           | {:signature_help, pid(), pid(), non_neg_integer(), position()}
           | {:hover_mouse, non_neg_integer(), non_neg_integer(), pid(), non_neg_integer(),
              non_neg_integer(), non_neg_integer()}
-          | {:semantic_tokens, pid()}
+          | {:semantic_tokens, pid(), pid(), non_neg_integer(),
+             Minga.LSP.PositionEncoding.encoding(), {[String.t()], [String.t()]}}
           | {:operation, operation_kind(), MingaEditor.State.Operation.id(),
              MingaEditor.State.Tab.id() | nil}
           | {:format, FormatOperation.t()}
@@ -202,10 +203,32 @@ defmodule MingaEditor.State.LSP.PendingRequests do
     )
   end
 
-  @spec track_semantic_tokens(t(), reference(), pid()) :: {:ok, t()} | {:error, :duplicate_ref}
-  def track_semantic_tokens(%__MODULE__{} = pending, ref, buffer)
-      when is_reference(ref) and is_pid(buffer) do
-    track_request(pending, ref, {:semantic_tokens, buffer})
+  @spec track_semantic_tokens(
+          t(),
+          reference(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          Minga.LSP.PositionEncoding.encoding(),
+          {[String.t()], [String.t()]}
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_semantic_tokens(
+        %__MODULE__{} = pending,
+        ref,
+        client,
+        buffer,
+        version,
+        encoding,
+        {types, mods}
+      )
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             version >= 0 and encoding in [:utf8, :utf16, :utf32] and is_list(types) and
+             is_list(mods) do
+    track_request(
+      pending,
+      ref,
+      {:semantic_tokens, client, buffer, version, encoding, {types, mods}}
+    )
   end
 
   @spec track_operation(

@@ -283,6 +283,8 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     hover_ref = make_ref()
     semantic_ref = make_ref()
     buffer = spawn_process()
+    client = spawn_process()
+    legend = {["variable"], []}
 
     assert {:ok, pending} =
              PendingRequests.track_hover_mouse(
@@ -296,12 +298,36 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
                99
              )
 
-    assert {:ok, pending} = PendingRequests.track_semantic_tokens(pending, semantic_ref, buffer)
+    assert {:ok, pending} =
+             PendingRequests.track_semantic_tokens(
+               pending,
+               semantic_ref,
+               client,
+               buffer,
+               7,
+               :utf16,
+               legend
+             )
 
     assert PendingRequests.fetch(pending, hover_ref) ==
              {:ok, {:hover_mouse, 12, 34, buffer, 3, 4, 99}}
 
-    assert PendingRequests.fetch(pending, semantic_ref) == {:ok, {:semantic_tokens, buffer}}
+    assert PendingRequests.fetch(pending, semantic_ref) ==
+             {:ok, {:semantic_tokens, client, buffer, 7, :utf16, legend}}
+
+    for {version, legend} <- [{-1, legend}, {7, :bad_legend}] do
+      assert_raise FunctionClauseError, fn ->
+        PendingRequests.track_semantic_tokens(
+          pending,
+          make_ref(),
+          client,
+          buffer,
+          version,
+          :utf16,
+          legend
+        )
+      end
+    end
   end
 
   defp operation(buffer, ref) do
