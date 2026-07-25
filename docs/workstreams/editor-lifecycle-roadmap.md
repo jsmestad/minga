@@ -27,7 +27,7 @@ Current accepted inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **VERIFIED routed follow-on:** ES06, L06, L07, L08.
+- **VERIFIED routed follow-on:** ES06, L06, L07, L08, L09.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -4819,7 +4819,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W120/L09: Split parser syntax from LSP semantic highlight layers
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** L09
 - **Decision:** APPROVE_DIRECT, parser highlighting owns syntax, `State.LSP` owns semantic spans and request correlation, and the pure content boundary composes them for rendering.
 - **Planning profile:** `L09RoutePlanner`, editor-lifecycle-planner, read-only; superseded where corrected by `L09PlanVerifier`.
@@ -4839,7 +4839,9 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** Default-concurrency full-suite subagent provider setup can fall through to real credential checks in `MingaAgent.Tools.SubagentTest`; this is unrelated to L09 and did not appear in focused or L09-adjacent broad suites.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
-- **PR URL:**
-- **Implementation commit SHA:**
-- **Merge SHA:**
+- **PR URL:** https://github.com/jsmestad/minga/pull/3236
+- **Implementation commit SHA:** `0005bd4e411111ed573b3603ae600547dab19a9f`.
+- **Merge SHA:** `df500a2272a6c395d2a854c3fd6542d736ce0d3c`.
+- **Merge evidence:** PR #3236 merged after required CI run `30141540742` passed; current main contains the implementation and test tree reviewed at `0005bd4e411111ed573b3603ae600547dab19a9f`.
+- **Findings resolved:** L09 is fully resolved as the approved ROUTE follow-on.
 - **Completion date:** 2026-07-25
