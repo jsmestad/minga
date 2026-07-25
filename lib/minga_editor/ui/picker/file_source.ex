@@ -10,7 +10,6 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   alias Minga.Project.Root
   alias Minga.Project.WorkspaceSnapshot
-  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Language
@@ -157,56 +156,32 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   defp open_selected_file({:ok, abs_path}, candidate, state) do
-    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
-      nil ->
-        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server,
-               history_attribution: :caller_managed
-             ) do
-          {:ok, pid} ->
-            Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
-            new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
-            record_selection(candidate, state)
-            new_state
+    opts = [
+      existing_target: existing_target(state),
+      start_opts: [history_attribution: :caller_managed]
+    ]
 
-          {:error, reason} ->
-            Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
-            state
-        end
-
-      idx ->
-        new_state = switch_existing_buffer(state, idx)
+    case MingaEditor.Handlers.BufferRegistry.open_or_activate_path(state, abs_path, opts) do
+      {:ok, new_state, pid, :opened} ->
+        Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
         record_selection(candidate, state)
         new_state
+
+      {:ok, new_state, _pid, _status} ->
+        record_selection(candidate, state)
+        new_state
+
+      {:error, reason} ->
+        Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
+        state
     end
   end
 
-  @spec switch_existing_buffer(term(), non_neg_integer()) :: term()
-  defp switch_existing_buffer(state, idx) do
-    # Prefer existing tabs when opening from normal picker flow so agentic view exits cleanly.
-    pid = Enum.at(state.workspace.buffers.list, idx)
-    {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
+  @spec existing_target(term()) :: :buffer | :tab
+  defp existing_target(state) when state.buffer_lifecycle.buffer_add_context == :preview,
+    do: :buffer
 
-    Log.debug(
-      :editor,
-      "[file_picker] existing buffer idx=#{idx} tab=#{inspect(tab && tab.id)}"
-    )
-
-    switch_existing_buffer_target(state, idx, tab)
-  end
-
-  @spec switch_existing_buffer_target(term(), non_neg_integer(), term()) :: term()
-  defp switch_existing_buffer_target(state, idx, _tab)
-       when state.buffer_lifecycle.buffer_add_context == :preview do
-    MingaEditor.BufferActivation.activate(state, idx)
-  end
-
-  defp switch_existing_buffer_target(state, _idx, %{id: tab_id}) do
-    MingaEditor.TabWorkflow.switch(state, tab_id)
-  end
-
-  defp switch_existing_buffer_target(state, idx, _tab) do
-    MingaEditor.BufferActivation.activate(state, idx)
-  end
+  defp existing_target(_state), do: :tab
 
   @impl true
   @spec on_cancel(term()) :: term()

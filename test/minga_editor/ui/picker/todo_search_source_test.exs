@@ -288,6 +288,20 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       assert new_state.workspace.buffers.active_index == 1
       assert BufferProcess.cursor(path_buffer) == {2, 0}
     end
+
+    test "missing authorized files keep the current buffer active" do
+      missing_path = Path.join(temporary_root(), "missing-todo.txt") |> Path.expand()
+      state = base_state(content: "scratch")
+
+      selected =
+        TodoSearchSource.on_select(
+          %Item{id: %{path: missing_path, line: 1}, label: "missing"},
+          state
+        )
+
+      assert selected.workspace.buffers.active == state.workspace.buffers.active
+      assert selected.workspace.buffers.list == state.workspace.buffers.list
+    end
   end
 
   @spec live_request() :: {WorkspaceSnapshot.t(), EditorState.t(), reference(), term()}

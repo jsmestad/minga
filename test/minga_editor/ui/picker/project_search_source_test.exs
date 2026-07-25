@@ -1,6 +1,10 @@
 defmodule MingaEditor.UI.Picker.ProjectSearchSourceTest do
   use ExUnit.Case, async: true
 
+  import MingaEditor.RenderPipeline.TestHelpers, only: [base_state: 1]
+
+  alias Minga.Buffer
+
   alias MingaEditor.State.Search
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -60,6 +64,20 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSourceTest do
     test "ignores items whose id is not a match map" do
       state = %{ignored: true}
       assert ProjectSearchSource.on_select(%Item{id: 0, label: "x"}, state) == state
+    end
+
+    test "opens a real match and moves to the selected cursor" do
+      tmp_dir = System.tmp_dir!()
+      path = Path.join(tmp_dir, "project-search-source-#{System.unique_integer([:positive])}.txt")
+      File.write!(path, "first\nsecond\n")
+      on_exit(fn -> File.rm(path) end)
+
+      item = %Item{id: %{file: path, line: 2, col: 1}, label: "match"}
+      state = ProjectSearchSource.on_select(item, base_state(content: "scratch"))
+      pid = state.workspace.buffers.active
+
+      assert Buffer.file_path(pid) == path
+      assert Buffer.cursor(pid) == {1, 1}
     end
   end
 end

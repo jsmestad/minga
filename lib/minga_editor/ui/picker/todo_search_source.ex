@@ -166,17 +166,10 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
 
   @spec open_match(term(), String.t(), non_neg_integer(), non_neg_integer()) :: term()
   defp open_match(state, abs_path, line, col) do
-    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
-      nil -> open_new_buffer(state, abs_path, line, col)
-      buf_idx -> jump_to_buffer(state, buf_idx, line, col)
-    end
-  end
-
-  @spec open_new_buffer(term(), String.t(), non_neg_integer(), non_neg_integer()) :: term()
-  defp open_new_buffer(state, abs_path, line, col) do
-    case MingaEditor.Commands.start_buffer(abs_path) do
-      {:ok, pid} ->
-        new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
+    case MingaEditor.Handlers.BufferRegistry.open_or_activate_path(state, abs_path,
+           options_server: nil
+         ) do
+      {:ok, new_state, pid, _status} ->
         Buffer.move_to(pid, {line, col})
         new_state
 
@@ -184,13 +177,5 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
         Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
         state
     end
-  end
-
-  @spec jump_to_buffer(term(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: term()
-  defp jump_to_buffer(state, buf_idx, line, col) do
-    new_state = MingaEditor.BufferActivation.activate(state, buf_idx)
-    pid = Enum.at(state.workspace.buffers.list, buf_idx)
-    Buffer.move_to(pid, {line, col})
-    new_state
   end
 end
