@@ -25,13 +25,11 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   @type state :: EditorState.t()
   @typep style_context :: %{
-           highlight: Highlight.t() | nil,
            theme_syntax: map(),
            byte_offset_map: %{non_neg_integer() => non_neg_integer()}
          }
@@ -511,7 +509,6 @@ defmodule MingaEditor.AgentLifecycle do
         ) ::
           TranscriptProjection.styled_cache()
   defp compute_styled_messages(state, messages, message_ids, previous_messages, previous_styled) do
-    highlight = nil
     theme_syntax = state.appearance.theme.syntax
 
     {full_text, line_offsets} = Transcript.messages_to_markdown_with_offsets(messages)
@@ -519,7 +516,6 @@ defmodule MingaEditor.AgentLifecycle do
     byte_offset_map = message_byte_offsets(line_offsets, full_lines)
 
     style_context = %{
-      highlight: highlight,
       theme_syntax: theme_syntax,
       byte_offset_map: byte_offset_map
     }
@@ -636,14 +632,14 @@ defmodule MingaEditor.AgentLifecycle do
       styled_lines:
         MarkdownHighlight.stylize(
           text,
-          style_context.highlight,
+          nil,
           style_context.theme_syntax,
           byte_offset
         ),
       markdown_blocks:
         MarkdownHighlight.render_blocks(
           text,
-          style_context.highlight,
+          nil,
           style_context.theme_syntax,
           message_id,
           byte_offset
@@ -665,7 +661,7 @@ defmodule MingaEditor.AgentLifecycle do
       styled_lines:
         MarkdownHighlight.stylize(
           text,
-          style_context.highlight,
+          nil,
           style_context.theme_syntax,
           byte_offset
         ),

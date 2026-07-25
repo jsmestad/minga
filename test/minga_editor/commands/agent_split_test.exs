@@ -1,8 +1,11 @@
 defmodule MingaEditor.Commands.AgentSplitTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Parser.Manager
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.HighlightSync
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -14,8 +17,13 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   alias MingaEditor.Window.Content
   alias Minga.Test.StubServer
 
-  defp make_state do
-    {:ok, buf} = BufferProcess.start_link(content: "hello world")
+  defp make_state(opts \\ []) do
+    {:ok, buf} =
+      BufferProcess.start_link(
+        content: "hello world",
+        filetype: Keyword.get(opts, :filetype, :text)
+      )
+
     {:ok, _prompt_buf} = BufferProcess.start_link(content: "")
     {:ok, fake_session} = StubServer.start_link()
 
@@ -76,6 +84,8 @@ defmodule MingaEditor.Commands.AgentSplitTest do
           next_id: 2
         }
       },
+      parser:
+        MingaEditor.State.Parser.new(Keyword.get(opts, :parser_manager, Minga.Parser.Manager)),
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -123,6 +133,79 @@ defmodule MingaEditor.Commands.AgentSplitTest do
         Map.values(state.workspace.windows.map) |> Enum.find(&Content.agent_chat?(&1.content))
 
       assert agent_win != nil
+    end
+
+    test "no-tab return restores parser presentation for the saved active buffer", %{test: test} do
+      manager =
+        start_supervised!(
+          {Manager,
+           name: Module.concat(__MODULE__, "Parser#{test}"), parser_path: "/missing/minga-parser"}
+        )
+
+      state = make_state(filetype: :elixir, parser_manager: manager)
+      saved_buffer = state.workspace.buffers.active
+
+      return_target =
+        UIState.return_target(
+          1,
+          saved_buffer,
+          state.workspace.windows,
+          state.workspace.file_tree,
+          :editor,
+          false
+        )
+
+      {:ok, agent_buffer} = BufferProcess.start_link(content: "agent view")
+
+      state =
+        state
+        |> then(fn state ->
+          buffers = %Buffers{
+            active: agent_buffer,
+            list: [agent_buffer, saved_buffer],
+            active_index: 0
+          }
+
+          workspace = %{
+            state.workspace
+            | buffers: buffers,
+              agent_ui:
+                UIState.activate(
+                  %UIState{},
+                  state.workspace.windows,
+                  state.workspace.file_tree,
+                  return_target
+                )
+          }
+
+          shell_state =
+            MingaEditor.Shell.Traditional.State.replace_agent(
+              %MingaEditor.Shell.Traditional.State{},
+              %AgentState{}
+            )
+
+          %{
+            state
+            | workspace: workspace,
+              shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
+          }
+        end)
+        |> HighlightSync.setup_for_buffer_pid(saved_buffer)
+
+      assert is_integer(Manager.buffer_id(saved_buffer, manager))
+
+      Process.sleep(2)
+
+      evicted = HighlightSync.evict_inactive(state, ttl_ms: 0)
+
+      assert Manager.buffer_id(saved_buffer, manager) == nil
+      refute Map.has_key?(evicted.parser.highlighting.highlights, saved_buffer)
+
+      returned = AgentCommands.return_to_editor(evicted)
+
+      assert returned.workspace.buffers.active == saved_buffer
+      assert is_integer(Manager.buffer_id(saved_buffer, manager))
+      assert Map.has_key?(returned.parser.highlighting.highlights, saved_buffer)
     end
 
     test "round-trip toggle restores file state" do

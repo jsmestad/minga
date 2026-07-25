@@ -11,6 +11,7 @@ defmodule MingaEditor.UserQueryOverrideTest do
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.HighlightSync
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.UI.Highlight
   alias Minga.Language.Grammar
 
   describe ":reload-highlights command" do
@@ -31,8 +32,10 @@ defmodule MingaEditor.UserQueryOverrideTest do
 
       state =
         state
-        |> HighlightSync.handle_names(["keyword"])
-        |> HighlightSync.handle_spans(1, [Span.new(0, 9, 0)])
+        |> HighlightSync.get_active_highlight()
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [Span.new(0, 9, 0)])
+        |> then(&HighlightSync.put_highlight(state, state.workspace.buffers.active, &1))
 
       refute HighlightSync.get_active_highlight(state).spans == {}
 

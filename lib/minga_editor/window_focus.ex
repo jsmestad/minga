@@ -2,6 +2,7 @@ defmodule MingaEditor.WindowFocus do
   @moduledoc "Focused workflow for window focus, buffer cursor calls, and shell focus presentation."
 
   alias Minga.Buffer
+  alias MingaEditor.HighlightSync
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
@@ -33,6 +34,7 @@ defmodule MingaEditor.WindowFocus do
 
   def focus_result(%EditorState{} = state, target_id) do
     windows = state.workspace.windows
+    old_buffer = state.workspace.buffers.active
 
     with {:ok, old_window} <- fetch_window(windows, windows.active),
          {:ok, target_window} <- fetch_window(windows, target_id),
@@ -43,15 +45,16 @@ defmodule MingaEditor.WindowFocus do
         | workspace: SessionState.focus_window(state.workspace, target_id, outgoing_cursor)
       }
 
-      focused = blur_bottom_panel(state)
-
-      {:ok, focused}
+      {:ok,
+       blur_bottom_panel(state) |> HighlightSync.ensure_active_buffer_presentation(old_buffer)}
     end
   end
 
   @doc "Restores focus without reading the outgoing window's buffer, for popup dismissal."
   @spec restore_focus(state(), Window.id()) :: {:ok, state()} | :error
   def restore_focus(%EditorState{} = state, target_id) do
+    old_buffer = state.workspace.buffers.active
+
     with {:ok, target_window} <- Windows.fetch(state.workspace.windows, target_id),
          :ok <- restore_target_cursor(target_window) do
       state = %{
@@ -59,9 +62,8 @@ defmodule MingaEditor.WindowFocus do
         | workspace: SessionState.focus_window(state.workspace, target_id, nil)
       }
 
-      restored = blur_bottom_panel(state)
-
-      {:ok, restored}
+      {:ok,
+       blur_bottom_panel(state) |> HighlightSync.ensure_active_buffer_presentation(old_buffer)}
     else
       _failure -> :error
     end
@@ -81,6 +83,8 @@ defmodule MingaEditor.WindowFocus do
   @doc "Focuses a surviving window after the active split was removed."
   @spec focus_surviving_window(state(), Windows.t(), Window.id()) :: state()
   def focus_surviving_window(%EditorState{} = state, %Windows{} = windows, target_id) do
+    old_buffer = state.workspace.buffers.active
+
     with {:ok, target_window} <- Windows.fetch(windows, target_id),
          :ok <- restore_target_cursor(target_window) do
       state = %{
@@ -88,7 +92,7 @@ defmodule MingaEditor.WindowFocus do
         | workspace: SessionState.focus_surviving_window(state.workspace, windows, target_id)
       }
 
-      blur_bottom_panel(state)
+      blur_bottom_panel(state) |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
     else
       _failure -> state
     end
@@ -186,13 +190,13 @@ defmodule MingaEditor.WindowFocus do
 
   @spec repair_focus_with_buffer(state(), Window.id(), pid()) :: {:ok, state()}
   defp repair_focus_with_buffer(%EditorState{} = state, target_id, buffer) do
+    old_buffer = state.workspace.buffers.active
     buffers = Buffers.switch_to_pid(state.workspace.buffers, buffer)
 
     workspace = SessionState.focus_window(state.workspace, target_id, nil)
     state = %{state | workspace: SessionState.activate_buffer(workspace, buffers)}
-    repaired = blur_bottom_panel(state)
 
-    {:ok, repaired}
+    {:ok, blur_bottom_panel(state) |> HighlightSync.ensure_active_buffer_presentation(old_buffer)}
   end
 
   @spec repair_focus_with_empty_surface(state(), Window.id()) :: {:ok, state()}

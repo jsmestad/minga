@@ -1,6 +1,6 @@
 defmodule MingaEditor.Handlers.HighlightHandlerTest do
+  alias Minga.Buffer
   alias Minga.Language.Highlight.Span
-
   use ExUnit.Case, async: true
 
   alias Minga.Parser.EventCorrelation
@@ -139,11 +139,13 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       buf = active_buffer(state)
       state = with_highlight(state, buf)
 
-      assert {_, []} =
-               HighlightHandler.handle(
-                 state,
-                 {:minga_highlight, {:highlight_names, buf, ["keyword"]}}
-               )
+      {new_state, []} =
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight, {:highlight_names, buf, ["keyword"]}}
+        )
+
+      assert HighlightSync.get_highlight(new_state, buf).capture_names == {"keyword"}
 
       {state, other_buf} = state_with_other_buffer(base_state())
       state = with_highlight(state, other_buf)
@@ -154,7 +156,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
           {:minga_highlight, {:highlight_names, other_buf, ["string"]}}
         )
 
-      assert new_state.parser.highlighting.highlights[other_buf] != nil
+      assert HighlightSync.get_highlight(new_state, other_buf).capture_names == {"string"}
     end
 
     test "an old queued event is rejected after registration presentation replacement" do
@@ -238,9 +240,13 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       buf = active_buffer(state)
       state = with_highlight(state, buf)
 
-      {_, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, buf, []}})
+      spans = [Span.new(0, 9, 0), Span.new(10, 15, 1)]
 
+      {new_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, buf, spans}})
+
+      assert HighlightSync.get_highlight(new_state, buf).version == 1
+      assert HighlightSync.get_highlight(new_state, buf).spans == List.to_tuple(spans)
       assert effects == [{:request_semantic_tokens, buf}, {:prettify_symbols, buf}, :render]
 
       spans = [%{start_byte: 0, end_byte: 5, replacement: ""}]
@@ -249,6 +255,17 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
         HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, buf, spans}})
 
       assert {:conceal_spans, buf, spans} in effects
+
+      dispatch_state =
+        HighlightHandler.dispatch(state, {:minga_highlight, {:conceal_spans, buf, spans}})
+
+      [conceal] = Buffer.decorations(buf).conceal_ranges
+
+      assert dispatch_state == state
+      assert conceal.start_pos == {0, 0}
+      assert conceal.end_pos == {0, 5}
+      assert conceal.replacement == nil
+      assert conceal.group == :ts_conceal
 
       {visible_state, visible_buf} = state_with_visible_other_buffer(base_state())
       visible_state = with_highlight(visible_state, visible_buf)

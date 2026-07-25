@@ -6,12 +6,12 @@ defmodule MingaEditor.HighlightSync do
   highlight response events back into editor state.
   """
 
-  alias Minga.Language.Highlight.Span
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager, as: ParserManager
+  alias MingaEditor.SemanticTokenSync
   alias MingaEditor.UI.Highlight
   alias Minga.Language.Grammar
 
@@ -65,6 +65,54 @@ defmodule MingaEditor.HighlightSync do
       :unsupported ->
         state
     end
+  end
+
+  @doc "Ensures parser presentation for a newly active buffer after an owner transition."
+  @spec ensure_active_buffer_presentation(EditorState.t(), pid() | nil) :: EditorState.t()
+  def ensure_active_buffer_presentation(
+        %EditorState{workspace: %{buffers: %{active: active_buffer}}} = state,
+        old_buffer
+      )
+      when is_pid(active_buffer) and active_buffer != old_buffer do
+    if active_buffer_process?(active_buffer) do
+      ensure_active_buffer_setup(state, active_buffer)
+    else
+      state
+    end
+  end
+
+  def ensure_active_buffer_presentation(%EditorState{} = state, _old_buffer), do: state
+
+  @spec ensure_active_buffer_setup(EditorState.t(), pid()) :: EditorState.t()
+  defp ensure_active_buffer_setup(%EditorState{} = state, active_buffer) do
+    if Map.has_key?(state.parser.highlighting.highlights, active_buffer) do
+      touch_active(state)
+    else
+      setup_active_buffer_presentation(state)
+    end
+  end
+
+  @spec active_buffer_process?(pid()) :: boolean()
+  defp active_buffer_process?(pid) when is_pid(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dictionary} ->
+        Keyword.get(dictionary, :"$initial_call") == {Minga.Buffer.Process, :init, 1}
+
+      nil ->
+        false
+    end
+  end
+
+  @spec setup_active_buffer_presentation(EditorState.t()) :: EditorState.t()
+  defp setup_active_buffer_presentation(%EditorState{frontend: %{backend: :headless}} = state) do
+    state
+    |> setup_for_buffer()
+    |> SemanticTokenSync.request_tokens()
+  end
+
+  defp setup_active_buffer_presentation(%EditorState{} = state) do
+    send(self(), :setup_highlight)
+    state
   end
 
   @doc """
@@ -313,18 +361,6 @@ defmodule MingaEditor.HighlightSync do
     %{state | parser: MingaEditor.State.Parser.retire_buffer(state.parser, buffer_pid)}
   end
 
-  @doc "Handles a highlight_names event for the active buffer."
-  @spec handle_names(EditorState.t(), [String.t()]) :: EditorState.t()
-  def handle_names(%EditorState{} = state, names) do
-    update_active_highlight(state, &Highlight.put_names(&1, names))
-  end
-
-  @doc "Handles a highlight_spans event for the active buffer."
-  @spec handle_spans(EditorState.t(), non_neg_integer(), [Span.t()]) :: EditorState.t()
-  def handle_spans(%EditorState{} = state, version, spans) do
-    update_active_highlight(state, &Highlight.put_spans(&1, version, spans))
-  end
-
   # ── Per-buffer highlight helpers ─────────────────────────────────────────────
 
   @doc "Returns the highlight data for the active buffer."
@@ -383,16 +419,5 @@ defmodule MingaEditor.HighlightSync do
             )
           )
     }
-  end
-
-  # Updates the active buffer's highlight via a function.
-  @spec update_active_highlight(EditorState.t(), (Highlight.t() -> Highlight.t())) ::
-          EditorState.t()
-  defp update_active_highlight(%EditorState{workspace: %{buffers: %{active: nil}}} = state, _fun),
-    do: state
-
-  defp update_active_highlight(%EditorState{} = state, fun) do
-    current = get_active_highlight(state)
-    put_active_highlight(state, fun.(current))
   end
 end
