@@ -174,10 +174,11 @@ defmodule MingaEditor.CompletionHandling do
           :ok
       end
 
-      _ =
-        CompletionTrigger.dismiss(ModalWorkflow.completion_trigger(state))
+      _ = CompletionTrigger.dismiss(ModalWorkflow.completion_trigger(state))
 
-      ModalWorkflow.dismiss(state)
+      state
+      |> Map.update!(:lsp, &LSPState.drop_completion_requests/1)
+      |> ModalWorkflow.dismiss()
     else
       state
     end

@@ -153,6 +153,62 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     refute function_exported?(PendingRequests, :track_response, 3)
   end
 
+  test "drop_completion_requests removes completion variants and preserves unrelated indexes" do
+    client = spawn_process()
+    buffer = spawn_process()
+    result_ref = make_ref()
+    resolve_ref = make_ref()
+    signature_ref = make_ref()
+    format = operation(buffer, make_ref())
+
+    assert {:ok, pending} =
+             PendingRequests.track_completion_result(
+               PendingRequests.new(),
+               result_ref,
+               :primary,
+               client,
+               buffer,
+               1,
+               2,
+               {3, 4}
+             )
+
+    assert {:ok, pending} =
+             PendingRequests.track_completion_resolve(
+               pending,
+               resolve_ref,
+               client,
+               buffer,
+               1,
+               2,
+               %{"label" => "a"}
+             )
+
+    assert {:ok, pending} =
+             PendingRequests.track_signature_help(
+               pending,
+               signature_ref,
+               client,
+               buffer,
+               1,
+               {3, 4}
+             )
+
+    assert {:ok, pending} = PendingRequests.track_format(pending, format)
+
+    pending = PendingRequests.drop_completion_requests(pending)
+
+    assert PendingRequests.fetch(pending, result_ref) == :error
+    assert PendingRequests.fetch(pending, resolve_ref) == :error
+
+    assert PendingRequests.fetch(pending, signature_ref) ==
+             {:ok, {:signature_help, client, buffer, 1, {3, 4}}}
+
+    assert PendingRequests.fetch_format(pending, format.ref) == {:ok, format}
+    assert PendingRequests.format_for_buffer(pending, buffer) == format
+    assert PendingRequests.newest_format(pending) == format
+  end
+
   test "current-origin response rejects invalid version and cursor" do
     client = spawn_process()
     buffer = spawn_process()

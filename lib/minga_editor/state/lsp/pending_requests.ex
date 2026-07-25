@@ -279,6 +279,18 @@ defmodule MingaEditor.State.LSP.PendingRequests do
     {Enum.reverse(requests), %{pending | by_ref: by_ref}}
   end
 
+  @spec drop_completion_requests(t()) :: t()
+  def drop_completion_requests(%__MODULE__{} = pending) do
+    by_ref =
+      Map.reject(pending.by_ref, fn
+        {_ref, {:completion_result, _role, _client, _buffer, _version, _gen, _pos}} -> true
+        {_ref, {:completion_resolve, _client, _buffer, _version, _gen, _raw_item}} -> true
+        {_ref, _request} -> false
+      end)
+
+    %{pending | by_ref: by_ref}
+  end
+
   @spec fetch(t(), reference()) :: {:ok, request()} | :error
   def fetch(%__MODULE__{} = pending, ref) when is_reference(ref),
     do: Map.fetch(pending.by_ref, ref)

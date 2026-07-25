@@ -422,6 +422,12 @@ defmodule MingaEditor.State.LSP do
     {requests, %{lsp | pending_requests: pending_requests}}
   end
 
+  @doc "Drops pending requests owned by the active completion lifecycle."
+  @spec drop_completion_requests(t()) :: t()
+  def drop_completion_requests(%__MODULE__{} = lsp) do
+    %{lsp | pending_requests: PendingRequests.drop_completion_requests(lsp.pending_requests)}
+  end
+
   @doc "Fetches an Editor-global LSP pending request by response reference."
   @spec fetch_pending_request(t(), reference()) :: {:ok, pending_request()} | :error
   def fetch_pending_request(%__MODULE__{} = lsp, ref) when is_reference(ref) do
