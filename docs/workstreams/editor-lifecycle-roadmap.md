@@ -28,6 +28,7 @@ Current accepted inventory:
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
 - **VERIFIED routed follow-on:** ES02, ES06, ES19, ES20, L06, L07, L08, L09, L17.
+- **DROPPED routed follow-on:** S30. W127 records why ES02 fully resolved the route.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -5023,4 +5024,23 @@ New split and float popup windows initialize their viewport metadata from `state
 - **CI run:** https://github.com/jsmestad/minga/actions/runs/30166982260
 - **Reviewer verdict:** `PASS` at `0.99` confidence after the fresh-active-tab Chrome projection blocker was corrected and targeted re-review confirmed both tab and workspace semantic models consume the live nested buffer owner.
 - **Findings resolved:** ES02 is complete. Accepted render intent remains strict and nested through renderer materialization, renderer-local caches and windows retain their owners, and emit/layout/focus/chrome consumers no longer depend on broad Editor-shaped transfer maps.
+- **Completion date:** 2026-07-25
+
+### W127/S30: Close the broad render round-trip route after ES02
+
+- **Status:** DROPPED
+- **Audit ID:** S30
+- **Decision:** DROP. Current main has no remaining S30 implementation slice because W126/ES02 removed the broad `EditorState -> Input -> Intent -> materialized Input` conversion cycle and the flat Input/Emit.Context duplication.
+- **Decision profile:** `S30Archie`, archie, read-only architecture review at baseline `24fc5ee0b6be7af03573f7c4f074fc0d3c3f1993`.
+- **Baseline:** `24fc5ee0b6be7af03573f7c4f074fc0d3c3f1993`.
+- **Current evidence:** Production now flows in one direction from `MingaEditor.State` to cache-free `RenderPipeline.Intent`, through `Renderer.BufferChanges.prepare/2` into renderer-local `RenderPipeline.Input`, then into focused `Frontend.Emit.Context`. Renderer callbacks accept only `%Intent{}`. No `Intent.from_input/2`, field-name reconstruction of broad Input, renderer cache in Intent, or broad frame-state mirror in Emit.Context remains.
+- **Owner result:** `RenderPipeline.Intent` owns the Editor-to-Renderer semantic contract; `Renderer.BufferChanges` joins accepted intent with renderer state; `RenderPipeline.Input` owns frame-local working values; `Frontend.Emit.Context` owns the focused semantic-UI/emit projection; bounded `RenderReceipt` remains the only return path.
+- **Why no implementation follows:** Input's renderer-local workspace, materialized windows, layout, focus tree, caches, font registry, message store, and frame sequence are live working state, not duplicate Editor authority. Emit.Context intentionally derives emit-only facts and omits renderer caches and focus. Removing either carrier now would erase an ownership boundary instead of simplifying one.
+- **Dependencies discharged:** ES02 is merged and VERIFIED. S30 no longer blocks ES01; ES01 may be planned against current main without an S30 implementation PR.
+- **Production changes:** None.
+- **Test changes:** None.
+- **Validation:** Read-only source, caller, and typeshape trace against current main; W126 records the focused, lint, full-suite, CI, and acceptance evidence for the cutover that resolved S30.
+- **Findings resolved:** S30 is terminal as resolved by ES02, not deferred.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
 - **Completion date:** 2026-07-25
