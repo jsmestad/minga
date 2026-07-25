@@ -5100,3 +5100,26 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 - **Completion date:** 2026-07-25
+
+### W130/L21: Route Ctrl-G through existing focus owners and active-window scope
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** L21
+- **Decision:** APPROVE_DIRECT, `Input.Interrupt` remains the Ctrl-G transaction coordinator while bottom panel, agent prompt, file tree, registered sidebar, TUI space-leader, and session scope remain with their existing owners.
+- **Planning profile:** `L21Planner`, editor-lifecycle-planner, locked READY at baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
+- **Implementation profile:** `L21Worker`, editor-lifecycle-worker, no delegation.
+- **Baseline:** `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
+- **Failure reproduction:** The locked source trace reproduced the stale Ctrl-G route before the correction: `Input.Interrupt.reset_to_known_good/1` hardcoded `keymap_scope` to `:editor` and never called the focus-owner transitions for bottom panel, agent prompt input, file tree, registered sidebars, or TUI space leader. During implementation, the expanded focused test suite first exposed test-fixture child-spec collisions while adding those regressions; after unique supervised buffer ids, the owner and scope regressions passed against the corrected route.
+- **Observable result:** Ctrl-G now dismisses modal and which-key state, cancels the BEAM TUI space-leader transaction, blurs bottom panel focus without hiding or changing filter/height, blurs agent prompt input without clearing prompt buffer content, normalizes and unfocuses file-tree help/edit/filter interactions without hiding loaded trees, clears registered sidebar focus without closing visible sidebars, resets Vim mode state, and derives the final keymap scope from the active window so buffer/empty windows return to `:editor` and active agent-chat windows remain `:agent`.
+- **Changed files:** `lib/minga_editor/input/interrupt.ex`, `test/minga_editor/input/interrupt_test.exs`, `docs/workstreams/editor-lifecycle-roadmap.md`.
+- **Focused validation:** `mix test test/minga_editor/input/interrupt_test.exs` passed `33` tests after the owner and active-window regressions were added. `mix test test/minga_editor/shell/traditional/input_state_test.exs test/minga_editor/shell/traditional/sidebars_test.exs test/minga_editor/input/agent_panel_nav_test.exs test/minga_editor/input/scoped_file_tree_test.exs` passed `24` tests, preserving adjacent input, sidebar, agent panel, and scoped file-tree behavior.
+- **Broad validation:** `mix format --check-formatted lib/minga_editor/input/interrupt.ex test/minga_editor/input/interrupt_test.exs` passed. `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with `Total errors: 0`. `git diff --check` produced no output. Final `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed `58 doctests, 98 properties, 9837 tests, 0 failures, 1 skipped, 616 excluded`; the run retained existing parser-manager and LSP shutdown warnings.
+- **Residue check:** Focused source search found no remaining `maybe_reset_scope`, no hardcoded `set_keymap_scope(state.workspace, :editor)` fallback in `Input.Interrupt`, and no stale `keymap_scope.*:editor` reset path in that module.
+- **Production lines added/removed before roadmap evidence:** `+85/-36`, net `+49`, within the locked production net cap of `<= +50`.
+- **Test lines added/removed before roadmap evidence:** `+178/-6`, net `+172`, limited to the locked focus-owner and active-window scope regressions plus unique supervised buffer ids needed by the expanded looped cases.
+- **Concepts added:** Ctrl-G coordination of existing focus owners, active-window-derived interrupt scope, and focused regression coverage for each owner.
+- **Concepts removed:** Removed the hardcoded Ctrl-G `:editor` scope reset and stale focus ownership after interrupt.
+- **Retained constraints:** No new module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, duplicated state owner, frontend behavior, GUI CUA replay change, visibility-closing behavior, prompt-buffer clearing, file-tree content clearing, sidebar closure, or input handler ordering change was introduced.
+- **Discoveries affecting later work:** `Input.Interrupt` keeps one aggregate focus-owner log label to stay inside the locked production cap; the observable owner transitions and scope derivation are covered directly. Expanded interrupt tests that start more than one `Minga.Buffer.Process` in one test must use unique supervised child ids.
+- **Unresolved questions:** None.
+- **needs_replan:** false.

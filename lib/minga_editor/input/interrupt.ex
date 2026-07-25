@@ -2,37 +2,29 @@ defmodule MingaEditor.Input.Interrupt do
   @moduledoc """
   Ctrl-G interrupt handler. First handler in the input stack.
 
-  Intercepts Ctrl-G (codepoint 7) and resets the editor to a known-good
-  state. This is Minga's equivalent of Emacs's `C-g`: it cancels
-  whatever is in progress and returns the user to normal mode in the
-  editor scope.
-
-  Sits before every other handler (including ConflictPrompt) so it
-  works even when a modal overlay is swallowing all input. This is the
-  last resort for focus confusion freezes where the editor is running
-  but keys go to the wrong place.
-
-  ## What gets reset
-
-  - `keymap_scope` → `:editor`
-  - Vim mode → `:normal` with fresh mode state
-  - Modal overlay → dismissed
-  - Which-key popup → dismissed
-  - Agent pending prefix → cleared
-  - Status message → cleared
-
-  A `*Messages*` log entry records what was reset for debuggability.
+  Cancels transient input, blurs focused owners without hiding durable
+  surfaces, resets mode state, and derives the surviving keymap scope from
+  the active window.
   """
 
   @behaviour MingaEditor.Input.Handler
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.Input.CUA.TUISpaceLeader
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
+  alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.WhichKey
   alias MingaEditor.VimState
@@ -59,30 +51,93 @@ defmodule MingaEditor.Input.Interrupt do
 
   # ── Reset logic ──────────────────────────────────────────────────────────
 
-  @spec reset_to_known_good(EditorState.t()) :: {EditorState.t(), [String.t()]}
   defp reset_to_known_good(state) do
     {state, resets} = {state, []}
 
-    {state, resets} = maybe_reset_scope(state, resets)
-    {state, resets} = maybe_reset_mode(state, resets)
     {state, resets} = maybe_dismiss_modal(state, resets)
     {state, resets} = maybe_clear_whichkey(state, resets)
+    {state, resets} = maybe_reset_focus_owners(state, resets)
+    {state, resets} = maybe_reset_mode(state, resets)
+    {state, resets} = maybe_derive_scope(state, resets)
     {state, resets} = maybe_clear_agent_prefix(state, resets)
     {state, resets} = maybe_clear_status(state, resets)
 
     {state, resets}
   end
 
-  @spec maybe_reset_scope(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_reset_scope(%{workspace: %{keymap_scope: :editor}} = state, resets),
-    do: {state, resets}
+  defp maybe_derive_scope(%{workspace: %{keymap_scope: current_scope}} = state, resets) do
+    scope = SessionState.scope_for_active_window(state.workspace)
 
-  defp maybe_reset_scope(%{workspace: %{keymap_scope: scope}} = state, resets) do
-    {%{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)},
-     ["scope #{scope} → :editor" | resets]}
+    if current_scope == scope do
+      {state, resets}
+    else
+      {%{state | workspace: SessionState.set_keymap_scope(state.workspace, scope)},
+       ["scope #{current_scope} → #{scope}" | resets]}
+    end
   end
 
-  @spec maybe_reset_mode(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
+  defp maybe_reset_focus_owners(state, resets) do
+    new_state =
+      state
+      |> maybe_cancel_space_leader()
+      |> maybe_blur_bottom_panel()
+      |> maybe_blur_agent_prompt()
+      |> maybe_unfocus_file_tree()
+      |> maybe_clear_sidebar_focus()
+
+    if new_state == state, do: {state, resets}, else: {new_state, ["focus owners reset" | resets]}
+  end
+
+  defp maybe_cancel_space_leader(
+         %{shell_runtime: %{state: %TraditionalState{} = shell_state}} = state
+       ) do
+    if TraditionalState.space_leader_pending?(shell_state) or
+         TraditionalState.space_leader_timer(shell_state) != nil,
+       do: TUISpaceLeader.cancel(state),
+       else: state
+  end
+
+  defp maybe_cancel_space_leader(state), do: state
+
+  defp maybe_blur_bottom_panel(
+         %{shell_runtime: %{state: %TraditionalState{bottom_panel: %{focused: true}}}} = state
+       ),
+       do: %{state | shell_runtime: Runtime.blur_bottom_panel(state.shell_runtime)}
+
+  defp maybe_blur_bottom_panel(state), do: state
+
+  defp maybe_blur_agent_prompt(
+         %{workspace: %{agent_ui: %{panel: %{input_focused: true}}}} = state
+       ) do
+    Workflow.install_agent_ui(
+      state,
+      PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+    )
+  end
+
+  defp maybe_blur_agent_prompt(state), do: state
+
+  defp maybe_unfocus_file_tree(%{workspace: %{file_tree: %FileTreeState{} = file_tree}} = state) do
+    new_file_tree =
+      file_tree
+      |> FileTreeState.hide_help()
+      |> FileTreeState.cancel_editing()
+      |> FileTreeState.accept_filter()
+      |> FileTreeState.unfocus()
+
+    if new_file_tree == file_tree,
+      do: state,
+      else: %{state | workspace: SessionState.set_file_tree(state.workspace, new_file_tree)}
+  end
+
+  defp maybe_clear_sidebar_focus(%EditorState{} = state) do
+    table = state.extension_surfaces.sidebar_registry
+
+    if SidebarWorkflow.active_id(state) != nil or Enum.any?(Sidebar.all(table), & &1.focused?),
+      do: SidebarWorkflow.select(state, nil),
+      else: state
+  end
+
   defp maybe_reset_mode(%{workspace: %{editing: %{mode: mode}}} = state, resets)
        when mode != :normal do
     {%{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)},
@@ -102,7 +157,6 @@ defmodule MingaEditor.Input.Interrupt do
     end
   end
 
-  @spec mode_state_dirty?(term(), Minga.Mode.State.t()) :: boolean()
   defp mode_state_dirty?(%Minga.Mode.State{} = current, %Minga.Mode.State{} = fresh) do
     current.leader_node != fresh.leader_node or
       current.leader_keys != fresh.leader_keys or
@@ -116,7 +170,6 @@ defmodule MingaEditor.Input.Interrupt do
 
   defp mode_state_dirty?(_current, _fresh), do: true
 
-  @spec maybe_dismiss_modal(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_dismiss_modal(state, resets) do
     if ModalOverlay.active?(state.shell_runtime.state.modal) do
       {ModalWorkflow.dismiss(state), ["modal dismissed" | resets]}
@@ -125,7 +178,6 @@ defmodule MingaEditor.Input.Interrupt do
     end
   end
 
-  @spec maybe_clear_whichkey(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_whichkey(
          %{shell_runtime: %{state: %{whichkey: %WhichKey{node: nil, show: false}}}} = state,
          resets
@@ -136,7 +188,6 @@ defmodule MingaEditor.Input.Interrupt do
     {WhichKeyWorkflow.dismiss(state), ["which-key dismissed" | resets]}
   end
 
-  @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_agent_prefix(state, resets) do
     case state.workspace.agent_ui.view |> UIState.View.pending_prefix() do
       nil ->
@@ -153,7 +204,6 @@ defmodule MingaEditor.Input.Interrupt do
     end
   end
 
-  @spec maybe_clear_status(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_status(
          %{
            shell_runtime: %{state: %{notice: %MingaEditor.Shell.Traditional.Notice{message: nil}}}
@@ -168,7 +218,6 @@ defmodule MingaEditor.Input.Interrupt do
 
   # ── Logging ──────────────────────────────────────────────────────────────
 
-  @spec log_resets(EditorState.t(), [String.t()]) :: EditorState.t()
   defp log_resets(state, []) do
     Minga.Log.info(:editor, "C-g: already in clean state")
     state
