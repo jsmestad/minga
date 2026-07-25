@@ -24,6 +24,7 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.RenderPipeline.Input, as: RenderInput
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.UI.Picker, as: PickerData
   alias MingaEditor.Viewport
@@ -161,7 +162,8 @@ defmodule MingaEditor.FocusTree do
   # ── Builders ───────────────────────────────────────────────────────────────
 
   @spec window_map(map()) :: map()
-  defp window_map(%{workspace: %{windows: %{map: map}}}) when is_map(map), do: map
+  defp window_map(%RenderInput{windows: %{map: map}}) when is_map(map), do: map
+  defp window_map(%EditorState{workspace: %{windows: %{map: map}}}) when is_map(map), do: map
   defp window_map(_state), do: %{}
 
   @spec build_base(Layout.t(), map(), module(), map() | nil) :: t()
@@ -194,25 +196,29 @@ defmodule MingaEditor.FocusTree do
 
   defp bottom_panel_rect(
          %Layout{} = layout,
-         %{
-           shell_runtime: %{
-             state: %{
-               bottom_panel: %BottomPanel{visible: true, height_percent: height_percent}
-             }
-           }
-         }
-       ),
-       do: bottom_panel_rect(layout, height_percent)
+         %RenderInput{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}}
+       ) do
+    case TraditionalState.bottom_panel(shell_state) do
+      %BottomPanel{visible: true, height_percent: height_percent} ->
+        bottom_panel_rect(layout, height_percent)
+
+      _panel ->
+        nil
+    end
+  end
 
   defp bottom_panel_rect(
          %Layout{} = layout,
-         %{
-           shell_state: %{
-             bottom_panel: %BottomPanel{visible: true, height_percent: height_percent}
-           }
-         }
-       ),
-       do: bottom_panel_rect(layout, height_percent)
+         %EditorState{shell_runtime: %{state: %TraditionalState{} = shell_state}}
+       ) do
+    case TraditionalState.bottom_panel(shell_state) do
+      %BottomPanel{visible: true, height_percent: height_percent} ->
+        bottom_panel_rect(layout, height_percent)
+
+      _panel ->
+        nil
+    end
+  end
 
   @spec bottom_panel_rect(Layout.t(), non_neg_integer()) :: Layout.rect()
   defp bottom_panel_rect(
@@ -402,24 +408,30 @@ defmodule MingaEditor.FocusTree do
   end
 
   @spec maybe_add_hover_overlay(t(), map()) :: t()
-  defp maybe_add_hover_overlay(%TreeNode{} = root, %{
-         shell_runtime: %{state: shell_state},
-         frontend: %{terminal_viewport: vp}
-       }) do
-    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp})
+  defp maybe_add_hover_overlay(
+         %TreeNode{} = root,
+         %RenderInput{
+           intent: %{
+             frame: %{shell_state: %TraditionalState{} = shell_state, terminal_viewport: vp}
+           }
+         }
+       ) do
+    maybe_add_hover_overlay(root, TraditionalState.__struct__(), shell_state.hover_popup, vp)
   end
 
-  defp maybe_add_hover_overlay(%TreeNode{} = root, %{
-         shell_runtime: %{state: shell_state},
-         terminal_viewport: vp
-       }) do
-    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp})
+  defp maybe_add_hover_overlay(
+         %TreeNode{} = root,
+         %EditorState{
+           shell_runtime: %{state: %TraditionalState{} = shell_state},
+           frontend: %{terminal_viewport: vp}
+         }
+       ) do
+    maybe_add_hover_overlay(root, TraditionalState.__struct__(), shell_state.hover_popup, vp)
   end
 
-  defp maybe_add_hover_overlay(%TreeNode{} = root, %{
-         shell_state: %{hover_popup: %HoverPopup{} = popup},
-         terminal_viewport: vp
-       }) do
+  defp maybe_add_hover_overlay(%TreeNode{} = root, _state), do: root
+
+  defp maybe_add_hover_overlay(%TreeNode{} = root, _owner, %HoverPopup{} = popup, vp) do
     case HoverPresenter.box(popup, {vp.rows, vp.cols}) do
       nil ->
         root
@@ -436,33 +448,41 @@ defmodule MingaEditor.FocusTree do
     end
   end
 
-  defp maybe_add_hover_overlay(%TreeNode{} = root, _state), do: root
+  defp maybe_add_hover_overlay(%TreeNode{} = root, _owner, _hover_popup, _vp), do: root
 
   @spec maybe_add_signature_overlay(t(), map()) :: t()
-  defp maybe_add_signature_overlay(%TreeNode{} = root, %{
-         shell_runtime: %{state: shell_state},
-         frontend: %{terminal_viewport: vp}
-       }) do
-    maybe_add_signature_overlay(root, %{
-      shell_state: shell_state,
-      terminal_viewport: vp
-    })
+  defp maybe_add_signature_overlay(
+         %TreeNode{} = root,
+         %RenderInput{
+           intent: %{
+             frame: %{shell_state: %TraditionalState{} = shell_state, terminal_viewport: vp}
+           }
+         }
+       ) do
+    maybe_add_signature_overlay(
+      root,
+      TraditionalState.__struct__(),
+      shell_state.signature_help,
+      vp
+    )
   end
 
-  defp maybe_add_signature_overlay(%TreeNode{} = root, %{
-         shell_runtime: %{state: shell_state},
-         terminal_viewport: vp
-       }) do
-    maybe_add_signature_overlay(root, %{
-      shell_state: shell_state,
-      terminal_viewport: vp
-    })
+  defp maybe_add_signature_overlay(
+         %TreeNode{} = root,
+         %EditorState{
+           shell_runtime: %{state: %TraditionalState{} = shell_state},
+           frontend: %{terminal_viewport: vp}
+         }
+       ) do
+    maybe_add_signature_overlay(
+      root,
+      TraditionalState.__struct__(),
+      shell_state.signature_help,
+      vp
+    )
   end
 
-  defp maybe_add_signature_overlay(%TreeNode{} = root, %{
-         shell_state: %{signature_help: %SignatureHelp{} = sh},
-         terminal_viewport: vp
-       }) do
+  defp maybe_add_signature_overlay(%TreeNode{} = root, _owner, %SignatureHelp{} = sh, vp) do
     case SignatureHelpPresenter.box(sh, {vp.rows, vp.cols}) do
       nil ->
         root
@@ -475,14 +495,16 @@ defmodule MingaEditor.FocusTree do
     end
   end
 
-  defp maybe_add_signature_overlay(%TreeNode{} = root, _state), do: root
+  defp maybe_add_signature_overlay(%TreeNode{} = root, _owner, _signature_help, _vp), do: root
 
   # ── Overlay builders ──────────────────────────────────────────────────────
 
   @spec add_modal_overlays(t(), map(), Layout.t()) :: t()
   defp add_modal_overlays(
          %TreeNode{} = root,
-         %{shell_runtime: %{state: %{modal: {:picker, payload}}}},
+         %RenderInput{
+           intent: %{frame: %{shell_state: %TraditionalState{modal: {:picker, payload}}}}
+         },
          layout
        ) do
     add_picker_overlay(root, payload.picker_ui, layout)
@@ -490,7 +512,7 @@ defmodule MingaEditor.FocusTree do
 
   defp add_modal_overlays(
          %TreeNode{} = root,
-         %{shell_state: %{modal: {:picker, payload}}},
+         %EditorState{shell_runtime: %{state: %TraditionalState{modal: {:picker, payload}}}},
          layout
        ) do
     add_picker_overlay(root, payload.picker_ui, layout)
@@ -614,7 +636,8 @@ defmodule MingaEditor.FocusTree do
   defp terminal_viewport(%EditorState{frontend: %FrontendState{terminal_viewport: viewport}}),
     do: viewport
 
-  defp terminal_viewport(%RenderInput{terminal_viewport: viewport}), do: viewport
+  defp terminal_viewport(%RenderInput{intent: %{frame: %{terminal_viewport: viewport}}}),
+    do: viewport
 
   @spec cursor_screen_pos(map(), Layout.t()) :: {non_neg_integer(), non_neg_integer()}
   defp cursor_screen_pos(%{workspace: %{buffers: %{active: buf}}} = state, layout)
@@ -660,7 +683,13 @@ defmodule MingaEditor.FocusTree do
   end
 
   @spec active_window_layout(Layout.t(), map()) :: Layout.window_layout() | nil
-  defp active_window_layout(%Layout{window_layouts: layouts}, %{
+  defp active_window_layout(%Layout{window_layouts: layouts}, %RenderInput{
+         windows: %{active: active}
+       }) do
+    Map.get(layouts, active)
+  end
+
+  defp active_window_layout(%Layout{window_layouts: layouts}, %EditorState{
          workspace: %{windows: %{active: active}}
        }) do
     Map.get(layouts, active)
@@ -669,7 +698,12 @@ defmodule MingaEditor.FocusTree do
   defp active_window_layout(_layout, _state), do: nil
 
   @spec active_window(map()) :: term() | nil
-  defp active_window(%{workspace: %{windows: %{map: windows, active: active}}})
+  defp active_window(%RenderInput{windows: %{map: windows, active: active}})
+       when is_map(windows) do
+    Map.get(windows, active)
+  end
+
+  defp active_window(%EditorState{workspace: %{windows: %{map: windows, active: active}}})
        when is_map(windows) do
     Map.get(windows, active)
   end

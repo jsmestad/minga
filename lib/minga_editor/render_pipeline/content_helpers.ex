@@ -66,6 +66,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         nil
       end
 
+    frame = state.intent.frame
+
     search_matches =
       case preview_matches do
         [] -> SearchHighlight.search_matches_for_lines(state, lines, first_line)
@@ -83,7 +85,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         decorations,
         search_matches,
         confirm_match,
-        state.theme.search,
+        frame.theme.search,
         state.caches.search_decoration_cache
       )
 
@@ -92,7 +94,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         merge_document_highlight_decorations(
           decorations,
           state.workspace.document_highlights,
-          state.theme,
+          frame.theme,
           state.caches.doc_highlight_cache
         )
       else
@@ -104,32 +106,30 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         merge_cmd_hover_link_decoration(
           decorations,
           state.workspace.cmd_hover_link,
-          state.theme,
+          frame.theme,
           state.caches.cmd_hover_link_cache
         )
       else
         {decorations, state.caches.cmd_hover_link_cache}
       end
 
-    state = %{
-      state
-      | caches: %{
-          state.caches
-          | search_decoration_cache: search_cache,
-            doc_highlight_cache: doc_highlight_cache,
-            cmd_hover_link_cache: cmd_hover_link_cache
-        }
-    }
+    state =
+      Input.record_content_decoration_caches(
+        state,
+        search_cache,
+        doc_highlight_cache,
+        cmd_hover_link_cache
+      )
 
     cursorline_bg =
       if is_active and Config.get(:cursorline) do
-        state.theme.editor.cursorline_bg
+        frame.theme.editor.cursorline_bg
       else
         nil
       end
 
     {show_invisible, tab_width, whitespace_face} =
-      invisible_char_settings(Map.get(params, :options, %{}), state.theme)
+      invisible_char_settings(Map.get(params, :options, %{}), frame.theme)
 
     ctx = %Context{
       viewport: viewport,
@@ -140,28 +140,28 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       confirm_match: confirm_match,
       highlight: window_highlight(state, window),
       cursorline_bg: cursorline_bg,
-      nav_flash: active_nav_flash(state.shell_state.flashes.nav),
-      nav_flash_bg: state.theme.editor.nav_flash_bg,
-      editor_bg: state.theme.editor.bg,
+      nav_flash: active_nav_flash(frame.shell_state.flashes.nav),
+      nav_flash_bg: frame.theme.editor.nav_flash_bg,
+      editor_bg: frame.theme.editor.bg,
       has_sign_column: has_sign_column,
       decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
       git_signs: prefetched_git_signs(params, state, window),
-      gutter_colors: state.theme.gutter,
-      git_colors: state.theme.git,
+      gutter_colors: frame.theme.gutter,
+      git_colors: frame.theme.git,
       show_invisible: show_invisible,
       tab_width: tab_width,
       whitespace_face: whitespace_face,
-      search_colors: state.theme.search,
-      document_highlight_colors: document_highlight_colors(state.theme),
+      search_colors: frame.theme.search,
+      document_highlight_colors: document_highlight_colors(frame.theme),
       wrap_on: Map.get(params, :wrap_on, false),
       line_number_style: Map.get(params, :line_number_style, :absolute),
       width_oracle: Map.get(params, :width_oracle, %Minga.Core.WidthOracle.Monospace{}),
       indent_guide_face:
-        Face.new(fg: state.theme.editor.indent_guide_fg || state.theme.gutter.fg),
+        Face.new(fg: frame.theme.editor.indent_guide_fg || frame.theme.gutter.fg),
       indent_guide_active_face:
-        Face.new(fg: state.theme.editor.indent_guide_active_fg || state.theme.gutter.current_fg),
-      hl_todo_faces: MingaEditor.UI.Theme.hl_todo_faces(state.theme),
+        Face.new(fg: frame.theme.editor.indent_guide_active_fg || frame.theme.gutter.current_fg),
+      hl_todo_faces: MingaEditor.UI.Theme.hl_todo_faces(frame.theme),
       cursor_col: Map.get(params, :cursor_col, cursor_display_col(lines, cursor, first_line)),
       cursor_line: elem(cursor, 0),
       hover_row: extract_hover_row(state),
@@ -427,12 +427,12 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @spec window_highlight(state(), window()) :: MingaEditor.UI.Highlight.t() | nil
   def window_highlight(state, %{content: {:buffer, buffer}}) do
     hl =
-      case Map.fetch(state.highlighting.highlights, buffer) do
+      case Map.fetch(state.intent.frame.highlighting.highlights, buffer) do
         {:ok, highlight} -> highlight
-        :error -> MingaEditor.UI.Highlight.from_theme(state.theme)
+        :error -> MingaEditor.UI.Highlight.from_theme(state.intent.frame.theme)
       end
 
-    semantic_layer = Map.get(state.semantic_tokens, buffer)
+    semantic_layer = Map.get(state.intent.frame.semantic_tokens, buffer)
 
     if hl.capture_names == {} and semantic_layer == nil do
       nil
@@ -454,7 +454,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   # Zero GenServer calls on the render path.
   @spec apply_buffer_face_overrides(Highlight.t(), pid(), state()) :: Highlight.t()
   defp apply_buffer_face_overrides(hl, buf_pid, state) when is_pid(buf_pid) do
-    case Map.get(state.face_override_registries, buf_pid) do
+    case Map.get(state.intent.frame.face_override_registries, buf_pid) do
       nil -> hl
       registry -> %{hl | face_registry: registry}
     end
@@ -462,7 +462,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Returns diff-view signs when a diff view is active, otherwise git signs for a window's buffer."
   @spec signs_for_window(state(), window()) :: %{non_neg_integer() => atom()}
-  def signs_for_window(%{diff_views: diff_views}, %{content: {:buffer, buf}} = window)
+  def signs_for_window(
+        %Input{intent: %{frame: %{diff_views: diff_views}}},
+        %{content: {:buffer, buf}} = window
+      )
       when is_pid(buf) and is_map(diff_views) do
     case Map.get(diff_views, buf) do
       nil -> git_signs_for_window(window)
@@ -485,7 +488,13 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   @spec prefetched_git_signs(map(), state(), window()) :: %{non_neg_integer() => atom()}
-  defp prefetched_git_signs(%{git_signs: signs}, _state, _window) when is_map(signs), do: signs
+  defp prefetched_git_signs(%{git_signs: signs}, state, window) when is_map(signs) do
+    case signs_for_window(state, window) do
+      diff_signs when map_size(diff_signs) > 0 -> diff_signs
+      _ordinary -> signs
+    end
+  end
+
   defp prefetched_git_signs(_params, state, window), do: signs_for_window(state, window)
 
   @doc "Returns git signs for a window's buffer."

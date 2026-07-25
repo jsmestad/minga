@@ -11,11 +11,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.FocusTree.Node, as: FocusNode
+  alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.RenderPipeline.WindowIntent
-  alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ClickRegions
@@ -32,66 +31,72 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   end
 
   defp materialized_window(input, id) do
-    window = Map.fetch!(input.workspace.windows.map, id)
-    WindowIntent.materialize(id, WindowIntent.from_window(window), WindowCache.reset())
+    Map.fetch!(input.windows.map, id)
   end
 
-  describe "from_editor_state/1" do
-    test "extracts workspace fields into workspace map", %{state: state} do
-      input = Input.from_editor_state(state)
+  describe "strict render input materialization" do
+    test "preserves accepted intent identity through renderer materialization", %{state: state} do
+      intent = Intent.from_editor_state(state, 7)
+      {_renderer, input} = BufferChanges.prepare(RendererState.new([]), intent)
 
-      assert input.workspace.windows == state.workspace.windows
-      assert input.workspace.buffers == state.workspace.buffers
-      refute Map.has_key?(input.workspace, :viewport)
-      assert input.terminal_viewport == state.frontend.terminal_viewport
-      assert input.workspace.editing == state.workspace.editing
-      assert input.highlighting == state.parser.highlighting
-      assert input.semantic_tokens == state.lsp.semantic_tokens
-      assert input.workspace.file_tree == state.workspace.file_tree
-      assert input.workspace.agent_ui == state.workspace.agent_ui
-      assert input.workspace.document_highlights == state.workspace.document_highlights
-      assert input.workspace.search == state.workspace.search
-      assert input.workspace.keymap_scope == state.workspace.keymap_scope
+      assert input.intent == intent
+      assert input.workspace == intent.workspace
+      assert input.windows.active == intent.window_layout.active
+
+      assert Enum.all?(input.windows.map, fn {id, window} ->
+               match?(%MingaEditor.Renderer.RenderWindow{}, window) and
+                 match?(%MingaEditor.RenderPipeline.WindowIntent{}, intent.windows[id])
+             end)
     end
 
-    test "extracts top-level state fields", %{state: state} do
+    test "exposes nested render input fields and rejects invalid render models", %{state: state} do
       input = Input.from_editor_state(state)
 
-      assert input.port_manager == state.frontend.port_manager
-      assert input.theme == state.appearance.theme
-      assert input.capabilities == state.frontend.capabilities
-      assert input.shell_id == Runtime.id(state.shell_runtime)
-      assert input.shell == Runtime.module(state.shell_runtime)
-      assert input.shell_identity == Runtime.identity(state.shell_runtime)
-      assert input.shell_state == Runtime.state(state.shell_runtime)
-      assert input.font_registry == MingaEditor.UI.FontRegistry.new()
-      assert input.message_store == state.render.message_store
-      assert input.editing_model == state.interaction.editing_model
-      assert input.backend == state.frontend.backend
-      assert input.layout == state.render.layout
-      assert input.face_override_registries == state.parser.face_override_registries
+      assert Map.keys(Map.from_struct(input)) |> Enum.sort() ==
+               [
+                 :caches,
+                 :focus_tree,
+                 :font_registry,
+                 :frame_seq,
+                 :intent,
+                 :layout,
+                 :message_store,
+                 :windows,
+                 :workspace
+               ]
+
+      for field <- [
+            :theme,
+            :capabilities,
+            :shell_state,
+            :sidebar_registry,
+            :highlighting,
+            :semantic_tokens,
+            :git_syncing,
+            :terminal_viewport
+          ] do
+        refute Map.has_key?(Map.from_struct(input), field)
+      end
+
+      invalid = put_in(input.intent.frame.editing_model, :emacs)
+      assert_raise ArgumentError, fn -> MingaEditor.Input.editing_dispatch_handler(invalid) end
     end
 
-    test "excludes GenServer-only fields", %{state: state} do
-      input = Input.from_editor_state(state)
-      input_fields = input |> Map.from_struct() |> Map.keys() |> MapSet.new()
+    test "workspace intent preserves reviewed workspace fields without windows", %{state: state} do
+      intent = Intent.from_editor_state(state)
 
-      # These GenServer-only or Editor-owned fields must NOT be in Input
-      excluded = [
-        :render_correlation,
-        :buffer_monitors,
-        :pending_quit,
-        :last_test_command,
-        :session,
-        :last_cursor_line,
-        :buffer_add_context,
-        :effect_scheduler,
-        :shell_runtime
-      ]
+      assert intent.workspace.launchpad == state.workspace.launchpad
+      assert intent.workspace.cmd_hover_link == state.workspace.hover_observation.link
+      assert intent.workspace.document_highlights == state.workspace.document_highlights
+      assert intent.workspace.mouse == state.workspace.mouse
+      assert intent.workspace.search == state.workspace.search
+      assert intent.workspace.keymap_scope == state.workspace.keymap_scope
+      refute Map.has_key?(Map.from_struct(intent.workspace), :windows)
 
-      for field <- excluded do
-        refute MapSet.member?(input_fields, field),
-               "Input should not include EditorState field #{inspect(field)}"
+      invalid_workspace = :erlang.binary_to_term(:erlang.term_to_binary(%{}))
+
+      assert_raise FunctionClauseError, fn ->
+        MingaEditor.RenderPipeline.WorkspaceIntent.from_workspace(invalid_workspace)
       end
     end
 
@@ -99,26 +104,29 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       refute Map.has_key?(Map.from_struct(state), :font_registry)
     end
 
-    test "workspace field supports state.workspace.X pattern-matching", %{state: state} do
-      input = Input.from_editor_state(state)
+    test "snapshots Git syncing as nested frame data without carrying the scheduler process", %{
+      state: state
+    } do
+      intent = Intent.from_editor_state(state)
+      refute intent.frame.git_syncing
 
-      # This is the key compatibility test: pipeline modules do
-      # %{workspace: %{editing: editing}} = state
-      assert %{workspace: %{editing: editing}} = input
-      assert editing == state.workspace.editing
-    end
-
-    test "snapshots Git syncing as data without carrying the scheduler process", %{state: state} do
-      input = Input.from_editor_state(state)
-      refute input.git_syncing
       idle_scheduler = start_scheduler()
-      idle_input = Input.from_editor_state(%{state | effect_scheduler: idle_scheduler})
-      refute idle_input.git_syncing
+      idle_intent = Intent.from_editor_state(%{state | effect_scheduler: idle_scheduler})
+      refute idle_intent.frame.git_syncing
 
       %{scheduler: scheduler, worker: worker, request: request} = start_git_syncing_activity()
       active_state = %{state | effect_scheduler: scheduler}
-      active_input = Input.from_editor_state(active_state)
-      assert active_input.git_syncing
+      active_intent = Intent.from_editor_state(active_state)
+      assert active_intent.frame.git_syncing
+
+      {_renderer, input} = BufferChanges.prepare(RendererState.new([]), active_intent)
+      ctx = Context.from_input(input)
+      assert input.intent.frame.git_syncing
+      assert ctx.intent.frame.git_syncing
+      assert ctx.intent == active_intent
+      refute Map.has_key?(Map.from_struct(active_intent.frame), :effect_scheduler)
+      refute Map.has_key?(Map.from_struct(input), :effect_scheduler)
+      refute Map.has_key?(Map.from_struct(ctx), :effect_scheduler)
 
       send(worker, {:release_effect, :git_syncing})
       assert_receive {:effect_result, ^scheduler, %Outcome{request: %{id: request_id}} = outcome}
@@ -126,7 +134,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert :ok = EffectScheduler.claim(scheduler, outcome)
       assert :ok = EffectScheduler.finalize(scheduler, outcome)
 
-      refute Input.from_editor_state(active_state).git_syncing
+      refute Intent.from_editor_state(active_state).frame.git_syncing
     end
 
     test "with_font_registry/2 attaches renderer-owned registry", %{state: state} do
@@ -149,8 +157,9 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       result = Input.record_render_window(input, id, render_window)
 
-      assert result.workspace.windows.map[id] == render_window
-      assert result.workspace.windows.tree == input.workspace.windows.tree
+      assert result.windows.map[id] == render_window
+      assert result.windows.tree == input.windows.tree
+      assert result.intent == input.intent
     end
 
     test "records agent scroll metrics in the frame-local workspace", %{state: state} do
@@ -245,10 +254,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         RendererState.new(editor_pid: nil, pipeline: &MingaEditor.RenderPipeline.run/1)
 
       {_renderer_state, materialized} = BufferChanges.prepare(renderer_state, intent)
-      assert materialized.git_syncing
-      assert materialized.semantic_tokens == state.lsp.semantic_tokens
+      assert materialized.intent.frame.git_syncing
+      assert materialized.intent.frame.semantic_tokens == state.lsp.semantic_tokens
       refute Map.has_key?(Map.from_struct(materialized), :effect_scheduler)
-      assert Context.from_editor_state(materialized).git_syncing
+      assert Context.from_input(materialized).intent.frame.git_syncing
 
       send(worker, {:release_effect, :git_syncing})
     end
@@ -286,6 +295,27 @@ defmodule MingaEditor.RenderPipeline.InputTest do
              }
     end
 
+    test "receipt derives click regions from current Chrome without mutating intent", %{
+      state: state
+    } do
+      input = Input.from_editor_state(state)
+      empty_regions = TraditionalState.click_regions(input.intent.frame.shell_state)
+      modeline = [{0, 4, :modeline}]
+      tab_bar = [{5, 9, {:tab, 1}}]
+      chrome = %Chrome{modeline_click_regions: modeline, tab_bar_click_regions: tab_bar}
+      output = Input.record_chrome_result(input, 123, chrome)
+
+      receipt = MingaEditor.Renderer.RenderReceipt.from_output(output, 10, 0, 0)
+
+      assert receipt.click_regions == ClickRegions.install(%ClickRegions{}, modeline, tab_bar)
+      assert TraditionalState.click_regions(input.intent.frame.shell_state) == empty_regions
+
+      result = integrate_receipt(state, receipt)
+
+      assert TraditionalState.click_regions(Runtime.state(result.shell_runtime)) ==
+               receipt.click_regions
+    end
+
     test "fresh receipt commits renderer-computed viewport observations", %{state: state} do
       input = Input.from_editor_state(state)
       id = state.workspace.windows.active
@@ -297,8 +327,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         |> materialized_window(id)
         |> MingaEditor.Renderer.RenderWindow.set_viewport(viewport)
 
-      windows = MingaEditor.State.Windows.set_map(input.workspace.windows, %{id => render_window})
-      output = %{input | workspace: %{input.workspace | windows: windows}}
+      windows = MingaEditor.State.Windows.set_map(input.windows, %{id => render_window})
+      output = %{input | windows: windows}
       receipt = MingaEditor.Renderer.RenderReceipt.from_output(output, 10, 0, 0)
 
       assert %MingaEditor.Renderer.WindowObservation{viewport: ^viewport} =
@@ -414,8 +444,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       input = Input.from_editor_state(state)
       synced = Input.sync_active_window_cursor(input)
 
-      win_id = synced.workspace.windows.active
-      window = Map.get(synced.workspace.windows.map, win_id)
+      win_id = synced.windows.active
+      window = Map.get(synced.windows.map, win_id)
       assert window.cursor == {1, 0}
     end
 
@@ -439,7 +469,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       input = Input.from_editor_state(state)
       synced = Input.sync_active_window_cursor(input)
 
-      window = Map.fetch!(synced.workspace.windows.map, synced.workspace.windows.active)
+      window = Map.fetch!(synced.windows.map, synced.windows.active)
       assert window.content == original_window.content
       assert window.cursor == original_cursor
     end
@@ -493,8 +523,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         [
           layout: nil,
           focus_tree: nil,
-          shell_id: input.shell_id,
-          shell_identity: input.shell_identity,
+          shell_id: input.intent.frame.shell_id,
+          shell_identity: input.intent.frame.shell_identity,
           click_regions: %ClickRegions{},
           frame_seq: frame_seq,
           keyframe?: keyframe?,

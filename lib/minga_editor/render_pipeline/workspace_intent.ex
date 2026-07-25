@@ -1,6 +1,9 @@
 defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
   @moduledoc "Explicit allowlisted workspace portion of an Editor-to-Renderer intent."
 
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Session.State, as: SessionState
+
   @fields [
     :buffers,
     :file_tree,
@@ -30,20 +33,30 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
           launchpad: term()
         }
 
-  @doc "Copies only reviewed workspace rendering fields; windows are a separate typed carrier."
-  @spec from_workspace(MingaEditor.RenderPipeline.Input.workspace()) :: t()
-  def from_workspace(workspace) when is_map(workspace) do
+  @spec from_workspace(SessionState.t()) :: t()
+  def from_workspace(%SessionState{} = workspace) do
     %__MODULE__{
-      buffers: Map.get(workspace, :buffers),
-      file_tree: Map.get(workspace, :file_tree),
-      agent_ui: Map.get(workspace, :agent_ui),
-      editing: Map.get(workspace, :editing),
-      document_highlights: Map.get(workspace, :document_highlights),
-      cmd_hover_link: Map.get(workspace, :cmd_hover_link),
-      mouse: Map.get(workspace, :mouse),
-      search: Map.get(workspace, :search),
-      keymap_scope: Map.get(workspace, :keymap_scope, :editor),
-      launchpad: Map.get(workspace, :launchpad)
+      buffers: workspace.buffers,
+      file_tree: SessionState.file_tree_state(workspace),
+      agent_ui: workspace.agent_ui,
+      editing: workspace.editing,
+      document_highlights: workspace.document_highlights,
+      cmd_hover_link: workspace.hover_observation.link,
+      mouse: workspace.mouse,
+      search: workspace.search,
+      keymap_scope: workspace.keymap_scope,
+      launchpad: workspace.launchpad
     }
+  end
+
+  @spec record_agent_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
+  def record_agent_scroll_metrics(
+        %__MODULE__{agent_ui: agent_ui} = workspace,
+        total_lines,
+        visible_height
+      ) do
+    struct!(workspace,
+      agent_ui: UIState.record_scroll_metrics(agent_ui, total_lines, visible_height)
+    )
   end
 end

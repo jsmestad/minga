@@ -68,9 +68,19 @@ defmodule MingaEditor.Extension.Sidebar do
   def default_table, do: @table
 
   @doc "Returns the sidebar registry table for a state-like value."
-  @spec table_for(map() | nil) :: table()
-  def table_for(%{sidebar_registry: table}) when is_atom(table), do: table
-  def table_for(_state), do: @table
+  @spec table_for(
+          MingaEditor.Frontend.Emit.Context.t()
+          | MingaEditor.RenderPipeline.Input.t()
+          | MingaEditor.State.t()
+        ) :: table()
+  def table_for(%MingaEditor.Frontend.Emit.Context{intent: %{frame: %{sidebar_registry: table}}})
+      when is_atom(table), do: table
+
+  def table_for(%MingaEditor.RenderPipeline.Input{intent: %{frame: %{sidebar_registry: table}}})
+      when is_atom(table), do: table
+
+  def table_for(%MingaEditor.State{extension_surfaces: %{sidebar_registry: table}})
+      when is_atom(table), do: table
 
   @doc "Registers or replaces a sidebar owned by `source`."
   @spec register(source(), register_attrs() | keyword()) :: :ok | {:error, term()}

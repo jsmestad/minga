@@ -71,12 +71,12 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       consumed = Buffer.renderer_consume(buffer)
 
       map =
-        Map.new(input.workspace.windows.map, fn entry ->
+        Map.new(input.windows.map, fn entry ->
           update_renderer_window(entry, buffer, consumed)
         end)
 
-      windows = %{input.workspace.windows | map: map}
-      %{input | workspace: %{input.workspace | windows: windows}}
+      windows = %{input.windows | map: map}
+      %{input | windows: windows}
     else
       input
     end
@@ -507,7 +507,14 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       epoch = wf.window_model.content_epoch
       row_id = hd(wf.window_model.rows).row_id
 
-      resized = %{state | terminal_viewport: Viewport.new(24, 100)}
+      resized = %{
+        state
+        | intent: %{
+            state.intent
+            | frame: %{state.intent.frame | terminal_viewport: Viewport.new(24, 100)}
+          }
+      }
+
       {[wf], _cursor, _state} = build_content(resized)
 
       assert wf.window_model.content_epoch == epoch
@@ -664,8 +671,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         )
 
       {[warm], _cursor, input} = build_content(state)
-      win_id = input.workspace.windows.active
-      window = Map.fetch!(input.workspace.windows.map, win_id)
+      win_id = input.windows.active
+      window = Map.fetch!(input.windows.map, win_id)
 
       exhausted = %RowSlotAllocator{
         slots: %{},
@@ -676,11 +683,11 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       window = %{window | render_cache: renderer_cache}
 
       windows = %{
-        input.workspace.windows
-        | map: Map.put(input.workspace.windows.map, win_id, window)
+        input.windows
+        | map: Map.put(input.windows.map, win_id, window)
       }
 
-      input = %{input | workspace: %{input.workspace | windows: windows}}
+      input = %{input | windows: windows}
 
       {[wf], _cursor, _state} = build_content(input)
 
@@ -1051,8 +1058,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     end
   end
 
-  defp resident_row_ids(state) do
-    window = MingaEditor.State.Windows.active_struct(state.workspace.windows)
+  defp resident_row_ids(%Input{windows: windows}) do
+    window = MingaEditor.State.Windows.active_struct(windows)
 
     window.render_cache.resident_build.store
     |> ResidentStore.entries()

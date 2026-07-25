@@ -2,7 +2,7 @@ defmodule MingaEditor.Renderer.StateTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Renderer.AckLease
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.State
@@ -89,17 +89,10 @@ defmodule MingaEditor.Renderer.StateTest do
   end
 
   defp attempt(seq), do: FrameAttempt.new(intent(), seq, 0)
-  defp intent, do: Intent.from_input(input())
+  defp intent, do: input().intent
 
   defp input do
-    %Input{
-      port_manager: self(),
-      theme: MingaEditor.UI.Theme.get!(:doom_one),
-      capabilities: %MingaEditor.Frontend.Capabilities{},
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      workspace: %{windows: %MingaEditor.State.Windows{}},
-      message_store: MingaEditor.UI.Panel.MessageStore.new()
-    }
+    TestHelpers.base_state()
+    |> Input.from_editor_state()
   end
 end

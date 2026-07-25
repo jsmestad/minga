@@ -28,7 +28,7 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   ]
 
   @spec build(Context.t()) :: EmptyState.t()
-  def build(%Context{launchpad: %Launchpad{} = lp, windows: %Windows{} = windows}) do
+  def build(%Context{workspace: %{launchpad: %Launchpad{} = lp}, windows: %Windows{} = windows}) do
     with %{content: content} <- Windows.active_struct(windows),
          true <- Content.empty?(content) do
       %EmptyState{

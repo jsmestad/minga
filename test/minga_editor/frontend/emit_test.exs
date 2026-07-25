@@ -180,13 +180,15 @@ defmodule MingaEditor.Frontend.EmitTest do
 
     test "a renderer without a frontend treats synchronous emission as the commit boundary" do
       frame = window_frame_with_content()
-      ctx = %{Context.from_editor_state(semantic_state()) | port_manager: nil, frame_seq: 11}
+
+      ctx =
+        Context.from_editor_state(semantic_state()) |> put_frame_seq(11) |> put_port_manager(nil)
 
       {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
       assert caches.last_acknowledged_frame_seq == 11
       assert caches.last_frame_keyframe?
 
-      ctx = %{ctx | frame_seq: 22}
+      ctx = put_frame_seq(ctx, 22)
       {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
       assert caches.last_acknowledged_frame_seq == 22
       refute caches.last_frame_keyframe?
@@ -427,16 +429,28 @@ defmodule MingaEditor.Frontend.EmitTest do
   end
 
   defp emit_and_capture(frame, state, caches, opts) do
-    ctx = %{
-      Context.from_editor_state(state)
-      | frame_seq: Keyword.fetch!(opts, :frame_seq),
-        force_keyframe?: Keyword.get(opts, :force_keyframe?, false),
-        acknowledgement_required?: true
-    }
+    ctx =
+      state
+      |> Context.from_editor_state()
+      |> put_frame_seq(Keyword.fetch!(opts, :frame_seq))
+      |> put_force_keyframe(Keyword.get(opts, :force_keyframe?, false))
+      |> Map.put(:acknowledgement_required?, true)
 
     {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
     commands = assert_receive_frame_commands()
     {commands, new_caches}
+  end
+
+  defp put_frame_seq(ctx, frame_seq), do: %{ctx | frame_seq: frame_seq}
+
+  defp put_force_keyframe(ctx, force?) do
+    frame = %{ctx.intent.frame | force_keyframe?: force?}
+    %{ctx | intent: %{ctx.intent | frame: frame}}
+  end
+
+  defp put_port_manager(ctx, port_manager) do
+    frame = %{ctx.intent.frame | port_manager: port_manager}
+    %{ctx | intent: %{ctx.intent | frame: frame}, acknowledgement_required?: false}
   end
 
   defp assert_receive_frame_commands do

@@ -54,7 +54,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   end
 
   @spec get_in_modal(Context.t()) :: term()
-  defp get_in_modal(%{shell_state: %{modal: modal}}), do: modal
+  defp get_in_modal(%Context{intent: %{frame: %{shell_state: %{modal: modal}}}}), do: modal
   defp get_in_modal(_ctx), do: nil
 
   @spec build_open(
@@ -162,21 +162,31 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   # Build preview content for the currently selected picker item.
   @spec build_picker_preview(Context.t()) :: [[PickerModel.preview_segment()]] | nil
-  defp build_picker_preview(
-         %{
-           shell_state: %{
-             modal:
-               {:picker,
-                %{
-                  picker_ui: %{
-                    picker: picker,
-                    source: source,
-                    callback_source: callback_source
-                  }
-                }}
-           }
-         } = ctx
-       ) do
+  defp build_picker_preview(ctx) do
+    case get_in_modal(ctx) do
+      {:picker,
+       %{
+         picker_ui: %{
+           picker: picker,
+           source: source,
+           callback_source: callback_source
+         }
+       }} ->
+        selected_preview(ctx, picker, source, callback_source)
+
+      _other ->
+        nil
+    end
+  end
+
+  @spec selected_preview(
+          Context.t(),
+          Picker.t(),
+          module() | nil,
+          MingaEditor.State.Picker.callback_source()
+        ) ::
+          [[PickerModel.preview_segment()]] | nil
+  defp selected_preview(ctx, picker, source, callback_source) do
     case Picker.selected_item(picker) do
       nil ->
         nil
@@ -213,7 +223,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   end
 
   defp build_preview_for_item(ctx, _source, %Picker.Item{id: idx}) when is_integer(idx) do
-    case Enum.at(ctx.buffers.list, idx) do
+    case Enum.at(ctx.workspace.buffers.list, idx) do
       nil -> nil
       buf_pid -> preview_from_buffer(ctx, buf_pid)
     end
@@ -237,7 +247,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   @spec preview_from_buffer(Context.t(), pid()) :: [[PickerModel.preview_segment()]] | nil
   defp preview_from_buffer(ctx, buf_pid) do
-    case Map.get(ctx.highlight.highlights, buf_pid) do
+    case Map.get(ctx.intent.frame.highlighting.highlights, buf_pid) do
       nil ->
         path = safe_file_path(buf_pid)
         if path, do: read_file_preview(path, ctx), else: nil
@@ -250,11 +260,11 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   @spec find_buffer_for_path(Context.t(), String.t()) ::
           {pid(), MingaEditor.UI.Highlight.t() | nil} | nil
   defp find_buffer_for_path(ctx, abs_path) do
-    Enum.find_value(ctx.buffers.list, fn buf_pid ->
+    Enum.find_value(ctx.workspace.buffers.list, fn buf_pid ->
       try do
         case Buffer.file_path(buf_pid) do
           ^abs_path ->
-            highlight = Map.get(ctx.highlight.highlights, buf_pid)
+            highlight = Map.get(ctx.intent.frame.highlighting.highlights, buf_pid)
             {buf_pid, highlight}
 
           _ ->
@@ -271,7 +281,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp build_highlighted_preview(buf_pid, highlight, ctx) do
     content = Buffer.content(buf_pid)
     lines = content |> String.split("\n") |> Enum.take(@preview_max_lines)
-    default_fg = Map.get(ctx.theme, :fg, 0xCCCCCC)
+    default_fg = Map.get(ctx.intent.frame.theme, :fg, 0xCCCCCC)
 
     {line_tuples, _} =
       Enum.map_reduce(lines, 0, fn line, offset ->
@@ -315,7 +325,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp read_file_preview(abs_path, ctx) do
     case File.read(abs_path) do
       {:ok, content} ->
-        fg_color = Map.get(ctx.theme, :fg, 0xCCCCCC)
+        fg_color = Map.get(ctx.intent.frame.theme, :fg, 0xCCCCCC)
 
         if text_preview?(content) do
           content

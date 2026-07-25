@@ -1,193 +1,96 @@
 defmodule MingaEditor.Frontend.Emit.Context do
   @moduledoc """
-  Focused data contract for the emit pipeline.
+  Strict emit-local projection over a materialized render input.
 
-  Contains exactly what the emit stage needs from the render pipeline input,
-  decoupling it from `State.t()`. The pipeline builds this context
-  in the Emit stage before calling `Emit.emit/4`.
+  The accepted intent stays nested and identical. This context keeps only renderer-local values plus derived emit fields.
   """
 
-  alias MingaEditor.Agent.UIState
   alias Minga.Editing.Completion
   alias MingaEditor.Layout
-  alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree
-  alias MingaEditor.State.Highlighting
-  alias MingaEditor.State.Search
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.RenderPipeline.WorkspaceIntent
+  alias MingaEditor.Shell.Traditional.GitToast
+  alias MingaEditor.State
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.VimState
-  alias MingaEditor.Viewport
-  alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.UI.FontRegistry
-  alias MingaEditor.UI.NotificationCenter
-  alias MingaEditor.UI.Theme
-  alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.State
+  alias MingaEditor.UI.Panel.MessageStore
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @type t :: %__MODULE__{
-          port_manager: GenServer.server() | nil,
-          capabilities: Capabilities.t(),
-          theme: Theme.t() | nil,
-          font_registry: FontRegistry.t(),
-          windows: Windows.t(),
+          intent: Intent.t(),
+          workspace: WorkspaceIntent.t(),
+          windows: Windows.t(MingaEditor.Renderer.RenderWindow.t()),
           layout: Layout.t(),
-          shell_id: atom(),
-          shell: module(),
-          shell_state: term(),
-          tab_bar: TabBar.t() | nil,
-          buffers: Buffers.t(),
-          viewport: Viewport.t(),
-          file_tree: FileTree.t(),
-          highlight: Highlighting.t(),
-          agent_ui: UIState.t(),
-          launchpad: MingaEditor.State.Launchpad.t() | nil,
-          completion: Completion.t() | nil,
-          keymap_scope: Minga.Keymap.Scope.scope_name(),
-          editing: VimState.t(),
-          message_store: MingaEditor.UI.Panel.MessageStore.t(),
-          notifications: NotificationCenter.t(),
-          sidebar_registry: MingaEditor.Extension.Sidebar.table(),
+          font_registry: FontRegistry.t(),
+          message_store: MessageStore.t(),
           title: String.t(),
-          status_bar_data: term(),
-          git_syncing: boolean(),
-          git_toast: GitToast.t(),
-          search: Search.t(),
-          last_input_seq: non_neg_integer(),
+          completion: Completion.t() | nil,
+          tab_bar: TabBar.t() | nil,
+          git_toast: GitToast.t() | nil,
           frame_seq: non_neg_integer() | nil,
-          force_keyframe?: boolean(),
-          acknowledgement_required?: boolean(),
           surface_placements: [MingaEditor.Layout.SurfaceRegistry.wire_placement()],
           gui?: boolean(),
-          line_spacing: number() | nil,
-          cursor_animate: boolean() | nil,
-          config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
+          acknowledgement_required?: boolean(),
           link_cursor: boolean()
         }
 
-  @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
-  defstruct port_manager: nil,
-            capabilities: nil,
-            theme: nil,
-            font_registry: nil,
-            windows: nil,
-            layout: nil,
-            shell_id: :traditional,
-            shell: nil,
-            shell_state: nil,
-            tab_bar: nil,
-            buffers: nil,
-            viewport: nil,
-            file_tree: nil,
-            highlight: nil,
-            agent_ui: nil,
-            launchpad: nil,
-            completion: nil,
-            keymap_scope: :editor,
-            editing: nil,
-            message_store: nil,
-            notifications: NotificationCenter.new(),
-            sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
-            title: "Minga",
-            status_bar_data: nil,
-            git_syncing: false,
-            git_toast: %GitToast{},
-            search: %Search{},
-            last_input_seq: 0,
-            frame_seq: nil,
-            force_keyframe?: false,
-            acknowledgement_required?: false,
-            surface_placements: [],
-            gui?: false,
-            line_spacing: nil,
-            cursor_animate: nil,
-            config_state: nil,
-            link_cursor: false
+  @enforce_keys [:intent, :workspace, :windows, :layout, :font_registry, :message_store, :title]
+  defstruct [
+    :intent,
+    :workspace,
+    :windows,
+    :layout,
+    :font_registry,
+    :message_store,
+    :title,
+    :completion,
+    :tab_bar,
+    :git_toast,
+    :frame_seq,
+    surface_placements: [],
+    gui?: false,
+    acknowledgement_required?: false,
+    link_cursor: false
+  ]
 
-  @doc "Builds an emit context from editor state or its render-pipeline transfer value."
-  @spec from_editor_state(State.t() | Input.t()) :: t()
-  def from_editor_state(%State{} = state) do
-    state |> Input.from_editor_state() |> from_editor_state()
-  end
-
-  def from_editor_state(
-        %Input{shell_id: shell_id, shell: shell, shell_state: shell_state} = input
-      ) do
-    build(input, shell_id, shell, shell_state)
-  end
-
-  @spec build(Input.t(), atom(), module(), term()) :: t()
-  defp build(state, shell_id, shell, shell_state) do
-    title = compute_title(state, shell, shell_state)
-    gui? = MingaEditor.Frontend.gui?(state.capabilities)
+  @doc "Builds an emit context from materialized render input."
+  @spec from_input(Input.t()) :: t()
+  def from_input(%Input{} = input) do
+    frame = input.intent.frame
+    shell_state = frame.shell_state
+    gui? = MingaEditor.Frontend.gui?(frame.capabilities)
 
     %__MODULE__{
-      port_manager: state.port_manager,
-      capabilities: state.capabilities,
-      theme: state.theme,
-      font_registry: Map.get(state, :font_registry, FontRegistry.new()),
-      windows: state.workspace.windows,
-      layout: MingaEditor.Layout.get(state),
-      shell_id: shell_id,
-      shell: shell,
-      shell_state: shell_state,
-      tab_bar: Map.get(shell_state, :tab_bar),
-      buffers: state.workspace.buffers,
-      viewport: state.terminal_viewport,
-      file_tree: state.workspace.file_tree,
-      highlight: state.highlighting,
-      agent_ui: state.workspace.agent_ui,
-      # Strict like every sibling field: a snapshot path that drops the
-      # launchpad key must fail loudly, not render the launchpad hidden.
-      launchpad: state.workspace.launchpad,
-      completion: MingaEditor.Shell.Traditional.ModalWorkflow.completion(state),
-      keymap_scope: state.workspace.keymap_scope,
-      editing: state.workspace.editing,
-      message_store: state.message_store,
-      notifications: state.notifications,
-      sidebar_registry:
-        Map.get(state, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table()),
-      title: title,
-      status_bar_data: state.status_bar_data,
-      git_syncing: state.git_syncing,
-      git_toast: Map.get(shell_state, :git_toast),
-      search: state.workspace.search,
-      last_input_seq: Map.get(state, :last_input_seq, 0),
-      frame_seq: Map.get(state, :frame_seq),
-      force_keyframe?: Map.get(state, :force_keyframe?, false),
-      acknowledgement_required?: state.backend != :headless and not is_nil(state.port_manager),
-      # The single per-frame surface layout authority (#2268), already projected
-      # to wire shape by the registry. Derived from the same focus tree mouse
-      # routing hit-tests against, so the emitted placement rect for every surface
-      # equals its BEAM hit-test rect by construction. The encoder consumes these
-      # plain maps and stays free of any MingaEditor dependency.
-      surface_placements: MingaEditor.Layout.SurfaceRegistry.wire_placements(state),
-      # GUI config settings carried in-frame as semantic models (#2119). These are
-      # GUI-only renderer preferences plus the native settings snapshot; they ride
-      # inside the frame transaction so a late-attaching client's keyframe carries
-      # them. The render pipeline Input pre-computes them from EditorState (a cheap
-      # ETS read for line_spacing/cursor_animate, a cached field for config_state)
-      # so the emit stage never reaches back into the config or keymap servers.
+      intent: input.intent,
+      workspace: input.workspace,
+      windows: input.windows,
+      layout: MingaEditor.Layout.get(input),
+      font_registry: input.font_registry,
+      message_store: input.message_store,
+      title: compute_title(input, frame.shell, shell_state),
+      completion: MingaEditor.Shell.Traditional.ModalWorkflow.completion(input),
+      tab_bar: tab_bar(shell_state),
+      git_toast: git_toast(shell_state),
+      frame_seq: input.frame_seq,
+      acknowledgement_required?: frame.backend != :headless and not is_nil(frame.port_manager),
+      surface_placements: MingaEditor.Layout.SurfaceRegistry.wire_placements(input),
       gui?: gui?,
-      line_spacing: gui_only(gui?, Map.get(state, :line_spacing)),
-      cursor_animate: gui_only(gui?, Map.get(state, :cursor_animate)),
-      config_state: gui_only(gui?, Map.get(state, :gui_config_state)),
-      # The pointing-hand cursor is GUI-only; a non-nil Cmd/Ctrl-hover link range
-      # means a navigable symbol is under the pointer (#2630).
-      link_cursor: gui? and state.workspace.cmd_hover_link != nil
+      link_cursor: gui? and input.workspace.cmd_hover_link != nil
     }
   end
 
-  @spec gui_only(boolean(), value) :: value | nil when value: var
-  defp gui_only(true, value), do: value
-  defp gui_only(false, _value), do: nil
+  @doc "Strict test/helper path from editor state through intent and renderer-local input."
+  @spec from_editor_state(State.t() | Input.t()) :: t()
+  def from_editor_state(%State{} = state), do: state |> Input.from_editor_state() |> from_input()
+  def from_editor_state(%Input{} = input), do: from_input(input)
 
-  @spec compute_title(State.t() | Input.t(), module(), term()) :: String.t()
-  defp compute_title(state, shell, shell_state) do
-    case shell.gui_payload(state) do
+  @spec compute_title(Input.t(), module(), term()) :: String.t()
+  defp compute_title(input, shell, shell_state) do
+    case shell.gui_payload(input) do
       nil ->
-        compute_standard_title(state, shell_state)
+        compute_standard_title(input, shell_state)
 
       other ->
         Minga.Log.warning(
@@ -195,24 +98,33 @@ defmodule MingaEditor.Frontend.Emit.Context do
           "Unsupported GUI shell payload #{inspect(other)}; using standard title"
         )
 
-        compute_standard_title(state, shell_state)
+        compute_standard_title(input, shell_state)
     end
   end
 
-  @spec compute_standard_title(State.t() | Input.t(), term()) :: String.t()
-  defp compute_standard_title(state, shell_state) do
-    if MingaEditor.Frontend.gui?(state.capabilities) do
-      MingaEditor.Title.format_gui(state)
+  @spec compute_standard_title(Input.t(), term()) :: String.t()
+  defp compute_standard_title(%Input{} = input, shell_state) do
+    if MingaEditor.Frontend.gui?(input.intent.frame.capabilities) do
+      MingaEditor.Title.format_gui(input)
     else
       format = Minga.Config.get(:title_format) |> to_string()
-      title = MingaEditor.Title.format(state, format)
-      tb = is_map(shell_state) && Map.get(shell_state, :tab_bar)
+      title = MingaEditor.Title.format(input, format)
+      tb = tab_bar(shell_state)
 
-      if tb && TabBar.any_attention?(tb) do
-        "[!] " <> title
-      else
-        title
-      end
+      if tb && TabBar.any_attention?(tb), do: "[!] " <> title, else: title
     end
   end
+
+  @doc "Accepts message-store write-back produced while building UI models."
+  @spec accept_message_store(t(), MessageStore.t()) :: t()
+  def accept_message_store(%__MODULE__{} = ctx, %MessageStore{} = message_store),
+    do: %{ctx | message_store: message_store}
+
+  @spec tab_bar(term()) :: TabBar.t() | nil
+  defp tab_bar(%TraditionalState{} = shell_state), do: TraditionalState.tab_bar(shell_state)
+  defp tab_bar(_shell_state), do: nil
+
+  @spec git_toast(term()) :: GitToast.t() | nil
+  defp git_toast(%TraditionalState{git_toast: git_toast}), do: git_toast
+  defp git_toast(_shell_state), do: nil
 end

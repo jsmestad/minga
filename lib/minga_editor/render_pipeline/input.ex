@@ -1,246 +1,198 @@
 defmodule MingaEditor.RenderPipeline.Input do
   @moduledoc """
-  Narrow rendering contract between the Editor GenServer and the render pipeline.
+  Renderer-local frame wrapper.
 
-  Input snapshots exactly the Editor and workspace fields that pipeline stages read, including parser highlighting and LSP semantic layers, while excluding Editor-owned process, cache, and correlation state. Pipeline modules keep their existing `state.workspace.X` access through the plain `workspace` map.
+  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, caches, font registry, message store, layout, focus tree, and frame sequence.
   """
 
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.Extension.Sidebar
-  alias MingaEditor.EffectScheduler
+  alias MingaEditor.FocusTree
   alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.RenderPipeline.WorkspaceIntent
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.Highlighting
-  alias MingaEditor.State.Mouse
-  alias MingaEditor.State.Search
   alias MingaEditor.State.Windows
-  alias MingaEditor.VimState
-  alias MingaEditor.Viewport
-  alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.StatusBar.Data, as: StatusBarData
-  alias MingaEditor.Renderer.Caches
-  alias MingaEditor.Shell.Runtime
   alias MingaEditor.UI.FontRegistry
-  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
-  alias MingaEditor.UI.Theme
 
-  @enforce_keys [:port_manager, :theme, :capabilities, :shell_id, :shell, :workspace]
+  @enforce_keys [:intent, :workspace, :windows, :caches, :font_registry, :message_store]
   defstruct [
-    # Top-level state fields
-    :port_manager,
-    :theme,
-    :capabilities,
-    :shell_id,
-    :shell,
-    :shell_identity,
-    :shell_state,
-    :message_store,
-    :notifications,
-    :sidebar_registry,
-    :face_override_registries,
-    :editing_model,
-    :backend,
+    :intent,
+    :workspace,
+    :windows,
     :layout,
     :focus_tree,
-    :diff_views,
-    :status_bar_data,
-    :highlighting,
-    # Workspace as a plain map (enables state.workspace.X pattern-matching)
-    :workspace,
-    semantic_tokens: %{},
-    git_syncing: false,
-    # Terminal-level viewport (screen dimensions reported by frontend on resize)
-    terminal_viewport: Viewport.new(24, 80),
-    # Render-pipeline caches (replaces process-dictionary entries)
-    caches: %Caches{},
-    # Renderer-owned font registration state. Editor snapshots use a fresh
-    # fallback; Renderer.Server replaces it with its persistent registry.
-    font_registry: FontRegistry.new(),
-    # Latest frontend-originated input correlation sequence (ticket #2215),
-    # echoed on commit_frame so the frontend can resolve a keystroke-to-write
-    # latency sample. 0 means "no correlation".
-    last_input_seq: 0,
-    # The strictly monotonic global frame sequence (#2219) used to bracket this
-    # frame's begin_frame/commit_frame transaction. The async path threads
-    # Renderer.Server's seq here; sync/headless paths default to a fresh monotonic
-    # value so every emit still carries a unique, advancing frame_seq.
-    frame_seq: nil,
-    # BEAM-owned recovery generation carried by begin_frame and echoed by statuses.
-    recovery_generation: 1,
-    # When true, the emitter forces this frame to a keyframe (base_frame_seq 0,
-    # full window snapshots, every chrome surface re-emitted). Set by the BEAM
-    # after an inbound request_keyframe (#2219).
-    force_keyframe?: false,
-    # GUI config settings emitted in-frame as semantic models (#2119). Pre-computed
-    # from EditorState so the pipeline never reaches back into the config/keymap
-    # servers: line_spacing/cursor_animate are cheap ETS option reads; gui_config_state
-    # is the editor's cached settings snapshot, rebuilt only on a settings change.
-    line_spacing: nil,
-    cursor_animate: nil,
-    gui_config_state: nil
+    :caches,
+    :font_registry,
+    :message_store,
+    :frame_seq
   ]
 
-  @typedoc """
-  Workspace-shaped map containing per-tab rendering fields.
-
-  Keeps the same `state.workspace.X` access pattern that pipeline modules
-  use, so existing pattern-matches work unchanged.
-  """
-  @type workspace :: %{
-          windows: Windows.t(),
-          buffers: Buffers.t(),
-          file_tree: FileTreeState.t(),
-          agent_ui: UIState.t(),
-          editing: VimState.t(),
-          document_highlights: [EditorState.document_highlight()] | nil,
-          cmd_hover_link: EditorState.cmd_hover_link(),
-          mouse: Mouse.t(),
-          search: Search.t(),
-          keymap_scope: Minga.Keymap.Scope.scope_name(),
-          launchpad: MingaEditor.State.Launchpad.t() | nil
-        }
-
   @type t :: %__MODULE__{
-          port_manager: GenServer.server() | nil,
-          theme: Theme.t(),
-          capabilities: Capabilities.t(),
-          shell_id: atom(),
-          shell: module(),
-          shell_identity: MingaEditor.Shell.Identity.t() | nil,
-          shell_state: term(),
+          intent: Intent.t(),
+          workspace: WorkspaceIntent.t(),
+          windows: Windows.t(RenderWindow.t()),
+          layout: Layout.t() | nil,
+          focus_tree: FocusTree.t() | nil,
+          caches: Caches.t(),
           font_registry: FontRegistry.t(),
           message_store: MessageStore.t(),
-          notifications: NotificationCenter.t(),
-          sidebar_registry: MingaEditor.Extension.Sidebar.table(),
-          face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
-          editing_model: :vim | :cua,
-          backend: EditorState.backend(),
-          layout: Layout.t() | nil,
-          focus_tree: MingaEditor.FocusTree.t() | nil,
-          diff_views: %{pid() => MingaEditor.State.Git.diff_view_info()},
-          git_syncing: boolean(),
-          status_bar_data: StatusBarData.t() | nil,
-          highlighting: Highlighting.t(),
-          semantic_tokens: %{pid() => MingaEditor.State.LSP.semantic_layer()},
-          caches: Caches.t(),
-          terminal_viewport: Viewport.t(),
-          last_input_seq: non_neg_integer(),
-          frame_seq: non_neg_integer() | nil,
-          recovery_generation: non_neg_integer(),
-          force_keyframe?: boolean(),
-          line_spacing: number() | nil,
-          cursor_animate: boolean() | nil,
-          gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
-          workspace: workspace()
+          frame_seq: non_neg_integer() | nil
         }
 
-  @doc """
-  Builds a render pipeline Input from the full editor state.
+  @type workspace :: WorkspaceIntent.t()
 
-  Extracts exactly the fields that the pipeline's seven stages read, leaving Editor process and correlation state behind.
-  """
-  @spec from_editor_state(EditorState.t()) :: t()
-  def from_editor_state(%EditorState{workspace: ws} = state) do
+  @spec from_intent(
+          Intent.t(),
+          Windows.t(RenderWindow.t()),
+          Caches.t(),
+          FontRegistry.t(),
+          MessageStore.t()
+        ) ::
+          t()
+  def from_intent(
+        %Intent{} = intent,
+        %Windows{} = windows,
+        %Caches{} = caches,
+        %FontRegistry{} = font_registry,
+        %MessageStore{} = message_store
+      ) do
     %__MODULE__{
-      port_manager: state.frontend.port_manager,
-      theme: state.appearance.theme,
-      capabilities: state.frontend.capabilities,
-      shell_id: Runtime.id(state.shell_runtime),
-      shell: Runtime.module(state.shell_runtime),
-      shell_identity: Runtime.identity(state.shell_runtime),
-      shell_state: Runtime.state(state.shell_runtime),
-      message_store: state.render.message_store,
-      notifications: state.feedback.notifications,
-      sidebar_registry: state.extension_surfaces.sidebar_registry,
-      face_override_registries: state.parser.face_override_registries,
-      editing_model: state.interaction.editing_model,
-      backend: state.frontend.backend,
-      layout: state.render.layout,
-      focus_tree: state.render.focus_tree,
-      diff_views: state.git.diff_views,
-      git_syncing: EffectScheduler.active_activity?(state.effect_scheduler, :git_syncing),
-      status_bar_data: safe_status_bar_data(state),
-      highlighting: state.parser.highlighting,
-      semantic_tokens: state.lsp.semantic_tokens,
-      terminal_viewport: state.frontend.terminal_viewport,
-      last_input_seq: state.frontend.last_input_seq,
-      line_spacing:
-        Minga.Config.Options.get(state.interaction.options_server, :line_spacing) || 1.0,
-      cursor_animate: Minga.Config.Options.get(state.interaction.options_server, :cursor_animate),
-      gui_config_state: state.appearance.gui_config_state,
-      workspace: %{
-        windows: ws.windows,
-        buffers: ws.buffers,
-        file_tree: MingaEditor.Session.State.file_tree_state(ws),
-        agent_ui: ws.agent_ui,
-        editing: ws.editing,
-        document_highlights: ws.document_highlights,
-        cmd_hover_link: ws.hover_observation.link,
-        mouse: ws.mouse,
-        search: ws.search,
-        keymap_scope: ws.keymap_scope,
-        # Emit.Context builds the gui_empty_state frame from this; only the
-        # async path crosses this snapshot, so dropping it is invisible to
-        # sync-path tests (#2689).
-        launchpad: ws.launchpad
-      }
+      intent: intent,
+      workspace: intent.workspace,
+      windows: windows,
+      layout: intent.frame.layout,
+      focus_tree: intent.frame.focus_tree,
+      caches: caches,
+      font_registry: font_registry,
+      message_store: message_store,
+      frame_seq: nil
     }
     |> sync_active_window_cursor()
   end
 
-  @doc "Returns the FileTree snapshot carried by this render input."
+  @spec from_editor_state(MingaEditor.State.t()) :: t()
+  def from_editor_state(%MingaEditor.State{} = state) do
+    intent = Intent.from_editor_state(state)
+
+    windows =
+      Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
+        {id, WindowIntent.materialize(id, carrier, MingaEditor.Renderer.WindowCache.reset())}
+      end)
+
+    from_intent(
+      intent,
+      Windows.new(
+        intent.window_layout.tree,
+        intent.window_layout.active,
+        intent.window_layout.next_id,
+        windows
+      ),
+      %Caches{},
+      FontRegistry.new(),
+      intent.frame.message_store
+    )
+  end
+
   @spec file_tree_state(t()) :: FileTreeState.t()
-  def file_tree_state(%__MODULE__{workspace: %{file_tree: %FileTreeState{} = file_tree}}),
-    do: file_tree
+  def file_tree_state(%__MODULE__{
+        workspace: %WorkspaceIntent{file_tree: %FileTreeState{} = file_tree}
+      }),
+      do: file_tree
 
   def file_tree_state(%__MODULE__{}), do: %FileTreeState{}
 
-  @doc "Records one renderer-owned working window in the frame-local input snapshot."
   @spec record_render_window(t(), RenderWindow.id(), RenderWindow.t()) :: t()
   def record_render_window(
-        %__MODULE__{workspace: %{windows: windows} = workspace} = input,
+        %__MODULE__{windows: %Windows{} = windows} = input,
         id,
         %RenderWindow{} = window
       ) do
-    map = Map.put(windows.map, id, window)
-    workspace = Map.put(workspace, :windows, Map.put(windows, :map, map))
-    %{input | workspace: workspace}
+    %{input | windows: Windows.set_map(windows, Map.put(windows.map, id, window))}
   end
 
-  @doc "Records agent transcript metrics in the frame-local input snapshot."
+  @spec with_frame_seq(t(), non_neg_integer()) :: t()
+  def with_frame_seq(%__MODULE__{} = input, frame_seq)
+      when is_integer(frame_seq) and frame_seq >= 0,
+      do: %{input | frame_seq: frame_seq}
+
+  @spec with_layout(t(), Layout.t()) :: t()
+  def with_layout(%__MODULE__{} = input, %Layout{} = layout), do: %{input | layout: layout}
+
+  @spec with_focus_tree(t(), FocusTree.t()) :: t()
+  def with_focus_tree(%__MODULE__{} = input, focus_tree), do: %{input | focus_tree: focus_tree}
+
+  @spec refresh_focus_tree(t()) :: t()
+  def refresh_focus_tree(%__MODULE__{} = input),
+    do: with_focus_tree(input, FocusTree.from_state(input))
+
+  @spec accept_emit_results(t(), Caches.t(), FontRegistry.t(), MessageStore.t()) :: t()
+  def accept_emit_results(
+        %__MODULE__{} = input,
+        %Caches{} = caches,
+        %FontRegistry{} = font_registry,
+        %MessageStore{} = message_store
+      ) do
+    %{input | caches: caches, font_registry: font_registry, message_store: message_store}
+  end
+
+  @spec reset_frame_rows_rasterized(t()) :: t()
+  def reset_frame_rows_rasterized(%__MODULE__{caches: caches} = input),
+    do: %{input | caches: Caches.reset_frame_rows_rasterized(caches)}
+
+  @spec add_frame_rows_rasterized(t(), non_neg_integer()) :: t()
+  def add_frame_rows_rasterized(%__MODULE__{caches: caches} = input, count),
+    do: %{input | caches: Caches.add_frame_rows_rasterized(caches, count)}
+
+  @spec record_frame_render_path(t(), MingaEditor.RenderPipeline.Classifier.path()) :: t()
+  def record_frame_render_path(%__MODULE__{caches: caches} = input, path),
+    do: %{input | caches: Caches.record_frame_render_path(caches, path)}
+
+  @spec record_chrome_result(t(), integer(), term()) :: t()
+  def record_chrome_result(%__MODULE__{caches: caches} = input, fingerprint, chrome),
+    do: %{input | caches: Caches.record_chrome_result(caches, fingerprint, chrome)}
+
+  @spec record_content_decoration_caches(t(), term(), term(), term()) :: t()
+  def record_content_decoration_caches(
+        %__MODULE__{caches: caches} = input,
+        search_cache,
+        doc_highlight_cache,
+        cmd_hover_link_cache
+      ) do
+    %{
+      input
+      | caches:
+          Caches.record_content_decoration_caches(
+            caches,
+            search_cache,
+            doc_highlight_cache,
+            cmd_hover_link_cache
+          )
+    }
+  end
+
   @spec record_agent_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
   def record_agent_scroll_metrics(
-        %__MODULE__{workspace: %{agent_ui: agent_ui} = workspace} = input,
+        %__MODULE__{workspace: %WorkspaceIntent{} = workspace} = input,
         total_lines,
         visible_height
       ) do
-    agent_ui = UIState.record_scroll_metrics(agent_ui, total_lines, visible_height)
-    %{input | workspace: Map.put(workspace, :agent_ui, agent_ui)}
+    %{
+      input
+      | workspace:
+          WorkspaceIntent.record_agent_scroll_metrics(workspace, total_lines, visible_height)
+    }
   end
 
-  @doc "Returns a copy of the render input with the renderer-owned font registry attached."
   @spec with_font_registry(t(), FontRegistry.t()) :: t()
   def with_font_registry(%__MODULE__{} = input, %FontRegistry{} = font_registry) do
     %{input | font_registry: font_registry}
   end
 
-  # ── Chrome dirty tracking ──────────────────────────────────────────────────
-
-  @doc """
-  Computes a fingerprint of chrome-relevant fields for dirty tracking.
-
-  The chrome stage is expensive (tab bar, status bar, file tree, overlays).
-  When the fingerprint matches the previous frame's, the chrome stage can
-  reuse cached draws. The fingerprint covers all fields that affect chrome
-  output; buffer content changes (which only affect the Content stage) do
-  not change the fingerprint.
-
-  Returns an integer hash suitable for fast equality comparison.
-  """
   @spec chrome_fingerprint(t()) :: integer()
   def chrome_fingerprint(%__MODULE__{} = input) do
     buf = input.workspace.buffers.active
@@ -249,7 +201,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   @spec chrome_fingerprint(t(), map()) :: integer()
   def chrome_fingerprint(%__MODULE__{} = input, scrolls) when is_map(scrolls) do
-    active = input.workspace.windows.active
+    active = input.windows.active
 
     fingerprint_data =
       case Map.get(scrolls, active) do
@@ -266,52 +218,29 @@ defmodule MingaEditor.RenderPipeline.Input do
   @spec chrome_fingerprint(t(), {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}) ::
           integer()
   def chrome_fingerprint(%__MODULE__{} = input, {buf_cursor, buf_version}) do
-    # Hash the fields that drive chrome output. We use :erlang.phash2
-    # for speed (no crypto needed, just change detection).
-    #
-    # Includes the active buffer identity, cursor, and version because the status
-    # bar displays file name, filetype, cursor position, line count, and dirty state. The render
-    # pipeline passes scroll-stage buffer data when available so this does
-    # not need duplicate GenServer calls in the hot path.
+    frame = input.intent.frame
 
     :erlang.phash2({
-      # Buffer state for status bar (identity, cursor pos, version/dirty)
       input.workspace.buffers.active,
       buf_cursor,
       buf_version,
-      # Theme affects status bar, tab bar, file tree, minibuffer, and overlay styling.
-      input.theme,
-      # Status bar metadata can change without a content version bump, such as save clearing dirty.
+      frame.theme,
       status_bar_fingerprint(input),
-      # Mode affects status bar label, minibuffer content, cursor shape
       input.workspace.editing.mode,
       input.workspace.editing.mode_state,
-      # Sidebar registry state drives sidebar chrome/layout rebuilds.
-      Sidebar.all(input.sidebar_registry),
-      # File tree
+      Sidebar.all(frame.sidebar_registry),
       input.workspace.file_tree,
-      # Viewport dimensions (overlay positioning)
-      input.terminal_viewport.rows,
-      input.terminal_viewport.cols,
-      # Window splits (separator rendering)
-      input.workspace.windows.tree,
-      # GUI notification center
-      input.notifications,
-      # Shell-owned chrome state stays behind the shell contract.
-      input.shell.chrome_fingerprint(input)
+      frame.terminal_viewport.rows,
+      frame.terminal_viewport.cols,
+      input.windows.tree,
+      frame.notifications,
+      frame.shell.chrome_fingerprint(input)
     })
   end
 
   @spec status_bar_fingerprint(t()) :: integer()
   defp status_bar_fingerprint(%__MODULE__{} = input) do
-    :erlang.phash2(input.status_bar_data)
-  end
-
-  @spec safe_status_bar_data(EditorState.t()) :: StatusBarData.t() | nil
-  defp safe_status_bar_data(%EditorState{} = state) do
-    StatusBarData.from_state(state)
-  catch
-    :exit, _ -> nil
+    :erlang.phash2(input.intent.frame.status_bar_data)
   end
 
   @spec buffer_fingerprint_data(pid() | nil) ::
@@ -324,26 +253,30 @@ defmodule MingaEditor.RenderPipeline.Input do
     :exit, _ -> {{0, 0}, 0}
   end
 
-  @doc """
-  Syncs the active window's cursor from the buffer process.
-
-  Equivalent to `MingaEditor.WindowFocus.remember_active_cursor/1` but operates
-  on the Input's workspace map.
-  """
   @spec sync_active_window_cursor(t()) :: t()
-  def sync_active_window_cursor(%__MODULE__{workspace: %{buffers: %{active: nil}}} = input),
-    do: input
+  def sync_active_window_cursor(
+        %__MODULE__{workspace: %WorkspaceIntent{buffers: %Buffers{active: nil}}} = input
+      ),
+      do: input
 
   def sync_active_window_cursor(
         %__MODULE__{
-          workspace: %{windows: %{map: windows, active: id}, buffers: %{active: buf}} = ws
+          windows: %Windows{map: windows, active: id} = window_set,
+          workspace: %WorkspaceIntent{buffers: %Buffers{active: buf}}
         } = input
       ) do
     case Map.fetch(windows, id) do
       {:ok, %{content: {:buffer, ^buf}} = window} ->
         cursor = Minga.Buffer.cursor(buf)
-        new_map = Map.put(windows, id, %{window | cursor: cursor})
-        %{input | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
+
+        %{
+          input
+          | windows:
+              Windows.set_map(
+                window_set,
+                Map.put(windows, id, RenderWindow.set_cursor(window, cursor))
+              )
+        }
 
       {:ok, _window} ->
         input

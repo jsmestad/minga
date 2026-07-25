@@ -48,12 +48,21 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
     }
   end
 
-  @doc "Materializes the pipeline's private working window with renderer-owned cache state."
   @spec materialize(Window.id(), t(), MingaEditor.Renderer.WindowCache.t()) :: RenderWindow.t()
   def materialize(id, %__MODULE__{} = carrier, cache) do
-    carrier
-    |> Map.from_struct()
-    |> Map.merge(%{id: id, render_cache: cache})
-    |> then(&struct!(RenderWindow, &1))
+    %RenderWindow{
+      id: id,
+      content: carrier.content,
+      viewport: carrier.viewport,
+      cursor: carrier.cursor,
+      fold_map: carrier.fold_map,
+      fold_ranges: carrier.fold_ranges,
+      popup_meta: carrier.popup_meta,
+      render_cache: cache,
+      scroll_velocity: carrier.scroll_velocity,
+      scroll_detach_cursor: carrier.scroll_detach_cursor,
+      scroll_echo_top: carrier.scroll_echo_top,
+      authoritative_scroll_seq: carrier.authoritative_scroll_seq
+    }
   end
 end

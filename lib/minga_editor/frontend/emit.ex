@@ -54,7 +54,7 @@ defmodule MingaEditor.Frontend.Emit do
         do: caches.last_acknowledged_frame_seq,
         else: caches.last_emitted_frame_seq
 
-    keyframe? = ctx.force_keyframe? or acknowledged_base == 0
+    keyframe? = ctx.intent.frame.force_keyframe? or acknowledged_base == 0
     base_frame_seq = if keyframe?, do: 0, else: acknowledged_base
 
     caches =
@@ -126,7 +126,7 @@ defmodule MingaEditor.Frontend.Emit do
          keyframe?
        ) do
     caches = %{caches | adapter_gui_caches: encoded_frame.caches}
-    input_seq = Map.get(ctx, :last_input_seq, 0)
+    input_seq = ctx.intent.frame.last_input_seq
 
     surface_layout_command =
       Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder.encode_command(ctx.surface_placements)
@@ -158,10 +158,11 @@ defmodule MingaEditor.Frontend.Emit do
       [:minga, :render, :emit_prepare],
       %{byte_count: byte_count, input_seq: input_seq, frame_seq: frame_seq, keyframe?: keyframe?},
       fn ->
-        _admission = MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
-        caches = send_title(render_model, ctx.port_manager, caches)
-        caches = send_window_bg(render_model, ctx.port_manager, caches)
-        {send_link_cursor(ctx, ctx.port_manager, caches), ctx}
+        port_manager = ctx.intent.frame.port_manager
+        _admission = MingaEditor.Frontend.send_render_commands(port_manager, commands)
+        caches = send_title(render_model, port_manager, caches)
+        caches = send_window_bg(render_model, port_manager, caches)
+        {send_link_cursor(ctx, port_manager, caches), ctx}
       end
     )
   rescue

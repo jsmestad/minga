@@ -43,28 +43,23 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
     active_buf = active_buffer_pid(ctx)
-    sb_data = status_bar_data || ctx.status_bar_data
+    sb_data = status_bar_data || ctx.intent.frame.status_bar_data
 
     # Bottom panel has a side effect: encoding may advance the message_store cursor.
     {bottom_panel, new_message_store} = BottomPanelBuilder.build(ctx)
 
-    ctx =
-      if new_message_store != nil and Map.has_key?(ctx, :message_store) do
-        %{ctx | message_store: new_message_store}
-      else
-        ctx
-      end
+    ctx = Context.accept_message_store(ctx, new_message_store)
 
     ui = %RenderModel.UI{
-      theme: ThemeBuilder.build(ctx.theme),
+      theme: ThemeBuilder.build(ctx.intent.frame.theme),
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
       which_key: build_which_key(ctx),
-      notifications: NotificationsBuilder.build(ctx.notifications),
-      search_state: SearchStateBuilder.build(ctx.search, active_buf),
+      notifications: NotificationsBuilder.build(ctx.intent.frame.notifications),
+      search_state: SearchStateBuilder.build(ctx.workspace.search, active_buf),
       git_status: build_git_status(ctx),
       agent_context: AgentContextBuilder.build(ctx),
       status_bar: build_status_bar(sb_data, ctx),
-      observatory: ObservatoryBuilder.build(ctx.shell_state),
+      observatory: ObservatoryBuilder.build(ctx.intent.frame.shell_state),
       tab_bar: TabBarBuilder.build(ctx),
       workspaces: WorkspacesBuilder.build(ctx),
       sidebars: SidebarsBuilder.build(ctx),
@@ -85,40 +80,44 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       split_separators: SplitSeparatorsBuilder.build(ctx),
       # GUI config settings carried in-frame (#2119). All three are GUI-only and
       # return nil for non-GUI frontends so they are omitted from the frame.
-      line_spacing: LineSpacingBuilder.build(ctx.line_spacing, ctx.gui?),
-      cursor_animation: CursorAnimationBuilder.build(ctx.cursor_animate, ctx.gui?),
-      config_state: ctx.config_state
+      line_spacing:
+        LineSpacingBuilder.build(gui_only(ctx, ctx.intent.frame.line_spacing), ctx.gui?),
+      cursor_animation:
+        CursorAnimationBuilder.build(gui_only(ctx, ctx.intent.frame.cursor_animate), ctx.gui?),
+      config_state: gui_only(ctx, ctx.intent.frame.gui_config_state)
     }
 
     {ui, ctx}
   end
 
   @spec build_git_status(Context.t()) :: Minga.RenderModel.UI.GitStatus.t()
-  defp build_git_status(%{
-         shell_state: %TraditionalState{} = shell_state,
-         git_syncing: syncing,
-         git_toast: toast
-       }) do
-    GitStatusBuilder.build(TraditionalState.git_status_panel(shell_state), syncing, toast)
-  end
+  defp build_git_status(%Context{} = ctx) do
+    shell_state = ctx.intent.frame.shell_state
 
-  defp build_git_status(%{git_syncing: syncing, git_toast: toast}) do
-    GitStatusBuilder.build(nil, syncing, toast)
+    panel =
+      if match?(%TraditionalState{}, shell_state),
+        do: TraditionalState.git_status_panel(shell_state),
+        else: nil
+
+    GitStatusBuilder.build(panel, ctx.intent.frame.git_syncing, ctx.git_toast)
   end
 
   @spec build_which_key(Context.t()) :: Minga.RenderModel.UI.WhichKey.t() | nil
-  defp build_which_key(%{shell_state: %{whichkey: wk}}) when wk != nil do
+  defp build_which_key(%Context{intent: %{frame: %{shell_state: %{whichkey: wk}}}})
+       when wk != nil do
     WhichKeyBuilder.build(wk)
   end
 
   defp build_which_key(_ctx), do: nil
 
   @spec active_buffer_pid(Context.t()) :: pid() | nil
-  defp active_buffer_pid(%{buffers: %{active: buf}}) when is_pid(buf), do: buf
+  defp active_buffer_pid(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf),
+    do: buf
+
   defp active_buffer_pid(_ctx), do: nil
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
-  defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp active_buffer_path(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     Buffer.file_path(buf)
   rescue
     _ -> nil
@@ -128,7 +127,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
 
   defp active_buffer_path(_ctx), do: nil
 
-  defp file_tree_root(%{file_tree: %FileTreeState{} = file_tree}),
+  defp file_tree_root(%Context{workspace: %{file_tree: %FileTreeState{} = file_tree}}),
     do: file_tree |> FileTreeState.tree() |> file_tree_tree_root()
 
   defp file_tree_tree_root(%{root: root}) when is_binary(root), do: root
@@ -139,6 +138,9 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   defp build_status_bar(nil, _ctx), do: nil
 
   defp build_status_bar(status_bar_data, ctx) do
-    StatusBarBuilder.build(status_bar_data, ctx.theme, ctx)
+    StatusBarBuilder.build(status_bar_data, ctx.intent.frame.theme, ctx)
   end
+
+  defp gui_only(%Context{gui?: true}, value), do: value
+  defp gui_only(%Context{}, _value), do: nil
 end

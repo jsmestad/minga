@@ -30,7 +30,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
-  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Renderer.RenderWindow, as: Window
 
@@ -54,7 +53,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   def prefetch_scrolls(input, layout) do
     layout.window_layouts
     |> Enum.reduce({%{}, input}, fn {win_id, win_layout}, {acc, st} ->
-      window = Map.get(st.workspace.windows.map, win_id)
+      window = Map.get(st.windows.map, win_id)
 
       if window == nil or not match?({:buffer, _}, window.content) do
         # Skip nil and semantic windows; they have no buffer snapshot to prefetch.
@@ -80,7 +79,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           Layout.window_layout()
         ) :: {%{Window.id() => WindowScroll.t()}, state()}
   defp scroll_and_invalidate(state, st, acc, win_id, window, win_layout) do
-    is_active = win_id == state.workspace.windows.active
+    is_active = win_id == state.windows.active
 
     case safe_scroll_window(st, win_id, window, win_layout, is_active) do
       :skip ->
@@ -132,18 +131,11 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
             line_identity: Window.line_identity(updated_window)
         }
 
-        new_map = Map.put(st.workspace.windows.map, win_id, updated_window)
-
-        windows = Windows.set_map(st.workspace.windows, new_map)
-        st = %{st | workspace: put_windows(st.workspace, windows)}
+        st = Input.record_render_window(st, win_id, updated_window)
 
         {Map.put(acc, win_id, scroll), st}
     end
   end
-
-  @spec put_windows(map(), Windows.t()) :: map()
-  defp put_windows(workspace, windows) when is_map(workspace),
-    do: Map.put(workspace, :windows, windows)
 
   # Wraps scroll_window with a catch for dead buffer processes. Returns
   # {:ok, scroll} on success, :skip if the buffer died mid-call.
@@ -175,7 +167,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # Ctrl-e/y, zz/zt/zb, and mouse wheel scroll actually persist.
     # scroll_to_cursor only adjusts top when the cursor moves off-screen.
     wrap_on = wrap_enabled?(buffer_pid(window))
-    width_oracle = Capabilities.width_oracle(state.capabilities)
+    width_oracle = Capabilities.width_oracle(state.intent.frame.capabilities)
     scroll_margin = scroll_margin(buffer_pid(window))
     fold_map = window.fold_map
     %Viewport{} = win_vp = window.viewport
@@ -289,7 +281,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         window: window,
         visible_line_map: visible_line_map,
         full_residence?: full_residence?,
-        keyframe?: state.force_keyframe?,
+        keyframe?: state.intent.frame.force_keyframe?,
         first_line: first_line,
         visible_rows: visible_rows,
         line_count: line_count,
@@ -634,7 +626,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           Minga.Buffer.RenderSnapshot.t()
         ) :: {non_neg_integer() | nil, Window.t()}
   defp total_visual_rows_for_frontend(state, window, true, nil, content_w, oracle, snapshot) do
-    if Capabilities.semantic_ui?(state.capabilities) do
+    if Capabilities.semantic_ui?(state.intent.frame.capabilities) do
       key = total_visual_rows_cache_key(snapshot, content_w, oracle)
 
       case Window.cached_total_visual_rows(window, key) do

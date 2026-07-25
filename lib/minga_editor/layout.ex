@@ -24,8 +24,8 @@ defmodule MingaEditor.Layout do
   """
 
   alias Minga.Buffer
-  alias MingaEditor.FocusTree
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input, as: RenderInput
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -100,8 +100,10 @@ defmodule MingaEditor.Layout do
     end
   end
 
-  def get(%{layout: %__MODULE__{} = cached}), do: cached
-  def get(%{shell: shell} = state) when is_atom(shell), do: shell.compute_layout(state)
+  def get(%RenderInput{layout: %__MODULE__{} = cached}), do: cached
+
+  def get(%RenderInput{intent: %{frame: %{shell: shell}}} = input) when is_atom(shell),
+    do: shell.compute_layout(input)
 
   @doc """
   Computes the layout and stores it in state for reuse within the same frame.
@@ -117,10 +119,10 @@ defmodule MingaEditor.Layout do
     %{state | render: MingaEditor.State.Render.cache_layout(state.render, layout, nil)}
   end
 
-  def put(%{shell: shell} = state) when is_atom(shell) do
-    layout = shell.compute_layout(state)
-    state = %{state | layout: layout}
-    %{state | focus_tree: FocusTree.from_state(state)}
+  def put(%RenderInput{intent: %{frame: %{shell: shell}}} = input) when is_atom(shell) do
+    shell.compute_layout(input)
+    |> then(&RenderInput.with_layout(input, &1))
+    |> RenderInput.refresh_focus_tree()
   end
 
   @doc """
@@ -143,7 +145,8 @@ defmodule MingaEditor.Layout do
     MingaEditor.Shell.Runtime.module(state.shell_runtime).compute_layout(state)
   end
 
-  def compute(%{shell: shell} = state) when is_atom(shell), do: shell.compute_layout(state)
+  def compute(%RenderInput{intent: %{frame: %{shell: shell}}} = input) when is_atom(shell),
+    do: shell.compute_layout(input)
 
   # ── Shared helpers (used by Layout.GUI) ────────────────────────────────────
 
@@ -268,7 +271,11 @@ defmodule MingaEditor.Layout do
   # ── Queries ────────────────────────────────────────────────────────────────
 
   @doc "Returns the window layout for the active window, or nil."
-  @spec active_window_layout(t(), EditorState.t()) :: window_layout() | nil
+  @spec active_window_layout(t(), EditorState.t() | RenderInput.t()) :: window_layout() | nil
+  def active_window_layout(%__MODULE__{window_layouts: wl}, %RenderInput{windows: windows}) do
+    Map.get(wl, windows.active)
+  end
+
   def active_window_layout(%__MODULE__{window_layouts: wl}, state) do
     Map.get(wl, state.workspace.windows.active)
   end

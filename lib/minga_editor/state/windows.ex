@@ -9,50 +9,59 @@ defmodule MingaEditor.State.Windows do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
-  @type t :: %__MODULE__{
+  @type t(window) :: %__MODULE__{
           tree: WindowTree.t() | nil,
-          map: %{Window.id() => Window.t()},
+          map: %{Window.id() => window},
           active: Window.id(),
           next_id: Window.id()
         }
+
+  @type t :: t(Window.t())
 
   defstruct tree: nil,
             map: %{},
             active: 1,
             next_id: 2
 
+  @doc "Builds an exact window container from explicit owner fields."
+  @spec new(WindowTree.t() | nil, Window.id(), Window.id(), %{Window.id() => window}) :: t(window)
+        when window: term()
+  def new(tree, active, next_id, map) when is_map(map) do
+    %__MODULE__{tree: tree, active: active, next_id: next_id, map: map}
+  end
+
   @doc "Returns the active window struct, or nil if no windows are initialized."
-  @spec active_struct(t()) :: Window.t() | nil
+  @spec active_struct(t(window)) :: window | nil when window: term()
   def active_struct(%__MODULE__{map: windows, active: id}) do
     Map.get(windows, id)
   end
 
   @doc "Returns true if the window tree contains a split."
-  @spec split?(t()) :: boolean()
+  @spec split?(t(window)) :: boolean() when window: term()
   def split?(%__MODULE__{tree: nil}), do: false
   def split?(%__MODULE__{tree: {:leaf, _}}), do: false
   def split?(%__MODULE__{tree: {:split, _, _, _, _}}), do: true
 
   @doc "Replaces the window layout tree."
-  @spec set_tree(t(), WindowTree.t() | nil) :: t()
+  @spec set_tree(t(window), WindowTree.t() | nil) :: t(window) when window: term()
   def set_tree(%__MODULE__{} = windows, tree) do
     %{windows | tree: tree}
   end
 
   @doc "Sets the active window id."
-  @spec set_active(t(), Window.id()) :: t()
+  @spec set_active(t(window), Window.id()) :: t(window) when window: term()
   def set_active(%__MODULE__{} = windows, id), do: %{windows | active: id}
 
   @doc "Replaces the window map."
-  @spec set_map(t(), %{Window.id() => Window.t()}) :: t()
+  @spec set_map(t(window), %{Window.id() => window}) :: t(window) when window: term()
   def set_map(%__MODULE__{} = windows, map) when is_map(map), do: %{windows | map: map}
 
   @doc "Sets the next available window id."
-  @spec set_next_id(t(), Window.id()) :: t()
+  @spec set_next_id(t(window), Window.id()) :: t(window) when window: term()
   def set_next_id(%__MODULE__{} = windows, id), do: %{windows | next_id: id}
 
   @doc "Allocates the next window id and advances the allocator."
-  @spec allocate_id(t()) :: {Window.id(), t()}
+  @spec allocate_id(t(window)) :: {Window.id(), t(window)} when window: term()
   def allocate_id(%__MODULE__{next_id: id} = windows) do
     {id, set_next_id(windows, id + 1)}
   end
@@ -64,7 +73,7 @@ defmodule MingaEditor.State.Windows do
   end
 
   @doc "Removes a tree-managed window from the container."
-  @spec remove_window(t(), Window.id()) :: {:ok, t()} | :error
+  @spec remove_window(t(window), Window.id()) :: {:ok, t(window)} | :error when window: term()
   def remove_window(%__MODULE__{tree: nil}, _id), do: :error
 
   def remove_window(%__MODULE__{tree: tree} = windows, id) do
@@ -81,13 +90,13 @@ defmodule MingaEditor.State.Windows do
   end
 
   @doc "Deletes a window from the map without touching the window tree."
-  @spec delete_window(t(), Window.id()) :: t()
+  @spec delete_window(t(window), Window.id()) :: t(window) when window: term()
   def delete_window(%__MODULE__{map: map} = windows, id) do
     set_map(windows, Map.delete(map, id))
   end
 
   @doc "Fetches a window by id."
-  @spec fetch(t(), Window.id()) :: {:ok, Window.t()} | :error
+  @spec fetch(t(window), Window.id()) :: {:ok, window} | :error when window: term()
   def fetch(%__MODULE__{map: map}, id), do: Map.fetch(map, id)
 
   @doc "Replaces one window with a concrete owner-produced value."

@@ -8,7 +8,9 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilder do
   alias MingaEditor.HoverPopup, as: EditorHoverPopup
 
   @spec build(Context.t()) :: HoverPopup.t()
-  def build(%Context{shell_state: %{hover_popup: popup}}), do: hover_popup_model(popup)
+  def build(%Context{intent: %{frame: %{shell_state: %{hover_popup: popup}}}}),
+    do: hover_popup_model(popup)
+
   def build(%Context{}), do: %HoverPopup{}
 
   @spec hover_popup_model(EditorHoverPopup.t() | nil) :: HoverPopup.t()

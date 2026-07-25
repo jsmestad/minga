@@ -84,6 +84,10 @@ defmodule MingaEditor.Renderer.RenderWindow do
     %{window | viewport: viewport}
   end
 
+  @doc "Stores the renderer-local cursor for this window."
+  @spec set_cursor(t(), Buffer.position()) :: t()
+  def set_cursor(%__MODULE__{} = window, cursor), do: %{window | cursor: cursor}
+
   @doc """
   Records whether this window is a full-document resident window (#2653/#2658).
 

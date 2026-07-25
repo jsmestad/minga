@@ -28,17 +28,14 @@ defmodule MingaEditor.RenderPipeline do
   is set to `:debug`. Attach custom handlers for histograms or alerting.
   """
 
-  alias MingaEditor.FocusTree
   alias MingaEditor.Layout
 
   alias MingaEditor.RenderPipeline.BufferPrefetch
-  alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Classifier
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.WindowTree
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.UI.FontRegistry
@@ -121,7 +118,7 @@ defmodule MingaEditor.RenderPipeline do
       end)
 
     # Scroll updates per-window viewports; rebuild the tree so overlay hit regions match what chrome renders.
-    input = %{input | focus_tree: FocusTree.from_state(input)}
+    input = Input.refresh_focus_tree(input)
 
     # Stage 3: Content (skips clean lines, updates window caches)
     {buffer_frames, cursor_info, input} =
@@ -151,17 +148,11 @@ defmodule MingaEditor.RenderPipeline do
         prev_chrome
       else
         Telemetry.span([:minga, :render, :stage], %{stage: :chrome}, fn ->
-          input.shell.build_chrome(input, layout, scrolls, cursor_info)
+          input.intent.frame.shell.build_chrome(input, layout, scrolls, cursor_info)
         end)
       end
 
-    input = %{
-      input
-      | caches: %{input.caches | chrome_prev_fingerprint: chrome_fp, chrome_prev_result: chrome}
-    }
-
-    # Cache the correlated render's click regions through the Traditional input owner.
-    input = %{input | shell_state: update_shell_click_regions(input.shell_state, chrome)}
+    input = Input.record_chrome_result(input, chrome_fp, chrome)
 
     # Stage 6: Compose
     frame =
@@ -171,31 +162,25 @@ defmodule MingaEditor.RenderPipeline do
 
     # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
-      input = %{input | font_registry: FontRegistry.current_process_registry(input.font_registry)}
-      ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)
+      input =
+        Input.with_font_registry(
+          input,
+          FontRegistry.current_process_registry(input.font_registry)
+        )
+
+      ctx = MingaEditor.Frontend.Emit.Context.from_input(input)
 
       {updated_caches, updated_font_registry, updated_message_store} =
         Emit.emit(frame, ctx, chrome, input.caches)
 
-      %{
-        input
-        | caches: updated_caches,
-          font_registry: updated_font_registry,
-          message_store: updated_message_store
-      }
+      Input.accept_emit_results(
+        input,
+        updated_caches,
+        updated_font_registry,
+        updated_message_store
+      )
     end)
   end
-
-  @spec update_shell_click_regions(term(), Chrome.t()) :: term()
-  defp update_shell_click_regions(%TraditionalState{} = shell_state, %Chrome{} = chrome) do
-    TraditionalState.install_click_regions(
-      shell_state,
-      chrome.modeline_click_regions,
-      chrome.tab_bar_click_regions
-    )
-  end
-
-  defp update_shell_click_regions(shell_state, %Chrome{}), do: shell_state
 
   # ── Stage 1: Layout ────────────────────────────────────────────────────────
 
@@ -212,13 +197,13 @@ defmodule MingaEditor.RenderPipeline do
 
   @spec put_render_path(input(), Classifier.path()) :: input()
   defp put_render_path(input, path) do
-    %{input | caches: %{input.caches | frame_render_path: path}}
+    Input.record_frame_render_path(input, path)
   end
 
   @spec window_count(input()) :: non_neg_integer()
-  defp window_count(%{workspace: %{windows: %{tree: nil}}}), do: 0
+  defp window_count(%Input{windows: %{tree: nil}}), do: 0
 
-  defp window_count(%{workspace: %{windows: %{tree: tree}}}) do
+  defp window_count(%Input{windows: %{tree: tree}}) do
     WindowTree.count(tree)
   end
 end

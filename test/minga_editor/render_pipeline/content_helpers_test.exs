@@ -166,7 +166,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
     test "threads the supplied width oracle into the render context" do
       editor = TestHelpers.base_state()
       state = MingaEditor.RenderPipeline.Input.from_editor_state(editor)
-      window = state.workspace.windows.map[state.workspace.windows.active]
+      window = state.windows.map[state.windows.active]
       oracle = %Minga.Core.WidthOracle.Measured{cache: %{"hello" => 2}}
 
       {ctx, _state} =
@@ -192,7 +192,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       editor = TestHelpers.base_state()
       state = MingaEditor.RenderPipeline.Input.from_editor_state(editor)
       buffer = state.workspace.buffers.active
-      window = state.workspace.windows.map[state.workspace.windows.active]
+      window = state.windows.map[state.windows.active]
 
       parser =
         Highlight.new(%{"keyword" => [fg: 0xFF0000], "@lsp.type.variable" => [fg: 0x00FF00]})
@@ -204,12 +204,15 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       override =
         Highlight.new(%{"keyword" => [fg: 0xFF0000], "@lsp.type.variable" => [fg: 0x123456]}).face_registry
 
-      state = %{
-        state
-        | highlighting: Highlighting.put_highlight(state.highlighting, buffer, parser),
+      frame = %{
+        state.intent.frame
+        | highlighting:
+            Highlighting.put_highlight(state.intent.frame.highlighting, buffer, parser),
           semantic_tokens: %{buffer => semantic},
           face_override_registries: %{buffer => override}
       }
+
+      state = %{state | intent: %{state.intent | frame: frame}}
 
       ctx = ContentHelpers.window_highlight(state, window)
 
@@ -217,8 +220,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
                Highlight.styles_for_visible_lines(ctx, [{"hello", 0}]) |> List.first()
 
       assert face.fg == 0x123456
-      assert state.highlighting.highlights[buffer] == parser
-      assert state.semantic_tokens[buffer] == semantic
+      assert state.intent.frame.highlighting.highlights[buffer] == parser
+      assert state.intent.frame.semantic_tokens[buffer] == semantic
     end
   end
 

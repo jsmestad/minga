@@ -23,7 +23,7 @@ defmodule MingaEditor.RenderModel.Builder do
         ui,
         frame.cursor,
         ctx.title,
-        ctx.theme.editor.bg
+        ctx.intent.frame.theme.editor.bg
       )
 
     {model, ctx}
@@ -37,7 +37,7 @@ defmodule MingaEditor.RenderModel.Builder do
       %UI{},
       frame.cursor,
       ctx.title,
-      ctx.theme.editor.bg
+      ctx.intent.frame.theme.editor.bg
     )
   end
 end

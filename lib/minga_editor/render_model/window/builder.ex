@@ -164,7 +164,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {all_visual_entries, resident_result} =
       if scroll.full_residence do
         materialize_full? =
-          state.force_keyframe? or adapter_full_snapshot_pending?(state, win_id)
+          state.intent.frame.force_keyframe? or adapter_full_snapshot_pending?(state, win_id)
 
         resident_opts = Keyword.put(opts, :keyframe?, materialize_full?)
 
@@ -1988,7 +1988,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec divider_hit_regions(state(), non_neg_integer()) :: [HitRegion.t()]
   defp divider_hit_regions(state, window_id) do
     layout = Layout.get(state)
-    windows = state.workspace.windows
+    windows = state.windows
 
     verticals =
       if windows.tree == nil do

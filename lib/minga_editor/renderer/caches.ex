@@ -1,61 +1,21 @@
 defmodule MingaEditor.Renderer.Caches do
-  @moduledoc """
-  Explicit render-pipeline cache state, replacing process-dictionary entries.
+  @moduledoc "Explicit render-pipeline cache state retained by the renderer."
 
-  Each field corresponds to a former `Process.put/get` key used across the
-  render pipeline stages. `Renderer.Server` retains the struct across frames and injects it into `RenderPipeline.Input`; it never crosses back into Editor state.
-
-  ## Ownership by stage
-
-  - **Chrome** (`chrome_prev_*`): `RenderPipeline`, stage 5 fingerprint cache.
-  - **Content** (`search_decoration_cache`, `doc_highlight_cache`): consumed by
-    `ContentHelpers.build_render_ctx/3`; cleared when the fingerprint changes.
-  - **Emit** (`last_title`, `last_window_bg`, `last_link_cursor`): consumed by
-    `Frontend.Emit` stage 7.
-  - **Adapter** (`adapter_gui_caches`): core GUI adapter fingerprint state.
-  """
-
-  defstruct [
-    # ── Chrome stage ──────────────────────────────────────────────────────────
-    chrome_prev_fingerprint: nil,
-    chrome_prev_result: nil,
-
-    # ── Content stage: inter-frame caches ─────────────────────────────────────
-    search_decoration_cache: nil,
-    doc_highlight_cache: nil,
-    cmd_hover_link_cache: nil,
-
-    # Number of buffer rows freshly rasterized (composed) this frame, summed
-    # across windows. Reset at the start of the Content stage and read by the
-    # pipeline telemetry span as `rows_rasterized` (#2287). A transient
-    # per-frame counter, not retained across frames.
-    frame_rows_rasterized: 0,
-
-    # Classification of this frame's render path, `:patch` or `:full` (#2287).
-    # Set after buffer prefetch resolves per-window invalidation and read by the
-    # pipeline telemetry span as the `path` tag. Transient per-frame state.
-    frame_render_path: :full,
-
-    # ── Emit stage ────────────────────────────────────────────────────────────
-    last_title: nil,
-    last_window_bg: nil,
-    last_link_cursor: nil,
-
-    # ── Frame transaction (#2219) ────────────────────────────────────────────
-    # The last frame written and the last frame explicitly acknowledged by the
-    # current frontend generation. Only the acknowledged value may be a delta base.
-    last_emitted_frame_seq: 0,
-    last_acknowledged_frame_seq: 0,
-    recovery_generation: 1,
-
-    # Whether the most recently emitted frame was a keyframe (base_frame_seq 0,
-    # full window snapshots). Renderer receipts carry this correlation fact so the
-    # Editor can fulfill a pending keyframe request only after actual emission.
-    last_frame_keyframe?: false,
-
-    # ── Core adapter caches (render-model migration) ─────────────────────────
-    adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
-  ]
+  defstruct chrome_prev_fingerprint: nil,
+            chrome_prev_result: nil,
+            search_decoration_cache: nil,
+            doc_highlight_cache: nil,
+            cmd_hover_link_cache: nil,
+            frame_rows_rasterized: 0,
+            frame_render_path: :full,
+            last_title: nil,
+            last_window_bg: nil,
+            last_link_cursor: nil,
+            last_emitted_frame_seq: 0,
+            last_acknowledged_frame_seq: 0,
+            recovery_generation: 1,
+            last_frame_keyframe?: false,
+            adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
 
   @type t :: %__MODULE__{
           chrome_prev_fingerprint: integer() | nil,
@@ -75,18 +35,47 @@ defmodule MingaEditor.Renderer.Caches do
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
 
-  @doc "Creates a fresh Caches struct with first-frame defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Records the frame explicitly applied by the current frontend generation."
+  @spec reset_frame_rows_rasterized(t()) :: t()
+  def reset_frame_rows_rasterized(%__MODULE__{} = caches),
+    do: %{caches | frame_rows_rasterized: 0}
+
+  @spec add_frame_rows_rasterized(t(), non_neg_integer()) :: t()
+  def add_frame_rows_rasterized(%__MODULE__{} = caches, count)
+      when is_integer(count) and count >= 0,
+      do: %{caches | frame_rows_rasterized: caches.frame_rows_rasterized + count}
+
+  @spec record_frame_render_path(t(), :patch | :full) :: t()
+  def record_frame_render_path(%__MODULE__{} = caches, path) when path in [:patch, :full],
+    do: %{caches | frame_render_path: path}
+
+  @spec record_chrome_result(t(), integer(), term()) :: t()
+  def record_chrome_result(%__MODULE__{} = caches, fingerprint, chrome),
+    do: %{caches | chrome_prev_fingerprint: fingerprint, chrome_prev_result: chrome}
+
+  @spec record_content_decoration_caches(t(), term(), term(), term()) :: t()
+  def record_content_decoration_caches(
+        %__MODULE__{} = caches,
+        search_decoration_cache,
+        doc_highlight_cache,
+        cmd_hover_link_cache
+      ) do
+    %{
+      caches
+      | search_decoration_cache: search_decoration_cache,
+        doc_highlight_cache: doc_highlight_cache,
+        cmd_hover_link_cache: cmd_hover_link_cache
+    }
+  end
+
   @spec acknowledge_frame(t(), non_neg_integer(), non_neg_integer()) :: t()
   def acknowledge_frame(%__MODULE__{} = caches, frame_seq, generation)
       when is_integer(frame_seq) and frame_seq >= 0 and is_integer(generation) and generation >= 0 do
     %{caches | last_acknowledged_frame_seq: frame_seq, recovery_generation: generation}
   end
 
-  @doc "Clears frontend-retained state tracking after the frontend reports ready again."
   @spec reset_frontend_state(t()) :: t()
   def reset_frontend_state(%__MODULE__{} = caches) do
     %{
@@ -95,7 +84,6 @@ defmodule MingaEditor.Renderer.Caches do
         last_title: nil,
         last_window_bg: nil,
         last_link_cursor: nil,
-        # A reconnecting frontend has no acknowledged base in the fresh generation.
         last_emitted_frame_seq: 0,
         last_acknowledged_frame_seq: 0,
         recovery_generation: caches.recovery_generation + 1

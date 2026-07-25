@@ -21,7 +21,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   # Named folders resolved via Devicon.folder_icon_and_color/1
 
   @spec build(Context.t()) :: FileTreeModel.t()
-  def build(%Context{file_tree: %FileTreeState{} = file_tree} = ctx) do
+  def build(%Context{workspace: %{file_tree: %FileTreeState{} = file_tree}} = ctx) do
     status = FileTreeState.status(file_tree)
 
     case {status, FileTreeState.tree(file_tree)} do
@@ -36,7 +36,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     end
   end
 
-  def build(%Context{file_tree: %{project_root: root_path}}) do
+  def build(%Context{workspace: %{file_tree: %{project_root: root_path}}}) do
     build_hidden(root_path)
   end
 
@@ -48,7 +48,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
           FileTreeModel.t()
   defp build_full(tree, file_tree, ctx, status) do
     active_path = active_buffer_path(ctx)
-    dirty_path_set = dirty_paths(ctx.buffers)
+    dirty_path_set = dirty_paths(ctx.workspace.buffers)
     diagnostics = file_tree_diagnostics(tree.root)
 
     rows =
@@ -63,7 +63,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
         heat_levels: file_tree_heat_levels(),
         selected_index: tree.cursor
       )
-      |> Enum.map(&row_model(&1, ctx.theme))
+      |> Enum.map(&row_model(&1, ctx.intent.frame.theme))
 
     %FileTreeModel{
       root_path: tree.root,
@@ -135,7 +135,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     do: Theme.icon_color(theme, Language.detect_filetype(name))
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
-  defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp active_buffer_path(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     Buffer.file_path(buf)
   rescue
     _ -> nil

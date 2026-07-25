@@ -3,7 +3,8 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
 
   alias MingaEditor.RenderModel.UI.Builder
   alias Minga.RenderModel
-  alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
 
   describe "build_ui/1" do
     test "module is defined and exports build_ui/1" do
@@ -18,7 +19,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
 
       assert %RenderModel.UI{} = ui
       assert %Minga.RenderModel.UI.Theme{} = ui.theme
-      assert ui.theme.name == ctx.theme.name
+      assert ui.theme.name == ctx.intent.frame.theme.name
       assert is_list(ui.theme.color_slots)
       assert %Minga.RenderModel.UI.Breadcrumb{} = ui.breadcrumb
       assert ui.breadcrumb.segments == []
@@ -32,21 +33,8 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
 
     # The builder fills UI fields from the emit context; values are stubs here.
     defp build_minimal_context do
-      %MingaEditor.Frontend.Emit.Context{
-        port_manager: self(),
-        capabilities: MingaEditor.Frontend.Capabilities.default(),
-        theme: MingaEditor.UI.Theme.get!(:doom_one),
-        font_registry: MingaEditor.UI.FontRegistry.new(),
-        file_tree: %FileTreeState{},
-        windows: %MingaEditor.State.Windows{map: %{}, active: 1},
-        layout: %MingaEditor.Layout{
-          terminal: {0, 0, 80, 24},
-          editor_area: {0, 0, 80, 24},
-          minibuffer: {23, 0, 80, 1},
-          window_layouts: %{}
-        },
-        shell: MingaEditor.Shell.Traditional
-      }
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
     end
   end
 end

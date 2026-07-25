@@ -4,14 +4,17 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
   alias MingaEditor.RenderModel.UI.EditTimelineBuilder
   alias Minga.RenderModel.UI.EditTimeline
   alias MingaEditor.Agent.EditTimeline, as: EditTimelineState
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
 
   describe "build/1" do
     test "builds a hidden timeline when there is no agent_ui" do
-      assert %EditTimeline{visible?: false, entries: []} = EditTimelineBuilder.build(%{})
+      assert %EditTimeline{visible?: false, entries: []} = EditTimelineBuilder.build(context(nil))
     end
 
     test "builds a hidden timeline when there is no active buffer" do
-      ctx = %{agent_ui: %{view: %{edit_timeline: nil}}, buffers: %{active: nil}}
+      ctx = context(nil)
 
       assert %EditTimeline{visible?: false} = EditTimelineBuilder.build(ctx)
     end
@@ -22,7 +25,7 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
         |> EditTimelineState.record_edit("lib/a.ex", "tc1", "edit_file", "old\n", "new\n")
         |> EditTimelineState.record_edit("lib/b.ex", "tc2", "edit_file", "one\n", "one\ntwo\n")
 
-      ctx = %{agent_ui: %{view: %{edit_timeline: timeline}}, buffers: %{active: nil}}
+      ctx = context(timeline)
 
       assert %EditTimeline{
                visible?: true,
@@ -45,5 +48,18 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
                ]
              } = EditTimelineBuilder.build(ctx)
     end
+  end
+
+  defp context(timeline) do
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    agent_ui = UIState.new()
+    agent_ui = put_in(agent_ui.view.edit_timeline, timeline)
+    buffers = %{ctx.workspace.buffers | active: nil, list: [], active_index: 0}
+    workspace = %{ctx.workspace | agent_ui: agent_ui, buffers: buffers}
+
+    %{ctx | workspace: workspace, intent: %{ctx.intent | workspace: workspace}}
   end
 end

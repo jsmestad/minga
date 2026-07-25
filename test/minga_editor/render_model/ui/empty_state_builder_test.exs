@@ -3,6 +3,9 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
 
   alias Minga.RenderModel.UI.EmptyState
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.Window
@@ -10,15 +13,16 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
   alias MingaEditor.State.Windows
 
   defp ctx(launchpad, window \\ render_window(Window.new_empty_state(1, 24, 80))) do
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: nil,
-      capabilities: nil,
-      theme: nil,
-      font_registry: nil,
+    input = Input.from_editor_state(TestHelpers.base_state())
+
+    %Context{
+      intent: input.intent,
+      workspace: %{input.workspace | launchpad: launchpad},
       windows: %Windows{tree: {:leaf, 1}, map: %{1 => window}, active: 1, next_id: 2},
-      layout: nil,
-      shell: nil,
-      launchpad: launchpad
+      layout: input.layout,
+      font_registry: input.font_registry,
+      message_store: input.message_store,
+      title: "Minga"
     }
   end
 

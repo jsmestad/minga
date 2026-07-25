@@ -175,6 +175,18 @@ defmodule MingaEditor.Input do
   requires no changes here.
   """
   @spec editing_dispatch_handler(map()) :: module()
+  def editing_dispatch_handler(%MingaEditor.RenderPipeline.Input{
+        intent: %{frame: %{editing_model: :cua}}
+      }),
+      do: MingaEditor.Input.CUA.Dispatch
+
+  def editing_dispatch_handler(%MingaEditor.RenderPipeline.Input{
+        intent: %{frame: %{editing_model: :vim}}
+      }),
+      do: MingaEditor.Input.ModeFSM
+
+  def editing_dispatch_handler(%MingaEditor.RenderPipeline.Input{}), do: raise(ArgumentError)
+
   def editing_dispatch_handler(state) do
     Minga.Editing.active_model(state).dispatch_handler()
   end

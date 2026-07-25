@@ -544,4 +544,33 @@ defmodule MingaEditor.LayoutTest do
       assert layout.status_bar == nil
     end
   end
+
+  describe "strict render boundaries" do
+    test "GUI layout rejects deleted flat maps and malformed render input" do
+      flat_state = %{terminal_viewport: Viewport.new(10, 20)}
+
+      assert_raise FunctionClauseError, fn ->
+        :erlang.apply(MingaEditor.Layout.GUI, :compute, [flat_state])
+      end
+
+      input = MingaEditor.RenderPipeline.Input.from_editor_state(new_state(10, 20))
+
+      malformed = %{
+        input
+        | intent: %{input.intent | frame: %{input.intent.frame | capabilities: nil}}
+      }
+
+      assert_raise FunctionClauseError, fn ->
+        :erlang.apply(MingaEditor.Layout.GUI, :compute, [malformed])
+      end
+    end
+
+    test "Sidebar.table_for/1 rejects deleted generic defaults" do
+      flat_state = %{}
+
+      assert_raise FunctionClauseError, fn ->
+        :erlang.apply(Sidebar, :table_for, [flat_state])
+      end
+    end
+  end
 end

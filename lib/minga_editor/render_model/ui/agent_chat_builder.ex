@@ -36,7 +36,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec active_session(Context.t()) :: pid() | nil
   defp active_session(ctx) do
-    ctx.shell.active_session(ctx.shell_state)
+    ctx.intent.frame.shell.active_session(ctx.intent.frame.shell_state)
   rescue
     _ -> nil
   catch
@@ -45,17 +45,19 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec build_visible(Context.t(), pid()) :: AgentChat.t()
   defp build_visible(ctx, session) do
-    panel = ctx.agent_ui.panel
-    view = ctx.agent_ui.view
+    agent_ui = ctx.workspace.agent_ui
+    shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
+    panel = agent_ui.panel
+    view = agent_ui.view
 
     prompt_text = safe_prompt_content(panel.prompt_buffer)
     {cursor_line, cursor_col} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
-    inner_width = max(ctx.viewport.cols - 10, 20)
+    inner_width = max(ctx.intent.frame.terminal_viewport.cols - 10, 20)
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
     full_pairs = panel.transcript.message_pairs
-    full_styled_cache = resolve_styled_cache(panel, ctx.theme)
-    pending_approval = TraditionalState.agent(ctx.shell_state).pending_approval
+    full_styled_cache = resolve_styled_cache(panel, ctx.intent.frame.theme)
+    pending_approval = shell_agent.pending_approval
 
     # Resident transcript (#2654): the projection display-start scoped conversation for
     # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
@@ -78,14 +80,14 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     %AgentChat{
       visible?: true,
-      status: TraditionalState.agent(ctx.shell_state).runtime.status || :idle,
+      status: shell_agent.runtime.status || :idle,
       model_name: display_model_name(panel.model_name),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
       prompt_line_count: MingaEditor.Agent.PromptBuffer.input_line_count(panel),
       prompt_cursor_line: cursor_line,
       prompt_cursor_col: cursor_col,
-      prompt_vim_mode: ctx.editing.mode,
+      prompt_vim_mode: ctx.workspace.editing.mode,
       prompt_visible_rows: visible_rows,
       prompt_completion: build_prompt_completion(panel),
       help_visible?: help_visible,

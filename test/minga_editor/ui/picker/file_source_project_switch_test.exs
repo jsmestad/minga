@@ -260,23 +260,9 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
   @spec build_preview_context(term(), MingaEditor.State.t()) ::
           MingaEditor.Frontend.Emit.Context.t()
   defp build_preview_context(modal, state) do
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: self(),
-      capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: %{fg: 0xCCCCCC},
-      font_registry: MingaEditor.UI.FontRegistry.new(),
-      windows: state.workspace.windows,
-      layout: %MingaEditor.Layout{
-        terminal: {0, 0, 80, 24},
-        editor_area: {0, 0, 80, 24},
-        minibuffer: {23, 0, 80, 1},
-        window_layouts: %{}
-      },
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %{modal: modal},
-      buffers: state.workspace.buffers,
-      highlight: %{highlights: %{}}
-    }
+    ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(state)
+    frame = %{ctx.intent.frame | shell_state: %{modal: modal}}
+    %{ctx | intent: %{ctx.intent | frame: frame}}
   end
 
   @spec open_single_picker(MingaEditor.State.t(), MingaEditor.UI.Picker.Item.t()) ::

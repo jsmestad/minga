@@ -8,6 +8,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   alias Minga.RenderModel.UI.StatusBar.File, as: StatusFile
   alias Minga.RenderModel.UI.StatusBar.Operation, as: StatusOperation
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
   alias MingaEditor.State.Operation, as: EditorOperation
@@ -21,7 +22,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
     %StatusBarData{common: %EditorStatusCommon{} = common, content: content} =
       StatusBarData.with_modeline_segments(status_bar_data, theme)
 
-    chrome_state = ChromeState.from_editor_state(ctx)
+    chrome_state = ChromeState.from_editor_state(chrome_state_input(ctx))
 
     %StatusBar{
       content_kind: content_kind(content),
@@ -130,4 +131,13 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
       attention?: workspace.attention?
     }
   end
+
+  defp chrome_state_input(%Context{} = ctx) do
+    %{
+      tab_bar: ctx.tab_bar,
+      workspace: %{file_tree: ctx.workspace.file_tree, keymap_scope: ctx.workspace.keymap_scope}
+    }
+  end
+
+  defp chrome_state_input(ctx), do: ctx
 end

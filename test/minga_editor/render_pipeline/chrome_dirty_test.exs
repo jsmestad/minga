@@ -59,7 +59,9 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       input = Input.from_editor_state(state)
       fp_before = Input.chrome_fingerprint(input)
 
-      input2 = %{input | theme: MingaEditor.UI.Theme.get!(:one_light)}
+      input2 =
+        put_frame(input, %{input.intent.frame | theme: MingaEditor.UI.Theme.get!(:one_light)})
+
       fp_after = Input.chrome_fingerprint(input2)
 
       assert fp_before != fp_after
@@ -203,8 +205,13 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "generic fingerprint treats non-Traditional shell state as opaque" do
-      input = base_state() |> Input.from_editor_state() |> Map.put(:shell, FakeShell)
-      input = %{input | shell_state: {:opaque, :shell_state}}
+      frame = %{
+        Input.from_editor_state(base_state()).intent.frame
+        | shell: FakeShell,
+          shell_state: {:opaque, :shell_state}
+      }
+
+      input = base_state() |> Input.from_editor_state() |> put_frame(frame)
 
       assert is_integer(Input.chrome_fingerprint(input))
     end
@@ -311,5 +318,9 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       assert fp_before != fp_after
       assert status.file.name == "second.ex"
     end
+  end
+
+  defp put_frame(input, frame) do
+    %{input | intent: %{input.intent | frame: frame}}
   end
 end

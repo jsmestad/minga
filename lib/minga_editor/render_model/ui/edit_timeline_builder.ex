@@ -52,11 +52,13 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
   end
 
   @spec get_timeline(Context.t()) :: EditTimelineState.t() | nil
-  defp get_timeline(%{agent_ui: %{view: %{edit_timeline: timeline}}}), do: timeline
+  defp get_timeline(%Context{workspace: %{agent_ui: %{view: %{edit_timeline: timeline}}}}),
+    do: timeline
+
   defp get_timeline(_ctx), do: nil
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
-  defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp active_buffer_path(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     Buffer.file_path(buf)
   catch
     :exit, _ -> nil

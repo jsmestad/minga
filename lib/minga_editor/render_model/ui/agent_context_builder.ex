@@ -56,15 +56,21 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   end
 
   @spec get_activity(Context.t()) :: Activity.t()
-  defp get_activity(%{agent_ui: %{view: %{activity: %Activity{} = activity}}}), do: activity
+  defp get_activity(%Context{
+         workspace: %{agent_ui: %{view: %{activity: %Activity{} = activity}}}
+       }),
+       do: activity
+
   defp get_activity(_ctx), do: Activity.new()
 
   @spec get_activity_from_state(map()) :: Activity.t()
   defp get_activity_from_state(state), do: state.workspace.agent_ui.view.activity
 
   @spec agent_status(Context.t()) :: atom()
-  defp agent_status(%Context{shell_state: %TraditionalState{} = shell_state}),
-    do: TraditionalState.agent(shell_state).runtime.status
+  defp agent_status(%Context{
+         intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
+       }),
+       do: TraditionalState.agent(shell_state).runtime.status
 
   defp agent_status(%Context{}), do: :idle
 
@@ -77,7 +83,10 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
     do: TraditionalState.agent(shell_state(state)).pending_approval != nil
 
   @spec shell_state(map()) :: TraditionalState.t()
-  defp shell_state(%{shell_state: %TraditionalState{} = shell_state}), do: shell_state
+  defp shell_state(%MingaEditor.RenderPipeline.Input{
+         intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
+       }),
+       do: shell_state
 
   defp shell_state(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}), do: shell_state
 
@@ -106,8 +115,10 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp context_status(_status, false), do: :idle
 
   @spec can_approve?(Context.t()) :: boolean()
-  defp can_approve?(%Context{shell_state: %TraditionalState{} = shell_state}),
-    do: TraditionalState.agent(shell_state).pending_approval != nil
+  defp can_approve?(%Context{
+         intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
+       }),
+       do: TraditionalState.agent(shell_state).pending_approval != nil
 
   defp can_approve?(%Context{}), do: false
 

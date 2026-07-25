@@ -163,7 +163,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
   defp execute_pipeline(state, input, intent, seq, pushed_at) do
     output =
       Telemetry.span([:minga, :render, :pipeline], %{frame_seq: seq}, fn ->
-        input |> Map.put(:frame_seq, seq) |> state.pipeline.()
+        input |> Input.with_frame_seq(seq) |> state.pipeline.()
       end)
 
     committed = BufferChanges.commit(state, output, intent)

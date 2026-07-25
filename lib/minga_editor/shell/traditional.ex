@@ -186,7 +186,9 @@ defmodule MingaEditor.Shell.Traditional do
 
   @impl true
   @spec chrome_fingerprint(term()) :: term()
-  def chrome_fingerprint(%RenderInput{shell_state: %ShellState{} = shell_state}) do
+  def chrome_fingerprint(%RenderInput{
+        intent: %{frame: %{shell_state: %ShellState{} = shell_state}}
+      }) do
     {
       shell_state.tab_bar,
       shell_state.notice,
@@ -218,11 +220,14 @@ defmodule MingaEditor.Shell.Traditional do
       }),
       do: false
 
-  def async_render?(%{shell: __MODULE__, workspace: %{buffers: %{active: active}}})
+  def async_render?(%RenderInput{
+        intent: %{frame: %{shell: __MODULE__}},
+        workspace: %{buffers: %{active: active}}
+      })
       when is_pid(active),
       do: true
 
-  def async_render?(%{shell: __MODULE__}), do: false
+  def async_render?(%RenderInput{intent: %{frame: %{shell: __MODULE__}}}), do: false
 
   @impl true
   @spec gui_payload(term()) :: nil

@@ -9,6 +9,9 @@ defmodule MingaEditor.Test.FakeShell do
 
   @impl true
   @spec compute_layout(map()) :: MingaEditor.Layout.t()
+  def compute_layout(%MingaEditor.RenderPipeline.Input{} = input),
+    do: compute_layout(%{terminal_viewport: input.intent.frame.terminal_viewport})
+
   def compute_layout(%{terminal_viewport: viewport}) do
     %MingaEditor.Layout{
       terminal: {0, 0, viewport.cols, viewport.rows},

@@ -11,16 +11,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias MingaEditor.UI.Theme
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
-  alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
@@ -360,22 +359,28 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
     window = Window.new_agent_chat(1, 24, 80)
 
-    %Context{
-      port_manager: self(),
-      capabilities: nil,
-      theme: Keyword.get(opts, :theme),
-      font_registry: nil,
-      windows: %Windows{map: %{1 => window}, active: 1},
-      layout: nil,
-      shell: Traditional,
-      shell_state:
-        TraditionalState.install_tab_bar(
-          TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
-          tab_bar
-        ),
-      agent_ui: %UIState{panel: panel},
-      viewport: Viewport.new(24, 80),
-      editing: VimState.new()
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    agent_ui = %UIState{panel: panel}
+    workspace = %{ctx.workspace | agent_ui: agent_ui, editing: VimState.new()}
+
+    frame = %{
+      ctx.intent.frame
+      | shell_state:
+          TraditionalState.install_tab_bar(
+            TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+            tab_bar
+          ),
+        theme: Keyword.get(opts, :theme)
+    }
+
+    %{
+      ctx
+      | workspace: workspace,
+        windows: %Windows{map: %{1 => window}, active: 1},
+        intent: %{ctx.intent | frame: frame, workspace: workspace}
     }
   end
 
