@@ -50,17 +50,12 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
           {EditorState.t(), compaction_action()}
   defp transition_status(state, status) do
     state = TraditionalWorkflow.install_agent_status(state, status)
-    state = engage_scroll(state, status)
     state = update_turn_activity(state, status)
     state = update_spinner(state, status)
     state = sync_tab_agent_status(state, status)
     state = sync_active_shell_agent_status(state, status)
     apply_status_compaction(state, status)
   end
-
-  @spec engage_scroll(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp engage_scroll(state, :thinking), do: TraditionalWorkflow.engage_agent_scroll(state)
-  defp engage_scroll(state, _status), do: state
 
   @spec update_turn_activity(EditorState.t(), Tab.agent_status()) :: EditorState.t()
   defp update_turn_activity(state, status) when status in [:thinking, :tool_executing],

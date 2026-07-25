@@ -5257,6 +5257,25 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed the dead `last_window_fps` GUI adapter cache field and its two private producer writes.
 - **Retained constraints:** `last_window_content_fps`, `last_window_overlay_fps`, `last_window_content_epochs`, `last_window_row_keys`, `last_window_rows`, `pending_window_delta_ids`, nested renderer `adapter_gui_caches`, emit side-channel dedupe, frame acknowledgement lineage, recovery fields, and WindowCache resident/snapshot fields remain unchanged.
 - **Discoveries affecting later work:** No replan trigger, owner drift, public API change, protocol/frontend wire change, frame-logic change, compatibility need, production budget miss, or additional dead D11 field was found.
+### W136/D39: Delete status-driven agent auto-scroll re-pinning
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** D39
+- **Decision:** APPROVE_DIRECT, delete only the status-driven `:thinking` auto-scroll re-pinning chain while preserving explicit scroll-to-bottom, frontend pin intents, resident transcript state, protocol behavior, and prompt-clearing scroll behavior.
+- **Planning profile:** `D39Refresh`, editor-lifecycle-planner, read-only, locked READY at baseline `0b22c1f192cc6fe6a7b2c18e0dc7d7b28a8b81f7`.
+- **Implementation profile:** `D39WorkerNext`, editor-lifecycle-worker, no delegation.
+- **Failure reproduction:** After adding the locked focused regression, `mix test test/minga_editor/agent/focused_event_workflows_test.exs` failed before the production deletion because `StatusEventWorkflow.status_changed(state, :thinking)` changed an explicitly unpinned transcript from `pinned: false` to `pinned: true`.
+- **Observable result:** `:thinking` status changes still synchronize the Traditional agent status, start turn activity, start the spinner, synchronize tab and active shell status, run compaction status handling, schedule render, and leave an already-unpinned transcript at its existing offset until an explicit pin or scroll-to-bottom transition occurs.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/agent/status_event_workflow.ex`, `lib/minga_editor/agent/ui_state.ex`, `lib/minga_editor/shell/traditional/workflow.ex`, and `test/minga_editor/agent/focused_event_workflows_test.exs`.
+- **Focused validation:** The new focused regression first failed with `Expected false or nil, got true` for `refute state.workspace.agent_ui.panel.scroll.pinned`; after the deletion, `mix test test/minga_editor/agent/focused_event_workflows_test.exs` passed `23` tests. `mix test test/minga_editor/handlers/gui_action_handler_test.exs test/minga_editor/input/agent_nav_test.exs` passed `35` tests, preserving explicit frontend pin intents and keyboard `G` scroll-to-bottom behavior.
+- **Broad validation:** `mix test test/minga_editor/agent test/minga_editor/handlers/gui_action_handler_test.exs test/minga_editor/input` passed `805` tests. `make lint` passed changed-source Credo, compile, formatting, and incremental Dialyzer with `Total errors: 0`. `mix test.llm --max-cases 1` passed `58 doctests, 98 properties, 9852 tests, 0 failures, 1 skipped, 616 excluded`; two earlier default-concurrency `make test.llm` attempts failed in unrelated SessionManager call timeouts in `MingaAgent.Tools.IntrospectionTest` and `MingaAgent.SessionManagerTest`, and their focused rerun passed.
+- **Residue check:** Focused source search found no remaining `engage_scroll`, `engage_agent_scroll`, or `engage_auto_scroll` references under `lib/` or `test/`.
+- **Production lines added/removed before roadmap evidence:** `lib/` diff is `+0/-16`, net `-16`, within the locked production net cap of `<= 0`.
+- **Test lines added/removed before roadmap evidence:** `test/` diff is `+6/-3`, net `+3`, limited to the locked unpinned `:thinking` regression.
+- **Concepts added:** One focused regression for status-preserving unpinned transcript behavior.
+- **Concepts removed:** Removed the status-driven auto-scroll re-pinning chain: `StatusEventWorkflow.engage_scroll/2`, `TraditionalWorkflow.engage_agent_scroll/1`, and `UIState.engage_auto_scroll/1`.
+- **Retained constraints:** `UIState.scroll_to_bottom/1`, `UIState.set_pinned/2`, `UIState.scroll_up/2`, `UIState.scroll_down/2`, prompt-clearing scroll-to-bottom, resident transcript projection, frontend protocol opcodes, render metrics, mouse and key routing, and `Minga.Editing.Scroll` semantics remain unchanged. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, scroll owner, or transcript owner was added.
+- **Discoveries affecting later work:** Default-concurrency `make test.llm` remains vulnerable to unrelated SessionManager call timeouts; a low-concurrency full `mix test.llm --max-cases 1` passed in this worktree. No D39 replan trigger, stale owner, dependency drift, frontend protocol change, or overlapping implementation dependency was found.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 - **Completion date:** 2026-07-25
