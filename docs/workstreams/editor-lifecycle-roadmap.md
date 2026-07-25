@@ -4936,7 +4936,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W124/L18: Persist remote workspace identity and replay cursor
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** L18
 - **Decision:** APPROVE_REVISED_CAP, Workspace schema v2 persists only durable remote session identity and committed replay cursor on agent workspaces; corrected cursor ordering keeps `last_seen_event_id` as the last applied event id, not merely the latest delivered catch-up id. `L18FinalBudget` approved the exact formatted readable delta after mandatory public API documentation restoration.
 - **Planning profile:** `L18CursorReplan`, editor-lifecycle-planner, read-only corrected READY lock at baseline `a28241428f02371b14dd505a342a22779ff71188`; `L18FinalBudget`, archie, read-only exact-cap decision.
@@ -4956,3 +4956,10 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Discoveries affecting later work:** `make lint` runs Credo only for changed source files and then incremental Dialyzer; the low-concurrency `test.llm` run still logs existing parser/LSP shutdown warnings but completed with zero failures. Mandatory baseline doc restoration established net `+54` as the truthful readable production minimum; `L18FinalBudget` approved exact caps of net `+54` production and net `+234` tests with zero headroom.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3244
+- **Implementation commit SHA:** `1b753fac44931d4faa7b0e7f88355debb098d7dd`
+- **Merge SHA:** `35cb4f7c8e2edc8abec0e45257353fb6bc26cb80`
+- **CI run:** https://github.com/jsmestad/minga/actions/runs/30157215419, passed.
+- **Reviewer verdict:** PASS with 0.99 confidence.
+- **Findings resolved:** L18 is complete. Remote workspace identity and committed replay position survive restart without serializing live state or skipping deferred events.
+- **Completion date:** 2026-07-25
