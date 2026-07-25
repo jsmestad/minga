@@ -5147,3 +5147,26 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 - **Completion date:** 2026-07-25
+
+### W132/S17: Close prompt callbacks before context-aware successor handling
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S17
+- **Decision:** APPROVE_DIRECT, `PromptUI` owns successor-safe callback sequencing through `ModalWorkflow`; context-aware prompt handlers may open a successor modal without a trailing prompt close dismissing it.
+- **Planning profile:** `S17Planner`, editor-lifecycle-planner, locked READY at baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
+- **Implementation profile:** `S17Worker`, no delegation.
+- **Baseline:** `9cd0615c1c00028f8b2349a3e5543ffb3d933fb7`.
+- **Failure reproduction:** After adding the locked successor-safety regressions, `mix test test/minga_editor/prompt_ui_test.exs` failed before the source correction: submit did not call the context-aware callback (`Process.get(:successor_submit_context) == nil`) and cancel did not call the context-aware callback (`Process.get(:successor_cancel_context) == nil`). The baseline source invoked submit/cancel callbacks while the original prompt modal was still active and then closed/dismissed afterward, so a callback-opened successor could be removed by the trailing close.
+- **Observable result:** Enter now captures prompt text and context, closes the completed prompt through `ModalWorkflow.close/1`, invokes `on_submit/3` when available or legacy `on_submit/2` otherwise, and returns the callback state directly. Escape now dismisses through `ModalWorkflow.dismiss/1`, routes optional cancel callbacks through private multi-clause pattern dispatch with exact `on_cancel/2` > `on_cancel/1` > dismissed-state precedence, and returns the callback state directly. Submit and cancel callbacks observe `modal == :none` before opening a successor, and that successor prompt remains active.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`, `lib/minga_editor/prompt_ui.ex`, `lib/minga_editor/ui/prompt/handler.ex`, `lib/minga_editor/ui/prompt/project_remove_confirm.ex`, and `test/minga_editor/prompt_ui_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/prompt_ui_test.exs` passed `32 tests`; final focused prompt command `mix test test/minga_editor/prompt_ui_test.exs test/minga_editor/input/prompt_test.exs test/minga_editor/minibuffer_data_test.exs test/minga_editor/ui/picker/project_remove_source_test.exs` passed `69 tests`.
+- **Broad validation:** `mix format lib/minga_editor/prompt_ui.ex test/minga_editor/prompt_ui_test.exs` passed after the mandatory dispatch correction; `git diff --check` produced no output; `make lint` passed changed-file Credo, compile, format, and incremental Dialyzer with `Total errors: 0`; `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed `58 doctests, 98 properties, 9831 tests, 0 failures, 1 skipped, 616 excluded`.
+- **Residue check:** Focused searches found no remaining `PromptUI` trailing submit close, no `do_cancel(...) |> close` sequencing, and no `cond do` in `lib/minga_editor/prompt_ui.ex`. The remaining `ProjectRemoveConfirm` modal-context lookup is only the legacy direct-call fallback; the normal context-aware path resolves from the captured callback context.
+- **Production lines added/removed before roadmap evidence:** `lib/` diff is `+52/-28`, net `+24`, within the locked `+25` production cap.
+- **Test lines added/removed before roadmap evidence:** `test/` diff is `+94/-0`, net `+94`.
+- **Concepts added:** Context-aware prompt callback arities `on_submit/3` and `on_cancel/2`, pre-callback close/dismiss sequencing, and mutation-proof successor modal regressions for both submit and cancel.
+- **Concepts removed:** The prompt workflow's post-callback submit close and cancel dismiss sequencing that could remove a successor modal.
+- **Retained constraints:** Prompt text editing, Tab completion, minibuffer rendering, Input.Prompt routing, picker sequencing, modal data shape, PromptState context field, ModalWorkflow ownership, and legacy `on_submit/2` and `on_cancel/1` handler behavior remain intact. No new module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, or alternate context representation was introduced.
+- **Discoveries affecting later work:** The worktree baseline is `9cd0615c1c00028f8b2349a3e5543ffb3d933fb7` while the planner recorded source freshness at `3e0b78dae40448c83e5b2258a28064d5bcdaac76`; refreshed `PromptUI`, `ProjectRemoveConfirm`, handler, prompt state, and ModalWorkflow symbols still matched the locked failure and owner shape, so no replan trigger was found.
+- **Unresolved questions:** None.
+- **needs_replan:** false.

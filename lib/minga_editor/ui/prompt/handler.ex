@@ -9,8 +9,8 @@ defmodule MingaEditor.UI.Prompt.Handler do
   ## Callbacks
 
   - `label/0` — the prompt label shown before the input field (e.g., "Title: ")
-  - `on_submit/2` — called when the user presses Enter; receives the input text and editor state
-  - `on_cancel/1` — optional; called when the user presses Escape; defaults to returning state unchanged
+  - `on_submit/2` or `on_submit/3` — called when the user presses Enter; receives the input text and editor state, plus stored context for `/3`
+  - `on_cancel/1` or `on_cancel/2` — optional; called when the user presses Escape; receives stored context for `/2` and defaults to returning state unchanged
 
   ## Example
 
@@ -41,8 +41,15 @@ defmodule MingaEditor.UI.Prompt.Handler do
   @doc "Called when the user presses Enter. Receives the input text and editor state."
   @callback on_submit(text :: String.t(), state :: EditorState.t()) :: EditorState.t()
 
+  @doc "Optional context-aware submit callback. Preferred over `on_submit/2` when implemented."
+  @callback on_submit(text :: String.t(), state :: EditorState.t(), context :: map() | nil) ::
+              EditorState.t()
+
   @doc "Optional. Called when the user presses Escape. Defaults to leaving the editor state unchanged."
   @callback on_cancel(state :: EditorState.t()) :: EditorState.t()
+
+  @doc "Optional context-aware cancel callback. Preferred over `on_cancel/1` when implemented."
+  @callback on_cancel(state :: EditorState.t(), context :: map() | nil) :: EditorState.t()
 
   @doc """
   Called when the user presses Tab. Returns the completed text.
@@ -52,5 +59,5 @@ defmodule MingaEditor.UI.Prompt.Handler do
   """
   @callback on_tab(text :: String.t()) :: String.t()
 
-  @optional_callbacks [on_cancel: 1, on_tab: 1]
+  @optional_callbacks [on_submit: 3, on_cancel: 1, on_cancel: 2, on_tab: 1]
 end
