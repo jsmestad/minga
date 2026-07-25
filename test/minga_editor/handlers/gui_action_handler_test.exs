@@ -81,6 +81,32 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
   end
 
+  test "space leader replay is key-local and outer housekeeping submits exactly one render", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table, backend: :gui)
+    state = %{state | render: MingaEditor.State.Render.connect_renderer(state.render, self())}
+    snapshot = MingaEditor.Input.Router.capture_snapshot(state)
+    revision = state.render.render_correlation.latest_intent_revision
+
+    handled = GuiActionHandler.dispatch(state, {:space_leader_chord, ?j, 0})
+
+    {line, _col} = Minga.Buffer.cursor(handled.workspace.buffers.active)
+    assert line == 1
+    assert MingaEditor.KeystrokeHistory.size(handled.interaction.keystroke_history) == 1
+    assert handled.render.render_correlation.latest_intent_revision == revision
+    refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+
+    rendered = MingaEditor.Input.Router.post_action_housekeeping(handled, snapshot)
+
+    assert rendered.render.render_correlation.latest_intent_revision == revision + 1
+
+    assert_receive {:"$gen_cast",
+                    {:render, %MingaEditor.RenderPipeline.Intent{}, _seq, _pushed_at}}
+
+    refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+  end
+
   test "notification dismiss removes only the selected notification", %{sidebar_registry: table} do
     state =
       table

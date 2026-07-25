@@ -28,6 +28,7 @@ Current accepted inventory:
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
 - **VERIFIED routed follow-on:** ES01, ES02, ES06, ES19, ES20, L06, L07, L08, L09, L17.
+- **IMPLEMENTED routed follow-on:** S08. W129 records implementation evidence; it is not VERIFIED until merge.
 - **DROPPED routed follow-on:** S30. W127 records why ES02 fully resolved the route.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
@@ -5074,3 +5075,28 @@ New split and float popup windows initialize their viewport metadata from `state
 - **CI run:** https://github.com/jsmestad/minga/actions/runs/30169648170
 - **Reviewer verdict:** `PASS` at `0.99` confidence after the cache-source mutation proof and exact WindowIntent domain types passed targeted correctness and Elixir rechecks.
 - **Findings resolved:** ES01 is complete. Per-window transfer and renderer working values have explicit separate owners, all required fields are enforced, renderer cache provenance is preserved, and no callback or receipt boundary was widened.
+
+
+### W129/S08: Complete key-local Router seam for GUI space-leader replay
+
+- **Status:** IMPLEMENTED
+- **Audit ID:** S08
+- **Planning profile:** `S08Planner`, editor-lifecycle-planner, read-only.
+- **Implementation profile:** `S08Worker`, editor-lifecycle-worker, no delegation.
+- **Ready provenance:** Locked by `agent://S08Planner` for baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`; the locked owner is `MingaEditor.Input.Router` for complete key-local routing, with `MingaEditor.handle_info/2` and `Router.post_action_housekeeping/2` retaining universal GUI housekeeping ownership.
+- **Observable result:** `Router.route_key/3` now performs only key-local work: notice preclear, pending-quit key semantics, shell availability, overlay/surface handler routing, keystroke history, and keyboard-specific completion/signature-help handling. `Router.dispatch/3` remains the full keyboard event wrapper around `capture_snapshot/1`, `route_key/3`, and one `post_action_housekeeping/2` call. GUI space-leader fallback and retract replay now call `route_key/3`, so the existing GUI action envelope submits universal render/scheduling housekeeping once.
+- **Failure reproduction:** Before the correction, the new focused tests failed in two observable ways: `Router.route_key/3` was undefined, and `GuiActionHandler.dispatch(state, {:space_leader_chord, ?j, 0})` advanced `latest_intent_revision` from `0` to `1` before the outer GUI housekeeping call. This proved the replay path entered full `Router.dispatch/3` and rendered inside the semantic GUI action handler path.
+- **Implementation result:** Added the single public `Router.route_key/3` seam by moving the existing key-local preclear, pending-quit, shell routing, history, and completion handling before universal housekeeping; rebuilt `Router.dispatch/3` as a small full-key-event wrapper; removed the now-obsolete `post_key_housekeeping/7` wrapper; changed `CUA.SpaceLeader.dispatch_key_normally/3` to call `route_key/3`; left protocol decoding, Swift/Go frontend behavior, keymap lookup, shell handler ordering, TUI space-leader timing, and `GuiActionHandler` action selection unchanged.
+- **Changed files:** `docs/workstreams/editor-lifecycle-roadmap.md`; `lib/minga_editor/input/router.ex`; `lib/minga_editor/input/cua/space_leader.ex`; `test/minga_editor/input/router_test.exs`; `test/minga_editor/handlers/gui_action_handler_test.exs`.
+- **Focused validation:** `mix test test/minga_editor/input/router_test.exs test/minga_editor/handlers/gui_action_handler_test.exs` first failed with the undefined `Router.route_key/3` and premature GUI space-leader render revision, then passed `58` tests after the correction. The final focused run after adding the completion preservation edge passed `59` tests.
+- **Broad validation:** `make lint` passed changed-source Credo, compile, format, and incremental Dialyzer with `Total errors: 0`. Final constrained validation `ERL_FLAGS='+S 2:2' mix test.llm --max-cases 4` passed `58 doctests, 98 properties, 9831 tests, 0 failures, 1 skipped, 616 excluded`. The run still emitted existing parser manager teardown warnings, one existing LSP stale-buffer warning, and one `erl_child_setup` warning, but all modules and tests passed.
+- **Diff and residue validation:** `git diff --check` produced no output. Focused residue search found no `Router.dispatch/3`, `post_action_housekeeping/2`, `do_render/1`, document-highlight scheduling, or inlay scheduling in `CUA.SpaceLeader` or `GuiActionHandler`; no `post_key_housekeeping` reference remains; the only new router seam is `MingaEditor.Input.Router.route_key/3`, and GUI replay calls that seam.
+- **Production lines added/removed before roadmap evidence:** `+32/-85`, net `-53`, within the locked production cap of net `<= +25`; per-file numstat: `lib/minga_editor/input/router.ex 31/84`, `lib/minga_editor/input/cua/space_leader.ex 1/1`.
+- **Test lines added/removed before roadmap evidence:** `+90/-0`; per-file numstat: `test/minga_editor/input/router_test.exs 64/0`, `test/minga_editor/handlers/gui_action_handler_test.exs 26/0`.
+- **Concepts added:** One key-local Router seam, `MingaEditor.Input.Router.route_key/3`, as explicitly permitted by the locked plan. No new module, process, dependency, behaviour, protocol, registry, configuration, compatibility shim, event struct, action result type, data representation, or public API family was added.
+- **Concepts removed:** Removed GUI space-leader replay's dependency on the full key event dispatch path, the resulting duplicate universal housekeeping/render submission, and the obsolete post-key housekeeping wrapper.
+- **Retained constraints:** Universal housekeeping remains solely in `Router.post_action_housekeeping/2`; `MingaEditor.handle_info/2` remains the GUI event envelope; `GuiActionHandler` remains semantic GUI action selection only; `CUA.SpaceLeader` remains stateless GUI space-leader interpretation and replay; pending-quit yes/no/Escape and ignored-key semantics, shell handler order, keystroke history, keyboard completion/signature-help handling, protocol decoding, keymap semantics, and TUI space-leader ownership are retained.
+- **Discoveries affecting later work:** None. The locked owner, contract, scope, dependency, and production-line budget remained valid; no replan trigger or overlapping implementation dependency was found.
+- **Unresolved questions:** None.
+- **needs_replan:** false.
+- **Completion date:** 2026-07-25

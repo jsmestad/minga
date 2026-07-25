@@ -132,7 +132,7 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   @spec dispatch_key_normally(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp dispatch_key_normally(state, codepoint, modifiers) do
-    MingaEditor.Input.Router.dispatch(state, codepoint, modifiers)
+    MingaEditor.Input.Router.route_key(state, codepoint, modifiers)
   end
 
   @spec execute_command(EditorState.t(), atom() | tuple()) :: EditorState.t()
