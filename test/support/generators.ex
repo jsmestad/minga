@@ -69,9 +69,10 @@ defmodule Minga.Test.Generators do
   def key_press_event do
     gen all(
           codepoint <- integer(1..0x10FFFF),
-          modifiers <- integer(0..15)
+          modifiers <- integer(0..15),
+          seq <- integer(0..0xFFFFFFFF)
         ) do
-      <<0x01, codepoint::32, modifiers::8>>
+      <<0x01, codepoint::32, modifiers::8, seq::32>>
     end
   end
 
@@ -91,9 +92,13 @@ defmodule Minga.Test.Generators do
   def ready_event do
     gen all(
           width <- integer(1..500),
-          height <- integer(1..200)
+          height <- integer(1..200),
+          semantic_ui <- integer(0..1)
         ) do
-      <<0x03, width::16, height::16>>
+      capabilities = <<0, 2, 1, 0, 0, 0, semantic_ui::8, 1, 64 * 1024 * 1024::32, 0::32, 0::32>>
+
+      <<0x03, width::16, height::16, 2, 20, capabilities::binary,
+        Minga.Protocol.Opcodes.protocol_version()::16>>
     end
   end
 

@@ -71,35 +71,21 @@ defmodule MingaEditor.Frontend.ProtocolTest do
   # ── Input event encoding/decoding round-trips ──
 
   describe "decode_event/1 — key_press" do
-    test "decodes a legacy key press without a correlation sequence (seq 0)" do
-      # 'a' = 97, no modifiers, no sequence appended
-      payload = <<0x01, 97::32, 0::8>>
-      assert {:ok, {:key_press, 97, 0, 0}} = Protocol.decode_event(payload)
-    end
-
-    test "decodes key press with modifiers" do
+    test "decodes key press with modifiers and a correlation sequence" do
       mods = Bitwise.bor(Protocol.mod_ctrl(), Protocol.mod_shift())
-      payload = <<0x01, 99::32, mods::8>>
-      assert {:ok, {:key_press, 99, ^mods, 0}} = Protocol.decode_event(payload)
-    end
-
-    test "decodes unicode codepoint" do
-      # 🥨 = U+1F968 = 129384
-      codepoint = 0x1F968
-      payload = <<0x01, codepoint::32, 0::8>>
-      assert {:ok, {:key_press, ^codepoint, 0, 0}} = Protocol.decode_event(payload)
-    end
-
-    test "decodes special keys (escape = 27)" do
-      payload = <<0x01, 27::32, 0::8>>
-      assert {:ok, {:key_press, 27, 0, 0}} = Protocol.decode_event(payload)
-    end
-
-    test "decodes the correlation sequence appended after modifiers (ticket #2215)" do
-      mods = Protocol.mod_ctrl()
       seq = 4_242
-      payload = <<0x01, 97::32, mods::8, seq::32>>
-      assert {:ok, {:key_press, 97, ^mods, ^seq}} = Protocol.decode_event(payload)
+      payload = <<0x01, 99::32, mods::8, seq::32>>
+      assert {:ok, {:key_press, 99, ^mods, ^seq}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes unicode codepoint with a correlation sequence" do
+      codepoint = 0x1F968
+      payload = <<0x01, codepoint::32, 0::8, 7::32>>
+      assert {:ok, {:key_press, ^codepoint, 0, 7}} = Protocol.decode_event(payload)
+    end
+
+    test "rejects the retired 6-byte key press layout" do
+      assert {:error, :malformed} = Protocol.decode_event(<<0x01, 65::32, 3::8>>)
     end
   end
 
@@ -116,9 +102,9 @@ defmodule MingaEditor.Frontend.ProtocolTest do
   end
 
   describe "decode_event/1 — ready" do
-    test "decodes a short ready event (backward compat)" do
+    test "decodes a short ready event as unversioned for fatal admission rejection" do
       payload = <<0x03, 80::16, 24::16>>
-      assert {:ok, {:ready, 80, 24}} = Protocol.decode_event(payload)
+      assert {:ok, {:ready, 80, 24, _caps, 0}} = Protocol.decode_event(payload)
     end
 
     test "decodes an extended ready without a version tail as protocol_version 0 (legacy)" do
@@ -135,11 +121,12 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert caps.float_support == :emulated
     end
 
-    test "decodes a protocol-v12 ready with capability-format-2 resource policy" do
+    test "decodes the current ready protocol version with capability-format-2 resource policy" do
       capabilities = <<1, 2, 1, 3, 1, 1, 1, 1, 16_777_216::32, 250_000::32, 16_384::32>>
-      payload = <<0x03, 200::16, 60::16, 2, 20, capabilities::binary, 12::16>>
+      version = Minga.Protocol.Opcodes.protocol_version()
+      payload = <<0x03, 200::16, 60::16, 2, 20, capabilities::binary, version::16>>
 
-      assert {:ok, {:ready, 200, 60, caps, 12}} = Protocol.decode_event(payload)
+      assert {:ok, {:ready, 200, 60, caps, ^version}} = Protocol.decode_event(payload)
       assert caps.frontend_type == :native_gui
       assert caps.image_support == :native
       assert caps.float_support == :native
@@ -292,8 +279,8 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
 
     test "key_press event has correct byte layout" do
-      payload = <<0x01, 65::32, 0x03::8>>
-      assert {:ok, {:key_press, 65, 3, 0}} = Protocol.decode_event(payload)
+      payload = <<0x01, 65::32, 0x03::8, 4_242::32>>
+      assert {:ok, {:key_press, 65, 3, 4_242}} = Protocol.decode_event(payload)
     end
   end
 
@@ -310,76 +297,76 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:mouse_event, 5, 10, :left, 0, :press, 2}} = Protocol.decode_event(payload)
     end
 
-    test "decodes 8-byte left click press (backward compat, click_count defaults to 1)" do
+    test "rejects the retired 8-byte mouse layout" do
       payload = <<0x04, 5::16-signed, 10::16-signed, 0x00, 0x00, 0x00>>
-      assert {:ok, {:mouse_event, 5, 10, :left, 0, :press, 1}} = Protocol.decode_event(payload)
+      assert {:error, :malformed} = Protocol.decode_event(payload)
     end
 
     test "decodes wheel_up press" do
-      payload = <<0x04, 0::16-signed, 0::16-signed, 0x40, 0x00, 0x00>>
+      payload = <<0x04, 0::16-signed, 0::16-signed, 0x40, 0x00, 0x00, 1>>
       assert {:ok, {:mouse_event, 0, 0, :wheel_up, 0, :press, 1}} = Protocol.decode_event(payload)
     end
 
     test "decodes wheel_down press" do
-      payload = <<0x04, 3::16-signed, 7::16-signed, 0x41, 0x00, 0x00>>
+      payload = <<0x04, 3::16-signed, 7::16-signed, 0x41, 0x00, 0x00, 1>>
 
       assert {:ok, {:mouse_event, 3, 7, :wheel_down, 0, :press, 1}} =
                Protocol.decode_event(payload)
     end
 
     test "decodes drag event" do
-      payload = <<0x04, 8::16-signed, 15::16-signed, 0x00, 0x00, 0x03>>
+      payload = <<0x04, 8::16-signed, 15::16-signed, 0x00, 0x00, 0x03, 1>>
       assert {:ok, {:mouse_event, 8, 15, :left, 0, :drag, 1}} = Protocol.decode_event(payload)
     end
 
     test "decodes release event" do
-      payload = <<0x04, 8::16-signed, 15::16-signed, 0x00, 0x00, 0x01>>
+      payload = <<0x04, 8::16-signed, 15::16-signed, 0x00, 0x00, 0x01, 1>>
       assert {:ok, {:mouse_event, 8, 15, :left, 0, :release, 1}} = Protocol.decode_event(payload)
     end
 
     test "decodes mouse event with modifier flags" do
       mods = Bitwise.bor(Protocol.mod_ctrl(), Protocol.mod_shift())
-      payload = <<0x04, 2::16-signed, 4::16-signed, 0x00, mods::8, 0x00>>
+      payload = <<0x04, 2::16-signed, 4::16-signed, 0x00, mods::8, 0x00, 1>>
       assert {:ok, {:mouse_event, 2, 4, :left, ^mods, :press, 1}} = Protocol.decode_event(payload)
     end
 
     test "decodes mouse event with negative row/col (signed)" do
-      payload = <<0x04, -1::16-signed, -5::16-signed, 0x00, 0x00, 0x00>>
+      payload = <<0x04, -1::16-signed, -5::16-signed, 0x00, 0x00, 0x00, 1>>
       assert {:ok, {:mouse_event, -1, -5, :left, 0, :press, 1}} = Protocol.decode_event(payload)
     end
 
     test "decodes right click" do
-      payload = <<0x04, 1::16-signed, 1::16-signed, 0x02, 0x00, 0x00>>
+      payload = <<0x04, 1::16-signed, 1::16-signed, 0x02, 0x00, 0x00, 1>>
       assert {:ok, {:mouse_event, 1, 1, :right, 0, :press, 1}} = Protocol.decode_event(payload)
     end
 
     test "decodes middle click" do
-      payload = <<0x04, 1::16-signed, 1::16-signed, 0x01, 0x00, 0x00>>
+      payload = <<0x04, 1::16-signed, 1::16-signed, 0x01, 0x00, 0x00, 1>>
       assert {:ok, {:mouse_event, 1, 1, :middle, 0, :press, 1}} = Protocol.decode_event(payload)
     end
 
     test "unknown button value returns {:unknown, value}" do
-      payload = <<0x04, 0::16-signed, 0::16-signed, 0xFF, 0x00, 0x00>>
+      payload = <<0x04, 0::16-signed, 0::16-signed, 0xFF, 0x00, 0x00, 1>>
 
       assert {:ok, {:mouse_event, 0, 0, {:unknown, 0xFF}, 0, :press, 1}} =
                Protocol.decode_event(payload)
     end
 
     test "unknown event type returns {:unknown, value}" do
-      payload = <<0x04, 0::16-signed, 0::16-signed, 0x00, 0x00, 0xFF>>
+      payload = <<0x04, 0::16-signed, 0::16-signed, 0x00, 0x00, 0xFF, 1>>
 
       assert {:ok, {:mouse_event, 0, 0, :left, 0, {:unknown, 0xFF}, 1}} =
                Protocol.decode_event(payload)
     end
 
     test "truncated mouse_event returns malformed" do
-      # Too short — missing event_type
+      # Too short, missing click_count.
       assert {:error, :malformed} =
                Protocol.decode_event(<<0x04, 0::16-signed, 0::16-signed, 0x00, 0x00>>)
     end
 
     test "mouse_event has correct byte layout" do
-      payload = <<0x04, 0::16-signed, 5::16-signed, 0x40, 0x02, 0x00>>
+      payload = <<0x04, 0::16-signed, 5::16-signed, 0x40, 0x02, 0x00, 1>>
 
       assert {:ok, {:mouse_event, 0, 5, :wheel_up, 0x02, :press, 1}} =
                Protocol.decode_event(payload)
@@ -421,9 +408,8 @@ defmodule MingaEditor.Frontend.ProtocolTest do
                Protocol.decode_event(<<0x0C, 3::32, 9::32, 7::32, 12::16>>)
     end
 
-    test "treats a draining protocol-v11 rejection as retryable" do
-      assert {:ok, {:frame_rejected, 3, 9, 7, :base_sequence_mismatch, :retryable_recovery}} =
-               Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4>>)
+    test "rejects the retired 14-byte frame rejection layout" do
+      assert {:error, :malformed} = Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4>>)
     end
 
     test "unknown dispositions fail closed as terminal" do

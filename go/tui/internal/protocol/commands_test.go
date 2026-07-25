@@ -37,6 +37,18 @@ func TestEncodeReadyReportsSemanticTUI(t *testing.T) {
 	}
 }
 
+func TestEncodeInputEventLayouts(t *testing.T) {
+	key := EncodeKeyPress('A', 0x03, 4242)
+	if len(key) != 10 || key[0] != generated.OPKeyPress || binary.BigEndian.Uint32(key[6:10]) != 4242 {
+		t.Fatalf("key_press layout = %v, want 10 bytes with sequence tail", key)
+	}
+
+	mouse := EncodeMouseEvent(-1, 5, 0, 0x02, MousePress, 1)
+	if len(mouse) != 9 || mouse[0] != generated.OPMouseEvent || mouse[8] != 1 {
+		t.Fatalf("mouse_event layout = %v, want 9 bytes with click count", mouse)
+	}
+}
+
 func TestDecodeProtocolError(t *testing.T) {
 	message := "protocol_version mismatch: frontend 1, beam 2"
 	packet := []byte{generated.OPProtocolError, byte(len(message) >> 8), byte(len(message))}

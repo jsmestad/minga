@@ -21,6 +21,8 @@ defmodule MingaEditor.Frontend.FrameTransaction do
     Opcodes.clipboard_write()
   ]
 
+  @retired_frame_body_opcodes [0x12, 0x13, 0x14, 0x1A, 0x1B, 0x1C]
+
   @type frame_seq :: non_neg_integer()
   @type state :: :outside | {:inside, frame_seq()}
 
@@ -31,6 +33,7 @@ defmodule MingaEditor.Frontend.FrameTransaction do
           | {:commit_seq_mismatch, expected :: frame_seq(), received :: frame_seq()}
           | {:unterminated_frame, frame_seq()}
           | {:out_of_transaction_command, opcode :: non_neg_integer()}
+          | {:retired_render_command, opcode :: non_neg_integer()}
 
   @doc "Validates one ordered frontend command batch without inspecting payload data."
   @spec validate([binary()]) :: :ok | {:error, validation_error()}
@@ -53,6 +56,10 @@ defmodule MingaEditor.Frontend.FrameTransaction do
 
   def format_error({:out_of_transaction_command, opcode}),
     do: "opcode 0x#{Integer.to_string(opcode, 16) |> String.pad_leading(2, "0")} outside a frame"
+
+  def format_error({:retired_render_command, opcode}),
+    do:
+      "retired render opcode 0x#{Integer.to_string(opcode, 16) |> String.pad_leading(2, "0")} inside a frame"
 
   @spec validate([binary()], state()) :: :ok | {:error, validation_error()}
   defp validate([], :outside), do: :ok
@@ -91,6 +98,10 @@ defmodule MingaEditor.Frontend.FrameTransaction do
 
   defp validate([<<opcode, _::binary>> | _commands], :outside),
     do: {:error, {:out_of_transaction_command, opcode}}
+
+  defp validate([<<opcode, _::binary>> | _commands], {:inside, _frame_seq})
+       when opcode in @retired_frame_body_opcodes,
+       do: {:error, {:retired_render_command, opcode}}
 
   defp validate([_command | commands], {:inside, frame_seq}),
     do: validate(commands, {:inside, frame_seq})

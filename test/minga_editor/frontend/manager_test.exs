@@ -69,9 +69,9 @@ defmodule MingaEditor.Frontend.ManagerTest do
       pid = start_manager(name)
       :ok = Manager.subscribe(name)
 
-      send_port_data(pid, nil, <<0x01, ?h::32, 0::8>>)
+      send_port_data(pid, nil, <<0x01, ?h::32, 0::8, 1::32>>)
 
-      assert_receive {:minga_input, {:key_press, ?h, 0, 0}}
+      assert_receive {:minga_input, {:key_press, ?h, 0, 1}}
     end
 
     test "request_keyframe is routed opaquely to subscribers (#2219)" do
@@ -92,7 +92,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       :ok = Manager.subscribe(name)
       :ok = Manager.subscribe(name)
 
-      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, nil, ready_packet(80, 24))
 
       assert_receive {:minga_input, {:ready, 80, 24}}
       refute_receive {:minga_input, {:ready, 80, 24}}, 50
@@ -100,26 +100,12 @@ defmodule MingaEditor.Frontend.ManagerTest do
   end
 
   describe "event handling" do
-    test "ready event sets ready state and terminal size" do
-      name = unique_name()
-      pid = start_manager(name)
-      :ok = Manager.subscribe(name)
-
-      send_port_data(pid, nil, <<0x03, 120::16, 40::16>>)
-
-      assert Manager.ready?(name)
-      assert Manager.terminal_size(name) == {120, 40}
-      assert_receive {:minga_input, {:ready, 120, 40}}
-    end
-
     test "versioned ready with the matching protocol_version becomes ready" do
       name = unique_name()
       pid = start_manager(name)
       :ok = Manager.subscribe(name)
 
-      version = Minga.Protocol.Opcodes.protocol_version()
-      # 7 caps fields (native GUI) then the u16 protocol_version tail.
-      ready = <<0x03, 120::16, 40::16, 1, 7, 1, 2, 1, 3, 1, 1, 1, version::16>>
+      ready = ready_packet(120, 40)
       send_port_data(pid, nil, ready)
 
       assert Manager.ready?(name)
@@ -129,25 +115,36 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
     test "ready with a mismatched protocol_version stays not ready (no silent desync)" do
       name = unique_name()
-      pid = start_manager(name)
+      parent = self()
+
+      commander = fn _port, batch, [:nosuspend] ->
+        send(parent, {:port_command, batch})
+        true
+      end
+
+      {pid, fake_port} = start_connected(name, port_commander: commander)
       :ok = Manager.subscribe(name)
 
       bad = Minga.Protocol.Opcodes.protocol_version() + 99
-      ready = <<0x03, 120::16, 40::16, 1, 7, 1, 2, 1, 3, 1, 1, 1, bad::16>>
-      send_port_data(pid, nil, ready)
+      ready = ready_packet(120, 40, bad)
+      send_port_data(pid, fake_port, ready)
 
       refute Manager.ready?(name)
+      assert_receive {:port_command, <<0x18, _::binary>> = protocol_error}
+      assert protocol_error =~ "this frontend speaks protocol v#{bad}"
       refute_receive {:minga_input, {:ready, 120, 40}}, 50
     end
 
-    test "legacy unversioned extended ready is rejected (protocol_version 0)" do
+    test "short unversioned ready is rejected without marking the frontend ready" do
       name = unique_name()
       pid = start_manager(name)
+      :ok = Manager.subscribe(name)
 
-      # Extended ready with no version tail decodes as protocol_version 0.
-      send_port_data(pid, nil, <<0x03, 120::16, 40::16, 1, 7, 1, 2, 1, 3, 1, 1, 1>>)
+      send_port_data(pid, nil, <<0x03, 120::16, 40::16>>)
 
       refute Manager.ready?(name)
+      assert Manager.terminal_size(name) == nil
+      refute_receive {:minga_input, {:ready, 120, 40}}, 50
     end
 
     test "resize event updates terminal size" do
@@ -174,7 +171,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       pid = start_manager(name)
 
-      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, nil, ready_packet(80, 24))
       assert Manager.ready?(name)
 
       send(pid, {nil, {:exit_status, 1}})
@@ -188,7 +185,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       pid = start_manager(name)
 
-      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, nil, ready_packet(80, 24))
       assert Manager.ready?(name)
 
       :ok = Manager.subscribe(name)
@@ -200,7 +197,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       pid = start_manager(name)
 
-      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, nil, ready_packet(80, 24))
       send_port_data(pid, nil, <<0x02, 120::16, 40::16>>)
       assert Manager.terminal_size(name) == {120, 40}
 
@@ -224,7 +221,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
 
-      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, fake_port, ready_packet(80, 24))
       assert Manager.ready?(name)
 
       :ok = Manager.subscribe(name)
@@ -237,7 +234,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
 
-      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, fake_port, ready_packet(80, 24))
       assert Manager.ready?(name)
       send(pid, {fake_port, :eof})
       refute Manager.ready?(name)
@@ -566,15 +563,15 @@ defmodule MingaEditor.Frontend.ManagerTest do
       {pid, fake_port} = start_connected(name)
       :ok = Manager.subscribe(name)
 
-      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, fake_port, ready_packet(80, 24))
 
       assert Manager.ready?(name)
       assert Manager.terminal_size(name) == {80, 24}
       assert_receive {:minga_input, {:ready, 80, 24}}
 
-      send_port_data(pid, fake_port, <<0x01, ?j::32, 0::8>>)
+      send_port_data(pid, fake_port, <<0x01, ?j::32, 0::8, 1::32>>)
 
-      assert_receive {:minga_input, {:key_press, ?j, 0, 0}}
+      assert_receive {:minga_input, {:key_press, ?j, 0, 1}}
     end
 
     test "EOF on connected port clears ready state" do
@@ -582,7 +579,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       {pid, fake_port} = start_connected(name)
       :ok = Manager.subscribe(name)
 
-      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, fake_port, ready_packet(80, 24))
       assert Manager.ready?(name)
 
       send(pid, {fake_port, :eof})
@@ -645,6 +642,11 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
   defp send_port_data(pid, port, payload) do
     send(pid, {port, {:data, payload}})
+  end
+
+  defp ready_packet(width, height, version \\ Minga.Protocol.Opcodes.protocol_version()) do
+    capabilities = <<0, 2, 1, 0, 0, 0, 1, 1, 64 * 1024 * 1024::32, 0::32, 0::32>>
+    <<0x03, width::16, height::16, 2, 20, capabilities::binary, version::16>>
   end
 
   defp fake_port_opener do

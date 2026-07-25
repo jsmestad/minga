@@ -35,9 +35,11 @@ defmodule MingaEditor.Frontend.ProtocolPropertyTest do
 
   property "decode_event produces valid ready for any dimensions" do
     check all(event <- ready_event()) do
-      assert {:ok, {:ready, width, height}} = Protocol.decode_event(event)
+      assert {:ok, {:ready, width, height, caps, version}} = Protocol.decode_event(event)
       assert is_integer(width) and width > 0
       assert is_integer(height) and height > 0
+      assert caps.resource_policy.max_frame_bytes == 64 * 1024 * 1024
+      assert version == Minga.Protocol.Opcodes.protocol_version()
     end
   end
 

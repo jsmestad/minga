@@ -78,10 +78,10 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
-| `0x01` | key_press | 6 | A key was pressed |
+| `0x01` | key_press | 10 | A key was pressed with an input correlation sequence |
 | `0x02` | resize | 5 | Terminal/window was resized |
-| `0x03` | ready | 5, 13, or 29 | Frontend is initialized and ready (29 carries capability format 2 and protocol version) |
-| `0x04` | mouse_event | 9 | Mouse button, wheel, or motion (8-byte legacy also accepted) |
+| `0x03` | ready | 29 | Frontend is initialized and ready (capability format 2 plus exact protocol version) |
+| `0x04` | mouse_event | 9 | Mouse button, wheel, or motion |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
@@ -287,9 +287,10 @@ A key was pressed.
 opcode:    u8  = 0x01
 codepoint: u32           Unicode codepoint of the key
 modifiers: u8            modifier flags (see below)
+seq:       u32           input correlation sequence echoed on commit_frame
 ```
 
-Total size: 6 bytes.
+Total size: 10 bytes.
 
 **Codepoint values:** Standard Unicode codepoints for printable characters. For special keys, use the codepoint values defined by the frontend's input library (e.g., libvaxis uses values above the Unicode range for function keys, arrows, etc.). The BEAM's key handling maps these to editor actions.
 
@@ -326,27 +327,18 @@ The frontend has initialized and is ready to receive render commands.
 
 The `width`/`height` fields carry the same "content cells at current presentation metrics" meaning as `resize` above (see that section for the row-fit rule and ADR-0001 reference).
 
-**Short format (5 bytes):**
-```
-opcode: u8  = 0x03
-width:  u16           initial content columns available at current presentation metrics
-height: u16           initial content rows available at current presentation metrics
-```
-
-**Extended format (13 bytes, or 15+ with a version tail):**
+**Current format (29 bytes):**
 ```
 opcode:           u8  = 0x03
 width:            u16           initial content columns available at current presentation metrics
 height:           u16           initial content rows available at current presentation metrics
 caps_version:     u8            capability format version (currently 2)
-caps_len:         u8            length of capability data
+caps_len:         u8            length of capability data (currently 20)
 caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" section)
-protocol_version: u16           OPTIONAL: the wire-contract version the frontend was generated against
+protocol_version: u16           exact wire-contract version the frontend was generated against
 ```
 
-**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending any render commands.
-
-Frontends should use the extended format with the `protocol_version` tail. The BEAM detects which format was sent by checking the payload length: 5 bytes = short format with default capabilities and no version (treated as protocol_version 0); 13 bytes = extended capabilities with no version tail (also treated as protocol_version 0); 15+ bytes = extended capabilities followed by a u16 `protocol_version`. See "Protocol Version Negotiation".
+**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 15. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
 
 ### `0x04` mouse_event
 
@@ -364,7 +356,6 @@ click_count: u8            1 = single, 2 = double, 3 = triple (clamped)
 
 Total size: 9 bytes.
 
-**Backward compatibility:** The BEAM decoder accepts 8-byte messages (legacy format without `click_count`) and defaults `click_count` to 1. GUI frontends should always send the 9-byte format with the native click count from the OS. TUI frontends send `click_count=1` and let the BEAM detect multi-clicks via timing.
 
 **Button values:**
 
@@ -394,7 +385,7 @@ Total size: 9 bytes.
 
 `frame_applied` (0x0A), fixed 9 bytes: `generation:u32, frame_seq:u32`. Emit it only after the complete transaction has validated and its semantic state has been published atomically. Do not wait for Metal submission, terminal drawing, visibility, or vsync.
 
-`frame_rejected` (0x0B), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, reason:u8, disposition:u8`. The disposition byte is appended, so generation, frame sequence, last-good base, and reason retain their protocol-version-11 positions.
+`frame_rejected` (0x0B), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, reason:u8, disposition:u8`. The retired 14-byte form without `disposition` is malformed.
 
 `window_ref_miss` (0x0C), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, window_id:u16`. It is the targeted form for a missing retained row/window reference; sibling windows and chrome remain committed at `last_applied_frame_seq`.
 
@@ -774,9 +765,9 @@ Total size: 4 + msg_len bytes.
 
 The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 15). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, protocol_version 10 widens clipboard and retained-window delta framing, protocol_version 11 makes `begin_frame` generation-aware and adds explicit frame status/retry events, protocol_version 12 appends frame rejection disposition and frontend resource policy, protocol_version 13 changes `agent_tool_toggle` to stable message ids, protocol_version 14 retires the native Tool Manager wire surface, and protocol_version 15 retires the Change Summary command, entry shape, and click action while retaining display-only breadcrumbs and legacy `breadcrumb_click` compatibility. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
-**Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0.
+**Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 
-**Enforcement.** The BEAM compares the handshake version against its own `Opcodes.protocol_version()` in `MingaEditor.Frontend.Manager`. On a match it marks the frontend ready and streams normally. On any mismatch (including 0, a frontend built before this mechanism) it does **not** mark the frontend ready and sends one `protocol_error` (0x18) carrying a human-readable reason, then drives nothing further. This converts a silent desync (a stale frontend decoding opcodes that moved or vanished) into an explicit, debuggable error.
+**Enforcement.** The BEAM compares the handshake version against its own `Opcodes.protocol_version()` in `MingaEditor.Frontend.Manager`. On an exact match it marks the frontend ready and streams normally. On any mismatch (including 0, a frontend built before this mechanism) it does **not** mark the frontend ready and sends one `protocol_error` (0x18) carrying a human-readable reason, then drives nothing further. This converts a silent desync (a stale frontend decoding opcodes that moved or vanished) into an explicit, debuggable error.
 
 **`0x18` protocol_error.**
 ```
@@ -825,7 +816,7 @@ The `ready` event supports an extended format with capability fields. This lets 
 
 Capability format 2 carries 20 capability bytes and the complete ready event is 29 bytes including the protocol-version tail. Format 1's original fields remain in the same positions.
 
-Frontends that send the short 5-byte `ready` format are assumed to have default capabilities: `{tui, rgb, wcwidth, none, emulated, monospace}`.
+Short 5-byte `ready` packets are unversioned and rejected during Manager admission; they are not a capability fallback path.
 
 ### `0x05` capabilities_updated
 
@@ -867,10 +858,6 @@ Capability format 2 has 20 payload bytes (23 bytes including opcode/version/leng
 | `max_frame_bytes` | u32; 0=unadvertised | Maximum admitted encoded frame bytes |
 | `max_frame_commands` | u32; 0=unadvertised | Maximum admitted commands in one frame |
 | `max_window_rows` | u32; 0=unadvertised | Maximum admitted rows for one semantic window |
-
-### Implementation Notes
-
-The TUI backend may send `ready` with default capabilities immediately at startup, then send `capabilities_updated` once its async terminal capability detection completes (e.g. after the DA1 response). The GUI backend sends `ready` with full native capabilities upfront since there is no detection delay.
 
 ## Text Measurement
 
