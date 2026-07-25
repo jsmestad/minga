@@ -50,7 +50,7 @@ defmodule MingaEditor.RenderPipeline.Classifier do
 
   @spec full_path?(Input.t(), scrolls()) :: boolean()
   defp full_path?(%Input{} = input, scrolls) do
-    input.force_keyframe? or
+    input.intent.frame.force_keyframe? or
       multi_window?(scrolls) or
       active_scroll_full?(input, scrolls)
   end
@@ -63,7 +63,7 @@ defmodule MingaEditor.RenderPipeline.Classifier do
   defp multi_window?(scrolls), do: map_size(scrolls) != 1
 
   @spec active_scroll_full?(Input.t(), scrolls()) :: boolean()
-  defp active_scroll_full?(%Input{workspace: %{windows: %{active: active}}}, scrolls) do
+  defp active_scroll_full?(%Input{windows: %{active: active}}, scrolls) do
     case Map.get(scrolls, active) do
       %WindowScroll{} = scroll -> structural_change?(scroll)
       _ -> true

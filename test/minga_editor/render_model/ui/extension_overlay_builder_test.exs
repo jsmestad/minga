@@ -34,7 +34,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
 
     test "maps matching visible overlays and filters wrong-buffer or offscreen overlays" do
       ctx = build_minimal_context(viewport_top: 2)
-      active_buffer = ctx.buffers.active
+      active_buffer = ctx.workspace.buffers.active
       other_buffer = start_supervised!({BufferProcess, content: "other"})
 
       :ok =
@@ -74,7 +74,14 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
     ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(state)
     viewport_top = Keyword.get(opts, :viewport_top, 0)
     window = Map.fetch!(ctx.windows.map, ctx.windows.active)
-    window = %{window | viewport: MingaEditor.Viewport.put_top(window.viewport, viewport_top)}
+    render_cache = %{window.render_cache | last_viewport_top: viewport_top}
+
+    window = %{
+      window
+      | viewport: MingaEditor.Viewport.put_top(window.viewport, viewport_top),
+        render_cache: render_cache
+    }
+
     windows = %{ctx.windows | map: Map.put(ctx.windows.map, ctx.windows.active, window)}
     %{ctx | windows: windows}
   end

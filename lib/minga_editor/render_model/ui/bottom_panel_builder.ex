@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
   alias MingaEditor.BottomPanel, as: EditorPanel
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.UI.Panel.MessageStore
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @doc """
   Builds the bottom panel model.
@@ -13,17 +14,16 @@ defmodule MingaEditor.RenderModel.UI.BottomPanelBuilder do
   advances the message_store cursor when new entries have arrived. The caller
   must apply the updated message_store back to ctx.
   """
-  @spec build(Context.t()) :: {BottomPanel.t(), term()}
-  def build(%{shell_state: %{bottom_panel: panel}, message_store: store}) do
-    build_panel(panel, store)
+  @spec build(Context.t()) :: {BottomPanel.t(), MessageStore.t()}
+  def build(%Context{
+        intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}},
+        message_store: %MessageStore{} = store
+      }) do
+    build_panel(TraditionalState.bottom_panel(shell_state), store)
   end
 
-  def build(%{message_store: store}) do
+  def build(%Context{message_store: %MessageStore{} = store}) do
     {%BottomPanel{visible?: false}, store}
-  end
-
-  def build(_ctx) do
-    {%BottomPanel{visible?: false}, nil}
   end
 
   @spec build_panel(EditorPanel.t() | map(), term()) :: {BottomPanel.t(), term()}

@@ -1,15 +1,14 @@
 defmodule MingaEditor.Renderer.BufferChangesTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.BufferChanges
   alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.State
   alias MingaEditor.Shell.Traditional.ClickRegions
+  alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
-  alias MingaEditor.UI.Theme.Fallback
   alias MingaEditor.Window
 
   test "one changed buffer is consumed once and ordered deltas fan out to both resident windows" do
@@ -72,24 +71,37 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     assert first_snapshot.lines == ["Ynew", "zero", "one", "two", "Xthree"]
   end
 
-  test "intent derives typed observed versions without calling the buffer" do
+  test "materialization does not reconstruct broad input" do
     buffer = start_supervised!({Minga.Buffer, content: "one"})
-    one = Window.new(1, buffer, 24, 80)
-    windows = %Windows{map: %{1 => one}, active: 1, tree: {:leaf, 1}, next_id: 2}
+    intent = intent(buffer, 0)
 
-    input = %Input{
-      port_manager: nil,
-      theme: Fallback.theme(),
-      capabilities: %Capabilities{},
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      message_store: %MingaEditor.UI.Panel.MessageStore{},
-      workspace: %{windows: windows}
-    }
+    {_state, input} = BufferChanges.prepare(State.new([]), intent)
 
-    calls = trace_buffer_calls(buffer, fn -> Intent.from_input(input) end)
-    assert calls.result.buffer_versions == %{buffer => 0}
-    assert calls.messages == []
+    assert Map.keys(Map.from_struct(input)) |> Enum.sort() ==
+             [
+               :caches,
+               :focus_tree,
+               :font_registry,
+               :frame_seq,
+               :intent,
+               :layout,
+               :message_store,
+               :windows,
+               :workspace
+             ]
+
+    for field <- [
+          :theme,
+          :capabilities,
+          :shell_state,
+          :sidebar_registry,
+          :highlighting,
+          :semantic_tokens,
+          :git_syncing,
+          :terminal_viewport
+        ] do
+      refute Map.has_key?(Map.from_struct(input), field)
+    end
   end
 
   test "window close, buffer replacement, and exact buffer DOWN share centralized cleanup" do
@@ -195,6 +207,12 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     refute binary =~ "ResidentStore"
     refute binary =~ "MingaEditor.RenderPipeline.Input"
 
+    invalid_intent = :erlang.binary_to_term(:erlang.term_to_binary(%{windows: bounded.windows}))
+
+    assert_raise FunctionClauseError, fn ->
+      BufferChanges.prepare(State.new([]), invalid_intent)
+    end
+
     fields =
       ~w(authoritative_scroll_seq content cursor fold_map fold_ranges popup_meta scroll_detach_cursor scroll_echo_top scroll_velocity viewport)a
 
@@ -233,18 +251,19 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     two = Window.new(2, buffer, 24, 80)
     windows = %Windows{map: %{1 => one, 2 => two}, active: 1, tree: {:leaf, 1}, next_id: 3}
 
-    input = %Input{
-      port_manager: nil,
-      theme: Fallback.theme(),
-      capabilities: %Capabilities{},
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      message_store: %MingaEditor.UI.Panel.MessageStore{},
-      workspace: %{windows: windows}
+    TestHelpers.base_state()
+    |> put_windows(windows, buffer)
+    |> Intent.from_editor_state()
+    |> Map.put(:buffer_versions, %{buffer => version})
+  end
+
+  defp put_windows(state, windows, buffer) do
+    workspace = %{
+      state.workspace
+      | buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
+        windows: windows
     }
 
-    input
-    |> Intent.from_input()
-    |> Map.put(:buffer_versions, %{buffer => version})
+    %{state | workspace: workspace}
   end
 end

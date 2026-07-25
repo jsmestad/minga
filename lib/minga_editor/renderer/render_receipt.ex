@@ -7,6 +7,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
   acknowledgement leases, and message-store cursors never cross back.
   """
 
+  alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.WindowObservation
   alias MingaEditor.Shell.Traditional.ClickRegions
@@ -53,12 +54,14 @@ defmodule MingaEditor.Renderer.RenderReceipt do
   @spec from_output(Input.t(), non_neg_integer(), integer(), non_neg_integer()) :: t()
   def from_output(%Input{} = output, frame_seq, sent_at, intent_revision)
       when is_integer(frame_seq) and frame_seq >= 0 and is_integer(sent_at) do
+    frame = output.intent.frame
+
     %__MODULE__{
       layout: output.layout,
       focus_tree: output.focus_tree,
-      shell_id: output.shell_id,
-      shell_identity: output.shell_identity,
-      click_regions: click_regions(output.shell_state),
+      shell_id: frame.shell_id,
+      shell_identity: frame.shell_identity,
+      click_regions: click_regions(frame.shell_state, output.caches.chrome_prev_result),
       frame_seq: frame_seq,
       keyframe?: output.caches.last_frame_keyframe?,
       render_sent_at: sent_at,
@@ -76,7 +79,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
   @spec window_observations(Input.t()) :: %{
           optional(MingaEditor.Window.id()) => WindowObservation.t()
         }
-  defp window_observations(%Input{workspace: %{windows: %Windows{map: windows}}}) do
+  defp window_observations(%Input{windows: %Windows{map: windows}}) do
     Enum.reduce(windows, %{}, fn {id, window}, observations ->
       case WindowObservation.from_window(window) do
         %WindowObservation{} = observation -> Map.put(observations, id, observation)
@@ -85,9 +88,14 @@ defmodule MingaEditor.Renderer.RenderReceipt do
     end)
   end
 
-  @spec click_regions(term()) :: ClickRegions.t() | nil
-  defp click_regions(%TraditionalState{} = shell_state),
-    do: TraditionalState.click_regions(shell_state)
+  @spec click_regions(term(), term()) :: ClickRegions.t() | nil
+  defp click_regions(%TraditionalState{}, %Chrome{} = chrome) do
+    ClickRegions.install(
+      %ClickRegions{},
+      chrome.modeline_click_regions,
+      chrome.tab_bar_click_regions
+    )
+  end
 
-  defp click_regions(_shell_state), do: nil
+  defp click_regions(_shell_state, _chrome), do: nil
 end

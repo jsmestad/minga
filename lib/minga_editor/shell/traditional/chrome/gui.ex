@@ -56,6 +56,10 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
   end
 
   @spec status_bar_data(state()) :: StatusBarData.t() | nil
-  defp status_bar_data(%MingaEditor.RenderPipeline.Input{status_bar_data: data}), do: data
+  defp status_bar_data(%MingaEditor.RenderPipeline.Input{
+         intent: %{frame: %{status_bar_data: data}}
+       }),
+       do: data
+
   defp status_bar_data(state), do: StatusBarData.from_state(state)
 end

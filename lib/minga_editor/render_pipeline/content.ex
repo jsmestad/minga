@@ -66,7 +66,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   def build_agent_chat_content(state, layout) do
     layout.window_layouts
     |> Enum.reduce({[], nil, state}, fn {win_id, win_layout}, {frames, cursor, st} ->
-      window = Map.get(st.workspace.windows.map, win_id)
+      window = Map.get(st.windows.map, win_id)
       maybe_render_agent_window(window, win_id, win_layout, frames, cursor, st)
     end)
   end
@@ -74,7 +74,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   @doc "Resets the per-frame rasterized-row counter at the start of the Content stage (#2287)."
   @spec reset_rows_rasterized(state()) :: state()
   def reset_rows_rasterized(state) do
-    %{state | caches: %{state.caches | frame_rows_rasterized: 0}}
+    Input.reset_frame_rows_rasterized(state)
   end
 
   # ── Private ──────────────────────────────────────────────────────────────
@@ -114,8 +114,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   @spec add_rows_rasterized(state(), non_neg_integer()) :: state()
   defp add_rows_rasterized(state, count) do
-    current = state.caches.frame_rows_rasterized
-    %{state | caches: %{state.caches | frame_rows_rasterized: current + count}}
+    Input.add_frame_rows_rasterized(state, count)
   end
 
   @spec build_window_content(state(), WindowScroll.t()) ::

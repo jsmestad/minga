@@ -1,13 +1,11 @@
 defmodule MingaEditor.Renderer.AckLeaseTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.AckLease
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Renderer.FrameAttempt
-  alias MingaEditor.State.Windows
 
   test "start stores attempt and output, derives generation, and schedules exact timeout" do
     attempt = FrameAttempt.new(intent(), 42, 100)
@@ -48,17 +46,11 @@ defmodule MingaEditor.Renderer.AckLeaseTest do
     refute_receive {:frame_ack_timeout, 7, 42}, 100
   end
 
-  defp intent, do: input(1) |> Intent.from_input()
+  defp intent, do: input(1).intent
 
   defp input(generation) do
-    %Input{
-      port_manager: self(),
-      theme: :theme,
-      capabilities: %Capabilities{},
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      workspace: %{windows: %Windows{}},
-      caches: %Caches{recovery_generation: generation}
-    }
+    TestHelpers.base_state()
+    |> Input.from_editor_state()
+    |> Map.put(:caches, %Caches{recovery_generation: generation})
   end
 end

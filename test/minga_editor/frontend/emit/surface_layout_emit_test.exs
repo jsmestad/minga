@@ -1,16 +1,4 @@
 defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
-  @moduledoc """
-  End-to-end AC-1 proof for #2268: the BEAM hit-test rect for every placed
-  surface equals the emitted placement rect, because both read the same
-  `SurfaceRegistry` placements.
-
-  The other half of the AC (registry rect == focus-tree hit-test rect) is pinned
-  in `MingaEditor.Layout.SurfaceRegistryTest`. This test pins the missing leg:
-  the bytes the emitter actually puts on the wire decode back to the exact rects
-  (and z, surface_id, hit_kind) the registry produced. Chaining the two gives
-  emitted-bytes == hit-test rects, one source, test-proven.
-  """
-
   use ExUnit.Case, async: true
 
   alias Minga.Protocol.Opcodes
@@ -43,8 +31,6 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     :ok
   end
 
-  # A base state with both promoted floating popups live in shell_state, so the
-  # focus tree adds hover/signature-help overlay nodes and the registry places them.
   defp state_with_floating_popups do
     state = emit_state()
     hover = HoverPopup.new("Returns the **value**.", 2, 6)
@@ -237,7 +223,10 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     center =
       MingaEditor.UI.NotificationCenter.upsert(MingaEditor.UI.NotificationCenter.new(), note)
 
-    state = emit_state() |> Map.put(:notifications, center) |> freeze_focus_tree()
+    state =
+      emit_state()
+      |> then(&%{&1 | feedback: %{&1.feedback | notifications: center}})
+      |> freeze_focus_tree()
 
     commands = emit_commands(state)
     decoded = commands |> surface_layout_command() |> decode_placements()
@@ -245,11 +234,8 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     placements = SurfaceRegistry.placements(state)
     expected = Enum.map(placements, &expected_entry/1)
 
-    # The promoted notifications surface is present in the registry derivation...
     assert :notifications in Enum.map(placements, & &1.surface_id)
 
-    # ...and its emitted bytes carry the historical stacking z (160) and the
-    # overlay hit_kind, matching the registry rect_for field-for-field.
     notes_u16 = SurfaceRegistry.surface_id_u16(:notifications)
     decoded_notes = Enum.find(decoded, &(&1.surface_id == notes_u16))
 
@@ -258,7 +244,6 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     assert decoded_notes.hit_kind == SurfaceRegistry.hit_kind_u8(:overlay)
     assert decoded_notes.rect == SurfaceRegistry.rect_for_in(placements, :notifications)
 
-    # And the full emitted list still matches the registry, order included.
     assert decoded == expected
   end
 

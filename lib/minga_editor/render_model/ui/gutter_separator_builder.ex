@@ -12,7 +12,7 @@ defmodule MingaEditor.RenderModel.UI.GutterSeparatorBuilder do
     gutter_w = gutter_width(active_window)
 
     if show_separator?() and gutter_w > 0 do
-      color = ctx.theme.gutter.separator_fg || ctx.theme.gutter.fg
+      color = ctx.intent.frame.theme.gutter.separator_fg || ctx.intent.frame.theme.gutter.fg
       %GutterSeparator{col: gutter_w, color_rgb: color}
     else
       %GutterSeparator{col: 0, color_rgb: 0}

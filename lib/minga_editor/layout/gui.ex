@@ -11,6 +11,7 @@ defmodule MingaEditor.Layout.GUI do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input, as: RenderInput
 
   @doc """
   Computes GUI layout: no tab bar, no file tree columns, no agent panel.
@@ -28,7 +29,7 @@ defmodule MingaEditor.Layout.GUI do
     terminal grid, so the minibuffer genuinely consumes the last row and must be
     reserved.
   """
-  @spec compute(EditorState.t() | map()) :: Layout.t()
+  @spec compute(EditorState.t() | RenderInput.t()) :: Layout.t()
   def compute(state) do
     vp = terminal_viewport(state)
     terminal = {0, 0, vp.cols, vp.rows}
@@ -49,15 +50,13 @@ defmodule MingaEditor.Layout.GUI do
     editor_area = {0, 0, vp.cols, editor_height}
 
     # All windows are no-modeline; the global SwiftUI status bar handles status display.
+    windows = windows(state)
+
     {window_layouts, horizontal_separators} =
-      if MingaEditor.State.Windows.split?(state.workspace.windows) do
-        Layout.compute_window_layouts_with_separators(
-          state.workspace.windows.tree,
-          editor_area,
-          state.workspace.windows.map
-        )
+      if MingaEditor.State.Windows.split?(windows) do
+        Layout.compute_window_layouts_with_separators(windows.tree, editor_area, windows.map)
       else
-        {%{state.workspace.windows.active => Layout.subdivide_window(editor_area)}, []}
+        {%{windows.active => Layout.subdivide_window(editor_area)}, []}
       end
 
     %Layout{
@@ -73,15 +72,18 @@ defmodule MingaEditor.Layout.GUI do
     }
   end
 
-  @spec terminal_viewport(EditorState.t() | map()) :: MingaEditor.Viewport.t()
-  defp terminal_viewport(%{frontend: %{terminal_viewport: viewport}}), do: viewport
-  defp terminal_viewport(%{terminal_viewport: viewport}), do: viewport
+  @spec terminal_viewport(EditorState.t() | RenderInput.t()) :: MingaEditor.Viewport.t()
+  defp terminal_viewport(%EditorState{frontend: %{terminal_viewport: viewport}}), do: viewport
 
-  # Reads frontend capabilities, defaulting to the terminal profile (reserve the
-  # minibuffer row) when they are absent so pre-ready frames and non-struct
-  # callers keep the conservative TUI-compatible geometry.
-  @spec capabilities(EditorState.t() | map()) :: Capabilities.t()
-  defp capabilities(%{frontend: %{capabilities: %Capabilities{} = caps}}), do: caps
-  defp capabilities(%{capabilities: %Capabilities{} = caps}), do: caps
-  defp capabilities(_state), do: Capabilities.default()
+  defp terminal_viewport(%RenderInput{intent: %{frame: %{terminal_viewport: viewport}}}),
+    do: viewport
+
+  @spec capabilities(EditorState.t() | RenderInput.t()) :: Capabilities.t()
+  defp capabilities(%EditorState{frontend: %{capabilities: %Capabilities{} = caps}}), do: caps
+
+  defp capabilities(%RenderInput{intent: %{frame: %{capabilities: %Capabilities{} = caps}}}),
+    do: caps
+
+  defp windows(%EditorState{workspace: %{windows: windows}}), do: windows
+  defp windows(%RenderInput{windows: windows}), do: windows
 end

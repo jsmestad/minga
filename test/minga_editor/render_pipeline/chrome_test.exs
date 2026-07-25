@@ -27,7 +27,7 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.intent.frame.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert %Chrome{} = chrome
     end
@@ -36,7 +36,7 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.intent.frame.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert chrome.tab_bar_click_regions == []
       assert chrome.modeline_click_regions == []
@@ -47,7 +47,7 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.intent.frame.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert %MingaEditor.StatusBar.Data{content: %MingaEditor.StatusBar.Data.Buffer{}} =
                chrome.status_bar_data

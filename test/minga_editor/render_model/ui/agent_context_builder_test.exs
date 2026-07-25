@@ -31,17 +31,11 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         |> AgentState.set_status(:tool_executing)
         |> AgentState.set_pending_approval(%{tool_call_id: "tc", name: "shell", args: %{}})
 
-      ctx = %Context{
-        port_manager: self(),
-        capabilities: nil,
-        theme: nil,
-        font_registry: nil,
-        windows: nil,
-        layout: nil,
-        shell: MingaEditor.Shell.Traditional,
-        shell_state: TraditionalState.replace_agent(%TraditionalState{}, agent),
-        agent_ui: agent_ui
-      }
+      ctx =
+        context(
+          agent_ui,
+          TraditionalState.replace_agent(%TraditionalState{}, agent)
+        )
 
       assert %AgentContext{
                visible: true,
@@ -71,21 +65,14 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
       started_at = state.workspace.agent_ui.view.activity.started_at
       assert started_at != nil
 
-      ctx = %Context{
-        port_manager: self(),
-        capabilities: nil,
-        theme: nil,
-        font_registry: nil,
-        windows: nil,
-        layout: nil,
-        shell: MingaEditor.Shell.Traditional,
-        shell_state:
+      ctx =
+        context(
+          state.workspace.agent_ui,
           TraditionalState.replace_agent(
             %TraditionalState{},
             MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-          ),
-        agent_ui: state.workspace.agent_ui
-      }
+          )
+        )
 
       first = AgentContextBuilder.build(ctx)
       second = AgentContextBuilder.build(ctx)
@@ -96,5 +83,16 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
       assert second.dispatch_timestamp == started_at
       assert first.dispatch_timestamp == second.dispatch_timestamp
     end
+  end
+
+  defp context(agent_ui, shell_state) do
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    workspace = %{ctx.workspace | agent_ui: agent_ui}
+    frame = %{ctx.intent.frame | shell_state: shell_state}
+
+    %{ctx | workspace: workspace, intent: %{ctx.intent | frame: frame, workspace: workspace}}
   end
 end

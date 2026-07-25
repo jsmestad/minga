@@ -3,12 +3,15 @@ defmodule MingaEditor.InlineEdit.RenderTest do
 
   alias Minga.Core.Decorations
   alias Minga.Project.FileRef
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.InlineEdit.Render
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.InlineEdit
 
-  test "merge_decorations reads flattened render-pipeline shell state" do
-    buffer_pid = self()
+  test "merge_decorations reads nested render-pipeline shell state" do
+    state = TestHelpers.base_state()
+    buffer_pid = state.workspace.buffers.active
 
     edit =
       buffer_pid
@@ -20,11 +23,11 @@ defmodule MingaEditor.InlineEdit.RenderTest do
       )
       |> InlineEdit.proposed("new text")
 
-    state = %{
-      shell_runtime: %{state: TraditionalState.activate_inline_edit(%TraditionalState{}, edit)}
-    }
+    shell_state = TraditionalState.activate_inline_edit(%TraditionalState{}, edit)
+    state = %{state | shell_runtime: %{state.shell_runtime | state: shell_state}}
+    input = Input.from_editor_state(state)
 
-    decorations = Render.merge_decorations(Decorations.new(), state, buffer_pid)
+    decorations = Render.merge_decorations(Decorations.new(), input, buffer_pid)
 
     assert Decorations.has_block_decorations?(decorations)
     [block] = decorations.block_decorations

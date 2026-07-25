@@ -3,8 +3,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
 
   alias Minga.Project.Root
   alias Minga.RenderModel.UI.Picker
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderModel.UI.PickerBuilder
-  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Picker, as: PickerUIState
   alias MingaEditor.UI.Picker, as: PickerState
   alias MingaEditor.UI.Picker.Item
@@ -184,23 +185,12 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
 
   @spec build_context(term()) :: MingaEditor.Frontend.Emit.Context.t()
   defp build_context(modal) do
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: self(),
-      capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: %{fg: 0xCCCCCC},
-      font_registry: MingaEditor.UI.FontRegistry.new(),
-      windows: %MingaEditor.State.Windows{map: %{}, active: 1},
-      layout: %MingaEditor.Layout{
-        terminal: {0, 0, 80, 24},
-        editor_area: {0, 0, 80, 24},
-        minibuffer: {23, 0, 80, 1},
-        window_layouts: %{}
-      },
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %{modal: modal},
-      buffers: %Buffers{},
-      highlight: %{highlights: %{}}
-    }
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    frame = %{ctx.intent.frame | shell_state: %{modal: modal}}
+    %{ctx | intent: %{ctx.intent | frame: frame}}
   end
 
   @spec temp_file!(String.t()) :: String.t()

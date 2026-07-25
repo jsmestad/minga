@@ -5,12 +5,16 @@ defmodule MingaEditor.RenderModel.UI.SignatureHelpBuilder do
   alias Minga.RenderModel.UI.SignatureHelp.Parameter
   alias Minga.RenderModel.UI.SignatureHelp.Signature
   alias MingaEditor.SignatureHelp, as: EditorSignatureHelp
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @max_encoded_items 255
 
-  @spec build(map()) :: SignatureHelp.t()
-  def build(%{shell_state: %{signature_help: sh}}), do: signature_help_model(sh)
-  def build(_ctx), do: %SignatureHelp{}
+  @spec build(Context.t()) :: SignatureHelp.t()
+  def build(%Context{intent: %{frame: %{shell_state: %TraditionalState{signature_help: sh}}}}),
+    do: signature_help_model(sh)
+
+  def build(%Context{}), do: %SignatureHelp{}
 
   @spec signature_help_model(EditorSignatureHelp.t() | nil) :: SignatureHelp.t()
   defp signature_help_model(nil), do: %SignatureHelp{}

@@ -3,6 +3,8 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilderTest do
 
   alias Minga.RenderModel.UI.TabBar
   alias MingaEditor.RenderModel.UI.TabBarBuilder
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
 
   describe "build/1" do
     test "returns hidden tab bar when shell has no gui_payload" do
@@ -23,20 +25,11 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilderTest do
   defp build_minimal_context(opts \\ []) do
     tab_bar = Keyword.get(opts, :tab_bar, nil)
 
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: self(),
-      capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: MingaEditor.UI.Theme.get!(:doom_one),
-      font_registry: MingaEditor.UI.FontRegistry.new(),
-      windows: %MingaEditor.State.Windows{map: %{}, active: 1},
-      layout: %MingaEditor.Layout{
-        terminal: {0, 0, 80, 24},
-        editor_area: {0, 0, 80, 24},
-        minibuffer: {23, 0, 80, 1},
-        window_layouts: %{}
-      },
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %{tab_bar: tab_bar}
-    }
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    frame = %{ctx.intent.frame | shell_state: %{tab_bar: tab_bar}}
+    %{ctx | intent: %{ctx.intent | frame: frame}, tab_bar: tab_bar}
   end
 end

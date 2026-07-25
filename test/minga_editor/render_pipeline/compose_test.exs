@@ -21,7 +21,7 @@ defmodule MingaEditor.RenderPipeline.ComposeTest do
     layout = Layout.get(state)
     {scrolls, state} = run_scroll_stage(state, layout)
     {contents, cursor_info, state} = Content.build_content(state, scrolls)
-    chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
+    chrome = state.intent.frame.shell.build_chrome(state, layout, scrolls, cursor_info)
     {contents, chrome, cursor_info, state}
   end
 

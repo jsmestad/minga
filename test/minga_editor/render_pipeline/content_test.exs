@@ -124,7 +124,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
       {_frames, _cursor, state} = Content.build_content(state, scrolls)
 
-      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
+      [{_win_id, window}] = Map.to_list(state.windows.map)
 
       # After rendering, dirty_lines should be cleared
       assert window.render_cache.dirty_lines == %{}
@@ -162,7 +162,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       {[content], _cursor, output} = Content.build_agent_chat_content(input, layout)
 
       [prompt_model] = content.models
-      updated_window = Map.fetch!(output.workspace.windows.map, win_id)
+      updated_window = Map.fetch!(output.windows.map, win_id)
 
       {content_row, _content_col, _content_width, _content_height} =
         layout.window_layouts[win_id].content

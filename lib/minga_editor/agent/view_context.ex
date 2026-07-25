@@ -87,14 +87,15 @@ defmodule MingaEditor.Agent.ViewContext do
   end
 
   @spec build_pipeline_context(Input.t()) :: t()
-  defp build_pipeline_context(input) do
-    agent = MingaEditor.Shell.Traditional.State.agent(input.shell_state)
+  defp build_pipeline_context(%Input{} = input) do
+    frame = input.intent.frame
+    agent = MingaEditor.Shell.Traditional.State.agent(frame.shell_state)
 
     %__MODULE__{
-      session: input.shell.active_session(input.shell_state),
+      session: frame.shell.active_session(frame.shell_state),
       ui_state: input.workspace.agent_ui,
-      capabilities: input.capabilities,
-      theme: input.theme,
+      capabilities: frame.capabilities,
+      theme: frame.theme,
       layout_rect: nil,
       editing: input.workspace.editing,
       buffers: input.workspace.buffers,

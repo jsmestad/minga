@@ -1196,13 +1196,13 @@ defmodule MingaEditor.Shell.RegistryTest do
 
     new_entry = Registry.get(:fake)
     assert new_entry.generation > old_entry.generation
-    refute Identity.matches?(input.shell_identity, new_entry)
+    refute Identity.matches?(input.intent.frame.shell_identity, new_entry)
 
     writeback = %MingaEditor.Renderer.RenderReceipt{
       layout: :rendered_layout,
       focus_tree: :rendered_focus_tree,
       shell_id: :fake,
-      shell_identity: input.shell_identity,
+      shell_identity: input.intent.frame.shell_identity,
       click_regions: nil,
       frame_seq: 1,
       keyframe?: false,

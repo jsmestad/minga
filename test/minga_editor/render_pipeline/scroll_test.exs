@@ -91,7 +91,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
 
       {_scrolls, state, _layout} = run_through_scroll(state)
-      window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+      window = Map.fetch!(state.windows.map, state.windows.active)
 
       assert {_cache_key, 20} = window.render_cache.total_visual_rows_cache
     end
@@ -314,7 +314,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
     test "first frame marks all lines dirty on the window" do
       state = base_state()
       {_scrolls, state, _layout} = run_through_scroll(state)
-      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
+      [{_win_id, window}] = Map.to_list(state.windows.map)
 
       # First frame: sentinel values trigger full invalidation
       assert window.render_cache.dirty_lines == :all

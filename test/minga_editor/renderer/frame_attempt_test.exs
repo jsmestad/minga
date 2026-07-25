@@ -1,11 +1,9 @@
 defmodule MingaEditor.Renderer.FrameAttemptTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.FrameAttempt
-  alias MingaEditor.State.Windows
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.TestHelpers
 
   test "new stores exact attempt identity" do
     intent = intent()
@@ -48,14 +46,8 @@ defmodule MingaEditor.Renderer.FrameAttemptTest do
   end
 
   defp intent do
-    %Input{
-      port_manager: self(),
-      theme: :theme,
-      capabilities: %Capabilities{},
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      workspace: %{windows: %Windows{}}
-    }
-    |> Intent.from_input()
+    TestHelpers.base_state()
+    |> Input.from_editor_state()
+    |> Map.fetch!(:intent)
   end
 end

@@ -13,8 +13,12 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.FrameIntent
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.RenderPipeline.WorkspaceIntent
+  alias MingaEditor.Shell.Runtime, as: ShellRuntime
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.State, as: RendererState
@@ -23,9 +27,8 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State.Render
   alias MingaEditor.State.RenderCorrelation
-  alias MingaEditor.UI.Panel.MessageStore
-  alias MingaEditor.Viewport
   alias MingaEditor.Renderer.RenderWindow, as: Window
+  alias MingaEditor.State.Windows
 
   @async_render_timeout 5_000
 
@@ -129,7 +132,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     snapshot = Input.from_editor_state(state)
     frame_ref = Minga.Test.HeadlessPort.prepare_await(state.frontend.port_manager)
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 123)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 123)
 
     assert {:ok, _screen} =
              Minga.Test.HeadlessPort.collect_frame(frame_ref, @async_render_timeout)
@@ -144,8 +147,8 @@ defmodule MingaEditor.Renderer.ServerTest do
     parent = self()
     renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
     initial_caches = %Caches{last_emitted_frame_seq: 10}
-    in_flight = stub_snapshot() |> Map.put(:caches, initial_caches) |> Intent.from_input()
-    pending = stub_snapshot() |> Map.put(:caches, initial_caches) |> Intent.from_input()
+    in_flight = stub_snapshot() |> Map.put(:caches, initial_caches) |> intent_of()
+    pending = stub_snapshot() |> Map.put(:caches, initial_caches) |> intent_of()
 
     token = make_ref()
 
@@ -173,12 +176,12 @@ defmodule MingaEditor.Renderer.ServerTest do
     buffer = state.workspace.buffers.active
     renderer = start_ack_renderer(self(), pipeline: lineage_probe_pipeline(self()))
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 70)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 70)
     assert_receive {:lineage_probe, 70, nil, 0, [0, 1, 2], 0}, @async_render_timeout
 
     :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
     :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 71)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 71)
     RendererServer.frame_status(renderer, {:frame_applied, 1, 70})
 
     assert_receive {:lineage_probe, 71, [3, 0, 1, 2], 1, [3, 0, 1, 2], 1},
@@ -191,12 +194,12 @@ defmodule MingaEditor.Renderer.ServerTest do
     buffer = state.workspace.buffers.active
     renderer = start_ack_renderer(self(), pipeline: lineage_probe_pipeline(self()))
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 80)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 80)
     assert_receive {:lineage_probe, 80, nil, 0, [0, 1], 0}, @async_render_timeout
 
     :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
     :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 81)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 81)
     reject_base_sequence_mismatch(renderer, 1, 80, 0)
     assert_receive {:lineage_probe, 81, nil, 0, [0, 1, 2], 1}, @async_render_timeout
     RendererServer.frame_status(renderer, {:frame_applied, 2, 81})
@@ -211,7 +214,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     renderer =
       start_renderer(self(), pipeline: failing_lineage_probe_pipeline(self(), failure_mode))
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 89)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 89)
     assert_receive {:lineage_probe, 89, nil, 0, [0, 1], 0}, @async_render_timeout
     assert_receive {:render_done, %RenderReceipt{frame_seq: 89}}, @async_render_timeout
 
@@ -223,8 +226,8 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     :sys.replace_state(renderer, fn renderer_state ->
       renderer_state
-      |> RendererState.schedule_frame(FrameAttempt.new(Intent.from_input(snapshot), 90, 0), token)
-      |> elem_from_coalesce(FrameAttempt.new(Intent.from_input(snapshot), 91, 0))
+      |> RendererState.schedule_frame(FrameAttempt.new(snapshot.intent, 90, 0), token)
+      |> elem_from_coalesce(FrameAttempt.new(snapshot.intent, 91, 0))
     end)
 
     send(renderer, {:do_render, token})
@@ -242,7 +245,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       %{state | caches: %Caches{last_emitted_frame_seq: 11}}
     end)
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(stale_editor_snapshot), 12)
+    RendererServer.cast_snapshot(renderer, stale_editor_snapshot.intent, 12)
 
     assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
 
@@ -263,7 +266,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       %{state | caches: %Caches{last_emitted_frame_seq: 11}}
     end)
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(reset_snapshot), 12)
+    RendererServer.cast_snapshot(renderer, reset_snapshot.intent, 12)
 
     assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
 
@@ -463,7 +466,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "identical terminal intent stays blocked until capability state changes" do
       renderer = start_ack_renderer(self())
       snapshot = stub_snapshot()
-      intent = Intent.from_input(snapshot)
+      intent = snapshot.intent
 
       RendererServer.cast_snapshot(renderer, intent, 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
@@ -477,12 +480,13 @@ defmodule MingaEditor.Renderer.ServerTest do
       RendererServer.cast_snapshot(renderer, intent, 21)
       refute_receive {:ack_pipeline, 21, _, _, _}, 50
 
-      changed = %{
-        snapshot
-        | capabilities: %{snapshot.capabilities | semantic_ui: true}
-      }
+      changed =
+        put_frame(snapshot, %{
+          snapshot.intent.frame
+          | capabilities: %{snapshot.intent.frame.capabilities | semantic_ui: true}
+        })
 
-      RendererServer.cast_snapshot(renderer, Intent.from_input(changed), 22)
+      RendererServer.cast_snapshot(renderer, changed.intent, 22)
       assert_receive {:ack_pipeline, 22, 1, 0, true}, @async_render_timeout
       assert RendererServer.terminal_failure(renderer) == nil
     end
@@ -492,11 +496,22 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       snapshot = stub_snapshot()
       policy = ResourcePolicy.new(1, 64 * 1_048_576, 0, 0)
-      snapshot = %{snapshot | capabilities: %{snapshot.capabilities | resource_policy: policy}}
-      rejected_intent = Intent.from_input(snapshot)
 
-      adapted_snapshot = %{snapshot | capabilities: %{snapshot.capabilities | semantic_ui: true}}
-      adapted_intent = Intent.from_input(adapted_snapshot)
+      snapshot =
+        put_frame(snapshot, %{
+          snapshot.intent.frame
+          | capabilities: %{snapshot.intent.frame.capabilities | resource_policy: policy}
+        })
+
+      rejected_intent = snapshot.intent
+
+      adapted_snapshot =
+        put_frame(snapshot, %{
+          snapshot.intent.frame
+          | capabilities: %{snapshot.intent.frame.capabilities | semantic_ui: true}
+        })
+
+      adapted_intent = adapted_snapshot.intent
 
       RendererServer.cast_snapshot(renderer, rejected_intent, 30)
       assert_receive {:adaptation_pipeline, 30, 1, 0, true, false}, @async_render_timeout
@@ -654,15 +669,15 @@ defmodule MingaEditor.Renderer.ServerTest do
       renderer = start_ack_renderer(self())
       snapshot = stub_snapshot()
 
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 100)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 100)
       assert_receive {:ack_pipeline, 100, 1, 0, true}, @async_render_timeout
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 101)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 101)
 
       :ok = :sys.suspend(renderer)
       RendererServer.frame_status(renderer, {:frame_applied, 1, 100})
 
       call_ref = make_ref()
-      intent = MingaEditor.RenderPipeline.Intent.from_input(snapshot)
+      intent = snapshot.intent
 
       send(
         renderer,
@@ -679,7 +694,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       monitor = Process.monitor(renderer)
       refute_receive {:DOWN, ^monitor, :process, ^renderer, _reason}, 50
 
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 103)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 103)
       refute_receive {:ack_pipeline, 103, _, _, _}, 50
       RendererServer.frame_status(renderer, {:frame_applied, 2, 102})
       assert_receive {:ack_pipeline, 103, 2, 102, false}, @async_render_timeout
@@ -690,17 +705,12 @@ defmodule MingaEditor.Renderer.ServerTest do
       state = build_editor_state(:tui, nil)
       snapshot = Input.from_editor_state(state)
 
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 40)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 40)
       assert_receive {:targeted_pipeline, 40, 1, 0, true, [1]}, @async_render_timeout
       RendererServer.frame_status(renderer, {:frame_applied, 1, 40})
       assert_receive {:render_done, %RenderReceipt{frame_seq: 40}}, @async_render_timeout
 
-      clean_snapshot =
-        Map.update!(snapshot, :caches, fn caches ->
-          %{caches | last_emitted_frame_seq: 40, last_acknowledged_frame_seq: 40}
-        end)
-
-      RendererServer.cast_snapshot(renderer, Intent.from_input(clean_snapshot), 41)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 41)
       assert_receive {:targeted_pipeline, 41, 1, 40, false, []}, @async_render_timeout
       RendererServer.frame_status(renderer, {:window_ref_miss, 1, 41, 40, 1})
 
@@ -717,7 +727,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(130)
       attach_line_fetch_handler()
 
-      :ok = RendererServer.reset_connection(renderer, Intent.from_input(snapshot), 10)
+      :ok = RendererServer.reset_connection(renderer, snapshot.intent, 10)
 
       assert_receive {:resident_probe, 10, 2, true, 130, nil, fresh_epoch},
                      @async_render_timeout
@@ -733,7 +743,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       :ok = Minga.Buffer.Process.move_to(buffer, {64, 0})
       :ok = Minga.Buffer.Process.insert_text(buffer, "Z")
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 11)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 11)
 
       assert_receive {:resident_probe, 11, 2, false, 1, [{64, 1, 1}], ^fresh_epoch},
                      @async_render_timeout
@@ -746,7 +756,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
       :ok = Minga.Buffer.Process.insert_text(buffer, "first\n")
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 20)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 20)
 
       assert_receive {:resident_probe_paused, 20}, @async_render_timeout
       :ok = Minga.Buffer.Process.move_to(buffer, {100, 0})
@@ -764,7 +774,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(130)
       attach_line_fetch_handler()
 
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 20)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 20)
       assert_receive {:resident_probe, 20, 1, false, 0, [], ^epoch}, @async_render_timeout
       assert_receive {:line_fetch, %{lines_fetched: 24}, %{full_residence?: true}}
 
@@ -784,7 +794,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       :ok = Minga.Buffer.Process.move_to(buffer, {64, 0})
       :ok = Minga.Buffer.Process.insert_text(buffer, "Z")
-      RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 30)
+      RendererServer.cast_snapshot(renderer, snapshot.intent, 30)
 
       assert_receive {:resident_probe, 30, 2, false, 1, [{64, 1, 1}], ^fresh_epoch},
                      @async_render_timeout
@@ -1045,7 +1055,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     snapshot = Input.from_editor_state(state)
     renderer = start_ack_renderer(self(), pipeline: pipeline || resident_probe_pipeline(self()))
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 1)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 1)
 
     assert_receive {:resident_probe, 1, 1, true, _first_rows, nil, _first_epoch},
                    @async_render_timeout
@@ -1053,7 +1063,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     RendererServer.frame_status(renderer, {:frame_applied, 1, 1})
     assert_receive {:render_done, %RenderReceipt{frame_seq: 1}}, @async_render_timeout
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 2)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 2)
 
     assert_receive {:resident_probe, 2, 1, false, ^line_count, nil, epoch},
                    @async_render_timeout
@@ -1061,7 +1071,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     RendererServer.frame_status(renderer, {:frame_applied, 1, 2})
     assert_receive {:render_done, %RenderReceipt{frame_seq: 2}}, @async_render_timeout
 
-    RendererServer.cast_snapshot(renderer, Intent.from_input(snapshot), 3)
+    RendererServer.cast_snapshot(renderer, snapshot.intent, 3)
     assert_receive {:resident_probe, 3, 1, false, 0, [], ^epoch}, @async_render_timeout
     RendererServer.frame_status(renderer, {:frame_applied, 1, 3})
     assert_receive {:render_done, %RenderReceipt{frame_seq: 3}}, @async_render_timeout
@@ -1116,7 +1126,9 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       {contents, _cursor, output} = Content.build_content(input, scrolls)
       model = contents |> List.first() |> Map.fetch!(:models) |> List.first()
-      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+
+      keyframe? =
+        input.intent.frame.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
 
       splices =
         if model.row_delta do
@@ -1158,7 +1170,8 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp acknowledgement_probe_pipeline(parent) do
     fn input ->
-      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+      keyframe? =
+        input.intent.frame.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
 
       send(parent, {
         :ack_pipeline,
@@ -1181,7 +1194,8 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp adaptation_probe_pipeline(parent) do
     fn input ->
-      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+      keyframe? =
+        input.intent.frame.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
 
       send(parent, {
         :adaptation_pipeline,
@@ -1189,7 +1203,7 @@ defmodule MingaEditor.Renderer.ServerTest do
         input.caches.recovery_generation,
         input.caches.last_acknowledged_frame_seq,
         keyframe?,
-        input.capabilities.semantic_ui
+        input.intent.frame.capabilities.semantic_ui
       })
 
       %{
@@ -1227,7 +1241,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   defp maybe_fail_lineage_pipeline(output, false), do: output
 
   defp update_lineage(input, parent) do
-    {window_id, window} = Enum.at(input.workspace.windows.map, 0)
+    {window_id, window} = Enum.at(input.windows.map, 0)
     input_identity = Window.line_identity(window)
     input_ids = if input_identity, do: LineIdentity.source_ids(input_identity), else: nil
     input_sequence = window.render_cache.applied_change_sequence
@@ -1247,21 +1261,21 @@ defmodule MingaEditor.Renderer.ServerTest do
       updated_window.render_cache.applied_change_sequence
     })
 
-    windows = input.workspace.windows
-    workspace = input.workspace
+    windows = input.windows
     updated_windows = %{windows | map: Map.put(windows.map, window_id, updated_window)}
-    %{input | workspace: %{workspace | windows: updated_windows}}
+    %{input | windows: updated_windows}
   end
 
   defp targeted_probe_pipeline(parent) do
     fn input ->
       reset_windows =
-        input.workspace.windows.map
+        input.windows.map
         |> Enum.filter(fn {_id, window} -> window.render_cache.reset_pending end)
         |> Enum.map(&elem(&1, 0))
         |> Enum.sort()
 
-      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+      keyframe? =
+        input.intent.frame.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
 
       send(parent, {
         :targeted_pipeline,
@@ -1273,16 +1287,13 @@ defmodule MingaEditor.Renderer.ServerTest do
       })
 
       windows =
-        Map.new(input.workspace.windows.map, fn {id, window} ->
+        Map.new(input.windows.map, fn {id, window} ->
           {id, %{window | render_cache: %{window.render_cache | reset_pending: false}}}
         end)
 
       %{
         input
-        | workspace: %{
-            input.workspace
-            | windows: %{input.workspace.windows | map: windows}
-          },
+        | windows: %{input.windows | map: windows},
           caches: %{
             input.caches
             | last_emitted_frame_seq: input.frame_seq,
@@ -1295,7 +1306,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   defp emit_commit_frame(input) do
     # The HeadlessPort fires :frame_ready on commit_frame (#2219), so a minimal
     # pipeline stub only needs to send a frame terminator.
-    MingaEditor.Frontend.send_commands(input.port_manager, [
+    MingaEditor.Frontend.send_commands(input.intent.frame.port_manager, [
       MingaEditor.Frontend.Protocol.encode_commit_frame(input.frame_seq || 0)
     ])
 
@@ -1367,20 +1378,114 @@ defmodule MingaEditor.Renderer.ServerTest do
     )
   end
 
-  defp stub_intent, do: Intent.from_input(stub_snapshot())
+  defp stub_intent, do: stub_snapshot().intent
+
+  defp intent_of(%Input{} = input), do: input.intent
+
+  defp put_frame(%Input{} = input, frame) do
+    %{input | intent: %{input.intent | frame: frame}}
+  end
 
   defp stub_snapshot do
-    %Input{
-      port_manager: self(),
-      theme: MingaEditor.UI.Theme.get!(:doom_one),
+    intent = manual_intent()
+
+    windows = %Windows{
+      tree: intent.window_layout.tree,
+      map: manual_render_windows(intent),
+      active: intent.window_layout.active,
+      next_id: intent.window_layout.next_id
+    }
+
+    Input.from_intent(
+      intent,
+      windows,
+      %Caches{},
+      MingaEditor.UI.FontRegistry.new(),
+      intent.frame.message_store
+    )
+  end
+
+  defp manual_intent do
+    window = manual_window_intent()
+
+    %Intent{
+      frame: manual_frame_intent(),
+      workspace: manual_workspace_intent(),
+      windows: %{1 => window},
+      window_layout: %{tree: MingaEditor.WindowTree.new(1), active: 1, next_id: 2},
+      buffer_versions: %{},
+      revision: 0
+    }
+  end
+
+  defp manual_render_windows(%Intent{} = intent) do
+    Map.new(intent.windows, fn {id, %WindowIntent{} = window} ->
+      {id, WindowIntent.materialize(id, window, MingaEditor.Renderer.WindowCache.reset())}
+    end)
+  end
+
+  defp manual_window_intent do
+    %WindowIntent{
+      content: {:empty, :semantic},
+      viewport: MingaEditor.Viewport.new(24, 80),
+      cursor: {0, 0},
+      fold_map: %MingaEditor.FoldMap{folds: []},
+      fold_ranges: [],
+      popup_meta: nil,
+      scroll_velocity: %MingaEditor.Window.ScrollVelocity{},
+      scroll_detach_cursor: nil,
+      scroll_echo_top: nil,
+      authoritative_scroll_seq: 0
+    }
+  end
+
+  defp manual_workspace_intent do
+    %WorkspaceIntent{
+      buffers: %MingaEditor.State.Buffers{},
+      file_tree: %MingaEditor.State.FileTree{},
+      agent_ui: MingaEditor.Agent.UIState.new(),
+      editing: MingaEditor.VimState.new(),
+      document_highlights: nil,
+      cmd_hover_link: nil,
+      mouse: %MingaEditor.State.Mouse{},
+      search: %MingaEditor.State.Search{},
+      keymap_scope: :editor,
+      launchpad: nil
+    }
+  end
+
+  defp manual_frame_intent do
+    shell_entry = MingaEditor.Shell.Registry.get(:traditional)
+
+    shell_runtime = ShellRuntime.new(shell_entry, %MingaEditor.Shell.Traditional.State{})
+
+    %FrameIntent{
+      port_manager: nil,
+      theme: MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default()),
       capabilities: %MingaEditor.Frontend.Capabilities{},
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      workspace: %{
-        windows: %MingaEditor.State.Windows{},
-        viewport: Viewport.new(24, 80)
-      },
-      message_store: MessageStore.new()
+      shell_id: ShellRuntime.id(shell_runtime),
+      shell: ShellRuntime.module(shell_runtime),
+      shell_identity: ShellRuntime.identity(shell_runtime),
+      shell_state: ShellRuntime.state(shell_runtime),
+      message_store: MingaEditor.UI.Panel.MessageStore.new(),
+      notifications: [],
+      sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
+      face_override_registries: %{},
+      editing_model: :vim,
+      backend: :tui,
+      layout: nil,
+      focus_tree: nil,
+      diff_views: %{},
+      git_syncing: false,
+      status_bar_data: nil,
+      highlighting: %MingaEditor.State.Highlighting{},
+      semantic_tokens: %{},
+      terminal_viewport: MingaEditor.Viewport.new(24, 80),
+      last_input_seq: 0,
+      force_keyframe?: false,
+      line_spacing: 1.0,
+      cursor_animate: nil,
+      gui_config_state: nil
     }
   end
 
@@ -1391,7 +1496,8 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   defp build_editor_state(backend, renderer_pid, content \\ "test") do
-    buf = start_supervised!({Minga.Buffer, content: content})
+    buf =
+      start_supervised!(Supervisor.child_spec({Minga.Buffer, content: content}, id: make_ref()))
 
     workspace = %MingaEditor.Session.State{
       buffers: %MingaEditor.State.Buffers{
@@ -1409,7 +1515,10 @@ defmodule MingaEditor.Renderer.ServerTest do
       keymap_scope: :editor
     }
 
-    port = start_supervised!({Minga.Test.HeadlessPort, width: 80, height: 24})
+    port =
+      start_supervised!(
+        Supervisor.child_spec({Minga.Test.HeadlessPort, width: 80, height: 24}, id: make_ref())
+      )
 
     %MingaEditor.State{
       frontend: %MingaEditor.State.Frontend{backend: backend, port_manager: port},

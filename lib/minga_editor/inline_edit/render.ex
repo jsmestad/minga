@@ -12,6 +12,8 @@ defmodule MingaEditor.InlineEdit.Render do
   alias Minga.Core.Face
   alias MingaEditor.InlineOverlay.Render, as: Overlay
   alias MingaEditor.State.InlineEdit
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @group :inline_edit
 
@@ -81,11 +83,13 @@ defmodule MingaEditor.InlineEdit.Render do
   defp face(:help), do: Face.new(fg: 0x808080)
 
   @spec inline_edits(term()) :: InlineEdit.store()
-  defp inline_edits(%{shell_state: shell_state}),
-    do: MingaEditor.Shell.Traditional.State.inline_edits(shell_state)
+  defp inline_edits(%Input{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}}),
+    do: TraditionalState.inline_edits(shell_state)
 
-  defp inline_edits(%{shell_runtime: %{state: shell_state}}),
-    do: MingaEditor.Shell.Traditional.State.inline_edits(shell_state)
+  defp inline_edits(%MingaEditor.State{
+         shell_runtime: %{state: %TraditionalState{} = shell_state}
+       }),
+       do: TraditionalState.inline_edits(shell_state)
 
   defp inline_edits(_state), do: %{}
 end

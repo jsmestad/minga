@@ -5,6 +5,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
   alias Minga.Project.FileTree, as: ProjectFileTree
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
 
   describe "build/1" do
     test "returns hidden semantic file tree when context has no file_tree" do
@@ -284,22 +286,13 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
     file_tree = Keyword.get(opts, :file_tree, nil)
     theme = Keyword.get(opts, :theme, :doom_one)
 
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: self(),
-      capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: MingaEditor.UI.Theme.get!(theme),
-      font_registry: MingaEditor.UI.FontRegistry.new(),
-      windows: %MingaEditor.State.Windows{map: %{}, active: 1},
-      layout: %MingaEditor.Layout{
-        terminal: {0, 0, 80, 24},
-        editor_area: {0, 0, 80, 24},
-        minibuffer: {23, 0, 80, 1},
-        window_layouts: %{}
-      },
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %{},
-      file_tree: file_tree,
-      buffers: %MingaEditor.State.Buffers{}
-    }
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    workspace = %{ctx.workspace | file_tree: file_tree || %FileTreeState{}}
+    frame = %{ctx.intent.frame | theme: MingaEditor.UI.Theme.get!(theme)}
+
+    %{ctx | workspace: workspace, intent: %{ctx.intent | frame: frame, workspace: workspace}}
   end
 end

@@ -33,7 +33,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
   @spec commit(State.t(), Input.t(), Intent.t()) :: State.t()
   def commit(%State{} = state, %Input{} = output, %Intent{}) do
     residents =
-      Enum.reduce(output.workspace.windows.map, state.resident_windows, fn {id, window}, acc ->
+      Enum.reduce(output.windows.map, state.resident_windows, fn {id, window}, acc ->
         case Map.get(acc, id) do
           %ResidentWindowState{} = resident ->
             version = ObservedBuffers.recorded_version(state.observed_buffers, resident.buffer)
@@ -220,19 +220,17 @@ defmodule MingaEditor.Renderer.BufferChanges do
         {id, WindowIntent.materialize(id, carrier, cache)}
       end)
 
-    windows = struct!(Windows, Map.put(intent.window_layout, :map, map))
-    workspace = intent.workspace |> Map.from_struct() |> Map.put(:windows, windows)
+    windows =
+      Windows.new(
+        intent.window_layout.tree,
+        intent.window_layout.active,
+        intent.window_layout.next_id,
+        map
+      )
+
     message_store = merge_message_store(intent.frame.message_store, state.message_store)
 
-    intent.frame
-    |> Map.from_struct()
-    |> Map.merge(%{
-      workspace: workspace,
-      caches: state.caches,
-      font_registry: state.font_registry,
-      message_store: message_store
-    })
-    |> then(&struct!(Input, &1))
+    Input.from_intent(intent, windows, state.caches, state.font_registry, message_store)
   end
 
   @spec materialize_cache(State.t(), MingaEditor.Window.id()) ::

@@ -2,13 +2,10 @@ defmodule MingaEditor.RenderPipeline.Intent do
   @moduledoc """
   Cache-free Editor-to-Renderer frame intent.
 
-  Pipeline and workspace fields use explicit allowlisted boundary structs;
-  windows use `WindowIntent`. No `Input`, editor `Window`, renderer cache,
-  resident store, font registry, or acknowledgement state crosses the boundary.
+  Pipeline and workspace fields use explicit allowlisted boundary structs; windows use `WindowIntent`. No `Input`, editor `Window`, renderer cache, resident store, font registry, or acknowledgement state crosses the boundary.
   """
 
   alias MingaEditor.RenderPipeline.FrameIntent
-  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.RenderPipeline.WorkspaceIntent
   alias MingaEditor.State, as: EditorState
@@ -28,18 +25,14 @@ defmodule MingaEditor.RenderPipeline.Intent do
         }
 
   @spec from_editor_state(EditorState.t(), non_neg_integer()) :: t()
-  def from_editor_state(%EditorState{} = state, revision \\ 0),
-    do: state |> Input.from_editor_state() |> from_input(revision)
-
-  @spec from_input(Input.t(), non_neg_integer()) :: t()
-  def from_input(%Input{} = input, revision \\ 0) do
-    windows = input.workspace.windows
-    carriers = Map.new(windows.map, fn {id, window} -> {id, WindowIntent.from_window(window)} end)
+  def from_editor_state(%EditorState{} = state, revision \\ 0) do
+    windows = state.workspace.windows
 
     %__MODULE__{
-      frame: FrameIntent.from_input(input),
-      workspace: WorkspaceIntent.from_workspace(input.workspace),
-      windows: carriers,
+      frame: FrameIntent.from_editor_state(state),
+      workspace: WorkspaceIntent.from_workspace(state.workspace),
+      windows:
+        Map.new(windows.map, fn {id, window} -> {id, WindowIntent.from_window(window)} end),
       window_layout: %{tree: windows.tree, active: windows.active, next_id: windows.next_id},
       buffer_versions: buffer_versions(windows.map),
       revision: revision
@@ -51,8 +44,9 @@ defmodule MingaEditor.RenderPipeline.Intent do
   def force_keyframe(%__MODULE__{} = intent),
     do: %{intent | frame: FrameIntent.force_keyframe(intent.frame)}
 
-  @spec buffer_versions(%{optional(Window.id()) => Window.t()}) ::
-          %{optional(pid()) => non_neg_integer()}
+  @spec buffer_versions(%{optional(Window.id()) => Window.t()}) :: %{
+          optional(pid()) => non_neg_integer()
+        }
   defp buffer_versions(windows) do
     Enum.reduce(windows, %{}, fn
       {_id,

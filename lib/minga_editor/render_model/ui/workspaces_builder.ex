@@ -4,14 +4,15 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
   alias Minga.RenderModel.UI.Workspaces
   alias Minga.RenderModel.UI.Workspaces.VisibleTab
   alias Minga.RenderModel.UI.Workspaces.Workspace
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
   alias MingaEditor.State.TabBar
 
   @spec build(map()) :: Workspaces.t()
-  def build(%{shell_state: %{tab_bar: %TabBar{}}} = ctx) do
-    chrome_state = ChromeState.from_editor_state(ctx)
+  def build(%Context{tab_bar: %TabBar{}} = ctx) do
+    chrome_state = ChromeState.from_editor_state(chrome_state_input(ctx))
 
     %Workspaces{
       visible?: true,
@@ -60,6 +61,17 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
       pinned?: tab.pinned?,
       ephemeral?: tab.ephemeral?,
       tint_color: tab.tint_color
+    }
+  end
+
+  defp chrome_state_input(%Context{} = ctx) do
+    %{
+      tab_bar: ctx.tab_bar,
+      workspace: %{
+        buffers: ctx.workspace.buffers,
+        file_tree: ctx.workspace.file_tree,
+        keymap_scope: ctx.workspace.keymap_scope
+      }
     }
   end
 end

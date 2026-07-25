@@ -11,7 +11,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
   @max_native_popup_lines 400
 
   @spec build(Context.t()) :: FloatPopup.t()
-  def build(%Context{shell_state: %TraditionalState{} = shell_state} = ctx) do
+  def build(%Context{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}} = ctx) do
     case shell_state |> TraditionalState.observatory() |> Observatory.inspection() do
       %{visible: true} = inspection -> float_popup_model(inspection)
       _hidden -> build_window_popup(ctx)
@@ -47,7 +47,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
   @spec build_float_popup_model(Context.t(), MingaEditor.Window.t()) :: FloatPopup.t()
   defp build_float_popup_model(ctx, %{content: {:buffer, buffer}} = window) do
     rule = window.popup_meta.rule
-    vp = ctx.viewport
+    vp = ctx.intent.frame.terminal_viewport
 
     width = resolve_float_dim(rule, :width, vp.cols)
     height = resolve_float_dim(rule, :height, vp.rows)

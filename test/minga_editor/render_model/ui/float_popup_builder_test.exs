@@ -81,6 +81,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
   defp build_minimal_context(shell_state) do
     state = gui_state()
     ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(state)
-    %{ctx | shell_state: shell_state}
+    frame = %{ctx.intent.frame | shell_state: shell_state}
+    %{ctx | intent: %{ctx.intent | frame: frame}}
   end
 end

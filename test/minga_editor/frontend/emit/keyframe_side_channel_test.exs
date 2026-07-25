@@ -110,17 +110,22 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
   end
 
   defp emit_and_capture(frame, state, caches, opts) do
-    ctx = %{
-      Context.from_editor_state(state)
-      | frame_seq: Keyword.fetch!(opts, :frame_seq),
-        force_keyframe?: Keyword.get(opts, :force_keyframe?, false)
-    }
+    ctx =
+      state
+      |> Context.from_editor_state()
+      |> Map.put(:frame_seq, Keyword.fetch!(opts, :frame_seq))
+      |> put_force_keyframe(Keyword.get(opts, :force_keyframe?, false))
 
     {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
 
     assert_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
 
     {nil, new_caches}
+  end
+
+  defp put_force_keyframe(ctx, force?) do
+    frame = %{ctx.intent.frame | force_keyframe?: force?}
+    %{ctx | intent: %{ctx.intent | frame: frame}}
   end
 
   defp flush_side_channels(title_op, bg_op) do

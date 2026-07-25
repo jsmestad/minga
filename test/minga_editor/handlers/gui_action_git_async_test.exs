@@ -114,7 +114,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
            }
 
     assert EffectScheduler.active?(scheduler, GitMutation)
-    assert Context.from_editor_state(state).git_syncing
+    assert Context.from_editor_state(state).intent.frame.git_syncing
     refute_received {:stub_git_commit, ^git_root, "after stage", []}
 
     send(stage_worker, :unblock_stub_stage)
@@ -134,7 +134,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     assert feedback(state).message == "Committed stub000"
     assert feedback(state).status == :success
     refute EffectScheduler.active?(scheduler, GitMutation)
-    refute Context.from_editor_state(state).git_syncing
+    refute Context.from_editor_state(state).intent.frame.git_syncing
   end
 
   test "dispatch returns before a blocked repository resolver is released", context do

@@ -4,6 +4,8 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilderTest do
   alias Minga.RenderModel.UI.Sidebars
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
 
   describe "build/1" do
     test "builds semantic sidebars model from context with default sidebar registry" do
@@ -61,22 +63,8 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilderTest do
   end
 
   defp build_minimal_context(sidebar_registry) do
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: self(),
-      capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: MingaEditor.UI.Theme.get!(:doom_one),
-      font_registry: MingaEditor.UI.FontRegistry.new(),
-      windows: %MingaEditor.State.Windows{map: %{}, active: 1},
-      layout: %MingaEditor.Layout{
-        terminal: {0, 0, 80, 24},
-        editor_area: {0, 0, 80, 24},
-        minibuffer: {23, 0, 80, 1},
-        window_layouts: %{}
-      },
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %{},
-      sidebar_registry: sidebar_registry
-    }
+    TestHelpers.base_state(port_manager: nil, sidebar_registry: sidebar_registry)
+    |> Context.from_editor_state()
   end
 
   defp start_sidebar_registry do

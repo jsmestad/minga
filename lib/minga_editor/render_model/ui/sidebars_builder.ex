@@ -46,7 +46,7 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
   @spec active_sidebar_id(Context.t(), [SidebarModel.t()], Sidebar.entry() | nil) :: String.t()
   defp active_sidebar_id(ctx, sidebars, registered_active) do
     registered_id = active_registered_sidebar_id(sidebars, registered_active)
-    preferred_id = preferred_sidebar_id(ctx.shell_state)
+    preferred_id = preferred_sidebar_id(ctx.intent.frame.shell_state)
 
     case registered_id || sidebar_visible_id(sidebars, preferred_id) do
       id when is_binary(id) -> id

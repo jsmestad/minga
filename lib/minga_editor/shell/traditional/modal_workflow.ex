@@ -71,7 +71,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   def completion(%EditorState{shell_runtime: %Runtime{state: %ShellState{} = shell_state}}),
     do: shell_state |> ShellState.modal() |> ModalOverlay.completion()
 
-  def completion(%Input{shell_state: %ShellState{} = shell_state}),
+  def completion(%Input{intent: %{frame: %{shell_state: %ShellState{} = shell_state}}}),
     do: shell_state |> ShellState.modal() |> ModalOverlay.completion()
 
   def completion(%EditorState{}), do: nil
@@ -84,7 +84,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
       }),
       do: shell_state |> ShellState.modal() |> ModalOverlay.completion_trigger()
 
-  def completion_trigger(%Input{shell_state: %ShellState{} = shell_state}),
+  def completion_trigger(%Input{intent: %{frame: %{shell_state: %ShellState{} = shell_state}}}),
     do: shell_state |> ShellState.modal() |> ModalOverlay.completion_trigger()
 
   def completion_trigger(%EditorState{}), do: MingaEditor.CompletionTrigger.new()
@@ -128,7 +128,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
       }),
       do: shell_state |> ShellState.modal() |> ModalOverlay.command_completion()
 
-  def command_completion(%Input{shell_state: %ShellState{} = shell_state}),
+  def command_completion(%Input{intent: %{frame: %{shell_state: %ShellState{} = shell_state}}}),
     do: shell_state |> ShellState.modal() |> ModalOverlay.command_completion()
 
   def command_completion(%EditorState{}), do: nil

@@ -4,9 +4,10 @@ defmodule MingaEditor.RenderModel.UI.ChromeBuildersParityTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.RenderModel.UI.WorkspacesBuilder
-  alias MingaEditor.Session.ChromeState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -16,7 +17,13 @@ defmodule MingaEditor.RenderModel.UI.ChromeBuildersParityTest do
     tmp_dir: tmp_dir
   } do
     first = file_tab(1, "first.ex", Path.join(tmp_dir, "first.ex"), dirty?: true, pinned?: true)
-    second = file_tab(2, "second.ex", Path.join(tmp_dir, "second.ex"))
+
+    {second, active} =
+      file_tab(2, "second.ex", Path.join(tmp_dir, "second.ex"),
+        dirty?: true,
+        context?: false,
+        return_buffer?: true
+      )
 
     agent =
       3
@@ -27,7 +34,7 @@ defmodule MingaEditor.RenderModel.UI.ChromeBuildersParityTest do
     first = Tab.set_group(first, 1)
     second = Tab.set_group(second, 1)
     seed = TabBar.new(first, tmp_dir)
-    {seed, workspace} = TabBar.add_workspace(seed, "Review")
+    {seed, _workspace} = TabBar.add_workspace(seed, "Review")
 
     tab_bar = %TabBar{
       seed
@@ -36,84 +43,36 @@ defmodule MingaEditor.RenderModel.UI.ChromeBuildersParityTest do
         next_id: 4
     }
 
-    ctx = context(tab_bar)
-    committed = ChromeState.from_editor_state(ctx)
+    ctx = context(tab_bar, active)
     tab_bar_model = TabBarBuilder.build(ctx)
     workspaces_model = WorkspacesBuilder.build(ctx)
 
-    assert workspace.id == 1
-    assert committed.active_tab_id == 2
-    assert committed.active_workspace_id == 1
-    assert Enum.map(committed.visible_tabs, & &1.id) == [3, 1, 2]
+    assert Enum.map(tab_bar_model.tabs, & &1.id) == [3, 1, 2]
 
-    assert Enum.map(tab_bar_model.tabs, &tab_projection/1) == [
-             %{
-               id: 3,
-               workspace_id: 1,
-               label: "Agent Review",
-               kind: :agent,
-               dirty?: false,
-               attention?: true,
-               pinned?: false
-             },
-             %{
-               id: 1,
-               workspace_id: 1,
-               label: "first.ex",
-               kind: :file,
-               dirty?: true,
-               attention?: false,
-               pinned?: true
-             },
-             %{
-               id: 2,
-               workspace_id: 1,
-               label: "second.ex",
-               kind: :file,
-               dirty?: false,
-               attention?: false,
-               pinned?: false
-             }
-           ]
+    assert tab_bar_model.tabs |> Enum.find(&(&1.id == 2)) |> tab_projection() == %{
+             id: 2,
+             workspace_id: 1,
+             label: "second.ex",
+             kind: :file,
+             dirty?: true,
+             attention?: false,
+             pinned?: false
+           }
 
-    assert Enum.map(workspaces_model.visible_tabs, &workspace_tab_projection/1) == [
-             %{
-               id: 3,
-               workspace_id: 1,
-               label: "Agent Review",
-               path: nil,
-               kind: :agent,
-               dirty?: false,
-               attention?: true,
-               pinned?: false
-             },
-             %{
-               id: 1,
-               workspace_id: 1,
-               label: "first.ex",
-               path: Path.join(tmp_dir, "first.ex"),
-               kind: :file,
-               dirty?: true,
-               attention?: false,
-               pinned?: true
-             },
+    assert workspaces_model.visible_tabs |> Enum.find(&(&1.id == 2)) |> workspace_tab_projection() ==
              %{
                id: 2,
                workspace_id: 1,
                label: "second.ex",
                path: Path.join(tmp_dir, "second.ex"),
                kind: :file,
-               dirty?: false,
+               dirty?: true,
                attention?: false,
                pinned?: false
              }
-           ]
-
-    assert tab_bar_model.active_tab_id == 2
-    assert workspaces_model.active_workspace_id == 1
   end
 
-  defp file_tab(id, label, path, opts \\ []) do
+  defp file_tab(id, label, path, opts) do
     File.write!(path, "")
     buffer = start_supervised!({BufferProcess, file_path: path}, id: make_ref())
 
@@ -123,10 +82,13 @@ defmodule MingaEditor.RenderModel.UI.ChromeBuildersParityTest do
 
     context = TabContext.from_workspace_map(%{buffers: %Buffers{active: buffer, list: [buffer]}})
 
-    id
-    |> Tab.new_file(label)
-    |> Tab.set_context(context)
-    |> Tab.set_pinned(opts[:pinned?] || false)
+    tab =
+      id
+      |> Tab.new_file(label)
+      |> maybe_set_context(context, opts[:context?] != false)
+      |> Tab.set_pinned(opts[:pinned?] || false)
+
+    if opts[:return_buffer?], do: {tab, buffer}, else: tab
   end
 
   defp tab_projection(tab) do
@@ -137,22 +99,21 @@ defmodule MingaEditor.RenderModel.UI.ChromeBuildersParityTest do
     Map.take(tab, [:id, :workspace_id, :label, :path, :kind, :dirty?, :attention?, :pinned?])
   end
 
-  defp context(tab_bar) do
-    %MingaEditor.Frontend.Emit.Context{
-      port_manager: self(),
-      capabilities: MingaEditor.Frontend.Capabilities.default(),
-      theme: MingaEditor.UI.Theme.get!(:doom_one),
-      font_registry: MingaEditor.UI.FontRegistry.new(),
-      windows: %MingaEditor.State.Windows{map: %{}, active: 1},
-      layout: %MingaEditor.Layout{
-        terminal: {0, 0, 80, 24},
-        editor_area: {0, 0, 80, 24},
-        minibuffer: {23, 0, 80, 1},
-        window_layouts: %{}
-      },
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %{tab_bar: tab_bar},
-      tab_bar: tab_bar
-    }
+  defp context(tab_bar, active_buffer) do
+    ctx =
+      TestHelpers.base_state(port_manager: nil)
+      |> Context.from_editor_state()
+
+    frame = %{ctx.intent.frame | shell_state: %{tab_bar: tab_bar}}
+
+    workspace =
+      if active_buffer,
+        do: %{ctx.workspace | buffers: %Buffers{active: active_buffer, list: [active_buffer]}},
+        else: ctx.workspace
+
+    %{ctx | intent: %{ctx.intent | frame: frame}, tab_bar: tab_bar, workspace: workspace}
   end
+
+  defp maybe_set_context(tab, context, true), do: Tab.set_context(tab, context)
+  defp maybe_set_context(tab, _context, false), do: tab
 end

@@ -9,7 +9,7 @@ defmodule MingaEditor.RenderModel.UI.SplitSeparatorsBuilder do
   def build(%Context{} = ctx) do
     if MingaEditor.State.Windows.split?(ctx.windows) do
       %SplitSeparators{
-        border_color_rgb: ctx.theme.editor.split_border_fg,
+        border_color_rgb: ctx.intent.frame.theme.editor.split_border_fg,
         verticals:
           ChromeHelpers.collect_vertical_separators(ctx.windows.tree, ctx.layout.editor_area),
         horizontals: ctx.layout.horizontal_separators

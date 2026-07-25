@@ -26,8 +26,8 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilder do
   end
 
   @spec build_standard(Context.t()) :: TabBar.t()
-  defp build_standard(%{shell_state: %{tab_bar: %TabBarState{}}} = ctx) do
-    chrome_state = ChromeState.from_editor_state(ctx)
+  defp build_standard(%Context{tab_bar: %TabBarState{}} = ctx) do
+    chrome_state = ChromeState.from_editor_state(chrome_state_input(ctx))
 
     %TabBar{
       visible?: true,
@@ -55,7 +55,9 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilder do
   end
 
   @spec shell_gui_payload(Context.t()) :: term()
-  defp shell_gui_payload(%{shell: shell} = ctx) do
+  defp shell_gui_payload(%Context{} = ctx) do
+    shell = ctx.intent.frame.shell
+
     if function_exported?(shell, :gui_payload, 1) do
       shell.gui_payload(ctx)
     else
@@ -63,5 +65,16 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilder do
     end
   rescue
     _ -> nil
+  end
+
+  defp chrome_state_input(%Context{} = ctx) do
+    %{
+      tab_bar: ctx.tab_bar,
+      workspace: %{
+        buffers: ctx.workspace.buffers,
+        file_tree: ctx.workspace.file_tree,
+        keymap_scope: ctx.workspace.keymap_scope
+      }
+    }
   end
 end
