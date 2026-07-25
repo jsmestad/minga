@@ -53,7 +53,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {"lib/minga_editor/commands/formatting.ex", 72},
     {"lib/minga_editor/commands/buffer_management.ex", 2198},
     {"lib/minga_editor/ui/picker/workspace_symbol_source.ex", 46},
-    {"lib/minga_editor/ui/picker/code_action_source.ex", 118},
+    {"lib/minga_editor/ui/picker/code_action_source.ex", 114},
     {"lib/minga_editor/agent/slash_command.ex", 1293},
     {"lib/minga_editor/agent/slash_command.ex", 1371},
     {"lib/minga_editor/ui/picker/todo_search_source.ex", 99},

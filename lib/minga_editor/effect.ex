@@ -17,4 +17,6 @@ defmodule MingaEditor.Effect do
   @callback coalesce(request(), request()) :: request()
   @callback apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
   @callback render?(Outcome.t()) :: boolean()
+
+  @optional_callbacks [coalesce: 2]
 end

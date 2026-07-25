@@ -18,10 +18,6 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   def title, do: "Remote file changed"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{picker_ui: %{context: %{buffer: buffer, path: path, content: content}}})
       when is_pid(buffer) and is_binary(path) and is_binary(content) do
@@ -97,10 +93,6 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
         "Remote diff failed: #{inspect(reason)}"
       )
   end
-
-  @impl true
-  @spec on_cancel(EditorState.t()) :: EditorState.t()
-  def on_cancel(state), do: state
 
   @spec show_diff(EditorState.t(), String.t(), DiffReview.t()) :: EditorState.t()
   defp show_diff(state, path, review) do

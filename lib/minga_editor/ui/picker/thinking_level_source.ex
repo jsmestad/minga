@@ -22,10 +22,6 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   def title, do: "Agent Thinking"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec layout() :: MingaEditor.UI.Picker.Source.layout()
   def layout, do: :centered
 
@@ -44,10 +40,6 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   def on_select(%Item{id: level}, state) when is_binary(level) do
     MingaEditor.Commands.Agent.set_thinking_level(state, level)
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 
   @spec format_level({String.t(), String.t()}, String.t() | nil) :: Item.t()
   defp format_level({level, description}, current_level) do

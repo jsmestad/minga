@@ -41,11 +41,6 @@ defmodule MingaEditor.Input.AgentMouse do
   # ── Handler callbacks ──────────────────────────────────────────────────────
 
   @impl true
-  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
-          MingaEditor.Input.Handler.result()
-  def handle_key(state, _cp, _mods), do: {:passthrough, state}
-
-  @impl true
   @spec handle_mouse_at_node(
           state(),
           FocusNode.t(),

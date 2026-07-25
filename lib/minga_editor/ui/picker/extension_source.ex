@@ -44,10 +44,6 @@ defmodule MingaEditor.UI.Picker.ExtensionSource do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Checking #{name} for updates...")
   end
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec source_description(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()

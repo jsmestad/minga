@@ -73,10 +73,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
 
   def on_select(_, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   @spec group_icon(Workspace.t()) :: String.t()

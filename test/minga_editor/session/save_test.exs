@@ -7,6 +7,7 @@ defmodule MingaEditor.Session.SaveTest do
   alias Minga.Session.Snapshot
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Session.Save
+  alias MingaEditor.Effect.Request
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -24,8 +25,8 @@ defmodule MingaEditor.Session.SaveTest do
     older = Save.request(snapshot(false), session_dir: dir)
     newer = Save.request(snapshot(true), session_dir: dir)
 
-    coalesced = older.handler.coalesce(older.effect, newer.effect)
-    assert coalesced.snapshot.clean_shutdown
+    coalesced = Request.coalesce(older, newer)
+    assert coalesced.effect.snapshot.clean_shutdown
   end
 
   test "run writes a loadable session and completed/canceled/stale application is state-neutral",

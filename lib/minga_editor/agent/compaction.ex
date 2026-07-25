@@ -69,10 +69,6 @@ defmodule MingaEditor.Agent.Compaction do
   end
 
   @impl true
-  @spec coalesce(t(), t()) :: t()
-  def coalesce(%__MODULE__{}, %__MODULE__{} = newer), do: newer
-
-  @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
   def apply(
         %EditorState{} = state,

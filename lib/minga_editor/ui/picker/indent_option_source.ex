@@ -46,10 +46,6 @@ defmodule MingaEditor.UI.Picker.IndentOptionSource do
 
   def on_select(_item, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec option_spec(Options.option_name()) :: {Options.option_name(), term(), term(), String.t()}
   defp option_spec(name) do
     Enum.find(Options.option_specs(), fn {option_name, _type, _default, _description} ->

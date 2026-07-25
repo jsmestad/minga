@@ -14,10 +14,6 @@ defmodule MingaEditor.UI.Picker.RemoteServerSource do
   def title, do: "Start agent session"
 
   @impl true
-  @spec preview?() :: boolean()
-  def preview?, do: false
-
-  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_ctx) do
     local = %Item{id: :local, label: "Local", description: "Start on this machine"}
@@ -41,8 +37,4 @@ defmodule MingaEditor.UI.Picker.RemoteServerSource do
   def on_select(%Item{id: {:remote, server_name}}, state) do
     AgentSession.start_remote_session(state, server_name)
   end
-
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
 end

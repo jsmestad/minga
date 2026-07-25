@@ -215,15 +215,6 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
     end
   end
 
-  describe "on_cancel/1" do
-    test "preserves current workspace" do
-      tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      state = editor_state(tb, start_buffer("a"))
-
-      assert PendingReviewsSource.on_cancel(state) == state
-    end
-  end
-
   describe "candidates/1 exclusion coverage" do
     test "excludes clean and in-progress workspaces", %{tmp_dir: dir} do
       tb = TabBar.new(Tab.new_file(1, "a.ex"), dir)

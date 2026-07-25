@@ -203,6 +203,19 @@ defmodule MingaEditor.PickerUITest do
     def on_action(_action, _item, state), do: state
   end
 
+  defmodule NoCancelSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    @impl true
+    def title, do: "No cancel"
+
+    @impl true
+    def candidates(_ctx), do: [%Item{id: :no_cancel, label: "No cancel"}]
+
+    @impl true
+    def on_select(_item, state), do: state
+  end
+
   defp state_with_scheduler do
     task_supervisor =
       start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
@@ -242,6 +255,18 @@ defmodule MingaEditor.PickerUITest do
     Enum.reduce(1..length(picker.items), picker, fn _, acc ->
       Picker.toggle_mark(acc) |> Picker.move_down()
     end)
+  end
+
+  describe "picker cancel" do
+    test "Escape closes a picker whose source omits on_cancel/1 without changing editor state" do
+      state = TestHelpers.base_state(rendering: :disabled)
+      opened = PickerUI.open(state, NoCancelSource)
+
+      canceled = PickerUI.handle_key(opened, 27, 0)
+
+      assert canceled.shell_runtime.state.modal == :none
+      assert canceled.workspace == state.workspace
+    end
   end
 
   describe "async picker lifecycle" do

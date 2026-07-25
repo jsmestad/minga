@@ -4,8 +4,10 @@ defmodule MingaEditor.Input.Handler do
 
   Each handler module decides whether to consume a key press or pass it
   through to the next handler in the shell-provided overlay or surface list.
-  Handlers self-gate: they return `{:passthrough, state}` when their feature
-  is inactive (e.g., the picker handler passes through when no picker is open).
+  Key-capable handlers self-gate by returning `{:passthrough, state}` when
+  their feature is inactive (e.g., the picker handler passes through when no
+  picker is open). Mouse-only handlers may omit `handle_key/3`; the router
+  treats the missing callback as passthrough.
 
   ## State contract
 
@@ -52,7 +54,8 @@ defmodule MingaEditor.Input.Handler do
   Returns `{:handled, state}` if this handler consumed the key, or
   `{:passthrough, state}` if the key should be forwarded to the next
   handler in the ordered list. The handler may modify state even when passing
-  through (e.g., clearing a transient flag).
+  through (e.g., clearing a transient flag). Mouse-only handlers may omit this
+  callback and will pass keyboard input through unchanged.
   """
   @callback handle_key(
               handler_state(),
@@ -91,5 +94,5 @@ defmodule MingaEditor.Input.Handler do
               click_count :: pos_integer()
             ) :: result()
 
-  @optional_callbacks [handle_mouse: 7, handle_mouse_at_node: 8]
+  @optional_callbacks [handle_key: 3, handle_mouse: 7, handle_mouse_at_node: 8]
 end

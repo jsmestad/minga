@@ -61,11 +61,4 @@ defmodule MingaEditor.UI.Picker.CommandHelpSourceTest do
       assert save_item.annotation =~ "SPC f s"
     end
   end
-
-  describe "on_cancel/1" do
-    test "returns state unchanged" do
-      state = %{foo: :bar}
-      assert CommandHelpSource.on_cancel(state) == state
-    end
-  end
 end

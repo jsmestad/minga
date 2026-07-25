@@ -43,10 +43,6 @@ defmodule MingaEditor.UI.Picker.Sources.ToolUninstall do
     end
   end
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec format_date(DateTime.t()) :: String.t()
   defp format_date(dt) do
     Calendar.strftime(dt, "%Y-%m-%d")

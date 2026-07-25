@@ -39,10 +39,6 @@ defmodule MingaEditor.UI.Picker.OptionSource do
 
   def on_select(_item, state), do: state
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec builtin_items(Options.server(), atom() | nil, pid() | nil) :: [Item.t()]
   defp builtin_items(options_server, filetype, buffer) do
     Enum.map(Options.option_specs(), fn {name, _type, default, description} ->

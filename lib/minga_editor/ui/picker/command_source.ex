@@ -62,10 +62,6 @@ defmodule MingaEditor.UI.Picker.CommandSource do
     end
   end
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec lookup_command(atom()) :: Command.t() | nil

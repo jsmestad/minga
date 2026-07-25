@@ -53,10 +53,6 @@ defmodule MingaEditor.UI.Picker.ProjectRemoveSource do
     @remove_prefix <> name <> @remove_suffix
   end
 
-  @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state), do: state
-
   @spec item(String.t()) :: Item.t()
   defp item(root) do
     %Item{id: root, label: Path.basename(root), description: root}

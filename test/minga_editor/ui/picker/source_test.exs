@@ -21,9 +21,6 @@ defmodule MingaEditor.UI.Picker.SourceTest do
 
     @impl true
     def on_select(_item, state), do: state
-
-    @impl true
-    def on_cancel(state), do: state
   end
 
   defmodule WithPreviewSource do
@@ -147,6 +144,14 @@ defmodule MingaEditor.UI.Picker.SourceTest do
 
     test "returns true for source with actions and on_action callbacks" do
       assert Source.has_actions?(WithActionsSource)
+    end
+  end
+
+  describe "on_cancel/3" do
+    test "returns the unchanged state when the source omits on_cancel/1" do
+      state = base_state()
+
+      assert Source.on_cancel(NoActionsSource, state) === state
     end
   end
 
