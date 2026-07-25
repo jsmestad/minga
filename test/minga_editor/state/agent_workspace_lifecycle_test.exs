@@ -22,6 +22,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
@@ -127,16 +128,27 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert prompt_text(state.workspace.agent_ui) == ""
   end
 
-  test "switching to inactive remote workspace drains queued catch-up once" do
+  @tag :tmp_dir
+  test "switching to inactive remote workspace commits replay cursor after successful replay", %{
+    tmp_dir: dir
+  } do
     state = state_with_agent_workspace_tabs()
     initial_tab_id = TabBar.active(state.shell_runtime.state.tab_bar).id
-    catchup = [EventRecord.new("remote-session", :message_changed, %{})]
+    catchup = [%{EventRecord.new("remote-session", :message_changed, %{}) | id: 42}]
 
     {tab_bar, agent_tab} = TabBar.add(state.shell_runtime.state.tab_bar, :agent, "Remote Agent")
     {tab_bar, remote_workspace} = TabBar.add_workspace(tab_bar, "Remote Agent")
 
+    remote_workspace =
+      remote_workspace
+      |> Workspace.with_project_root(dir)
+      |> Workspace.put_remote_session("home", "remote-session", :connected, 41)
+
+    assert :ok = Persistence.write(remote_workspace, remote_workspace.project_root)
+
     tab_bar =
       tab_bar
+      |> TabBar.accept_workspace(remote_workspace)
       |> TabBar.move_tab_to_workspace(agent_tab.id, remote_workspace.id)
       |> TabBar.set_workspace_agent_ui(remote_workspace.id, UIState.new())
       |> TabBar.set_workspace_pending_catchup_events(remote_workspace.id, catchup)
@@ -168,6 +180,15 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert first_version == initial_version + 1
     assert workspace_payload(drained_workspace).pending_catchup_events == []
+    assert workspace_payload(drained_workspace).remote_session.last_seen_event_id == 42
+
+    assert {:ok, persisted} =
+             Persistence.read(
+               Persistence.path_for(remote_workspace.project_root, remote_workspace.id),
+               remote_workspace.project_root
+             )
+
+    assert workspace_payload(persisted).remote_session.last_seen_event_id == 42
 
     state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
     state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
