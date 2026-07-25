@@ -332,8 +332,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   defp put_window_fingerprints(%Caches{} = caches, window_id, content_fp, overlay_fp, window) do
     caches = %{
       caches
-      | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
-        last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
+      | last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
         last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
         pending_window_delta_ids: MapSet.delete(caches.pending_window_delta_ids, window_id)
     }
@@ -351,8 +350,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   defp put_window_delta_pending(%Caches{} = caches, window_id, content_fp, overlay_fp, window) do
     caches = %{
       caches
-      | last_window_fps: Map.put(caches.last_window_fps, window_id, content_fp),
-        last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
+      | last_window_content_fps: Map.put(caches.last_window_content_fps, window_id, content_fp),
         last_window_overlay_fps: Map.put(caches.last_window_overlay_fps, window_id, overlay_fp),
         pending_window_delta_ids: MapSet.put(caches.pending_window_delta_ids, window_id)
     }
