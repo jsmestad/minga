@@ -8,8 +8,8 @@ defmodule MingaEditor.State.TabBar do
 
   ## Invariants
 
-  - There is always at least one tab.
-  - `active_id` always refers to an existing tab.
+  - `active_id: nil` means no tab is active.
+  - When `active_id` is non-nil, it points at an existing tab.
   - Tab ids are unique and monotonically increasing.
   """
 
@@ -24,7 +24,7 @@ defmodule MingaEditor.State.TabBar do
   @typedoc "Tab bar state."
   @type t :: %__MODULE__{
           tabs: [Tab.t()],
-          active_id: Tab.id(),
+          active_id: Tab.id() | nil,
           next_id: Tab.id(),
           workspaces: [Workspace.t()],
           next_workspace_id: pos_integer()
@@ -32,8 +32,8 @@ defmodule MingaEditor.State.TabBar do
 
   @enforce_keys [:tabs, :active_id, :next_id]
   defstruct tabs: [],
-            active_id: 1,
-            next_id: 2,
+            active_id: nil,
+            next_id: 1,
             workspaces: [],
             next_workspace_id: 1
 
@@ -48,19 +48,13 @@ defmodule MingaEditor.State.TabBar do
     }
   end
 
-  @doc """
-  Creates a tab bar with no tabs, for a zero-buffers launchpad startup (#2689).
-
-  `active_id` keeps its dangling default (1) — `active/1` returns nil for an
-  empty bar — so `next_id` starts at 2 to guarantee no restored or added tab
-  ever collides with the dangling active id.
-  """
+  @doc "Creates a tab bar with no tabs, for a zero-buffers launchpad startup (#2689)."
   @spec new_empty(String.t() | nil) :: t()
   def new_empty(project_root \\ nil) do
     %__MODULE__{
       tabs: [],
-      active_id: 1,
-      next_id: 2,
+      active_id: nil,
+      next_id: 1,
       workspaces: [Workspace.new_manual(project_root)]
     }
   end
@@ -78,13 +72,13 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc "Returns the number of tabs."
-  @spec count(t()) :: pos_integer()
+  @spec count(t()) :: non_neg_integer()
   def count(%__MODULE__{tabs: tabs}), do: length(tabs)
 
-  @doc "Returns the index of the active tab (0-based)."
-  @spec active_index(t()) :: non_neg_integer()
+  @doc "Returns the index of the active tab (0-based), or nil when no tab is active."
+  @spec active_index(t()) :: non_neg_integer() | nil
   def active_index(%__MODULE__{tabs: tabs, active_id: id}) do
-    Enum.find_index(tabs, &(&1.id == id)) || 0
+    Enum.find_index(tabs, &(&1.id == id))
   end
 
   @doc """
@@ -103,7 +97,7 @@ defmodule MingaEditor.State.TabBar do
 
   Returns `{updated_tab_bar, new_tab}`. The caller is responsible for
   calling `switch_to/2` or `EditorState.switch_tab/2` to activate it.
-  This is the primitive that `add/3` and `EditorState.add_buffer/2` build on.
+  Empty insertion creates the first real tab id without activating it.
   """
   @spec insert(t(), Tab.kind(), String.t()) :: {t(), Tab.t()}
   def insert(%__MODULE__{} = tb, kind, label \\ "") do
@@ -113,7 +107,7 @@ defmodule MingaEditor.State.TabBar do
         :agent -> Tab.new_agent(tb.next_id, label)
       end
 
-    active_idx = active_index(tb)
+    active_idx = active_index(tb) || length(tb.tabs) - 1
     {before, rest} = Enum.split(tb.tabs, active_idx + 1)
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     new_tabs = before ++ [tab] ++ rest
@@ -138,7 +132,7 @@ defmodule MingaEditor.State.TabBar do
       case {Enum.find(remaining, &(&1.id == active_id)), remaining} do
         {%Tab{}, _} -> active_id
         {nil, [%Tab{id: first_id} | _]} -> first_id
-        {nil, []} -> active_id
+        {nil, []} -> nil
       end
 
     %{tb | tabs: remaining, active_id: new_active}
@@ -259,7 +253,9 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc "Updates the context of the tab with the given id."
-  @spec update_context(t(), Tab.id(), Tab.context() | Tab.legacy_context()) :: t()
+  @spec update_context(t(), Tab.id() | nil, Tab.context() | Tab.legacy_context()) :: t()
+  def update_context(%__MODULE__{} = tb, nil, _context), do: tb
+
   def update_context(%__MODULE__{tabs: tabs} = tb, id, context) do
     new_tabs =
       Enum.map(tabs, fn
@@ -270,8 +266,8 @@ defmodule MingaEditor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
-  @doc "Snapshots the outgoing tab and activates an existing target tab atomically."
-  @spec snapshot_and_switch(t(), Tab.id(), Tab.context(), Tab.id()) :: t()
+  @doc "Snapshots the outgoing tab, if any, and activates an existing target tab atomically."
+  @spec snapshot_and_switch(t(), Tab.id() | nil, Tab.context(), Tab.id()) :: t()
   def snapshot_and_switch(%__MODULE__{} = tab_bar, current_id, context, target_id) do
     if has_tab?(tab_bar, target_id) do
       tab_bar
@@ -434,17 +430,25 @@ defmodule MingaEditor.State.TabBar do
 
   @doc "Toggles the pinned state of the active tab."
   @spec toggle_active_pin(t()) :: t()
+  def toggle_active_pin(%__MODULE__{active_id: nil} = tb), do: tb
+
   def toggle_active_pin(%__MODULE__{active_id: id} = tb) do
     replace_matching_tab(tb, id, &Tab.toggle_pinned/1)
   end
 
   @doc "Moves the active tab one visible slot left within its workspace."
   @spec move_active_tab_left(t()) :: t()
-  def move_active_tab_left(%__MODULE__{} = tb), do: move_tab(tb, tb.active_id, -1)
+  def move_active_tab_left(%__MODULE__{active_id: nil} = tb), do: tb
+
+  def move_active_tab_left(%__MODULE__{active_id: active_id} = tb),
+    do: move_tab(tb, active_id, -1)
 
   @doc "Moves the active tab one visible slot right within its workspace."
   @spec move_active_tab_right(t()) :: t()
-  def move_active_tab_right(%__MODULE__{} = tb), do: move_tab(tb, tb.active_id, 1)
+  def move_active_tab_right(%__MODULE__{active_id: nil} = tb), do: tb
+
+  def move_active_tab_right(%__MODULE__{active_id: active_id} = tb),
+    do: move_tab(tb, active_id, 1)
 
   @doc "Moves the tab with the given id one visible slot left within its workspace."
   @spec move_tab_left(t(), Tab.id()) :: t()
@@ -1145,6 +1149,7 @@ defmodule MingaEditor.State.TabBar do
     tb = %{
       tb
       | tabs: tabs,
+        active_id: restored_active_id(tb.active_id, tabs),
         next_id: next_id,
         workspaces: workspaces,
         next_workspace_id: next_restored_workspace_id(workspaces)
@@ -1181,6 +1186,15 @@ defmodule MingaEditor.State.TabBar do
       nil -> nil
     end
   end
+
+  @spec restored_active_id(Tab.id() | nil, [Tab.t()]) :: Tab.id() | nil
+  defp restored_active_id(nil, _tabs), do: nil
+
+  defp restored_active_id(active_id, [%Tab{id: first_id} | _] = tabs) do
+    if Enum.any?(tabs, &(&1.id == active_id)), do: active_id, else: first_id
+  end
+
+  defp restored_active_id(_active_id, []), do: nil
 
   @spec ensure_manual_workspace([Workspace.t()], String.t() | nil) :: [Workspace.t()]
   defp ensure_manual_workspace(workspaces, project_root) do

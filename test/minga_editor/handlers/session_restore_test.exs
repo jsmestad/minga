@@ -132,6 +132,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       SessionRestore.restore_session(%{state | frontend: %{state.frontend | backend: :tui}})
 
     assert [] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
+    assert restored.shell_runtime.state.tab_bar.active_id == nil
     refute_receive :request_code_lens_and_inlay_hints, 900
   end
 

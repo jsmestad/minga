@@ -128,6 +128,12 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       assert TabBar.get(switched.shell_runtime.state.tab_bar, tab2.id).context.buffers.active ==
                buf_b
     end
+
+    test "selecting workspace with no visible target is unchanged" do
+      state = editor_state(TabBar.new_empty(), start_buffer("a"), :normal)
+
+      assert WorkspaceSource.on_select(%Item{id: 0, label: "Manual"}, state) == state
+    end
   end
 
   describe "on_cancel/1" do

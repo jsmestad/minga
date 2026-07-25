@@ -197,6 +197,22 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
       assert switched.shell_runtime.state.tab_bar.active_id == tab2.id
       assert switched.workspace.buffers.active == buf_b
     end
+
+    test "non-restored pending workspace with no visible target is unchanged" do
+      {_tab_bar, tab} = TabBar.new_empty() |> TabBar.insert(:agent, "Agent")
+
+      tab_bar =
+        %{
+          TabBar.new_empty()
+          | tabs: [%{tab | group_id: 0}],
+            next_id: tab.id + 1
+        }
+        |> put_workspace(0, &Workspace.set_review(&1, review(:needs_review)))
+
+      state = editor_state(tab_bar, start_buffer("a"))
+
+      assert PendingReviewsSource.on_select(%Item{id: 0, label: "Manual"}, state) == state
+    end
   end
 
   describe "on_cancel/1" do

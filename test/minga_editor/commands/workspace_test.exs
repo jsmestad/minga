@@ -250,6 +250,20 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert %EditorState{} = result
       assert result.shell_runtime.state.tab_bar.active_id == 2
     end
+
+    test "workspace_next is unchanged with an empty nil-active tab bar" do
+      state = make_state()
+      tab_bar = TabBar.new_empty("/tmp/minga-empty-launchpad")
+      shell_state = TraditionalState.install_tab_bar(Runtime.state(state.shell_runtime), tab_bar)
+
+      state = %{
+        state
+        | workspace: SessionState.enter_empty_state(state.workspace),
+          shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      assert Workspace.workspace_next(state) == state
+    end
   end
 
   describe "workspace_prev/1" do

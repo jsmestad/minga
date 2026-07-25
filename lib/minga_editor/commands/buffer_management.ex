@@ -978,11 +978,14 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp toggle_tab_pin(state), do: state
 
   @spec unpin_active_tab(state()) :: state()
-  defp unpin_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
+  defp unpin_active_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: active_id} = tb}}} = state
+       )
+       when is_integer(active_id) do
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(
         MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        MingaEditor.State.TabBar.unpin_tab(tb, tb.active_id)
+        MingaEditor.State.TabBar.unpin_tab(tb, active_id)
       )
 
     %{
@@ -2334,12 +2337,13 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp remove_current_tab(state, replacement_id \\ nil)
 
   defp remove_current_tab(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: active_id} = tb}}} = state,
          replacement_id
-       ) do
-    case TabBar.remove(tb, tb.active_id) do
+       )
+       when is_integer(active_id) do
+    case TabBar.remove(tb, active_id) do
       {:ok, new_tb} ->
-        state = EditorState.retire_lsp_operations_for_tab(state, tb.active_id)
+        state = EditorState.retire_lsp_operations_for_tab(state, active_id)
         tab_bar = maybe_switch_to_replacement(new_tb, replacement_id)
 
         shell_state =
@@ -2354,7 +2358,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         }
 
       :last_tab ->
-        EditorState.retire_lsp_operations_for_tab(state, tb.active_id)
+        EditorState.retire_lsp_operations_for_tab(state, active_id)
     end
   end
 

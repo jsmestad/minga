@@ -101,7 +101,7 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
     test "uses hidden-active sentinel when no visible tab is active" do
       model = %TabBar{
         visible?: true,
-        active_tab_id: 99,
+        active_tab_id: nil,
         tabs: [%Tab{id: 1, workspace_id: 2, label: "other.ex", icon: ""}]
       }
 
