@@ -623,6 +623,56 @@ defmodule MingaEditor.Input.RouterTest do
     %{state | render: render}
   end
 
+  describe "route_key/3" do
+    alias MingaEditor.KeystrokeHistory
+
+    test "routes a key locally without universal render housekeeping" do
+      state = base_state()
+      state = %{state | render: Render.connect_renderer(state.render, self())}
+      revision = state.render.render_correlation.latest_intent_revision
+
+      routed = Router.route_key(state, ?j, 0)
+
+      assert BufferProcess.cursor(routed.workspace.buffers.active) == {1, 0}
+      assert KeystrokeHistory.size(routed.interaction.keystroke_history) == 1
+      [entry] = KeystrokeHistory.entries(routed.interaction.keystroke_history)
+      assert entry.key == {?j, 0}
+      assert routed.render.render_correlation.latest_intent_revision == revision
+      refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+    end
+
+    test "preserves keyboard-specific completion handling for CUA insertion" do
+      state = base_state(editing_model: :cua)
+      BufferProcess.move_to(state.workspace.buffers.active, {0, 1})
+
+      completion =
+        Minga.Editing.Completion.new(
+          [
+            completion_item("print"),
+            completion_item("put"),
+            completion_item("assert")
+          ],
+          {0, 1}
+        )
+
+      payload = MingaEditor.State.ModalOverlay.Completion.new(1, completion: completion)
+
+      state = MingaEditor.Shell.Traditional.ModalWorkflow.open(state, {:completion, payload})
+
+      routed = Router.route_key(state, ?p, 0)
+
+      assert BufferProcess.content(routed.workspace.buffers.active) == "hpello\nworld\nthird"
+
+      labels =
+        routed
+        |> MingaEditor.Shell.Traditional.ModalWorkflow.completion()
+        |> Map.fetch!(:filtered)
+        |> Enum.map(& &1.label)
+
+      assert labels == ["print", "put"]
+    end
+  end
+
   describe "keystroke recording" do
     alias MingaEditor.KeystrokeHistory
 
@@ -651,5 +701,19 @@ defmodule MingaEditor.Input.RouterTest do
       keys = Enum.map(KeystrokeHistory.entries(state.interaction.keystroke_history), & &1.key)
       assert keys == [{?j, 0}, {?k, 0}, {?l, 0}]
     end
+  end
+
+  defp completion_item(label) do
+    %{
+      label: label,
+      insert_text: label,
+      filter_text: label,
+      kind: :function,
+      detail: "",
+      documentation: "",
+      sort_text: label,
+      text_edit: nil,
+      raw: nil
+    }
   end
 end

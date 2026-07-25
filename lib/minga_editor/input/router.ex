@@ -1,17 +1,15 @@
 defmodule MingaEditor.Input.Router do
   @moduledoc """
   Dispatches key presses through the active shell's overlay and surface
-  handler lists, then runs centralized post-action housekeeping.
+  handler lists.
 
-  `dispatch/3` asks the active shell for ordered `overlay` handlers first.
-  The first handler that returns `{:handled, state}` stops dispatch; if all
-  overlays pass through, the router repeats the same walk for the shell's
-  `surface` handlers.
+  `route_key/3` runs only key-local routing: notice preclear, pending-quit
+  key handling, shell availability, overlay/surface handler walking,
+  keystroke history, and keyboard-specific completion/signature-help updates.
 
-  After dispatch, `post_key_housekeeping/6` runs keyboard-specific steps
-  (completion triggering) then delegates to `post_action_housekeeping/2`
-  for the universal pipeline shared by all input paths (keyboard, mouse,
-  GUI actions).
+  `dispatch/3` is the full keyboard event convenience wrapper: it captures the
+  pre-action snapshot, calls `route_key/3`, then runs universal housekeeping
+  through `post_action_housekeeping/2`.
   """
 
   alias Minga.Buffer
@@ -62,13 +60,22 @@ defmodule MingaEditor.Input.Router do
   end
 
   @doc """
-  Dispatches a key press through shell-provided handlers and runs post-key housekeeping.
-
-  Captures the buffer version, active buffer, and mode before dispatch so
-  housekeeping can detect what changed.
+  Dispatches a full key press event and runs universal post-action housekeeping.
   """
   @spec dispatch(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def dispatch(state, codepoint, modifiers) do
+    snapshot = capture_snapshot(state)
+
+    state
+    |> route_key(codepoint, modifiers)
+    |> post_action_housekeeping(snapshot)
+  end
+
+  @doc """
+  Routes a key press through shell-provided handlers without universal housekeeping.
+  """
+  @spec route_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  def route_key(state, codepoint, modifiers) do
     # Ctrl-G owns explicit notice dismissal in Interrupt. Every other keyboard
     # command acknowledges an ordinary notice before any handler runs.
     state = preclear_notice(state, codepoint, modifiers)
@@ -78,7 +85,7 @@ defmodule MingaEditor.Input.Router do
     if state.session.pending_quit do
       return_dispatch_confirm_quit(state, codepoint)
     else
-      dispatch_normal(state, codepoint, modifiers)
+      route_key_normal(state, codepoint, modifiers)
     end
   end
 
@@ -91,46 +98,21 @@ defmodule MingaEditor.Input.Router do
     alias MingaEditor.Commands
 
     case codepoint do
-      ?y ->
-        Commands.execute(state, :confirm_quit_yes)
-
-      cancel when cancel in [?n, 27] ->
-        new_state = Commands.execute(state, :confirm_quit_no)
-        # Run housekeeping so the cleared prompt triggers a render.
-        post_key_housekeeping(
-          new_state,
-          state.workspace.buffers.active,
-          buffer_version(state),
-          Editing.mode(state),
-          Editing.inserting?(state),
-          {cancel, 0}
-        )
-
-      _ ->
-        state
+      ?y -> Commands.execute(state, :confirm_quit_yes)
+      cancel when cancel in [?n, 27] -> Commands.execute(state, :confirm_quit_no)
+      _ -> state
     end
   end
 
-  @spec dispatch_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
-  defp dispatch_normal(state, codepoint, modifiers) do
-    old_buffer = state.workspace.buffers.active
+  @spec route_key_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  defp route_key_normal(state, codepoint, modifiers) do
     old_mode = Editing.mode(state)
     was_inserting = Editing.inserting?(state)
-    buf_version_before = buffer_version(state)
-    old_cursor = safe_cursor(old_buffer)
 
-    state = dispatch_split(state, codepoint, modifiers)
-    state = record_keystroke(state, codepoint, modifiers, old_mode)
-
-    post_key_housekeeping(
-      state,
-      old_buffer,
-      buf_version_before,
-      old_mode,
-      was_inserting,
-      {codepoint, modifiers},
-      old_cursor
-    )
+    state
+    |> dispatch_split(codepoint, modifiers)
+    |> record_keystroke(codepoint, modifiers, old_mode)
+    |> maybe_handle_completion(was_inserting, codepoint, modifiers)
   end
 
   # Walks overlay handlers first (ConflictPrompt, Picker, Completion).
@@ -190,41 +172,6 @@ defmodule MingaEditor.Input.Router do
     |> maybe_schedule_document_highlight(snapshot.old_buffer, snapshot.old_cursor)
     |> LspActions.schedule_inlay_hints_on_scroll()
     |> maybe_render(snapshot.buf_version)
-  end
-
-  @doc """
-  Keyboard-specific post-key housekeeping. Handles completion triggering
-  (which needs the codepoint/modifiers), then delegates to
-  `post_action_housekeeping/2` for the universal pipeline.
-  """
-  @spec post_key_housekeeping(
-          EditorState.t(),
-          pid() | nil,
-          non_neg_integer(),
-          atom(),
-          boolean(),
-          {non_neg_integer(), non_neg_integer()},
-          {non_neg_integer(), non_neg_integer()} | nil
-        ) :: EditorState.t()
-  def post_key_housekeeping(
-        state,
-        old_buffer,
-        buf_version_before,
-        old_mode,
-        was_inserting,
-        {codepoint, modifiers},
-        old_cursor \\ nil
-      ) do
-    snapshot = %{
-      old_buffer: old_buffer,
-      buf_version: buf_version_before,
-      old_mode: old_mode,
-      old_cursor: old_cursor
-    }
-
-    state
-    |> maybe_handle_completion(was_inserting, codepoint, modifiers)
-    |> post_action_housekeeping(snapshot)
   end
 
   @spec maybe_handle_completion(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
