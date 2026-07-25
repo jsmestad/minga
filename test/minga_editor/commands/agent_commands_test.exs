@@ -1091,6 +1091,27 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert [%{files: [], payload: %WorkspaceAgent{session: session}}] = agent_workspaces
       assert is_pid(session)
     end
+
+    test "starting from an active agent workspace preserves session UI and clears the active workspace payload" do
+      state = active_agent_workspace_state()
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          state.workspace.agent_ui
+          |> MingaEditor.Agent.PromptBuffer.ensure()
+          |> MingaEditor.Agent.PromptBuffer.set_prompt_text("active draft")
+        )
+
+      new_state = AgentSession.start_agent_session(state)
+      active_workspace = TabBar.active_workspace(new_state.shell_runtime.state.tab_bar)
+
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) ==
+               "active draft"
+
+      assert %WorkspaceAgent{agent_ui: nil, session: session} = active_workspace.payload
+      assert is_pid(session)
+    end
   end
 
   test "detach remote session command disconnects workspace payload and agent tab payload" do

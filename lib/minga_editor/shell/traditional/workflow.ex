@@ -4,18 +4,16 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
   editor workflow boundary.
   """
 
-  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.InlineEdit
-  alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace
 
   @spec install_traditional_state(EditorState.t(), TraditionalState.t()) :: EditorState.t()
   defp install_traditional_state(%EditorState{} = state, %TraditionalState{} = shell_state) do
@@ -26,37 +24,8 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
     }
   end
 
-  @doc "Installs the active Traditional agent presentation and its workspace mirror."
+  @doc "Installs the active Traditional agent presentation."
   @spec install_agent_ui(EditorState.t(), UIState.t()) :: EditorState.t()
-  def install_agent_ui(
-        %EditorState{shell_runtime: %Runtime{state: %TraditionalState{}}} = state,
-        %UIState{} = agent_ui
-      ) do
-    shell_state = Runtime.state(state.shell_runtime)
-
-    shell_state =
-      case TraditionalState.tab_bar(shell_state) do
-        %TabBar{} = tab_bar ->
-          tab_bar =
-            case TabBar.active_workspace(tab_bar) do
-              %Workspace{id: workspace_id} ->
-                TabBar.set_workspace_agent_ui(tab_bar, workspace_id, agent_ui)
-
-              _ ->
-                tab_bar
-            end
-
-          TraditionalState.install_tab_bar(shell_state, tab_bar)
-
-        _ ->
-          shell_state
-      end
-
-    state = install_traditional_state(state, shell_state)
-    workspace = SessionState.set_agent_ui(state.workspace, agent_ui)
-    %{state | workspace: workspace}
-  end
-
   def install_agent_ui(%EditorState{} = state, %UIState{} = agent_ui),
     do: %{state | workspace: SessionState.set_agent_ui(state.workspace, agent_ui)}
 

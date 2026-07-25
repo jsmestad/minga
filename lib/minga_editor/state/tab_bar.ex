@@ -1070,8 +1070,8 @@ defmodule MingaEditor.State.TabBar do
     |> project_workspace_agent_tabs(workspace_id)
   end
 
-  @doc "Records the agent UI projection on the identified workspace."
-  @spec set_workspace_agent_ui(t(), non_neg_integer(), MingaEditor.Agent.UIState.t()) :: t()
+  @doc "Records the inactive agent UI projection on the identified workspace."
+  @spec set_workspace_agent_ui(t(), non_neg_integer(), MingaEditor.Agent.UIState.t() | nil) :: t()
   def set_workspace_agent_ui(tab_bar, workspace_id, agent_ui) do
     replace_matching_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, agent_ui))
   end

@@ -49,6 +49,9 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       state = AgentEvents.dispatch(state, {:text_delta, "hello"})
       assert state.workspace.agent_ui.panel.transcript.version == 1
+      workspace = TabBar.active_workspace(state.shell_runtime.state.tab_bar)
+      assert %WorkspaceAgent{agent_ui: workspace_ui} = workspace.payload
+      assert workspace_ui.panel.transcript.version == 0
 
       state = AgentEvents.dispatch(state, {:credentials_status, true})
       assert state.workspace.agent_ui.panel.credentials_configured
@@ -102,7 +105,7 @@ defmodule MingaEditor.State.EventRoutingTest do
     end
   end
 
-  describe "tab context excludes shell agent runtime and projected workspace agent UI" do
+  describe "tab context excludes shell agent runtime and active workspace agent UI" do
     test "snapshot_tab_context keeps routing state without shell runtime or agent UI projection" do
       %{state: state} = make_state()
 
@@ -121,7 +124,7 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       workspace = TabBar.active_workspace(state.shell_runtime.state.tab_bar)
       assert %WorkspaceAgent{agent_ui: agent_ui} = workspace.payload
-      assert agent_ui == state.workspace.agent_ui
+      refute agent_ui == state.workspace.agent_ui
       assert state.workspace.agent_ui.panel.input_focused
     end
   end

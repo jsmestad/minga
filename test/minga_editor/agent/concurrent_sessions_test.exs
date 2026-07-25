@@ -493,11 +493,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert switched.workspace.agent_ui.panel.transcript.version > 7
       assert switched.workspace.agent_ui.panel.transcript.version < 100
       assert switched.workspace.agent_ui.panel.transcript.version != 42
-      assert %WorkspaceAgent{agent_ui: drained_ui, pending_catchup_events: []} = drained.payload
-      assert drained_ui.panel.transcript.version != 42
-
-      assert drained_ui.panel.transcript.version ==
-               switched.workspace.agent_ui.panel.transcript.version
+      assert %WorkspaceAgent{agent_ui: nil, pending_catchup_events: []} = drained.payload
 
       assert TraditionalState.modal(switched.shell_runtime.state) == :none
       assert agent.spinner_timer != nil
@@ -515,6 +511,14 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       drain_spinner_ticks()
       refute_receive :agent_spinner_tick, 150
+
+      switched_away = MingaEditor.TabWorkflow.switch(switched, 1)
+
+      stashed =
+        TabBar.get_workspace(switched_away.shell_runtime.state.tab_bar, incoming_workspace.id)
+
+      assert stashed.payload.agent_ui.panel.transcript.version ==
+               switched.workspace.agent_ui.panel.transcript.version
     end
 
     test "switch_tab rebuilds a background agent tab's semantic transcript cache" do

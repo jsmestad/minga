@@ -809,17 +809,20 @@ defmodule MingaEditor.Commands.AgentSession do
   defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
     case reusable_agent_workspace(tb, session_pid) do
       %Workspace{id: workspace_id} ->
-        agent_ui = state.workspace.agent_ui
-
         workspace =
           tb
           |> TabBar.get_workspace(workspace_id)
           |> Workspace.set_session(session_pid)
-          |> Workspace.set_agent_ui(agent_ui)
 
         tb = TabBar.accept_workspace(tb, workspace)
 
-        sync_state_to_workspace(state, tb, workspace_id)
+        tb =
+          case TabBar.active_workspace_id(tb) do
+            id when id == workspace_id -> TabBar.set_workspace_agent_ui(tb, workspace_id, nil)
+            _workspace_id -> tb
+          end
+
+        MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
 
       nil ->
         create_agent_workspace(state, tb, session_pid)
@@ -856,43 +859,28 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp create_agent_workspace(state, %TabBar{} = tb, session_pid) do
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
-    agent_ui = state.workspace.agent_ui
 
     tb =
-      tb
-      |> TabBar.set_workspace_agent_ui(ws.id, agent_ui)
-      |> then(fn tb ->
-        case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
-          %Tab{id: tab_id} = tab ->
-            tb
-            |> TabBar.move_tab_to_workspace(tab_id, ws.id)
-            |> TabBar.update_context(
-              tab_id,
-              TabContext.put_fields(tab.context, keymap_scope: :agent)
-            )
+      case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
+        %Tab{id: tab_id} = tab ->
+          tb
+          |> TabBar.move_tab_to_workspace(tab_id, ws.id)
+          |> TabBar.update_context(
+            tab_id,
+            TabContext.put_fields(tab.context, keymap_scope: :agent)
+          )
 
-          nil ->
-            tb
-        end
-      end)
-
-    sync_state_to_workspace(state, tb, ws.id)
-  end
-
-  @spec sync_state_to_workspace(state(), TabBar.t(), non_neg_integer()) :: state()
-  defp sync_state_to_workspace(state, %TabBar{} = tb, workspace_id) do
-    agent_ui =
-      case TabBar.get_workspace(tb, workspace_id) do
-        %Workspace{payload: %WorkspaceAgent{agent_ui: %MingaEditor.Agent.UIState{} = agent_ui}} ->
-          agent_ui
-
-        _ ->
-          MingaEditor.Agent.UIState.new()
+        nil ->
+          tb
       end
 
-    state = MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
-    workspace = MingaEditor.Session.State.set_agent_ui(state.workspace, agent_ui)
-    %{state | workspace: workspace}
+    tb =
+      case TabBar.active_workspace_id(tb) do
+        id when id == ws.id -> TabBar.set_workspace_agent_ui(tb, ws.id, nil)
+        _workspace_id -> tb
+      end
+
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
   end
 
   @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::
