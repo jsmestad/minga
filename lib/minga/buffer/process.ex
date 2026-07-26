@@ -255,6 +255,14 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :save, @file_io_call_timeout)
   end
 
+  @doc "Saves the buffer content to the associated file only when the version matches."
+  @spec save_if_version(GenServer.server(), non_neg_integer(), keyword()) ::
+          :ok | {:error, term()}
+  def save_if_version(server, expected_version, opts \\ [])
+      when is_integer(expected_version) and expected_version >= 0 and is_list(opts) do
+    GenServer.call(server, {:save_if_version, expected_version, opts}, @file_io_call_timeout)
+  end
+
   @doc "Force-saves the buffer, skipping mtime conflict detection."
   @spec force_save(GenServer.server()) :: :ok | {:error, term()}
   def force_save(server) do
@@ -271,6 +279,19 @@ defmodule Minga.Buffer.Process do
   @spec save_as(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def save_as(server, file_path) do
     GenServer.call(server, {:save_as, file_path}, @file_io_call_timeout)
+  end
+
+  @doc "Saves the buffer to a specific file path only when the version matches."
+  @spec save_as_if_version(GenServer.server(), non_neg_integer(), String.t(), keyword()) ::
+          :ok | {:error, term()}
+  def save_as_if_version(server, expected_version, file_path, opts \\ [])
+      when is_integer(expected_version) and expected_version >= 0 and is_binary(file_path) and
+             is_list(opts) do
+    GenServer.call(
+      server,
+      {:save_as_if_version, expected_version, file_path, opts},
+      @file_io_call_timeout
+    )
   end
 
   @doc "Retargets the buffer to a new file path without writing content."
@@ -293,7 +314,7 @@ defmodule Minga.Buffer.Process do
           non_neg_integer(),
           String.t(),
           BufState.edit_source()
-        ) :: :ok | {:error, :read_only | :stale}
+        ) :: {:ok, non_neg_integer()} | {:error, :read_only | :stale}
   def replace_content_if_version(server, expected_version, new_content, source \\ :user)
       when is_integer(expected_version) and expected_version >= 0 and is_binary(new_content) and
              source in [:user, :agent, :lsp, :recovery] do
@@ -1146,33 +1167,16 @@ defmodule Minga.Buffer.Process do
     {:reply, :ok, %{state | document: new_buf}}
   end
 
-  def handle_call(:save, _from, %{buffer_type: bt} = state) when bt in [:nofile, :nowrite] do
-    {:reply, {:error, :buffer_not_saveable}, state}
-  end
+  def handle_call(:save, _from, state), do: save_current_reply(state)
 
-  def handle_call(:save, _from, %{file_path: nil} = state) do
-    {:reply, {:error, :no_file_path}, state}
-  end
-
-  def handle_call(:save, _from, state) do
-    {disk_mtime, disk_size} = Persistence.file_metadata(state, state.file_path)
-
-    if Persistence.changed_since_saved?(state, disk_mtime, disk_size) do
-      {:reply, {:error, :file_changed}, state}
-    else
-      content = Document.content(state.document)
-
-      case Persistence.write_content(state, state.file_path, content) do
-        :ok ->
-          {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
-          new_state = mark_saved(state, {new_mtime, new_size}, content)
-          broadcast_buffer_saved(new_state, state.file_path)
-
-          {:reply, :ok, new_state}
-
-        {:error, reason} ->
-          {:reply, {:error, reason}, state}
+  def handle_call({:save_if_version, expected_version, opts}, _from, state) do
+    if BufState.version(state) == expected_version do
+      case apply_save_transforms(state, opts) do
+        {:ok, state} -> save_current_reply(state)
+        {:error, reason} -> {:reply, {:error, reason}, state}
       end
+    else
+      {:reply, {:error, :stale}, state}
     end
   end
 
@@ -1247,28 +1251,17 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:save_as, file_path}, _from, state) do
-    content = Document.content(state.document)
+    save_as_reply(state, file_path)
+  end
 
-    case Persistence.write_content(state, file_path, content) do
-      :ok ->
-        {new_mtime, new_size} = Persistence.file_metadata(state, file_path)
-        unregister_path(state.file_path)
-        register_path(file_path)
-
-        # The buffer's identity is now the file: drop any scratch display
-        # name and re-detect the filetype from the new extension.
-        first_line = content |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Language.detect_filetype_from_content(file_path, first_line)
-
-        new_state = BufState.adopt_saved_path(state, file_path, filetype)
-        new_state = %{new_state | options: reseed_options(new_state, filetype)}
-        new_state = mark_saved(new_state, {new_mtime, new_size}, content)
-        broadcast_buffer_saved(new_state, file_path)
-
-        {:reply, :ok, new_state}
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+  def handle_call({:save_as_if_version, expected_version, file_path, opts}, _from, state) do
+    if BufState.version(state) == expected_version do
+      case apply_save_transforms(state, opts) do
+        {:ok, state} -> save_as_reply(state, file_path)
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
+    else
+      {:reply, {:error, :stale}, state}
     end
   end
 
@@ -1312,7 +1305,8 @@ defmodule Minga.Buffer.Process do
       ) do
     case BufState.version(state) do
       ^expected_version ->
-        {:reply, :ok, replace_content_preserving_cursor_state(state, new_content, source)}
+        new_state = replace_content_preserving_cursor_state(state, new_content, source)
+        {:reply, {:ok, BufState.version(new_state)}, new_state}
 
       _other_version ->
         {:reply, {:error, :stale}, state}
@@ -1845,6 +1839,78 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:decorations_version, _from, state) do
     {:reply, state.decorations.version, state}
+  end
+
+  defp save_as_reply(state, file_path) do
+    content = Document.content(state.document)
+
+    case Persistence.write_content(state, file_path, content) do
+      :ok ->
+        {new_mtime, new_size} = Persistence.file_metadata(state, file_path)
+        unregister_path(state.file_path)
+        register_path(file_path)
+
+        first_line = content |> String.split("\n", parts: 2) |> List.first("")
+        filetype = Language.detect_filetype_from_content(file_path, first_line)
+
+        new_state = BufState.adopt_saved_path(state, file_path, filetype)
+        new_state = %{new_state | options: reseed_options(new_state, filetype)}
+        new_state = mark_saved(new_state, {new_mtime, new_size}, content)
+        broadcast_buffer_saved(new_state, file_path)
+
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp apply_save_transforms(state, opts) do
+    trim = Keyword.get(opts, :trim_trailing_whitespace, false)
+    final_newline = Keyword.get(opts, :insert_final_newline, false)
+
+    if trim or final_newline do
+      content = Document.content(state.document)
+      transformed = Minga.Editing.apply_save_transforms(content, trim, final_newline)
+
+      cond do
+        transformed == content -> {:ok, state}
+        state.read_only -> {:error, :read_only}
+        true -> {:ok, replace_content_state(state, transformed, :user)}
+      end
+    else
+      {:ok, state}
+    end
+  end
+
+  defp save_current_reply(%{buffer_type: bt} = state) when bt in [:nofile, :nowrite] do
+    {:reply, {:error, :buffer_not_saveable}, state}
+  end
+
+  defp save_current_reply(%{file_path: nil} = state) do
+    {:reply, {:error, :no_file_path}, state}
+  end
+
+  defp save_current_reply(state) do
+    {disk_mtime, disk_size} = Persistence.file_metadata(state, state.file_path)
+
+    if Persistence.changed_since_saved?(state, disk_mtime, disk_size) do
+      {:reply, {:error, :file_changed}, state}
+    else
+      content = Document.content(state.document)
+
+      case Persistence.write_content(state, state.file_path, content) do
+        :ok ->
+          {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
+          new_state = mark_saved(state, {new_mtime, new_size}, content)
+          broadcast_buffer_saved(new_state, state.file_path)
+
+          {:reply, :ok, new_state}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    end
   end
 
   # ── Deferred broadcasts (avoid deadlock in handle_call) ──

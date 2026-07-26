@@ -3,6 +3,7 @@ defmodule MingaEditor.LSP.FormatLifecycle do
 
   alias Minga.LSP.Client
   alias Minga.LSP.PositionEncoding
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.State.LSP.FormatOperation
 
   @spinner_delay 100
@@ -10,9 +11,16 @@ defmodule MingaEditor.LSP.FormatLifecycle do
   @timeout 5_000
 
   @doc "Arms Editor feedback timers and builds one operation value."
-  @spec arm(pid(), reference(), pid(), non_neg_integer(), PositionEncoding.encoding()) ::
+  @spec arm(
+          pid(),
+          reference(),
+          pid(),
+          non_neg_integer(),
+          PositionEncoding.encoding(),
+          BufferManagement.save_continuation() | nil
+        ) ::
           FormatOperation.t()
-  def arm(client, ref, buffer, version, encoding)
+  def arm(client, ref, buffer, version, encoding, continuation \\ nil)
       when is_pid(client) and is_reference(ref) and is_pid(buffer) and is_integer(version) and
              version >= 0 and encoding in [:utf8, :utf16, :utf32] do
     FormatOperation.new(
@@ -21,6 +29,7 @@ defmodule MingaEditor.LSP.FormatLifecycle do
       buffer: buffer,
       version: version,
       encoding: encoding,
+      continuation: continuation,
       spinner_timer: Process.send_after(self(), {:lsp_format_spinner, ref}, @spinner_delay),
       cancellable_timer:
         Process.send_after(self(), {:lsp_format_cancellable, ref}, @cancel_delay),

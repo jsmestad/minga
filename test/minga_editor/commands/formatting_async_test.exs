@@ -5,6 +5,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Commands.Formatting
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Request
@@ -57,12 +58,149 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert match?({:completed, _result}, outcome.value)
   end
 
+  test "external format continuation saves after successful scheduler result" do
+    path = tmp_path("external-format-save.txt")
+    File.write!(path, "hello\n")
+    state = base_state("hello\n", file_path: path)
+    buffer = state.workspace.buffers.active
+    version = Buffer.version(buffer)
+    continuation = {:save_after_format, buffer, version, :save}
+    {state, request} = external_request(state, buffer, continuation)
+    result = ExternalFormatResult.new(buffer, version, "HELLO\n")
+
+    {new_state, _outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert Buffer.content(buffer) == "HELLO\n"
+    assert File.read!(path) == "HELLO\n"
+    assert feedback(new_state).message == "Formatted"
+  end
+
+  test "delayed external save worker snapshot rejects intervening edit" do
+    path = tmp_path("external-format-delayed-save.txt")
+    File.write!(path, "old\n")
+    state = base_state("old\n", file_path: path)
+    buffer = state.workspace.buffers.active
+    requested_version = Buffer.version(buffer)
+    continuation = {:save_after_format, buffer, requested_version, :save}
+    Buffer.replace_content(buffer, "user edit\n")
+    worker_version = Buffer.version(buffer)
+    {state, request} = external_request(state, buffer, continuation)
+    result = ExternalFormatResult.new(buffer, worker_version, "FORMATTED NEW\n")
+
+    {new_state, outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert Buffer.content(buffer) == "user edit\n"
+    assert File.read!(path) == "old\n"
+    assert feedback(new_state).status == :stale
+    assert outcome.value == {:stale, :buffer_version_changed}
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+             "Save skipped: buffer changed during formatting"
+  end
+
+  test "edit after formatter commit does not bless a newer save revision" do
+    path = tmp_path("external-format-commit-race.txt")
+    File.write!(path, "old\n")
+    state = base_state("old\n", file_path: path)
+    buffer = state.workspace.buffers.active
+    requested_version = Buffer.version(buffer)
+    continuation = {:save_after_format, buffer, requested_version, :save}
+
+    assert {:ok, committed_version} =
+             Buffer.replace_content_if_version(buffer, requested_version, "FORMATTED\n", :lsp)
+
+    Buffer.insert_text(buffer, "user ")
+
+    new_state =
+      BufferManagement.continue_after_format(state, continuation, {:committed, committed_version})
+
+    assert File.read!(path) == "old\n"
+    assert Buffer.dirty?(buffer)
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+             "Save skipped: buffer changed during formatting"
+  end
+
+  test "save_as continuation rejects edit after formatter commit" do
+    target = tmp_path("external-format-save-as-race.txt")
+    state = base_state("old\n")
+    buffer = state.workspace.buffers.active
+    requested_version = Buffer.version(buffer)
+    continuation = {:save_after_format, buffer, requested_version, {:save_as, target}}
+
+    assert {:ok, committed_version} =
+             Buffer.replace_content_if_version(buffer, requested_version, "FORMATTED\n", :lsp)
+
+    Buffer.insert_text(buffer, "user ")
+
+    new_state =
+      BufferManagement.continue_after_format(state, continuation, {:committed, committed_version})
+
+    refute File.exists?(target)
+    assert Buffer.file_path(buffer) == nil
+    assert Buffer.dirty?(buffer)
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+             "Save skipped: buffer changed during formatting"
+  end
+
+  test "dead buffer failed terminal does not exit the editor continuation" do
+    path = tmp_path("external-format-dead-buffer.txt")
+    File.write!(path, "old\n")
+    state = base_state("old\n", file_path: path)
+    buffer = state.workspace.buffers.active
+    continuation = {:save_after_format, buffer, Buffer.version(buffer), :save}
+    monitor = Process.monitor(buffer)
+    Process.exit(buffer, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^buffer, :killed}
+
+    new_state = BufferManagement.continue_after_format(state, continuation, {:failed, :not_alive})
+
+    assert File.read!(path) == "old\n"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+             "Save failed: buffer closed"
+  end
+
+  test "external formatter failure continues only if the buffer is still at requested version" do
+    path = tmp_path("external-format-failure.txt")
+    File.write!(path, "hello\n")
+    state = base_state("hello\n", file_path: path)
+    buffer = state.workspace.buffers.active
+    version = Buffer.version(buffer)
+    continuation = {:save_after_format, buffer, version, :save}
+    {state, request} = external_request(state, buffer, continuation)
+
+    {new_state, _outcome} =
+      ExternalFormat.apply(state, Outcome.failed(request, "formatter failed"))
+
+    assert File.read!(path) == "hello\n"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) =~ "Wrote"
+
+    stale_path = tmp_path("external-format-failure-stale.txt")
+    File.write!(stale_path, "old\n")
+    stale_state = base_state("old\n", file_path: stale_path)
+    stale_buffer = stale_state.workspace.buffers.active
+    stale_version = Buffer.version(stale_buffer)
+    stale_continuation = {:save_after_format, stale_buffer, stale_version, :save}
+    {stale_state, stale_request} = external_request(stale_state, stale_buffer, stale_continuation)
+    Buffer.insert_text(stale_buffer, "new ")
+
+    {stale_state, _outcome} =
+      ExternalFormat.apply(stale_state, Outcome.failed(stale_request, "formatter failed"))
+
+    assert File.read!(stale_path) == "old\n"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(stale_state) ==
+             "Save skipped: buffer changed during formatting"
+  end
+
   test "successful replacement does not query a buffer that closes after replying" do
     buffer =
       spawn(fn ->
         receive do
           {:"$gen_call", from, {:replace_content_if_version, 0, "FORMATTED\n", :user}} ->
-            GenServer.reply(from, :ok)
+            GenServer.reply(from, {:ok, 1})
         end
       end)
 
@@ -235,8 +373,8 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
   @spec feedback(EditorState.t()) :: MingaEditor.State.Operation.t()
   defp feedback(state), do: OperationFeedback.selected(state.feedback.operation_feedback)
 
-  @spec external_request(EditorState.t(), pid()) :: {EditorState.t(), Request.t()}
-  defp external_request(state, buffer) do
+  @spec external_request(EditorState.t(), pid(), term() | nil) :: {EditorState.t(), Request.t()}
+  defp external_request(state, buffer, continuation \\ nil) do
     {operation_feedback, operation} =
       OperationFeedback.start(
         state.feedback.operation_feedback,
@@ -250,7 +388,13 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
       | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
     }
 
-    {state, ExternalFormat.request(buffer, "cat", operation.id)}
+    {state, ExternalFormat.request(buffer, "cat", operation.id, continuation)}
+  end
+
+  defp tmp_path(name) do
+    path = Path.join(System.tmp_dir!(), "#{System.unique_integer([:positive])}-#{name}")
+    on_exit(fn -> File.rm(path) end)
+    path
   end
 
   @spec base_state(String.t(), keyword()) :: EditorState.t()

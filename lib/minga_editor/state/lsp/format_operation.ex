@@ -2,6 +2,7 @@ defmodule MingaEditor.State.LSP.FormatOperation do
   @moduledoc "Lifecycle data for one asynchronous LSP formatting request."
 
   alias Minga.LSP.PositionEncoding
+  alias MingaEditor.Commands.BufferManagement
 
   @enforce_keys [
     :client,
@@ -19,6 +20,7 @@ defmodule MingaEditor.State.LSP.FormatOperation do
     :buffer,
     :version,
     :encoding,
+    :continuation,
     :spinner_timer,
     :cancellable_timer,
     :timeout_timer
@@ -30,6 +32,7 @@ defmodule MingaEditor.State.LSP.FormatOperation do
           buffer: pid(),
           version: non_neg_integer(),
           encoding: PositionEncoding.encoding(),
+          continuation: BufferManagement.save_continuation() | nil,
           spinner_timer: reference(),
           cancellable_timer: reference(),
           timeout_timer: reference()

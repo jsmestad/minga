@@ -12,8 +12,10 @@ defmodule MingaEditor.Commands.Formatting do
   alias Minga.Buffer
   alias Minga.LSP.TextEdit
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Effects.ExternalFormat
   alias MingaEditor.LSP.FormatLifecycle
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaEditor.State, as: EditorState
@@ -31,27 +33,34 @@ defmodule MingaEditor.Commands.Formatting do
 
   @spec format_buffer(state()) :: state()
   def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    case try_lsp_format(state, buf) do
-      {:ok, state} ->
-        state
-
-      :not_available ->
-        try_external_format(state, buf)
+    case try_lsp_format(state, buf, nil) do
+      {:ok, state} -> state
+      :not_available -> state |> try_external_format(buf, nil) |> elem(1)
     end
   end
 
   def format_buffer(state),
-    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No buffer to format")
+    do: NoticeWorkflow.publish(state, "No buffer to format")
+
+  @spec format_for_save(state(), pid(), BufferManagement.save_continuation()) ::
+          {:pending, state()} | {:ready, state()}
+  def format_for_save(state, buf, continuation) when is_pid(buf) do
+    case try_lsp_format(state, buf, continuation) do
+      {:ok, state} -> {:pending, state}
+      :not_available -> try_external_format(state, buf, continuation)
+    end
+  end
 
   # ── LSP Formatting ────────────────────────────────────────────────────────
 
-  @spec try_lsp_format(state(), pid()) :: {:ok, state()} | :not_available
-  defp try_lsp_format(state, buf) when is_pid(buf) do
+  @spec try_lsp_format(state(), pid(), BufferManagement.save_continuation() | nil) ::
+          {:ok, state()} | :not_available
+  defp try_lsp_format(state, buf, continuation) when is_pid(buf) do
     buf
     |> SyncServer.clients_for_buffer()
     |> Enum.find_value(:not_available, fn client ->
       case formatting_encoding(client) do
-        {:ok, encoding} -> {:ok, request_lsp_format(state, buf, client, encoding)}
+        {:ok, encoding} -> {:ok, request_lsp_format(state, buf, client, encoding, continuation)}
         :not_available -> false
       end
     end)
@@ -60,21 +69,23 @@ defmodule MingaEditor.Commands.Formatting do
   @spec formatting_encoding(pid()) ::
           {:ok, Minga.LSP.PositionEncoding.encoding()} | :not_available
   defp formatting_encoding(client) do
-    capabilities = Client.capabilities(client)
-    provider = get_in(capabilities, ["documentFormattingProvider"])
-
-    if match?(%{}, provider) or provider == true do
-      {:ok, Client.encoding(client)}
-    else
-      :not_available
+    case get_in(Client.capabilities(client), ["documentFormattingProvider"]) do
+      provider when is_map(provider) or provider == true -> {:ok, Client.encoding(client)}
+      _provider -> :not_available
     end
   catch
     :exit, _reason -> :not_available
   end
 
-  @spec request_lsp_format(state(), pid(), pid(), Minga.LSP.PositionEncoding.encoding()) ::
+  @spec request_lsp_format(
+          state(),
+          pid(),
+          pid(),
+          Minga.LSP.PositionEncoding.encoding(),
+          BufferManagement.save_continuation() | nil
+        ) ::
           state()
-  defp request_lsp_format(state, buf, client, encoding) do
+  defp request_lsp_format(state, buf, client, encoding, continuation) do
     state = cancel_buffer_format(state, buf)
     file_path = Buffer.file_path(buf)
     uri = SyncServer.path_to_uri(file_path)
@@ -86,13 +97,17 @@ defmodule MingaEditor.Commands.Formatting do
       "options" => %{"tabSize" => tab_width, "insertSpaces" => insert_spaces}
     }
 
-    version = Buffer.version(buf)
+    version =
+      case continuation do
+        {:save_after_format, ^buf, requested_version, _action} -> requested_version
+        nil -> Buffer.version(buf)
+      end
+
     ref = Client.request(client, "textDocument/formatting", params)
-    operation = FormatLifecycle.arm(client, ref, buf, version, encoding)
+    operation = FormatLifecycle.arm(client, ref, buf, version, encoding, continuation)
     %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
   end
 
-  @doc "Cancels the newest active LSP formatting request, if one exists."
   @spec cancel_pending_format(state()) :: {:canceled, state()} | :none
   def cancel_pending_format(state) do
     case LSPState.newest_format(state.lsp) do
@@ -104,14 +119,14 @@ defmodule MingaEditor.Commands.Formatting do
           %{state | lsp: (&LSPState.drop_format(&1, operation.ref)).(state.lsp)}
 
         FormatLifecycle.cancel(operation)
+        state = continue_canceled_format(state, operation)
         {:canceled, state}
     end
   end
 
-  @doc "Applies LSP text edits only when the buffer still has `expected_version`."
   @spec apply_lsp_edits(pid(), [map()], non_neg_integer(), Minga.LSP.PositionEncoding.encoding()) ::
-          :ok | {:error, format_commit_error()}
-  def apply_lsp_edits(_buf, [], _expected_version, _encoding), do: :ok
+          {:ok, non_neg_integer()} | {:error, format_commit_error()}
+  def apply_lsp_edits(_buf, [], expected_version, _encoding), do: {:ok, expected_version}
 
   def apply_lsp_edits(buf, edits, expected_version, encoding)
       when is_pid(buf) and is_list(edits) and is_integer(expected_version) and
@@ -137,40 +152,52 @@ defmodule MingaEditor.Commands.Formatting do
           %{state | lsp: (&LSPState.drop_format(&1, operation.ref)).(state.lsp)}
 
         FormatLifecycle.cancel(operation)
-        state
+        continue_canceled_format(state, operation)
     end
   end
 
+  defp continue_canceled_format(state, %{continuation: nil}), do: state
+
+  defp continue_canceled_format(state, operation),
+    do: BufferManagement.continue_after_format(state, operation.continuation, :canceled)
+
   # ── External Formatter ────────────────────────────────────────────────────
 
-  @spec try_external_format(state(), pid()) :: state()
-  defp try_external_format(state, buf) do
+  @spec try_external_format(state(), pid(), BufferManagement.save_continuation() | nil) ::
+          {:pending | :ready, state()}
+  defp try_external_format(state, buf, continuation) do
     filetype = Buffer.filetype(buf)
     file_path = Buffer.file_path(buf)
     spec = Minga.Editing.resolve_formatter(filetype, file_path)
 
     case spec do
       nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "No formatter configured for #{filetype}"
-        )
+        state =
+          if continuation,
+            do: state,
+            else: NoticeWorkflow.publish(state, "No formatter configured for #{filetype}")
+
+        {:ready, state}
 
       _ ->
         command = spec |> String.split() |> List.first()
 
         if System.find_executable(command) do
-          format_and_replace(state, buf, spec)
+          format_and_replace(state, buf, spec, continuation)
         else
-          maybe_prompt_formatter_install(state, command)
+          {:ready, maybe_prompt_formatter_install(state, command)}
         end
     end
   end
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
-  @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
-  defp format_and_replace(state, buf, spec) do
+  defp format_and_replace(state, buf, spec, continuation) do
+    {state, operation_id} = start_external_format_operation(state, buf)
+    schedule_external_format(state, buf, spec, operation_id, continuation)
+  end
+
+  defp start_external_format_operation(state, buf) do
     resource = "buffer:" <> inspect(buf)
 
     {operation_feedback, operation} =
@@ -186,18 +213,25 @@ defmodule MingaEditor.Commands.Formatting do
       | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
     }
 
-    schedule_external_format(state, buf, spec, operation.id)
+    {state, operation.id}
   end
 
   @spec schedule_external_format(
           state(),
           pid(),
           Minga.Editing.Formatter.formatter_spec(),
-          pos_integer()
+          pos_integer(),
+          BufferManagement.save_continuation() | nil
         ) ::
-          state()
-  defp schedule_external_format(%{effect_scheduler: nil} = state, _buf, _spec, operation_id) do
-    %{
+          {:pending | :ready, state()}
+  defp schedule_external_format(
+         %{effect_scheduler: nil} = state,
+         _buf,
+         _spec,
+         operation_id,
+         _continuation
+       ) do
+    state = %{
       state
       | feedback:
           Feedback.accept_operation_feedback(
@@ -210,17 +244,19 @@ defmodule MingaEditor.Commands.Formatting do
             )
           )
     }
+
+    {:ready, state}
   end
 
-  defp schedule_external_format(state, buf, spec, operation_id) do
-    request = ExternalFormat.request(buf, spec, operation_id)
+  defp schedule_external_format(state, buf, spec, operation_id, continuation) do
+    request = ExternalFormat.request(buf, spec, operation_id, continuation)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _request_id, _disposition} ->
-        state
+        {:pending, state}
 
       {:error, reason} ->
-        %{
+        state = %{
           state
           | feedback:
               Feedback.accept_operation_feedback(
@@ -233,6 +269,8 @@ defmodule MingaEditor.Commands.Formatting do
                 )
               )
         }
+
+        {:ready, state}
     end
   end
 
@@ -241,7 +279,7 @@ defmodule MingaEditor.Commands.Formatting do
           non_neg_integer(),
           String.t(),
           Minga.Buffer.State.edit_source()
-        ) :: :ok | {:error, :read_only | :stale}
+        ) :: {:ok, non_neg_integer()} | {:error, :read_only | :stale}
   defp commit_formatted_content(buf, expected_version, content, source) do
     Buffer.replace_content_if_version(buf, expected_version, content, source)
   end
@@ -260,17 +298,11 @@ defmodule MingaEditor.Commands.Formatting do
   defp maybe_prompt_formatter_install(state, command) do
     case RecipeRegistry.for_command(command) do
       nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "Formatter not found: #{command}"
-        )
+        NoticeWorkflow.publish(state, "Formatter not found: #{command}")
 
       recipe ->
         if ToolPromptWorkflow.skip?(state, recipe.name) do
-          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-            state,
-            "Formatter not found: #{command}"
-          )
+          NoticeWorkflow.publish(state, "Formatter not found: #{command}")
         else
           queue_and_show_prompt(state, recipe.name)
         end
