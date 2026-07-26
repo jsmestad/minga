@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.LSP.FormatLifecycle
   alias MingaEditor.LspActions
   alias MingaEditor.SemanticTokenSync
@@ -116,7 +117,9 @@ defmodule MingaEditor.Handlers.LspEventHandler do
       {:ok, operation} ->
         state = %{state | lsp: (&LSPState.drop_format(&1, ref)).(state.lsp)}
         FormatLifecycle.cancel(operation)
-        {NoticeWorkflow.publish(state, "Format timed out [r to retry]"), [:render_now]}
+        state = NoticeWorkflow.publish(state, "Format timed out [r to retry]")
+        state = continue_format_save(state, operation.continuation, {:failed, :timeout})
+        {state, [:render_now]}
     end
   end
 
@@ -135,13 +138,16 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   defp dispatch_pending_response({:format, operation}, state, result) do
     FormatLifecycle.finish(operation)
 
-    LspActions.handle_formatting_response(
-      state,
-      result,
-      operation.buffer,
-      operation.version,
-      operation.encoding
-    )
+    {state, terminal} =
+      LspActions.handle_formatting_response(
+        state,
+        result,
+        operation.buffer,
+        operation.version,
+        operation.encoding
+      )
+
+    continue_format_save(state, operation.continuation, terminal)
   end
 
   defp dispatch_pending_response(
@@ -224,6 +230,17 @@ defmodule MingaEditor.Handlers.LspEventHandler do
          result
        ) do
     SemanticTokenSync.handle_response(state, client, buffer, version, encoding, legend, result)
+  end
+
+  @spec continue_format_save(
+          EditorState.t(),
+          BufferManagement.save_continuation() | nil,
+          BufferManagement.format_terminal()
+        ) :: EditorState.t()
+  defp continue_format_save(state, nil, _terminal), do: state
+
+  defp continue_format_save(state, continuation, terminal) do
+    BufferManagement.continue_after_format(state, continuation, terminal)
   end
 
   @spec apply_completion_resolve_response(EditorState.t(), map(), term()) :: EditorState.t()

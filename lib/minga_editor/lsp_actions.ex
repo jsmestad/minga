@@ -1269,44 +1269,48 @@ defmodule MingaEditor.LspActions do
           pid(),
           non_neg_integer(),
           Minga.LSP.PositionEncoding.encoding()
-        ) :: state()
+        ) :: {state(), MingaEditor.Commands.BufferManagement.format_terminal()}
   def handle_formatting_response(state, {:error, reason}, _buf, _version, _encoding) do
     Log.warning(:lsp, "LSP formatting error: #{inspect(reason)}")
 
-    NoticeWorkflow.publish(
-      state,
-      "Format error: LSP request failed"
-    )
+    {NoticeWorkflow.publish(
+       state,
+       "Format error: LSP request failed"
+     ), {:failed, reason}}
   end
 
   def handle_formatting_response(state, {:ok, response}, _buf, _version, _encoding)
       when response in [nil, []] do
-    NoticeWorkflow.publish(state, "No formatting changes")
+    {NoticeWorkflow.publish(state, "No formatting changes"), :unchanged}
   end
 
   def handle_formatting_response(state, {:ok, edits}, buf, version, encoding)
       when is_list(edits) do
     case Commands.Formatting.apply_lsp_edits(buf, edits, version, encoding) do
-      :ok ->
-        NoticeWorkflow.publish(state, "Formatted (LSP)")
+      {:ok, committed_version} ->
+        {NoticeWorkflow.publish(state, "Formatted (LSP)"), {:committed, committed_version}}
 
       {:error, :invalid_edits} ->
-        NoticeWorkflow.publish(state, "Invalid LSP formatting edits skipped")
+        {NoticeWorkflow.publish(state, "Invalid LSP formatting edits skipped"),
+         {:failed, :invalid_edits}}
 
       {:error, :stale} ->
-        NoticeWorkflow.publish(state, "Buffer changed, format skipped")
+        {NoticeWorkflow.publish(state, "Buffer changed, format skipped"), :stale}
 
       {:error, :read_only} ->
-        NoticeWorkflow.publish(state, "Buffer is read-only, format skipped")
+        {NoticeWorkflow.publish(state, "Buffer is read-only, format skipped"),
+         {:failed, :read_only}}
 
       {:error, :not_alive} ->
-        NoticeWorkflow.publish(state, "Buffer closed, format skipped")
+        {NoticeWorkflow.publish(state, "Buffer closed, format skipped"), {:failed, :not_alive}}
     end
   end
 
   def handle_formatting_response(state, {:ok, malformed}, _buf, _version, _encoding) do
     Log.warning(:lsp, "Invalid LSP formatting response: #{inspect(malformed)}")
-    NoticeWorkflow.publish(state, "Invalid LSP formatting response skipped")
+
+    {NoticeWorkflow.publish(state, "Invalid LSP formatting response skipped"),
+     {:failed, :invalid_response}}
   end
 
   # ── Type definition / Implementation responses ────────────────────────────

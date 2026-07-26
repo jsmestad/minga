@@ -838,10 +838,13 @@ defmodule Minga.Buffer.ProcessTest do
       Buffer.move_to(pid, {1, 4})
       version = Buffer.version(pid)
 
-      assert :ok = Buffer.replace_content_if_version(pid, version, "goodbye", :lsp)
+      assert {:ok, committed_version} =
+               Buffer.replace_content_if_version(pid, version, "goodbye", :lsp)
+
       assert Buffer.content(pid) == "goodbye"
       assert Buffer.cursor(pid) == {0, 4}
       assert Buffer.version(pid) == version + 1
+      assert committed_version == version + 1
       assert BufferProcess.last_undo_source(pid) == :lsp
     end
 

@@ -11,8 +11,6 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   alias MingaAgent.Session
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
-  alias MingaEditor.Shell.Traditional.ToolPrompts
-  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaAgent.ProjectView
   alias Minga.Buffer
   alias Minga.Project.FileRef, as: ProjectFileRef
@@ -44,13 +42,15 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias Minga.Frontend.WaitRequests
   alias MingaEditor.Window
   alias Minga.Mode
-  alias Minga.Mode.ToolConfirmState
-  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
   alias MingaEditor.WorkspaceWorkflow
 
   @type state :: EditorState.t()
   @typep save_result :: {:ok, state()} | {:error, state()}
+  @type save_action :: :save | {:save_quit, Tab.id() | nil} | {:save_as, Path.t()}
+  @type save_continuation :: {:save_after_format, pid(), non_neg_integer(), save_action()}
+  @type format_terminal ::
+          {:committed, non_neg_integer()} | :unchanged | {:failed, term()} | :stale | :canceled
   @typep kill_intent :: :ordinary | :force
 
   @spec execute(state(), Mode.command()) :: state()
@@ -276,8 +276,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:save_quit, []}}) do
-    case save_active_buffer(state) do
-      {:ok, state} -> close_tab_or_quit(state)
+    case save_active_buffer(state, :save_quit) do
+      {:ok, state} -> state
+      {:pending, state} -> state
       {:error, state} -> state
     end
   end
@@ -2043,21 +2044,21 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp close_agent_tab_or_quit(state), do: close_agent_tab(state)
 
-  @spec close_file_tab_or_quit(state(), Tab.id()) :: state()
-  defp close_file_tab_or_quit(state, _active_id) do
+  defp close_file_tab_or_quit(state, active_id) do
     tb = state.shell_runtime.state.tab_bar
+    preferred_replacement_id = if tb.active_id == active_id, do: nil, else: tb.active_id
 
-    if TabBar.count(tb) > 1 do
-      close_file_tab(state)
+    if match?(%Tab{kind: :file}, TabBar.get(tb, active_id)) do
+      state = MingaEditor.TabWorkflow.switch(state, active_id)
+
+      if TabBar.count(tb) > 1,
+        do: close_file_tab(state, preferred_replacement_id),
+        else: quit_last_file_tab(state)
     else
-      quit_last_file_tab(state)
+      state
     end
   end
 
-  # `:q` on the last open tab: vim behavior quits the editor; the
-  # `quit_last_tab: :empty_state` option closes into the launchpad instead
-  # (kills the buffer, so the empty state truly has zero buffers, #2689).
-  @spec quit_last_file_tab(state()) :: state()
   defp quit_last_file_tab(state) do
     case quit_last_tab_option(state) do
       :empty_state -> remove_current_buffer(state, :force)
@@ -2167,25 +2168,26 @@ defmodule MingaEditor.Commands.BufferManagement do
     end)
   end
 
-  @spec save_active_buffer(state()) :: save_result()
+  @spec save_active_buffer(state(), :save | :save_quit) :: save_result() | {:pending, state()}
+  defp save_active_buffer(state, action \\ :save)
 
-  defp save_active_buffer(%{workspace: %{buffers: %{active: buf}}} = state) do
+  defp save_active_buffer(%{workspace: %{buffers: %{active: buf}}} = state, action) do
     try do
-      state = apply_pre_save_transforms(state, buf)
+      version = Buffer.version(buf)
 
-      case Buffer.save(buf) do
-        :ok ->
-          name = Helpers.buffer_display_name(buf)
-          {:ok, NoticeWorkflow.publish(state, "Wrote #{name}")}
+      action =
+        if action == :save_quit,
+          do: {:save_quit, state.shell_runtime.state.tab_bar.active_id},
+          else: action
 
-        {:error, :file_changed} ->
-          {:error, handle_file_changed_on_save(state, buf)}
+      continuation = {:save_after_format, buf, version, action}
 
-        {:error, :no_file_path} ->
-          {:error, NoticeWorkflow.publish(state, "No file name — use :w <filename>")}
+      case maybe_format_on_save(state, buf, continuation) do
+        {:pending, state} ->
+          {:pending, state}
 
-        {:error, reason} ->
-          {:error, NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")}
+        {:ready, state} ->
+          finish_save_continuation(state, continuation, :unchanged)
       end
     catch
       :exit, reason ->
@@ -2294,14 +2296,15 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
-  # Closes the current file tab without killing the buffer. The buffer
-  # stays in the buffer pool (matching Neovim's `:q` which closes the
-  # window but leaves the buffer in the background buffer list).
-  @spec close_file_tab(state()) :: state()
-  defp close_file_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
+  defp close_file_tab(state, preferred_replacement_id) do
+    tb = state.shell_runtime.state.tab_bar
     active_tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
     label = if active_tab, do: active_tab.label, else: "tab"
-    replacement_id = active_tab && replacement_tab_id(tb, active_tab)
+
+    replacement_id =
+      (TabBar.has_tab?(tb, preferred_replacement_id) && preferred_replacement_id) ||
+        (active_tab && replacement_tab_id(tb, active_tab))
+
     :ok = complete_active_wait_on_close(state)
     Minga.Log.info(:editor, "Closed: #{label}")
 
@@ -2481,20 +2484,12 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec write_buffer_as(state(), pid(), String.t()) :: state()
   defp write_buffer_as(state, buf, target) do
     adopt_target_filetype(buf, target)
-    state = apply_pre_save_transforms(state, buf)
+    version = Buffer.version(buf)
+    continuation = {:save_after_format, buf, version, {:save_as, target}}
 
-    case Buffer.save_as(buf, target) do
-      :ok ->
-        state
-        |> MingaEditor.BufferActivation.refresh_presentation()
-        |> setup_highlight_or_defer()
-        |> NoticeWorkflow.publish("Wrote #{Path.basename(target)}")
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Save failed: #{inspect(reason)}"
-        )
+    case maybe_format_on_save(state, buf, continuation) do
+      {:pending, state} -> state
+      {:ready, state} -> elem(finish_save_continuation(state, continuation, :unchanged), 1)
     end
   end
 
@@ -2514,237 +2509,106 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Pre-save transforms ─────────────────────────────────────────────────
 
-  @spec apply_pre_save_transforms(state(), pid()) :: state()
-  defp apply_pre_save_transforms(state, buf) when is_pid(buf) do
-    state = maybe_format_on_save(state, buf, nil)
-    apply_whitespace_transforms(buf)
-    state
-  end
-
-  @spec maybe_format_on_save(state(), pid(), atom()) :: state()
-  defp maybe_format_on_save(state, buf, _filetype) do
+  @spec maybe_format_on_save(state(), pid(), save_continuation()) ::
+          {:pending, state()} | {:ready, state()}
+  defp maybe_format_on_save(state, buf, continuation) do
     if Buffer.get_option(buf, :format_on_save) do
-      run_format_on_save(state, buf)
+      Commands.Formatting.format_for_save(state, buf, continuation)
     else
-      state
+      {:ready, state}
     end
   end
 
-  @spec run_format_on_save(state(), pid()) :: state()
-  defp run_format_on_save(state, buf) do
-    file_path = Buffer.file_path(buf)
-    filetype = Buffer.filetype(buf)
-    spec = Minga.Editing.resolve_formatter(filetype, file_path)
-    buf_name = Helpers.buffer_display_name(buf)
+  @spec continue_after_format(state(), save_continuation(), format_terminal()) :: state()
+  def continue_after_format(state, continuation, terminal) do
+    elem(finish_save_continuation(state, continuation, terminal), 1)
+  end
 
-    case try_lsp_format_on_save(buf) do
-      {:ok, _formatted} ->
-        Minga.Log.info(:editor, "Format-on-save (LSP): #{buf_name}")
-        state
+  @spec finish_save_continuation(state(), save_continuation(), format_terminal()) :: save_result()
+  defp finish_save_continuation(
+         state,
+         {:save_after_format, buf, requested_version, action},
+         terminal
+       ) do
+    case terminal do
+      :stale ->
+        stale_save(state)
 
-      :not_available ->
-        run_external_formatter_on_save(state, buf, spec, buf_name)
+      :canceled ->
+        stale_save(state)
+
+      {:failed, :not_alive} ->
+        {:error, NoticeWorkflow.publish(state, "Save failed: buffer closed")}
+
+      :unchanged ->
+        save_continued(state, buf, requested_version, action)
+
+      {:failed, _reason} ->
+        save_continued(state, buf, requested_version, action)
+
+      {:committed, committed_version} ->
+        save_continued(state, buf, committed_version, action)
+    end
+  catch
+    :exit, _reason ->
+      {:error, NoticeWorkflow.publish(state, "Save failed: buffer closed")}
+  end
+
+  defp stale_save(state) do
+    {:error, NoticeWorkflow.publish(state, "Save skipped: buffer changed during formatting")}
+  end
+
+  defp save_continued(state, buf, version, :save) do
+    case Buffer.save_if_version(buf, version, save_transform_opts(buf)) do
+      :ok ->
+        name = Helpers.buffer_display_name(buf)
+        {:ok, NoticeWorkflow.publish(state, "Wrote #{name}")}
+
+      {:error, :stale} ->
+        stale_save(state)
+
+      {:error, :file_changed} ->
+        {:error, handle_file_changed_on_save(state, buf)}
+
+      {:error, :no_file_path} ->
+        {:error, NoticeWorkflow.publish(state, "No file name — use :w <filename>")}
+
+      {:error, reason} ->
+        {:error, NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")}
     end
   end
 
-  @spec run_external_formatter_on_save(state(), pid(), String.t() | nil, String.t()) :: state()
-  defp run_external_formatter_on_save(state, _buf, nil, _buf_name), do: state
-
-  defp run_external_formatter_on_save(state, buf, spec, buf_name) do
-    command = spec |> String.split() |> List.first()
-
-    if System.find_executable(command) do
-      run_formatter_with_spec(state, buf, spec, buf_name)
-    else
-      queue_formatter_tool_prompt(state, command)
+  defp save_continued(state, buf, version, {:save_quit, origin_tab_id}) do
+    case save_continued(state, buf, version, :save) do
+      {:ok, state} -> {:ok, close_file_tab_or_quit(state, origin_tab_id)}
+      error -> error
     end
   end
 
-  # ── LSP format-on-save ─────────────────────────────────────────────────
-
-  # Timeout for LSP formatting during save. Shorter than the interactive
-  # formatting timeout (5s) because save should feel instant.
-  @lsp_format_on_save_timeout 1_000
-
-  @spec try_lsp_format_on_save(pid()) :: {:ok, String.t()} | :not_available
-  defp try_lsp_format_on_save(buf) when is_pid(buf) do
-    clients = Minga.LSP.SyncServer.clients_for_buffer(buf)
-
-    case Enum.find(clients, &lsp_supports_formatting?/1) do
-      nil ->
-        :not_available
-
-      client ->
-        do_lsp_format_on_save(buf, client)
-    end
-  end
-
-  @spec lsp_supports_formatting?(pid()) :: boolean()
-  defp lsp_supports_formatting?(client) do
-    caps = Minga.LSP.Client.capabilities(client)
-
-    get_in(caps, ["documentFormattingProvider"]) == true or
-      get_in(caps, ["textDocument", "formatting", "provider"]) == true
-  end
-
-  @spec do_lsp_format_on_save(pid(), pid()) :: {:ok, String.t()} | :not_available
-  defp do_lsp_format_on_save(buf, client) do
-    file_path = Buffer.file_path(buf)
-    uri = Minga.LSP.SyncServer.path_to_uri(file_path)
-    tab_size = Buffer.get_option(buf, :tab_width) || 2
-    insert_spaces = Buffer.get_option(buf, :indent_with) == :spaces
-
-    params = %{
-      "textDocument" => %{"uri" => uri},
-      "options" => %{"tabSize" => tab_size, "insertSpaces" => insert_spaces}
-    }
-
-    # credo:disable-for-next-line Minga.Credo.NoBlockingEditorCallCheck
-    case Minga.LSP.Client.request_sync(
-           client,
-           "textDocument/formatting",
-           params,
-           @lsp_format_on_save_timeout
-         ) do
-      {:ok, edits} when is_list(edits) ->
-        content = Buffer.content(buf)
-        new_content = apply_lsp_edits_to_content(content, edits)
-
-        if new_content != content do
-          {cursor_line, cursor_col} = Buffer.cursor(buf)
-          Buffer.replace_content(buf, new_content)
-          line_count = Buffer.line_count(buf)
-          safe_line = min(cursor_line, max(line_count - 1, 0))
-          Buffer.move_to(buf, {safe_line, cursor_col})
-        end
-
-        {:ok, new_content}
-
-      {:ok, nil} ->
-        :not_available
-
-      {:error, _reason} ->
-        :not_available
-    end
-  end
-
-  @spec apply_lsp_edits_to_content(String.t(), [map()]) :: String.t()
-  defp apply_lsp_edits_to_content(content, edits) when is_list(edits) do
-    Enum.reduce(Enum.reverse(edits), content, fn edit, acc ->
-      range = Map.get(edit, "range", %{})
-      new_text = Map.get(edit, "newText", "")
-      start_line = get_in(range, ["start", "line"]) || 0
-      start_col = get_in(range, ["start", "character"]) || 0
-      end_line = get_in(range, ["end", "line"]) || 0
-      end_col = get_in(range, ["end", "character"]) || 0
-
-      apply_single_lsp_edit(acc, start_line, start_col, end_line, end_col, new_text)
-    end)
-  end
-
-  @spec apply_single_lsp_edit(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) :: String.t()
-  defp apply_single_lsp_edit(content, start_line, start_col, end_line, end_col, new_text) do
-    lines = String.split(content, "\n")
-
-    case Enum.at(lines, start_line) do
-      nil ->
-        content
-
-      start_text ->
-        case Enum.at(lines, end_line) do
-          nil ->
-            content
-
-          end_text ->
-            before = String.slice(start_text, 0, start_col)
-            after_end = String.slice(end_text, end_col..-1//1)
-            replacement = before <> new_text <> after_end
-
-            {before_lines, rest} = Enum.split(lines, start_line)
-            {_removed, after_lines} = Enum.split(rest, end_line - start_line + 1)
-
-            new_lines = before_lines ++ [replacement] ++ after_lines
-            Enum.join(new_lines, "\n")
-        end
-    end
-  end
-
-  @spec run_formatter_with_spec(state(), pid(), String.t(), String.t()) :: state()
-  defp run_formatter_with_spec(state, buf, spec, buf_name) do
-    case Minga.Editing.format(Buffer.content(buf), spec) do
-      {:ok, formatted} ->
-        Buffer.replace_content(buf, formatted)
-        Minga.Log.info(:editor, "Format-on-save: #{buf_name}")
-        state
-
-      {:error, msg} ->
-        Minga.Log.warning(:editor, "Format-on-save failed: #{buf_name} (#{msg})")
-        state
-    end
-  end
-
-  @spec queue_formatter_tool_prompt(state(), String.t()) :: state()
-  defp queue_formatter_tool_prompt(state, command) do
-    case RecipeRegistry.for_command(command) do
-      nil ->
-        state
-
-      recipe ->
-        if ToolPromptWorkflow.skip?(state, recipe.name) do
+  defp save_continued(state, buf, version, {:save_as, target}) do
+    case Buffer.save_as_if_version(buf, version, target, save_transform_opts(buf)) do
+      :ok ->
+        state =
           state
-        else
-          state
-          |> ToolPromptWorkflow.enqueue(recipe.name)
-          |> show_tool_prompt_if_normal()
-        end
+          |> MingaEditor.BufferActivation.refresh_presentation()
+          |> setup_highlight_or_defer()
+          |> NoticeWorkflow.publish("Wrote #{Path.basename(target)}")
+
+        {:ok, state}
+
+      {:error, :stale} ->
+        stale_save(state)
+
+      {:error, reason} ->
+        {:error, NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")}
     end
   end
 
-  @spec show_tool_prompt_if_normal(state()) :: state()
-  defp show_tool_prompt_if_normal(%{workspace: %{editing: %{mode: :normal}}} = state) do
-    prompts = ToolPromptWorkflow.prompts(state)
-    show_tool_prompt(state, ToolPrompts.queue(prompts), ToolPrompts.declined(prompts))
-  end
-
-  defp show_tool_prompt_if_normal(state), do: state
-
-  @spec show_tool_prompt(state(), [atom()], MapSet.t(atom())) :: state()
-  defp show_tool_prompt(state, [], _declined), do: state
-
-  defp show_tool_prompt(state, pending, declined) do
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.transition_mode(
-            state.workspace,
-            :tool_confirm,
-            %ToolConfirmState{pending: pending, declined: declined}
-          )
-    }
-  end
-
-  @spec apply_whitespace_transforms(pid()) :: :ok
-  defp apply_whitespace_transforms(buf) do
-    needs_trim = Buffer.get_option(buf, :trim_trailing_whitespace)
-    needs_final_newline = Buffer.get_option(buf, :insert_final_newline)
-
-    if needs_trim or needs_final_newline do
-      content = Buffer.content(buf)
-      transformed = Minga.Editing.apply_save_transforms(content, needs_trim, needs_final_newline)
-
-      if transformed != content do
-        Buffer.replace_content(buf, transformed)
-      end
-    end
-
-    :ok
+  defp save_transform_opts(buf) do
+    [
+      trim_trailing_whitespace: Buffer.get_option(buf, :trim_trailing_whitespace),
+      insert_final_newline: Buffer.get_option(buf, :insert_final_newline)
+    ]
   end
 
   # Opens a special buffer (like *Messages* or *Warnings*) as a popup if a

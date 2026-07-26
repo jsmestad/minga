@@ -249,7 +249,7 @@ defmodule Minga.Buffer do
           non_neg_integer(),
           String.t(),
           Minga.Buffer.State.edit_source()
-        ) :: :ok | {:error, :read_only | :stale}
+        ) :: {:ok, non_neg_integer()} | {:error, :read_only | :stale}
   defdelegate replace_content_if_version(server, expected_version, new_content, source \\ :user),
     to: BufferProcess
 
@@ -302,6 +302,13 @@ defmodule Minga.Buffer do
   @doc "Save the buffer to disk."
   @spec save(t()) :: :ok | {:error, term()}
   defdelegate save(server), to: BufferProcess
+
+  @spec save_if_version(t(), non_neg_integer(), keyword()) :: :ok | {:error, term()}
+  defdelegate save_if_version(server, expected_version, opts \\ []), to: BufferProcess
+
+  @spec save_as_if_version(t(), non_neg_integer(), String.t(), keyword()) ::
+          :ok | {:error, term()}
+  defdelegate save_as_if_version(server, expected_version, target, opts \\ []), to: BufferProcess
 
   @doc """
   Saves all dirty file-backed buffers to disk.
