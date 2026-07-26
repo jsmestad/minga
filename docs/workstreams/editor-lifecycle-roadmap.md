@@ -23,13 +23,14 @@ The cumulative target across the full accepted program is net-negative productio
 
 The independent Ponytail gate produced 91 `ACCEPT`, 28 `ROUTE`, 11 `PRESERVE`, and 9 `REJECT` verdicts. W001 through W006 resolved only the first six accepted findings. They are a verified initial tranche, not completion of the audit program.
 
-Current accepted inventory:
+Current terminal inventory:
 
 - **VERIFIED:** L01, L02, L04, L05, L10, L11, L12, L13, L14, L15, L16, L19, L20, L22, L23, L24, L25, L26, L27, L28, L29, L30; D05, D06, D08, D09, D10, D11, D13, D14, D15, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31, D32, D34, D35, D36, D39, D40; S03, S04, S05, S06, S07, S09, S11, S12, S14, S15, S18, S20, S22, S23, S25, S26, S28, S29, S32, S33, S34, S35; E02, E03, E05, E08; ES03, ES05, ES07, ES08, ES09, ES10, ES12, ES14, ES16, ES17, ES18, ES21, ES24.
 - **DROPPED:** S21. W088 records the merged decision and evidence.
-- **VERIFIED routed follow-on:** ES01, ES02, ES06, ES19, ES20, L06, L07, L08, L09, L17.
-- **IMPLEMENTED routed follow-on:** S01, S08. W129 and W137 record implementation evidence; they are not VERIFIED until merge.
-- **DROPPED routed follow-on:** S30. W127 records why ES02 fully resolved the route.
+- **VERIFIED routed follow-on:** L03, L06, L07, L08, L09, L17, L18, L21; D02, D03; S01, S08, S13, S16, S17, S27; E01; ES01, ES02, ES06, ES19, ES20.
+- **IMPLEMENTED routed follow-on:** (none).
+- **PRESERVED routed decision:** D01, D07, D17, S10. The architecture decision wave records why these retained contracts must not enter the implementation queue.
+- **DROPPED routed follow-on:** S30, S31. W127 records why ES02 fully resolved S30; the architecture decision wave records why focused lifecycle work fully subsumed S31.
 - **CANDIDATE, lifecycle:** (none)
 - **CANDIDATE, deletion:** (none)
 - **CANDIDATE, shrink:** (none)
@@ -47,15 +48,15 @@ Eleven independent read-only GPT-5.5 `medium` batches checked all 85 remaining `
 - **STILL_REPRODUCIBLE, data shape:** ES05, ES07, ES09, ES10, ES12, ES14, ES16
 - **DRIFTED:** D13, D36, D40, S14
 
-### Terminal ACCEPT reconciliation at `48111abe5db3a736b1f046d2e89b54e069a2a20e`
+### Terminal ACCEPT reconciliation at `65607b42b83066fce96f03fba1bfc2118afe5041`
 
-The immutable FINDINGS.md decision inventory contains 91 unique `ACCEPT` IDs. The final ledger contains the same 91 unique IDs with no omission or extra entry: 90 are `VERIFIED`, and S21 is `DROPPED` by the merged W088 decision. Category totals are lifecycle 22 verified, deletion 29 verified, shrink 22 verified plus one dropped, craftsmanship four verified, and data shape 13 verified.
+The immutable FINDINGS.md decision inventory contains 91 unique `ACCEPT` IDs. The final ledger contains the same 91 unique IDs with no omission or extra entry: 90 are `VERIFIED`, and S21 is `DROPPED` by the merged W088 decision. Category totals remain lifecycle 22 verified, deletion 29 verified, shrink 22 verified plus one dropped, craftsmanship four verified, and data shape 13 verified.
 
-Five independent read-only category audits traced every ID through its terminal work-unit section, reviewer verdict, PR, implementation or decision SHA, and merge evidence. All 115 roadmap work-unit sections are terminal: 114 are `VERIFIED`, including follow-on and split slices, and one is `DROPPED`. The current inventory above is the authority for audit findings; the work-unit sections retain the detailed evidence.
+At current main `65607b42b83066fce96f03fba1bfc2118afe5041`, all 143 status-bearing execution records are terminal: 141 `VERIFIED` and two `DROPPED`, S21 and S30. This final merge-evidence closure pass moved 14 merged implementation entries to `VERIFIED` with terminal PR, head, merge, CI, reviewer, and findings-resolved evidence: L03 worktree evidence, W129/S08, W130/L21, W131/S27, W132/S17, W133/S13, W134/S16, W135/D11, W136/D39, S14Refresh/S14, W130/S20-Refresh, W089/S22, W137/D13, and W137/S01. This records their implementation PR merges only; it does not claim a docs PR for this ledger update has merged.
 
 Repository token search found no reference to the removed directory editor or its alias in production code, tests, configuration, or current user documentation. Remaining references are confined to the immutable FINDINGS.md evidence and the W041/W042 historical roadmap record of the completed deletion.
 
-Closure validation: `git diff --check` passed; `make lint` passed compile, formatting, and incremental Dialyzer; and low-concurrency `mix test.llm` passed 58 doctests, 98 properties, and 9,786 tests with zero failures, one skipped, and 616 excluded. The adversarial correctness and Ponytail reviews found the historical freshness overwrite and an off-by-one work-unit count; both were corrected, and targeted rechecks returned `RESOLVED/PASS` and `RESOLVED/LEAN`.
+Closure validation for this docs-only reconciliation: status-parser count confirmed 143 records, 141 `VERIFIED` and two `DROPPED`; `FINDINGS.md` was unchanged; `git diff --check` passed; `make lint` passed; Markdown LSP was unavailable.
 
 Historical drift evidence used for replanning:
 
@@ -85,7 +86,7 @@ Decision inventory:
 
 - **ROUTE, lifecycle:** L03, L06, L07, L08, L09, L17, L18, L21
 - **ROUTE, deletion:** D01, D02, D03, D07, D17
-- **ROUTE, shrink:** S08, S10, S13, S16, S17, S27, S30, S31
+- **ROUTE, shrink:** S01, S08, S10, S13, S16, S17, S27, S30, S31
 - **ROUTE, craftsmanship:** E01
 - **ROUTE, data shape:** ES01, ES02, ES06, ES19, ES20
 
@@ -126,7 +127,7 @@ Ten independent read-only `archie` reviews at `xhigh` resolved all 28 routed fin
 
 #### L03 worktree implementation evidence at `fix-editor-route-l03`
 
-- **Status:** IMPLEMENTED in worktree, not yet PR-verified or merged.
+- **Status:** VERIFIED
 - **Outcome:** `MingaEditor.Handlers.BufferRegistry.buffer_inventory/1` now derives the ordered active-workspace plus inactive file-tab buffer pid inventory. Dirty confirmation, `:wqa`, and lifecycle tracking consume that owner, while `MingaEditor.State.remove_buffer/2` remains the retirement boundary.
 - **Failing-before proof:** After adding the locked regressions and before production changes, `mix test.debug test/minga_editor/state/buffer_lifecycle_test.exs test/minga_editor/commands/buffer_management_save_quit_test.exs` failed because `BufferRegistry.buffer_inventory/1` was undefined, `:quit_all` did not publish the dirty confirmation for an inactive-tab-only dirty buffer, and `:wqa` left the inactive file unchanged.
 - **Focused validation:** `mix test.debug test/minga_editor/state/buffer_lifecycle_test.exs test/minga_editor/commands/buffer_management_save_quit_test.exs` passed with 20 tests. `mix test.debug test/minga_editor/commands/buffer_management_kill_test.exs` passed with 5 tests.
@@ -136,6 +137,12 @@ Ten independent read-only `archie` reviews at `xhigh` resolved all 28 routed fin
 - **Test lines added/removed:** 177 added / 0 removed, net +177.
 - **Concepts added/removed:** Added one BufferRegistry-owned ordered live-plus-tab buffer inventory. Removed the duplicate private tab tracking predicate in favor of the shared inventory. No module, process, dependency, protocol, configuration, persistence shape, retirement path, or save-result contract was added.
 - **Completion date:** 2026-07-25.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3261
+- **Implementation commit SHA:** `23f06c758b4fb77a65420039350cccfc19d2d2bc`
+- **Merge SHA:** `a32399319ae454984ee9260dbbabbb9a6a342e57`
+- **CI run:** [30175057465](https://github.com/jsmestad/minga/actions/runs/30175057465) passed.
+- **Reviewer verdict:** Final reviewer `PASS` at 0.99 confidence.
+- **Findings resolved:** L03 now has one BufferRegistry-owned ordered inventory for live workspace and inactive file-tab buffers, with retirement authority retained by `MingaEditor.State.remove_buffer/2`.
 
 Dependency order from the decisions is mandatory: ES06 before L06, L06 before L07 and L08, and L06 before L09; ES20 before L18 and ES19; L17 before L18; ES19 before ES02, ES02 before S30, and S30 before ES01. Same-owner work remains serialized even where no hard dependency exists.
 
@@ -3780,7 +3787,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### S14Refresh/S14: Make remaining default-only lifecycle callbacks optional
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S14
 - **Planning profile:** `S14Refresh`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S14WorkerNext`, `editor-lifecycle-worker`, no delegation.
@@ -3797,9 +3804,15 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts added:** No production module, process, dependency, behaviour, protocol, registry, public API, configuration flag, compatibility shim, or data representation. Test support added one effect coalesce probe and two input handler probe modules so global-registry mutation lives in one serialized test file while async handler and router tests remain async.
 - **Concepts removed:** Removed default-only identity picker cancel callbacks, false picker preview callbacks, latest-wins effect coalescing callbacks, and mouse-only input key passthrough callbacks from the locked owner list.
 - **Retained contracts:** Picker restore callbacks using `Source.restore_or_keep/1`, `BufferSource` delegation, `ThemeSource` restore, true `preview?/0`, `gui_preview?/0`, custom `FileTree.Refresh` and `WatcherSync` coalescing, `EffectProbe.coalesce/2`, key-capable handler fallback clauses, module-load failures for missing input handlers, mouse routing, PromptUI prompt-cancel behavior, picker close ordering, and extension invalid-return validation for exported callbacks remain unchanged.
-- **Findings resolved:** S14's remaining default-only picker, effect, and input lifecycle callback boilerplate is implemented as optional-boundary behavior. This is not VERIFIED until merge.
+- **Findings resolved:** S14's remaining default-only picker, effect, and input lifecycle callback boilerplate is removed through optional callbacks at the existing owner boundaries.
 - **Discoveries affecting later work:** `make lint` can become a full Credo run when a changed-file edit shifts a custom-check known-site line; future locked callback cleanup plans should account for known-site maintenance when deleting lines above a sanctioned blocking call. Unconstrained `mix test.llm` remains vulnerable to unrelated parallel suite timeouts; the constrained `ERL_FLAGS='+S 2:2' mix test.llm` command was stable and passed.
 - **needs_replan:** false.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3265
+- **Implementation commit SHA:** `ae00f1549fb8b4251f5e5da5be1c4548a1fcc721`
+- **Merge SHA:** `fbb5874edba533a263f26cacd59da230d48aa1f3`
+- **CI run:** [30176495947](https://github.com/jsmestad/minga/actions/runs/30176495947) passed.
+- **Reviewer verdict:** Final targeted reviewer `PASS` at 0.99 confidence.
+- **Completion date:** 2026-07-25
 
 ### W085/S15: Share status-bar buffer semantics between buffer and agent variants
 
@@ -3894,7 +3907,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W130/S20-Refresh: Drop Editor-global completion requests on modal dismissal
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S20
 - **Planning profile:** `S20Refresh`, `editor-lifecycle-planner`, read-only refresh.
 - **Implementation profile:** `S20WorkerNext`, `editor-lifecycle-worker`, no delegation.
@@ -3912,6 +3925,12 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Retained contracts:** Signature-help, hover, inlay hint, semantic token, operation, formatting, current-origin response, formatting indexes, completion generation checks, late-response harmlessness, modal dismissal behavior, resolve timer cancellation, frontend protocol, and renderer behavior remain unchanged.
 - **Findings resolved:** The refreshed S20 stale completion request path is closed at the Editor-global LSP pending-request owner boundary: completion dismissal clears completion-owned pending refs immediately without touching unrelated requests or generations. The S20 Ponytail follow-up inlined the completion tuple matches into `Map.reject/2` and deleted the one-call private helper.
 - **Discoveries affecting later work:** The original CompletionTrigger-owned fix is stale on current main because completion pending refs now live in `MingaEditor.State.LSP.PendingRequests`; later lifecycle work should route pending-request cleanup through LSP owner transitions rather than rebuilding per-feature ref sets in workflow structs.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3263
+- **Implementation commit SHA:** `e48abcb0260867fea3c88eb4b2b3634353d14521`.
+- **Merge SHA:** `b46ae4298a426d892f2dcbc33acfdd5aa6a923b2`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30175607482
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Completion date:** 2026-07-25.
 
 ### W088/S21: Evaluate Doom One Palette/Builder conversion
 
@@ -3938,7 +3957,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W089/S22: Move repeated operation lifecycle installation into Feedback
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S22
 - **Planning profile:** `S22Refresh`, `editor-lifecycle-planner`, read-only.
 - **Implementation profile:** `S22WorkerNext`, `editor-lifecycle-worker`, no delegation.
@@ -3958,6 +3977,11 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Retained contracts:** External format queued, running, timeout, generic error, superseded-stale, canceled, scheduler-stale, success, buffer-version stale, read-only, and buffer-closed messages remain unchanged; Git mutation queued/running/success/timeout/error/superseded/coalesced/stale/canceled messages and refresh behavior remain unchanged; Git admission queued/running/not-git/timeout/generic-failure/canceled/stale messages and successful `EffectScheduler.finalize_and_schedule/3` handoff remain unchanged; queue metadata is still scheduler-authored, running clears queue metadata, and terminal feedback clears queue metadata and cancelability through existing state feedback owners.
 - **Findings resolved:** S22's repeated queue/run/finish operation feedback installation in the three locked effect modules is centralized without moving domain policy out of the effects or changing scheduler, feedback owner, operation, frontend, log, or external-format/git behavior.
 - **Discoveries affecting later work:** Full-suite `mix test` in this worktree is sensitive to native support and parallel session-manager timing; building native support and constraining max cases produced a full-suite pass. No replan trigger, owner drift, dependency, protocol/frontend impact, scheduler impact, production budget issue, test budget issue, compatibility need, or new broad concept was found.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3264
+- **Implementation commit SHA:** `c96b22e8129a22124807465e2d6146d013496795`.
+- **Merge SHA:** `b8989a6aee4e8560b1c298fce938190919e4c1dd`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30175650724
+- **Reviewer verdict:** Targeted `PASS` at `0.99` confidence.
 - **Completion date:** 2026-07-25.
 
 ### W090/S23: Narrow decoration composition exit handling
@@ -5139,7 +5163,7 @@ New split and float popup windows initialize their viewport metadata from `state
 
 ### W129/S08: Complete key-local Router seam for GUI space-leader replay
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S08
 - **Planning profile:** `S08Planner`, editor-lifecycle-planner, read-only.
 - **Implementation profile:** `S08Worker`, editor-lifecycle-worker, no delegation.
@@ -5157,13 +5181,19 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed GUI space-leader replay's dependency on the full key event dispatch path, the resulting duplicate universal housekeeping/render submission, and the obsolete post-key housekeeping wrapper.
 - **Retained constraints:** Universal housekeeping remains solely in `Router.post_action_housekeeping/2`; `MingaEditor.handle_info/2` remains the GUI event envelope; `GuiActionHandler` remains semantic GUI action selection only; `CUA.SpaceLeader` remains stateless GUI space-leader interpretation and replay; pending-quit yes/no/Escape and ignored-key semantics, shell handler order, keystroke history, keyboard completion/signature-help handling, protocol decoding, keymap semantics, and TUI space-leader ownership are retained.
 - **Discoveries affecting later work:** None. The locked owner, contract, scope, dependency, and production-line budget remained valid; no replan trigger or overlapping implementation dependency was found.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3253
+- **Implementation commit SHA:** `b65609193223b0e1fa3e4c78d328eb77657ad2da`.
+- **Merge SHA:** `e95fd6acb87a1706f864d325b0dc9850f2d0c9bc`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30171511149
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** S08 is complete. GUI space-leader replay now uses the key-local Router seam, so universal housekeeping remains owned by the outer GUI action envelope and no duplicate render/scheduling pass remains.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 - **Completion date:** 2026-07-25
 
 ### W130/L21: Route Ctrl-G through existing focus owners and active-window scope
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** L21
 - **Decision:** APPROVE_DIRECT, `Input.Interrupt` remains the Ctrl-G transaction coordinator while bottom panel, agent prompt, file tree, registered sidebar, TUI space-leader, and session scope remain with their existing owners.
 - **Planning profile:** `L21Planner`, editor-lifecycle-planner, locked READY at baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
@@ -5181,12 +5211,19 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed the hardcoded Ctrl-G `:editor` scope reset and stale focus ownership after interrupt.
 - **Retained constraints:** No new module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, duplicated state owner, frontend behavior, GUI CUA replay change, visibility-closing behavior, prompt-buffer clearing, file-tree content clearing, sidebar closure, or input handler ordering change was introduced.
 - **Discoveries affecting later work:** `Input.Interrupt` keeps one aggregate focus-owner log label to stay inside the locked production cap; the observable owner transitions and scope derivation are covered directly. Expanded interrupt tests that start more than one `Minga.Buffer.Process` in one test must use unique supervised child ids.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3254
+- **Implementation commit SHA:** `97b0458ea3d09e6f0de4af89ca7c8980485805fd`.
+- **Merge SHA:** `ea02ec3eaea515497d1a0e9bb25fde312c986457`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30172020444
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** L21 is complete. Ctrl-G now coordinates the existing focus owners and derives interrupt scope from the active window without introducing a new focus owner or closing visibility surfaces.
+- **Completion date:** 2026-07-25
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 
 ### W131/S27: Enforce exact frontend protocol admission
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S27
 - **Decision:** APPROVE_DIRECT, enforce the one generated frontend protocol version at Manager admission and remove packet layouts that the admitted version cannot send.
 - **Planning profile:** `S27Planner`, editor-lifecycle-planner, read-only, locked READY at baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
@@ -5204,13 +5241,19 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Retained constraints:** No generated frontend encoder, opcode number, schema version, frontend data representation, public API, process, dependency, behaviour, registry, configuration, compatibility shim, capability cleanup, breadcrumb compatibility, parser protocol, or renderer recovery behavior changed.
 - **Roadmap evidence retained:** The S27 Ponytail review proposed deleting this W129 block, but the governing execution contract requires every implementation PR to update the roadmap evidence. The valid smallest cut is to keep this block and correct it after removing duplicate Manager ready-success coverage and stale Capabilities short-ready fallback documentation.
 - **Discoveries affecting later work:** The planner's Go focused path used a non-package directory; use `go/tui` module-local package paths for future Go focused validation. The final constrained Elixir suite still emitted existing parser-manager unregister and LSP stale-buffer warnings, but all modules and tests passed.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3255
+- **Implementation commit SHA:** `2ed4f028f40dc003f9ebe58121ada0148e284c57`.
+- **Merge SHA:** `f5874c7867535c2e2f384d891eb620aa5d74cb91`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30172685537
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** S27 is complete. Frontend admission now accepts only the exact generated protocol version and rejects retired packet/body layouts without changing generated opcodes or frontend data shapes.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 - **Completion date:** 2026-07-25
 
 ### W132/S17: Close prompt callbacks before context-aware successor handling
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S17
 - **Decision:** APPROVE_DIRECT, `PromptUI` owns successor-safe callback sequencing through `ModalWorkflow`; context-aware prompt handlers may open a successor modal without a trailing prompt close dismissing it.
 - **Planning profile:** `S17Planner`, editor-lifecycle-planner, locked READY at baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
@@ -5228,10 +5271,17 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** The prompt workflow's post-callback submit close and cancel dismiss sequencing that could remove a successor modal.
 - **Retained constraints:** Prompt text editing, Tab completion, minibuffer rendering, Input.Prompt routing, picker sequencing, modal data shape, PromptState context field, ModalWorkflow ownership, and legacy `on_submit/2` and `on_cancel/1` handler behavior remain intact. No new module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, or alternate context representation was introduced.
 - **Discoveries affecting later work:** The worktree baseline is `9cd0615c1c00028f8b2349a3e5543ffb3d933fb7` while the planner recorded source freshness at `3e0b78dae40448c83e5b2258a28064d5bcdaac76`; refreshed `PromptUI`, `ProjectRemoveConfirm`, handler, prompt state, and ModalWorkflow symbols still matched the locked failure and owner shape, so no replan trigger was found.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3256
+- **Implementation commit SHA:** `221a6256faaea32ef950f405ba2517b7b989335b`.
+- **Merge SHA:** `e55c923a582072be7dfd11d4388788f5576506a8`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30173196008
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** S17 is complete. Prompt submit and cancel callbacks now run after the completed prompt is closed or dismissed, so context-aware callbacks can open successor prompts without trailing cleanup removing them.
+- **Completion date:** 2026-07-25
 
 ### W133/S13: Represent empty TabBar with nil active id
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S13
 - **Decision:** APPROVE_DIRECT, `TabBar` represents no active tab as `active_id: nil`; the first real tab id remains `1`; the GUI hidden-active byte `255` is retained only at the wire encoder boundary.
 - **Planning profile:** `S13Planner` plus corrected READY relock from `S13Replanner`, editor-lifecycle-planner, locked against the nil-outgoing first-insert workflow correction.
@@ -5250,9 +5300,16 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** The reserved empty-tab `active_id: 1` sentinel, skipped first real tab id, dangling active-id documentation, fake active index `0` for zero tabs, accidental leaf activation of synthesized restored tabs during nil-active empty startup, and the accidental treatment of nil current-active as a real departing tab id.
 - **Retained constraints:** Manual workspace id `0` remains the empty-state workspace fallback and root active workspace while restored agent tabs are inactive; `Minga.RenderModel.UI.TabBar.active_tab_id` remains nullable; GUI protocol hidden-active byte `255` remains adapter-owned; `TabBar.insert/3` remains insert-without-activation so insert-then-`TabWorkflow.switch/2` callers keep the root restoration path; `TabWorkflow.switch/2` still expects a real tab id; positive-id LSP pending request APIs remain positive-id shaped; no Workspace authority, agent UI projection, LSP lifecycle redesign, tab context persistence, generated protocol, Swift, Go, schema, frontend rendering, or root-facade ownership changed.
 - **Discoveries affecting later work:** Preserving nil active id through restore means workspace cycling from launchpad/root starts from manual workspace id `0` and selects the first agent workspace on the first explicit next-workspace command; callers that want a restored agent workspace active must still perform an explicit real-tab activation.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3259
+- **Implementation commit SHA:** `3053a8e337312711b5815ccd4c218d21bd388ff8`.
+- **Merge SHA:** `f7c2827c78c254a94a962528b030a488983be5f7`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30173650675
+- **Reviewer verdict:** `PASS` at `0.98` confidence.
+- **Findings resolved:** S13 is complete. Empty TabBar state now represents no active tab with `active_id: nil`, preserves restored inactive agent tabs, and keeps the GUI hidden-active byte only at the encoder boundary.
+- **Completion date:** 2026-07-25
 ### W134/S16: Consolidate picker authorized-path open activation
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S16
 - **Decision:** APPROVE_DIRECT, `MingaEditor.Handlers.BufferRegistry` owns only authorized-path lookup, start, registration, buffer activation, and tab switching mechanics; picker sources retain authorization, cursor movement, preview policy, history/frecency recording, notices, and logging.
 - **Planning profile:** `S16Planner`, editor-lifecycle-planner, locked READY at baseline `3e0b78dae40448c83e5b2258a28064d5bcdaac76`.
@@ -5271,12 +5328,19 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Seven duplicated picker-local open-or-activate implementations, including repeated live-buffer lookup, buffer start, registration, activation, and source-local tab-switch mechanics.
 - **Retained constraints:** `open_file_by_path_result/2`, `start_and_register_file/2`, public editor and GUI open-file behavior, ProjectFileCandidate authorization, Root authorization, preview decisions, cursor movement, jump marks, history/frecency recording, notices, logging, extension root derivation, and TodoSearchSource's nil options-server behavior remain source-owned or unchanged. No new module, process, dependency, behaviour, protocol, registry, public API beyond the locked BufferRegistry helper, configuration, compatibility shim, persistence change, or alternate data representation was added.
 - **Discoveries affecting later work:** Changing `WorkspaceSymbolSource` made existing changed-file lint evaluate its pre-existing synchronous LSP request; the existing synchronous behavior was retained with the same local Credo disable pattern used elsewhere. Root-level extension test execution does not compile bundled extension picker source modules directly, so the new root-level extension regression explicitly requires the source file before exercising it.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3258
+- **Implementation commit SHA:** `00a9387e5fa2f984bdd26bd4efab4f1d8e20e5e7`.
+- **Merge SHA:** `c22af52539271ba6f87931b1fff7c1070977c53b`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30174418014
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** S16 is complete. Authorized picker open-or-activate mechanics now route through `BufferRegistry.open_or_activate_path/3`, while authorization, preview, cursor, history, notices, and logging stay source-owned.
+- **Completion date:** 2026-07-25
 - **Unresolved questions:** None.
 - **needs_replan:** false.
 
 ### W135/D11: Remove dead GUI adapter last-window FPS cache
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** D11
 - **Decision:** APPROVE_DIRECT, remove only the refreshed write-only `last_window_fps` cache field while retaining the live GUI adapter window cache fields and frame decision logic.
 - **Planning profile:** `D11Refresh`, editor-lifecycle-planner, locked READY at baseline `0b22c1f192cc6fe6a7b2c18e0dc7d7b28a8b81f7`.
@@ -5294,9 +5358,16 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed the dead `last_window_fps` GUI adapter cache field and its two private producer writes.
 - **Retained constraints:** `last_window_content_fps`, `last_window_overlay_fps`, `last_window_content_epochs`, `last_window_row_keys`, `last_window_rows`, `pending_window_delta_ids`, nested renderer `adapter_gui_caches`, emit side-channel dedupe, frame acknowledgement lineage, recovery fields, and WindowCache resident/snapshot fields remain unchanged.
 - **Discoveries affecting later work:** No replan trigger, owner drift, public API change, protocol/frontend wire change, frame-logic change, compatibility need, production budget miss, or additional dead D11 field was found.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3260
+- **Implementation commit SHA:** `d6cbcdfb6bf3060cb907b613a1c7b48613bb2a4f`.
+- **Merge SHA:** `ded1dca7be978cf2c43b3d798338986a6d9f8ce3`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30175018952
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** D11 is complete. The write-only `last_window_fps` GUI adapter cache field and its producers are removed while live content, overlay, epoch, row, pending-delta, and recovery caches remain unchanged.
+- **Completion date:** 2026-07-25
 ### W136/D39: Delete status-driven agent auto-scroll re-pinning
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** D39
 - **Decision:** APPROVE_DIRECT, delete only the status-driven `:thinking` auto-scroll re-pinning chain while preserving explicit scroll-to-bottom, frontend pin intents, resident transcript state, protocol behavior, and prompt-clearing scroll behavior.
 - **Planning profile:** `D39Refresh`, editor-lifecycle-planner, read-only, locked READY at baseline `0b22c1f192cc6fe6a7b2c18e0dc7d7b28a8b81f7`.
@@ -5313,9 +5384,16 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Concepts removed:** Removed the status-driven auto-scroll re-pinning chain: `StatusEventWorkflow.engage_scroll/2`, `TraditionalWorkflow.engage_agent_scroll/1`, and `UIState.engage_auto_scroll/1`.
 - **Retained constraints:** `UIState.scroll_to_bottom/1`, `UIState.set_pinned/2`, `UIState.scroll_up/2`, `UIState.scroll_down/2`, prompt-clearing scroll-to-bottom, resident transcript projection, frontend protocol opcodes, render metrics, mouse and key routing, and `Minga.Editing.Scroll` semantics remain unchanged. No module, process, dependency, behaviour, protocol, registry, public API, configuration, compatibility shim, replacement abstraction, data representation, scroll owner, or transcript owner was added.
 - **Discoveries affecting later work:** Default-concurrency `make test.llm` remains vulnerable to unrelated SessionManager call timeouts; a low-concurrency full `mix test.llm --max-cases 1` passed in this worktree. No D39 replan trigger, stale owner, dependency drift, frontend protocol change, or overlapping implementation dependency was found.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3262
+- **Implementation commit SHA:** `75280ddf2b3b914851d59850146799147a62be52`.
+- **Merge SHA:** `79f09850a5f2987aea1acec01d702dbcc8ed0330`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30175521136
+- **Reviewer verdict:** `PASS` at `0.99` confidence.
+- **Findings resolved:** D39 is complete. The status-driven `:thinking` auto-scroll re-pinning chain is removed, while explicit pin, scroll-to-bottom, transcript state, protocol, and prompt-clearing scroll behavior remain unchanged.
+- **Completion date:** 2026-07-25
 ### W137/D13: Move live highlight activation to lifecycle owners
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** D13 with D24 overlap resolved where the refreshed D24 planner identified the same router/delegate hook and owner-local activation/add setup residue.
 - **Decision:** APPROVE_DIRECT, keep parser event handling in `MingaEditor.Handlers.HighlightHandler`, centralize changed-active-buffer parser presentation in `HighlightSync.ensure_active_buffer_presentation/2`, route every real file-buffer activation producer through that owner, and delete the universal router hook plus active-only compatibility adapters and unused agent highlight plumbing.
 - **Planning profile:** `D13Refresh`, editor-lifecycle-planner, locked READY at baseline `0b22c1f192cc6fe6a7b2c18e0dc7d7b28a8b81f7`; D24 overlap checked against `D24Refresh`.
@@ -5338,12 +5416,18 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Mandatory correction validation:** After the final correction, `mix test test/minga_editor/highlight_sync_test.exs test/minga_editor/window_focus_test.exs test/minga_editor/buffer_activation_test.exs test/minga_editor/handlers/highlight_handler_test.exs` passed `37` tests. `make lint` passed changed-source Credo, compile, format, and incremental Dialyzer with `Total errors: 0`. `ERL_FLAGS='+S 2:2' mix test.llm` passed `58 doctests, 98 properties, 9896 tests, 0 failures, 1 skipped, 616 excluded`. `git diff --check` produced no output.
 - **Mandatory correction deltas before this roadmap evidence:** Final ownership amendment delta is production `+40/-30` across `lib/minga_editor/handlers/gui_action_handler.ex`, `lib/minga_editor/handlers/highlight_handler.ex`, `lib/minga_editor/highlight_sync.ex`, and `lib/minga_editor/window_focus.ex`; test `+76/-0` in `test/minga_editor/highlight_sync_test.exs`. The production additions are exactly the locked `<= 40` gross amendment cap.
 - **Unresolved questions:** None.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3266
+- **Implementation commit SHA:** `f1734de215ab1db81b0a4673324137052c0a1dc8`.
+- **Merge SHA:** `f5829d7894835bd8a4b6ee88c7ba51a055a5b521`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30178589173
+- **Reviewer verdict:** `PASS/LEAN` at `0.99` confidence.
+- **Findings resolved:** D13 is complete. Highlight activation now belongs to lifecycle producers through `HighlightSync.ensure_active_buffer_presentation/2`, and the universal router hook, active-only compatibility adapters, and unused agent highlight plumbing are removed.
 - **needs_replan:** false.
 - **Completion date:** 2026-07-25
 
 ### W137/S01: Unify format-on-save with async Formatting lifecycle
 
-- **Status:** IMPLEMENTED
+- **Status:** VERIFIED
 - **Audit ID:** S01
 - **Decision:** APPROVE_DIRECT, `MingaEditor.Commands.Formatting` owns formatter admission and async LSP/external lifecycle, `MingaEditor.Commands.BufferManagement` owns save intent and the post-format save or close continuation, and `Minga.Buffer.Process` owns the atomic version-checked save transition.
 - **Planning profile:** `S01TrueMainPlanner`, editor-lifecycle-planner, locked READY at baseline `fbb5874edba533a263f26cacd59da230d48aa1f3`.
@@ -5376,6 +5460,12 @@ New split and float popup windows initialize their viewport metadata from `state
 - **Residual production and test lines before roadmap evidence:** The preserved staged S01 production total remains at `lib/ +453/-403`, net `+50`; the residual production amendment is `lib/minga_editor/commands/buffer_management.ex +10/-10`, net `0`, so the combined production total is `lib/ +463/-413`, net `+50`. The residual test amendment is `test/minga_editor/commands/buffer_management_save_quit_test.exs +151/-0`, net `+151`, limited to the locked A,C,B, agent-B, missing-B fallback, and last-file-plus-agent regressions.
 - **Residual concepts added:** One local preferred replacement id inside `close_file_tab_or_quit/2`, threaded only through existing private close/remove helpers.
 - **Residual concepts removed:** Removed async save-quit completion's dependency on the origin tab's neighbor when a distinct completion-time active tab still exists.
+- **PR URL:** https://github.com/jsmestad/minga/pull/3267
+- **Implementation commit SHA:** `fdb0a05069cf3906689591743bfb3f46c90c6f12`.
+- **Merge SHA:** `65607b42b83066fce96f03fba1bfc2118afe5041`.
+- **CI run passed:** https://github.com/jsmestad/minga/actions/runs/30181922041
+- **Reviewer verdict:** Final targeted `PASS` at `0.99` confidence.
+- **Findings resolved:** S01 is complete. Format-on-save now uses the async Formatting lifecycle with typed save continuations, version-checked Buffer persistence, origin-tab close semantics, and completion-time tab restoration.
 - **Unresolved questions:** None.
 - **needs_replan:** false.
-- **Completion date:** 2026-07-25
+- **Completion date:** 2026-07-26
