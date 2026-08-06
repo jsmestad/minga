@@ -29,7 +29,7 @@ defmodule MingaEditor.Renderer.ContentEpoch do
 
   @spec install_counter() :: :atomics.atomics_ref()
   defp install_counter do
-    :global.trans(@key, fn ->
+    :global.trans({@key, self()}, fn ->
       case :persistent_term.get(@key, nil) do
         nil ->
           counter = :atomics.new(1, signed: false)
