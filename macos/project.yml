@@ -1,6 +1,6 @@
 name: Minga
 options:
-  minimumXcodeGenVersion: "2.45.4"
+  minimumXcodeGenVersion: "2.46.0"
   bundleIdPrefix: com.minga
   deploymentTarget:
     macOS: "15.0"

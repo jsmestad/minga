@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["yonaskolb/XcodeGen"],
+      "groupName": "XcodeGen"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.xcodegen-version$/"],
+      "matchStrings": ["^(?<currentValue>\\d+\\.\\d+\\.\\d+)$"],
+      "depName": "yonaskolb/XcodeGen",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "loose"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^macos\\/project\\.yml$/"],
+      "matchStrings": ["minimumXcodeGenVersion: \\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""],
+      "depName": "yonaskolb/XcodeGen",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "loose"
+    }
+  ]
+}

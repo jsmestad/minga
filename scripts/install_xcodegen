@@ -7,6 +7,14 @@ version=$(cat "$repo_root/.xcodegen-version")
 destination=${1:?usage: scripts/install_xcodegen DESTINATION}
 archive=${TMPDIR:-/tmp}/xcodegen-$version.zip
 
+if [ -x "$destination/xcodegen/bin/xcodegen" ]; then
+  actual=$($destination/xcodegen/bin/xcodegen --version | awk '{print $NF}')
+  if [ "$actual" = "$version" ]; then
+    printf '%s\n' "$destination/xcodegen/bin"
+    exit 0
+  fi
+fi
+
 rm -rf "$destination"
 mkdir -p "$destination"
 curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/$version/xcodegen.zip" -o "$archive"

@@ -15,6 +15,7 @@ zig/src/generated/
 go/tui/bin/
 
 # Swift / Xcode
+/.tools/
 macos/.build/
 macos/.swiftpm/
 macos/.generated/

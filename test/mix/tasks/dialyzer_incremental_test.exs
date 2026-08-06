@@ -6,12 +6,12 @@ defmodule Mix.Tasks.Dialyzer.IncrementalTest do
   @moduletag :tmp_dir
 
   test "cache key changes for every invalidation input" do
-    base = ["29.0.3", "1.20.2", "lock", [flags: [:unmatched_returns]]]
+    base = ["29.0.5", "1.20.3", "lock", [flags: [:unmatched_returns]]]
     key = apply(Incremental, :cache_key, base)
 
     for {value, index} <- [
-          {"29.0.4", 0},
-          {"1.20.3", 1},
+          {"29.0.6", 0},
+          {"1.20.4", 1},
           {"changed lock", 2},
           {[flags: [:underspecs]], 3}
         ] do
@@ -21,10 +21,10 @@ defmodule Mix.Tasks.Dialyzer.IncrementalTest do
   end
 
   test "toolchain key changes for OTP and Elixir version changes" do
-    key = Incremental.toolchain_key("29.0.3", "1.20.2")
+    key = Incremental.toolchain_key("29.0.5", "1.20.3")
 
-    refute Incremental.toolchain_key("29.0.4", "1.20.2") == key
-    refute Incremental.toolchain_key("29.0.3", "1.20.3") == key
+    refute Incremental.toolchain_key("29.0.6", "1.20.3") == key
+    refute Incremental.toolchain_key("29.0.5", "1.20.4") == key
   end
 
   test "uses a compatible cache when the exact cache is absent", %{tmp_dir: dir} do
