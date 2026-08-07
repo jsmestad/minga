@@ -1,5 +1,5 @@
 .PHONY: help lint lint.full lint.format lint.credo lint.credo.changed lint.compile lint.dialyzer lint.dialyzer.incremental lint.fix test test.llm \
-       native.support native.tui native.go-tui \
+       native.support native.tui native.go-tui xcodegen-install xcodegen-generate \
        release release-tui release-mac install install-tui install-mac uninstall
 
 .DEFAULT_GOAL := help
@@ -20,7 +20,9 @@ help:
 	@printf "\033[1;36mNative builds\033[0m\n"
 	@printf "  \033[1mmake native.support\033[0m Build parser and hook-runner support binaries\n"
 	@printf "  \033[1mmake native.tui\033[0m     Build the TUI binaries (Go renderer, parser)\n"
-	@printf "  \033[1mmake native.go-tui\033[0m  Build only the Go TUI renderer\n\n"
+	@printf "  \033[1mmake native.go-tui\033[0m  Build only the Go TUI renderer\n"
+	@printf "  \033[1mmake xcodegen-install\033[0m Install the pinned XcodeGen locally\n"
+	@printf "  \033[1mmake xcodegen-generate\033[0m Regenerate the macOS Xcode project\n\n"
 	@printf "\033[1;36mBuild and install\033[0m\n"
 	@printf "  \033[1mmake release\033[0m       Build release artifacts for this platform\n"
 	@printf "  \033[1mmake release-tui\033[0m   Build the TUI release\n"
@@ -137,6 +139,17 @@ native.tui:
 native.go-tui:
 	mix native.build.go_tui
 
+# ── XcodeGen ────────────────────────────────────────────────────────────
+
+XCODEGEN_DIR := $(CURDIR)/.tools/xcodegen
+XCODEGEN_BIN := $(XCODEGEN_DIR)/xcodegen/bin/xcodegen
+
+xcodegen-install:
+	@scripts/install_xcodegen "$(XCODEGEN_DIR)"
+
+xcodegen-generate: xcodegen-install
+	@cd macos && "$(XCODEGEN_BIN)" generate
+
 # ── Release (build without installing) ─────────────────────────────────
 
 release-tui:
@@ -149,11 +162,10 @@ release-tui:
 
 release-mac:
 ifeq ($(OS),Darwin)
+release-mac: xcodegen-install
 	@command -v xcodebuild >/dev/null 2>&1 || { echo "\033[31mError: xcodebuild not found. Install Xcode from the App Store.\033[0m"; exit 1; }
-	@command -v xcodegen >/dev/null 2>&1 || { echo "\033[31mError: pinned xcodegen not found. Run scripts/install_xcodegen <dir>.\033[0m"; exit 1; }
-	@test "$$(xcodegen --version | awk '{print $$NF}')" = "$$(cat .xcodegen-version)" || { echo "\033[31mError: XcodeGen version does not match .xcodegen-version.\033[0m"; exit 1; }
 	@echo "Building macOS GUI app..."
-	MIX_ENV=prod mix app.assemble
+	PATH="$(XCODEGEN_DIR)/xcodegen/bin:$$PATH" MIX_ENV=prod mix app.assemble
 	@echo "\033[32mMinga.app built successfully.\033[0m"
 else
 	@echo "\033[31mError: make release-mac is only available on macOS.\033[0m"; exit 1

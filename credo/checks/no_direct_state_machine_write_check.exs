@@ -219,7 +219,7 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
     ]
   end
 
-  defp guarded_path_match(path, guarded_struct_fields) when is_list(path) do
+  defp guarded_path_match(path, guarded_struct_fields) do
     guarded_struct_fields
     |> Enum.find_value(fn {parent, children} ->
       path
@@ -230,8 +230,6 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       end)
     end)
   end
-
-  defp guarded_path_match(_path, _guarded_struct_fields), do: nil
 
   defp extract_dot_path({{:., _, [left, field]}, _, []}) when is_atom(field) do
     extract_dot_path(left) ++ [field]
