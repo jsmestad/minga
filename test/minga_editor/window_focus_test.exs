@@ -246,6 +246,65 @@ defmodule MingaEditor.WindowFocusTest do
     assert WindowFocus.focus(state, 2) == state
   end
 
+  test "buffer-target focus rejects removed windows and changed window content" do
+    {state, first_buffer, second_buffer} = split_state()
+
+    assert {:ok, focused} = WindowFocus.focus_buffer_result(state, 2, second_buffer)
+    assert focused.workspace.windows.active == 2
+    assert focused.workspace.buffers.active == second_buffer
+
+    {:ok, removed_windows} = Windows.remove_window(state.workspace.windows, 2)
+
+    removed_state = %{
+      state
+      | workspace: SessionState.set_windows(state.workspace, removed_windows)
+    }
+
+    assert WindowFocus.focus_buffer_result(removed_state, 2, second_buffer) ==
+             {:error, :window_not_found}
+
+    changed_windows =
+      Windows.replace_window(
+        state.workspace.windows,
+        2,
+        Window.show_buffer(Map.fetch!(state.workspace.windows.map, 2), first_buffer)
+      )
+
+    changed_state = %{
+      state
+      | workspace: SessionState.set_windows(state.workspace, changed_windows)
+    }
+
+    assert WindowFocus.focus_buffer_result(changed_state, 2, second_buffer) ==
+             {:error, :target_mismatch}
+  end
+
+  test "buffer-target focus rejects an inconsistent active buffer" do
+    {state, first_buffer, second_buffer} = split_state()
+
+    inconsistent = %{
+      state
+      | workspace:
+          SessionState.set_buffers(
+            state.workspace,
+            Buffers.switch_to_pid(state.workspace.buffers, second_buffer)
+          )
+    }
+
+    assert WindowFocus.focus_buffer_result(inconsistent, 1, first_buffer) ==
+             {:error, :cursor_source_mismatch}
+  end
+
+  test "buffer-target focus probes the active-window buffer before taking its shortcut" do
+    {state, first_buffer, _second_buffer} = split_state()
+    monitor = Process.monitor(first_buffer)
+    GenServer.stop(first_buffer, :normal)
+    assert_receive {:DOWN, ^monitor, :process, ^first_buffer, :normal}
+
+    assert WindowFocus.focus_buffer_result(state, 1, first_buffer) ==
+             {:error, :buffer_unavailable}
+  end
+
   test "cursor-source mismatch returns a focused failure and leaves state unchanged" do
     {state, _first_buffer, second_buffer} = split_state()
 

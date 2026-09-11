@@ -11,7 +11,8 @@ defmodule MingaEditor.WindowFocus do
   alias MingaEditor.Window
 
   @type state :: EditorState.t()
-  @type focus_failure :: :window_not_found | :cursor_source_mismatch | :buffer_unavailable
+  @type focus_failure ::
+          :window_not_found | :cursor_source_mismatch | :buffer_unavailable | :target_mismatch
   @type focus_result :: {:ok, state()} | {:error, focus_failure()}
 
   @doc "Focuses a window after saving and restoring its buffer cursor state."
@@ -49,6 +50,50 @@ defmodule MingaEditor.WindowFocus do
        blur_bottom_panel(state) |> HighlightSync.ensure_active_buffer_presentation(old_buffer)}
     end
   end
+
+  @doc "Focuses a window only while it still presents the expected buffer."
+  @spec focus_buffer_result(state(), Window.id(), pid()) :: focus_result()
+  def focus_buffer_result(%EditorState{} = state, target_id, target_buffer)
+      when is_pid(target_buffer) do
+    case target_buffer_available(target_buffer) do
+      :ok -> focus_matching_buffer(state, target_id, target_buffer)
+      {:error, :buffer_unavailable} = error -> error
+    end
+  end
+
+  @spec target_buffer_available(pid()) :: :ok | {:error, :buffer_unavailable}
+  defp target_buffer_available(target_buffer) do
+    _cursor = Buffer.cursor(target_buffer)
+    :ok
+  catch
+    :exit, _reason -> {:error, :buffer_unavailable}
+  end
+
+  @spec focus_matching_buffer(state(), Window.id(), pid()) :: focus_result()
+  defp focus_matching_buffer(state, target_id, target_buffer) do
+    case Windows.fetch(state.workspace.windows, target_id) do
+      {:ok, %Window{content: {:buffer, ^target_buffer}}} ->
+        verify_focused_buffer(focus_result(state, target_id), target_buffer)
+
+      {:ok, %Window{}} ->
+        {:error, :target_mismatch}
+
+      :error ->
+        {:error, :window_not_found}
+    end
+  end
+
+  @spec verify_focused_buffer(focus_result(), pid()) :: focus_result()
+  defp verify_focused_buffer(
+         {:ok, %EditorState{workspace: %{buffers: %{active: target_buffer}}} = focused},
+         target_buffer
+       ),
+       do: {:ok, focused}
+
+  defp verify_focused_buffer({:ok, %EditorState{}}, _target_buffer),
+    do: {:error, :cursor_source_mismatch}
+
+  defp verify_focused_buffer({:error, _reason} = error, _target_buffer), do: error
 
   @doc "Restores focus without reading the outgoing window's buffer, for popup dismissal."
   @spec restore_focus(state(), Window.id()) :: {:ok, state()} | :error
