@@ -27,6 +27,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.Git, as: GitState
   alias MingaEditor.State.Interaction
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Parser, as: ParserState
   alias MingaEditor.State.Remote
@@ -342,8 +343,9 @@ defmodule MingaEditor.State do
     {requests, lsp} = LSPState.take_operation_requests_for_tab(state.lsp, tab_id)
 
     feedback =
-      Enum.reduce(requests, state.feedback, fn {:operation, kind, operation_id, ^tab_id},
-                                               feedback ->
+      Enum.reduce(requests, state.feedback, fn request, feedback ->
+        {kind, operation_id} = tab_operation_identity(request, tab_id)
+
         operation_feedback =
           OperationFeedback.finish(
             feedback.operation_feedback,
@@ -357,6 +359,17 @@ defmodule MingaEditor.State do
 
     %{state | lsp: lsp, feedback: feedback}
   end
+
+  @spec tab_operation_identity(LSPState.operation_request(), Tab.id()) ::
+          {:references | :rename, Operation.id()}
+  defp tab_operation_identity({:operation, kind, operation_id, tab_id}, tab_id),
+    do: {kind, operation_id}
+
+  defp tab_operation_identity(
+         {:workspace_operation, kind, operation_id, tab_id, _context},
+         tab_id
+       ),
+       do: {kind, operation_id}
 
   @spec integrate_fresh_renderer_receipt(t(), RenderReceipt.t()) ::
           {t(), render_receipt_result()}

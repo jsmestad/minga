@@ -7,10 +7,16 @@ defmodule MingaEditor.State.LSP.PendingRequests do
 
   alias MingaEditor.State.LSP.FormatOperation
 
-  defstruct by_ref: %{}, format_by_buffer: %{}, newest_formats: []
+  defstruct by_ref: %{},
+            format_by_buffer: %{},
+            newest_formats: [],
+            workspace_generations: %{},
+            next_workspace_generation: 1
 
   @type operation_kind :: :references | :rename
   @type position :: {non_neg_integer(), non_neg_integer()}
+  @type workspace_generation :: pos_integer()
+  @type workspace_key :: {:code_action, pid()}
   @type request ::
           {:response, MingaEditor.State.LSP.current_origin_response_kind(), pid(), pid(),
            non_neg_integer(), MingaEditor.State.Tab.id() | nil, position() | nil}
@@ -26,12 +32,18 @@ defmodule MingaEditor.State.LSP.PendingRequests do
              Minga.LSP.PositionEncoding.encoding(), {[String.t()], [String.t()]}}
           | {:operation, operation_kind(), MingaEditor.State.Operation.id(),
              MingaEditor.State.Tab.id() | nil}
+          | {:workspace_operation, :rename, MingaEditor.State.Operation.id(),
+             MingaEditor.State.Tab.id() | nil, Minga.LSP.DocumentContext.t()}
+          | {:workspace_response, :code_action, workspace_generation(),
+             Minga.LSP.DocumentContext.t(), MingaEditor.State.Tab.id() | nil, position()}
           | {:format, FormatOperation.t()}
 
   @type t :: %__MODULE__{
           by_ref: %{reference() => request()},
           format_by_buffer: %{pid() => reference()},
-          newest_formats: [reference()]
+          newest_formats: [reference()],
+          workspace_generations: %{workspace_key() => workspace_generation()},
+          next_workspace_generation: workspace_generation()
         }
 
   @spec new() :: t()
@@ -142,6 +154,40 @@ defmodule MingaEditor.State.LSP.PendingRequests do
     track_request(pending, ref, {:response, kind, client, buffer, version, tab_id, cursor})
   end
 
+  @spec track_workspace_response(
+          t(),
+          reference(),
+          :code_action,
+          Minga.LSP.DocumentContext.t(),
+          MingaEditor.State.Tab.id() | nil,
+          position()
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_workspace_response(
+        %__MODULE__{} = pending,
+        ref,
+        :code_action,
+        context,
+        tab_id,
+        cursor
+      )
+      when is_reference(ref) and is_struct(context, Minga.LSP.DocumentContext) and
+             (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) and
+             valid_cursor_guard(cursor) do
+    track_workspace_request(pending, ref, context, tab_id, cursor)
+  end
+
+  @doc "Returns whether a workspace response generation is still current for its origin."
+  @spec workspace_generation_current?(
+          t(),
+          :code_action,
+          pid(),
+          workspace_generation()
+        ) :: boolean()
+  def workspace_generation_current?(pending, :code_action, buffer, generation)
+      when is_pid(buffer) and is_integer(generation) and generation > 0 do
+    Map.get(pending.workspace_generations, {:code_action, buffer}) == generation
+  end
+
   @spec track_inlay_hint(
           t(),
           reference(),
@@ -244,6 +290,28 @@ defmodule MingaEditor.State.LSP.PendingRequests do
     track_request(pending, ref, {:operation, kind, operation_id, tab_id})
   end
 
+  @spec track_workspace_operation(
+          t(),
+          reference(),
+          :rename,
+          MingaEditor.State.Operation.id(),
+          MingaEditor.State.Tab.id() | nil,
+          Minga.LSP.DocumentContext.t()
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_workspace_operation(
+        %__MODULE__{} = pending,
+        ref,
+        :rename,
+        operation_id,
+        tab_id,
+        context
+      )
+      when is_reference(ref) and is_integer(operation_id) and operation_id > 0 and
+             (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) and
+             is_struct(context, Minga.LSP.DocumentContext) do
+    track_request(pending, ref, {:workspace_operation, :rename, operation_id, tab_id, context})
+  end
+
   @spec track_format(t(), FormatOperation.t()) ::
           {:ok, t()} | {:error, :duplicate_ref | :buffer_busy}
   def track_format(%__MODULE__{} = pending, %FormatOperation{} = operation) do
@@ -272,6 +340,10 @@ defmodule MingaEditor.State.LSP.PendingRequests do
         {_ref, {:operation, _kind, _operation_id, ^tab_id} = request}, {requests, by_ref} ->
           {[request | requests], by_ref}
 
+        {_ref, {:workspace_operation, _kind, _operation_id, ^tab_id, _context} = request},
+        {requests, by_ref} ->
+          {[request | requests], by_ref}
+
         {ref, request}, {requests, by_ref} ->
           {requests, Map.put(by_ref, ref, request)}
       end)
@@ -289,6 +361,26 @@ defmodule MingaEditor.State.LSP.PendingRequests do
       end)
 
     %{pending | by_ref: by_ref}
+  end
+
+  @doc "Drops pending workspace responses and generation state for a retired buffer."
+  @spec retire_buffer(t(), pid()) :: t()
+  def retire_buffer(%__MODULE__{} = pending, buffer) when is_pid(buffer) do
+    by_ref =
+      Map.reject(pending.by_ref, fn
+        {_ref,
+         {:workspace_response, :code_action, _generation, %{buffer: ^buffer}, _tab, _cursor}} ->
+          true
+
+        {_ref, _request} ->
+          false
+      end)
+
+    %{
+      pending
+      | by_ref: by_ref,
+        workspace_generations: Map.delete(pending.workspace_generations, {:code_action, buffer})
+    }
   end
 
   @spec fetch(t(), reference()) :: {:ok, request()} | :error
@@ -342,6 +434,47 @@ defmodule MingaEditor.State.LSP.PendingRequests do
     if Map.has_key?(pending.by_ref, ref),
       do: {:error, :duplicate_ref},
       else: {:ok, %{pending | by_ref: Map.put(pending.by_ref, ref, request)}}
+  end
+
+  @spec track_workspace_request(
+          t(),
+          reference(),
+          Minga.LSP.DocumentContext.t(),
+          MingaEditor.State.Tab.id() | nil,
+          position()
+        ) :: {:ok, t()} | {:error, :duplicate_ref}
+  defp track_workspace_request(pending, ref, context, tab_id, cursor) do
+    if Map.has_key?(pending.by_ref, ref) do
+      {:error, :duplicate_ref}
+    else
+      generation = pending.next_workspace_generation
+      key = {:code_action, context.buffer}
+      by_ref = drop_workspace_requests(pending.by_ref, context.buffer)
+
+      request =
+        {:workspace_response, :code_action, generation, context, tab_id, cursor}
+
+      {:ok,
+       %{
+         pending
+         | by_ref: Map.put(by_ref, ref, request),
+           workspace_generations: Map.put(pending.workspace_generations, key, generation),
+           next_workspace_generation: generation + 1
+       }}
+    end
+  end
+
+  @spec drop_workspace_requests(%{reference() => request()}, pid()) :: %{
+          reference() => request()
+        }
+  defp drop_workspace_requests(by_ref, buffer) do
+    Map.reject(by_ref, fn
+      {_ref, {:workspace_response, :code_action, _generation, %{buffer: ^buffer}, _tab, _cursor}} ->
+        true
+
+      {_ref, _request} ->
+        false
+    end)
   end
 
   defp track_format_ref({:ok, _request}, %__MODULE__{}, %FormatOperation{}),

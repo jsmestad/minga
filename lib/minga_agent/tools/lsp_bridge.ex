@@ -16,6 +16,7 @@ defmodule MingaAgent.Tools.LspBridge do
 
   alias Minga.Buffer
   alias Minga.LSP.Client
+  alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SyncServer
   alias Minga.LSP.Supervisor, as: LSPSupervisor
 
@@ -120,10 +121,38 @@ defmodule MingaAgent.Tools.LspBridge do
   """
   @spec position_params(String.t(), non_neg_integer(), non_neg_integer()) :: map()
   def position_params(path, line, col) do
+    position_params(path, line, col, :utf8)
+  end
+
+  @doc "Builds position params using the producing client's negotiated encoding."
+  @spec position_params(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          PositionEncoding.encoding()
+        ) :: map()
+  def position_params(path, line, col, encoding) do
+    line_text = document_line(path, line)
+
     %{
       "textDocument" => %{"uri" => path_to_uri(path)},
-      "position" => %{"line" => line, "character" => col}
+      "position" => PositionEncoding.to_lsp({line, col}, line_text, encoding)
     }
+  end
+
+  @spec document_line(String.t(), non_neg_integer()) :: String.t()
+  defp document_line(path, line) do
+    case Buffer.pid_for_path(Path.expand(path)) do
+      {:ok, buffer} ->
+        buffer |> Buffer.lines(line, 1) |> List.first() || ""
+
+      :not_found ->
+        path |> File.read!() |> String.split(~r/\r\n|\n|\r/, trim: false) |> Enum.at(line, "")
+    end
+  rescue
+    _ -> ""
+  catch
+    :exit, _ -> ""
   end
 
   # ── Response parsing helpers ───────────────────────────────────────────────

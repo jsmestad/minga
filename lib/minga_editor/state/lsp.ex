@@ -34,11 +34,14 @@ defmodule MingaEditor.State.LSP do
           | :code_lens
           | :code_lens_resolve
   @type pending_request :: PendingRequests.request()
+  @type workspace_generation :: PendingRequests.workspace_generation()
   @type semantic_layer ::
           {buffer_version :: non_neg_integer(), capture_names :: tuple(), spans :: tuple()}
   @type operation_request ::
           {:operation, :references | :rename, MingaEditor.State.Operation.id(),
            MingaEditor.State.Tab.id() | nil}
+          | {:workspace_operation, :rename, MingaEditor.State.Operation.id(),
+             MingaEditor.State.Tab.id() | nil, Minga.LSP.DocumentContext.t()}
 
   @type t :: %__MODULE__{
           status: MingaEditor.Shell.Traditional.Modeline.lsp_status(),
@@ -376,8 +379,10 @@ defmodule MingaEditor.State.LSP do
     do: %{lsp | semantic_tokens: Map.delete(lsp.semantic_tokens, buffer)}
 
   @spec retire_buffer(t(), pid()) :: t()
-  def retire_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer),
-    do: clear_semantic_tokens(lsp, buffer)
+  def retire_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer) do
+    lsp = clear_semantic_tokens(lsp, buffer)
+    %{lsp | pending_requests: PendingRequests.retire_buffer(lsp.pending_requests, buffer)}
+  end
 
   @doc "Tracks an Editor-global LSP request for a structured operation."
   @spec track_operation_request(
@@ -392,6 +397,64 @@ defmodule MingaEditor.State.LSP do
       PendingRequests.track_operation(lsp.pending_requests, ref, kind, operation_id, tab_id)
 
     %{lsp | pending_requests: pending_requests}
+  end
+
+  @doc "Tracks a code-action response with its producing document context."
+  @spec track_workspace_response_request(
+          t(),
+          reference(),
+          :code_action,
+          Minga.LSP.DocumentContext.t(),
+          MingaEditor.State.Tab.id() | nil,
+          {non_neg_integer(), non_neg_integer()}
+        ) :: t()
+  def track_workspace_response_request(lsp, ref, kind, context, tab_id, cursor) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_workspace_response(
+        lsp.pending_requests,
+        ref,
+        kind,
+        context,
+        tab_id,
+        cursor
+      )
+    )
+  end
+
+  @doc "Returns whether a code-action generation is still current for its origin buffer."
+  @spec workspace_generation_current?(t(), :code_action, pid(), workspace_generation()) ::
+          boolean()
+  def workspace_generation_current?(lsp, kind, buffer, generation) do
+    PendingRequests.workspace_generation_current?(
+      lsp.pending_requests,
+      kind,
+      buffer,
+      generation
+    )
+  end
+
+  @doc "Tracks a rename operation with its producing document context."
+  @spec track_workspace_operation_request(
+          t(),
+          reference(),
+          :rename,
+          MingaEditor.State.Operation.id(),
+          MingaEditor.State.Tab.id() | nil,
+          Minga.LSP.DocumentContext.t()
+        ) :: t()
+  def track_workspace_operation_request(lsp, ref, kind, operation_id, tab_id, context) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_workspace_operation(
+        lsp.pending_requests,
+        ref,
+        kind,
+        operation_id,
+        tab_id,
+        context
+      )
+    )
   end
 
   @doc "Tracks an Editor-global formatting operation."

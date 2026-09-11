@@ -4,17 +4,17 @@ defmodule Minga.LSP.WorkspaceEditTest do
   alias Minga.LSP.WorkspaceEdit
 
   describe "parse/1" do
-    test "returns empty list for nil" do
-      assert WorkspaceEdit.parse(nil) == []
+    test "rejects nil" do
+      assert WorkspaceEdit.parse(nil) == {:error, :invalid_workspace_edit}
     end
 
-    test "returns empty list for non-map input" do
-      assert WorkspaceEdit.parse("not a map") == []
-      assert WorkspaceEdit.parse(42) == []
+    test "rejects non-map input" do
+      assert WorkspaceEdit.parse("not a map") == {:error, :invalid_workspace_edit}
+      assert WorkspaceEdit.parse(42) == {:error, :invalid_workspace_edit}
     end
 
-    test "returns empty list for empty edit" do
-      assert WorkspaceEdit.parse(%{}) == []
+    test "distinguishes a valid empty edit" do
+      assert WorkspaceEdit.parse(%{}) == {:ok, []}
     end
 
     test "parses changes format with single file" do
@@ -39,17 +39,15 @@ defmodule Minga.LSP.WorkspaceEditTest do
         }
       }
 
-      result = WorkspaceEdit.parse(edit)
-      assert Enum.count(result) == 1
-      {path, edits} = hd(result)
-      assert String.ends_with?(path, "lib/foo.ex")
-      assert Enum.count(edits) == 2
+      assert {:ok, [document]} = WorkspaceEdit.parse(edit)
+      assert String.ends_with?(document.path, "lib/foo.ex")
+      assert document.uri == "file:///home/user/project/lib/foo.ex"
+      assert document.version == nil
+      assert Enum.count(document.edits) == 2
 
-      # Edits should be in reverse document order (line 5 before line 2)
-      [first, second] = edits
-      {{l1, _}, _, _} = first
-      {{l2, _}, _, _} = second
-      assert l1 > l2
+      [first, second] = document.edits
+      assert first["range"]["start"]["line"] == 5
+      assert second["range"]["start"]["line"] == 2
     end
 
     test "parses changes format with multiple files" do
@@ -76,9 +74,9 @@ defmodule Minga.LSP.WorkspaceEditTest do
         }
       }
 
-      result = WorkspaceEdit.parse(edit)
-      assert Enum.count(result) == 2
-      paths = Enum.map(result, fn {path, _} -> path end) |> Enum.sort()
+      assert {:ok, documents} = WorkspaceEdit.parse(edit)
+      assert Enum.count(documents) == 2
+      paths = Enum.map(documents, & &1.path) |> Enum.sort()
       assert Enum.any?(paths, &String.ends_with?(&1, "a.ex"))
       assert Enum.any?(paths, &String.ends_with?(&1, "b.ex"))
     end
@@ -104,11 +102,12 @@ defmodule Minga.LSP.WorkspaceEditTest do
         ]
       }
 
-      result = WorkspaceEdit.parse(edit)
-      assert Enum.count(result) == 1
-      {path, edits} = hd(result)
-      assert String.ends_with?(path, "lib/bar.ex")
-      assert [{{10, 2}, {10, 8}, "renamed"}] = edits
+      assert {:ok, [document]} = WorkspaceEdit.parse(edit)
+      assert String.ends_with?(document.path, "lib/bar.ex")
+      assert document.uri == "file:///project/lib/bar.ex"
+      assert document.version == 1
+      assert [edit] = document.edits
+      assert edit["newText"] == "renamed"
     end
 
     test "documentChanges takes priority over changes" do
@@ -141,13 +140,11 @@ defmodule Minga.LSP.WorkspaceEditTest do
       }
 
       # documentChanges should take priority
-      result = WorkspaceEdit.parse(edit)
-      assert Enum.count(result) == 1
-      {path, _} = hd(result)
-      assert String.ends_with?(path, "a.ex")
+      assert {:ok, [document]} = WorkspaceEdit.parse(edit)
+      assert String.ends_with?(document.path, "a.ex")
     end
 
-    test "sorts edits in reverse document order within a file" do
+    test "preserves server edit order within a file" do
       edit = %{
         "changes" => %{
           "file:///project/test.ex" => [
@@ -176,9 +173,9 @@ defmodule Minga.LSP.WorkspaceEditTest do
         }
       }
 
-      [{_path, edits}] = WorkspaceEdit.parse(edit)
-      lines = Enum.map(edits, fn {{line, _}, _, _} -> line end)
-      assert lines == [10, 5, 1]
+      assert {:ok, [document]} = WorkspaceEdit.parse(edit)
+      lines = Enum.map(document.edits, & &1["range"]["start"]["line"])
+      assert lines == [1, 10, 5]
     end
 
     test "handles edits on the same line sorted by column" do
@@ -203,12 +200,12 @@ defmodule Minga.LSP.WorkspaceEditTest do
         }
       }
 
-      [{_path, edits}] = WorkspaceEdit.parse(edit)
-      cols = Enum.map(edits, fn {{_, col}, _, _} -> col end)
+      assert {:ok, [document]} = WorkspaceEdit.parse(edit)
+      cols = Enum.map(document.edits, & &1["range"]["start"]["character"])
       assert cols == [10, 2]
     end
 
-    test "skips unsupported documentChanges kinds (CreateFile, etc.)" do
+    test "rejects unsupported resource operations before returning documents" do
       edit = %{
         "documentChanges" => [
           %{"kind" => "create", "uri" => "file:///project/new.ex"},
@@ -227,35 +224,52 @@ defmodule Minga.LSP.WorkspaceEditTest do
         ]
       }
 
-      result = WorkspaceEdit.parse(edit)
-      assert Enum.count(result) == 1
-      {path, _} = hd(result)
-      assert String.ends_with?(path, "a.ex")
+      assert WorkspaceEdit.parse(edit) == {:error, :unsupported_resource_operation}
     end
   end
 
-  describe "parse_text_edit/1" do
-    test "parses a standard TextEdit" do
-      te = %{
-        "range" => %{
-          "start" => %{"line" => 3, "character" => 7},
-          "end" => %{"line" => 3, "character" => 12}
-        },
-        "newText" => "replacement"
+  test "rejects a missing replacement instead of turning it into deletion" do
+    workspace_edit = %{
+      "changes" => %{
+        "file:///project/a.ex" => [
+          %{
+            "range" => %{
+              "start" => %{"line" => 0, "character" => 0},
+              "end" => %{"line" => 1, "character" => 0}
+            }
+          }
+        ]
       }
+    }
 
-      assert {{3, 7}, {3, 12}, "replacement"} = WorkspaceEdit.parse_text_edit(te)
-    end
+    assert WorkspaceEdit.parse(workspace_edit) == {:error, :invalid_text_edit}
+  end
 
-    test "handles missing newText as empty string" do
-      te = %{
-        "range" => %{
-          "start" => %{"line" => 0, "character" => 0},
-          "end" => %{"line" => 1, "character" => 0}
+  test "rejects malformed versions and positions" do
+    malformed_version = %{
+      "documentChanges" => [
+        %{
+          "textDocument" => %{"uri" => "file:///project/a.ex", "version" => "7"},
+          "edits" => []
         }
-      }
+      ]
+    }
 
-      assert {{0, 0}, {1, 0}, ""} = WorkspaceEdit.parse_text_edit(te)
-    end
+    malformed_position = %{
+      "changes" => %{
+        "file:///project/a.ex" => [
+          %{
+            "range" => %{
+              "start" => %{"line" => -1, "character" => 0},
+              "end" => %{"line" => 0, "character" => 0}
+            },
+            "newText" => "x"
+          }
+        ]
+      }
+    }
+
+    assert WorkspaceEdit.parse(malformed_version) == {:error, :invalid_document_change}
+    assert WorkspaceEdit.parse(malformed_position) == {:error, :invalid_text_edit}
   end
 end

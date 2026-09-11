@@ -159,6 +159,24 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   defp dispatch_pending_response(
+         {:workspace_operation, :rename, operation_id, origin_tab_id, context},
+         state,
+         result
+       ) do
+    dispatch_lsp_response({:rename, operation_id, origin_tab_id, context}, state, result)
+  end
+
+  defp dispatch_pending_response(
+         {:workspace_response, :code_action, generation, context, tab_id, cursor},
+         state,
+         result
+       ) do
+    if workspace_response_current?(state, generation, context, tab_id, cursor),
+      do: LspActions.handle_code_action_response(state, result, context, generation),
+      else: state
+  end
+
+  defp dispatch_pending_response(
          {:completion_result, role, client, buffer, version, gen, trigger_pos},
          state,
          result
@@ -319,6 +337,29 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     end
   end
 
+  defp dispatch_lsp_response({:rename, operation_id, origin_tab_id, context}, state, result) do
+    {state, active_tab} = MingaEditor.Shell.Workflow.resolve_active_tab(state)
+
+    if operation_response_current?(origin_tab_id, active_tab) and
+         workspace_context_current?(state, context) do
+      LspActions.handle_rename_response(state, result, operation_id, context)
+    else
+      %{
+        state
+        | feedback:
+            Feedback.accept_operation_feedback(
+              state.feedback,
+              OperationFeedback.finish(
+                state.feedback.operation_feedback,
+                operation_id,
+                :stale,
+                "Rename response ignored after source document changed"
+              )
+            )
+      }
+    end
+  end
+
   defp dispatch_lsp_response({:references, operation_id}, state, result),
     do: LspActions.handle_references_response(state, result, operation_id)
 
@@ -433,6 +474,35 @@ defmodule MingaEditor.Handlers.LspEventHandler do
       match?([^client | _], Minga.LSP.SyncServer.clients_for_buffer(buffer)) and
       buffer_value(buffer, &Minga.Buffer.version/1) == version and
       (is_nil(cursor) or buffer_value(buffer, &Minga.Buffer.cursor/1) == cursor)
+  end
+
+  @spec workspace_response_current?(
+          EditorState.t(),
+          MingaEditor.State.LSP.workspace_generation(),
+          Minga.LSP.DocumentContext.t(),
+          MingaEditor.State.Tab.id() | nil,
+          {non_neg_integer(), non_neg_integer()}
+        ) :: boolean()
+  defp workspace_response_current?(state, generation, context, tab_id, cursor) do
+    active_tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
+
+    tab_id == if(active_tab, do: active_tab.id) and
+      LSPState.workspace_generation_current?(
+        state.lsp,
+        :code_action,
+        context.buffer,
+        generation
+      ) and
+      workspace_context_current?(state, context) and
+      buffer_value(context.buffer, &Minga.Buffer.cursor/1) == cursor
+  end
+
+  @spec workspace_context_current?(EditorState.t(), Minga.LSP.DocumentContext.t()) :: boolean()
+  defp workspace_context_current?(state, context) do
+    state.workspace.buffers.active == context.buffer and
+      context.client in Minga.LSP.SyncServer.clients_for_buffer(context.buffer) and
+      buffer_value(context.buffer, &Minga.Buffer.version/1) == context.buffer_revision and
+      Minga.LSP.Client.context_current?(context)
   end
 
   defp inlay_viewport_current?(state, top, rows) do

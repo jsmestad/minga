@@ -37,13 +37,17 @@ defmodule Minga.LSP.Client.State do
   @type pending_document_open :: %{
           uri: String.t(),
           language_id: String.t(),
-          text: String.t()
+          text: String.t(),
+          buffer: pid() | nil,
+          buffer_revision: non_neg_integer() | nil
         }
 
   @typedoc "An open document tracked by version."
   @type open_doc :: %{
           uri: String.t(),
-          version: pos_integer()
+          version: pos_integer(),
+          buffer: pid() | nil,
+          buffer_revision: non_neg_integer() | nil
         }
 
   @typedoc "A compiled file watcher from `client/registerCapability`."

@@ -1,111 +1,111 @@
 defmodule Minga.LSP.WorkspaceEdit do
   @moduledoc """
-  Parses and normalizes LSP WorkspaceEdit objects.
+  Validates an LSP WorkspaceEdit without losing its document contracts.
 
-  A WorkspaceEdit can arrive in two formats from the server:
-
-  1. `"changes"` — a map of `{uri => [TextEdit]}` entries
-  2. `"documentChanges"` — an array of `TextDocumentEdit` objects
-
-  Both formats ultimately produce a list of `{file_path, [text_edit]}`
-  tuples where text edits are sorted in reverse document order for safe
-  sequential application (later edits first so earlier offsets stay valid).
-
-  This module is pure data transformation. It does not open buffers or
-  apply edits. The caller (e.g., `LspActions`) handles editor state
-  mutation.
+  Parsing is effect-free. Unsupported resource operations and malformed outer data fail the whole parse so callers can reject them before opening or changing any file.
   """
 
   alias Minga.LSP.SyncServer
+  alias Minga.LSP.WorkspaceEdit.Document
 
-  @typedoc "A single text edit: `{start_pos, end_pos, replacement_text}`."
-  @type text_edit ::
-          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()},
-           String.t()}
+  @type error ::
+          :invalid_workspace_edit
+          | :invalid_document_change
+          | :invalid_text_edit
+          | :unsupported_resource_operation
 
-  @typedoc "Edits grouped by file path, sorted in reverse document order."
-  @type file_edits :: {file_path :: String.t(), edits :: [text_edit()]}
+  @doc "Parses a WorkspaceEdit into ordered per-document values."
+  @spec parse(map()) :: {:ok, [Document.t()]} | {:error, error()}
+  def parse(%{"documentChanges" => changes}) when is_list(changes),
+    do: parse_document_changes(changes, [])
 
-  @doc """
-  Parses an LSP WorkspaceEdit JSON object into a list of `{path, edits}` tuples.
-
-  Handles both `"documentChanges"` (preferred) and `"changes"` formats.
-  Returns an empty list if the edit is nil or empty.
-
-  Each edit tuple is `{{start_line, start_col}, {end_line, end_col}, new_text}`.
-  Edits within each file are sorted in reverse document order (last position
-  first) so they can be applied sequentially without invalidating earlier offsets.
-  """
-  @spec parse(map() | nil) :: [file_edits()]
-  def parse(nil), do: []
-  def parse(edit) when not is_map(edit), do: []
-
-  def parse(%{"documentChanges" => doc_changes}) when is_list(doc_changes) do
-    doc_changes
-    |> Enum.flat_map(&parse_document_change/1)
-    |> group_and_sort()
-  end
+  def parse(%{"documentChanges" => _}), do: {:error, :invalid_workspace_edit}
 
   def parse(%{"changes" => changes}) when is_map(changes) do
     changes
-    |> Enum.flat_map(fn {uri, edits} ->
-      path = uri_to_path(uri)
-      Enum.map(edits, fn edit -> {path, parse_text_edit(edit)} end)
+    |> Enum.sort_by(fn {uri, _edits} -> uri end)
+    |> Enum.reduce_while({:ok, []}, fn {uri, edits}, {:ok, documents} ->
+      case build_document(uri, nil, edits) do
+        {:ok, document} -> {:cont, {:ok, [document | documents]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
     end)
-    |> group_and_sort()
+    |> reverse_documents()
   end
 
-  def parse(_), do: []
+  def parse(%{"changes" => _}), do: {:error, :invalid_workspace_edit}
+  def parse(edit) when is_map(edit) and map_size(edit) == 0, do: {:ok, []}
+  def parse(_), do: {:error, :invalid_workspace_edit}
 
-  @doc """
-  Parses a single LSP TextEdit object into a text_edit tuple.
+  @spec parse_document_changes([term()], [Document.t()]) ::
+          {:ok, [Document.t()]} | {:error, error()}
+  defp parse_document_changes([], documents), do: {:ok, Enum.reverse(documents)}
 
-  A TextEdit has a `"range"` with `"start"` and `"end"` positions,
-  and a `"newText"` replacement string.
-  """
-  @spec parse_text_edit(map()) :: text_edit()
-  def parse_text_edit(%{"range" => range, "newText" => new_text}) do
-    {start_line, start_col} = extract_position(range["start"])
-    {end_line, end_col} = extract_position(range["end"])
-    {{start_line, start_col}, {end_line, end_col}, new_text}
+  defp parse_document_changes([change | rest], documents) do
+    case parse_document_change(change) do
+      {:ok, document} -> parse_document_changes(rest, [document | documents])
+      {:error, _reason} = error -> error
+    end
   end
 
-  def parse_text_edit(%{"range" => range}) do
-    {start_line, start_col} = extract_position(range["start"])
-    {end_line, end_col} = extract_position(range["end"])
-    {{start_line, start_col}, {end_line, end_col}, ""}
+  @spec parse_document_change(term()) :: {:ok, Document.t()} | {:error, error()}
+  defp parse_document_change(%{"kind" => kind}) when kind in ["create", "rename", "delete"],
+    do: {:error, :unsupported_resource_operation}
+
+  defp parse_document_change(%{
+         "textDocument" => %{"uri" => uri} = text_document,
+         "edits" => edits
+       }) do
+    case Map.fetch(text_document, "version") do
+      {:ok, version} when is_integer(version) and version >= 0 ->
+        build_document(uri, version, edits)
+
+      {:ok, nil} ->
+        build_document(uri, nil, edits)
+
+      {:ok, _invalid} ->
+        {:error, :invalid_document_change}
+
+      :error ->
+        build_document(uri, nil, edits)
+    end
   end
 
-  # ── Private ────────────────────────────────────────────────────────────────
+  defp parse_document_change(_), do: {:error, :invalid_document_change}
 
-  @spec parse_document_change(map()) :: [{String.t(), text_edit()}]
-  defp parse_document_change(%{"textDocument" => %{"uri" => uri}, "edits" => edits})
-       when is_list(edits) do
-    path = uri_to_path(uri)
-    Enum.map(edits, fn edit -> {path, parse_text_edit(edit)} end)
+  @spec build_document(term(), non_neg_integer() | nil, term()) ::
+          {:ok, Document.t()} | {:error, error()}
+  defp build_document(uri, version, edits) when is_binary(uri) and is_list(edits) do
+    if Enum.all?(edits, &valid_text_edit?/1) do
+      {:ok,
+       %Document{uri: uri, path: SyncServer.uri_to_path(uri), version: version, edits: edits}}
+    else
+      {:error, :invalid_text_edit}
+    end
   end
 
-  # CreateFile, RenameFile, DeleteFile — not yet supported
-  defp parse_document_change(_), do: []
+  defp build_document(_uri, _version, _edits), do: {:error, :invalid_document_change}
 
-  @spec group_and_sort([{String.t(), text_edit()}]) :: [file_edits()]
-  defp group_and_sort(flat_edits) do
-    flat_edits
-    |> Enum.group_by(fn {path, _edit} -> path end, fn {_path, edit} -> edit end)
-    |> Enum.map(fn {path, edits} -> {path, sort_edits_reverse(edits)} end)
+  @spec valid_text_edit?(term()) :: boolean()
+  defp valid_text_edit?(%{
+         "range" => %{
+           "start" => %{"line" => start_line, "character" => start_character},
+           "end" => %{"line" => end_line, "character" => end_character}
+         },
+         "newText" => new_text
+       }) do
+    valid_position?(start_line, start_character) and valid_position?(end_line, end_character) and
+      is_binary(new_text)
   end
 
-  @spec sort_edits_reverse([text_edit()]) :: [text_edit()]
-  defp sort_edits_reverse(edits) do
-    Enum.sort(edits, fn {{l1, c1}, _, _}, {{l2, c2}, _, _} ->
-      {l1, c1} > {l2, c2}
-    end)
-  end
+  defp valid_text_edit?(_), do: false
 
-  @spec extract_position(map() | nil) :: {non_neg_integer(), non_neg_integer()}
-  defp extract_position(%{"line" => line, "character" => col}), do: {line, col}
-  defp extract_position(_), do: {0, 0}
+  @spec valid_position?(term(), term()) :: boolean()
+  defp valid_position?(line, character),
+    do: is_integer(line) and line >= 0 and is_integer(character) and character >= 0
 
-  @spec uri_to_path(String.t()) :: String.t()
-  defp uri_to_path(uri), do: SyncServer.uri_to_path(uri)
+  @spec reverse_documents({:ok, [Document.t()]} | {:error, error()}) ::
+          {:ok, [Document.t()]} | {:error, error()}
+  defp reverse_documents({:ok, documents}), do: {:ok, Enum.reverse(documents)}
+  defp reverse_documents({:error, _reason} = error), do: error
 end

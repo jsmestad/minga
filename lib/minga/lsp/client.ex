@@ -32,6 +32,7 @@ defmodule Minga.LSP.Client do
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.Client.RequestRegistry
   alias Minga.LSP.Client.State
+  alias Minga.LSP.DocumentContext
   alias Minga.LSP.GlobMatcher
   alias Minga.LSP.JsonRpc
   alias Minga.LSP.PositionEncoding
@@ -102,7 +103,22 @@ defmodule Minga.LSP.Client do
   @spec did_open(GenServer.server(), String.t(), String.t(), String.t()) :: :ok
   def did_open(server, uri, language_id, text)
       when is_binary(uri) and is_binary(language_id) and is_binary(text) do
-    GenServer.cast(server, {:did_open, uri, language_id, text})
+    GenServer.cast(server, {:did_open, uri, language_id, text, nil, nil})
+  end
+
+  @doc "Notifies the server that a buffer revision was opened as wire version 1."
+  @spec did_open(
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          String.t(),
+          pid(),
+          non_neg_integer()
+        ) :: :ok
+  def did_open(server, uri, language_id, text, buffer, buffer_revision)
+      when is_binary(uri) and is_binary(language_id) and is_binary(text) and is_pid(buffer) and
+             is_integer(buffer_revision) and buffer_revision >= 0 do
+    GenServer.cast(server, {:did_open, uri, language_id, text, buffer, buffer_revision})
   end
 
   @doc """
@@ -112,7 +128,15 @@ defmodule Minga.LSP.Client do
   """
   @spec did_change(GenServer.server(), String.t(), String.t()) :: :ok
   def did_change(server, uri, text) when is_binary(uri) and is_binary(text) do
-    GenServer.cast(server, {:did_change, uri, text})
+    GenServer.cast(server, {:did_change, uri, text, nil, nil})
+  end
+
+  @doc "Sends a full-content change and binds its wire version to a buffer revision."
+  @spec did_change(GenServer.server(), String.t(), String.t(), pid(), non_neg_integer()) :: :ok
+  def did_change(server, uri, text, buffer, buffer_revision)
+      when is_binary(uri) and is_binary(text) and is_pid(buffer) and is_integer(buffer_revision) and
+             buffer_revision >= 0 do
+    GenServer.cast(server, {:did_change, uri, text, buffer, buffer_revision})
   end
 
   @doc "Notifies the server that a document was saved."
@@ -155,6 +179,80 @@ defmodule Minga.LSP.Client do
     ref
   end
 
+  @doc """
+  Admits and registers a document request against one exact synchronized snapshot.
+
+  `content` is used only when the client must advance a lagging full-document sync before sending the request. The didChange and request are emitted from the same Client callback, which gives them one mailbox ordering authority.
+  """
+  @spec request_document(
+          GenServer.server(),
+          String.t(),
+          pid(),
+          non_neg_integer(),
+          String.t(),
+          map(),
+          String.t()
+        ) :: {:ok, reference(), DocumentContext.t()} | {:error, atom()}
+  def request_document(server, uri, buffer, buffer_revision, method, params, content)
+      when is_binary(uri) and is_pid(buffer) and is_integer(buffer_revision) and
+             buffer_revision >= 0 and is_binary(method) and is_map(params) and is_binary(content) do
+    request_document(server, uri, buffer, buffer_revision, method, params, content, self())
+  end
+
+  @doc "Admits a document request and delivers its eventual response to `response_to`."
+  @spec request_document(
+          GenServer.server(),
+          String.t(),
+          pid(),
+          non_neg_integer(),
+          String.t(),
+          map(),
+          String.t(),
+          pid()
+        ) :: {:ok, reference(), DocumentContext.t()} | {:error, atom()}
+  def request_document(server, uri, buffer, buffer_revision, method, params, content, response_to)
+      when is_binary(uri) and is_pid(buffer) and is_integer(buffer_revision) and
+             buffer_revision >= 0 and is_binary(method) and is_map(params) and is_binary(content) and
+             is_pid(response_to) do
+    ref = make_ref()
+
+    GenServer.call(
+      server,
+      {:request_document, uri, buffer, buffer_revision, method, params, content, response_to, ref}
+    )
+  end
+
+  @doc "Returns whether a numeric wire version represents the exact target buffer snapshot."
+  @spec validate_document_version(
+          GenServer.server(),
+          String.t(),
+          non_neg_integer(),
+          pid(),
+          non_neg_integer()
+        ) :: :ok | {:error, atom()}
+  def validate_document_version(server, uri, wire_version, buffer, buffer_revision)
+      when is_binary(uri) and is_integer(wire_version) and wire_version >= 0 and is_pid(buffer) and
+             is_integer(buffer_revision) and buffer_revision >= 0 do
+    GenServer.call(
+      server,
+      {:validate_document_version, uri, wire_version, buffer, buffer_revision}
+    )
+  end
+
+  @doc "Returns whether a captured request context still names the client's current snapshot."
+  @spec context_current?(DocumentContext.t()) :: boolean()
+  def context_current?(%DocumentContext{} = context) do
+    validate_document_version(
+      context.client,
+      context.uri,
+      context.lsp_version,
+      context.buffer,
+      context.buffer_revision
+    ) == :ok
+  catch
+    :exit, _ -> false
+  end
+
   @doc "Queues cancellation of an asynchronous request by the reference returned from `request/3`."
   @spec cancel_request(GenServer.server(), reference()) :: :ok
   def cancel_request(server, ref) when is_reference(ref) do
@@ -189,7 +287,24 @@ defmodule Minga.LSP.Client do
         ) :: :ok
   def did_change_incremental(server, uri, changes)
       when is_binary(uri) and is_list(changes) do
-    GenServer.cast(server, {:did_change_incremental, uri, changes})
+    GenServer.cast(server, {:did_change_incremental, uri, changes, nil, nil})
+  end
+
+  @doc "Sends incremental changes and binds their wire version to a buffer revision."
+  @spec did_change_incremental(
+          GenServer.server(),
+          String.t(),
+          list(),
+          pid(),
+          non_neg_integer()
+        ) :: :ok
+  def did_change_incremental(server, uri, changes, buffer, buffer_revision)
+      when is_binary(uri) and is_list(changes) and is_pid(buffer) and
+             is_integer(buffer_revision) and buffer_revision >= 0 do
+    GenServer.cast(
+      server,
+      {:did_change_incremental, uri, changes, buffer, buffer_revision}
+    )
   end
 
   @doc """
@@ -381,6 +496,55 @@ defmodule Minga.LSP.Client do
     {:reply, state.started_at, state}
   end
 
+  def handle_call(
+        {:request_document, uri, buffer, buffer_revision, method, params, content, caller, ref},
+        _from,
+        %{status: :ready} = state
+      ) do
+    case synchronize_document(state, uri, buffer, buffer_revision, content) do
+      {:ok, state, doc} ->
+        {id, state} = send_request(state, method, params)
+        state = put_pending(state, id, method, {:async, caller, ref})
+
+        context = %DocumentContext{
+          client: self(),
+          buffer: buffer,
+          uri: uri,
+          buffer_revision: buffer_revision,
+          lsp_version: doc.version,
+          encoding: state.encoding
+        }
+
+        {:reply, {:ok, ref, context}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:request_document, _uri, _buffer, _revision, _method, _params, _content, _caller, _ref},
+        _from,
+        state
+      ) do
+    {:reply, {:error, :client_not_ready}, state}
+  end
+
+  def handle_call(
+        {:validate_document_version, uri, wire_version, buffer, buffer_revision},
+        _from,
+        state
+      ) do
+    reply =
+      case Map.get(state.open_documents, uri) do
+        %{version: ^wire_version, buffer: ^buffer, buffer_revision: ^buffer_revision} -> :ok
+        nil -> {:error, :unknown_document}
+        _doc -> {:error, :version_mismatch}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call(:shutdown, from, %{status: :ready} = state) do
     {id, state} = send_request(state, "shutdown", %{})
     state = put_pending(state, id, "shutdown", from)
@@ -393,65 +557,33 @@ defmodule Minga.LSP.Client do
   end
 
   @impl true
-  def handle_cast({:did_open, uri, language_id, text}, %{status: :ready} = state) do
-    {:noreply, send_did_open(state, uri, language_id, text)}
+  def handle_cast(
+        {:did_open, uri, language_id, text, buffer, buffer_revision},
+        %{status: :ready} = state
+      ) do
+    {:noreply, send_did_open(state, uri, language_id, text, buffer, buffer_revision)}
   end
 
-  def handle_cast({:did_open, uri, language_id, text}, state) do
-    {:noreply, queue_document_open(state, uri, language_id, text)}
+  def handle_cast({:did_open, uri, language_id, text, buffer, buffer_revision}, state) do
+    {:noreply, queue_document_open(state, uri, language_id, text, buffer, buffer_revision)}
   end
 
-  def handle_cast({:did_change, uri, text}, %{status: :ready} = state) do
-    case Map.get(state.open_documents, uri) do
-      nil ->
-        {:noreply, state}
-
-      %{version: version} ->
-        new_version = version + 1
-        doc = %{uri: uri, version: new_version}
-        state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
-
-        send_notification(state, "textDocument/didChange", %{
-          "textDocument" => %{"uri" => uri, "version" => new_version},
-          "contentChanges" => [%{"text" => text}]
-        })
-
-        {:noreply, state}
-    end
+  def handle_cast(
+        {:did_change, uri, text, buffer, buffer_revision},
+        %{status: :ready} = state
+      ) do
+    {:noreply, maybe_send_full_change(state, uri, text, buffer, buffer_revision)}
   end
 
-  def handle_cast({:did_change, uri, text}, state) do
-    {:noreply, update_queued_document_text(state, uri, text)}
+  def handle_cast({:did_change, uri, text, buffer, buffer_revision}, state) do
+    {:noreply, update_queued_document_text(state, uri, text, buffer, buffer_revision)}
   end
 
-  def handle_cast({:did_change_incremental, uri, changes}, %{status: :ready} = state) do
-    case Map.get(state.open_documents, uri) do
-      nil ->
-        {:noreply, state}
-
-      %{version: version} ->
-        new_version = version + 1
-        doc = %{uri: uri, version: new_version}
-        state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
-
-        content_changes =
-          Enum.map(changes, fn {sl, sc, el, ec, text} ->
-            %{
-              "range" => %{
-                "start" => %{"line" => sl, "character" => sc},
-                "end" => %{"line" => el, "character" => ec}
-              },
-              "text" => text
-            }
-          end)
-
-        send_notification(state, "textDocument/didChange", %{
-          "textDocument" => %{"uri" => uri, "version" => new_version},
-          "contentChanges" => content_changes
-        })
-
-        {:noreply, state}
-    end
+  def handle_cast(
+        {:did_change_incremental, uri, changes, buffer, buffer_revision},
+        %{status: :ready} = state
+      ) do
+    {:noreply, maybe_send_incremental_change(state, uri, changes, buffer, buffer_revision)}
   end
 
   def handle_cast({:did_save, uri}, %{status: :ready} = state) do
@@ -991,9 +1123,16 @@ defmodule Minga.LSP.Client do
 
   # ── Document Sync Helpers ─────────────────────────────────────────────────
 
-  @spec send_did_open(State.t(), String.t(), String.t(), String.t()) :: State.t()
-  defp send_did_open(state, uri, language_id, text) do
-    doc = %{uri: uri, version: 1}
+  @spec send_did_open(
+          State.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp send_did_open(state, uri, language_id, text, buffer, buffer_revision) do
+    doc = %{uri: uri, version: 1, buffer: buffer, buffer_revision: buffer_revision}
     state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
 
     send_notification(state, "textDocument/didOpen", %{
@@ -1008,18 +1147,44 @@ defmodule Minga.LSP.Client do
     state
   end
 
-  @spec queue_document_open(State.t(), String.t(), String.t(), String.t()) :: State.t()
-  defp queue_document_open(state, uri, language_id, text) do
-    pending_open = %{uri: uri, language_id: language_id, text: text}
+  @spec queue_document_open(
+          State.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp queue_document_open(state, uri, language_id, text, buffer, buffer_revision) do
+    pending_open = %{
+      uri: uri,
+      language_id: language_id,
+      text: text,
+      buffer: buffer,
+      buffer_revision: buffer_revision
+    }
+
     pending = Map.put(state.pending_document_opens, uri, pending_open)
     %{state | pending_document_opens: pending}
   end
 
-  @spec update_queued_document_text(State.t(), String.t(), String.t()) :: State.t()
-  defp update_queued_document_text(state, uri, text) do
+  @spec update_queued_document_text(
+          State.t(),
+          String.t(),
+          String.t(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp update_queued_document_text(state, uri, text, buffer, buffer_revision) do
     case Map.fetch(state.pending_document_opens, uri) do
       {:ok, pending_open} ->
-        pending = Map.put(state.pending_document_opens, uri, Map.put(pending_open, :text, text))
+        updated =
+          pending_open
+          |> Map.put(:text, text)
+          |> Map.put(:buffer, buffer || pending_open.buffer)
+          |> Map.put(:buffer_revision, buffer_revision || pending_open.buffer_revision)
+
+        pending = Map.put(state.pending_document_opens, uri, updated)
         %{state | pending_document_opens: pending}
 
       :error ->
@@ -1032,9 +1197,140 @@ defmodule Minga.LSP.Client do
     pending_opens = Map.values(state.pending_document_opens)
     state = %{state | pending_document_opens: %{}}
 
-    Enum.reduce(pending_opens, state, fn %{uri: uri, language_id: language_id, text: text}, acc ->
-      send_did_open(acc, uri, language_id, text)
+    Enum.reduce(pending_opens, state, fn pending, acc ->
+      send_did_open(
+        acc,
+        pending.uri,
+        pending.language_id,
+        pending.text,
+        pending.buffer,
+        pending.buffer_revision
+      )
     end)
+  end
+
+  @spec synchronize_document(State.t(), String.t(), pid(), non_neg_integer(), String.t()) ::
+          {:ok, State.t(), State.open_doc()} | {:error, atom()}
+  defp synchronize_document(state, uri, buffer, buffer_revision, content) do
+    case Map.get(state.open_documents, uri) do
+      nil ->
+        {:error, :unknown_document}
+
+      %{buffer: ^buffer, buffer_revision: ^buffer_revision} = doc ->
+        {:ok, state, doc}
+
+      %{buffer: ^buffer, buffer_revision: revision}
+      when is_integer(revision) and revision < buffer_revision ->
+        state = send_full_change(state, uri, content, buffer, buffer_revision)
+        {:ok, state, Map.fetch!(state.open_documents, uri)}
+
+      %{buffer: ^buffer} ->
+        {:error, :stale_document}
+
+      _other ->
+        {:error, :document_replaced}
+    end
+  end
+
+  @spec maybe_send_full_change(
+          State.t(),
+          String.t(),
+          String.t(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp maybe_send_full_change(state, uri, text, buffer, buffer_revision) do
+    case Map.get(state.open_documents, uri) do
+      nil ->
+        state
+
+      %{buffer: nil} ->
+        send_full_change(state, uri, text, nil, nil)
+
+      %{buffer: ^buffer, buffer_revision: revision}
+      when is_integer(buffer_revision) and (is_nil(revision) or buffer_revision > revision) ->
+        send_full_change(state, uri, text, buffer, buffer_revision)
+
+      _doc ->
+        state
+    end
+  end
+
+  @spec send_full_change(
+          State.t(),
+          String.t(),
+          String.t(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp send_full_change(state, uri, text, buffer, buffer_revision) do
+    %{version: version} = Map.fetch!(state.open_documents, uri)
+    new_version = version + 1
+    doc = %{uri: uri, version: new_version, buffer: buffer, buffer_revision: buffer_revision}
+    state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
+
+    send_notification(state, "textDocument/didChange", %{
+      "textDocument" => %{"uri" => uri, "version" => new_version},
+      "contentChanges" => [%{"text" => text}]
+    })
+
+    state
+  end
+
+  @spec maybe_send_incremental_change(
+          State.t(),
+          String.t(),
+          list(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp maybe_send_incremental_change(state, uri, changes, buffer, buffer_revision) do
+    case Map.get(state.open_documents, uri) do
+      nil ->
+        state
+
+      %{buffer: nil} ->
+        send_incremental_change(state, uri, changes, nil, nil)
+
+      %{buffer: ^buffer, buffer_revision: revision}
+      when is_integer(buffer_revision) and (is_nil(revision) or buffer_revision > revision) ->
+        send_incremental_change(state, uri, changes, buffer, buffer_revision)
+
+      _doc ->
+        state
+    end
+  end
+
+  @spec send_incremental_change(
+          State.t(),
+          String.t(),
+          list(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp send_incremental_change(state, uri, changes, buffer, buffer_revision) do
+    %{version: version} = Map.fetch!(state.open_documents, uri)
+    new_version = version + 1
+    doc = %{uri: uri, version: new_version, buffer: buffer, buffer_revision: buffer_revision}
+    state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
+
+    content_changes =
+      Enum.map(changes, fn {sl, sc, el, ec, text} ->
+        %{
+          "range" => %{
+            "start" => %{"line" => sl, "character" => sc},
+            "end" => %{"line" => el, "character" => ec}
+          },
+          "text" => text
+        }
+      end)
+
+    send_notification(state, "textDocument/didChange", %{
+      "textDocument" => %{"uri" => uri, "version" => new_version},
+      "contentChanges" => content_changes
+    })
+
+    state
   end
 
   # ── Port & Protocol Helpers ────────────────────────────────────────────────

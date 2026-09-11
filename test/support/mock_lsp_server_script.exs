@@ -19,6 +19,8 @@ defmodule MockServer do
     # of the parent port doesn't produce noisy :epipe errors.
     :io.setopts(:standard_io, binary: true, encoding: :latin1)
     Logger.configure(level: :none)
+    Process.put(:documents, %{})
+    Process.put(:transcript, [])
     if stderr_banner?(), do: IO.puts(:standard_error, "mock lsp stderr banner")
     loop("")
   end
@@ -100,6 +102,10 @@ defmodule MockServer do
   defp handle_message(%{"method" => "textDocument/didOpen", "params" => params}) do
     # Publish a test diagnostic for the opened file
     uri = get_in(params, ["textDocument", "uri"])
+    text = get_in(params, ["textDocument", "text"])
+    version = get_in(params, ["textDocument", "version"])
+    put_document(uri, text, version)
+    record_transcript("textDocument/didOpen", %{"uri" => uri, "version" => version})
 
     send_notification("textDocument/publishDiagnostics", %{
       "uri" => uri,
@@ -118,7 +124,19 @@ defmodule MockServer do
     })
   end
 
-  defp handle_message(%{"method" => "textDocument/didChange"}) do
+  defp handle_message(%{"method" => "textDocument/didChange", "params" => params}) do
+    uri = get_in(params, ["textDocument", "uri"])
+    version = get_in(params, ["textDocument", "version"])
+    changes = Map.fetch!(params, "contentChanges")
+    text = changed_document_text(uri, changes)
+    put_document(uri, text, version)
+
+    record_transcript("textDocument/didChange", %{
+      "uri" => uri,
+      "version" => version,
+      "changeKind" => change_kind(changes)
+    })
+
     :ok
   end
 
@@ -132,6 +150,54 @@ defmodule MockServer do
 
   defp handle_message(%{"method" => "mock/stall", "id" => _id}) do
     :ok
+  end
+
+  defp handle_message(%{"method" => "mock/transcript", "id" => id}) do
+    documents =
+      Process.get(:documents, %{})
+      |> Map.new(fn {uri, document} ->
+        {uri, Map.put(document, "bytes", :binary.bin_to_list(document["text"]))}
+      end)
+
+    send_response(id, %{
+      "events" => Enum.reverse(Process.get(:transcript, [])),
+      "documents" => documents
+    })
+  end
+
+  defp handle_message(%{
+         "method" => "textDocument/rename",
+         "id" => id,
+         "params" => params
+       }) do
+    uri = get_in(params, ["textDocument", "uri"])
+    position = Map.fetch!(params, "position")
+    document = Process.get(:documents, %{}) |> Map.fetch!(uri)
+    start_character = Map.fetch!(position, "character")
+
+    record_transcript("textDocument/rename", %{
+      "uri" => uri,
+      "position" => position,
+      "documentVersion" => document["version"],
+      "documentBytes" => :binary.bin_to_list(document["text"])
+    })
+
+    send_response(id, %{
+      "documentChanges" => [
+        %{
+          "textDocument" => %{"uri" => uri, "version" => document["version"]},
+          "edits" => [
+            %{
+              "range" => %{
+                "start" => %{"line" => position["line"], "character" => start_character},
+                "end" => %{"line" => position["line"], "character" => start_character + 3}
+              },
+              "newText" => Map.fetch!(params, "newName")
+            }
+          ]
+        }
+      ]
+    })
   end
 
   defp handle_message(%{"method" => "$/cancelRequest", "params" => %{"id" => id}}) do
@@ -257,6 +323,75 @@ defmodule MockServer do
       _ -> nil
     end)
   end
+
+  defp put_document(uri, text, version) do
+    documents = Process.get(:documents, %{})
+    Process.put(:documents, Map.put(documents, uri, %{"text" => text, "version" => version}))
+  end
+
+  defp record_transcript(method, details) do
+    event = Map.put(details, "method", method)
+    Process.put(:transcript, [event | Process.get(:transcript, [])])
+  end
+
+  defp changed_document_text(_uri, [%{"text" => text}]), do: text
+
+  defp changed_document_text(uri, changes) do
+    document = Process.get(:documents, %{}) |> Map.fetch!(uri)
+
+    Enum.reduce(changes, document["text"], fn change, text ->
+      apply_incremental_change(text, change)
+    end)
+  end
+
+  defp apply_incremental_change(text, %{"range" => range, "text" => replacement}) do
+    start_offset = lsp_offset(text, range["start"])
+    end_offset = lsp_offset(text, range["end"])
+    prefix = binary_part(text, 0, start_offset)
+    suffix = binary_part(text, end_offset, byte_size(text) - end_offset)
+    prefix <> replacement <> suffix
+  end
+
+  defp lsp_offset(text, %{"line" => line, "character" => character}) do
+    {line_prefix, target_line} = split_target_line(text, line)
+    byte_size(line_prefix) + character_offset(target_line, character, position_encoding())
+  end
+
+  defp split_target_line(text, target_line) do
+    lines = String.split(text, "\n", trim: false)
+    line_prefix = lines |> Enum.take(target_line) |> Enum.map_join(&(&1 <> "\n"))
+    {line_prefix, Enum.at(lines, target_line, "")}
+  end
+
+  defp character_offset(line, character, "utf-8"), do: min(character, byte_size(line))
+
+  defp character_offset(line, character, encoding) do
+    unit_size = if encoding == "utf-16", do: 2, else: 4
+
+    line
+    |> String.codepoints()
+    |> Enum.reduce_while({0, 0}, fn codepoint, {units, bytes} ->
+      next_units =
+        units +
+          div(
+            byte_size(:unicode.characters_to_binary(codepoint, :utf8, encoding_atom(encoding))),
+            unit_size
+          )
+
+      if next_units > character do
+        {:halt, {units, bytes}}
+      else
+        {:cont, {next_units, bytes + byte_size(codepoint)}}
+      end
+    end)
+    |> elem(1)
+  end
+
+  defp encoding_atom("utf-16"), do: {:utf16, :little}
+  defp encoding_atom("utf-32"), do: {:utf32, :little}
+
+  defp change_kind([%{"range" => _range} | _]), do: "incremental"
+  defp change_kind(_changes), do: "full"
 
   defp send_test_diagnostic(uri, code, message) do
     send_notification("textDocument/publishDiagnostics", %{

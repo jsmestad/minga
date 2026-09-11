@@ -50,6 +50,7 @@ defmodule Minga.LSP.SyncServer do
           client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}},
           pending_tool_buffers: %{String.t() => [pid()]},
           delta_accumulators: %{pid() => delta_accumulator()},
+          pending_revisions: %{pid() => non_neg_integer()},
           events_registry: Events.registry()
         }
 
@@ -113,6 +114,26 @@ defmodule Minga.LSP.SyncServer do
     GenServer.cast(server, {:resync_buffers, buffer_pids})
   end
 
+  @doc """
+  Flushes one document's pending synchronization and asks its producing Client to admit an asynchronous request against `expected_revision`.
+  """
+  @spec request_document(
+          pid(),
+          pid(),
+          non_neg_integer(),
+          String.t(),
+          map(),
+          GenServer.server()
+        ) :: {:ok, reference(), Minga.LSP.DocumentContext.t()} | {:error, atom()}
+  def request_document(buffer, client, expected_revision, method, params, server \\ __MODULE__)
+      when is_pid(buffer) and is_pid(client) and is_integer(expected_revision) and
+             expected_revision >= 0 and is_binary(method) and is_map(params) do
+    GenServer.call(
+      server,
+      {:request_document, buffer, client, expected_revision, method, params}
+    )
+  end
+
   # ── GenServer callbacks ────────────────────────────────────────────────
 
   @impl true
@@ -142,8 +163,45 @@ defmodule Minga.LSP.SyncServer do
        # Accumulated deltas per buffer pid. When a delta is nil (bulk op),
        # the value is set to :full_sync to force full content sync.
        delta_accumulators: %{},
+       pending_revisions: %{},
        events_registry: events_registry
      }}
+  end
+
+  @impl true
+  @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
+  def handle_call(
+        {:request_document, buffer, client, expected_revision, method, params},
+        {response_to, _tag},
+        state
+      ) do
+    state = flush_did_change(state, buffer)
+
+    reply =
+      with true <- client in clients_for_buffer(buffer),
+           path when is_binary(path) <- safe_file_path(buffer),
+           uri = path_to_uri(path),
+           {content, ^expected_revision} <- safe_content_with_version(buffer) do
+        Client.request_document(
+          client,
+          uri,
+          buffer,
+          expected_revision,
+          method,
+          params,
+          content,
+          response_to
+        )
+      else
+        false -> {:error, :client_replaced}
+        nil -> {:error, :unknown_document}
+        :stale -> {:error, :stale_document}
+        {_content, _revision} -> {:error, :stale_document}
+      end
+
+    {:reply, reply, state}
+  catch
+    :exit, _ -> {:reply, {:error, :client_unavailable}, state}
   end
 
   @impl true
@@ -162,13 +220,14 @@ defmodule Minga.LSP.SyncServer do
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info(
-        {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: buf, delta: delta}},
+        {:minga_event, :buffer_changed,
+         %Events.BufferChangedEvent{buffer: buf, delta: delta, version: version}},
         state
       ) do
     if clients_for_buffer(buf) == [] do
       {:noreply, state}
     else
-      state = accumulate_delta(state, buf, delta)
+      state = accumulate_delta(state, buf, delta, event_revision(buf, version))
       {:noreply, schedule_did_change(state, buf)}
     end
   end
@@ -227,6 +286,7 @@ defmodule Minga.LSP.SyncServer do
     state = demonitor_clients_for_buffer(state, buffer_pid)
     state = cancel_debounce(state, buffer_pid)
     state = %{state | delta_accumulators: Map.delete(state.delta_accumulators, buffer_pid)}
+    state = %{state | pending_revisions: Map.delete(state.pending_revisions, buffer_pid)}
     :ets.delete(@registry_table, buffer_pid)
     do_buffer_open(state, buffer_pid)
   end
@@ -262,7 +322,7 @@ defmodule Minga.LSP.SyncServer do
       path ->
         configs = ServerRegistry.servers_for(filetype)
         uri = path_to_uri(path)
-        {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
+        {content, revision} = Buffer.content_with_version(buffer_pid)
         language_id = to_string(filetype)
 
         results =
@@ -281,7 +341,7 @@ defmodule Minga.LSP.SyncServer do
             _ -> false
           end)
           |> Enum.map(fn {_config, {:ok, pid}} ->
-            Client.did_open(pid, uri, language_id, content)
+            Client.did_open(pid, uri, language_id, content, buffer_pid, revision)
             pid
           end)
 
@@ -339,6 +399,7 @@ defmodule Minga.LSP.SyncServer do
     :ets.delete(@registry_table, buffer_pid)
     state = demonitor_clients_for_buffer(state, buffer_pid)
     state = %{state | delta_accumulators: Map.delete(state.delta_accumulators, buffer_pid)}
+    state = %{state | pending_revisions: Map.delete(state.pending_revisions, buffer_pid)}
     cancel_debounce(state, buffer_pid)
   catch
     :exit, _ -> state
@@ -498,9 +559,16 @@ defmodule Minga.LSP.SyncServer do
 
     # Drain accumulated deltas for this buffer
     {deltas, accumulators} = drain_deltas(state.delta_accumulators, buffer_pid)
-    state = %{state | debounce_timers: timers, delta_accumulators: accumulators}
+    {revision, pending_revisions} = Map.pop(state.pending_revisions, buffer_pid)
 
-    notify_clients_change(clients, buffer_pid, deltas)
+    state = %{
+      state
+      | debounce_timers: timers,
+        delta_accumulators: accumulators,
+        pending_revisions: pending_revisions
+    }
+
+    if is_integer(revision), do: notify_clients_change(clients, buffer_pid, deltas, revision)
     state
   end
 
@@ -520,14 +588,31 @@ defmodule Minga.LSP.SyncServer do
 
   # Accumulates a delta for a buffer. When delta is nil (bulk operation),
   # marks the buffer as needing full sync by setting the value to :full_sync.
-  @spec accumulate_delta(state(), pid(), Minga.Buffer.EditDelta.t() | nil) :: state()
-  defp accumulate_delta(state, buffer_pid, nil) do
+  @spec accumulate_delta(
+          state(),
+          pid(),
+          Minga.Buffer.EditDelta.t() | nil,
+          non_neg_integer()
+        ) :: state()
+  defp accumulate_delta(state, buffer_pid, delta, revision) do
+    previous_revision = Map.get(state.pending_revisions, buffer_pid)
+
+    if is_integer(previous_revision) and revision <= previous_revision do
+      state
+    else
+      state = put_accumulated_delta(state, buffer_pid, delta)
+      %{state | pending_revisions: Map.put(state.pending_revisions, buffer_pid, revision)}
+    end
+  end
+
+  @spec put_accumulated_delta(state(), pid(), Minga.Buffer.EditDelta.t() | nil) :: state()
+  defp put_accumulated_delta(state, buffer_pid, nil) do
     # Bulk op (undo, redo, replace_content): discard accumulated deltas
     # and mark as full sync needed
     %{state | delta_accumulators: Map.put(state.delta_accumulators, buffer_pid, :full_sync)}
   end
 
-  defp accumulate_delta(state, buffer_pid, delta) do
+  defp put_accumulated_delta(state, buffer_pid, delta) do
     accumulators = state.delta_accumulators
 
     new_acc =
@@ -587,13 +672,14 @@ defmodule Minga.LSP.SyncServer do
     :ok
   end
 
-  @spec notify_clients_change([pid()], pid(), [Minga.Buffer.EditDelta.t()]) :: :ok
-  defp notify_clients_change([], _buffer_pid, _deltas), do: :ok
+  @spec notify_clients_change([pid()], pid(), [Minga.Buffer.EditDelta.t()], non_neg_integer()) ::
+          :ok
+  defp notify_clients_change([], _buffer_pid, _deltas, _revision), do: :ok
 
-  defp notify_clients_change(clients, buffer_pid, deltas) do
+  defp notify_clients_change(clients, buffer_pid, deltas, revision) do
     with uri when is_binary(uri) <- buffer_uri(buffer_pid) do
       send_to_alive_clients(clients, fn client ->
-        send_change(client, uri, buffer_pid, deltas)
+        send_change(client, uri, buffer_pid, deltas, revision)
       end)
     end
 
@@ -604,8 +690,14 @@ defmodule Minga.LSP.SyncServer do
 
   # Sends a change notification using incremental sync if the server supports
   # it and deltas are available, otherwise falls back to full sync.
-  @spec send_change(pid(), String.t(), pid(), [Minga.Buffer.EditDelta.t()]) :: :ok
-  defp send_change(client, uri, buffer_pid, deltas) do
+  @spec send_change(
+          pid(),
+          String.t(),
+          pid(),
+          [Minga.Buffer.EditDelta.t()],
+          non_neg_integer()
+        ) :: :ok
+  defp send_change(client, uri, buffer_pid, deltas, revision) do
     sync_kind =
       try do
         Client.sync_kind(client)
@@ -613,14 +705,21 @@ defmodule Minga.LSP.SyncServer do
         :exit, _ -> :full
       end
 
-    case {sync_kind, deltas} do
-      {:incremental, [_ | _]} ->
+    encoding =
+      try do
+        Client.encoding(client)
+      catch
+        :exit, _ -> :unknown
+      end
+
+    case {sync_kind, encoding, deltas} do
+      {:incremental, :utf8, [_ | _]} ->
         changes = Enum.map(deltas, &delta_to_lsp_change/1)
-        Client.did_change_incremental(client, uri, changes)
+        Client.did_change_incremental(client, uri, changes, buffer_pid, revision)
 
       _ ->
-        {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
-        Client.did_change(client, uri, content)
+        {content, current_revision} = Buffer.content_with_version(buffer_pid)
+        Client.did_change(client, uri, content, buffer_pid, current_revision)
     end
   end
 
@@ -638,6 +737,24 @@ defmodule Minga.LSP.SyncServer do
       nil -> nil
       path -> path_to_uri(path)
     end
+  end
+
+  @spec event_revision(pid(), non_neg_integer() | nil) :: non_neg_integer()
+  defp event_revision(_buffer_pid, version) when is_integer(version) and version >= 0, do: version
+  defp event_revision(buffer_pid, _version), do: Buffer.version(buffer_pid)
+
+  @spec safe_file_path(pid()) :: String.t() | nil
+  defp safe_file_path(buffer) do
+    Buffer.file_path(buffer)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec safe_content_with_version(pid()) :: {String.t(), non_neg_integer()} | :stale
+  defp safe_content_with_version(buffer) do
+    Buffer.content_with_version(buffer)
+  catch
+    :exit, _ -> :stale
   end
 
   @spec send_to_alive_clients([pid()], (pid() -> term())) :: :ok
