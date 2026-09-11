@@ -109,6 +109,10 @@ defmodule MingaEditor.Commands.BufferManagement do
     |> close_tab_or_quit()
   end
 
+  def execute(state, {:close_tab, id}) when is_integer(id) do
+    close_targeted_tab(state, id)
+  end
+
   def execute(state, :close_other_tabs), do: close_other_tabs(state)
   def execute(state, :kill_other_buffers), do: close_other_tabs(state)
   def execute(state, :close_tabs_to_right), do: close_tabs_to_right(state)
@@ -1040,25 +1044,95 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
+  @spec close_targeted_tab(state(), Tab.id()) :: state()
+  defp close_targeted_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state,
+         id
+       ) do
+    case TabBar.get(tab_bar, id) do
+      %Tab{kind: :file} = tab -> close_targeted_file_tab(state, tab_bar, tab)
+      %Tab{kind: :agent} = tab -> close_targeted_agent_tab(state, tab_bar, tab)
+      nil -> state
+    end
+  end
+
+  defp close_targeted_tab(state, _id), do: state
+
+  @spec close_targeted_file_tab(state(), TabBar.t(), Tab.file()) :: state()
+  defp close_targeted_file_tab(state, tab_bar, %Tab{id: id, group_id: workspace_id} = tab) do
+    replacement_id = inactive_replacement_id(tab_bar, id)
+
+    if last_visible_file_tab?(tab_bar, workspace_id) do
+      close_targeted_last_file_tab(state, tab, replacement_id)
+    else
+      state
+      |> EditorState.stage_tab_close(tab)
+      |> close_file_tab(replacement_id)
+    end
+  end
+
+  @spec close_targeted_last_file_tab(state(), Tab.file(), Tab.id() | nil) :: state()
+  defp close_targeted_last_file_tab(state, %Tab{} = tab, replacement_id) do
+    case tab_kill_decision(tab) do
+      :refuse ->
+        NoticeWorkflow.publish(state, "Buffer has unsaved changes. Use SPC b X to force kill.")
+
+      _allowed ->
+        state
+        |> EditorState.stage_tab_close(tab)
+        |> remove_current_buffer(:ordinary, replacement_id)
+    end
+  end
+
+  @spec close_targeted_agent_tab(state(), TabBar.t(), Tab.agent()) :: state()
+  defp close_targeted_agent_tab(state, tab_bar, %Tab{id: id} = tab) do
+    replacement_id = inactive_replacement_id(tab_bar, id)
+
+    state
+    |> EditorState.stage_tab_close(tab)
+    |> close_agent_tab(replacement_id)
+  end
+
+  @spec inactive_replacement_id(TabBar.t(), Tab.id()) :: Tab.id() | nil
+  defp inactive_replacement_id(%TabBar{active_id: id}, id), do: nil
+  defp inactive_replacement_id(%TabBar{active_id: active_id}, _id), do: active_id
+
+  @spec last_visible_file_tab?(TabBar.t(), non_neg_integer()) :: boolean()
+  defp last_visible_file_tab?(%TabBar{} = tab_bar, workspace_id) do
+    match?([_single], TabBar.visible_file_tabs(tab_bar, workspace_id))
+  end
+
+  @spec tab_kill_decision(Tab.file()) :: :persistent | :refuse | :destroy
+  defp tab_kill_decision(%Tab{context: context}) do
+    case TabContext.active_buffer_pid(context) do
+      buffer when is_pid(buffer) -> kill_decision(buffer, :ordinary)
+      nil -> :destroy
+    end
+  end
+
+  defp remove_current_buffer(state, intent), do: remove_current_buffer(state, intent, nil)
+
+  @spec remove_current_buffer(state(), kill_intent(), Tab.id() | nil) :: state()
   defp remove_current_buffer(
          %{workspace: %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs}} = state,
-         intent
+         intent,
+         replacement_id
        ) do
     buf = Enum.at(buffers, idx)
 
     case kill_decision(buf, intent) do
       :persistent ->
-        clear_persistent_buffer(state, buffers, idx, bs, buf)
+        clear_persistent_buffer(state, buffers, idx, bs, buf, replacement_id)
 
       :refuse ->
         NoticeWorkflow.publish(state, "Buffer has unsaved changes. Use SPC b X to force kill.")
 
       :destroy ->
-        destroy_current_buffer(state, buffers, idx, bs, buf)
+        destroy_current_buffer(state, buffers, idx, bs, buf, replacement_id)
     end
   end
 
-  defp remove_current_buffer(state, _intent), do: state
+  defp remove_current_buffer(state, _intent, _replacement_id), do: state
 
   defp kill_decision(buf, intent) when is_pid(buf) do
     try do
@@ -1082,63 +1156,86 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp kill_decision(_buf, _intent), do: :destroy
 
-  defp clear_persistent_buffer(state, buffers, idx, bs, buf) do
+  defp clear_persistent_buffer(state, buffers, idx, bs, buf, replacement_id) do
     try do
       :ok = Buffer.replace_generated_content(buf, "")
       NoticeWorkflow.publish(state, "Buffer is persistent — content cleared")
     catch
-      :exit, _ -> destroy_current_buffer(state, buffers, idx, bs, buf)
+      :exit, _ -> destroy_current_buffer(state, buffers, idx, bs, buf, replacement_id)
     end
   end
 
-  defp destroy_current_buffer(state, buffers, idx, bs, buf) do
+  @spec destroy_current_buffer(
+          state(),
+          [pid()],
+          non_neg_integer(),
+          Buffers.t(),
+          pid(),
+          Tab.id() | nil
+        ) :: state()
+  defp destroy_current_buffer(state, _buffers, _idx, bs, buf, replacement_id) do
     buf_name =
-      if buf do
-        try do
-          Helpers.buffer_display_name(buf)
-        catch
-          :exit, _ -> "[unknown]"
-        end
-      else
-        "[unknown]"
+      try do
+        Helpers.buffer_display_name(buf)
+      catch
+        :exit, _ -> "[unknown]"
       end
 
     :ok = complete_active_wait_on_close(state)
 
-    if buf do
-      try do
-        Minga.Events.broadcast(
-          :buffer_closed,
-          %Minga.Events.BufferClosedEvent{buffer: buf, path: Buffer.file_path(buf) || :scratch},
-          state.extension_surfaces.events_registry
-        )
+    try do
+      Minga.Events.broadcast(
+        :buffer_closed,
+        %Minga.Events.BufferClosedEvent{buffer: buf, path: Buffer.file_path(buf) || :scratch},
+        state.extension_surfaces.events_registry
+      )
 
-        GenServer.stop(buf, :normal)
-      catch
-        :exit, _ -> :ok
-      end
+      GenServer.stop(buf, :normal)
+    catch
+      :exit, _ -> :ok
     end
 
     state = HighlightSync.close_buffer(state, buf)
 
     Minga.Log.info(:editor, "Closed: #{buf_name}")
 
-    new_buffers = List.delete_at(buffers, idx)
     had_neighbor_tab? = has_neighbor_tab?(state)
 
-    state = remove_current_tab(state)
+    state = EditorState.remove_buffer(state, buf)
 
-    case new_buffers do
+    case state.workspace.buffers.list do
       [] ->
-        restore_neighbor_tab_or_create_fallback(state, bs, had_neighbor_tab?)
+        state = remove_current_tab(state, replacement_id)
 
-      _ ->
-        new_idx = min(idx, Enum.count(new_buffers) - 1)
-        new_bs = Buffers.replace_list(bs, new_buffers, new_idx)
+        if replacement_id do
+          restore_after_tab_close(state, replacement_id)
+        else
+          restore_neighbor_tab_or_create_fallback(state, bs, had_neighbor_tab?)
+        end
 
-        MingaEditor.BufferActivation.activate(state, new_bs, notify_shell?: false)
+      _retained when is_integer(replacement_id) ->
+        restore_after_tab_close(state, replacement_id)
+
+      _retained ->
+        MingaEditor.BufferActivation.activate(state, state.workspace.buffers,
+          notify_shell?: false
+        )
     end
   end
+
+  defp restore_after_tab_close(state, nil), do: restore_active_tab_context(state)
+
+  defp restore_after_tab_close(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state,
+         replacement_id
+       ) do
+    case TabBar.get(tab_bar, replacement_id) do
+      %Tab{} = replacement -> EditorState.restore_tab_after_close(state, replacement)
+      nil -> restore_active_tab_context(state)
+    end
+  end
+
+  defp restore_after_tab_close(state, _replacement_id), do: restore_active_tab_context(state)
 
   defp cleanup_agent_session(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state) do
     session = Runtime.active_session(state.shell_runtime)
@@ -1839,7 +1936,13 @@ defmodule MingaEditor.Commands.BufferManagement do
   # cleanup/preservation pass first, and only cleanly closed workspaces have
   # their tab removed.
   @spec close_agent_tab(state()) :: state()
-  defp close_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
+  defp close_agent_tab(state), do: close_agent_tab(state, nil)
+
+  @spec close_agent_tab(state(), Tab.id() | nil) :: state()
+  defp close_agent_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         replacement_id
+       ) do
     workspace = TabBar.active_workspace(tb)
 
     session_pid =
@@ -1852,18 +1955,18 @@ defmodule MingaEditor.Commands.BufferManagement do
       {nil,
        %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = workspace_view}} =
            workspace} ->
-        close_agent_tab_without_session(state, tb, workspace, workspace_view)
+        close_agent_tab_without_session(state, tb, workspace, workspace_view, replacement_id)
 
       {nil, _workspace} ->
         state
-        |> remove_current_tab()
-        |> restore_active_tab_context()
+        |> remove_current_tab(replacement_id)
+        |> restore_after_tab_close(replacement_id)
 
       {_session_pid, nil} ->
         state
         |> cleanup_agent_session()
-        |> remove_current_tab()
-        |> restore_active_tab_context()
+        |> remove_current_tab(replacement_id)
+        |> restore_after_tab_close(replacement_id)
 
       {session_pid,
        %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = workspace_view}} =
@@ -1877,20 +1980,32 @@ defmodule MingaEditor.Commands.BufferManagement do
           session_pid,
           :normal
         )
-        |> finish_agent_tab_close(workspace.id)
+        |> finish_agent_tab_close(workspace.id, replacement_id)
 
       {_session_pid, %WorkspaceModel{}} ->
         state
-        |> remove_current_tab()
-        |> restore_active_tab_context()
+        |> remove_current_tab(replacement_id)
+        |> restore_after_tab_close(replacement_id)
     end
   end
 
-  defp close_agent_tab(state), do: state
+  defp close_agent_tab(state, _replacement_id), do: state
 
-  @spec close_agent_tab_without_session(state(), TabBar.t(), WorkspaceModel.t(), ProjectView.t()) ::
+  @spec close_agent_tab_without_session(
+          state(),
+          TabBar.t(),
+          WorkspaceModel.t(),
+          ProjectView.t(),
+          Tab.id() | nil
+        ) ::
           state()
-  defp close_agent_tab_without_session(state, tb, workspace, _workspace_view) do
+  defp close_agent_tab_without_session(
+         state,
+         tb,
+         workspace,
+         _workspace_view,
+         replacement_id
+       ) do
     case project_view_changed_files(workspace) do
       {:ok, []} ->
         case MingaEditor.WorkspaceWorkflow.close_project_view(workspace) do
@@ -1905,7 +2020,7 @@ defmodule MingaEditor.Commands.BufferManagement do
               MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
 
             state = %{state | workspace: workspace}
-            state |> remove_current_tab() |> restore_active_tab_context()
+            state |> remove_current_tab(replacement_id) |> restore_after_tab_close(replacement_id)
 
           {:error, reason} ->
             keep_workspace_after_session_down(
@@ -1935,17 +2050,18 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec finish_agent_tab_close(state(), non_neg_integer()) :: state()
+  @spec finish_agent_tab_close(state(), non_neg_integer(), Tab.id() | nil) :: state()
   defp finish_agent_tab_close(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         workspace_id
+         workspace_id,
+         replacement_id
        ) do
     if TabBar.get_workspace(tb, workspace_id) == nil do
       Minga.Log.info(:editor, "Closed agent tab")
 
       workspace = MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
       state = %{state | workspace: workspace}
-      state |> remove_current_tab() |> restore_active_tab_context()
+      state |> remove_current_tab(replacement_id) |> restore_after_tab_close(replacement_id)
     else
       state
     end
@@ -2236,6 +2352,16 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp complete_active_wait_on_close(_state), do: :ok
 
+  @spec complete_retained_wait_on_close(state()) :: :ok
+  defp complete_retained_wait_on_close(%{workspace: %{buffers: %{active: buffer}}})
+       when is_pid(buffer) do
+    if Buffer.dirty?(buffer), do: :ok, else: complete_wait_on_close(buffer)
+  catch
+    :exit, _reason -> WaitRequests.cancel(buffer, "buffer closed unexpectedly")
+  end
+
+  defp complete_retained_wait_on_close(_state), do: :ok
+
   @spec complete_wait_on_close(pid() | nil) :: :ok
   defp complete_wait_on_close(buffer) when is_pid(buffer) do
     if Buffer.dirty?(buffer) do
@@ -2305,12 +2431,12 @@ defmodule MingaEditor.Commands.BufferManagement do
       (TabBar.has_tab?(tb, preferred_replacement_id) && preferred_replacement_id) ||
         (active_tab && replacement_tab_id(tb, active_tab))
 
-    :ok = complete_active_wait_on_close(state)
+    :ok = complete_retained_wait_on_close(state)
     Minga.Log.info(:editor, "Closed: #{label}")
 
     state
     |> remove_current_tab(replacement_id)
-    |> restore_active_tab_context()
+    |> restore_after_tab_close(preferred_replacement_id)
   end
 
   @spec has_neighbor_tab?(state()) :: boolean()
@@ -2339,8 +2465,6 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec remove_current_tab(state(), Tab.id() | nil) :: state()
-  defp remove_current_tab(state, replacement_id \\ nil)
-
   defp remove_current_tab(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: active_id} = tb}}} = state,
          replacement_id
