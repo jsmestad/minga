@@ -263,6 +263,7 @@ defmodule Minga.MixProject do
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:req_llm, "~> 1.16"},
       {:req, "~> 0.6.2"},
+      {:vibe_kit, "~> 0.1.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
