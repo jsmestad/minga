@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.BufferRegistryNavigationTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.Window
 
   @moduletag :tmp_dir
 
@@ -59,20 +60,27 @@ defmodule MingaEditor.Handlers.BufferRegistryNavigationTest do
     assert TabBar.active(new_state.shell_runtime.state.tab_bar).id == 2
   end
 
-  test "falls back to buffer activation when tab preference has no matching tab", %{
+  test "opens a tab when tab preference has no matching tab", %{
     tmp_dir: tmp_dir
   } do
     target_path = write_file!(tmp_dir, "target-without-tab.txt")
     active_path = write_file!(tmp_dir, "active-without-tab.txt")
     target = file_buffer!(target_path)
     active = file_buffer!(active_path)
-    state = state_with_buffers([target, active], 1)
+    state = state_with_buffers([target, active], 1) |> with_active_tab(active, "active.txt")
 
-    assert {:ok, new_state, ^target, :activated} =
+    original_tab = TabBar.active(state.shell_runtime.state.tab_bar)
+
+    assert {:ok, new_state, ^target, :opened_tab} =
              BufferRegistry.open_or_activate_path(state, target_path, existing_target: :tab)
 
     assert new_state.workspace.buffers.active == target
     assert new_state.workspace.buffers.active_index == 0
+    assert TabBar.count(new_state.shell_runtime.state.tab_bar) == 2
+    assert TabBar.active(new_state.shell_runtime.state.tab_bar).context.buffers.active == target
+
+    assert TabBar.get(new_state.shell_runtime.state.tab_bar, original_tab.id).context.buffers.active ==
+             active
   end
 
   test "returns a start error without mutating buffers", %{tmp_dir: tmp_dir} do
@@ -169,5 +177,32 @@ defmodule MingaEditor.Handlers.BufferRegistryNavigationTest do
     tab_bar = %TabBar{tabs: [active_tab, target_tab], active_id: 1, next_id: 3}
     shell_state = ShellState.install_tab_bar(state.shell_runtime.state, tab_bar)
     %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  end
+
+  defp with_active_tab(state, active, label) do
+    active_window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+
+    windows = %{
+      state.workspace.windows
+      | map: %{state.workspace.windows.active => Window.show_buffer(active_window, active)}
+    }
+
+    workspace =
+      state.workspace
+      |> SessionState.set_buffers(%Buffers{
+        active: active,
+        list: state.workspace.buffers.list,
+        active_index: Enum.find_index(state.workspace.buffers.list, &(&1 == active))
+      })
+      |> SessionState.set_windows(windows)
+
+    tab = Tab.new_file(1, label) |> Tab.set_context(TabContext.from_workspace(workspace))
+    shell_state = ShellState.install_tab_bar(state.shell_runtime.state, TabBar.new(tab))
+
+    %{
+      state
+      | workspace: workspace,
+        shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

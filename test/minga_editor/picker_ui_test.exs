@@ -1,8 +1,10 @@
 defmodule MingaEditor.PickerUITest do
   @moduledoc "Tests PickerUI picker-state transitions and orchestration."
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias Minga.Project
+  alias Minga.Project.Root
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
@@ -17,6 +19,7 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
@@ -283,6 +286,162 @@ defmodule MingaEditor.PickerUITest do
     {opened, path, bytes}
   end
 
+  @spec file_confirmation_state(String.t(), :file | :directory, boolean()) :: map()
+  defp file_confirmation_state(tmp_dir, target_kind \\ :file, existing_target? \\ false) do
+    project = Path.join(tmp_dir, "confirmation-project")
+    origin_path = Path.join(project, "origin.txt")
+    preview_path = Path.join(project, "preview-a.txt")
+    target_path = Path.join(project, "target-b.txt")
+    File.mkdir_p!(project)
+    File.write!(origin_path, "origin")
+    File.write!(preview_path, "preview A")
+    write_confirmation_target!(target_path, target_kind)
+    {:ok, root} = Root.directory(project)
+    activate_project!(root)
+
+    {:ok, preview_candidate} = ProjectFileCandidate.new(root, "preview-a.txt")
+    {:ok, target_candidate} = ProjectFileCandidate.new(root, "target-b.txt")
+
+    {state, origin_buffer} = state_with_origin_file(origin_path, project)
+
+    {state, target_buffer} =
+      if existing_target? do
+        add_existing_target_buffer(state, target_path)
+      else
+        {state, nil}
+      end
+
+    picker =
+      Picker.new(
+        [
+          %Item{id: target_candidate, label: "target-b.txt"},
+          %Item{id: preview_candidate, label: "preview-a.txt"}
+        ],
+        title: "Find file"
+      )
+
+    picker_state = %PickerState{
+      picker: picker,
+      source: FileSource,
+      restore: state.workspace.buffers.active_index
+    }
+
+    %{
+      state: ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)}),
+      origin_buffer: origin_buffer,
+      origin_path: origin_path,
+      preview_path: preview_path,
+      target_buffer: target_buffer,
+      target_path: target_path
+    }
+  end
+
+  @spec write_confirmation_target!(String.t(), :file | :directory) :: :ok
+  defp write_confirmation_target!(path, :file), do: File.write!(path, "target B")
+  defp write_confirmation_target!(path, :directory), do: File.mkdir!(path)
+
+  @spec state_with_origin_file(String.t(), String.t()) :: {EditorState.t(), pid()}
+  defp state_with_origin_file(origin_path, project) do
+    state = TestHelpers.base_state(content: "discarded scratch")
+    scratch_buffer = state.workspace.buffers.active
+    {:ok, origin_buffer} = BufferProcess.start_link(file_path: origin_path)
+    active_window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+
+    windows = %{
+      state.workspace.windows
+      | map: %{
+          state.workspace.windows.active => Window.show_buffer(active_window, origin_buffer)
+        }
+    }
+
+    workspace =
+      state.workspace
+      |> SessionState.set_buffers(%Buffers{
+        active: origin_buffer,
+        list: [origin_buffer],
+        active_index: 0
+      })
+      |> SessionState.set_windows(windows)
+      |> SessionState.set_file_tree(%FileTree{project_root: project})
+
+    tab_bar =
+      Tab.new_file(1, "origin.txt")
+      |> TabBar.new(project)
+      |> TabBar.update_context(1, SessionState.to_tab_context(workspace))
+
+    shell_state = ShellState.install_tab_bar(state.shell_runtime.state, tab_bar)
+    stop_pid(scratch_buffer)
+
+    {%{
+       state
+       | workspace: workspace,
+         shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+     }, origin_buffer}
+  end
+
+  @spec add_existing_target_buffer(EditorState.t(), String.t()) :: {EditorState.t(), pid()}
+  defp add_existing_target_buffer(state, target_path) do
+    {:ok, target_buffer} = BufferProcess.start_link(file_path: target_path)
+    buffers = Buffers.add_background(state.workspace.buffers, target_buffer)
+    state = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
+
+    {state, target_buffer}
+  end
+
+  @spec preview_a(EditorState.t()) :: EditorState.t()
+  defp preview_a(state), do: PickerUI.handle_key(state, ?n, MingaEditor.Input.mod_ctrl())
+
+  @spec select_target(EditorState.t()) :: EditorState.t()
+  defp select_target(state), do: PickerUI.handle_key(state, ?p, MingaEditor.Input.mod_ctrl())
+
+  @spec choose_open_action(EditorState.t()) :: EditorState.t()
+  defp choose_open_action(state) do
+    state
+    |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+    |> PickerUI.handle_key(13, 0)
+  end
+
+  @spec tab_buffer_paths(EditorState.t()) :: [String.t() | nil]
+  defp tab_buffer_paths(state) do
+    state.shell_runtime.state.tab_bar.tabs
+    |> Enum.map(fn tab -> Minga.Buffer.file_path(tab.context.buffers.active) end)
+  end
+
+  @spec flush_file_visits() :: [String.t()]
+  defp flush_file_visits do
+    _ = :sys.get_state(Project)
+    Project.recent_files()
+  end
+
+  @spec activate_project!(Root.t()) :: :ok
+  defp activate_project!(%Root{path: path} = root) do
+    Minga.Events.subscribe(:project_rebuilt)
+    assert {:ok, snapshot} = Project.activate(root)
+
+    if snapshot.rebuilding? do
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^path}},
+                     5_000
+    end
+
+    _ = :sys.get_state(Project)
+    :ok
+  end
+
+  @spec restore_project(Minga.Project.WorkspaceSnapshot.t() | nil) :: :ok
+  defp restore_project(nil) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    :ok
+  end
+
+  defp restore_project(%Minga.Project.WorkspaceSnapshot{root: root}) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    _ = Project.activate(root)
+    :ok
+  end
+
   @spec stop_added_buffers(EditorState.t(), EditorState.t()) :: :ok
   defp stop_added_buffers(result_state, initial_state) do
     initial_buffers = MapSet.new(initial_state.workspace.buffers.list)
@@ -540,20 +699,162 @@ defmodule MingaEditor.PickerUITest do
     end
   end
 
-  describe "preview promotion" do
-    test "restores the original tab before creating the promoted preview tab" do
-      {state, original_buf, preview_buf} = preview_promotion_state()
+  describe "file confirmation after preview" do
+    @describetag :tmp_dir
 
-      new_state = PickerUI.handle_key(state, 13, 0)
-
-      tb = new_state.shell_runtime.state.tab_bar
-      assert new_state.shell_runtime.state.modal == :none
-      assert TabBar.count(tb) == 2
-      assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
-      assert %Buffers{active: ^preview_buf} = TabBar.get(tb, 2).context.buffers
-      assert new_state.workspace.buffers.active == preview_buf
+    setup do
+      original_workspace = Project.snapshot()
+      on_exit(fn -> restore_project(original_workspace) end)
+      :ok
     end
 
+    test "Open restores the origin before confirming valid B", %{tmp_dir: tmp_dir} do
+      fixture = file_confirmation_state(tmp_dir)
+      previewed = preview_a(fixture.state)
+      assert Minga.Buffer.file_path(previewed.workspace.buffers.active) == fixture.preview_path
+
+      selected = select_target(previewed)
+      assert Minga.Buffer.file_path(selected.workspace.buffers.active) == fixture.target_path
+      result = choose_open_action(selected)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert Minga.Buffer.file_path(result.workspace.buffers.active) == fixture.target_path
+      assert tab_buffer_paths(result) == [fixture.origin_path, fixture.target_path]
+      assert TabBar.count(result.shell_runtime.state.tab_bar) == 2
+      assert result.shell_runtime.state.tab_bar.active_id == 2
+
+      assert TabBar.get(result.shell_runtime.state.tab_bar, 1).context.buffers.active ==
+               fixture.origin_buffer
+
+      assert result.shell_runtime.state.notice.message == nil
+      assert flush_file_visits() == ["target-b.txt"]
+    end
+
+    test "Enter restores the origin and reports missing B without promoting A", %{
+      tmp_dir: tmp_dir
+    } do
+      fixture = file_confirmation_state(tmp_dir)
+      previewed = preview_a(fixture.state)
+      File.rm!(fixture.target_path)
+      selected = select_target(previewed)
+      assert Minga.Buffer.file_path(selected.workspace.buffers.active) == fixture.preview_path
+
+      result = PickerUI.handle_key(selected, 13, 0)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.workspace.buffers.active == fixture.origin_buffer
+      assert tab_buffer_paths(result) == [fixture.origin_path]
+      assert result.shell_runtime.state.tab_bar.active_id == 1
+      assert result.shell_runtime.state.notice.message == "Could not open target-b.txt"
+      assert flush_file_visits() == []
+    end
+
+    test "Enter reports an opening failure independently from candidate resolution", %{
+      tmp_dir: tmp_dir
+    } do
+      fixture = file_confirmation_state(tmp_dir, :directory)
+      previewed = preview_a(fixture.state)
+      selected = select_target(previewed)
+      assert Minga.Buffer.file_path(selected.workspace.buffers.active) == fixture.preview_path
+
+      result = PickerUI.handle_key(selected, 13, 0)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.workspace.buffers.active == fixture.origin_buffer
+      assert tab_buffer_paths(result) == [fixture.origin_path]
+      assert result.shell_runtime.state.tab_bar.active_id == 1
+      assert result.shell_runtime.state.notice.message == "Could not open target-b.txt"
+      assert flush_file_visits() == []
+    end
+
+    test "confirming previewed A creates exactly one proper tab and preserves the origin tab", %{
+      tmp_dir: tmp_dir
+    } do
+      fixture = file_confirmation_state(tmp_dir)
+      previewed = preview_a(fixture.state)
+      preview_buffer = previewed.workspace.buffers.active
+      result = PickerUI.handle_key(previewed, 13, 0)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.workspace.buffers.active == preview_buffer
+      assert tab_buffer_paths(result) == [fixture.origin_path, fixture.preview_path]
+      assert TabBar.count(result.shell_runtime.state.tab_bar) == 2
+      assert result.shell_runtime.state.tab_bar.active_id == 2
+
+      assert TabBar.get(result.shell_runtime.state.tab_bar, 1).context.buffers.active ==
+               fixture.origin_buffer
+
+      assert result.shell_runtime.state.notice.message == nil
+      assert flush_file_visits() == ["preview-a.txt"]
+    end
+
+    test "confirming an already open target creates its missing tab without buffer duplication",
+         %{
+           tmp_dir: tmp_dir
+         } do
+      fixture = file_confirmation_state(tmp_dir, :file, true)
+      previewed = preview_a(fixture.state)
+      selected = select_target(previewed)
+      assert selected.workspace.buffers.active == fixture.target_buffer
+
+      result = PickerUI.handle_key(selected, 13, 0)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.workspace.buffers.active == fixture.target_buffer
+      assert tab_buffer_paths(result) == [fixture.origin_path, fixture.target_path]
+      assert TabBar.count(result.shell_runtime.state.tab_bar) == 2
+      assert result.shell_runtime.state.tab_bar.active_id == 2
+      assert Enum.count(result.workspace.buffers.list, &(&1 == fixture.target_buffer)) == 1
+
+      assert TabBar.get(result.shell_runtime.state.tab_bar, 1).context.buffers.active ==
+               fixture.origin_buffer
+
+      assert result.shell_runtime.state.notice.message == nil
+      assert flush_file_visits() == ["target-b.txt"]
+    end
+
+    test "Enter with no selected result restores the origin without opening or recording", %{
+      tmp_dir: tmp_dir
+    } do
+      fixture = file_confirmation_state(tmp_dir)
+
+      no_result =
+        fixture.state
+        |> preview_a()
+        |> PickerUI.handle_key(?z, 0)
+
+      result = PickerUI.handle_key(no_result, 13, 0)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.workspace.buffers.active == fixture.origin_buffer
+      assert tab_buffer_paths(result) == [fixture.origin_path]
+      assert result.shell_runtime.state.tab_bar.active_id == 1
+      assert result.shell_runtime.state.notice.message == nil
+      assert flush_file_visits() == []
+    end
+
+    test "cancellation restores the origin without opening or recording", %{tmp_dir: tmp_dir} do
+      fixture = file_confirmation_state(tmp_dir)
+      previewed = preview_a(fixture.state)
+      result = PickerUI.handle_key(previewed, 27, 0)
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.workspace.buffers.active == fixture.origin_buffer
+      assert tab_buffer_paths(result) == [fixture.origin_path]
+      assert result.shell_runtime.state.tab_bar.active_id == 1
+      assert result.shell_runtime.state.notice.message == nil
+      assert flush_file_visits() == []
+    end
+  end
+
+  describe "picker source switching" do
     test "backspace through a mode prefix restores the original source and prompt" do
       {state, _original_buf, _preview_buf} = preview_promotion_state()
 

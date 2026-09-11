@@ -150,9 +150,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
           ProjectFileCandidate.t(),
           term()
         ) :: term()
-  defp open_selected_file({:error, reason}, _candidate, state) do
+  defp open_selected_file({:error, reason}, candidate, state) do
     Log.error(:editor, "Failed to resolve project file candidate: #{inspect(reason)}")
-    state
+    publish_open_error(state, candidate)
   end
 
   defp open_selected_file({:ok, abs_path}, candidate, state) do
@@ -173,8 +173,19 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
       {:error, reason} ->
         Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
-        state
+        publish_open_error(state, candidate)
     end
+  end
+
+  @spec publish_open_error(term(), ProjectFileCandidate.t()) :: term()
+  defp publish_open_error(
+         %{buffer_lifecycle: %{buffer_add_context: :preview}} = state,
+         %ProjectFileCandidate{}
+       ),
+       do: state
+
+  defp publish_open_error(state, %ProjectFileCandidate{path: path}) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Could not open #{path}")
   end
 
   @spec existing_target(term()) :: :buffer | :tab
