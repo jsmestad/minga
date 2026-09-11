@@ -28,7 +28,7 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     on_exit(fn -> restore_project(original_workspace) end)
   end
 
-  test "all delayed action paths stay tied to Project A after Project and file tree switch to B",
+  test "delayed file actions stay tied to Project A and stale delete is harmless after switching to B",
        %{
          tmp_dir: tmp_dir
        } do
@@ -38,7 +38,7 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     relative_paths = [
       "single.txt",
       "preview.txt",
-      "delete.txt",
+      "stale-delete.txt",
       "marked/one.txt",
       "marked/two.txt",
       "bulk/one.txt",
@@ -109,9 +109,11 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
       assert legacy_preview_model.preview_lines == nil
     end
 
-    FileSource.on_action(:delete, items_by_path["delete.txt"], rerooted_state)
-    refute File.exists?(Path.join(project_a, "delete.txt"))
-    assert File.read!(Path.join(project_b, "delete.txt")) == "B:delete.txt"
+    assert FileSource.on_action(:delete, items_by_path["stale-delete.txt"], rerooted_state) ==
+             rerooted_state
+
+    assert File.read!(Path.join(project_a, "stale-delete.txt")) == "A:stale-delete.txt"
+    assert File.read!(Path.join(project_b, "stale-delete.txt")) == "B:stale-delete.txt"
 
     marked_items = [items_by_path["marked/one.txt"], items_by_path["marked/two.txt"]]
     marked_state = open_marked_picker(rerooted_state, marked_items)

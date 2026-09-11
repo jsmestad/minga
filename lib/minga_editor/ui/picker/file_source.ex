@@ -190,43 +190,13 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @impl true
   @spec actions(Item.t()) :: [MingaEditor.UI.Picker.Source.action_entry()]
   def actions(_item) do
-    [{"Open", :open}, {"Delete", :delete}]
+    [{"Open", :open}]
   end
 
   @impl true
   @spec on_action(term(), Item.t(), term()) :: term()
   def on_action(:open, item, state), do: on_select(item, state)
-
-  def on_action(
-        :delete,
-        %Item{id: %ProjectFileCandidate{} = candidate},
-        state
-      ) do
-    delete_selected_file(ProjectFileCandidate.authorized_entry_path(candidate), state)
-  end
-
   def on_action(_action, _item, state), do: state
-
-  @spec delete_selected_file(
-          {:ok, String.t()} | {:error, ProjectFileCandidate.error()},
-          term()
-        ) :: term()
-  defp delete_selected_file({:error, reason}, state) do
-    Log.error(:editor, "Failed to resolve project file candidate: #{inspect(reason)}")
-    state
-  end
-
-  defp delete_selected_file({:ok, abs_path}, state) do
-    case File.rm(abs_path) do
-      :ok ->
-        Minga.Log.info(:editor, "Deleted file: #{abs_path}")
-        state
-
-      {:error, reason} ->
-        Minga.Log.error(:editor, "Failed to delete file: #{inspect(reason)}")
-        state
-    end
-  end
 
   @impl true
   @spec on_bulk_select([Item.t()], term()) :: term()

@@ -91,21 +91,22 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
              Path.join(original_root, "same.txt")
   end
 
-  test "delete unlinks an authorized symlink without deleting its target", %{tmp_dir: tmp_dir} do
-    project = Path.join(tmp_dir, "symlink-delete")
-    target = Path.join(project, "target.txt")
-    link = Path.join(project, "link.txt")
+  test "offered actions omit Delete and stale delete delivery preserves disk bytes", %{
+    tmp_dir: tmp_dir
+  } do
+    project = Path.join(tmp_dir, "stale-delete")
+    path = Path.join(project, "kept.txt")
+    bytes = <<0, 1, 2, "keep me">>
     File.mkdir_p!(project)
-    File.write!(target, "keep me")
-    File.ln_s!("target.txt", link)
+    File.write!(path, bytes)
     {:ok, root} = Root.directory(project)
 
     state = TestHelpers.base_state(content: "initial")
-    item = %Item{id: candidate!(root, "link.txt"), label: "link.txt"}
+    item = %Item{id: candidate!(root, "kept.txt"), label: "kept.txt"}
 
+    assert FileSource.actions(item) == [{"Open", :open}]
     assert FileSource.on_action(:delete, item, state) == state
-    assert {:error, :enoent} = File.lstat(link)
-    assert File.read!(target) == "keep me"
+    assert File.read!(path) == bytes
   end
 
   test "bulk actions expose open all marked", %{tmp_dir: tmp_dir} do
