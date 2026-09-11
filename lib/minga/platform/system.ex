@@ -3,8 +3,7 @@ defmodule Minga.Platform.System do
   Production platform backend. Shells out to OS-specific commands for
   trash operations.
 
-  - **macOS:** Uses `osascript` to ask Finder to trash the item. This moves
-    the item to `~/.Trash` with Undo support in Finder.
+  - **macOS:** Uses AppleScriptObjC to call Foundation's native Trash API.
   - **Linux:** Uses `gio trash` (GNOME/freedesktop) which follows the
     freedesktop Trash spec (`~/.local/share/Trash/`).
   """
@@ -19,18 +18,7 @@ defmodule Minga.Platform.System do
   end
 
   @spec trash_macos(String.t()) :: :ok | {:error, String.t()}
-  defp trash_macos(path) do
-    # Escape single quotes in the path for AppleScript
-    escaped = String.replace(path, "'", "'\\''")
-
-    script =
-      ~s|tell application "Finder" to delete (POSIX file "#{escaped}" as alias)|
-
-    case System.cmd("osascript", ["-e", script], stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {output, _} -> {:error, String.trim(output)}
-    end
-  end
+  defp trash_macos(path), do: Minga.Platform.MacOSTrash.trash(path)
 
   @spec trash_linux(String.t()) :: :ok | {:error, String.t()}
   defp trash_linux(path) do
