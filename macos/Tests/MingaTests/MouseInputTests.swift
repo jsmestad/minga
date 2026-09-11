@@ -423,6 +423,46 @@ struct MouseInputTests {
         #expect(spy.mouseEventCalls[0].eventType == MOUSE_PRESS)
     }
 
+    @Test("inactive pane definition and middle-click gestures retain their screen target")
+    @MainActor func inactivePaneTargetedGestures() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        let activeGutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
+            isActive: true, contentWidth: 40, cursorLine: 0, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        let inactiveGutter = Wire.WindowGutter(
+            windowId: 2, contentRow: 0, contentCol: 41, contentHeight: 24,
+            isActive: false, contentWidth: 39, cursorLine: 0, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        try commitEditorFrame(
+            view,
+            contents: [try windowContent(for: activeGutter), try windowContent(for: inactiveGutter)],
+            gutters: [activeGutter, inactiveGutter]
+        )
+
+        let location = NSPoint(x: cw * 50.5, y: ch * 6.5)
+        guard let definition = mouseEvent(type: .leftMouseDown, location: location, modifiers: .command),
+              let paste = mouseEvent(type: .otherMouseDown, location: location) else { return }
+
+        view.mouseDown(with: definition)
+        view.otherMouseDown(with: paste)
+
+        #expect(spy.mouseEventCalls.count == 2)
+        #expect(spy.mouseEventCalls[0].row == 6)
+        #expect(spy.mouseEventCalls[0].col == 50)
+        #expect(spy.mouseEventCalls[0].button == MOUSE_BUTTON_LEFT)
+        #expect(spy.mouseEventCalls[0].modifiers & 0x08 != 0)
+        #expect(spy.mouseEventCalls[1].row == 6)
+        #expect(spy.mouseEventCalls[1].col == 50)
+        #expect(spy.mouseEventCalls[1].button == MOUSE_BUTTON_MIDDLE)
+    }
+
     // MARK: - Drag
 
     @Test("mouseDragged sends drag event with left button")

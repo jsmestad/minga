@@ -48,6 +48,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.Window
+  alias MingaEditor.WindowFocus
   alias MingaEditor.WindowTree
 
   alias MingaEditor.Frontend.Capabilities
@@ -297,20 +298,12 @@ defmodule MingaEditor.Mouse do
         close_tab_at(state, row, col)
 
       :not_tab_bar ->
-        case mouse_to_buffer_pos(state, row, col) do
-          nil ->
+        case resolve_and_focus_buffer_target(state, row, col) do
+          {:ok, focused, target} ->
+            paste_at_buffer_target(state, focused, target)
+
+          :error ->
             state
-
-          {target_line, target_col} ->
-            Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
-            state = cancel_mode_for_mouse(state)
-
-            state = %{
-              state
-              | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
-            }
-
-            MingaEditor.dispatch_command(state, :paste_after)
         end
     end
   end
@@ -756,25 +749,30 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_left_press(state(), integer(), integer(), non_neg_integer(), pos_integer()) ::
           state()
-  defp handle_left_press(state, row, col, mods, native_click_count) do
+  defp handle_left_press(original, row, col, mods, native_click_count) do
     # Record press for multi-click detection
     mouse =
       MouseState.record_press_at(
-        state.workspace.mouse,
+        original.workspace.mouse,
         row,
         col,
         native_click_count,
         System.monotonic_time(:millisecond)
       )
 
-    state = %{state | workspace: MingaEditor.Session.State.set_mouse(state.workspace, mouse)}
+    state = %{
+      original
+      | workspace: MingaEditor.Session.State.set_mouse(original.workspace, mouse)
+    }
+
     click_count = MouseState.click_count(mouse)
 
     # Check modifier clicks first
-    handle_left_press_modifiers(state, row, col, mods, click_count)
+    handle_left_press_modifiers(original, state, row, col, mods, click_count)
   end
 
   @spec handle_left_press_modifiers(
+          state(),
           state(),
           integer(),
           integer(),
@@ -783,17 +781,20 @@ defmodule MingaEditor.Mouse do
         ) :: state()
 
   # Shift+click: extend selection
-  defp handle_left_press_modifiers(state, row, col, mods, _cc) when band(mods, @mod_shift) != 0 do
+  defp handle_left_press_modifiers(_original, state, row, col, mods, _cc)
+       when band(mods, @mod_shift) != 0 do
     handle_shift_click(state, row, col)
   end
 
   # Cmd+click (GUI) or Ctrl+click (TUI): go-to-definition.
-  defp handle_left_press_modifiers(state, row, col, mods, _cc) when band(mods, @mod_super) != 0 do
-    handle_goto_definition_click(state, row, col)
+  defp handle_left_press_modifiers(original, state, row, col, mods, _cc)
+       when band(mods, @mod_super) != 0 do
+    handle_goto_definition_click(original, state, row, col)
   end
 
   # On native GUI frontends, Ctrl-click follows platform context-menu semantics.
   defp handle_left_press_modifiers(
+         _original,
          %{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}} = state,
          row,
          col,
@@ -804,12 +805,13 @@ defmodule MingaEditor.Mouse do
     handle_context_click(state, row, col)
   end
 
-  defp handle_left_press_modifiers(state, row, col, mods, _cc) when band(mods, @mod_ctrl) != 0 do
-    handle_goto_definition_click(state, row, col)
+  defp handle_left_press_modifiers(original, state, row, col, mods, _cc)
+       when band(mods, @mod_ctrl) != 0 do
+    handle_goto_definition_click(original, state, row, col)
   end
 
   # Double-click: reset split divider or select word
-  defp handle_left_press_modifiers(state, row, col, _mods, 2) do
+  defp handle_left_press_modifiers(_original, state, row, col, _mods, 2) do
     case reset_split_at_separator(state, row, col) do
       {:ok, reset_state} -> reset_state
       :error -> handle_double_click(state, row, col)
@@ -817,12 +819,12 @@ defmodule MingaEditor.Mouse do
   end
 
   # Triple-click: line selection
-  defp handle_left_press_modifiers(state, row, col, _mods, 3) do
+  defp handle_left_press_modifiers(_original, state, row, col, _mods, 3) do
     handle_triple_click(state, row, col)
   end
 
   # Single click: normal cursor positioning
-  defp handle_left_press_modifiers(state, row, col, _mods, _cc) do
+  defp handle_left_press_modifiers(_original, state, row, col, _mods, _cc) do
     handle_plain_left_press(state, row, col)
   end
 
@@ -953,31 +955,73 @@ defmodule MingaEditor.Mouse do
 
   # ── Cmd/Ctrl+click: go-to-definition ───────────────────────────────────────
 
-  @spec handle_goto_definition_click(state(), integer(), integer()) :: state()
-  defp handle_goto_definition_click(state, row, col) do
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
+  @spec handle_goto_definition_click(state(), state(), integer(), integer()) :: state()
+  defp handle_goto_definition_click(original, state, row, col) do
+    case resolve_and_focus_buffer_target(state, row, col) do
+      {:ok, focused, target} ->
+        goto_definition_at_buffer_target(original, focused, target)
 
-      {target_line, target_col} ->
-        buf = state.workspace.buffers.active
-        Buffer.move_to(buf, {target_line, target_col})
-        # Navigation may open or switch to a different buffer, so drop the link
-        # preview now; otherwise its underline would draw against the new buffer
-        # until the next mouse motion (#2630).
-        state = %{
-          state
-          | workspace: MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)
-        }
+      :error ->
+        original
+    end
+  end
 
-        state = cancel_mode_for_mouse(state)
+  @spec paste_at_buffer_target(state(), state(), BufferTarget.t()) :: state()
+  defp paste_at_buffer_target(original, focused, target) do
+    Buffer.move_to(target.buffer, BufferTarget.position(target))
 
-        state = %{
-          state
-          | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
-        }
+    focused
+    |> normalize_mode_for_targeted_gesture()
+    |> MingaEditor.dispatch_command(:paste_after)
+  catch
+    :exit, _reason -> original
+  end
 
-        MingaEditor.dispatch_command(state, :goto_definition)
+  @spec goto_definition_at_buffer_target(state(), state(), BufferTarget.t()) :: state()
+  defp goto_definition_at_buffer_target(original, focused, target) do
+    Buffer.move_to(target.buffer, BufferTarget.position(target))
+
+    # Navigation may open or switch to a different buffer, so drop the link
+    # preview now; otherwise its underline would draw against the new buffer
+    # until the next mouse motion (#2630).
+    focused
+    |> clear_cmd_hover_link_for_targeted_gesture()
+    |> normalize_mode_for_targeted_gesture()
+    |> MingaEditor.dispatch_command(:goto_definition)
+  catch
+    :exit, _reason -> original
+  end
+
+  @spec clear_cmd_hover_link_for_targeted_gesture(state()) :: state()
+  defp clear_cmd_hover_link_for_targeted_gesture(state) do
+    %{
+      state
+      | workspace: MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)
+    }
+  end
+
+  @spec normalize_mode_for_targeted_gesture(state()) :: state()
+  defp normalize_mode_for_targeted_gesture(state) do
+    state = cancel_mode_for_mouse(state)
+
+    %{
+      state
+      | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+    }
+  end
+
+  @spec resolve_and_focus_buffer_target(state(), integer(), integer()) ::
+          {:ok, state(), BufferTarget.t()} | :error
+  defp resolve_and_focus_buffer_target(state, row, col) do
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} ->
+        case WindowFocus.focus_buffer_result(state, target.window_id, target.buffer) do
+          {:ok, focused} -> {:ok, focused, target}
+          {:error, _reason} -> :error
+        end
+
+      _command_or_miss ->
+        :error
     end
   end
 
