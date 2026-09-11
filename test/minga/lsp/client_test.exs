@@ -194,6 +194,72 @@ defmodule Minga.LSP.ClientTest do
 
       assert Diagnostics.for_uri(diag_server, @uri) == []
     end
+
+    test "binds independent wire versions to exact buffer revisions", %{client: client} do
+      buffer = self()
+
+      Client.did_open(client, @uri, "elixir", "original", buffer, 42)
+      assert Client.validate_document_version(client, @uri, 1, buffer, 42) == :ok
+
+      assert Client.validate_document_version(client, @uri, 42, buffer, 42) ==
+               {:error, :version_mismatch}
+
+      Client.did_change(client, @uri, "changed", buffer, 45)
+      assert Client.validate_document_version(client, @uri, 2, buffer, 45) == :ok
+
+      assert Client.validate_document_version(client, @uri, 1, buffer, 42) ==
+               {:error, :version_mismatch}
+
+      Client.did_change(client, @uri, "stale", buffer, 44)
+      assert Client.validate_document_version(client, @uri, 2, buffer, 45) == :ok
+    end
+
+    test "document request admission synchronizes and registers one exact context", %{
+      client: client
+    } do
+      buffer = self()
+      Client.did_open(client, @uri, "elixir", "one", buffer, 7)
+
+      assert {:ok, ref, context} =
+               Client.request_document(
+                 client,
+                 @uri,
+                 buffer,
+                 11,
+                 "textDocument/hover",
+                 %{"textDocument" => %{"uri" => @uri}},
+                 "eleven"
+               )
+
+      assert context.client == client
+      assert context.buffer == buffer
+      assert context.buffer_revision == 11
+      assert context.lsp_version == 2
+      assert context.encoding == :utf8
+      assert Client.context_current?(context)
+      assert_receive {:lsp_response, ^ref, {:ok, nil}}, @event_timeout
+    end
+
+    test "reopen replaces document identity and resets the wire mapping", %{client: client} do
+      first_buffer = spawn(fn -> receive do: (:stop -> :ok) end)
+      second_buffer = spawn(fn -> receive do: (:stop -> :ok) end)
+
+      on_exit(fn ->
+        send(first_buffer, :stop)
+        send(second_buffer, :stop)
+      end)
+
+      Client.did_open(client, @uri, "elixir", "first", first_buffer, 9)
+      assert Client.validate_document_version(client, @uri, 1, first_buffer, 9) == :ok
+
+      Client.did_close(client, @uri)
+      Client.did_open(client, @uri, "elixir", "second", second_buffer, 3)
+
+      assert Client.validate_document_version(client, @uri, 1, second_buffer, 3) == :ok
+
+      assert Client.validate_document_version(client, @uri, 1, first_buffer, 9) ==
+               {:error, :version_mismatch}
+    end
   end
 
   describe "workspace/configuration" do

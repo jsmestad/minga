@@ -15,6 +15,8 @@ defmodule MingaAgent.Tools.LspCodeActions do
   alias MingaAgent.Tools.LspBridge
   alias Minga.Buffer
   alias Minga.Diagnostics
+  alias Minga.LSP.Client
+  alias Minga.LSP.TextEdit
   alias Minga.LSP.WorkspaceEdit
 
   @doc """
@@ -48,7 +50,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
         ) ::
           {:ok, String.t()} | {:error, String.t()}
   defp do_code_actions(client, abs_path, path, line, col, apply_action) do
-    case fetch_actions(client, abs_path, line, col) do
+    case fetch_actions(client, abs_path, line, col, Client.encoding(client)) do
       {:ok, []} ->
         {:ok, "No code actions available at #{Path.basename(path)}:#{line + 1}"}
 
@@ -66,14 +68,21 @@ defmodule MingaAgent.Tools.LspCodeActions do
 
   # ── Private: fetch ─────────────────────────────────────────────────────────
 
-  @spec fetch_actions(pid(), String.t(), non_neg_integer(), non_neg_integer()) ::
+  @spec fetch_actions(
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.LSP.PositionEncoding.encoding()
+        ) ::
           {:ok, [map()]} | {:error, String.t()}
-  defp fetch_actions(client, abs_path, line, col) do
+  defp fetch_actions(client, abs_path, line, col, encoding) do
     uri = LspBridge.path_to_uri(abs_path)
+    position = LspBridge.position_params(abs_path, line, col, encoding)["position"]
 
     range = %{
-      "start" => %{"line" => line, "character" => col},
-      "end" => %{"line" => line, "character" => col}
+      "start" => position,
+      "end" => position
     }
 
     diagnostics = diagnostics_at_line(uri, line)
@@ -186,9 +195,15 @@ defmodule MingaAgent.Tools.LspCodeActions do
         end
 
       workspace_edit ->
-        file_edits = WorkspaceEdit.parse(workspace_edit)
-        {file_count, edit_count, errors} = apply_file_edits(file_edits)
-        finish_workspace_edit(client, action, title, file_count, edit_count, errors)
+        case WorkspaceEdit.parse(workspace_edit) do
+          {:ok, documents} ->
+            encoding = Client.encoding(client)
+            {file_count, edit_count, errors} = apply_file_edits(documents, client, encoding)
+            finish_workspace_edit(client, action, title, file_count, edit_count, errors)
+
+          {:error, reason} ->
+            {:error, "Code action returned an invalid workspace edit: #{inspect(reason)}"}
+        end
     end
   end
 
@@ -205,9 +220,24 @@ defmodule MingaAgent.Tools.LspCodeActions do
           String.t()
         ]) ::
           {:ok, String.t()} | {:error, String.t()}
+  defp finish_workspace_edit(client, action, title, 0, 0, []) do
+    finish_workspace_edit_success(client, action, "Code action \"#{title}\": no edits to apply")
+  end
+
   defp finish_workspace_edit(client, action, title, file_count, edit_count, []) do
     success = "Applied \"#{title}\": #{edit_count} edits across #{file_count} files"
+    finish_workspace_edit_success(client, action, success)
+  end
 
+  defp finish_workspace_edit(_client, _action, title, file_count, edit_count, errors) do
+    {:error,
+     "Failed to apply \"#{title}\": #{edit_count} edits across #{file_count} files\n" <>
+       Enum.join(errors, "\n")}
+  end
+
+  @spec finish_workspace_edit_success(pid(), map(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp finish_workspace_edit_success(client, action, success) do
     case Map.get(action, "command") do
       nil ->
         {:ok, success}
@@ -218,12 +248,6 @@ defmodule MingaAgent.Tools.LspCodeActions do
           {:error, reason} -> {:error, "#{success}, but #{reason}"}
         end
     end
-  end
-
-  defp finish_workspace_edit(_client, _action, title, file_count, edit_count, errors) do
-    {:error,
-     "Failed to apply \"#{title}\": #{edit_count} edits across #{file_count} files\n" <>
-       Enum.join(errors, "\n")}
   end
 
   @spec resolve_action(pid(), map()) :: map()
@@ -256,79 +280,158 @@ defmodule MingaAgent.Tools.LspCodeActions do
     end
   end
 
-  @spec apply_file_edits([WorkspaceEdit.file_edits()]) ::
+  @spec apply_file_edits(
+          [WorkspaceEdit.Document.t()],
+          pid(),
+          Minga.LSP.PositionEncoding.encoding()
+        ) ::
           {non_neg_integer(), non_neg_integer(), [String.t()]}
-  defp apply_file_edits(file_edits) do
-    Enum.reduce(file_edits, {0, 0, []}, fn {path, edits}, {fc, ec, errs} ->
-      case apply_edits_to_file(path, edits) do
-        :ok -> {fc + 1, ec + Enum.count(edits), errs}
-        {:error, reason} -> {fc, ec, ["  #{Path.basename(path)}: #{reason}" | errs]}
-      end
-    end)
+  defp apply_file_edits(documents, client, encoding) do
+    {file_count, edit_count, errors} =
+      Enum.reduce(documents, {0, 0, []}, fn document, counts ->
+        accumulate_file_edit(document, client, encoding, counts)
+      end)
+
+    {file_count, edit_count, Enum.reverse(errors)}
   end
 
-  @spec apply_edits_to_file(String.t(), [WorkspaceEdit.text_edit()]) :: :ok | {:error, String.t()}
-  defp apply_edits_to_file(path, edits) do
-    case Buffer.pid_for_path(path) do
+  @spec accumulate_file_edit(
+          WorkspaceEdit.Document.t(),
+          pid(),
+          Minga.LSP.PositionEncoding.encoding(),
+          {non_neg_integer(), non_neg_integer(), [String.t()]}
+        ) :: {non_neg_integer(), non_neg_integer(), [String.t()]}
+  defp accumulate_file_edit(
+         %WorkspaceEdit.Document{edits: [], version: nil},
+         _client,
+         _encoding,
+         counts
+       ),
+       do: counts
+
+  defp accumulate_file_edit(
+         %WorkspaceEdit.Document{edits: []} = document,
+         client,
+         _encoding,
+         {file_count, edit_count, errors} = counts
+       ) do
+    case validate_empty_file_edit(document, client) do
+      :ok ->
+        counts
+
+      {:error, reason} ->
+        {file_count, edit_count, ["  #{Path.basename(document.path)}: #{reason}" | errors]}
+    end
+  end
+
+  defp accumulate_file_edit(document, client, encoding, {file_count, edit_count, errors}) do
+    case apply_edits_to_file(document, client, encoding) do
+      :ok ->
+        {file_count + 1, edit_count + Enum.count(document.edits), errors}
+
+      {:error, reason} ->
+        {file_count, edit_count, ["  #{Path.basename(document.path)}: #{reason}" | errors]}
+    end
+  end
+
+  @spec apply_edits_to_file(
+          WorkspaceEdit.Document.t(),
+          pid(),
+          Minga.LSP.PositionEncoding.encoding()
+        ) :: :ok | {:error, String.t()}
+  defp apply_edits_to_file(document, client, encoding) do
+    case Buffer.pid_for_path(document.path) do
       {:ok, pid} ->
-        case Buffer.apply_edits(pid, edits) do
-          :ok -> :ok
+        {content, revision} = Buffer.content_with_version(pid)
+
+        with :ok <- validate_version(document, client, pid, revision),
+             {:ok, new_content} <- TextEdit.apply(content, document.edits, encoding),
+             {:ok, _revision} <-
+               Buffer.replace_content_if_version(pid, revision, new_content, :agent) do
+          :ok
+        else
           {:error, :read_only} -> {:error, "buffer is read-only"}
+          {:error, reason} -> {:error, inspect(reason)}
         end
 
       :not_found ->
-        apply_edits_via_filesystem(path, edits)
+        apply_edits_via_filesystem(document, encoding)
     end
   rescue
     e -> {:error, Exception.message(e)}
   catch
-    :exit, _ -> apply_edits_via_filesystem(path, edits)
+    :exit, _ -> apply_edits_via_filesystem(document, encoding)
   end
 
-  @spec apply_edits_via_filesystem(String.t(), [WorkspaceEdit.text_edit()]) ::
+  @spec validate_empty_file_edit(WorkspaceEdit.Document.t(), pid()) ::
           :ok | {:error, String.t()}
-  defp apply_edits_via_filesystem(path, edits) do
-    case File.read(path) do
-      {:ok, content} ->
-        lines = String.split(content, "\n", trim: false)
+  defp validate_empty_file_edit(document, client) do
+    case Buffer.pid_for_path(document.path) do
+      {:ok, pid} ->
+        {_content, revision} = Buffer.content_with_version(pid)
 
-        new_lines =
-          Enum.reduce(edits, lines, fn {{sl, sc}, {el, ec}, new_text}, acc ->
-            apply_text_edit(acc, sl, sc, el, ec, new_text)
-          end)
-
-        case File.write(path, Enum.join(new_lines, "\n")) do
+        case validate_version(document, client, pid, revision) do
           :ok -> :ok
-          {:error, reason} -> {:error, "could not write: #{file_error(reason)}"}
+          {:error, reason} -> {:error, inspect(reason)}
         end
+
+      :not_found ->
+        {:error, "cannot verify document version for a closed file"}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  catch
+    :exit, _ -> {:error, "cannot verify document version for a closed file"}
+  end
+
+  @spec apply_edits_via_filesystem(
+          WorkspaceEdit.Document.t(),
+          Minga.LSP.PositionEncoding.encoding()
+        ) ::
+          :ok | {:error, String.t()}
+  defp apply_edits_via_filesystem(%WorkspaceEdit.Document{version: version}, _encoding)
+       when is_integer(version),
+       do: {:error, "cannot verify document version for a closed file"}
+
+  defp apply_edits_via_filesystem(document, encoding) do
+    case File.read(document.path) do
+      {:ok, content} ->
+        apply_filesystem_text_edit(document, encoding, content)
 
       {:error, reason} ->
         {:error, "could not read: #{reason}"}
     end
   end
 
+  @spec apply_filesystem_text_edit(
+          WorkspaceEdit.Document.t(),
+          Minga.LSP.PositionEncoding.encoding(),
+          String.t()
+        ) :: :ok | {:error, String.t()}
+  defp apply_filesystem_text_edit(document, encoding, content) do
+    case TextEdit.apply(content, document.edits, encoding) do
+      {:ok, new_content} -> write_filesystem_edit(document.path, new_content)
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  end
+
+  @spec write_filesystem_edit(String.t(), String.t()) :: :ok | {:error, String.t()}
+  defp write_filesystem_edit(path, content) do
+    case File.write(path, content) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "could not write: #{file_error(reason)}"}
+    end
+  end
+
   @spec file_error(File.posix()) :: String.t()
   defp file_error(reason), do: reason |> :file.format_error() |> IO.chardata_to_string()
 
-  @spec apply_text_edit(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) :: [String.t()]
-  defp apply_text_edit(lines, start_line, start_col, end_line, end_col, new_text) do
-    before_edit = Enum.at(lines, start_line, "") |> String.slice(0, start_col)
-    after_edit = Enum.at(lines, end_line, "") |> String.slice(end_col..-1//1)
+  @spec validate_version(WorkspaceEdit.Document.t(), pid(), pid(), non_neg_integer()) ::
+          :ok | {:error, atom()}
+  defp validate_version(%WorkspaceEdit.Document{version: nil}, _client, _pid, _revision), do: :ok
 
-    replacement = before_edit <> new_text <> after_edit
-    replacement_lines = String.split(replacement, "\n", trim: false)
-
-    prefix = Enum.take(lines, start_line)
-    suffix = Enum.drop(lines, end_line + 1)
-
-    prefix ++ replacement_lines ++ suffix
+  defp validate_version(document, client, pid, revision) do
+    Client.validate_document_version(client, document.uri, document.version, pid, revision)
   end
 
   @spec severity_to_lsp(atom()) :: non_neg_integer()

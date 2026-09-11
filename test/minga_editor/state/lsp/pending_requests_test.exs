@@ -111,6 +111,58 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     end
   end
 
+  test "new code-action admission supersedes the prior generation for one origin" do
+    client = spawn_process()
+    buffer = spawn_process()
+    context = document_context(client, buffer)
+    first_ref = make_ref()
+    second_ref = make_ref()
+
+    assert {:ok, pending} =
+             PendingRequests.track_workspace_response(
+               PendingRequests.new(),
+               first_ref,
+               :code_action,
+               context,
+               nil,
+               {0, 0}
+             )
+
+    assert {:ok, {:workspace_response, :code_action, first_generation, ^context, nil, {0, 0}}} =
+             PendingRequests.fetch(pending, first_ref)
+
+    assert {:ok, pending} =
+             PendingRequests.track_workspace_response(
+               pending,
+               second_ref,
+               :code_action,
+               context,
+               nil,
+               {0, 0}
+             )
+
+    assert PendingRequests.fetch(pending, first_ref) == :error
+
+    assert {:ok, {:workspace_response, :code_action, second_generation, ^context, nil, {0, 0}}} =
+             PendingRequests.fetch(pending, second_ref)
+
+    assert second_generation > first_generation
+
+    refute PendingRequests.workspace_generation_current?(
+             pending,
+             :code_action,
+             buffer,
+             first_generation
+           )
+
+    assert PendingRequests.workspace_generation_current?(
+             pending,
+             :code_action,
+             buffer,
+             second_generation
+           )
+  end
+
   test "L07 responses and L08 inlay use typed variants" do
     client = spawn_process()
     buffer = spawn_process()
@@ -397,6 +449,17 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
       cancellable_timer: make_ref(),
       timeout_timer: make_ref()
     )
+  end
+
+  defp document_context(client, buffer) do
+    %Minga.LSP.DocumentContext{
+      client: client,
+      buffer: buffer,
+      uri: "file:///tmp/code-action.ex",
+      buffer_revision: 0,
+      lsp_version: 1,
+      encoding: :utf16
+    }
   end
 
   defp spawn_process do

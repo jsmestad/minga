@@ -3,6 +3,7 @@ defmodule MingaEditor.LspActions.RenameTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command.Parser
+  alias Minga.LSP.SyncServer
   alias MingaEditor.LspActions
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
@@ -57,6 +58,32 @@ defmodule MingaEditor.LspActions.RenameTest do
   end
 
   describe "handle_rename_response/3" do
+    test "applies exclusive LSP ranges without consuming adjacent text" do
+      cases = [
+        {"abc!", text_edit(0, 1, 0, 2, "Z"), "aZc!"},
+        {"abc!", text_edit(0, 1, 0, 1, "Z"), "aZbc!"},
+        {"é foo!", text_edit(0, 2, 0, 5, "bar"), "é bar!"}
+      ]
+
+      for {content, edit, expected} <- cases do
+        path =
+          Path.join(System.tmp_dir!(), "exact-rename-#{System.unique_integer([:positive])}.ex")
+
+        File.write!(path, content)
+        on_exit(fn -> File.rm(path) end)
+        state = file_state(path, content)
+
+        assert {:ok, result, _message} =
+                 LspActions.apply_workspace_edit_result(
+                   state,
+                   %{"changes" => %{SyncServer.path_to_uri(path) => [edit]}},
+                   "Rename"
+                 )
+
+        assert Minga.Buffer.content(result.workspace.buffers.active) == expected
+      end
+    end
+
     test "applies workspace edits and finishes the correlated identity successfully" do
       path =
         Path.join(System.tmp_dir!(), "rename-feedback-#{System.unique_integer([:positive])}.ex")
@@ -96,11 +123,74 @@ defmodule MingaEditor.LspActions.RenameTest do
 
       state = LspActions.handle_rename_response(state, {:ok, edit}, operation.id)
 
-      assert Minga.Buffer.content(state.workspace.buffers.active) == "new_name"
+      assert Minga.Buffer.content(state.workspace.buffers.active) == "new_name\n"
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
 
       assert OperationFeedback.selected(state.feedback.operation_feedback).message ==
                "Rename: applied 1 edits across 1 files"
+    end
+
+    test "empty TextDocumentEdit preserves buffer revision dirty state and undo history" do
+      path = Path.join(System.tmp_dir!(), "empty-rename-#{System.unique_integer([:positive])}.ex")
+      File.write!(path, "old_name\n")
+      on_exit(fn -> File.rm(path) end)
+      state = file_state(path)
+      buffer = state.workspace.buffers.active
+      version = BufferProcess.version(buffer)
+      dirty? = BufferProcess.dirty?(buffer)
+      undo_source = BufferProcess.last_undo_source(buffer)
+
+      edit = %{
+        "documentChanges" => [
+          %{
+            "textDocument" => %{"uri" => SyncServer.path_to_uri(path), "version" => nil},
+            "edits" => []
+          }
+        ]
+      }
+
+      assert {:ok, result, "Rename: no edits to apply"} =
+               LspActions.apply_workspace_edit_result(state, edit, "Rename")
+
+      assert result.workspace.buffers.active == buffer
+      assert Minga.Buffer.content(buffer) == "old_name\n"
+      assert BufferProcess.version(buffer) == version
+      assert BufferProcess.dirty?(buffer) == dirty?
+      assert BufferProcess.last_undo_source(buffer) == undo_source
+    end
+
+    test "neutral empty documents do not inflate mixed workspace-edit counts or open buffers" do
+      path = Path.join(System.tmp_dir!(), "mixed-rename-#{System.unique_integer([:positive])}.ex")
+
+      empty_path =
+        Path.join(System.tmp_dir!(), "mixed-empty-#{System.unique_integer([:positive])}.ex")
+
+      File.write!(path, "old_name\n")
+      File.write!(empty_path, "unchanged\n")
+      on_exit(fn -> File.rm(path) end)
+      on_exit(fn -> File.rm(empty_path) end)
+      state = file_state(path)
+
+      edit = %{
+        "documentChanges" => [
+          %{
+            "textDocument" => %{"uri" => SyncServer.path_to_uri(path), "version" => nil},
+            "edits" => rename_edit_for_range()
+          },
+          %{
+            "textDocument" => %{"uri" => SyncServer.path_to_uri(empty_path), "version" => nil},
+            "edits" => []
+          }
+        ]
+      }
+
+      assert {:ok, result, "Rename: applied 1 edits across 1 files"} =
+               LspActions.apply_workspace_edit_result(state, edit, "Rename")
+
+      assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name\n"
+      assert result.workspace.buffers.list == state.workspace.buffers.list
+      assert File.read!(empty_path) == "unchanged\n"
+      assert Minga.Buffer.pid_for_path(empty_path) == :not_found
     end
 
     test "error, no-result, and empty application outcomes finish one identity" do
@@ -197,9 +287,10 @@ defmodule MingaEditor.LspActions.RenameTest do
       result = LspActions.handle_rename_response(state, {:ok, edit}, operation.id)
       selected = OperationFeedback.selected(result.feedback.operation_feedback)
 
-      assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name"
+      assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name\n"
       assert selected.status == :error
-      assert selected.message == "Rename: applied 1 edits across 1 of 2 files"
+      assert selected.message =~ "Rename: applied 1 edits across 1 of 2 files"
+      assert selected.message =~ "could not open buffer"
     end
   end
 
@@ -228,10 +319,10 @@ defmodule MingaEditor.LspActions.RenameTest do
     ]
   end
 
-  @spec file_state(String.t()) :: EditorState.t()
-  defp file_state(path) do
+  @spec file_state(String.t(), String.t()) :: EditorState.t()
+  defp file_state(path, content \\ "old_name\n") do
     buffer =
-      start_supervised!({BufferProcess, file_path: path, content: "old_name\n"},
+      start_supervised!({BufferProcess, file_path: path, content: content},
         id: {:rename_buffer, make_ref()}
       )
 
@@ -248,6 +339,23 @@ defmodule MingaEditor.LspActions.RenameTest do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: workspace
+    }
+  end
+
+  @spec text_edit(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) :: map()
+  defp text_edit(start_line, start_character, end_line, end_character, new_text) do
+    %{
+      "range" => %{
+        "start" => %{"line" => start_line, "character" => start_character},
+        "end" => %{"line" => end_line, "character" => end_character}
+      },
+      "newText" => new_text
     }
   end
 

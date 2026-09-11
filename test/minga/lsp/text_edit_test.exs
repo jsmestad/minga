@@ -11,6 +11,21 @@ defmodule Minga.LSP.TextEditTest do
     assert TextEdit.apply("abcdef", edits, :utf8) == {:ok, "ABcdEF"}
   end
 
+  test "preserves adjacent bytes for replacement, insertion, and deletion" do
+    assert TextEdit.apply("abc!", [edit(0, 1, 0, 2, "Z")], :utf8) == {:ok, "aZc!"}
+    assert TextEdit.apply("abc!", [edit(0, 1, 0, 1, "Z")], :utf8) == {:ok, "aZbc!"}
+    assert TextEdit.apply("abc!", [edit(0, 1, 0, 2, "")], :utf8) == {:ok, "ac!"}
+  end
+
+  test "preserves the next line when a multiline range ends at column zero" do
+    assert TextEdit.apply("first\nsecond\nthird", [edit(0, 2, 1, 0, "X")], :utf8) ==
+             {:ok, "fiXsecond\nthird"}
+  end
+
+  test "handles the reported UTF-16 corruption without consuming adjacent text" do
+    assert TextEdit.apply("é foo!", [edit(0, 2, 0, 5, "bar")], :utf16) == {:ok, "é bar!"}
+  end
+
   test "applies an edit spanning multiple lines" do
     edits = [edit(0, 2, 2, 2, "X\nY")]
 

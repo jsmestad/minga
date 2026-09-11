@@ -14,7 +14,11 @@ defmodule MingaEditor.UI.Picker.CodeActionSource do
   alias MingaEditor.LspActions
   alias Minga.Log
   alias Minga.LSP.Client
+  alias Minga.LSP.DocumentContext
   alias Minga.LSP.SyncServer
+  alias MingaEditor.Effects.LspCodeActionResolve
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -28,8 +32,11 @@ defmodule MingaEditor.UI.Picker.CodeActionSource do
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(%Context{picker_ui: %{context: %{actions: actions}}})
+  def candidates(%Context{picker_ui: %{context: %{actions: actions} = picker_context}})
       when is_list(actions) do
+    document_context = Map.get(picker_context, :document_context)
+    generation = Map.get(picker_context, :workspace_generation)
+
     actions
     |> Enum.with_index()
     |> Enum.map(fn {action, index} ->
@@ -41,7 +48,7 @@ defmodule MingaEditor.UI.Picker.CodeActionSource do
       preferred_label = if is_preferred, do: " ★", else: ""
 
       %Item{
-        id: {index, action},
+        id: {index, action, document_context, generation},
         label: "#{title}#{kind_label}#{preferred_label}",
         description: kind || ""
       }
@@ -52,108 +59,201 @@ defmodule MingaEditor.UI.Picker.CodeActionSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: {_index, action}}, state) do
-    apply_code_action(state, action)
+  def on_select(%Item{id: {_index, action, context, generation}}, state) do
+    apply_code_action(state, action, context, generation)
   end
+
+  def on_select(%Item{id: {_index, action, context}}, state) do
+    apply_code_action(state, action, context, nil)
+  end
+
+  def on_select(%Item{id: {_index, action}}, state),
+    do: apply_code_action(state, action, nil, nil)
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec apply_code_action(term(), map()) :: term()
-  defp apply_code_action(state, action) do
-    # If the action has a `data` field but no `edit` field, resolve it first
-    # via codeAction/resolve to get the full action with the edit.
-    action = maybe_resolve_action(state, action)
-
-    # Code actions can have an edit (WorkspaceEdit) and/or a command
-    state =
-      case action["edit"] do
-        nil -> state
-        edit -> LspActions.apply_workspace_edit(state, edit, "Code action")
-      end
-
-    # If there's a command, execute it via the LSP client
-    case action["command"] do
-      nil ->
-        state
-
-      %{"command" => cmd} = command ->
-        execute_lsp_command(state, cmd, command)
-
-      _ ->
-        state
+  @spec apply_code_action(
+          EditorState.t(),
+          map(),
+          DocumentContext.t() | nil,
+          MingaEditor.State.LSP.workspace_generation() | nil
+        ) :: EditorState.t()
+  defp apply_code_action(state, action, context, generation) do
+    case validate_context(state, context, generation) do
+      :ok -> continue_or_schedule(state, action, context, generation)
+      {:error, reason} -> reject_action(state, reason)
     end
   end
 
-  # Resolves a code action that has a `data` field but no `edit` field.
-  # This handles lazy-resolved actions per LSP 3.16+.
-  @spec maybe_resolve_action(term(), map()) :: map()
-  defp maybe_resolve_action(state, action) do
-    needs_resolve = action["data"] != nil and action["edit"] == nil
+  @spec continue_or_schedule(
+          EditorState.t(),
+          map(),
+          DocumentContext.t() | nil,
+          MingaEditor.State.LSP.workspace_generation() | nil
+        ) :: EditorState.t()
+  defp continue_or_schedule(state, %{"data" => nil} = action, context, generation),
+    do: apply_resolved_action(state, action, context, generation)
 
-    if needs_resolve do
-      resolve_action(state, action)
+  defp continue_or_schedule(
+         state,
+         %{"data" => _data, "edit" => nil} = action,
+         context,
+         generation
+       ) do
+    schedule_resolve(state, action, context, generation)
+  end
+
+  defp continue_or_schedule(state, %{"data" => _data} = action, context, generation)
+       when not is_map_key(action, "edit") do
+    schedule_resolve(state, action, context, generation)
+  end
+
+  defp continue_or_schedule(state, action, context, generation),
+    do: apply_resolved_action(state, action, context, generation)
+
+  @spec schedule_resolve(
+          EditorState.t(),
+          map(),
+          DocumentContext.t() | nil,
+          MingaEditor.State.LSP.workspace_generation() | nil
+        ) :: EditorState.t()
+  defp schedule_resolve(state, _action, nil, _generation),
+    do: reject_action(state, :missing_document_context)
+
+  defp schedule_resolve(state, _action, _context, nil),
+    do: reject_action(state, :missing_workspace_generation)
+
+  defp schedule_resolve(%{effect_scheduler: nil} = state, _action, _context, _generation),
+    do: resolve_failed(state, :scheduler_unavailable)
+
+  defp schedule_resolve(state, action, %DocumentContext{} = context, generation) do
+    request = LspCodeActionResolve.request(action, context, generation)
+
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} -> state
+      {:error, reason} -> resolve_failed(state, reason)
+    end
+  catch
+    :exit, reason -> resolve_failed(state, {:scheduler_unavailable, reason})
+  end
+
+  @doc "Continues a resolved code action after revalidating its producing document context."
+  @spec apply_resolved_action(
+          EditorState.t(),
+          map(),
+          DocumentContext.t() | nil,
+          MingaEditor.State.LSP.workspace_generation() | nil
+        ) :: EditorState.t()
+  def apply_resolved_action(state, action, context, generation) do
+    with :ok <- validate_context(state, context, generation),
+         {:ok, state} <- apply_action_edit(state, action, context) do
+      maybe_execute_command(state, action, context)
     else
-      action
+      {:edit_error, state} -> state
+      {:error, reason} -> reject_action(state, reason)
     end
   end
 
-  @spec resolve_action(term(), map()) :: map()
-  defp resolve_action(state, action) do
-    case lsp_client_for(state.workspace.buffers.active) do
-      nil ->
-        Log.warning(:lsp, "No LSP client to resolve code action")
-        action
+  @doc "Publishes failure feedback for a deferred code-action resolve."
+  @spec resolve_failed(EditorState.t(), term()) :: EditorState.t()
+  def resolve_failed(state, reason) do
+    Log.warning(:lsp, "codeAction/resolve failed: #{inspect(reason)}")
 
-      client ->
-        do_resolve_request(client, action)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Code action could not be resolved"
+    )
+  end
+
+  @spec apply_action_edit(EditorState.t(), map(), DocumentContext.t() | nil) ::
+          {:ok, EditorState.t()} | {:edit_error, EditorState.t()}
+  defp apply_action_edit(state, %{"edit" => edit}, context) when is_map(edit) do
+    case LspActions.apply_workspace_edit_result(state, edit, "Code action", context) do
+      {:ok, state, message} ->
+        {:ok, MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)}
+
+      {:error, state, message} ->
+        {:edit_error, MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)}
     end
   end
 
-  @spec do_resolve_request(pid(), map()) :: map()
-  defp do_resolve_request(client, action) do
-    case Client.request_sync(client, "codeAction/resolve", action, 5_000) do
-      {:ok, resolved} when is_map(resolved) ->
-        resolved
+  defp apply_action_edit(state, %{"edit" => nil}, _context), do: {:ok, state}
 
-      {:error, reason} ->
-        Log.warning(:lsp, "codeAction/resolve failed: #{inspect(reason)}")
-        action
-
-      _ ->
-        action
-    end
+  defp apply_action_edit(state, %{"edit" => _invalid}, _context) do
+    {:edit_error,
+     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+       state,
+       "Code action: could not apply edits (invalid workspace edit)"
+     )}
   end
 
-  @spec execute_lsp_command(term(), String.t(), map()) :: term()
-  defp execute_lsp_command(state, cmd, command) do
-    buf = state.workspace.buffers.active
+  defp apply_action_edit(state, _action, _context), do: {:ok, state}
 
-    case lsp_client_for(buf) do
-      nil ->
-        Log.warning(:lsp, "No LSP client to execute command: #{cmd}")
-        state
-
-      client ->
-        params = %{
-          "command" => cmd,
-          "arguments" => Map.get(command, "arguments", [])
-        }
-
-        # Fire and forget; command results (if any) arrive as LSP notifications
-        Client.request(client, "workspace/executeCommand", params)
-        Log.info(:lsp, "Executing LSP command: #{cmd}")
-        state
-    end
+  @spec maybe_execute_command(EditorState.t(), map(), DocumentContext.t() | nil) ::
+          EditorState.t()
+  defp maybe_execute_command(state, %{"command" => %{"command" => cmd} = command}, context) do
+    execute_lsp_command(state, cmd, command, context)
   end
 
-  @spec lsp_client_for(pid() | nil) :: pid() | nil
-  defp lsp_client_for(nil), do: nil
+  defp maybe_execute_command(state, _action, _context), do: state
 
-  defp lsp_client_for(buffer_pid) do
-    case SyncServer.clients_for_buffer(buffer_pid) do
-      [client | _] -> client
-      [] -> nil
+  @spec execute_lsp_command(EditorState.t(), String.t(), map(), DocumentContext.t() | nil) ::
+          EditorState.t()
+  defp execute_lsp_command(state, _cmd, _command, nil),
+    do: reject_action(state, :missing_document_context)
+
+  defp execute_lsp_command(state, cmd, command, %DocumentContext{client: client}) do
+    params = %{"command" => cmd, "arguments" => Map.get(command, "arguments", [])}
+    Client.request(client, "workspace/executeCommand", params)
+    Log.info(:lsp, "Executing LSP command: #{cmd}")
+    state
+  end
+
+  @spec validate_context(
+          EditorState.t(),
+          DocumentContext.t() | nil,
+          MingaEditor.State.LSP.workspace_generation() | nil
+        ) :: :ok | {:error, atom()}
+  defp validate_context(_state, nil, _generation), do: :ok
+
+  defp validate_context(state, %DocumentContext{} = context, generation) do
+    if state.workspace.buffers.active == context.buffer and
+         context.client in SyncServer.clients_for_buffer(context.buffer) and
+         Minga.Buffer.version(context.buffer) == context.buffer_revision and
+         generation_current?(state, context, generation) and
+         Client.context_current?(context) do
+      :ok
+    else
+      {:error, :stale_code_action}
     end
+  catch
+    :exit, _ -> {:error, :stale_code_action}
+  end
+
+  @spec generation_current?(
+          EditorState.t(),
+          DocumentContext.t(),
+          MingaEditor.State.LSP.workspace_generation() | nil
+        ) :: boolean()
+  defp generation_current?(_state, _context, nil), do: true
+
+  defp generation_current?(state, context, generation) do
+    MingaEditor.State.LSP.workspace_generation_current?(
+      state.lsp,
+      :code_action,
+      context.buffer,
+      generation
+    )
+  end
+
+  @spec reject_action(EditorState.t(), term()) :: EditorState.t()
+  defp reject_action(state, reason) do
+    Log.warning(:lsp, "Code action rejected: #{inspect(reason)}")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Code action rejected because its source document changed"
+    )
   end
 
   @spec format_kind(String.t()) :: String.t()

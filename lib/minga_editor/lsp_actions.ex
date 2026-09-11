@@ -40,8 +40,11 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.VimState
   alias Minga.Log
   alias Minga.LSP.Client
+  alias Minga.LSP.DocumentContext
+  alias Minga.LSP.PositionEncoding
   alias Minga.LSP.DocumentHighlight
   alias Minga.LSP.SyncServer
+  alias Minga.LSP.TextEdit
   alias Minga.LSP.WorkspaceEdit
   alias Minga.Mode.CommandState
   alias Minga.Mode.VisualState
@@ -257,37 +260,62 @@ defmodule MingaEditor.LspActions do
 
   def code_action(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
-      nil ->
-        NoticeWorkflow.publish(state, "No language server")
+      nil -> NoticeWorkflow.publish(state, "No language server")
+      client -> code_action_for_client(state, buf, client, Buffer.file_path(buf))
+    end
+  end
 
-      client ->
-        file_path = Buffer.file_path(buf)
+  @spec code_action_for_client(state(), pid(), pid(), String.t() | nil) :: state()
+  defp code_action_for_client(state, _buf, _client, nil),
+    do: NoticeWorkflow.publish(state, "Buffer has no file path")
 
-        case file_path do
-          nil ->
-            NoticeWorkflow.publish(state, "Buffer has no file path")
+  defp code_action_for_client(state, buf, client, path) do
+    uri = SyncServer.path_to_uri(path)
+    {line, col} = Buffer.cursor(buf)
+    {content, revision} = Buffer.content_with_version(buf)
+    encoding = Client.encoding(client)
+    range = build_action_range(state, content, line, col, encoding)
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            {line, col} = Buffer.cursor(buf)
+    params = %{
+      "textDocument" => %{"uri" => uri},
+      "range" => range,
+      "context" => %{"diagnostics" => diagnostics_at_range(uri, range), "only" => nil}
+    }
 
-            # Build the range (cursor position for point actions, or selection for visual mode)
-            range = build_action_range(state, buf, line, col)
-            diagnostics = diagnostics_at_range(uri, range)
+    admit_code_action_request(state, buf, client, revision, params, {line, col})
+  end
 
-            params = %{
-              "textDocument" => %{"uri" => uri},
-              "range" => range,
-              "context" => %{
-                "diagnostics" => diagnostics,
-                "only" => nil
-              }
-            }
+  @spec admit_code_action_request(
+          state(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          map(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: state()
+  defp admit_code_action_request(state, buf, client, revision, params, cursor) do
+    case SyncServer.request_document(
+           buf,
+           client,
+           revision,
+           "textDocument/codeAction",
+           params
+         ) do
+      {:ok, ref, context} ->
+        track_workspace_response_request(
+          state,
+          ref,
+          :code_action,
+          context,
+          active_tab_id(state),
+          cursor
+        )
 
-            ref = Client.request(client, "textDocument/codeAction", params)
-
-            track_response_request(state, ref, :code_action, client, buf, {line, col})
-        end
+      {:error, _reason} ->
+        NoticeWorkflow.publish(
+          state,
+          "Code action request rejected because the document changed"
+        )
     end
   end
 
@@ -319,46 +347,65 @@ defmodule MingaEditor.LspActions do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     case lsp_client_for(state, buf) do
-      nil ->
-        NoticeWorkflow.publish(state, "No language server")
+      nil -> NoticeWorkflow.publish(state, "No language server")
+      client -> rename_for_client(state, buf, client, Buffer.file_path(buf), new_name)
+    end
+  end
 
-      client ->
-        file_path = Buffer.file_path(buf)
+  @spec rename_for_client(state(), pid(), pid(), String.t() | nil, String.t()) :: state()
+  defp rename_for_client(state, _buf, _client, nil, _new_name),
+    do: NoticeWorkflow.publish(state, "Buffer has no file path")
 
-        case file_path do
-          nil ->
-            NoticeWorkflow.publish(state, "Buffer has no file path")
+  defp rename_for_client(state, buf, client, path, new_name) do
+    uri = SyncServer.path_to_uri(path)
+    {line, col} = Buffer.cursor(buf)
+    {content, revision} = Buffer.content_with_version(buf)
+    encoding = Client.encoding(client)
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            {line, col} = Buffer.cursor(buf)
+    params = %{
+      "textDocument" => %{"uri" => uri},
+      "position" => encoded_position(content, {line, col}, encoding),
+      "newName" => new_name
+    }
 
-            params = %{
-              "textDocument" => %{"uri" => uri},
-              "position" => %{"line" => line, "character" => col},
-              "newName" => new_name
-            }
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :lsp_rename,
+        "lsp:rename:" <> path,
+        "Renaming…",
+        cancelable?: false
+      )
 
-            {operation_feedback, operation} =
-              OperationFeedback.start(
-                state.feedback.operation_feedback,
-                :lsp_rename,
-                "lsp:rename:" <> path,
-                "Renaming…",
-                cancelable?: false
-              )
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
-            state = %{
-              state
-              | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
-            }
+    admit_rename_request(state, buf, client, revision, params, operation)
+  end
 
-            ref = Client.request(client, "textDocument/rename", params)
+  @spec admit_rename_request(state(), pid(), pid(), non_neg_integer(), map(), Operation.t()) ::
+          state()
+  defp admit_rename_request(state, buf, client, revision, params, operation) do
+    case SyncServer.request_document(buf, client, revision, "textDocument/rename", params) do
+      {:ok, ref, context} ->
+        state
+        |> track_workspace_operation_request(
+          ref,
+          :rename,
+          operation.id,
+          active_tab_id(state),
+          context
+        )
+        |> mark_operation_running(operation.id, "Renaming…")
 
-            state
-            |> track_operation_request(ref, :rename, operation.id, active_tab_id(state))
-            |> mark_operation_running(operation.id, "Renaming…")
-        end
+      {:error, _reason} ->
+        finish_operation_error(
+          state,
+          operation.id,
+          "Rename request rejected because the document changed"
+        )
     end
   end
 
@@ -1113,21 +1160,45 @@ defmodule MingaEditor.LspActions do
   its workspace edit or executes its command.
   """
   @spec handle_code_action_response(state(), {:ok, term()} | {:error, term()}) :: state()
-  def handle_code_action_response(state, {:error, error}) do
+  def handle_code_action_response(state, result),
+    do: handle_code_action_response(state, result, nil, nil)
+
+  @doc "Handles a code-action response with the exact producing document context."
+  @spec handle_code_action_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          DocumentContext.t() | nil
+        ) :: state()
+  def handle_code_action_response(state, result, context),
+    do: handle_code_action_response(state, result, context, nil)
+
+  @doc "Handles a code-action response with its producing context and pending generation."
+  @spec handle_code_action_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          DocumentContext.t() | nil,
+          LSPState.workspace_generation() | nil
+        ) :: state()
+  def handle_code_action_response(state, {:error, error}, _context, _generation) do
     Log.debug(:lsp, "Code action request failed: #{inspect(error)}")
     NoticeWorkflow.publish(state, "Code action request failed")
   end
 
-  def handle_code_action_response(state, {:ok, nil}) do
+  def handle_code_action_response(state, {:ok, nil}, _context, _generation) do
     NoticeWorkflow.publish(state, "No code actions available")
   end
 
-  def handle_code_action_response(state, {:ok, []}) do
+  def handle_code_action_response(state, {:ok, []}, _context, _generation) do
     NoticeWorkflow.publish(state, "No code actions available")
   end
 
-  def handle_code_action_response(state, {:ok, actions}) when is_list(actions) do
-    PickerUI.open(state, MingaEditor.UI.Picker.CodeActionSource, %{actions: actions})
+  def handle_code_action_response(state, {:ok, actions}, context, generation)
+      when is_list(actions) do
+    PickerUI.open(state, MingaEditor.UI.Picker.CodeActionSource, %{
+      actions: actions,
+      document_context: context,
+      workspace_generation: generation
+    })
   end
 
   # ── Rename response ───────────────────────────────────────────────────────
@@ -1167,16 +1238,32 @@ defmodule MingaEditor.LspActions do
   @spec handle_rename_response(state(), {:ok, term()} | {:error, term()}, pos_integer()) ::
           state()
   def handle_rename_response(state, response, operation_id) do
+    handle_rename_response(state, response, operation_id, nil)
+  end
+
+  @doc "Handles a rename response using its captured producing document context."
+  @spec handle_rename_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          pos_integer(),
+          DocumentContext.t() | nil
+        ) :: state()
+  def handle_rename_response(state, response, operation_id, context) do
     if OperationFeedback.active?(state.feedback.operation_feedback, operation_id) do
-      do_handle_rename_response(state, response, operation_id)
+      do_handle_rename_response(state, response, operation_id, context)
     else
       state
     end
   end
 
-  @spec do_handle_rename_response(state(), {:ok, term()} | {:error, term()}, pos_integer()) ::
+  @spec do_handle_rename_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          pos_integer(),
+          DocumentContext.t() | nil
+        ) ::
           state()
-  defp do_handle_rename_response(state, {:error, :timeout}, operation_id) do
+  defp do_handle_rename_response(state, {:error, :timeout}, operation_id, _context) do
     %{
       state
       | feedback:
@@ -1192,7 +1279,7 @@ defmodule MingaEditor.LspActions do
     }
   end
 
-  defp do_handle_rename_response(state, {:error, error}, operation_id) do
+  defp do_handle_rename_response(state, {:error, error}, operation_id, _context) do
     Log.debug(:lsp, "Rename failed: #{inspect(error)}")
 
     %{
@@ -1210,7 +1297,7 @@ defmodule MingaEditor.LspActions do
     }
   end
 
-  defp do_handle_rename_response(state, {:ok, nil}, operation_id) do
+  defp do_handle_rename_response(state, {:ok, nil}, operation_id, _context) do
     %{
       state
       | feedback:
@@ -1226,8 +1313,8 @@ defmodule MingaEditor.LspActions do
     }
   end
 
-  defp do_handle_rename_response(state, {:ok, workspace_edit}, operation_id) do
-    case apply_workspace_edit_result(state, workspace_edit, "Rename") do
+  defp do_handle_rename_response(state, {:ok, workspace_edit}, operation_id, context) do
+    case apply_workspace_edit_result(state, workspace_edit, "Rename", context) do
       {:ok, state, message} ->
         %{
           state
@@ -1695,7 +1782,13 @@ defmodule MingaEditor.LspActions do
   """
   @spec apply_workspace_edit(state(), map(), String.t()) :: state()
   def apply_workspace_edit(state, workspace_edit, label) do
-    case apply_workspace_edit_result(state, workspace_edit, label) do
+    apply_workspace_edit(state, workspace_edit, label, nil)
+  end
+
+  @doc "Applies a WorkspaceEdit using the captured producing-client document context."
+  @spec apply_workspace_edit(state(), map(), String.t(), DocumentContext.t() | nil) :: state()
+  def apply_workspace_edit(state, workspace_edit, label, context) do
+    case apply_workspace_edit_result(state, workspace_edit, label, context) do
       {:ok, state, message} ->
         NoticeWorkflow.publish(state, message)
 
@@ -1704,82 +1797,269 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  @spec apply_workspace_edit_result(state(), map(), String.t()) ::
+  @doc "Applies a WorkspaceEdit and returns a terminal result before any follow-on command."
+  @spec apply_workspace_edit_result(
+          state(),
+          map(),
+          String.t(),
+          DocumentContext.t() | nil
+        ) ::
           {:ok, state(), String.t()} | {:error, state(), String.t()}
-  defp apply_workspace_edit_result(state, workspace_edit, label) do
-    state
-    |> apply_file_edits(WorkspaceEdit.parse(workspace_edit), label)
-    |> workspace_edit_result(label)
+  def apply_workspace_edit_result(state, workspace_edit, label, context \\ nil) do
+    with :ok <- validate_workspace_origin(state, context),
+         {:ok, documents} <- WorkspaceEdit.parse(workspace_edit) do
+      state
+      |> apply_file_edits(documents, label, context)
+      |> workspace_edit_result(label)
+    else
+      {:error, reason} ->
+        {:error, state, "#{label}: could not apply edits (#{format_workspace_error(reason)})"}
+    end
   end
 
-  @spec apply_file_edits(state(), [WorkspaceEdit.file_edits()], String.t()) ::
-          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp apply_file_edits(state, [], _label), do: {state, 0, 0, 0}
+  @spec apply_file_edits(
+          state(),
+          [WorkspaceEdit.Document.t()],
+          String.t(),
+          DocumentContext.t() | nil
+        ) ::
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]}
+  defp apply_file_edits(state, [], _label, _context), do: {state, 0, 0, 0, []}
 
-  defp apply_file_edits(state, file_edits, label) do
-    {state, file_count, edit_count} =
-      Enum.reduce(file_edits, {state, 0, 0}, &apply_single_file_edit(&1, &2, label))
+  defp apply_file_edits(state, file_edits, label, context) do
+    {state, requested_files, file_count, edit_count, errors} =
+      Enum.reduce(file_edits, {state, 0, 0, 0, []}, fn document, counts ->
+        apply_single_file_edit(document, counts, label, context)
+      end)
 
-    {state, Enum.count(file_edits), file_count, edit_count}
+    {state, requested_files, file_count, edit_count, Enum.reverse(errors)}
   end
 
   @spec workspace_edit_result(
-          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]},
           String.t()
         ) :: {:ok, state(), String.t()} | {:error, state(), String.t()}
-  defp workspace_edit_result({state, 0, 0, 0}, label) do
+  defp workspace_edit_result({state, 0, 0, 0, []}, label) do
     {:ok, state, "#{label}: no edits to apply"}
   end
 
-  defp workspace_edit_result({state, _requested_files, 0, 0}, label) do
-    {:error, state, "#{label}: could not apply edits"}
+  defp workspace_edit_result({state, _requested_files, 0, 0, []}, label) do
+    {:ok, state, "#{label}: no edits to apply"}
   end
 
-  defp workspace_edit_result({state, requested_files, file_count, edit_count}, label)
+  defp workspace_edit_result({state, _requested_files, 0, 0, errors}, label) do
+    {:error, state, "#{label}: could not apply edits; #{Enum.join(errors, "; ")}"}
+  end
+
+  defp workspace_edit_result({state, requested_files, file_count, edit_count, errors}, label)
        when file_count < requested_files do
     {:error, state,
-     "#{label}: applied #{edit_count} edits across #{file_count} of #{requested_files} files"}
+     "#{label}: applied #{edit_count} edits across #{file_count} of #{requested_files} files; failed: #{Enum.join(errors, "; ")}"}
   end
 
-  defp workspace_edit_result({state, _requested_files, file_count, edit_count}, label) do
+  defp workspace_edit_result({state, _requested_files, file_count, edit_count, []}, label) do
     {:ok, state, "#{label}: applied #{edit_count} edits across #{file_count} files"}
   end
 
   @spec apply_single_file_edit(
-          {String.t(), [WorkspaceEdit.text_edit()]},
-          {state(), non_neg_integer(), non_neg_integer()},
-          String.t()
-        ) :: {state(), non_neg_integer(), non_neg_integer()}
-  defp apply_single_file_edit({path, edits}, {st, fc, ec}, label) do
+          WorkspaceEdit.Document.t(),
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]},
+          String.t(),
+          DocumentContext.t() | nil
+        ) ::
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]}
+  defp apply_single_file_edit(
+         %WorkspaceEdit.Document{edits: [], version: nil},
+         counts,
+         _label,
+         _context
+       ),
+       do: counts
+
+  defp apply_single_file_edit(
+         %WorkspaceEdit.Document{edits: []} = document,
+         counts,
+         label,
+         context
+       ) do
+    validate_empty_file_edit(document, counts, label, context)
+  end
+
+  defp apply_single_file_edit(
+         %WorkspaceEdit.Document{} = document,
+         {st, requested, fc, ec, errors},
+         label,
+         context
+       ) do
+    path = document.path
     st = ensure_buffer_open(st, path)
+    counts = {st, requested + 1, fc, ec, errors}
 
     case find_buffer_by_path(st, path) do
       nil ->
         Log.warning(:lsp, "#{label}: could not open buffer for #{path}")
-        {st, fc, ec}
+        {st, requested + 1, fc, ec, ["#{path}: could not open buffer" | errors]}
 
       pid ->
-        apply_buffer_edits(pid, edits, {st, fc, ec}, path, label)
+        apply_buffer_edits(pid, document, counts, label, context)
     end
+  end
+
+  @spec validate_empty_file_edit(
+          WorkspaceEdit.Document.t(),
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]},
+          String.t(),
+          DocumentContext.t() | nil
+        ) ::
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]}
+  defp validate_empty_file_edit(
+         %WorkspaceEdit.Document{} = document,
+         {state, requested, file_count, edit_count, errors} = counts,
+         label,
+         context
+       ) do
+    case find_buffer_by_path(state, document.path) do
+      nil ->
+        empty_file_edit_error(
+          document,
+          {state, requested + 1, file_count, edit_count, errors},
+          label,
+          :unknown_document_version
+        )
+
+      pid ->
+        {_content, revision} = Buffer.content_with_version(pid)
+
+        case validate_target_version(context, document, pid, revision) do
+          :ok ->
+            counts
+
+          {:error, reason} ->
+            empty_file_edit_error(
+              document,
+              {state, requested + 1, file_count, edit_count, errors},
+              label,
+              reason
+            )
+        end
+    end
+  catch
+    :exit, reason ->
+      empty_file_edit_error(
+        document,
+        {state, requested + 1, file_count, edit_count, errors},
+        label,
+        {:buffer_unavailable, reason}
+      )
+  end
+
+  @spec empty_file_edit_error(
+          WorkspaceEdit.Document.t(),
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]},
+          String.t(),
+          term()
+        ) ::
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]}
+  defp empty_file_edit_error(
+         document,
+         {state, requested, file_count, edit_count, errors},
+         label,
+         reason
+       ) do
+    Log.warning(
+      :lsp,
+      "#{label}: could not validate empty edit for #{document.path}: #{inspect(reason)}"
+    )
+
+    {state, requested, file_count, edit_count,
+     ["#{document.path}: #{format_workspace_error(reason)}" | errors]}
   end
 
   @spec apply_buffer_edits(
           pid(),
-          [WorkspaceEdit.text_edit()],
-          {state(), non_neg_integer(), non_neg_integer()},
+          WorkspaceEdit.Document.t(),
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]},
           String.t(),
-          String.t()
-        ) :: {state(), non_neg_integer(), non_neg_integer()}
-  defp apply_buffer_edits(pid, edits, {state, file_count, edit_count}, path, label) do
-    case Buffer.apply_edits(pid, edits) do
-      :ok ->
-        {state, file_count + 1, edit_count + Enum.count(edits)}
+          DocumentContext.t() | nil
+        ) ::
+          {state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [String.t()]}
+  defp apply_buffer_edits(
+         pid,
+         %WorkspaceEdit.Document{} = document,
+         {state, requested, file_count, edit_count, errors},
+         label,
+         context
+       ) do
+    {content, revision} = Buffer.content_with_version(pid)
+    encoding = if context, do: context.encoding, else: :utf16
 
+    with :ok <- validate_target_version(context, document, pid, revision),
+         {:ok, new_content} <- TextEdit.apply(content, document.edits, encoding),
+         {:ok, _new_revision} <-
+           Buffer.replace_content_if_version(pid, revision, new_content, :lsp) do
+      {state, requested, file_count + 1, edit_count + Enum.count(document.edits), errors}
+    else
       {:error, reason} ->
-        Log.warning(:lsp, "#{label}: could not apply edits to #{path}: #{inspect(reason)}")
-        {state, file_count, edit_count}
+        Log.warning(
+          :lsp,
+          "#{label}: could not apply edits to #{document.path}: #{inspect(reason)}"
+        )
+
+        {state, requested, file_count, edit_count,
+         ["#{document.path}: #{format_workspace_error(reason)}" | errors]}
     end
+  catch
+    :exit, reason ->
+      Log.warning(:lsp, "#{label}: buffer unavailable for #{document.path}: #{inspect(reason)}")
+
+      {state, requested, file_count, edit_count,
+       ["#{document.path}: buffer unavailable (#{inspect(reason)})" | errors]}
   end
+
+  @spec validate_workspace_origin(state(), DocumentContext.t() | nil) :: :ok | {:error, atom()}
+  defp validate_workspace_origin(_state, nil), do: :ok
+
+  defp validate_workspace_origin(state, %DocumentContext{} = context) do
+    if state.workspace.buffers.active == context.buffer and Client.context_current?(context) and
+         context.client in SyncServer.clients_for_buffer(context.buffer) and
+         Buffer.version(context.buffer) == context.buffer_revision do
+      :ok
+    else
+      {:error, :stale_origin}
+    end
+  catch
+    :exit, _ -> {:error, :stale_origin}
+  end
+
+  @spec validate_target_version(
+          DocumentContext.t() | nil,
+          WorkspaceEdit.Document.t(),
+          pid(),
+          non_neg_integer()
+        ) :: :ok | {:error, atom()}
+  defp validate_target_version(_context, %WorkspaceEdit.Document{version: nil}, _pid, _revision),
+    do: :ok
+
+  defp validate_target_version(
+         %DocumentContext{client: client},
+         %WorkspaceEdit.Document{uri: uri, version: version},
+         pid,
+         revision
+       ) do
+    Client.validate_document_version(client, uri, version, pid, revision)
+  catch
+    :exit, _ -> {:error, :client_unavailable}
+  end
+
+  defp validate_target_version(nil, %WorkspaceEdit.Document{}, _pid, _revision),
+    do: {:error, :unknown_document_version}
+
+  @spec format_workspace_error(term()) :: String.t()
+  defp format_workspace_error(:unsupported_resource_operation),
+    do: "unsupported resource operation"
+
+  defp format_workspace_error(:stale_origin), do: "source document changed"
+  defp format_workspace_error(reason), do: inspect(reason)
 
   # ── Location parsing ───────────────────────────────────────────────────────
 
@@ -1931,6 +2211,28 @@ defmodule MingaEditor.LspActions do
     %{state | lsp: lsp}
   end
 
+  @spec track_workspace_response_request(
+          state(),
+          reference(),
+          :code_action,
+          DocumentContext.t(),
+          pos_integer() | nil,
+          {non_neg_integer(), non_neg_integer()}
+        ) :: state()
+  defp track_workspace_response_request(state, ref, kind, context, tab_id, cursor) do
+    lsp =
+      LSPState.track_workspace_response_request(
+        state.lsp,
+        ref,
+        kind,
+        context,
+        tab_id,
+        cursor
+      )
+
+    %{state | lsp: lsp}
+  end
+
   defp capture_lsp_origin(state, buffer) do
     case Buffer.file_path(buffer) do
       nil -> :no_file
@@ -1948,6 +2250,19 @@ defmodule MingaEditor.LspActions do
     %{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)}
   end
 
+  @spec finish_operation_error(state(), Operation.id(), String.t()) :: state()
+  defp finish_operation_error(state, operation_id, message) do
+    operation_feedback =
+      OperationFeedback.finish(
+        state.feedback.operation_feedback,
+        operation_id,
+        :error,
+        message
+      )
+
+    %{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)}
+  end
+
   @spec track_operation_request(
           state(),
           reference(),
@@ -1957,6 +2272,28 @@ defmodule MingaEditor.LspActions do
         ) :: state()
   defp track_operation_request(state, ref, kind, operation_id, tab_id) do
     %{state | lsp: LSPState.track_operation_request(state.lsp, ref, kind, operation_id, tab_id)}
+  end
+
+  @spec track_workspace_operation_request(
+          state(),
+          reference(),
+          :rename,
+          Operation.id(),
+          pos_integer() | nil,
+          DocumentContext.t()
+        ) :: state()
+  defp track_workspace_operation_request(state, ref, kind, operation_id, tab_id, context) do
+    lsp =
+      LSPState.track_workspace_operation_request(
+        state.lsp,
+        ref,
+        kind,
+        operation_id,
+        tab_id,
+        context
+      )
+
+    %{state | lsp: lsp}
   end
 
   @spec active_tab_id(state()) :: pos_integer() | nil
@@ -2222,8 +2559,14 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  @spec build_action_range(state(), pid(), non_neg_integer(), non_neg_integer()) :: map()
-  defp build_action_range(state, _buf, line, col) do
+  @spec build_action_range(
+          state(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          PositionEncoding.encoding()
+        ) :: map()
+  defp build_action_range(state, content, line, col, encoding) do
     # If we're in visual mode, use the visual anchor
     case Minga.Editing.mode(state) do
       :visual ->
@@ -2233,25 +2576,43 @@ defmodule MingaEditor.LspActions do
             _ -> {line, col}
           end
 
-        {anchor_line, anchor_col} = anchor
+        {start_position, end_position} = ordered_positions(anchor, {line, col})
 
         %{
-          "start" => %{
-            "line" => min(anchor_line, line),
-            "character" => min(anchor_col, col)
-          },
-          "end" => %{
-            "line" => max(anchor_line, line),
-            "character" => max(anchor_col, col)
-          }
+          "start" => encoded_position(content, start_position, encoding),
+          "end" => encoded_position(content, end_position, encoding)
         }
 
       _ ->
+        position = encoded_position(content, {line, col}, encoding)
+
         %{
-          "start" => %{"line" => line, "character" => col},
-          "end" => %{"line" => line, "character" => col}
+          "start" => position,
+          "end" => position
         }
     end
+  end
+
+  @spec ordered_positions(
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()}
+        ) ::
+          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}
+  defp ordered_positions(left, right) when left <= right, do: {left, right}
+  defp ordered_positions(left, right), do: {right, left}
+
+  @spec encoded_position(
+          String.t(),
+          {non_neg_integer(), non_neg_integer()},
+          PositionEncoding.encoding()
+        ) :: map()
+  defp encoded_position(content, {line, col}, encoding) do
+    line_text =
+      content
+      |> String.split(~r/\r\n|\n|\r/, trim: false)
+      |> Enum.at(line, "")
+
+    PositionEncoding.to_lsp({line, col}, line_text, encoding)
   end
 
   @spec diagnostics_at_range(String.t(), map()) :: [map()]

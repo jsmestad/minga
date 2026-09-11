@@ -30,6 +30,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
   alias MingaEditor.UI.Highlight
+  alias MingaEditor.UI.Picker.CodeActionSource
+  alias MingaEditor.UI.Picker.Item
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -412,8 +414,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert_receive {:lsp_request, "textDocument/rename", _params, caller, ref}
       assert caller == self()
 
-      assert {:ok, {:operation, :rename, operation_id, nil}} =
+      assert {:ok, {:workspace_operation, :rename, operation_id, nil, context}} =
                LSPState.fetch_pending_request(state.lsp, ref)
+
+      assert context.client == client
+      assert context.buffer == buffer
 
       assert OperationFeedback.selected(state.feedback.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :running
@@ -428,6 +433,176 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert OperationFeedback.selected(state.feedback.operation_feedback).message ==
                "Rename returned no edits"
+    end
+
+    test "code action picker rejects selection after the origin buffer changes" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      context = document_context(client, buffer)
+
+      :ok = BufferProcess.insert_text(buffer, "!")
+
+      action = %{
+        "title" => "Run stale action",
+        "command" => %{"command" => "test.stale"}
+      }
+
+      result = CodeActionSource.on_select(%Item{id: {0, action, context}, label: "stale"}, state)
+
+      refute_receive {:lsp_request, "workspace/executeCommand", _params, _caller, _ref}
+
+      assert NoticeWorkflow.message(result) ==
+               "Code action rejected because its source document changed"
+    end
+
+    test "code action picker suppresses follow-on command when its edit fails" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      context = document_context(client, buffer)
+
+      action = %{
+        "title" => "Invalid edit",
+        "edit" => %{
+          "changes" => %{
+            context.uri => [
+              %{
+                "range" => %{
+                  "start" => %{"line" => 99, "character" => 0},
+                  "end" => %{"line" => 99, "character" => 1}
+                },
+                "newText" => "broken"
+              }
+            ]
+          }
+        },
+        "command" => %{"command" => "test.must_not_run"}
+      }
+
+      result =
+        CodeActionSource.on_select(%Item{id: {0, action, context}, label: "invalid"}, state)
+
+      refute_receive {:lsp_request, "workspace/executeCommand", _params, _caller, _ref}
+      assert Minga.Buffer.content(buffer) == "hello\n"
+      assert NoticeWorkflow.message(result) =~ "could not apply edits"
+    end
+
+    test "code action picker treats a present non-map edit as failure and suppresses its command" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      version = Minga.Buffer.version(buffer)
+      state = MingaEditor.LspActions.code_action(state)
+
+      assert_receive {:lsp_request, "textDocument/codeAction", _params, _caller, ref}
+
+      assert {:ok, {:workspace_response, :code_action, generation, context, nil, {0, 0}}} =
+               LSPState.fetch_pending_request(state.lsp, ref)
+
+      action = %{
+        "title" => "Malformed edit",
+        "edit" => "not-a-workspace-edit",
+        "command" => %{"command" => "test.must_not_run"}
+      }
+
+      {picker_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, [action]}})
+
+      assert effects == [:render_now]
+
+      result =
+        CodeActionSource.on_select(
+          %Item{id: {0, action, context, generation}, label: "Malformed edit"},
+          picker_state
+        )
+
+      refute_receive {:lsp_request, "workspace/executeCommand", _params, _caller, _ref}
+      assert Minga.Buffer.version(buffer) == version
+      assert Minga.Buffer.content(buffer) == "hello\n"
+      assert NoticeWorkflow.message(result) =~ "invalid workspace edit"
+    end
+
+    test "versioned empty workspace edit validates the producing client mapping" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client(1)
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      context = document_context(client, buffer)
+      version = Minga.Buffer.version(buffer)
+      dirty? = Minga.Buffer.dirty?(buffer)
+      undo_source = BufferProcess.last_undo_source(buffer)
+
+      edit = %{
+        "documentChanges" => [
+          %{
+            "textDocument" => %{"uri" => context.uri, "version" => 2},
+            "edits" => []
+          }
+        ]
+      }
+
+      assert {:error, result, message} =
+               MingaEditor.LspActions.apply_workspace_edit_result(
+                 state,
+                 edit,
+                 "Rename",
+                 context
+               )
+
+      assert message =~ "version_mismatch"
+      assert result == state
+      assert Minga.Buffer.version(buffer) == version
+      assert Minga.Buffer.dirty?(buffer) == dirty?
+      assert BufferProcess.last_undo_source(buffer) == undo_source
+    end
+
+    test "newer code-action request wins reverse-order responses and invalidates the old picker item" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+
+      first_state = MingaEditor.LspActions.code_action(state)
+      assert_receive {:lsp_request, "textDocument/codeAction", _params, _caller, first_ref}
+
+      assert {:ok,
+              {:workspace_response, :code_action, first_generation, first_context, nil, {0, 0}}} =
+               LSPState.fetch_pending_request(first_state.lsp, first_ref)
+
+      second_state = MingaEditor.LspActions.code_action(first_state)
+      assert_receive {:lsp_request, "textDocument/codeAction", _params, _caller, second_ref}
+      assert LSPState.fetch_pending_request(second_state.lsp, first_ref) == :error
+
+      assert {:ok,
+              {:workspace_response, :code_action, second_generation, second_context, nil, {0, 0}}} =
+               LSPState.fetch_pending_request(second_state.lsp, second_ref)
+
+      action = %{
+        "title" => "Current action",
+        "command" => %{"command" => "test.current"}
+      }
+
+      {picker_state, _effects} =
+        LspEventHandler.handle(second_state, {:lsp_response, second_ref, {:ok, [action]}})
+
+      {unchanged, _effects} =
+        LspEventHandler.handle(picker_state, {:lsp_response, first_ref, {:ok, [action]}})
+
+      assert unchanged == picker_state
+      assert second_generation > first_generation
+      assert second_context.client == first_context.client
+
+      stale_item = %Item{id: {0, action, first_context, first_generation}, label: "stale"}
+      result = CodeActionSource.on_select(stale_item, unchanged)
+
+      refute_receive {:lsp_request, "workspace/executeCommand", _params, _caller, _ref}
+
+      assert NoticeWorkflow.message(result) ==
+               "Code action rejected because its source document changed"
     end
 
     test "operation response remains correlated after the active workspace changes" do
@@ -1706,6 +1881,17 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end)
   end
 
+  defp document_context(client, buffer) do
+    %Minga.LSP.DocumentContext{
+      client: client,
+      buffer: buffer,
+      uri: Minga.LSP.SyncServer.path_to_uri(Minga.Buffer.file_path(buffer)),
+      buffer_revision: Minga.Buffer.version(buffer),
+      lsp_version: 1,
+      encoding: :utf16
+    }
+  end
+
   defp file_buffer_state(content) do
     path =
       Path.join(
@@ -1851,16 +2037,16 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     }
   end
 
-  defp start_fake_lsp_client do
+  defp start_fake_lsp_client(valid_wire_version \\ 1) do
     parent = self()
 
     start_supervised!(
-      {Task, fn -> fake_lsp_client_loop(parent) end},
+      {Task, fn -> fake_lsp_client_loop(parent, valid_wire_version) end},
       id: {:fake_lsp_client, make_ref()}
     )
   end
 
-  defp fake_lsp_client_loop(parent) do
+  defp fake_lsp_client_loop(parent, valid_wire_version) do
     receive do
       {:"$gen_call", from, :capabilities} ->
         GenServer.reply(from, %{
@@ -1869,26 +2055,46 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
           "documentHighlightProvider" => true
         })
 
-        fake_lsp_client_loop(parent)
+        fake_lsp_client_loop(parent, valid_wire_version)
 
       {:"$gen_call", from, :semantic_token_legend} ->
         GenServer.reply(from, {["variable"], []})
-        fake_lsp_client_loop(parent)
+        fake_lsp_client_loop(parent, valid_wire_version)
 
       {:"$gen_call", from, :encoding} ->
         GenServer.reply(from, :utf16)
-        fake_lsp_client_loop(parent)
+        fake_lsp_client_loop(parent, valid_wire_version)
+
+      {:"$gen_call", from,
+       {:request_document, uri, buffer, revision, method, params, _content, caller, ref}} ->
+        context = %Minga.LSP.DocumentContext{
+          client: self(),
+          buffer: buffer,
+          uri: uri,
+          buffer_revision: revision,
+          lsp_version: 1,
+          encoding: :utf16
+        }
+
+        send(parent, {:lsp_request, method, params, caller, ref})
+        GenServer.reply(from, {:ok, ref, context})
+        fake_lsp_client_loop(parent, valid_wire_version)
+
+      {:"$gen_call", from, {:validate_document_version, _uri, wire_version, _buffer, _revision}} ->
+        result = if wire_version == valid_wire_version, do: :ok, else: {:error, :version_mismatch}
+        GenServer.reply(from, result)
+        fake_lsp_client_loop(parent, valid_wire_version)
 
       {:"$gen_cast", {:cancel_request, ref}} ->
         send(parent, {:lsp_cancel, ref})
-        fake_lsp_client_loop(parent)
+        fake_lsp_client_loop(parent, valid_wire_version)
 
       {:"$gen_cast", {:async_request, method, params, caller, ref}} ->
         send(parent, {:lsp_request, method, params, caller, ref})
-        fake_lsp_client_loop(parent)
+        fake_lsp_client_loop(parent, valid_wire_version)
 
       _other ->
-        fake_lsp_client_loop(parent)
+        fake_lsp_client_loop(parent, valid_wire_version)
     end
   end
 end
