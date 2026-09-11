@@ -17,6 +17,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Language.Highlight.Span
   alias Minga.Parser.EventCorrelation
   alias MingaEditor.HighlightSync
@@ -458,8 +459,8 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   @spec add_conceal_spans(Decorations.t(), [map()], [String.t()]) :: Decorations.t()
   defp add_conceal_spans(decs, spans, lines) do
     Enum.reduce(spans, decs, fn span, acc ->
-      {start_line, start_col} = byte_to_position(lines, span.start_byte)
-      {end_line, end_col} = byte_to_position(lines, span.end_byte)
+      {start_line, start_col} = Unicode.position_at_byte_offset(lines, span.start_byte)
+      {end_line, end_col} = Unicode.position_at_byte_offset(lines, span.end_byte)
       replacement = if span.replacement == "", do: nil, else: span.replacement
 
       {_id, new_decs} =
@@ -472,33 +473,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
       new_decs
     end)
-  end
-
-  @spec byte_to_position([String.t()], non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp byte_to_position(lines, byte_offset) do
-    do_byte_to_position(lines, byte_offset, 0)
-  end
-
-  @spec do_byte_to_position([String.t()], non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp do_byte_to_position([], _remaining, line_idx), do: {max(line_idx - 1, 0), 0}
-
-  defp do_byte_to_position([line | rest], remaining, line_idx) do
-    line_bytes = byte_size(line) + 1
-
-    if remaining < line_bytes do
-      col = grapheme_col(line, remaining)
-      {line_idx, col}
-    else
-      do_byte_to_position(rest, remaining - line_bytes, line_idx + 1)
-    end
-  end
-
-  @spec grapheme_col(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp grapheme_col(line, byte_offset) do
-    prefix = binary_part(line, 0, min(byte_offset, byte_size(line)))
-    String.length(prefix)
   end
 
   @spec handle_parser_restarted(EditorState.t()) :: {EditorState.t(), [highlight_effect()]}

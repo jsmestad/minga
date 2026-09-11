@@ -7,6 +7,7 @@ defmodule Minga.Extensions.LanguagePacks do
 
   use Agent
 
+  alias Minga.Extensions.PackLoader
   alias Minga.Language
   alias Minga.Language.Registry, as: LanguageRegistry
 
@@ -61,32 +62,7 @@ defmodule Minga.Extensions.LanguagePacks do
   def source_for(pack_module) when is_atom(pack_module), do: {:extension, pack_module.name()}
 
   @spec load_packs([pack_module()], [atom()]) :: state()
-  defp load_packs(packs, disabled) do
-    Enum.reduce(packs, %{loaded: [], failed: []}, fn pack, state ->
-      load_pack(pack, disabled, state)
-    end)
-  end
-
-  @spec load_pack(pack_module(), [atom()], state()) :: state()
-  defp load_pack(pack, disabled, state) do
-    name = pack.name()
-
-    if name in disabled do
-      unregister_pack(pack)
-      state
-    else
-      case register_pack(pack) do
-        :ok -> %{state | loaded: Enum.concat(state.loaded, [name])}
-        {:error, reason} -> record_failed_pack(state, name, reason)
-      end
-    end
-  end
-
-  @spec record_failed_pack(state(), atom(), term()) :: state()
-  defp record_failed_pack(state, name, reason) do
-    Minga.Log.warning(:config, "Language pack #{name} failed to load: #{inspect(reason)}")
-    %{state | failed: Enum.concat(state.failed, [{name, reason}])}
-  end
+  defp load_packs(packs, disabled), do: PackLoader.load(packs, disabled, __MODULE__, "Language")
 
   @spec disabled_pack_names() :: [atom()]
   defp disabled_pack_names do
@@ -137,7 +113,7 @@ defmodule Minga.Extensions.LanguagePacks do
         ) :: {:ok, map()} | {:error, pack_validation_error()}
   defp validate_pack_language_keys(%Language{} = lang, mod, seen) do
     lang
-    |> language_keys()
+    |> Language.identity_keys()
     |> Enum.reduce_while(seen, &validate_pack_language_key(&1, &2, mod))
     |> normalize_pack_key_validation()
   end
@@ -155,15 +131,6 @@ defmodule Minga.Extensions.LanguagePacks do
           {:ok, map()} | {:error, pack_validation_error()}
   defp normalize_pack_key_validation({:error, _reason} = error), do: error
   defp normalize_pack_key_validation(seen), do: {:ok, seen}
-
-  @spec language_keys(Language.t()) :: [term()]
-  defp language_keys(%Language{} = lang) do
-    name_key = {:name, lang.name}
-    ext_keys = Enum.map(lang.extensions, &{:ext, String.downcase(&1)})
-    filename_keys = Enum.map(lang.filenames, &{:filename, &1})
-    shebang_keys = Enum.map(lang.shebangs, &{:shebang, &1})
-    [name_key | ext_keys ++ filename_keys ++ shebang_keys]
-  end
 
   @spec cleanup_failed_register(:ok | {:error, term()}, LanguageRegistry.contribution_source()) ::
           :ok | {:error, term()}

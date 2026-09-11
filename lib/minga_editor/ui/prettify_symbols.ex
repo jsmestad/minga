@@ -29,6 +29,7 @@ defmodule MingaEditor.UI.PrettifySymbols do
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias MingaEditor.UI.Highlight
 
   @typedoc "A substitution rule: source text, replacement character, and matching captures."
@@ -197,7 +198,7 @@ defmodule MingaEditor.UI.PrettifySymbols do
 
         matching_rules ->
           text = binary_part(content, span.start_byte, span.end_byte - span.start_byte)
-          check_rules(matching_rules, text, span, lines, content, acc)
+          check_rules(matching_rules, text, span, lines, acc)
       end
     end)
   end
@@ -212,45 +213,16 @@ defmodule MingaEditor.UI.PrettifySymbols do
     end)
   end
 
-  @spec check_rules([rule()], String.t(), map(), [String.t()], String.t(), list()) :: list()
-  defp check_rules(rules, text, span, lines, content, acc) do
+  @spec check_rules([rule()], String.t(), map(), [String.t()], list()) :: list()
+  defp check_rules(rules, text, span, lines, acc) do
     case Enum.find(rules, fn r -> r.source == text end) do
       nil ->
         acc
 
       rule ->
-        {start_line, start_col} = byte_to_position(span.start_byte, lines, content)
-        {end_line, end_col} = byte_to_position(span.end_byte, lines, content)
+        {start_line, start_col} = Unicode.position_at_byte_offset(lines, span.start_byte)
+        {end_line, end_col} = Unicode.position_at_byte_offset(lines, span.end_byte)
         [{{start_line, start_col}, {end_line, end_col}, rule.replacement} | acc]
     end
-  end
-
-  # Converts a byte offset to {line, col} position.
-  @spec byte_to_position(non_neg_integer(), [String.t()], String.t()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp byte_to_position(byte_offset, lines, _content) do
-    do_byte_to_position(lines, byte_offset, 0)
-  end
-
-  @spec do_byte_to_position([String.t()], non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp do_byte_to_position([], _remaining, line_idx), do: {max(line_idx - 1, 0), 0}
-
-  defp do_byte_to_position([line | rest], remaining, line_idx) do
-    line_bytes = byte_size(line) + 1
-
-    if remaining < line_bytes do
-      col = grapheme_col(line, remaining)
-      {line_idx, col}
-    else
-      do_byte_to_position(rest, remaining - line_bytes, line_idx + 1)
-    end
-  end
-
-  # Converts a byte offset within a line to a grapheme column.
-  @spec grapheme_col(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp grapheme_col(line, byte_offset) do
-    prefix = binary_part(line, 0, min(byte_offset, byte_size(line)))
-    String.length(prefix)
   end
 end

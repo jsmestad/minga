@@ -8,6 +8,7 @@ defmodule Minga.Extensions.ThemePacks do
   use Agent
 
   alias Minga.Config.ThemeRegistry
+  alias Minga.Extensions.PackLoader
 
   @typedoc "A module that implements the theme-pack extension callbacks."
   @type pack_module :: module()
@@ -59,32 +60,7 @@ defmodule Minga.Extensions.ThemePacks do
   def source_for(pack_module) when is_atom(pack_module), do: {:extension, pack_module.name()}
 
   @spec load_packs([pack_module()], [atom()]) :: state()
-  defp load_packs(packs, disabled) do
-    Enum.reduce(packs, %{loaded: [], failed: []}, fn pack, state ->
-      load_pack(pack, disabled, state)
-    end)
-  end
-
-  @spec load_pack(pack_module(), [atom()], state()) :: state()
-  defp load_pack(pack, disabled, state) do
-    name = pack.name()
-
-    if name in disabled do
-      unregister_pack(pack)
-      state
-    else
-      case register_pack(pack) do
-        :ok -> %{state | loaded: Enum.concat(state.loaded, [name])}
-        {:error, reason} -> record_failed_pack(state, name, reason)
-      end
-    end
-  end
-
-  @spec record_failed_pack(state(), atom(), term()) :: state()
-  defp record_failed_pack(state, name, reason) do
-    Minga.Log.warning(:config, "Theme pack #{name} failed to load: #{inspect(reason)}")
-    %{state | failed: Enum.concat(state.failed, [{name, reason}])}
-  end
+  defp load_packs(packs, disabled), do: PackLoader.load(packs, disabled, __MODULE__, "Theme")
 
   @spec disabled_pack_names() :: [atom()]
   defp disabled_pack_names do

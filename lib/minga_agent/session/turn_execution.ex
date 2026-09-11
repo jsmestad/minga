@@ -137,6 +137,8 @@ defmodule MingaAgent.Session.TurnExecution do
   def active_tool_name(%__MODULE__{
         phase: {:active, {:tool_execution, tools}, _approval, _error}
       }) do
+    # The collection preserves provider start order and stays bounded by active tool calls.
+    # credo:disable-for-next-line ExSlop.Check.Refactor.ListLast
     case List.last(tools) do
       {_id, name} -> name
       nil -> nil
@@ -546,11 +548,15 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @spec queue_prompt(t(), prompt_kind(), content()) :: prompt_admission()
   defp queue_prompt(%__MODULE__{} = execution, :steering, content) do
+    # Queues are bounded by human interaction and consumed in insertion order.
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     next = %{execution | steering_queue: execution.steering_queue ++ [content]}
     {:queued, next}
   end
 
   defp queue_prompt(%__MODULE__{} = execution, :follow_up, content) do
+    # Queues are bounded by human interaction and consumed in insertion order.
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     next = %{execution | follow_up_queue: execution.follow_up_queue ++ [content]}
     {:queued, next}
   end
@@ -572,11 +578,13 @@ defmodule MingaAgent.Session.TurnExecution do
       {scope, pending_auto_approvals} =
         Map.pop(execution.pending_auto_approvals, event.tool_call_id)
 
+      # Active tool calls are bounded by provider concurrency and exposed in start order.
+      # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
+      active_tools = tools ++ [{event.tool_call_id, event.name}]
+
       next = %{
         execution
-        | phase:
-            {:active, {:tool_execution, tools ++ [{event.tool_call_id, event.name}]}, approval,
-             nil},
+        | phase: {:active, {:tool_execution, active_tools}, approval, nil},
           pending_auto_approvals: pending_auto_approvals
       }
 

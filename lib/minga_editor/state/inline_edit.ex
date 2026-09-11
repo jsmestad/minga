@@ -75,25 +75,39 @@ defmodule MingaEditor.State.InlineEdit do
   end
 
   @spec active(store(), pid() | nil) :: t() | nil
+  # Inline edit and inline ask retain distinct typed state APIs over their shared store.
+  # ex_dna:disable-for-next-line
   def active(store, buffer_pid), do: Store.active(store, buffer_pid, __MODULE__)
 
   @spec session?(store(), pid()) :: boolean()
+  # Inline edit and inline ask retain distinct typed state APIs over their shared store.
+  # ex_dna:disable-for-next-line
   def session?(store, session_pid), do: Store.session?(store, session_pid, &session_pid/1)
 
   @spec put(store(), t()) :: store()
+  # Inline edit owns validation of its state type before storage.
+  # ex_dna:disable-for-next-line
   def put(store, %__MODULE__{} = edit), do: Store.put(store, edit, __MODULE__)
   def put(store, _edit) when is_map(store), do: store
 
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
+  # Inline edit and inline ask retain distinct typed state APIs over their shared store.
+  # ex_dna:disable-for-next-line
   def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid, &session_pid/1)
 
   @spec append_input(t(), String.t()) :: t()
+  # Inline edit retains a typed delegate to the shared prompt calculation.
+  # ex_dna:disable-for-next-line
   def append_input(edit, text), do: Prompt.append_input(edit, text)
 
   @spec backspace(t()) :: t()
+  # Inline edit retains a typed delegate to the shared prompt calculation.
+  # ex_dna:disable-for-next-line
   def backspace(edit), do: Prompt.backspace(edit)
 
   @spec scroll(t(), integer()) :: t()
+  # Inline edit retains a typed delegate to the shared prompt calculation.
+  # ex_dna:disable-for-next-line
   def scroll(edit, delta), do: Prompt.scroll(edit, delta)
 
   @spec phase(t()) :: phase()

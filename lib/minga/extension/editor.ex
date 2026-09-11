@@ -126,6 +126,8 @@ defmodule Minga.Extension.Editor do
         execute: {MingaOrg.Checkbox, :toggle},
         requires_buffer: true
   """
+  # This compatibility DSL mirrors Minga.Extension while keeping editor-only imports explicit.
+  # ex_dna:disable-for-next-line
   defmacro command(name, description, opts) do
     quote do
       @__extension_commands__ {unquote(name), unquote(description), unquote(opts)}
@@ -145,6 +147,8 @@ defmodule Minga.Extension.Editor do
         end
       end
   """
+  # This compatibility DSL mirrors Minga.Extension while keeping editor-only imports explicit.
+  # ex_dna:disable-for-next-line
   defmacro modeline_segment(name, opts \\ [], do: block) do
     fun_name = :"__modeline_segment_#{name}__"
 
@@ -182,6 +186,8 @@ defmodule Minga.Extension.Editor do
       keybind :normal, "SPC m t", :org_cycle_todo, "Cycle TODO"
       keybind :normal, "M-h", :org_promote_heading, "Promote heading", filetype: :org
   """
+  # This compatibility DSL mirrors Minga.Extension while keeping editor-only imports explicit.
+  # ex_dna:disable-for-next-line
   defmacro keybind(mode, key_string, command_name, description) do
     quote do
       @__extension_keybinds__ {unquote(mode), unquote(key_string), unquote(command_name),

@@ -44,6 +44,24 @@ defmodule MingaEditor.State.WorkspaceReview do
   @spec conflict_count(t()) :: non_neg_integer()
   def conflict_count(%__MODULE__{conflict_files: files}), do: length(files)
 
+  @doc "Converts project-view conflict details into workspace file references."
+  @spec conflict_file_refs(String.t() | nil, map()) :: [FileRef.t()]
+  def conflict_file_refs(project_root, %{conflicts: conflicts})
+      when is_binary(project_root) and is_list(conflicts) do
+    Enum.flat_map(conflicts, &conflict_file_ref(project_root, &1))
+  end
+
+  def conflict_file_refs(_project_root, _details), do: []
+
+  @doc "Converts project-view diff entries into unique workspace file references."
+  @spec changed_file_refs(String.t(), [map()]) :: [FileRef.t()]
+  def changed_file_refs(project_root, entries)
+      when is_binary(project_root) and is_list(entries) do
+    entries
+    |> Enum.flat_map(&diff_file_ref(project_root, &1))
+    |> Enum.uniq_by(&{&1.project_root, &1.relative_path})
+  end
+
   @doc "Sets changed files without changing the stable state."
   @spec set_changed_files(t(), [FileRef.t()]) :: t()
   def set_changed_files(%__MODULE__{} = review, files) when is_list(files) do
@@ -175,6 +193,32 @@ defmodule MingaEditor.State.WorkspaceReview do
   end
 
   defp normalize_state_after_file_discard(%__MODULE__{} = review), do: clean(review)
+
+  @spec conflict_file_ref(String.t(), term()) :: [FileRef.t()]
+  defp conflict_file_ref(project_root, conflict) do
+    with path when is_binary(path) <- conflict_path(conflict),
+         {:ok, file_ref} <- FileRef.from_path(project_root, path) do
+      [file_ref]
+    else
+      _invalid_conflict -> []
+    end
+  end
+
+  @spec diff_file_ref(String.t(), map()) :: [FileRef.t()]
+  defp diff_file_ref(project_root, %{path: path}) when is_binary(path) do
+    case FileRef.from_path(project_root, path) do
+      {:ok, file_ref} -> [file_ref]
+      {:error, _reason} -> []
+    end
+  end
+
+  defp diff_file_ref(_project_root, _entry), do: []
+
+  @spec conflict_path(term()) :: String.t() | nil
+  defp conflict_path({:conflict, path, _reason}) when is_binary(path), do: path
+  defp conflict_path({path, {:conflict, _details}}) when is_binary(path), do: path
+  defp conflict_path({path, {:error, _reason}}) when is_binary(path), do: path
+  defp conflict_path(_conflict), do: nil
 
   @spec invalid(state(), state()) :: {:error, {:invalid_transition, state(), state()}}
   defp invalid(from, to), do: {:error, {:invalid_transition, from, to}}

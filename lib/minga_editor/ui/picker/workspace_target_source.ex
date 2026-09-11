@@ -249,7 +249,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   defp promote_then_move(context, state) do
     with {:ok, tab_bar, source, _destination} <- fetch_transfer_workspaces(state, context),
          %ProjectView{} = view <- workspace_project_view(source),
-         :ok <- safe_project_view_promote(view) do
+         :ok <- ProjectView.promote(view, :project_root) do
       tab_bar =
         TabBar.set_workspace_review(tab_bar, source.id, WorkspaceReview.clean(source.review))
 
@@ -307,7 +307,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       source.review
       |> WorkspaceReview.set_changed_files(changed_files)
       |> WorkspaceReview.promote_found_overlaps(
-        conflict_files(source.project_root, details),
+        WorkspaceReview.conflict_file_refs(source.project_root, details),
         details
       )
     end
@@ -361,43 +361,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
   @spec project_view_changed_files(ProjectView.t()) :: {:ok, [FileRef.t()]} | {:error, term()}
   defp project_view_changed_files(%ProjectView{} = view) do
-    with {:ok, entries} <- safe_project_view_diff(view) do
-      {:ok, diff_entries_to_file_refs(view.project_root, entries)}
+    with {:ok, entries} <- ProjectView.diff(view) do
+      {:ok, WorkspaceReview.changed_file_refs(view.project_root, entries)}
     end
   end
-
-  @spec diff_entries_to_file_refs(String.t(), [map()]) :: [FileRef.t()]
-  defp diff_entries_to_file_refs(project_root, entries) do
-    entries
-    |> Enum.flat_map(fn entry -> file_ref_from_diff_entry(project_root, entry) end)
-    |> Enum.uniq_by(&{&1.project_root, &1.relative_path})
-  end
-
-  @spec conflict_files(String.t() | nil, map()) :: [FileRef.t()]
-  defp conflict_files(project_root, %{conflicts: conflicts})
-       when is_binary(project_root) and is_list(conflicts) do
-    conflicts
-    |> Enum.map(&conflict_path/1)
-    |> Enum.flat_map(fn path -> file_ref_from_diff_entry(project_root, %{path: path}) end)
-  end
-
-  defp conflict_files(_project_root, _details), do: []
-
-  @spec file_ref_from_diff_entry(String.t(), map()) :: [FileRef.t()]
-  defp file_ref_from_diff_entry(project_root, %{path: path}) when is_binary(path) do
-    case FileRef.from_path(project_root, path) do
-      {:ok, file_ref} -> [file_ref]
-      {:error, _reason} -> []
-    end
-  end
-
-  defp file_ref_from_diff_entry(_project_root, _entry), do: []
-
-  @spec conflict_path(term()) :: String.t() | nil
-  defp conflict_path({:conflict, path, _reason}) when is_binary(path), do: path
-  defp conflict_path({path, {:conflict, _details}}) when is_binary(path), do: path
-  defp conflict_path({path, {:error, _reason}}) when is_binary(path), do: path
-  defp conflict_path(_conflict), do: nil
 
   @spec fetch_transfer_workspaces(term(), map()) ::
           {:ok, TabBar.t(), Workspace.t(), Workspace.t()} | {:error, String.t()}
@@ -427,7 +394,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
     case {workspace_project_view(source), file_ref} do
       {%ProjectView{} = view, %FileRef{kind: :path, relative_path: relative_path}}
       when is_binary(relative_path) ->
-        safe_project_view_discard_file(view, relative_path)
+        ProjectView.discard_file(view, relative_path)
 
       {nil, %FileRef{kind: :path}} ->
         {:error, "Workspace move failed: missing project view"}
@@ -438,30 +405,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   end
 
   defp maybe_discard_file_drafts(%Workspace{}, %FileRef{}, false), do: :ok
-
-  @spec safe_project_view_discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
-  defp safe_project_view_discard_file(%ProjectView{} = view, relative_path) do
-    safe_project_view_call(fn -> ProjectView.discard_file(view, relative_path) end)
-  end
-
-  @spec safe_project_view_promote(ProjectView.t()) :: :ok | {:conflict, map()} | {:error, term()}
-  defp safe_project_view_promote(%ProjectView{} = view) do
-    safe_project_view_call(fn -> ProjectView.promote(view, :project_root) end)
-  end
-
-  @spec safe_project_view_diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
-  defp safe_project_view_diff(%ProjectView{} = view) do
-    safe_project_view_call(fn -> ProjectView.diff(view) end)
-  end
-
-  @spec safe_project_view_call((-> term())) :: term()
-  defp safe_project_view_call(fun) do
-    try do
-      fun.()
-    catch
-      :exit, reason -> {:error, {:project_view_unavailable, reason}}
-    end
-  end
 
   @spec remove_source_file(Workspace.t(), FileRef.t(), boolean()) :: Workspace.t()
   defp remove_source_file(%Workspace{} = source, %FileRef{} = file_ref, true) do

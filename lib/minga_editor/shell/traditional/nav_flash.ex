@@ -1,6 +1,8 @@
 defmodule MingaEditor.Shell.Traditional.NavFlash do
   @moduledoc "Pure lifecycle owner for the navigation flash animation."
 
+  alias Minga.Core.Color
+
   @type generation :: non_neg_integer()
   @type t :: %__MODULE__{
           generation: generation(),
@@ -56,23 +58,9 @@ defmodule MingaEditor.Shell.Traditional.NavFlash do
   @doc "Computes the current animation color."
   @spec color_for_step(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   def color_for_step(%__MODULE__{step: step, max_steps: max_steps}, flash_bg, target_bg) do
-    lerp_color(flash_bg, target_bg, step / max(max_steps - 1, 1))
+    Color.interpolate(flash_bg, target_bg, step / max(max_steps - 1, 1))
   end
 
   @spec deactivate(t()) :: t()
   defp deactivate(%__MODULE__{} = flash), do: %{flash | line: nil, step: 0, timer: nil}
-
-  @spec lerp_color(non_neg_integer(), non_neg_integer(), float()) :: non_neg_integer()
-  defp lerp_color(_from, to, fraction) when fraction >= 1.0, do: to
-  defp lerp_color(from, _to, fraction) when fraction <= 0.0, do: from
-
-  defp lerp_color(from, to, fraction) do
-    interpolate = fn shift ->
-      from_channel = Bitwise.band(Bitwise.bsr(from, shift), 0xFF)
-      to_channel = Bitwise.band(Bitwise.bsr(to, shift), 0xFF)
-      round(from_channel + (to_channel - from_channel) * fraction)
-    end
-
-    Bitwise.bsl(interpolate.(16), 16) + Bitwise.bsl(interpolate.(8), 8) + interpolate.(0)
-  end
 end

@@ -5,6 +5,8 @@ defmodule MingaEditor.MacroRecorder do
   The `phase` carries exactly one active lifecycle, while replay can preserve a post-replay recording phase that is restored after the outermost replay returns normally.
   """
 
+  alias MingaEditor.Recorder.ReplayPhase
+
   defstruct phase: :idle,
             registers: %{},
             last_register: nil
@@ -75,28 +77,15 @@ defmodule MingaEditor.MacroRecorder do
   def recording?(%__MODULE__{}), do: false
 
   @spec replaying?(t()) :: boolean()
-  def replaying?(%__MODULE__{phase: {:replaying, _depth, _post}}), do: true
-  def replaying?(%__MODULE__{}), do: false
+  def replaying?(%__MODULE__{phase: phase}), do: ReplayPhase.active?(phase)
 
   @spec start_replay(t()) :: t()
-  def start_replay(%__MODULE__{phase: {:replaying, depth, post}} = rec) do
-    %{rec | phase: {:replaying, depth + 1, post}}
-  end
-
   def start_replay(%__MODULE__{phase: phase} = rec) do
-    %{rec | phase: {:replaying, 1, phase}}
+    %{rec | phase: ReplayPhase.start(phase)}
   end
 
   @spec stop_replay(t()) :: t()
-  def stop_replay(%__MODULE__{phase: {:replaying, depth, post}} = rec) when depth > 1 do
-    %{rec | phase: {:replaying, depth - 1, post}}
-  end
-
-  def stop_replay(%__MODULE__{phase: {:replaying, 1, post}} = rec) do
-    %{rec | phase: post}
-  end
-
-  def stop_replay(%__MODULE__{} = rec), do: rec
+  def stop_replay(%__MODULE__{phase: phase} = rec), do: %{rec | phase: ReplayPhase.stop(phase)}
 
   @spec select_replay_register(t(), String.t()) :: t()
   def select_replay_register(%__MODULE__{} = rec, register) when is_binary(register) do

@@ -551,61 +551,19 @@ defmodule MingaEditor.Commands.Workspace do
   defp project_view_changed_files(%WorkspaceModel{
          payload: %WorkspaceAgent{project_view: %ProjectView{} = view}
        }) do
-    with {:ok, entries} <- safe_project_view_diff(view) do
-      {:ok, diff_entries_to_file_refs(view.project_root, entries)}
+    with {:ok, entries} <- ProjectView.diff(view) do
+      {:ok, WorkspaceReview.changed_file_refs(view.project_root, entries)}
     end
   end
 
   defp project_view_changed_files(%WorkspaceModel{}), do: {:ok, []}
-
-  @spec diff_entries_to_file_refs(String.t(), [map()]) :: [FileRef.t()]
-  defp diff_entries_to_file_refs(project_root, entries) do
-    entries
-    |> Enum.flat_map(fn entry -> file_ref_from_diff_entry(project_root, entry) end)
-    |> Enum.uniq_by(&{&1.project_root, &1.relative_path})
-  end
-
-  @spec file_ref_from_diff_entry(String.t(), map()) :: [FileRef.t()]
-  defp file_ref_from_diff_entry(project_root, %{path: path}) when is_binary(path) do
-    case FileRef.from_path(project_root, path) do
-      {:ok, file_ref} -> [file_ref]
-      {:error, _reason} -> []
-    end
-  end
-
-  defp file_ref_from_diff_entry(_project_root, _entry), do: []
-
-  @spec safe_project_view_discard(ProjectView.t()) :: :ok | {:error, term()}
-  defp safe_project_view_discard(%ProjectView{} = view) do
-    safe_project_view_call(fn -> ProjectView.discard(view) end)
-  end
-
-  @spec safe_project_view_promote(ProjectView.t()) :: :ok | {:conflict, map()} | {:error, term()}
-  defp safe_project_view_promote(%ProjectView{} = view) do
-    safe_project_view_call(fn -> ProjectView.promote(view, :project_root) end)
-  end
-
-  @spec safe_project_view_diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
-  defp safe_project_view_diff(%ProjectView{} = view) do
-    safe_project_view_call(fn -> ProjectView.diff(view) end)
-  end
-
-  @spec safe_project_view_call((-> term())) :: term()
-  # credo:disable-for-next-line Credo.Check.Readability.PreferImplicitTry
-  defp safe_project_view_call(fun) do
-    try do
-      fun.()
-    catch
-      :exit, reason -> {:error, {:project_view_unavailable, reason}}
-    end
-  end
 
   @spec promote_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
   defp promote_workspace(
          %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} =
            workspace
        ) do
-    case safe_project_view_promote(view) do
+    case ProjectView.promote(view, :project_root) do
       :ok ->
         WorkspaceModel.transition_review(workspace, :promote_succeeded)
 
@@ -613,7 +571,7 @@ defmodule MingaEditor.Commands.Workspace do
         WorkspaceModel.transition_review(
           workspace,
           :promote_found_overlaps,
-          {conflict_files(view.project_root, details), details}
+          {WorkspaceReview.conflict_file_refs(view.project_root, details), details}
         )
 
       {:error, _reason} = error ->
@@ -623,27 +581,12 @@ defmodule MingaEditor.Commands.Workspace do
 
   defp promote_workspace(%WorkspaceModel{}), do: {:error, :missing_project_view}
 
-  @spec conflict_files(String.t(), map()) :: [FileRef.t()]
-  defp conflict_files(project_root, %{conflicts: conflicts}) when is_list(conflicts) do
-    conflicts
-    |> Enum.map(&conflict_path/1)
-    |> Enum.flat_map(fn path -> file_ref_from_diff_entry(project_root, %{path: path}) end)
-  end
-
-  defp conflict_files(_project_root, _details), do: []
-
-  @spec conflict_path(term()) :: String.t() | nil
-  defp conflict_path({:conflict, path, _reason}) when is_binary(path), do: path
-  defp conflict_path({path, {:conflict, _details}}) when is_binary(path), do: path
-  defp conflict_path({path, {:error, _reason}}) when is_binary(path), do: path
-  defp conflict_path(_conflict), do: nil
-
   @spec discard_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
   defp discard_workspace(
          %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} =
            workspace
        ) do
-    with :ok <- safe_project_view_discard(view) do
+    with :ok <- ProjectView.discard(view) do
       WorkspaceModel.transition_review(workspace, :discard)
     end
   end

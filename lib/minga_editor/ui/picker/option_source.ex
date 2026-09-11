@@ -20,9 +20,8 @@ defmodule MingaEditor.UI.Picker.OptionSource do
   def candidates(%Context{} = context) do
     options_server = options_server(context)
     filetype = current_filetype(context)
-    buffer = active_buffer(context)
 
-    (builtin_items(options_server, filetype, buffer) ++ extension_items(options_server, filetype))
+    (builtin_items(context) ++ extension_items(options_server, filetype))
     |> Enum.sort_by(& &1.label)
   end
 
@@ -39,9 +38,14 @@ defmodule MingaEditor.UI.Picker.OptionSource do
 
   def on_select(_item, state), do: state
 
-  @spec builtin_items(Options.server(), atom() | nil, pid() | nil) :: [Item.t()]
-  defp builtin_items(options_server, filetype, buffer) do
-    Enum.map(Options.option_specs(), fn {name, _type, default, description} ->
+  @doc "Builds picker items for all or a selected set of built-in options."
+  @spec builtin_items(Context.t(), :all | [Options.option_name()]) :: [Item.t()]
+  def builtin_items(%Context{} = context, names \\ :all) do
+    options_server = options_server(context)
+    filetype = current_filetype(context)
+    buffer = active_buffer(context)
+
+    Enum.map(option_specs(names), fn {name, _type, default, description} ->
       current = current_value(options_server, name, filetype, buffer)
       changed? = current != default
 
@@ -52,6 +56,16 @@ defmodule MingaEditor.UI.Picker.OptionSource do
         annotation: option_annotation(changed?)
       }
     end)
+  end
+
+  @spec option_specs(:all | [Options.option_name()]) :: [
+          {Options.option_name(), term(), term(), String.t()}
+        ]
+  defp option_specs(:all), do: Options.option_specs()
+
+  defp option_specs(names) when is_list(names) do
+    specs = Options.option_specs()
+    Enum.map(names, &List.keyfind(specs, &1, 0))
   end
 
   @spec extension_items(Options.server(), atom() | nil) :: [Item.t()]

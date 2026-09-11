@@ -29,6 +29,8 @@ defmodule MingaEditor.Input.RegistryTest do
   end
 
   test "first surface lookup seeds built-ins when the registry is missing" do
+    # This test must remove the registry directly to exercise lazy initialization.
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     :persistent_term.erase({Input, :surface_handlers})
 
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})

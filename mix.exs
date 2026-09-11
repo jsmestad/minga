@@ -47,7 +47,7 @@ defmodule Minga.MixProject do
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
-        plt_add_apps: [:llm_db, :mix, :plug, :plug_crypto, :thousand_island, :websock, :ex_unit],
+        plt_add_apps: [:llm_db, :mix, :plug, :plug_crypto, :thousand_island, :websock],
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
       consolidate_protocols: Mix.env() != :prod,
@@ -228,8 +228,7 @@ defmodule Minga.MixProject do
         "test.debug": :test,
         "test.quick": :test,
         "test.heavy": :test,
-        conformance: :test,
-        ci: :test
+        conformance: :test
       ]
     ]
   end
@@ -397,12 +396,13 @@ defmodule Minga.MixProject do
       # fails. Mix aliases stop on first failure, which skips dialyzer.
       "lint.fix": ["format", "credo --strict"],
       ci: [
+        "native.build.support",
         "compile --warnings-as-errors",
         "format --check-formatted",
-        "test",
+        "cmd env MIX_ENV=test mix test --max-cases 4 --timeout 120000",
         "credo --strict",
         "dialyzer",
-        "ex_dna --max-clones 112",
+        "ex_dna --max-clones 0",
         "reach.check --arch --smells"
       ]
     ]

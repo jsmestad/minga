@@ -18,6 +18,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   """
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.VimMode
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
@@ -114,7 +115,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> Writer.uint8(:prompt_line_count, model.prompt_line_count || 1)
     |> Writer.uint16(:prompt_cursor_line, model.prompt_cursor_line || 0)
     |> Writer.uint16(:prompt_cursor_col, model.prompt_cursor_col || 0)
-    |> Writer.uint8(:prompt_vim_mode, encode_vim_mode(model.prompt_vim_mode))
+    |> Writer.uint8(:prompt_vim_mode, VimMode.encode(model.prompt_vim_mode))
     |> Writer.uint8(:prompt_visible_rows, model.prompt_visible_rows || 1)
     |> Writer.finish()
   end
@@ -211,16 +212,4 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @spec bool_byte(boolean() | nil) :: 0 | 1
   defp bool_byte(true), do: 1
   defp bool_byte(_), do: 0
-
-  @spec encode_vim_mode(atom() | nil) :: non_neg_integer()
-  defp encode_vim_mode(:normal), do: 0
-  defp encode_vim_mode(:insert), do: 1
-  defp encode_vim_mode(:visual), do: 2
-  defp encode_vim_mode(:visual_line), do: 2
-  defp encode_vim_mode(:command), do: 3
-  defp encode_vim_mode(:operator_pending), do: 4
-  defp encode_vim_mode(:search), do: 5
-  defp encode_vim_mode(:search_prompt), do: 5
-  defp encode_vim_mode(:replace), do: 6
-  defp encode_vim_mode(_), do: 0
 end

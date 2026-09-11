@@ -552,11 +552,20 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec discard_file_cleanup(state(), String.t()) :: :ok | {:error, term()}
-  defp discard_file_cleanup(state, path) do
+  defp discard_file_cleanup(state, path),
+    do: restore_original_with_backup(state, path, ".__discard_backup__")
+
+  @spec restore_original(state(), String.t()) :: :ok | {:error, term()}
+  defp restore_original(state, path),
+    do: restore_original_with_backup(state, path, ".__restore_backup__")
+
+  @spec restore_original_with_backup(state(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  defp restore_original_with_backup(state, path, backup_suffix) do
     overlay_path = Path.join(state.overlay.overlay_dir, path)
     project_path = Path.join(state.project_root, path)
     tombstone_path = overlay_path <> ".__changeset_deleted__"
-    backup_path = overlay_path <> ".__discard_backup__"
+    backup_path = overlay_path <> backup_suffix
 
     if File.regular?(project_path) do
       with :ok <- remove_overlay_artifact(backup_path),
@@ -676,43 +685,6 @@ defmodule MingaAgent.Changeset.Server do
       end
     else
       :ok
-    end
-  end
-
-  @spec restore_original(state(), String.t()) :: :ok | {:error, term()}
-  defp restore_original(state, path) do
-    overlay_path = Path.join(state.overlay.overlay_dir, path)
-    project_path = Path.join(state.project_root, path)
-    tombstone_path = overlay_path <> ".__changeset_deleted__"
-    backup_path = overlay_path <> ".__restore_backup__"
-
-    if File.regular?(project_path) do
-      with :ok <- remove_overlay_artifact(backup_path),
-           :ok <- remove_overlay_artifact(tombstone_path),
-           :ok <- prune_empty_overlay_dirs(state, path),
-           :ok <-
-             restore_project_file(state.overlay, state.project_root, overlay_path, backup_path),
-           :ok <- remove_overlay_artifact(backup_path) do
-        :ok
-      else
-        {:error, reason} ->
-          case restore_overlay_backup(overlay_path, backup_path) do
-            :ok -> {:error, reason}
-            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
-          end
-      end
-    else
-      with :ok <- remove_overlay_artifact(overlay_path),
-           :ok <- remove_overlay_artifact(tombstone_path),
-           :ok <- prune_empty_overlay_dirs(state, path) do
-        :ok
-      else
-        {:error, reason} ->
-          case restore_discarded_overlay(state, path, tombstone_path) do
-            :ok -> {:error, reason}
-            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
-          end
-      end
     end
   end
 

@@ -114,6 +114,14 @@ defmodule Minga.Diagnostics do
     |> merged_for_uri(uri)
   end
 
+  @doc "Counts diagnostics by severity."
+  @spec severity_counts([Diagnostic.t()]) :: %{atom() => non_neg_integer()}
+  def severity_counts(diagnostics) when is_list(diagnostics) do
+    Enum.reduce(diagnostics, %{error: 0, warning: 0, info: 0, hint: 0}, fn diagnostic, counts ->
+      Map.update!(counts, diagnostic.severity, &(&1 + 1))
+    end)
+  end
+
   @doc """
   Returns the highest severity diagnostic per line for a URI.
 

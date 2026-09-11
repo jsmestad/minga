@@ -75,7 +75,7 @@ lint:
 	scripts/credo_changed || failed="$$failed credo"; \
 	mix compile --warnings-as-errors || failed="$$failed compile"; \
 	mix dialyzer.incremental || failed="$$failed dialyzer"; \
-	mix ex_dna --max-clones 112 || failed="$$failed ex-dna"; \
+	mix ex_dna --max-clones 0 || failed="$$failed ex-dna"; \
 	mix reach.check --arch --smells || failed="$$failed reach"; \
 	if [ -n "$$failed" ]; then \
 		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
@@ -93,7 +93,7 @@ lint.full:
 	mix compile --warnings-as-errors || failed="$$failed compile"; \
 	mix dialyzer || failed="$$failed dialyzer"; \
 	wait "$$credo_pid" || failed="$$failed credo"; \
-	mix ex_dna --max-clones 112 || failed="$$failed ex-dna"; \
+	mix ex_dna --max-clones 0 || failed="$$failed ex-dna"; \
 	mix reach.check --arch --smells || failed="$$failed reach"; \
 	if [ -n "$$failed" ]; then \
 		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
@@ -121,7 +121,7 @@ lint.dialyzer.incremental:
 	mix dialyzer.incremental
 
 lint.ex-dna:
-	mix ex_dna --max-clones 112
+	mix ex_dna --max-clones 0
 
 lint.reach:
 	mix reach.check --arch --smells

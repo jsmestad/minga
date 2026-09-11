@@ -137,6 +137,23 @@ defmodule Minga.Core.UnicodeTest do
     end
   end
 
+  describe "position_at_byte_offset/2" do
+    test "maps byte offsets across lines and multibyte graphemes" do
+      lines = ["café", "a🥨b"]
+
+      assert Unicode.position_at_byte_offset(lines, 0) == {0, 0}
+      assert Unicode.position_at_byte_offset(lines, 3) == {0, 3}
+      assert Unicode.position_at_byte_offset(lines, 6) == {1, 0}
+      assert Unicode.position_at_byte_offset(lines, 7) == {1, 1}
+      assert Unicode.position_at_byte_offset(lines, 11) == {1, 2}
+    end
+
+    test "clamps offsets past the document to the last line" do
+      assert Unicode.position_at_byte_offset(["one", "two"], 99) == {1, 0}
+      assert Unicode.position_at_byte_offset([], 0) == {0, 0}
+    end
+  end
+
   # ── last_grapheme_byte_offset/1 ──────────────────────────────────────────
 
   describe "last_grapheme_byte_offset/1" do

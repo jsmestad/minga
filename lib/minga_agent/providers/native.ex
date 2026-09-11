@@ -699,39 +699,7 @@ defmodule MingaAgent.Providers.Native do
           last_user_prompt: content
       }
 
-      # Notify subscriber that agent is starting
-      notify(state.subscriber, %Event.AgentStart{})
-
-      # Spawn the agent turn loop in a linked task
-      lctx = %LoopCtx{
-        provider_pid: self(),
-        session_pid: state.subscriber,
-        model: state.model,
-        config: state.config,
-        tools: state.tools,
-        project_root: state.project_root,
-        project_view: state.project_view,
-        fork_store: state.fork_store,
-        changeset: state.changeset,
-        tool_metadata: state.tool_metadata,
-        thinking_level: state.thinking_level,
-        max_tokens: state.max_tokens,
-        max_retries: state.max_retries,
-        llm_client: state.llm_client,
-        hook_runner: state.hook_runner,
-        max_turns: state.max_turns,
-        max_cost: state.max_cost,
-        session_cost: state.session_cost
-      }
-
-      task =
-        Task.async(fn ->
-          run_agent_loop(lctx, context)
-        end)
-
-      state = %{state | task: task}
-
-      {:reply, :ok, state}
+      {:reply, :ok, start_agent_turn(state, context)}
     end
   end
 
@@ -768,33 +736,7 @@ defmodule MingaAgent.Providers.Native do
     context = Context.append(state.context, Context.user(continuation))
     state = %{state | context: context, streaming: true, interrupted: false}
 
-    notify(state.subscriber, %Event.AgentStart{})
-
-    lctx = %LoopCtx{
-      provider_pid: self(),
-      session_pid: state.subscriber,
-      model: state.model,
-      config: state.config,
-      tools: state.tools,
-      project_root: state.project_root,
-      project_view: state.project_view,
-      fork_store: state.fork_store,
-      changeset: state.changeset,
-      tool_metadata: state.tool_metadata,
-      thinking_level: state.thinking_level,
-      max_tokens: state.max_tokens,
-      max_retries: state.max_retries,
-      llm_client: state.llm_client,
-      hook_runner: state.hook_runner,
-      max_turns: state.max_turns,
-      max_cost: state.max_cost,
-      session_cost: state.session_cost
-    }
-
-    task = Task.async(fn -> run_agent_loop(lctx, context) end)
-    state = %{state | task: task}
-
-    {:reply, :ok, state}
+    {:reply, :ok, start_agent_turn(state, context)}
   end
 
   def handle_call({:activate_skill, name}, _from, state) do
@@ -1056,6 +998,35 @@ defmodule MingaAgent.Providers.Native do
     Log.info(:agent, "[Agent.Native] cost budget disabled")
     state = %{state | max_cost: nil}
     {:reply, :ok, clear_stuck_streaming(state)}
+  end
+
+  @spec start_agent_turn(state(), Context.t()) :: state()
+  defp start_agent_turn(state, context) do
+    notify(state.subscriber, %Event.AgentStart{})
+
+    loop_context = %LoopCtx{
+      provider_pid: self(),
+      session_pid: state.subscriber,
+      model: state.model,
+      config: state.config,
+      tools: state.tools,
+      project_root: state.project_root,
+      project_view: state.project_view,
+      fork_store: state.fork_store,
+      changeset: state.changeset,
+      tool_metadata: state.tool_metadata,
+      thinking_level: state.thinking_level,
+      max_tokens: state.max_tokens,
+      max_retries: state.max_retries,
+      llm_client: state.llm_client,
+      hook_runner: state.hook_runner,
+      max_turns: state.max_turns,
+      max_cost: state.max_cost,
+      session_cost: state.session_cost
+    }
+
+    task = Task.async(fn -> run_agent_loop(loop_context, context) end)
+    %{state | task: task}
   end
 
   @impl GenServer

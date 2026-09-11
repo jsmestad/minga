@@ -48,4 +48,20 @@ defmodule MingaEditor.UI.Theme.Palette.Base do
         raise ArgumentError, "theme palette is missing required key #{inspect(key)}"
     end
   end
+
+  @doc "Returns an optional color or its default and rejects invalid configured values."
+  @spec optional_color(map(), atom(), color()) :: color()
+  def optional_color(attrs, key, default) do
+    case Map.fetch(attrs, key) do
+      {:ok, value} when is_integer(value) and value >= 0 ->
+        value
+
+      {:ok, value} ->
+        raise ArgumentError,
+              "theme palette #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
+
+      :error ->
+        default
+    end
+  end
 end

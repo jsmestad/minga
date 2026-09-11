@@ -1144,10 +1144,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           :destroy
 
         {false, :ordinary} ->
-          case Buffer.dirty?(buf) do
-            true -> :refuse
-            false -> :destroy
-          end
+          if Buffer.dirty?(buf), do: :refuse, else: :destroy
       end
     catch
       :exit, _ -> :destroy
@@ -2320,15 +2317,13 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp save_all_buffers(state, [buf | rest]) do
     try do
-      case Buffer.dirty?(buf) do
-        true ->
-          case Buffer.save(buf) do
-            :ok -> save_all_buffers(state, rest)
-            {:error, _reason} -> {:error, state}
-          end
-
-        false ->
-          save_all_buffers(state, rest)
+      if Buffer.dirty?(buf) do
+        case Buffer.save(buf) do
+          :ok -> save_all_buffers(state, rest)
+          {:error, _reason} -> {:error, state}
+        end
+      else
+        save_all_buffers(state, rest)
       end
     catch
       :exit, _reason -> {:error, state}

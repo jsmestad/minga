@@ -52,10 +52,7 @@ defmodule MingaAgent.ToolPacks.ReadOnly do
 
   @doc "Returns source-owned specs for every tool in the bundled pack."
   @spec specs() :: [Spec.t()]
-  def specs do
-    MingaAgent.Tools.specs()
-    |> Enum.filter(&(&1.source == source()))
-  end
+  def specs, do: MingaAgent.Tools.specs_for_source(source())
 
   @doc "Registers all read-only pack specs into a registry table or service."
   @spec register(atom()) :: :ok | {:error, term()}

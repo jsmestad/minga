@@ -1,9 +1,8 @@
 defmodule MingaEditor.NativeIPC.Endpoint do
   @moduledoc false
 
-  import Bitwise
-
   alias MingaEditor.NativeIPC.Identity
+  alias MingaEditor.NativeIPC.RuntimeEntry
 
   @max_frame 65_536
   @descriptor_version 1
@@ -31,7 +30,7 @@ defmodule MingaEditor.NativeIPC.Endpoint do
       }
 
       with :ok <- File.chmod(socket_path, 0o600),
-           :ok <- validate_private_file(socket_path, :other, base.euid, 0o600),
+           :ok <- RuntimeEntry.validate_private(socket_path, :other, base.euid, 0o600),
            :ok <- publish_descriptor(endpoint.descriptor_path, endpoint.identity, base.euid) do
         {:ok, endpoint}
       else
@@ -86,7 +85,7 @@ defmodule MingaEditor.NativeIPC.Endpoint do
              [:exclusive]
            ),
          :ok <- File.chmod(temp, 0o600),
-         :ok <- validate_private_file(temp, :regular, euid, 0o600) do
+         :ok <- RuntimeEntry.validate_private(temp, :regular, euid, 0o600) do
       publish_current_descriptor(path, temp, identity, euid)
     else
       {:error, _reason} = error -> remove_temp_descriptor(temp, error)
@@ -105,7 +104,7 @@ defmodule MingaEditor.NativeIPC.Endpoint do
   @spec validate_published_descriptor(String.t(), Identity.t(), non_neg_integer()) ::
           :ok | {:error, term()}
   defp validate_published_descriptor(path, identity, euid) do
-    case validate_private_file(path, :regular, euid, 0o600) do
+    case RuntimeEntry.validate_private(path, :regular, euid, 0o600) do
       :ok ->
         :ok
 
@@ -129,22 +128,6 @@ defmodule MingaEditor.NativeIPC.Endpoint do
     end
 
     :ok
-  end
-
-  @spec validate_private_file(String.t(), atom(), non_neg_integer(), non_neg_integer()) ::
-          :ok | {:error, term()}
-  defp validate_private_file(path, expected_type, euid, permissions) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: ^expected_type, uid: ^euid, mode: mode}}
-      when (mode &&& 0o777) == permissions ->
-        :ok
-
-      {:ok, %File.Stat{} = stat} ->
-        {:error, {:insecure_runtime_entry, path, stat.type, stat.uid, stat.mode &&& 0o777}}
-
-      {:error, reason} ->
-        {:error, {:runtime_entry, path, reason}}
-    end
   end
 
   @spec random_socket_path(String.t()) :: String.t()

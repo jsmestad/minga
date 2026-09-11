@@ -41,35 +41,20 @@ defmodule MingaEditor.UI.Theme.Palette.Syntax do
   @doc "Builds the syntax palette from a flat theme map."
   @spec new(map(), Semantic.t(), Base.t()) :: t()
   def new(attrs, semantic, base) when is_map(attrs) do
-    functions = optional_color(attrs, :functions, semantic.info)
+    functions = Base.optional_color(attrs, :functions, semantic.info)
 
     %__MODULE__{
-      builtin: optional_color(attrs, :builtin, semantic.info),
+      builtin: Base.optional_color(attrs, :builtin, semantic.info),
       functions: functions,
-      keywords: optional_color(attrs, :keywords, semantic.highlight),
-      methods: optional_color(attrs, :methods, functions),
-      operators: optional_color(attrs, :operators, semantic.accent),
-      constants: optional_color(attrs, :constants, semantic.warning),
-      strings: optional_color(attrs, :strings, semantic.success),
-      numbers: optional_color(attrs, :numbers, semantic.warning),
-      type: optional_color(attrs, :type, semantic.warning),
-      variables: optional_color(attrs, :variables, base.fg),
-      comments: optional_color(attrs, :comments, base.muted)
+      keywords: Base.optional_color(attrs, :keywords, semantic.highlight),
+      methods: Base.optional_color(attrs, :methods, functions),
+      operators: Base.optional_color(attrs, :operators, semantic.accent),
+      constants: Base.optional_color(attrs, :constants, semantic.warning),
+      strings: Base.optional_color(attrs, :strings, semantic.success),
+      numbers: Base.optional_color(attrs, :numbers, semantic.warning),
+      type: Base.optional_color(attrs, :type, semantic.warning),
+      variables: Base.optional_color(attrs, :variables, base.fg),
+      comments: Base.optional_color(attrs, :comments, base.muted)
     }
-  end
-
-  @spec optional_color(map(), atom(), color()) :: color()
-  defp optional_color(attrs, key, default) do
-    case Map.fetch(attrs, key) do
-      {:ok, value} when is_integer(value) and value >= 0 ->
-        value
-
-      {:ok, value} ->
-        raise ArgumentError,
-              "theme palette #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
-
-      :error ->
-        default
-    end
   end
 end

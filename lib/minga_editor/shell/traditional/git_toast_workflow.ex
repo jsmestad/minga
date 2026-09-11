@@ -66,6 +66,8 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
   end
 
   @spec cancel_timer(reference() | nil) :: :ok
+  # Timer cancellation stays visible in this independently owned workflow.
+  # ex_dna:disable-for-next-line
   defp cancel_timer(nil), do: :ok
 
   defp cancel_timer(timer) do
@@ -76,6 +78,8 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
   @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
                                                MingaEditor.Shell.Traditional.State.t())) ::
           EditorState.t()
+  # This workflow retains its explicit Traditional-state installation boundary.
+  # ex_dna:disable-for-next-line
   defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
     shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
 

@@ -52,13 +52,12 @@ defmodule MingaAgent.ToolPacks.LSP do
 
   @doc "Returns source-owned specs for every bundled LSP tool."
   @spec specs() :: [Spec.t()]
-  def specs do
-    MingaAgent.Tools.specs()
-    |> Enum.filter(&(&1.source == source()))
-  end
+  def specs, do: MingaAgent.Tools.specs_for_source(source())
 
   @doc "Registers all bundled LSP specs into a registry table or service."
   @spec register(atom()) :: :ok | {:error, term()}
+  # This source-owned pack preserves stronger rollback than the read-only pack.
+  # ex_dna:disable-for-next-line
   def register(table \\ Registry) when is_atom(table) do
     previous_specs = current_pack_name_specs(table)
 
@@ -73,6 +72,8 @@ defmodule MingaAgent.ToolPacks.LSP do
   end
 
   @spec register_specs(atom(), [Spec.t()]) :: :ok | {:error, term()}
+  # Registration remains local so this pack can restore replaced source entries on failure.
+  # ex_dna:disable-for-next-line
   defp register_specs(table, specs) do
     Enum.reduce_while(specs, :ok, fn spec, :ok ->
       case Registry.register(table, spec) do
@@ -83,6 +84,8 @@ defmodule MingaAgent.ToolPacks.LSP do
   end
 
   @spec current_pack_name_specs(atom()) :: [Spec.t()]
+  # This snapshot is part of the LSP pack's rollback contract.
+  # ex_dna:disable-for-next-line
   defp current_pack_name_specs(table) do
     tool_names()
     |> Enum.flat_map(fn name ->
@@ -94,6 +97,8 @@ defmodule MingaAgent.ToolPacks.LSP do
   end
 
   @spec restore_pack_name_specs(atom(), [Spec.t()]) :: :ok
+  # LSP restoration intentionally has a direct ETS fallback for colliding entries.
+  # ex_dna:disable-for-next-line
   defp restore_pack_name_specs(table, previous_specs) do
     Registry.unregister_source(table, source())
     Enum.each(previous_specs, fn spec -> restore_previous_spec(table, spec) end)

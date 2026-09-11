@@ -166,7 +166,11 @@ defmodule MingaAgent.Tools do
 
   @doc "Returns source-owned built-in tool declarations."
   @spec builtin_specs() :: [Spec.t()]
-  def builtin_specs, do: Enum.filter(specs(), &(&1.source == :builtin))
+  def builtin_specs, do: specs_for_source(:builtin)
+
+  @doc "Returns canonical tool declarations owned by one source."
+  @spec specs_for_source(Spec.source()) :: [Spec.t()]
+  def specs_for_source(source), do: Enum.filter(specs(), &(&1.source == source))
 
   @doc "Returns all core built-in tool names."
   @spec builtin_names() :: [String.t()]
