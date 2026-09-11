@@ -110,26 +110,6 @@ defmodule MingaEditor.Shell.Traditional do
   @spec handle_gui_action(ShellState.t(), MingaEditor.Session.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Session.State.t()}
 
-  # No tab bar yet (GUI not initialized): close_tab is a no-op.
-  def handle_gui_action(%ShellState{tab_bar: nil} = shell_state, workspace, {:close_tab, _id}) do
-    {shell_state, workspace}
-  end
-
-  # Switch to the target tab if not already active. The actual buffer
-  # close is handled by the Editor after this returns.
-  def handle_gui_action(
-        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
-        workspace,
-        {:close_tab, id}
-      ) do
-    if tb.active_id != id do
-      {shell_state, workspace} = switch_to_buffer_tab(shell_state, workspace, id)
-      {shell_state, workspace}
-    else
-      {shell_state, workspace}
-    end
-  end
-
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
@@ -673,13 +653,6 @@ defmodule MingaEditor.Shell.Traditional do
     tb
     |> TabBar.visible_file_tabs()
     |> Enum.find(&tab_has_active_buffer?(&1, pid))
-  end
-
-  # Switch to an existing file tab that matches the buffer being opened.
-  @spec switch_to_buffer_tab(ShellState.t(), SessionState.t(), Tab.id()) ::
-          {ShellState.t(), SessionState.t()}
-  defp switch_to_buffer_tab(shell_state, workspace, target_id) do
-    switch_to_buffer_tab(shell_state, workspace, workspace, target_id)
   end
 
   @spec switch_to_buffer_tab(ShellState.t(), SessionState.t(), SessionState.t(), Tab.id()) ::

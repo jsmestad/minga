@@ -821,6 +821,30 @@ struct TabBarViewViewTests {
         #expect(strings.contains("test.ex"))
     }
 
+    @Test("Native close buttons emit the represented tab IDs without selecting them")
+    @MainActor func closeButtonsEmitRepresentedTabIds() throws {
+        let spy = SpyEncoder()
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 41, isActive: true, label: "active.ex"),
+            wireTab(id: 73, label: "inactive.ex"),
+        ])
+        let sut = TabBarView(tabBarState: state, encoder: spy)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        let closedIds = spy.guiActions.compactMap { action -> UInt32? in
+            if case let .closeTab(id) = action { return id }
+            return nil
+        }
+
+        #expect(closedIds.sorted() == [41, 73])
+        #expect(!spy.guiActions.contains(.selectTab(id: 73)))
+    }
+
     @Test("Inactive tab context menu actions use id-scoped events")
     @MainActor func inactiveTabContextMenuActionsUseIdScopedEvents() throws {
         let spy = SpyEncoder()

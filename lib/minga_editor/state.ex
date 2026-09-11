@@ -335,6 +335,45 @@ defmodule MingaEditor.State do
     end
   end
 
+  @doc "Snapshots the active tab and installs a caller-resolved close target without running normal tab-departure transitions."
+  @spec stage_tab_close(t(), Tab.t()) :: t()
+  def stage_tab_close(%__MODULE__{} = state, %Tab{id: target_id} = target) do
+    case traditional_tab_bar(state.shell_runtime) do
+      %TabBar{active_id: ^target_id} ->
+        state
+
+      %TabBar{active_id: current_id} = tab_bar ->
+        context = TabContext.snapshot(state.workspace)
+        tab_bar = TabBar.snapshot_and_switch(tab_bar, current_id, context, target_id)
+        runtime = install_tab_bar(state.shell_runtime, tab_bar)
+
+        state = %{state | shell_runtime: runtime}
+        restore_tab_context(state, target.context)
+
+      nil ->
+        state
+    end
+  end
+
+  @doc "Restores a caller-resolved replacement after a close without running normal tab-switch lifecycle effects."
+  @spec restore_tab_after_close(t(), Tab.t()) :: t()
+  def restore_tab_after_close(%__MODULE__{} = state, %Tab{id: target_id} = target) do
+    case traditional_tab_bar(state.shell_runtime) do
+      %TabBar{active_id: ^target_id} ->
+        restore_tab_context(state, target.context)
+
+      %TabBar{active_id: current_id} = tab_bar ->
+        context = TabContext.snapshot(state.workspace)
+        tab_bar = TabBar.snapshot_and_switch(tab_bar, current_id, context, target_id)
+        runtime = install_tab_bar(state.shell_runtime, tab_bar)
+        state = %{state | shell_runtime: runtime}
+        restore_tab_context(state, target.context)
+
+      nil ->
+        state
+    end
+  end
+
   @doc "Retires tab-scoped LSP correlations and their operation feedback atomically."
   @spec retire_lsp_operations_for_tab(t(), Tab.id() | nil) :: t()
   def retire_lsp_operations_for_tab(%__MODULE__{} = state, nil), do: state
