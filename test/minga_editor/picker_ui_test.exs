@@ -7,8 +7,10 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.Input.Picker, as: PickerInput
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FetchEffect
@@ -23,7 +25,9 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.State.Windows
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.ProjectFileCandidate
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -257,6 +261,44 @@ defmodule MingaEditor.PickerUITest do
     end)
   end
 
+  @spec file_picker_state(String.t()) :: {EditorState.t(), String.t(), binary()}
+  defp file_picker_state(tmp_dir) do
+    project = Path.join(tmp_dir, "find-file-project")
+    path = Path.join(project, "kept.bin")
+    bytes = <<0, 1, 2, "keep me">>
+    File.mkdir_p!(project)
+    File.write!(path, bytes)
+    {:ok, root} = Minga.Project.Root.directory(project)
+    {:ok, candidate} = ProjectFileCandidate.new(root, "kept.bin")
+
+    state = TestHelpers.base_state(content: "initial")
+
+    picker_state = %PickerState{
+      picker: Picker.new([%Item{id: candidate, label: "kept.bin"}], title: "Find file"),
+      source: FileSource,
+      restore: state.workspace.buffers.active_index
+    }
+
+    opened = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
+    {opened, path, bytes}
+  end
+
+  @spec stop_added_buffers(EditorState.t(), EditorState.t()) :: :ok
+  defp stop_added_buffers(result_state, initial_state) do
+    initial_buffers = MapSet.new(initial_state.workspace.buffers.list)
+
+    result_state.workspace.buffers.list
+    |> Enum.reject(&MapSet.member?(initial_buffers, &1))
+    |> Enum.each(&stop_pid/1)
+  end
+
+  @spec stop_pid(pid()) :: :ok
+  defp stop_pid(pid) do
+    GenServer.stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
   describe "picker cancel" do
     test "Escape closes a picker whose source omits on_cancel/1 without changing editor state" do
       state = TestHelpers.base_state(rendering: :disabled)
@@ -382,6 +424,51 @@ defmodule MingaEditor.PickerUITest do
 
       assert result.shell_runtime.state.modal == :none
       assert result.shell_runtime.state.notice.message == "Deleted via action"
+    end
+  end
+
+  describe "Find file actions" do
+    @tag :tmp_dir
+    test "C-d is a no-op that keeps the picker open and preserves disk bytes", %{
+      tmp_dir: tmp_dir
+    } do
+      {state, path, bytes} = file_picker_state(tmp_dir)
+
+      assert {:handled, result} =
+               PickerInput.handle_key(state, ?d, MingaEditor.Input.mod_ctrl())
+
+      assert result == state
+      assert {:picker, %{picker_ui: %{action_menu: nil}}} = result.shell_runtime.state.modal
+      assert File.read!(path) == bytes
+    end
+
+    @tag :tmp_dir
+    test "Actions offers only Open and dispatches it without changing disk bytes", %{
+      tmp_dir: tmp_dir
+    } do
+      {state, path, bytes} = file_picker_state(tmp_dir)
+
+      assert {:handled, menu_state} =
+               PickerInput.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
+
+      assert {:picker, %{picker_ui: %{action_menu: {[{"Open", :open}], 0}}}} =
+               menu_state.shell_runtime.state.modal
+
+      model =
+        menu_state
+        |> MingaEditor.Frontend.Emit.Context.from_editor_state()
+        |> PickerBuilder.build()
+
+      assert model.action_menu.actions == ["Open"]
+      refute "Delete" in model.action_menu.actions
+      assert File.read!(path) == bytes
+
+      assert {:handled, opened_state} = PickerInput.handle_key(menu_state, 13, 0)
+      on_exit(fn -> stop_added_buffers(opened_state, state) end)
+
+      assert opened_state.shell_runtime.state.modal == :none
+      assert Minga.Buffer.file_path(opened_state.workspace.buffers.active) == path
+      assert File.read!(path) == bytes
     end
   end
 
