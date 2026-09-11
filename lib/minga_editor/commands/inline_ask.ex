@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   alias Minga.Mode.VisualState
   alias Minga.Project.FileRef
   alias MingaEditor.AgentLifecycle
+  alias MingaEditor.BufferFileIdentity
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.InlineAsk
@@ -171,30 +172,8 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec file_ref_for_active_buffer(state(), pid()) ::
           {:ok, FileRef.t(), String.t()} | {:error, String.t()}
-  defp file_ref_for_active_buffer(state, buffer_pid) do
-    case Buffer.file_path(buffer_pid) do
-      path when is_binary(path) ->
-        root = project_root(state)
-
-        case FileRef.from_path(root, path) do
-          {:ok, file_ref} ->
-            {:ok, file_ref, file_ref.display_name}
-
-          {:error, :outside_project} ->
-            {:ok, FileRef.from_buffer(buffer_pid), Path.basename(path)}
-        end
-
-      _ ->
-        file_ref = FileRef.from_buffer(buffer_pid)
-        {:ok, file_ref, file_ref.display_name}
-    end
-  end
-
-  @spec project_root(state()) :: String.t()
-  defp project_root(state) do
-    file_tree = state.workspace.file_tree
-    file_tree.project_root || file_tree.original_root || File.cwd!()
-  end
+  defp file_ref_for_active_buffer(state, buffer_pid),
+    do: BufferFileIdentity.resolve(state, buffer_pid)
 
   @spec anchor_line(state(), non_neg_integer()) :: non_neg_integer()
   defp anchor_line(state, fallback_line) do

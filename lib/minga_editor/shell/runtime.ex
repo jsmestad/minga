@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Runtime do
   alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.StateStash
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.TabBar
 
   @type shell_state :: MingaEditor.Shell.shell_state()
   @type stash :: %{Identity.t() => StateStash.t()}
@@ -53,6 +54,14 @@ defmodule MingaEditor.Shell.Runtime do
   @doc "Returns the active shell state."
   @spec state(t()) :: shell_state()
   def state(%__MODULE__{state: state}), do: state
+
+  @doc "Returns the active Traditional tab bar, or nil for another shell."
+  @spec traditional_tab_bar(t()) :: TabBar.t() | nil
+  def traditional_tab_bar(%__MODULE__{state: %TraditionalState{} = shell_state}) do
+    TraditionalState.tab_bar(shell_state)
+  end
+
+  def traditional_tab_bar(%__MODULE__{}), do: nil
 
   @doc "Returns the identity-keyed shell-state stash."
   @spec stash(t()) :: stash()

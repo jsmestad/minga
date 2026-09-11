@@ -42,39 +42,24 @@ defmodule MingaEditor.UI.Theme.Palette.Semantic do
   @spec new(map(), :dark | :light, Base.t()) :: t()
   def new(attrs, variant, base) when is_map(attrs) do
     # `accent` is the construction input, `highlight` is the concrete UI source used by slots.
-    accent = optional_color(attrs, :accent, default_info(variant))
-    highlight = optional_color(attrs, :highlight, accent)
-    warning = optional_color(attrs, :warning, default_warning(variant))
-    info = optional_color(attrs, :info, accent)
+    accent = Base.optional_color(attrs, :accent, default_info(variant))
+    highlight = Base.optional_color(attrs, :highlight, accent)
+    warning = Base.optional_color(attrs, :warning, default_warning(variant))
+    info = Base.optional_color(attrs, :info, accent)
 
     %__MODULE__{
       accent: accent,
       highlight: highlight,
-      selection_bg: optional_color(attrs, :selection_bg, base.surface),
-      error: optional_color(attrs, :error, default_error(variant)),
+      selection_bg: Base.optional_color(attrs, :selection_bg, base.surface),
+      error: Base.optional_color(attrs, :error, default_error(variant)),
       warning: warning,
       info: info,
-      success: optional_color(attrs, :success, default_success(variant)),
-      match: optional_color(attrs, :match, warning),
-      link: optional_color(attrs, :link, info),
-      border: optional_color(attrs, :border, base.subtle),
-      contrast_fg: optional_color(attrs, :contrast_fg, default_contrast_fg(variant, base.bg))
+      success: Base.optional_color(attrs, :success, default_success(variant)),
+      match: Base.optional_color(attrs, :match, warning),
+      link: Base.optional_color(attrs, :link, info),
+      border: Base.optional_color(attrs, :border, base.subtle),
+      contrast_fg: Base.optional_color(attrs, :contrast_fg, default_contrast_fg(variant, base.bg))
     }
-  end
-
-  @spec optional_color(map(), atom(), color()) :: color()
-  defp optional_color(attrs, key, default) do
-    case Map.fetch(attrs, key) do
-      {:ok, value} when is_integer(value) and value >= 0 ->
-        value
-
-      {:ok, value} ->
-        raise ArgumentError,
-              "theme palette #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
-
-      :error ->
-        default
-    end
   end
 
   @spec default_contrast_fg(:dark | :light, color()) :: color()

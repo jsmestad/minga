@@ -93,24 +93,25 @@ defmodule MingaAgent.ProjectView do
 
   @doc "Returns backend-specific diff data for the view."
   @spec diff(t()) :: {:ok, [map()]} | {:error, term()}
-  def diff(%__MODULE__{} = view), do: view.backend.diff(view)
+  def diff(%__MODULE__{} = view), do: call_backend(fn -> view.backend.diff(view) end)
 
   @doc "Promotes view-local changes to `target`."
   @spec promote(t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
-  def promote(%__MODULE__{} = view, target), do: view.backend.promote(view, target)
+  def promote(%__MODULE__{} = view, target),
+    do: call_backend(fn -> view.backend.promote(view, target) end)
 
   @doc "Discards one file from view-local state."
   @spec discard_file(t(), String.t()) :: :ok | {:error, term()}
   def discard_file(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
     with {:ok, path} <- normalize_relative_path(relative_path),
          :ok <- reject_tombstone_suffix(path) do
-      view.backend.discard_file(view, path)
+      call_backend(fn -> view.backend.discard_file(view, path) end)
     end
   end
 
   @doc "Discards view-local state."
   @spec discard(t()) :: :ok | {:error, term()}
-  def discard(%__MODULE__{} = view), do: view.backend.discard(view)
+  def discard(%__MODULE__{} = view), do: call_backend(fn -> view.backend.discard(view) end)
 
   @doc "Releases backend-owned resources for the view."
   @spec close(t()) :: :ok | {:error, term()}
@@ -187,6 +188,13 @@ defmodule MingaAgent.ProjectView do
   @spec tombstone_component?([String.t()]) :: boolean()
   defp tombstone_component?(components) do
     Enum.any?(components, &String.ends_with?(&1, ".__changeset_deleted__"))
+  end
+
+  @spec call_backend((-> term())) :: term()
+  defp call_backend(operation) do
+    operation.()
+  catch
+    :exit, reason -> {:error, {:project_view_unavailable, reason}}
   end
 
   @spec unique_id() :: String.t()

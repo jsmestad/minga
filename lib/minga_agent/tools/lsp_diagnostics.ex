@@ -46,7 +46,7 @@ defmodule MingaAgent.Tools.LspDiagnostics do
 
   @spec format_diagnostics(String.t(), [Diagnostics.Diagnostic.t()]) :: String.t()
   defp format_diagnostics(path, diagnostics) do
-    counts = count_by_severity(diagnostics)
+    counts = Diagnostics.severity_counts(diagnostics)
     summary = format_counts(counts)
     rel = relative_path(path)
     header = "#{rel}: #{Enum.count(diagnostics)} diagnostics (#{summary})"
@@ -59,13 +59,6 @@ defmodule MingaAgent.Tools.LspDiagnostics do
       end)
 
     Enum.join([header | details], "\n")
-  end
-
-  @spec count_by_severity([Diagnostics.Diagnostic.t()]) :: %{atom() => non_neg_integer()}
-  defp count_by_severity(diagnostics) do
-    Enum.reduce(diagnostics, %{error: 0, warning: 0, info: 0, hint: 0}, fn diag, acc ->
-      Map.update!(acc, diag.severity, &(&1 + 1))
-    end)
   end
 
   @spec format_counts(%{atom() => non_neg_integer()}) :: String.t()

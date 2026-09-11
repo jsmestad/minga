@@ -8,6 +8,7 @@ defmodule MingaEditor.NativeIPC.Server do
 
   alias MingaEditor.NativeIPC.Endpoint
   alias MingaEditor.NativeIPC.Identity
+  alias MingaEditor.NativeIPC.RuntimeEntry
   alias MingaEditor.NativeIPC.Server.State
 
   @runtime_directory_name "com.minga.editor"
@@ -185,7 +186,7 @@ defmodule MingaEditor.NativeIPC.Server do
   @spec prepare_runtime_dir(String.t(), non_neg_integer()) :: :ok | {:error, term()}
   defp prepare_runtime_dir(path, euid) do
     case File.lstat(path) do
-      {:ok, _stat} -> validate_private_file(path, :directory, euid, 0o700)
+      {:ok, _stat} -> RuntimeEntry.validate_private(path, :directory, euid, 0o700)
       {:error, :enoent} -> create_runtime_dir(path, euid)
       {:error, reason} -> {:error, {:runtime_directory, reason}}
     end
@@ -195,27 +196,11 @@ defmodule MingaEditor.NativeIPC.Server do
   defp create_runtime_dir(path, euid) do
     with :ok <- File.mkdir(path),
          :ok <- File.chmod(path, 0o700),
-         :ok <- validate_private_file(path, :directory, euid, 0o700) do
+         :ok <- RuntimeEntry.validate_private(path, :directory, euid, 0o700) do
       :ok
     else
-      {:error, :eexist} -> validate_private_file(path, :directory, euid, 0o700)
+      {:error, :eexist} -> RuntimeEntry.validate_private(path, :directory, euid, 0o700)
       {:error, reason} -> {:error, {:runtime_directory, reason}}
-    end
-  end
-
-  @spec validate_private_file(String.t(), atom(), non_neg_integer(), non_neg_integer()) ::
-          :ok | {:error, term()}
-  defp validate_private_file(path, expected_type, euid, permissions) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: ^expected_type, uid: ^euid, mode: mode}}
-      when (mode &&& 0o777) == permissions ->
-        :ok
-
-      {:ok, %File.Stat{} = stat} ->
-        {:error, {:insecure_runtime_entry, path, stat.type, stat.uid, stat.mode &&& 0o777}}
-
-      {:error, reason} ->
-        {:error, {:runtime_entry, path, reason}}
     end
   end
 

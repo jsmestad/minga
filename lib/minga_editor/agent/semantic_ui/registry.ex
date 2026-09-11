@@ -45,6 +45,8 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
 
   @doc "Starts the semantic UI registry."
   @spec start_link(keyword()) :: GenServer.on_start()
+  # OTP startup is intentionally explicit for this source-owned registry.
+  # ex_dna:disable-for-next-line
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
@@ -52,6 +54,8 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
 
   @doc false
   @spec child_spec(keyword()) :: Supervisor.child_spec()
+  # OTP child metadata is intentionally explicit for this source-owned registry.
+  # ex_dna:disable-for-next-line
   def child_spec(opts) do
     id = Keyword.get(opts, :name, __MODULE__)
     %{id: id, start: {__MODULE__, :start_link, [opts]}, type: :worker}
@@ -106,6 +110,8 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
   @doc "Unregisters an entry when it is owned by the caller's source."
   @spec unregister(source(), String.t()) :: :ok | {:error, term()}
   @spec unregister(table(), source(), String.t()) :: :ok | {:error, term()}
+  # The semantic UI registry keeps its distinct source and notification contract.
+  # ex_dna:disable-for-next-line
   def unregister(source, id), do: unregister(@table, source, id)
 
   def unregister(table, source, id) when is_binary(id) do
@@ -564,6 +570,8 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
   end
 
   @spec remove_source_entries(table(), source()) :: boolean()
+  # Source cleanup is intentionally local to the semantic UI registry's entry type.
+  # ex_dna:disable-for-next-line
   defp remove_source_entries(table, source) do
     table
     |> :ets.tab2list()

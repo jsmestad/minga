@@ -4,6 +4,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   import Bitwise
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.VimMode
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.StatusBar
@@ -64,7 +65,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
         @section_identity,
         Writer.new(@command)
         |> Writer.uint8(:content_kind, content_kind_byte(content_kind))
-        |> Writer.uint8(:mode, encode_vim_mode(data.mode))
+        |> Writer.uint8(:mode, VimMode.encode(data.mode))
         |> Writer.uint8(:flags, build_status_flags(data))
         |> Writer.finish()
       ),
@@ -326,18 +327,6 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     italic = if Keyword.get(opts, :italic, false), do: 0x04, else: 0x00
     bold ||| underline ||| italic
   end
-
-  @spec encode_vim_mode(atom()) :: non_neg_integer()
-  defp encode_vim_mode(:normal), do: 0
-  defp encode_vim_mode(:insert), do: 1
-  defp encode_vim_mode(:visual), do: 2
-  defp encode_vim_mode(:visual_line), do: 2
-  defp encode_vim_mode(:command), do: 3
-  defp encode_vim_mode(:operator_pending), do: 4
-  defp encode_vim_mode(:search), do: 5
-  defp encode_vim_mode(:search_prompt), do: 5
-  defp encode_vim_mode(:replace), do: 6
-  defp encode_vim_mode(_), do: 0
 
   @spec encode_indent_type(Indent.t()) :: non_neg_integer()
   defp encode_indent_type(%Indent{type: :tabs}), do: 1

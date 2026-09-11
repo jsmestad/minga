@@ -77,6 +77,8 @@ defmodule Minga.Extension.Panel do
 
   @spec remove(atom(), term()) :: :ok
   @spec remove(table(), atom(), term()) :: :ok
+  # Panel and overlay registries expose parallel typed APIs over different entry contracts.
+  # ex_dna:disable-for-next-line
   def remove(extension_name, panel_id), do: remove(@table, extension_name, panel_id)
 
   def remove(table, extension_name, panel_id) when is_atom(extension_name) do
@@ -109,6 +111,8 @@ defmodule Minga.Extension.Panel do
 
   @spec all() :: [entry()]
   @spec all(table()) :: [entry()]
+  # Panel enumeration preserves panel-specific visibility and entry semantics.
+  # ex_dna:disable-for-next-line
   def all, do: all(@table)
 
   def all(table) do
@@ -121,6 +125,8 @@ defmodule Minga.Extension.Panel do
 
   @spec empty?() :: boolean()
   @spec empty?(table()) :: boolean()
+  # This typed panel query intentionally mirrors the overlay registry surface.
+  # ex_dna:disable-for-next-line
   def empty?, do: empty?(@table)
   def empty?(table), do: !table_ready?(table) or :ets.info(table, :size) == 0
 

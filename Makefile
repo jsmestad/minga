@@ -1,4 +1,4 @@
-.PHONY: help lint lint.full lint.format lint.credo lint.credo.changed lint.compile lint.dialyzer lint.dialyzer.incremental lint.fix test test.llm \
+.PHONY: help lint lint.full lint.format lint.credo lint.credo.changed lint.compile lint.dialyzer lint.dialyzer.incremental lint.ex-dna lint.reach lint.fix test test.llm \
        native.support native.tui native.go-tui xcodegen-install xcodegen-generate \
        release release-tui release-mac install install-tui install-mac uninstall
 
@@ -12,8 +12,8 @@ help:
 	@printf "  \033[1mbin/minga\033[0m          Launch the Go/Bubble Tea TUI\n"
 	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
 	@printf "\033[1;36mQuality checks\033[0m\n"
-	@printf "  \033[1mmake lint\033[0m          Fast local format, changed Credo, compile, and incremental Dialyzer\n"
-	@printf "  \033[1mmake lint.full\033[0m     Full format, Credo, compile, and classic Dialyzer\n"
+	@printf "  \033[1mmake lint\033[0m          Local format, changed Credo, compile, Dialyzer, ExDNA, and Reach\n"
+	@printf "  \033[1mmake lint.full\033[0m     Full format, Credo, compile, Dialyzer, ExDNA, and Reach\n"
 	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict Credo\n"
 	@printf "  \033[1mmake test\033[0m          Build parser support and run the full ExUnit suite\n"
 	@printf "  \033[1mmake test.llm\033[0m      Build parser support and run LLM-friendly tests\n\n"
@@ -67,7 +67,7 @@ endif
 
 # ── Lint ────────────────────────────────────────────────────────────────
 
-# Run the fast local lint gate. Each step runs independently so later checks
+# Run the local lint gate. Each step runs independently so later checks
 # still report failures when an earlier check fails.
 lint:
 	@failed=""; \
@@ -75,6 +75,8 @@ lint:
 	scripts/credo_changed || failed="$$failed credo"; \
 	mix compile --warnings-as-errors || failed="$$failed compile"; \
 	mix dialyzer.incremental || failed="$$failed dialyzer"; \
+	mix ex_dna --max-clones 0 || failed="$$failed ex-dna"; \
+	mix reach.check --arch --smells || failed="$$failed reach"; \
 	if [ -n "$$failed" ]; then \
 		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
 		exit 1; \
@@ -91,6 +93,8 @@ lint.full:
 	mix compile --warnings-as-errors || failed="$$failed compile"; \
 	mix dialyzer || failed="$$failed dialyzer"; \
 	wait "$$credo_pid" || failed="$$failed credo"; \
+	mix ex_dna --max-clones 0 || failed="$$failed ex-dna"; \
+	mix reach.check --arch --smells || failed="$$failed reach"; \
 	if [ -n "$$failed" ]; then \
 		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
 		exit 1; \
@@ -115,6 +119,12 @@ lint.dialyzer:
 
 lint.dialyzer.incremental:
 	mix dialyzer.incremental
+
+lint.ex-dna:
+	mix ex_dna --max-clones 0
+
+lint.reach:
+	mix reach.check --arch --smells
 
 lint.fix:
 	mix format

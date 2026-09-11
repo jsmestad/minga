@@ -36,6 +36,8 @@ defmodule MingaAgent.StatusCommand do
 
   @doc false
   @spec child_spec(keyword()) :: Supervisor.child_spec()
+  # OTP child metadata is explicit for this independently supervised service.
+  # ex_dna:disable-for-next-line
   def child_spec(opts) do
     %{
       id: Keyword.get(opts, :id, __MODULE__),

@@ -20,6 +20,32 @@ defmodule MingaEditor.State.WorkspaceReviewTest do
     refute WorkspaceReview.pending?(review)
   end
 
+  test "converts supported conflict details into file references", %{file_ref_a: file_ref_a} do
+    details = %{
+      conflicts: [
+        {:conflict, "lib/a.ex", :changed},
+        {"lib/b.ex", {:conflict, :changed}},
+        {"lib/c.ex", {:error, :unreadable}},
+        {:unknown, "lib/ignored.ex"}
+      ]
+    }
+
+    assert [^file_ref_a, file_ref_b, file_ref_c] =
+             WorkspaceReview.conflict_file_refs("/tmp/minga", details)
+
+    assert file_ref_b.relative_path == "lib/b.ex"
+    assert file_ref_c.relative_path == "lib/c.ex"
+    assert WorkspaceReview.conflict_file_refs(nil, details) == []
+    assert WorkspaceReview.conflict_file_refs("/tmp/minga", %{}) == []
+  end
+
+  test "converts diff entries into unique file references", %{file_ref_a: file_ref_a} do
+    entries = [%{path: "lib/a.ex"}, %{path: "lib/a.ex"}, %{path: "lib/b.ex"}, %{status: :bad}]
+
+    assert [^file_ref_a, file_ref_b] = WorkspaceReview.changed_file_refs("/tmp/minga", entries)
+    assert file_ref_b.relative_path == "lib/b.ex"
+  end
+
   test "legal transition path covers draft, review, conflict, and clean", %{
     file_ref_a: file_ref_a
   } do

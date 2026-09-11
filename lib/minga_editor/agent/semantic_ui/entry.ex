@@ -118,6 +118,8 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
   defp publish_actions(actions, _existing), do: actions(actions)
 
   @spec required_string(map(), atom()) :: {:ok, String.t()} | {:error, term()}
+  # This boundary validates its own entry type and error vocabulary.
+  # ex_dna:disable-for-next-line
   defp required_string(attrs, key), do: required_binary_value(Map.get(attrs, key), key)
 
   @spec required_binary_value(term(), atom()) :: {:ok, String.t()} | {:error, term()}

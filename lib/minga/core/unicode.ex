@@ -321,6 +321,27 @@ defmodule Minga.Core.Unicode do
     end
   end
 
+  @doc "Converts a document byte offset into a zero-based line and grapheme column."
+  @spec position_at_byte_offset([String.t()], non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  def position_at_byte_offset(lines, byte_offset) do
+    do_position_at_byte_offset(lines, byte_offset, 0)
+  end
+
+  @spec do_position_at_byte_offset([String.t()], non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp do_position_at_byte_offset([], _remaining, line_index), do: {max(line_index - 1, 0), 0}
+
+  defp do_position_at_byte_offset([line | rest], remaining, line_index) do
+    line_bytes = byte_size(line) + 1
+
+    if remaining < line_bytes do
+      {line_index, grapheme_col(line, remaining)}
+    else
+      do_position_at_byte_offset(rest, remaining - line_bytes, line_index + 1)
+    end
+  end
+
   @doc """
   Converts a byte column to a display column by summing grapheme display
   widths for the first `byte_col` bytes of `text`.

@@ -10,6 +10,7 @@ defmodule MingaAgent.Tools.Find do
   alias MingaAgent.Tools.DirectoryListing
   alias MingaAgent.Tools.OutputLimit
   alias MingaAgent.Tools.PathIgnore
+  alias MingaAgent.Tools.SearchRoot
 
   @max_results 1_000
   @max_output_bytes OutputLimit.default_max_bytes()
@@ -31,22 +32,11 @@ defmodule MingaAgent.Tools.Find do
 
   @spec execute(String.t(), String.t(), map(), exec_opts()) ::
           {:ok, String.t()} | {:error, String.t()}
+  # Find and grep retain separate typed adapters after sharing search-root policy.
+  # ex_dna:disable-for-next-line
   def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
       when is_binary(pattern) and is_binary(path) do
-    filter_root = Keyword.get(exec_opts, :filter_root, path)
-
-    if File.dir?(path) do
-      if ignored_search_root?(filter_root),
-        do: {:ok, "No matches found."},
-        else: do_execute(pattern, path, public_opts(opts), exec_opts)
-    else
-      {:error, "Directory does not exist: #{path}"}
-    end
-  end
-
-  @spec ignored_search_root?(String.t()) :: boolean()
-  defp ignored_search_root?(path) do
-    PathIgnore.ignored_path?(path)
+    SearchRoot.run(pattern, path, public_opts(opts), exec_opts, &do_execute/4)
   end
 
   @spec public_opts(map()) :: map()

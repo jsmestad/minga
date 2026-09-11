@@ -239,12 +239,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   end
 
   @spec traditional_tab_bar(EditorState.t()) :: TabBar.t() | nil
-  defp traditional_tab_bar(state) do
-    case Runtime.state(state.shell_runtime) do
-      %TraditionalState{} = shell_state -> TraditionalState.tab_bar(shell_state)
-      _other_shell_state -> nil
-    end
-  end
+  defp traditional_tab_bar(state), do: Runtime.traditional_tab_bar(state.shell_runtime)
 
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
   defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do

@@ -263,8 +263,11 @@ defmodule Minga.MixProject do
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:req_llm, "~> 1.16"},
       {:req, "~> 0.6.2"},
+      {:vibe_kit, "~> 0.1.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false},
+      {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:telemetry, "~> 1.0"},
       {:toml, "~> 0.7.0"},
@@ -391,7 +394,17 @@ defmodule Minga.MixProject do
       ],
       # lint runs via Makefile (`make lint`) so all steps run even if one
       # fails. Mix aliases stop on first failure, which skips dialyzer.
-      "lint.fix": ["format", "credo --strict"]
+      "lint.fix": ["format", "credo --strict"],
+      ci: [
+        "native.build.support",
+        "compile --warnings-as-errors",
+        "format --check-formatted",
+        "cmd env MIX_ENV=test mix test --max-cases 4 --timeout 120000",
+        "credo --strict",
+        "dialyzer",
+        "ex_dna --max-clones 0",
+        "reach.check --arch --smells"
+      ]
     ]
   end
 end

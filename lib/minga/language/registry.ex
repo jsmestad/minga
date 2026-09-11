@@ -261,7 +261,7 @@ defmodule Minga.Language.Registry do
     ensure_source_table!()
 
     lang
-    |> language_keys()
+    |> Language.identity_keys()
     |> Enum.reduce_while(:ok, fn key, :ok -> validate_source_key(key, source) end)
   end
 
@@ -278,15 +278,6 @@ defmodule Minga.Language.Registry do
       [] ->
         {:cont, :ok}
     end
-  end
-
-  @spec language_keys(Language.t()) :: [term()]
-  defp language_keys(%Language{} = lang) do
-    name_key = {:name, lang.name}
-    ext_keys = Enum.map(lang.extensions, &{:ext, String.downcase(&1)})
-    filename_keys = Enum.map(lang.filenames, &{:filename, &1})
-    shebang_keys = Enum.map(lang.shebangs, &{:shebang, &1})
-    [name_key | ext_keys ++ filename_keys ++ shebang_keys]
   end
 
   @spec remove_index_entries(Language.t()) :: :ok

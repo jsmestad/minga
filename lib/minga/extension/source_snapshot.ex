@@ -137,6 +137,8 @@ defmodule Minga.Extension.SourceSnapshot do
   end
 
   @spec limit(keyword(), atom(), pos_integer()) :: pos_integer()
+  # Snapshot limits intentionally share the validator's positive-default rule at this boundary.
+  # ex_dna:disable-for-next-line
   defp limit(opts, key, default) do
     case Keyword.get(opts, key, default) do
       value when is_integer(value) and value > 0 -> value

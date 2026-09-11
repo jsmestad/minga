@@ -77,7 +77,7 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     send_ex_sync(ctx, "wq")
 
     assert File.read!(second_path) == " editedsecond"
-    assert length(visible_file_tabs(ctx, active_workspace_id(ctx))) == 1
+    assert [_remaining_tab] = visible_file_tabs(ctx, active_workspace_id(ctx))
     refute "second.txt" in tab_labels(ctx)
     refute_received {:shutdown, 0}
   end

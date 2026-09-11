@@ -96,6 +96,16 @@ defmodule Minga.Language do
     to: Minga.Language.TreeSitter,
     as: :register_grammar
 
+  @doc "Returns every registry identity key claimed by a language definition."
+  @spec identity_keys(t()) :: [term()]
+  def identity_keys(%__MODULE__{} = language) do
+    name_key = {:name, language.name}
+    extension_keys = Enum.map(language.extensions, &{:ext, String.downcase(&1)})
+    filename_keys = Enum.map(language.filenames, &{:filename, &1})
+    shebang_keys = Enum.map(language.shebangs, &{:shebang, &1})
+    [name_key | extension_keys ++ filename_keys ++ shebang_keys]
+  end
+
   # ── Language lookup ──────────────────────────────────────────────────────
 
   @doc "Returns the language definition for a name atom (e.g., `:elixir`), or nil."

@@ -5,6 +5,8 @@ defmodule MingaEditor.ChangeRecorder do
   The `phase` carries exactly one active lifecycle, while replay can preserve a post-replay recording phase that is restored after the outermost replay returns normally.
   """
 
+  alias MingaEditor.Recorder.ReplayPhase
+
   defstruct phase: :idle,
             pending_keys: [],
             last_change: nil
@@ -81,24 +83,14 @@ defmodule MingaEditor.ChangeRecorder do
   def get_last_change(%__MODULE__{last_change: lc}), do: lc
 
   @spec start_replay(t()) :: t()
-  def start_replay(%__MODULE__{phase: {:replaying, depth, post}} = rec) do
-    %{rec | phase: {:replaying, depth + 1, post}}
-  end
-
+  # Each recorder remains the sole writer of its struct after sharing the phase calculation.
+  # ex_dna:disable-for-next-line
   def start_replay(%__MODULE__{phase: phase} = rec) do
-    %{rec | phase: {:replaying, 1, phase}}
+    %{rec | phase: ReplayPhase.start(phase)}
   end
 
   @spec stop_replay(t()) :: t()
-  def stop_replay(%__MODULE__{phase: {:replaying, depth, post}} = rec) when depth > 1 do
-    %{rec | phase: {:replaying, depth - 1, post}}
-  end
-
-  def stop_replay(%__MODULE__{phase: {:replaying, 1, post}} = rec) do
-    %{rec | phase: post}
-  end
-
-  def stop_replay(%__MODULE__{} = rec), do: rec
+  def stop_replay(%__MODULE__{phase: phase} = rec), do: %{rec | phase: ReplayPhase.stop(phase)}
 
   @spec recording?(t()) :: boolean()
   def recording?(%__MODULE__{phase: {:recording, _keys}}), do: true
@@ -106,8 +98,7 @@ defmodule MingaEditor.ChangeRecorder do
   def recording?(%__MODULE__{}), do: false
 
   @spec replaying?(t()) :: boolean()
-  def replaying?(%__MODULE__{phase: {:replaying, _depth, _post}}), do: true
-  def replaying?(%__MODULE__{}), do: false
+  def replaying?(%__MODULE__{phase: phase}), do: ReplayPhase.active?(phase)
 
   @spec replace_count([key()], non_neg_integer() | nil) :: [key()]
   def replace_count(keys, nil), do: keys
