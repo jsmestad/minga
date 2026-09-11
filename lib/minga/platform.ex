@@ -12,7 +12,7 @@ defmodule Minga.Platform do
   @doc """
   Moves the given path to the system trash.
 
-  On macOS, uses AppleScript to ask Finder to trash the item (supports Undo).
+  On macOS, uses Foundation's native Trash API.
   On Linux, uses `gio trash` (freedesktop Trash spec).
 
   Returns `:ok` on success, or `{:error, reason}` if the trash operation failed

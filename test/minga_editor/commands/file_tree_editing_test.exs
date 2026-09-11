@@ -418,6 +418,31 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       refute FileTreeState.focused?(restored.workspace.file_tree)
       assert restored.workspace.keymap_scope == :editor
     end
+
+    test "trash failure preserves the selected path and requires permanent-delete confirmation",
+         %{
+           tmp_dir: dir,
+           events_registry: events_registry
+         } do
+      path = Path.join(dir, "selected.txt")
+      File.write!(path, "keep until separately confirmed")
+
+      delete_state = Minga.Mode.DeleteConfirmState.new(path, "selected.txt", false)
+      state = make_state(dir, events_registry)
+      workspace = SessionState.transition_mode(state.workspace, :delete_confirm, delete_state)
+      state = %{state | workspace: workspace}
+
+      Minga.Platform.Stub.set_trash_result({:error, "native trash failed"})
+
+      result = Commands.execute(state, {:delete_confirm_trash, path})
+
+      assert result.workspace.editing.mode == :delete_confirm
+      assert result.workspace.editing.mode_state.phase == :permanent
+      assert result.workspace.editing.mode_state.path == path
+      assert File.read!(path) == "keep until separately confirmed"
+    after
+      Minga.Platform.Stub.set_trash_result(:ok)
+    end
   end
 
   describe "[command-state] rename to same name cancels" do
