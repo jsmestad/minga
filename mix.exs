@@ -47,7 +47,7 @@ defmodule Minga.MixProject do
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
-        plt_add_apps: [:llm_db, :mix, :plug, :plug_crypto, :thousand_island, :websock],
+        plt_add_apps: [:llm_db, :mix, :plug, :plug_crypto, :thousand_island, :websock, :ex_unit],
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
       consolidate_protocols: Mix.env() != :prod,
@@ -228,7 +228,8 @@ defmodule Minga.MixProject do
         "test.debug": :test,
         "test.quick": :test,
         "test.heavy": :test,
-        conformance: :test
+        conformance: :test,
+        ci: :test
       ]
     ]
   end
@@ -265,7 +266,9 @@ defmodule Minga.MixProject do
       {:req, "~> 0.6.2"},
       {:vibe_kit, "~> 0.1.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false},
+      {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:telemetry, "~> 1.0"},
       {:toml, "~> 0.7.0"},
@@ -392,7 +395,16 @@ defmodule Minga.MixProject do
       ],
       # lint runs via Makefile (`make lint`) so all steps run even if one
       # fails. Mix aliases stop on first failure, which skips dialyzer.
-      "lint.fix": ["format", "credo --strict"]
+      "lint.fix": ["format", "credo --strict"],
+      ci: [
+        "compile --warnings-as-errors",
+        "format --check-formatted",
+        "test",
+        "credo --strict",
+        "dialyzer",
+        "ex_dna --max-clones 112",
+        "reach.check --arch --smells"
+      ]
     ]
   end
 end

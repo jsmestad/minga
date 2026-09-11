@@ -7,7 +7,7 @@
         included: ["lib/", "mix/", "test/"],
         excluded: [~r"/_build/", ~r"/deps/", ~r"/test/support/"]
       },
-      plugins: [],
+      plugins: [{ExSlop, []}],
       requires: ["credo/checks/*.exs"],
       checks: %{
         enabled: [
