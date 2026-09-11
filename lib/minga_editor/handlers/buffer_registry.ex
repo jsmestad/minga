@@ -26,7 +26,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   @typedoc "Editor state (same as `MingaEditor.state()`)."
   @type state :: EditorState.t()
-  @type open_or_activate_status :: :opened | :activated | :switched_tab
+  @type open_or_activate_status :: :opened | :opened_tab | :activated | :switched_tab
   @type open_or_activate_option ::
           {:existing_target, :buffer | :tab}
           | {:options_server, GenServer.server() | nil}
@@ -276,7 +276,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
     case tab do
       %Tab{id: tab_id} -> {:ok, TabWorkflow.switch(state, tab_id), pid, :switched_tab}
-      _ -> activate_path_buffer(state, idx, :buffer)
+      _ -> {:ok, add_buffer(state, pid, context: :open), pid, :opened_tab}
     end
   end
 

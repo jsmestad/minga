@@ -552,7 +552,7 @@ defmodule MingaEditor.PickerUI do
         _mods
       ) do
     case Picker.selected_item(picker) do
-      nil -> close(state)
+      nil -> state |> restore_picker_origin() |> close()
       item -> select_item(state, picker, item, source, callback_source)
     end
   end
@@ -738,7 +738,7 @@ defmodule MingaEditor.PickerUI do
           EditorState.t()
   defp run_source_action_and_close(state, source, action_id, item) do
     callback_source = current_callback_source(state)
-    new_state = close(state)
+    new_state = state |> restore_picker_origin() |> close()
     run_action(source, action_id, item, new_state, callback_source)
   end
 
@@ -781,50 +781,8 @@ defmodule MingaEditor.PickerUI do
       new_state = Source.on_select(source, item, state, callback_source)
       refresh_items(new_state)
     else
-      select_item_and_close(state, item, source, callback_source)
-    end
-  end
-
-  @spec select_item_and_close(
-          EditorState.t(),
-          Picker.item(),
-          module(),
-          PickerState.callback_source()
-        ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
-  defp select_item_and_close(state, item, source, callback_source) do
-    if Picker.Source.live_preview?(source, callback_source) and previewed?(state) do
-      promote_previewed_buffer(state)
-    else
       run_select_and_close(state, item, source, callback_source)
     end
-  end
-
-  # Preview loaded a different buffer into the window. Close the picker and
-  # promote the previewed buffer to a proper new tab via add_buffer(:open).
-  # The tab bar was never modified by preview, so on_buffer_added will create
-  # a fresh tab.
-  @spec promote_previewed_buffer(EditorState.t()) :: EditorState.t()
-  defp promote_previewed_buffer(state) do
-    previewed_pid = state.workspace.buffers.active
-
-    state =
-      state
-      |> restore_picker_origin()
-      |> close()
-      |> MingaEditor.Handlers.BufferRegistry.add_buffer(previewed_pid, context: :open)
-
-    record_previewed_buffer_access(previewed_pid)
-    state
-  end
-
-  @spec record_previewed_buffer_access(pid()) :: :ok
-  defp record_previewed_buffer_access(buffer) when is_pid(buffer) do
-    case Minga.Buffer.file_path(buffer) do
-      path when is_binary(path) -> Minga.Project.record_file(path)
-      _ -> :ok
-    end
-  catch
-    :exit, _ -> :ok
   end
 
   @spec run_select_and_close(
@@ -834,7 +792,7 @@ defmodule MingaEditor.PickerUI do
           PickerState.callback_source()
         ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
   defp run_select_and_close(state, item, source, callback_source) do
-    new_state = close(state)
+    new_state = state |> restore_picker_origin() |> close()
     new_state = Source.on_select(source, item, new_state, callback_source)
 
     case Map.get(new_state, :pending_command) do
@@ -1119,19 +1077,6 @@ defmodule MingaEditor.PickerUI do
   end
 
   defp restore_picker_origin(state), do: state
-
-  # Returns true when preview navigation changed the active buffer from
-  # what it was when the picker opened (stored in the picker payload's `restore` field).
-  @spec previewed?(state()) :: boolean()
-  defp previewed?(%{
-         shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{restore: restore}}}}},
-         workspace: %{buffers: bs}
-       })
-       when is_integer(restore) do
-    bs.active_index != restore
-  end
-
-  defp previewed?(_state), do: false
 
   # Live preview: temporarily apply the source's on_select for the highlighted item.
   # Sets buffer_add_context to :preview so add_buffer calls inside on_select update
