@@ -282,6 +282,8 @@ defmodule Minga.Editing do
   defdelegate resolve_formatter(filetype, file_path), to: Minga.Editing.Formatter
 
   @doc "Format content using a formatter command string."
+  @spec format(String.t(), Minga.Editing.Formatter.formatter_spec()) ::
+          {:ok, Minga.Editing.Formatter.Result.t()} | {:error, Minga.Editing.Formatter.failure()}
   defdelegate format(content, command_string), to: Minga.Editing.Formatter
 
   @doc "Apply save-time transforms (trim trailing whitespace, final newline)."

@@ -6,6 +6,8 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
 
   alias Minga.Buffer
   alias Minga.Config.Options
+  alias Minga.Editing.Formatter.Failure, as: FormatterFailure
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Commands.Formatting
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Request
@@ -16,6 +18,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   alias MingaEditor.State.OperationFeedback
 
   @effect_timeout 2_000
+  @fixture Path.expand("../../fixtures/formatter_stream_fixture", __DIR__)
 
   test "origin creates feedback before scheduling and correlates the running lifecycle" do
     Options.set_for_filetype(:elixir, :formatter, "cat")
@@ -124,4 +127,104 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     _stats = EffectScheduler.stats(scheduler)
     refute_received {:effect_terminal, %Outcome{request: %Request{id: ^old_id}}}
   end
+
+  test "real format-on-save writes only stdout in both stream orders" do
+    for order <- ["stdout-first", "stderr-first"] do
+      {state, scheduler, path} = format_on_save_state("original\n", order, "success")
+      buffer = state.workspace.buffers.active
+
+      state = BufferManagement.execute(state, :save)
+      assert File.read!(path) == "original\n"
+
+      assert_receive {:effect_result, ^scheduler,
+                      %Outcome{value: {:completed, result}} = outcome},
+                     @effect_timeout
+
+      assert result.content == "formatted:original\n"
+      assert result.diagnostics == "formatter warning: optional setting ignored\n"
+      {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+      assert Buffer.content(buffer) == "formatted:original\n"
+      assert File.read!(path) == "formatted:original\n"
+      refute File.read!(path) =~ "formatter warning"
+
+      assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
+    end
+  end
+
+  test "real format-on-save preserves an empty successful stdout" do
+    {state, scheduler, path} = format_on_save_state("original\n", "stderr-first", "empty")
+    buffer = state.workspace.buffers.active
+    state = BufferManagement.execute(state, :save)
+
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {:completed, result}} = outcome},
+                   @effect_timeout
+
+    assert result.content == ""
+    assert result.diagnostics == "formatter warning: empty result\n"
+    {:noreply, _state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+    assert Buffer.content(buffer) == ""
+    assert File.read!(path) == ""
+  end
+
+  test "nonzero formatter exit preserves the buffer and blocks format-on-save" do
+    {state, scheduler, path} = format_on_save_state("original\n", "stdout-first", "failure")
+    buffer = state.workspace.buffers.active
+    state = BufferManagement.execute(state, :save)
+
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{value: {:failed, %FormatterFailure{} = failure}} = outcome},
+                   @effect_timeout
+
+    assert failure.exit_code == 7
+    assert failure.stdout == "partial formatter output\n"
+    assert failure.stderr == "formatter failed: invalid source\n"
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+    assert Buffer.content(buffer) == "original\n"
+    assert File.read!(path) == "original\n"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Save skipped: formatter failed"
+  end
+
+  @spec format_on_save_state(String.t(), String.t(), String.t()) ::
+          {MingaEditor.State.t(), pid(), String.t()}
+  defp format_on_save_state(content, order, outcome) do
+    Options.set_for_filetype(:elixir, :formatter, fixture_command(order, outcome))
+
+    task_supervisor = start_supervised!({Task.Supervisor, []}, id: make_ref())
+
+    scheduler =
+      start_supervised!(
+        {EffectScheduler, task_supervisor: task_supervisor, observer: self()},
+        id: make_ref()
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+
+    state =
+      TestHelpers.base_state(
+        content: content,
+        effect_scheduler: scheduler,
+        rendering: :disabled
+      )
+
+    buffer = state.workspace.buffers.active
+    path = Path.join(System.tmp_dir!(), "#{System.unique_integer([:positive])}-format-save.ex")
+    on_exit(fn -> File.rm(path) end)
+    :ok = Buffer.save_as(buffer, path)
+    assert {:ok, _previous} = Buffer.set_option(buffer, :format_on_save, true)
+    {state, scheduler, path}
+  end
+
+  @spec fixture_command(String.t(), String.t()) :: String.t()
+  defp fixture_command(order, outcome) do
+    System.find_executable("elixir") <>
+      " " <> Enum.map_join([@fixture, order, outcome], " ", &shell_escape/1)
+  end
+
+  @spec shell_escape(String.t()) :: String.t()
+  defp shell_escape(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 end
