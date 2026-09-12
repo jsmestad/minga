@@ -11,6 +11,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
 
   alias MingaEditor.Commands.BufferManagement
   alias Minga.Buffer
+  alias Minga.Editing.Formatter.Failure, as: FormatterFailure
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
@@ -52,7 +53,14 @@ defmodule MingaEditor.Effects.ExternalFormat do
 
     case Minga.Editing.format(content, formatter) do
       {:ok, formatted} ->
-        {:ok, ExternalFormatResult.new(buffer, version, formatted, file_name)}
+        {:ok,
+         ExternalFormatResult.new(
+           buffer,
+           version,
+           formatted.content,
+           file_name,
+           formatted.diagnostics
+         )}
 
       {:error, reason} ->
         {:error, reason}
@@ -133,12 +141,19 @@ defmodule MingaEditor.Effects.ExternalFormat do
   @spec apply_formatted_content(EditorState.t(), Outcome.t(), ExternalFormatResult.t()) ::
           {EditorState.t(), Outcome.t()}
   defp apply_formatted_content(state, outcome, result) do
+    log_formatter_diagnostics(result)
+
     with :ok <- admit_worker_result(outcome.request.effect.continuation, result),
          {:ok, committed_version} <- replace_if_current(result) do
       Minga.Log.info(:editor, "Formatted: #{result.file_name}")
 
       terminalize(
-        EffectFeedback.finished(state, outcome.request.operation_id, :success, "Formatted"),
+        EffectFeedback.finished(
+          state,
+          outcome.request.operation_id,
+          :success,
+          success_message(result)
+        ),
         outcome,
         {:committed, committed_version}
       )
@@ -208,12 +223,36 @@ defmodule MingaEditor.Effects.ExternalFormat do
     {BufferManagement.continue_after_format(state, continuation, terminal), outcome}
   end
 
+  @spec log_formatter_diagnostics(ExternalFormatResult.t()) :: :ok
+  defp log_formatter_diagnostics(%ExternalFormatResult{diagnostics: diagnostics} = result) do
+    case String.trim(diagnostics) do
+      "" ->
+        :ok
+
+      message ->
+        Minga.Log.warning(:editor, "Formatter diagnostics for #{result.file_name}: #{message}")
+    end
+  end
+
+  @spec success_message(ExternalFormatResult.t()) :: String.t()
+  defp success_message(%ExternalFormatResult{diagnostics: diagnostics}) do
+    case String.trim(diagnostics) do
+      "" -> "Formatted"
+      _message -> "Formatted (diagnostics in *Messages*)"
+    end
+  end
+
   @spec format_failure_message(term()) :: String.t()
   defp format_failure_message({:worker_exit, reason}),
     do: "Format worker failed: #{inspect(reason)}"
 
   defp format_failure_message({:start_failed, reason}),
     do: "Format worker failed to start: #{inspect(reason)}"
+
+  defp format_failure_message(%FormatterFailure{} = failure),
+    do: FormatterFailure.message(failure)
+
+  defp format_failure_message({:subprocess, detail}), do: "Format error: #{detail}"
 
   defp format_failure_message(reason) when is_binary(reason), do: "Format error: #{reason}"
   defp format_failure_message(reason), do: "Format error: #{inspect(reason)}"

@@ -1,0 +1,32 @@
+[order, outcome] = System.argv()
+input = IO.binread(:standard_io, :eof)
+
+{stdout, stderr, exit_code} =
+  case outcome do
+    "success" ->
+      {"formatted:" <> input, "formatter warning: optional setting ignored\n", 0}
+
+    "empty" ->
+      {"", "formatter warning: empty result\n", 0}
+
+    "failure" ->
+      {"partial formatter output\n", "formatter failed: invalid source\n", 7}
+
+    "large" ->
+      {String.duplicate("o", 131_072), String.duplicate("e", 131_072), 0}
+  end
+
+write_streams = fn ->
+  case order do
+    "stdout-first" ->
+      IO.binwrite(:standard_io, stdout)
+      IO.binwrite(:stderr, stderr)
+
+    "stderr-first" ->
+      IO.binwrite(:stderr, stderr)
+      IO.binwrite(:standard_io, stdout)
+  end
+end
+
+write_streams.()
+System.halt(exit_code)

@@ -25,10 +25,15 @@ defmodule Minga.Editing.Formatter do
   """
 
   alias Minga.Config
+  alias Minga.Editing.Formatter.Failure
+  alias Minga.Editing.Formatter.Result
   alias Minga.Language
 
   @typedoc "A shell command string, optionally containing `{file}`."
   @type formatter_spec :: String.t()
+  @type failure :: Failure.t() | {:subprocess, String.t()}
+
+  @typep cleanup_owner :: {pid(), reference()}
 
   @doc "Returns the default formatter map (filetype atom to command string)."
   @spec default_formatters() :: %{atom() => formatter_spec()}
@@ -68,35 +73,59 @@ defmodule Minga.Editing.Formatter do
   Formats content by piping it through the given command.
 
   Writes the content to a temporary file and pipes it to the command via
-  shell redirection. Returns `{:ok, formatted_content}` on success
+  shell redirection. Standard output is the formatted document and standard error
+  is retained separately as diagnostics. Returns `{:ok, result}` on success
   (exit code 0) or `{:error, reason}` on failure.
   """
-  @spec format(String.t(), formatter_spec()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec format(String.t(), formatter_spec()) :: {:ok, Result.t()} | {:error, failure()}
   def format(content, command_string) when is_binary(content) and is_binary(command_string) do
-    tmp_path = temp_path()
-    File.write!(tmp_path, content)
+    workspace = temp_path()
 
-    try do
-      run_formatter(command_string, tmp_path)
-    after
-      File.rm(tmp_path)
+    case start_cleanup_owner(workspace) do
+      {:ok, cleanup_owner} ->
+        run_in_workspace(content, command_string, workspace, cleanup_owner)
+
+      {:error, reason} ->
+        {:error, {:subprocess, "formatter error: #{format_file_error(reason)}"}}
     end
   rescue
     e ->
-      {:error, "formatter error: #{Exception.message(e)}"}
+      {:error, {:subprocess, "formatter error: #{Exception.message(e)}"}}
   end
 
-  @spec run_formatter(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_formatter(command_string, tmp_path) do
-    shell_cmd = "#{command_string} < #{escape_path(tmp_path)}"
+  @spec run_in_workspace(String.t(), String.t(), String.t(), cleanup_owner()) ::
+          {:ok, Result.t()} | {:error, failure()}
+  defp run_in_workspace(content, command_string, workspace, cleanup_owner) do
+    input_path = Path.join(workspace, "input")
+    stdout_path = Path.join(workspace, "stdout")
+    stderr_path = Path.join(workspace, "stderr")
 
-    case System.shell(shell_cmd, stderr_to_stdout: true) do
-      {output, 0} ->
-        {:ok, output}
+    try do
+      File.write!(input_path, content)
+      File.write!(stdout_path, "")
+      File.write!(stderr_path, "")
+      run_formatter(command_string, input_path, stdout_path, stderr_path)
+    after
+      cleanup_workspace(cleanup_owner, workspace)
+    end
+  end
 
-      {output, exit_code} ->
-        trimmed = String.trim(output)
-        {:error, "formatter exited with code #{exit_code}: #{trimmed}"}
+  @spec run_formatter(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, Result.t()} | {:error, failure()}
+  defp run_formatter(command_string, input_path, stdout_path, stderr_path) do
+    shell_cmd =
+      "(#{command_string}\n) < #{escape_path(input_path)} > #{escape_path(stdout_path)} 2> #{escape_path(stderr_path)}"
+
+    {_shell_output, exit_code} = System.shell(shell_cmd)
+    stdout = File.read!(stdout_path)
+    stderr = File.read!(stderr_path)
+
+    case exit_code do
+      0 ->
+        {:ok, Result.new(stdout, stderr)}
+
+      status ->
+        {:error, Failure.new(status, stdout, stderr)}
     end
   end
 
@@ -151,6 +180,72 @@ defmodule Minga.Editing.Formatter do
     id = System.unique_integer([:positive])
     Path.join(System.tmp_dir!(), "minga_fmt_#{id}")
   end
+
+  @spec start_cleanup_owner(String.t()) :: {:ok, cleanup_owner()} | {:error, File.posix()}
+  defp start_cleanup_owner(workspace) do
+    caller = self()
+    cleanup_ref = make_ref()
+
+    owner =
+      spawn(fn ->
+        caller_monitor = Process.monitor(caller)
+
+        case File.mkdir(workspace) do
+          :ok ->
+            send(caller, {:formatter_workspace_ready, cleanup_ref})
+            await_cleanup(caller, caller_monitor, cleanup_ref, workspace)
+
+          {:error, reason} ->
+            send(caller, {:formatter_workspace_error, cleanup_ref, reason})
+        end
+      end)
+
+    receive do
+      {:formatter_workspace_ready, ^cleanup_ref} -> {:ok, {owner, cleanup_ref}}
+      {:formatter_workspace_error, ^cleanup_ref, reason} -> {:error, reason}
+    end
+  end
+
+  @spec await_cleanup(pid(), reference(), reference(), String.t()) :: :ok
+  defp await_cleanup(caller, caller_monitor, cleanup_ref, workspace) do
+    receive do
+      {:cleanup_formatter_workspace, ^caller, ^cleanup_ref} ->
+        remove_workspace(workspace)
+        Process.demonitor(caller_monitor, [:flush])
+        send(caller, {:formatter_workspace_removed, cleanup_ref})
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        remove_workspace(workspace)
+    end
+  end
+
+  @spec cleanup_workspace(cleanup_owner(), String.t()) :: :ok
+  defp cleanup_workspace({owner, cleanup_ref}, workspace) do
+    monitor = Process.monitor(owner)
+    send(owner, {:cleanup_formatter_workspace, self(), cleanup_ref})
+
+    receive do
+      {:formatter_workspace_removed, ^cleanup_ref} ->
+        Process.demonitor(monitor, [:flush])
+        :ok
+
+      {:DOWN, ^monitor, :process, ^owner, _reason} ->
+        remove_workspace(workspace)
+    after
+      1_000 ->
+        Process.demonitor(monitor, [:flush])
+        remove_workspace(workspace)
+    end
+  end
+
+  @spec remove_workspace(String.t()) :: :ok
+  defp remove_workspace(workspace) do
+    _ = File.rm_rf(workspace)
+    :ok
+  end
+
+  @spec format_file_error(File.posix()) :: String.t()
+  defp format_file_error(reason), do: reason |> :file.format_error() |> IO.iodata_to_binary()
 
   @spec escape_path(String.t()) :: String.t()
   defp escape_path(path) do

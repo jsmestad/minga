@@ -2662,6 +2662,9 @@ defmodule MingaEditor.Commands.BufferManagement do
       :unchanged ->
         save_continued(state, buf, requested_version, action)
 
+      {:failed, %Minga.Editing.Formatter.Failure{}} ->
+        {:error, NoticeWorkflow.publish(state, "Save skipped: formatter failed")}
+
       {:failed, _reason} ->
         save_continued(state, buf, requested_version, action)
 
