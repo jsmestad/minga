@@ -3,8 +3,10 @@ defmodule Minga.Buffer.PersistenceTest do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Persistence
+  alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.SaveState
   alias Minga.Buffer.State, as: BufState
+  alias Minga.Buffer.State.LocalPersistence
 
   @moduletag :tmp_dir
 
@@ -22,7 +24,7 @@ defmodule Minga.Buffer.PersistenceTest do
     tmp_dir: tmp_dir
   } do
     path = Path.join([tmp_dir, "nested", "dir", "file.txt"])
-    state = %BufState{document: Document.new(""), storage: :local}
+    state = local_state()
 
     assert Persistence.write_content(state, path, "hello") == :ok
     assert Persistence.read_content(state, path) == {:ok, "hello"}
@@ -32,7 +34,7 @@ defmodule Minga.Buffer.PersistenceTest do
   test "exclusive creation preserves a destination that already exists", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "existing.txt")
     File.write!(path, <<0, 1, 2, 255>>)
-    state = %BufState{document: Document.new(""), storage: :local}
+    state = local_state()
 
     assert Persistence.write_content(state, path, "replacement", :exclusive_create) ==
              {:error, :eexist}
@@ -42,7 +44,7 @@ defmodule Minga.Buffer.PersistenceTest do
 
   test "exclusive creation creates a destination exactly once", %{tmp_dir: tmp_dir} do
     path = Path.join([tmp_dir, "new", "created.txt"])
-    state = %BufState{document: Document.new(""), storage: :local}
+    state = local_state()
 
     assert :ok = Persistence.write_content(state, path, <<0, 255>>, :exclusive_create)
     assert File.read!(path) == <<0, 255>>
@@ -95,6 +97,14 @@ defmodule Minga.Buffer.PersistenceTest do
       document: Document.new(content),
       file_path: path,
       save_state: SaveState.loaded(path, {mtime, size}, content)
+    }
+  end
+
+  defp local_state do
+    %BufState{
+      document: Document.new(""),
+      storage: :local,
+      local_persistence: LocalPersistence.new([], SystemFileSystem)
     }
   end
 end

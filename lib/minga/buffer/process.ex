@@ -34,6 +34,8 @@ defmodule Minga.Buffer.Process do
 
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
+  alias Minga.Buffer.Persistence.SystemFileSystem
+  alias Minga.Buffer.State.LocalPersistence
   alias Minga.Buffer.State.Swap, as: SwapState
   alias Minga.Config
   alias Minga.Core.Decorations
@@ -51,6 +53,8 @@ defmodule Minga.Buffer.Process do
           | {:buffer_name, String.t()}
           | {:buffer_type, BufState.buffer_type()}
           | {:storage, BufState.storage()}
+          | {:persistence_file_system, module()}
+          | {:persistence_file_system_options, keyword()}
           | {:filetype, atom()}
           | {:options_server, Minga.Config.Options.server() | nil}
           | {:read_only, boolean()}
@@ -960,6 +964,7 @@ defmodule Minga.Buffer.Process do
           filetype: filetype,
           options_server: options_server,
           storage: storage,
+          local_persistence: LocalPersistence.new(opts, SystemFileSystem),
           buffer_type: buffer_type,
           save_state: BufState.loaded_save_state(path, {mtime, size}, text),
           name: Keyword.get(opts, :buffer_name),
