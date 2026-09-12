@@ -51,9 +51,15 @@ final class BEAMProcessManager {
     private let maxRestarts = 3
     private let windowSeconds: TimeInterval = 5.0
 
-    /// Set during graceful shutdown to prevent the termination handler
-    /// from attempting a restart.
-    private(set) var isShuttingDown = false
+    enum ExitIntent: Equatable, Sendable {
+        case running
+        case transportRestart
+        case restartScheduled
+        case appShutdown
+    }
+
+    private(set) var exitIntent: ExitIntent = .running
+    var isShuttingDown: Bool { exitIntent == .appShutdown }
 
     /// Whether start() has been called at least once. Used to gate
     /// onBEAMReady so it only fires on restarts, not the initial start.
@@ -231,6 +237,11 @@ final class BEAMProcessManager {
 
     /// Spawns the BEAM release as a child process with piped stdin/stdout.
     func start() {
+        guard exitIntent != .appShutdown else { return }
+        guard process == nil else { return }
+        if exitIntent == .restartScheduled {
+            exitIntent = .running
+        }
         guard let execURL = Self.beamExecutableURL() else {
             NSLog("BEAMProcessManager: no embedded BEAM release found")
             return
@@ -342,8 +353,64 @@ final class BEAMProcessManager {
     /// the crash-backoff history so the fresh process gets a clean budget.
     func restartAfterRecovery() {
         restartTimestamps.removeAll()
-        isShuttingDown = false
+        exitIntent = .restartScheduled
         start()
+    }
+
+    func beginAppShutdown() {
+        exitIntent = .appShutdown
+    }
+
+    enum TransportRestartDisposition: Equatable, Sendable {
+        case terminateForRestart
+        case startImmediately
+        case awaitProcessTermination
+        case awaitScheduledRestart
+        case rejectDuringShutdown
+    }
+
+    nonisolated static func transportRestartDisposition(
+        managedProcessPresent: Bool,
+        processIsRunning: Bool,
+        exitIntent: ExitIntent
+    ) -> TransportRestartDisposition {
+        switch exitIntent {
+        case .appShutdown:
+            return .rejectDuringShutdown
+        case .restartScheduled, .transportRestart:
+            return .awaitScheduledRestart
+        case .running:
+            guard managedProcessPresent else { return .startImmediately }
+            return processIsRunning ? .terminateForRestart : .awaitProcessTermination
+        }
+    }
+
+    /// Retires a terminally failed bundled transport and lets the normal crash path install fresh pipes.
+    /// The user explicitly confirms this action after being warned that unsaved changes may be lost.
+    @discardableResult
+    func restartTransportAfterFailure() -> TransportRestartDisposition {
+        let managedProcess = process
+        let disposition = Self.transportRestartDisposition(
+            managedProcessPresent: managedProcess != nil,
+            processIsRunning: managedProcess?.isRunning ?? false,
+            exitIntent: exitIntent
+        )
+        switch disposition {
+        case .terminateForRestart:
+            restartTimestamps.removeAll()
+            exitIntent = .transportRestart
+            managedProcess?.terminate()
+        case .awaitProcessTermination:
+            restartTimestamps.removeAll()
+            exitIntent = .transportRestart
+        case .startImmediately:
+            restartTimestamps.removeAll()
+            exitIntent = .restartScheduled
+            start()
+        case .awaitScheduledRestart, .rejectDuringShutdown:
+            break
+        }
+        return disposition
     }
 
     private static func randomReleaseCookie() -> String {
@@ -368,11 +435,12 @@ final class BEAMProcessManager {
     /// the termination handler calls it (#2698 defect B).
     nonisolated static func terminationOutcome(
         status: Int32,
-        isShuttingDown: Bool,
+        exitIntent: ExitIntent,
         recentRestartCount: Int,
         maxRestarts: Int
     ) -> TerminationOutcome {
-        if isShuttingDown { return .normalExit }
+        if exitIntent == .appShutdown { return .normalExit }
+        if exitIntent == .transportRestart { return .restart(delay: 0) }
         if status == 0 { return .normalExit }
         if recentRestartCount >= maxRestarts { return .giveUp }
 
@@ -400,25 +468,30 @@ final class BEAMProcessManager {
 
         let outcome = Self.terminationOutcome(
             status: status,
-            isShuttingDown: isShuttingDown,
+            exitIntent: exitIntent,
             recentRestartCount: restartTimestamps.count,
             maxRestarts: maxRestarts
         )
-
         switch outcome {
         case .normalExit:
+            if exitIntent != .appShutdown {
+                exitIntent = .running
+            }
             onNormalExit?()
 
         case .giveUp:
+            exitIntent = .running
             NSLog("BEAMProcessManager: too many crashes (\(maxRestarts) in \(windowSeconds)s), giving up")
             // Recovery is presented by onCrash; it must not block the main actor.
             onCrash?()
 
         case let .restart(delay):
             restartTimestamps.append(now)
+            exitIntent = .restartScheduled
             NSLog("BEAMProcessManager: restarting in \(delay)s")
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.start()
+                guard let self, self.exitIntent == .restartScheduled else { return }
+                self.start()
             }
         }
     }

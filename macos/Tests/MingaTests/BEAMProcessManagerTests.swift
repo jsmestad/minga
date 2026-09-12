@@ -205,12 +205,19 @@ struct BEAMProcessManagerLaunchArgumentsTests {
 
 @Suite("BEAMProcessManager Termination Handling")
 struct BEAMProcessManagerTerminationTests {
+    struct TransportRestartCase: Sendable {
+        let managedProcessPresent: Bool
+        let processIsRunning: Bool
+        let exitIntent: BEAMProcessManager.ExitIntent
+        let expected: BEAMProcessManager.TransportRestartDisposition
+    }
+
     // MARK: - Pure decision function
 
     @Test("graceful shutdown resolves to a normal exit")
     func gracefulShutdownIsNormalExit() {
         let outcome = BEAMProcessManager.terminationOutcome(
-            status: 0, isShuttingDown: true, recentRestartCount: 0, maxRestarts: 3
+            status: 0, exitIntent: .appShutdown, recentRestartCount: 0, maxRestarts: 3
         )
         #expect(outcome == .normalExit)
     }
@@ -218,7 +225,7 @@ struct BEAMProcessManagerTerminationTests {
     @Test("clean exit code resolves to a normal exit")
     func cleanExitIsNormalExit() {
         let outcome = BEAMProcessManager.terminationOutcome(
-            status: 0, isShuttingDown: false, recentRestartCount: 2, maxRestarts: 3
+            status: 0, exitIntent: .running, recentRestartCount: 2, maxRestarts: 3
         )
         #expect(outcome == .normalExit)
     }
@@ -227,17 +234,17 @@ struct BEAMProcessManagerTerminationTests {
     func crashWithinBudgetRestarts() {
         #expect(
             BEAMProcessManager.terminationOutcome(
-                status: 1, isShuttingDown: false, recentRestartCount: 0, maxRestarts: 3
+                status: 1, exitIntent: .running, recentRestartCount: 0, maxRestarts: 3
             ) == .restart(delay: 0.1)
         )
         #expect(
             BEAMProcessManager.terminationOutcome(
-                status: 1, isShuttingDown: false, recentRestartCount: 1, maxRestarts: 3
+                status: 1, exitIntent: .running, recentRestartCount: 1, maxRestarts: 3
             ) == .restart(delay: 0.2)
         )
         #expect(
             BEAMProcessManager.terminationOutcome(
-                status: 1, isShuttingDown: false, recentRestartCount: 2, maxRestarts: 3
+                status: 1, exitIntent: .running, recentRestartCount: 2, maxRestarts: 3
             ) == .restart(delay: 0.4)
         )
     }
@@ -245,9 +252,74 @@ struct BEAMProcessManagerTerminationTests {
     @Test("crash past the budget resolves to give up (recovery surface)")
     func crashPastBudgetGivesUp() {
         let outcome = BEAMProcessManager.terminationOutcome(
-            status: 1, isShuttingDown: false, recentRestartCount: 3, maxRestarts: 3
+            status: 1, exitIntent: .running, recentRestartCount: 3, maxRestarts: 3
         )
         #expect(outcome == .giveUp)
+    }
+
+    @Test("transport recovery disposition follows process and restart state", arguments: [
+        TransportRestartCase(
+            managedProcessPresent: true,
+            processIsRunning: true,
+            exitIntent: .running,
+            expected: .terminateForRestart
+        ),
+        TransportRestartCase(
+            managedProcessPresent: true,
+            processIsRunning: false,
+            exitIntent: .running,
+            expected: .awaitProcessTermination
+        ),
+        TransportRestartCase(
+            managedProcessPresent: false,
+            processIsRunning: false,
+            exitIntent: .running,
+            expected: .startImmediately
+        ),
+        TransportRestartCase(
+            managedProcessPresent: false,
+            processIsRunning: false,
+            exitIntent: .restartScheduled,
+            expected: .awaitScheduledRestart
+        ),
+        TransportRestartCase(
+            managedProcessPresent: true,
+            processIsRunning: true,
+            exitIntent: .restartScheduled,
+            expected: .awaitScheduledRestart
+        ),
+        TransportRestartCase(
+            managedProcessPresent: true,
+            processIsRunning: false,
+            exitIntent: .transportRestart,
+            expected: .awaitScheduledRestart
+        ),
+        TransportRestartCase(
+            managedProcessPresent: true,
+            processIsRunning: true,
+            exitIntent: .appShutdown,
+            expected: .rejectDuringShutdown
+        ),
+    ])
+    func transportRecoveryDisposition(testCase: TransportRestartCase) {
+        let disposition = BEAMProcessManager.transportRestartDisposition(
+            managedProcessPresent: testCase.managedProcessPresent,
+            processIsRunning: testCase.processIsRunning,
+            exitIntent: testCase.exitIntent
+        )
+        #expect(disposition == testCase.expected)
+    }
+
+    @Test("user-confirmed transport restart replaces pipes even when termination exits zero")
+    func transportRestartIntentOverridesExitStatus() {
+        #expect(
+            BEAMProcessManager.terminationOutcome(
+                status: 0,
+                exitIntent: .transportRestart,
+                recentRestartCount: 3,
+                maxRestarts: 3
+            ) == .restart(delay: 0)
+        )
     }
 
     // MARK: - Main-actor is never blocked by the termination path (#2698 defect B)
@@ -292,6 +364,7 @@ struct BEAMProcessManagerTerminationTests {
         #expect(recoveryPresented == false)
         #expect(normalExited == false)
         #expect(elapsed < 0.1)
+        #expect(manager.exitIntent == .restartScheduled)
     }
 
     @Test("clean exit routes to normal exit, not recovery")

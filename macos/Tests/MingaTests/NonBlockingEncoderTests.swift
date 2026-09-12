@@ -63,12 +63,104 @@ private func framedPayload(_ payload: Data) -> Data {
     return frame
 }
 
+private final class ControlledWriter: @unchecked Sendable {
+    enum Result {
+        case write(Int)
+        case wouldBlock
+        case fatal(Int32)
+        case writeAll
+    }
+
+    private let lock = NSLock()
+    private var results: [Result] = []
+    private var defaultResult: Result = .wouldBlock
+    private var written = Data()
+
+    func replaceResults(_ results: [Result], default defaultResult: Result = .wouldBlock) {
+        lock.lock()
+        self.results = results
+        self.defaultResult = defaultResult
+        lock.unlock()
+    }
+
+    func allowAllWrites() {
+        replaceResults([], default: .writeAll)
+    }
+
+    func write(pointer: UnsafeRawPointer, count: Int) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let result = results.isEmpty ? defaultResult : results.removeFirst()
+        switch result {
+        case .write(let requestedCount):
+            let actualCount = min(requestedCount, count)
+            written.append(Data(bytes: pointer, count: actualCount))
+            return actualCount
+        case .wouldBlock:
+            errno = EAGAIN
+            return -1
+        case .fatal(let errorCode):
+            errno = errorCode
+            return -1
+        case .writeAll:
+            written.append(Data(bytes: pointer, count: count))
+            return count
+        }
+    }
+
+    func writtenData() -> Data {
+        lock.lock()
+        let snapshot = written
+        lock.unlock()
+        return snapshot
+    }
+}
+
+@MainActor
+private final class TransportFailureCapture {
+    private(set) var failures: [OutboundTransportFailureReport] = []
+
+    func append(_ failure: OutboundTransportFailureReport) {
+        MainActor.assertIsolated()
+        failures.append(failure)
+    }
+}
+
+@MainActor
+private func awaitFailureCount(_ count: Int, capture: TransportFailureCapture) async {
+    for _ in 0..<1_000 where capture.failures.count < count {
+        await Task.yield()
+    }
+}
+
+private func makeControlledEncoder(
+    writer: ControlledWriter,
+    maxBufferSize: Int = 1_024 * 1_024,
+    maximumPayloadSize: Int = 1_024 * 1_024,
+    nonBlockingSetupOperation: @escaping ProtocolEncoder.NonBlockingSetupOperation = { _ in nil },
+    onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void = { _ in }
+) -> ProtocolEncoder {
+    let pipe = Pipe()
+    return try! ProtocolEncoder(
+        output: pipe.fileHandleForWriting,
+        maxBufferSize: maxBufferSize,
+        maximumPayloadSize: maximumPayloadSize,
+        retryDelay: nil,
+        nonBlockingSetupOperation: nonBlockingSetupOperation,
+        writeOperation: { _, pointer, count in
+            writer.write(pointer: pointer, count: count)
+        },
+        onTransportFailure: onTransportFailure
+    )
+}
+
 @Suite("Encoder: Non-blocking Buffer")
 struct NonBlockingEncoderTests {
     @Test("writes are buffered and delivered asynchronously")
     func writesDeliveredAsynchronously() {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
         encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
@@ -85,69 +177,295 @@ struct NonBlockingEncoderTests {
         #expect(frames?[2].first == OP_RESIZE)
     }
 
-    @Test("single frame larger than threshold is preserved when writable")
-    func singleLargeFrameIsPreservedWhenWritable() {
-        let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting, maxBufferSize: 16)
+    @Test("authoritative keys paste and GUI actions survive saturation in FIFO order")
+    func authoritativeEventsSurviveSaturation() throws {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(writer: writer)
 
-        encoder.sendPasteEvent(text: String(repeating: "x", count: 128))
-
+        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0, seq: 1)
+        encoder.sendPasteEvent(text: "paste")
+        encoder.sendSelectTab(id: 42)
+        encoder.sendFrameApplied(generation: 3, frameSeq: 7)
+        encoder.sendFrameRejected(
+            generation: 3,
+            frameSeq: 8,
+            lastAppliedFrameSeq: 7,
+            reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue
+        )
+        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0, seq: 2)
         #expect(encoder.waitForPendingWritesForTesting())
-        pipe.fileHandleForWriting.closeFile()
+        #expect(writer.writtenData().isEmpty)
 
-        let raw = pipe.fileHandleForReading.readDataToEndOfFile()
-        let frames = parseFrames(raw)
-        #expect(encoder.droppedMessageCount == 0)
-        #expect(frames?.count == 1)
-        #expect(frames?.first?.first == OP_PASTE_EVENT)
-    }
-
-    @Test("buffer overflow drops complete oldest messages")
-    func bufferOverflowDropsCompleteMessages() {
-        let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting, maxBufferSize: 16)
-        fillPipeUntilWouldBlock(pipe.fileHandleForWriting.fileDescriptor)
-
-        encoder.sendPasteEvent(text: String(repeating: "x", count: 128))
-        encoder.sendKeyPress(codepoint: 0x63, modifiers: 0)
-
+        writer.allowAllWrites()
         #expect(encoder.waitForPendingWritesForTesting())
 
-        let frames = parseFrames(encoder.bufferedDataForTesting())
-        #expect(encoder.droppedMessageCount > 0)
-        #expect(frames?.count == 1)
-        #expect(frames?.first?.first == OP_KEY_PRESS)
-
-        pipe.fileHandleForWriting.closeFile()
-        pipe.fileHandleForReading.closeFile()
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(
+            frames.map(\.first) == [
+                OP_KEY_PRESS,
+                OP_PASTE_EVENT,
+                OP_GUI_ACTION,
+                OP_FRAME_APPLIED,
+                OP_FRAME_REJECTED,
+                OP_KEY_PRESS
+            ]
+        )
+        #expect(frames[0][4] == 0x61)
+        #expect(String(data: frames[1].subdata(in: 3..<frames[1].count), encoding: .utf8) == "paste")
+        #expect(frames[2][1] == GUI_ACTION_SELECT_TAB)
+        #expect(frames[5][4] == 0x62)
     }
 
-    @Test("buffer overflow never evicts a pending application quit request")
-    func bufferOverflowPreservesApplicationQuitRequest() throws {
-        let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting, maxBufferSize: 16)
-        fillPipeUntilWouldBlock(pipe.fileHandleForWriting.fileDescriptor)
+    @Test("partial writes retain the head frame and resume from its explicit offset")
+    func partialWritesRetainHeadOffset() throws {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(writer: writer)
+        encoder.sendPasteEvent(text: "authoritative paste")
+        encoder.sendKeyPress(codepoint: 0x6B, modifiers: 0)
+        encoder.sendSelectTab(id: 9)
+        #expect(encoder.waitForPendingWritesForTesting())
+
+        writer.replaceResults([.write(7), .wouldBlock])
+        #expect(encoder.waitForPendingWritesForTesting())
+        #expect(encoder.headWriteOffsetForTesting == 7)
+
+        writer.allowAllWrites()
+        #expect(encoder.waitForPendingWritesForTesting())
+
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames.map(\.first) == [OP_PASTE_EVENT, OP_KEY_PRESS, OP_GUI_ACTION])
+        #expect(String(data: frames[0].subdata(in: 3..<frames[0].count), encoding: .utf8) == "authoritative paste")
+        #expect(frames[2][1] == GUI_ACTION_SELECT_TAB)
+    }
+
+    @Test("resize coalescing cannot cross an authoritative barrier")
+    func resizeCoalescingRespectsBarrier() throws {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(writer: writer)
+
+        encoder.sendResize(cols: 80, rows: 24)
+        encoder.sendResize(cols: 90, rows: 30)
+        encoder.sendKeyPress(codepoint: 0x78, modifiers: 0)
+        encoder.sendResize(cols: 100, rows: 40)
+        encoder.sendResize(cols: 110, rows: 50)
+        #expect(encoder.waitForPendingWritesForTesting())
+
+        writer.allowAllWrites()
+        #expect(encoder.waitForPendingWritesForTesting())
+
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames.map(\.first) == [OP_RESIZE, OP_KEY_PRESS, OP_RESIZE])
+        #expect(frames[0][1...2] == Data([0, 90]))
+        #expect(frames[2][1...2] == Data([0, 110]))
+    }
+
+    @Test("a partially written resize head is never coalesced")
+    func partialResizeHeadIsNotCoalesced() throws {
+        let writer = ControlledWriter()
+        writer.replaceResults([.write(2), .wouldBlock])
+        let encoder = makeControlledEncoder(writer: writer)
+
+        encoder.sendResize(cols: 80, rows: 24)
+        #expect(encoder.waitForPendingWritesForTesting())
+        #expect(encoder.headWriteOffsetForTesting == 2)
+        encoder.sendResize(cols: 100, rows: 40)
+
+        writer.allowAllWrites()
+        #expect(encoder.waitForPendingWritesForTesting())
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames.count == 2)
+        #expect(frames[0][1...2] == Data([0, 80]))
+        #expect(frames[1][1...2] == Data([0, 100]))
+    }
+
+    @Test("the maximum legal paste frame fits at exact capacity")
+    func maximumLegalPasteFitsCapacity() {
+        let writer = ControlledWriter()
+        let maximumPastePayloadSize = 3 + Int(UInt16.max)
+        let maximumPasteFrameSize = 4 + maximumPastePayloadSize
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            maxBufferSize: maximumPasteFrameSize,
+            maximumPayloadSize: maximumPastePayloadSize
+        )
+
+        encoder.sendPasteEvent(text: String(repeating: "x", count: Int(UInt16.max)))
+        #expect(encoder.waitForPendingWritesForTesting())
+        #expect(encoder.bufferedByteCount == maximumPasteFrameSize)
+    }
+
+    @Test("production capacity admits the maximum legal protocol frame")
+    func productionCapacityAdmitsMaximumFrame() {
+        let writer = ControlledWriter()
+        let maximumPayloadSize = Int(RESOURCE_MAX_FRAME_BYTES)
+        let maximumFrameSize = maximumPayloadSize + 4
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            maxBufferSize: maximumFrameSize,
+            maximumPayloadSize: maximumPayloadSize
+        )
+
+        encoder.writePayloadForTesting(Data(repeating: 0xA5, count: maximumPayloadSize))
+        #expect(encoder.waitForPendingWritesForTesting())
+        #expect(encoder.bufferedByteCount == maximumFrameSize)
+    }
+
+    @Test("lifecycle request and decision preserve synchronous admission under saturation")
+    func lifecycleAdmissionRemainsSynchronous() throws {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            maxBufferSize: 19,
+            maximumPayloadSize: 15
+        )
 
         #expect(encoder.sendApplicationQuitRequest(requestID: 42))
-        encoder.sendPasteEvent(text: String(repeating: "x", count: 128))
+        #expect(encoder.sendApplicationQuitDecision(requestID: 42, decision: 1))
+        #expect(encoder.bufferedByteCount == 19)
 
+        writer.allowAllWrites()
         #expect(encoder.waitForPendingWritesForTesting())
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames.map(\.first) == [OP_APPLICATION_QUIT_REQUEST, OP_APPLICATION_QUIT_DECISION])
+    }
 
-        let frames = try #require(parseFrames(encoder.bufferedDataForTesting()))
-        #expect(frames.count == 1)
-        #expect(frames[0].first == OP_APPLICATION_QUIT_REQUEST)
-        #expect(encoder.droppedMessageCount == 1)
+    @Test("capacity exhaustion reports exactly one terminal failure")
+    @MainActor
+    func capacityExhaustionFailsOnce() async {
+        let writer = ControlledWriter()
+        let capture = TransportFailureCapture()
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            maxBufferSize: 14,
+            maximumPayloadSize: 10,
+            onTransportFailure: { failure in capture.append(failure) }
+        )
 
+        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
+        encoder.sendPasteEvent(text: "ignored after terminal failure")
+        await awaitFailureCount(1, capture: capture)
+
+        #expect(capture.failures == [OutboundTransportFailureReport(
+            failure: .capacityExhausted(limit: 14, attemptedFrameBytes: 14),
+            undeliveredDurableFrameCount: 1,
+            undeliveredDurableByteCount: 14
+        )])
+        #expect(encoder.bufferedByteCount == 0)
+    }
+
+    @Test("fatal writes report exactly one terminal failure")
+    @MainActor
+    func fatalWriteFailsOnce() async {
+        let writer = ControlledWriter()
+        writer.replaceResults([.write(5), .fatal(EPIPE)], default: .fatal(EPIPE))
+        let capture = TransportFailureCapture()
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            onTransportFailure: { failure in capture.append(failure) }
+        )
+
+        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        #expect(encoder.waitForPendingWritesForTesting())
+        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
+        #expect(encoder.waitForPendingWritesForTesting())
+        await awaitFailureCount(1, capture: capture)
+
+        #expect(capture.failures == [OutboundTransportFailureReport(
+            failure: .writeFailed(errorCode: EPIPE),
+            undeliveredDurableFrameCount: 1,
+            undeliveredDurableByteCount: 9
+        )])
+    }
+
+    @Test("unexpected disconnect reports accepted durable frames exactly once")
+    @MainActor
+    func unexpectedDisconnectReportsStrandedFramesOnce() async {
+        let writer = ControlledWriter()
+        let capture = TransportFailureCapture()
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            onTransportFailure: { failure in capture.append(failure) }
+        )
+
+        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        encoder.sendPasteEvent(text: "accepted")
+        #expect(encoder.waitForPendingWritesForTesting())
+        let strandedBytes = encoder.bufferedByteCount
+        encoder.disconnect(reason: .unexpectedPeerClosure)
+        encoder.disconnect(reason: .unexpectedPeerClosure)
+        #expect(encoder.waitForPendingWritesForTesting())
+        await awaitFailureCount(1, capture: capture)
+
+        #expect(capture.failures == [OutboundTransportFailureReport(
+            failure: .peerDisconnected,
+            undeliveredDurableFrameCount: 2,
+            undeliveredDurableByteCount: strandedBytes
+        )])
+    }
+
+    @Test("failure report omits accepted-input loss when no durable frame is stranded")
+    func zeroDurableFrameFailureMessage() {
+        let report = OutboundTransportFailureReport(
+            failure: .peerDisconnected,
+            undeliveredDurableFrameCount: 0,
+            undeliveredDurableByteCount: 0
+        )
+
+        #expect(report.userFacingMessage == OutboundTransportFailure.peerDisconnected.userFacingMessage)
+        #expect(report.userFacingMessage.contains("Undelivered accepted input") == false)
+    }
+
+    @Test("failure report summarizes stranded accepted durable frames")
+    func nonzeroDurableFrameFailureMessage() {
+        let report = OutboundTransportFailureReport(
+            failure: .peerDisconnected,
+            undeliveredDurableFrameCount: 2,
+            undeliveredDurableByteCount: 28
+        )
+
+        #expect(report.userFacingMessage.contains("Undelivered accepted input: 2 durable frames, 28 bytes."))
+    }
+
+    @Test("nonblocking setup failure rejects input and reports once")
+    func nonBlockingSetupFailureIsTerminal() {
+        let writer = ControlledWriter()
+        writer.allowAllWrites()
+        let pipe = Pipe()
+
+        #expect(throws: OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: EPERM)) {
+            try ProtocolEncoder(
+                output: pipe.fileHandleForWriting,
+                nonBlockingSetupOperation: { _ in EPERM },
+                writeOperation: { _, pointer, count in
+                    writer.write(pointer: pointer, count: count)
+                }
+            )
+        }
+        #expect(writer.writtenData().isEmpty)
+    }
+
+    @Test("saturated transport admission does not wait for pipe writability")
+    @MainActor
+    func saturationDoesNotBlockMainActor() {
+        let pipe = Pipe()
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
+        fillPipeUntilWouldBlock(pipe.fileHandleForWriting.fileDescriptor)
+        let start = ContinuousClock.now
+
+        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+
+        #expect(start.duration(to: .now) < .milliseconds(100))
         pipe.fileHandleForWriting.closeFile()
         pipe.fileHandleForReading.closeFile()
     }
 
-    @Test("disconnect discards buffered writes")
-    func disconnectDiscardsBufferedWrites() {
+    @Test("expected teardown discards buffered writes without reporting failure")
+    func expectedTeardownDiscardsBufferedWrites() {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
-        encoder.disconnect()
+        encoder.disconnect(reason: .expectedTeardown)
         encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
         encoder.sendPasteEvent(text: "dropped")
 
@@ -161,7 +479,7 @@ struct NonBlockingEncoderTests {
     @Test("concurrent writes from multiple tasks keep frame boundaries")
     func concurrentWritesKeepFrameBoundaries() async {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         await withTaskGroup(of: Void.self) { group in
             for taskIndex in 0..<8 {

@@ -17,53 +17,139 @@ import MingaUI
 /// `NSFileHandleOperationException` (ObjC exception) on broken pipes.
 /// ObjC exceptions cannot be caught from Swift, so `FileHandle.write()`
 /// to a dead pipe zombifies the app (beachball). POSIX `write()` returns
-/// -1 with `errno = EPIPE`, which we handle by marking the encoder as
-/// disconnected and silently dropping subsequent writes.
+/// -1 with `errno = EPIPE`, which becomes one terminal transport failure.
+enum OutboundTransportFailure: Equatable, Sendable {
+    case capacityExhausted(limit: Int, attemptedFrameBytes: Int)
+    case frameTooLarge(limit: Int, payloadBytes: Int)
+    case peerDisconnected
+    case writeFailed(errorCode: Int32)
+
+    var userFacingMessage: String {
+        switch self {
+        case .capacityExhausted(let limit, let attemptedFrameBytes):
+            let cause = "The \(attemptedFrameBytes)-byte frame did not fit in the configured \(limit)-byte queue."
+            return "Minga stopped accepting input. " + cause + " Restart the editor core before continuing."
+        case .frameTooLarge(let limit, let payloadBytes):
+            let cause = "The \(payloadBytes)-byte outbound payload exceeded the \(limit)-byte protocol limit."
+            return "Minga stopped accepting input. " + cause + " Restart the editor core before continuing."
+        case .peerDisconnected:
+            return "The editor connection closed unexpectedly."
+        case .writeFailed(let errorCode):
+            let detail = "Minga lost its connection to the editor core while sending an outbound frame "
+                + "(write error \(errorCode))."
+            return detail + " Restart the editor core before continuing."
+        }
+    }
+}
+
+struct OutboundTransportFailureReport: Equatable, Sendable {
+    let failure: OutboundTransportFailure
+    let undeliveredDurableFrameCount: Int
+    let undeliveredDurableByteCount: Int
+
+    var userFacingMessage: String {
+        guard undeliveredDurableFrameCount > 0 else { return failure.userFacingMessage }
+        let summary = "Undelivered accepted input: \(undeliveredDurableFrameCount) durable frames, "
+            + "\(undeliveredDurableByteCount) bytes."
+        return failure.userFacingMessage + " " + summary
+    }
+}
+
+enum OutboundTransportInitializationError: Error, Equatable {
+    case nonBlockingSetupFailed(errorCode: Int32)
+
+    var userFacingMessage: String {
+        switch self {
+        case .nonBlockingSetupFailed(let errorCode):
+            return "Minga could not configure nonblocking input transport (error \(errorCode))."
+        }
+    }
+}
+
 final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
+    enum DisconnectReason: Sendable {
+        case expectedTeardown
+        case unexpectedPeerClosure
+    }
+
+    private enum CoalescingClass: Equatable, Sendable {
+        case viewportResize
+    }
+
+    private enum DeliveryPolicy: Equatable, Sendable {
+        case durable
+        case coalescing(CoalescingClass)
+    }
+
+    private struct QueuedFrame: Sendable {
+        let bytes: Data
+        let deliveryPolicy: DeliveryPolicy
+        var writeOffset: Int = 0
+
+        var remainingByteCount: Int { bytes.count - writeOffset }
+    }
+
+    typealias WriteOperation = @Sendable (Int32, UnsafeRawPointer, Int) -> Int
+    typealias NonBlockingSetupOperation = @Sendable (Int32) -> Int32?
+
     private let fd: Int32
     private let writeQueue = DispatchQueue(label: "minga.encoder.write", qos: .userInteractive)
     private let writeQueueKey = DispatchSpecificKey<Void>()
     private let maxBufferSize: Int
-    private let retryDelay: DispatchTimeInterval = .milliseconds(10)
+    private let maximumPayloadSize: Int
+    private let retryDelay: DispatchTimeInterval?
+    private let writeOperation: WriteOperation
+    private let onTransportFailure: @MainActor @Sendable (OutboundTransportFailureReport) -> Void
+    private let maximumWriteCallsPerDrainPass = 32
 
-    /// Once a write fails with EPIPE, all subsequent writes are dropped.
+    /// All mutable transport state is confined to `writeQueue`.
     private var connected: Bool = true
-    private var writeBuffer = Data()
+    private var queuedFrames: [QueuedFrame] = []
+    private var firstQueuedFrameIndex: Int = 0
     private var bufferSize: Int = 0
-    /// Byte offset immediately after the last lifecycle frame that must not be evicted.
-    /// The offset shrinks as the buffer drains and becomes nil after that frame is written.
-    private var protectedWriteEnd: Int?
+    private var drainPassScheduled: Bool = false
     private var drainRetryScheduled: Bool = false
-    private var droppedCount: UInt64 = 0
+    private var terminalFailureReported: Bool = false
 
     /// Creates an encoder. Defaults to stdout for production use.
     /// Pass a pipe's write handle for testing binary layout.
-    init(output: FileHandle = .standardOutput, maxBufferSize: Int = 64 * 1024) {
+    init(
+        output: FileHandle = .standardOutput,
+        maxBufferSize: Int = Int(RESOURCE_MAX_FRAME_BYTES) + 4,
+        maximumPayloadSize: Int = Int(RESOURCE_MAX_FRAME_BYTES),
+        retryDelay: DispatchTimeInterval? = .milliseconds(10),
+        nonBlockingSetupOperation: @escaping NonBlockingSetupOperation = ProtocolEncoder.configureNonBlocking,
+        writeOperation: @escaping WriteOperation = { fileDescriptor, pointer, count in
+            Darwin.write(fileDescriptor, pointer, count)
+        },
+        onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void = { _ in }
+    ) throws {
+        if let errorCode = nonBlockingSetupOperation(output.fileDescriptor) {
+            throw OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: errorCode)
+        }
         self.fd = output.fileDescriptor
         self.maxBufferSize = maxBufferSize
+        self.maximumPayloadSize = maximumPayloadSize
+        self.retryDelay = retryDelay
+        self.writeOperation = writeOperation
+        self.onTransportFailure = onTransportFailure
         writeQueue.setSpecific(key: writeQueueKey, value: ())
-        setNonBlocking(fd: fd)
     }
 
     /// Mark the encoder as disconnected. Called by the reader's
     /// `onDisconnect` callback so writes stop immediately without
     /// waiting for the next EPIPE.
-    func disconnect() {
+    func disconnect(reason: DisconnectReason) {
         writeQueue.async { [weak self] in
-            guard let self else { return }
-            self.connected = false
-            self.writeBuffer.removeAll(keepingCapacity: false)
-            self.bufferSize = 0
-            self.protectedWriteEnd = nil
+            guard let self, self.connected else { return }
+            switch reason {
+            case .expectedTeardown:
+                self.connected = false
+                self.clearQueue()
+            case .unexpectedPeerClosure:
+                self.failTransport(.peerDisconnected)
+            }
         }
-    }
-
-    /// Snapshot of dropped messages for diagnostics and tests.
-    var droppedMessageCount: UInt64 {
-        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
-            return droppedCount
-        }
-        return writeQueue.sync { droppedCount }
     }
 
     /// Snapshot of buffered bytes for diagnostics and tests.
@@ -77,9 +163,22 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Snapshot of currently buffered framed bytes for unit tests.
     func bufferedDataForTesting() -> Data {
         if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
-            return writeBuffer
+            return bufferedData()
         }
-        return writeQueue.sync { writeBuffer }
+        return writeQueue.sync { bufferedData() }
+    }
+
+    /// Snapshot of the partially written head offset for unit tests.
+    var headWriteOffsetForTesting: Int? {
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return headWriteOffset()
+        }
+        return writeQueue.sync { headWriteOffset() }
+    }
+
+    /// Admits an arbitrary legal payload through the production framing path for boundary tests.
+    func writePayloadForTesting(_ payload: Data) {
+        writeFrame(payload)
     }
 
     /// Blocks until previously enqueued writes have had a chance to drain.
@@ -92,7 +191,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
         let semaphore = DispatchSemaphore(value: 0)
         writeQueue.async { [weak self] in
-            self?.drainBuffer()
+            self?.drainBuffer(writeCallBudget: .max)
             semaphore.signal()
         }
         return semaphore.wait(timeout: .now() + timeout) == .success
@@ -152,7 +251,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_RESIZE
         writeU16(&buf, 1, cols)
         writeU16(&buf, 3, rows)
-        writeFrame(buf)
+        writeFrame(buf, deliveryPolicy: .coalescing(.viewportResize))
     }
 
     /// Request a fresh BEAM recovery generation.
@@ -1141,44 +1240,75 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     // MARK: - Private
 
-    /// Enqueue a length-prefixed frame for asynchronous POSIX `write()`.
+    /// Admit a length-prefixed frame before scheduling asynchronous POSIX `write()` work.
     ///
     /// `FileHandle.write()` raises an ObjC `NSFileHandleOperationException`
     /// on EPIPE that Swift cannot catch, zombifying the app. POSIX `write()`
     /// returns -1 and sets `errno = EPIPE`, which we handle by flipping
     /// `connected` to false. The file descriptor is non-blocking, so pipe
     /// backpressure returns EAGAIN instead of freezing the caller.
-    private func writeFrame(_ payload: Data) {
-        let frame = makeFrame(payload)
-        writeQueue.async { [weak self] in
-            guard let self, self.connected else { return }
-            self.writeBuffer.append(frame)
-            self.bufferSize += frame.count
-            self.dropOldestFramesIfNeeded()
-            self.drainBuffer()
+    private func writeFrame(_ payload: Data, deliveryPolicy: DeliveryPolicy = .durable) {
+        withWriteQueue {
+            guard admit(payload: payload, deliveryPolicy: deliveryPolicy) else { return }
+            scheduleDrainPass()
         }
     }
 
-    /// Enqueues a lifecycle frame only when this exact transport is still writable.
+    /// Admits a lifecycle frame only when this exact transport can retain it durably.
     ///
     /// The file descriptor is nonblocking, so this ordered queue hop cannot wait on pipe backpressure.
-    /// A false result lets AppKit cancel termination immediately instead of approving a quit that the BEAM never received.
+    /// A false result lets AppKit cancel termination instead of approving a quit that the BEAM never received.
     private func writeCriticalFrame(_ payload: Data) -> Bool {
-        let enqueue = { [self] () -> Bool in
-            guard connected else { return false }
-            let frame = makeFrame(payload)
-            writeBuffer.append(frame)
-            bufferSize += frame.count
-            protectedWriteEnd = writeBuffer.count
-            dropOldestFramesIfNeeded()
-            drainBuffer()
-            return connected
+        withWriteQueue {
+            guard admit(payload: payload, deliveryPolicy: .durable) else { return false }
+            scheduleDrainPass()
+            return true
+        }
+    }
+
+    private func withWriteQueue<T>(_ operation: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return operation()
+        }
+        return writeQueue.sync(execute: operation)
+    }
+
+    private func admit(payload: Data, deliveryPolicy: DeliveryPolicy) -> Bool {
+        guard connected else { return false }
+        guard payload.count <= maximumPayloadSize else {
+            failTransport(.frameTooLarge(limit: maximumPayloadSize, payloadBytes: payload.count))
+            return false
         }
 
-        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
-            return enqueue()
+        let frame = QueuedFrame(bytes: makeFrame(payload), deliveryPolicy: deliveryPolicy)
+        if replaceCoalescibleTail(with: frame) {
+            return true
         }
-        return writeQueue.sync(execute: enqueue)
+
+        guard frame.bytes.count <= maxBufferSize,
+              bufferSize <= maxBufferSize - frame.bytes.count else {
+            failTransport(.capacityExhausted(limit: maxBufferSize, attemptedFrameBytes: frame.bytes.count))
+            return false
+        }
+
+        queuedFrames.append(frame)
+        bufferSize += frame.bytes.count
+        return true
+    }
+
+    private func replaceCoalescibleTail(with frame: QueuedFrame) -> Bool {
+        guard case .coalescing = frame.deliveryPolicy,
+              firstQueuedFrameIndex < queuedFrames.count,
+              let tail = queuedFrames.last,
+              tail.writeOffset == 0,
+              tail.deliveryPolicy == frame.deliveryPolicy else { return false }
+
+        let replacementSize = bufferSize - tail.bytes.count + frame.bytes.count
+        guard replacementSize <= maxBufferSize else { return false }
+
+        queuedFrames[queuedFrames.count - 1] = frame
+        bufferSize = replacementSize
+        return true
     }
 
     private func makeFrame(_ payload: Data) -> Data {
@@ -1192,20 +1322,31 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         return frame
     }
 
-    private func drainBuffer() {
+    private func drainBuffer(writeCallBudget: Int) {
         guard connected else { return }
 
-        while bufferSize > 0 {
-            let written = writeBuffer.withUnsafeBytes { buffer -> Int in
+        var writeCalls = 0
+        while firstQueuedFrameIndex < queuedFrames.count, writeCalls < writeCallBudget {
+            let head = queuedFrames[firstQueuedFrameIndex]
+            writeCalls += 1
+            let written = head.bytes.withUnsafeBytes { buffer -> Int in
                 guard let ptr = buffer.baseAddress else { return 0 }
-                return Darwin.write(fd, ptr, bufferSize)
+                return writeOperation(fd, ptr.advanced(by: head.writeOffset), head.remainingByteCount)
             }
 
             if written > 0 {
-                writeBuffer.removeSubrange(0..<written)
-                bufferSize -= written
-                if let end = protectedWriteEnd {
-                    protectedWriteEnd = end > written ? end - written : nil
+                guard written <= head.remainingByteCount else {
+                    failTransport(.writeFailed(errorCode: EIO))
+                    return
+                }
+
+                let nextOffset = head.writeOffset + written
+                if nextOffset == head.bytes.count {
+                    firstQueuedFrameIndex += 1
+                    bufferSize -= head.bytes.count
+                    compactCompletedFramesIfNeeded()
+                } else {
+                    queuedFrames[firstQueuedFrameIndex].writeOffset = nextOffset
                 }
                 continue
             }
@@ -1224,87 +1365,89 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
                 return
             }
 
-            connected = false
-            writeBuffer.removeAll(keepingCapacity: false)
-            bufferSize = 0
-            protectedWriteEnd = nil
+            failTransport(.writeFailed(errorCode: Int32(error)))
             return
+        }
+
+        if firstQueuedFrameIndex < queuedFrames.count {
+            scheduleDrainPass()
+        }
+    }
+
+    private func scheduleDrainPass() {
+        guard !drainPassScheduled, connected else { return }
+        drainPassScheduled = true
+        writeQueue.async { [weak self] in
+            guard let self else { return }
+            self.drainPassScheduled = false
+            self.drainBuffer(writeCallBudget: self.maximumWriteCallsPerDrainPass)
         }
     }
 
     private func scheduleDrainRetry() {
-        guard !drainRetryScheduled, connected else { return }
+        guard let retryDelay, !drainRetryScheduled, connected else { return }
         drainRetryScheduled = true
         writeQueue.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
             guard let self else { return }
             self.drainRetryScheduled = false
-            self.drainBuffer()
+            self.drainBuffer(writeCallBudget: self.maximumWriteCallsPerDrainPass)
         }
     }
 
-    private func dropOldestFramesIfNeeded() {
-        guard bufferSize > maxBufferSize else { return }
+    private func failTransport(_ failure: OutboundTransportFailure) {
+        guard !terminalFailureReported else { return }
+        let undeliveredFrames = queuedFrames[firstQueuedFrameIndex...]
+            .filter { $0.deliveryPolicy == .durable }
+        let report = OutboundTransportFailureReport(
+            failure: failure,
+            undeliveredDurableFrameCount: undeliveredFrames.count,
+            undeliveredDurableByteCount: undeliveredFrames.reduce(0) { $0 + $1.remainingByteCount }
+        )
+        terminalFailureReported = true
+        connected = false
+        clearQueue()
 
-        if let protectedWriteEnd {
-            dropFramesAfterProtectedWrite(end: protectedWriteEnd)
+        let callback = onTransportFailure
+        Task { @MainActor in
+            callback(report)
+        }
+    }
+
+    private func bufferedData() -> Data {
+        queuedFrames[firstQueuedFrameIndex...].reduce(into: Data()) { data, frame in
+            data.append(frame.bytes.subdata(in: frame.writeOffset..<frame.bytes.count))
+        }
+    }
+
+    private func headWriteOffset() -> Int? {
+        guard firstQueuedFrameIndex < queuedFrames.count else { return nil }
+        return queuedFrames[firstQueuedFrameIndex].writeOffset
+    }
+
+    private func compactCompletedFramesIfNeeded() {
+        if firstQueuedFrameIndex == queuedFrames.count {
+            queuedFrames.removeAll(keepingCapacity: true)
+            firstQueuedFrameIndex = 0
             return
         }
 
-        var droppedThisPass: UInt64 = 0
-        while bufferSize > maxBufferSize, writeBuffer.count >= 4 {
-            let payloadLength = Int(writeBuffer[0]) << 24 | Int(writeBuffer[1]) << 16 | Int(writeBuffer[2]) << 8 | Int(writeBuffer[3])
-            let frameLength = 4 + payloadLength
-            guard frameLength > 4, frameLength <= writeBuffer.count else {
-                writeBuffer.removeAll(keepingCapacity: false)
-                bufferSize = 0
-                droppedThisPass += 1
-                break
-            }
-
-            // A single valid frame can be slightly larger than the default
-            // threshold, for example a maximum-size paste event. Preserve it
-            // rather than silently dropping user input before a drain attempt.
-            guard frameLength < writeBuffer.count else { break }
-
-            writeBuffer.removeSubrange(0..<frameLength)
-            bufferSize -= frameLength
-            droppedThisPass += 1
-        }
-
-        guard droppedThisPass > 0 else { return }
-        droppedCount += droppedThisPass
-        PortLogger.warn("GUI output buffer exceeded \(maxBufferSize) bytes; dropped \(droppedThisPass) oldest messages (total \(droppedCount))")
+        guard firstQueuedFrameIndex >= 64,
+              firstQueuedFrameIndex * 2 >= queuedFrames.count else { return }
+        queuedFrames.removeFirst(firstQueuedFrameIndex)
+        firstQueuedFrameIndex = 0
     }
 
-    /// Drops only complete ordinary frames queued after a lifecycle frame.
-    ///
-    /// The protected prefix can include a partially written ordinary frame plus the lifecycle frame.
-    /// Removing any byte from that prefix would corrupt framing or lose the quit handshake, so temporary overflow is allowed until it drains.
-    private func dropFramesAfterProtectedWrite(end protectedEnd: Int) {
-        var droppedThisPass: UInt64 = 0
-
-        while bufferSize > maxBufferSize, writeBuffer.count - protectedEnd >= 4 {
-            let payloadLength = Int(writeBuffer[protectedEnd]) << 24
-                | Int(writeBuffer[protectedEnd + 1]) << 16
-                | Int(writeBuffer[protectedEnd + 2]) << 8
-                | Int(writeBuffer[protectedEnd + 3])
-            let frameLength = 4 + payloadLength
-            guard frameLength > 4, protectedEnd + frameLength <= writeBuffer.count else { break }
-
-            writeBuffer.removeSubrange(protectedEnd..<(protectedEnd + frameLength))
-            bufferSize -= frameLength
-            droppedThisPass += 1
-        }
-
-        guard droppedThisPass > 0 else { return }
-        droppedCount += droppedThisPass
-        PortLogger.warn("GUI output buffer exceeded \(maxBufferSize) bytes; dropped \(droppedThisPass) messages after a lifecycle frame (total \(droppedCount))")
+    private func clearQueue() {
+        queuedFrames.removeAll(keepingCapacity: false)
+        firstQueuedFrameIndex = 0
+        bufferSize = 0
     }
 
-    private func setNonBlocking(fd: Int32) {
-        let flags = fcntl(fd, F_GETFL, 0)
-        guard flags >= 0 else { return }
-        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+    private static func configureNonBlocking(fileDescriptor: Int32) -> Int32? {
+        let flags = fcntl(fileDescriptor, F_GETFL, 0)
+        guard flags >= 0 else { return errno }
+        guard fcntl(fileDescriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else { return errno }
+        return nil
     }
 
     private func fileTreeDropPayloadError(sourcePaths: [String], targetId: String, targetPath: String) -> String? {
