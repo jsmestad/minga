@@ -17,6 +17,9 @@ defmodule Minga.Buffer.Operation do
   @typedoc "Result of a pure edit operation."
   @type result :: :unchanged | {:edited, Document.t(), EditDelta.t()}
 
+  @typedoc "Result of replacing an explicitly byte-sized range."
+  @type byte_range_result :: result() | {:error, :invalid_range}
+
   @typedoc "A range replacement edit using Buffer's characterwise inclusive range semantics."
   @type range_edit :: {Document.position(), Document.position(), String.t()}
 
@@ -55,6 +58,82 @@ defmodule Minga.Buffer.Operation do
       )
 
     {:edited, new_doc, delta}
+  end
+
+  @doc "Replaces a half-open byte range beginning at an editor position."
+  @spec replace_byte_range(Document.t(), Document.position(), non_neg_integer(), String.t()) ::
+          byte_range_result()
+  def replace_byte_range(%Document{} = doc, {line, col} = position, byte_length, replacement)
+      when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 and
+             is_integer(byte_length) and byte_length >= 0 and is_binary(replacement) do
+    with line_text when is_binary(line_text) <- Lines.fetch(doc, line),
+         true <- col <= byte_size(line_text),
+         content = Document.content(doc),
+         start_byte = Position.point_for(doc, position),
+         old_end_byte = start_byte + byte_length,
+         true <- old_end_byte <= byte_size(content),
+         true <- valid_utf8_boundary?(content, start_byte),
+         true <- valid_utf8_boundary?(content, old_end_byte),
+         true <- String.valid?(replacement) do
+      replace_valid_byte_range(
+        doc,
+        position,
+        start_byte,
+        old_end_byte,
+        byte_length,
+        replacement
+      )
+    else
+      _invalid -> {:error, :invalid_range}
+    end
+  end
+
+  def replace_byte_range(%Document{}, _position, byte_length, replacement)
+      when is_integer(byte_length) and byte_length >= 0 and is_binary(replacement),
+      do: {:error, :invalid_range}
+
+  @spec replace_valid_byte_range(
+          Document.t(),
+          Document.position(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) :: result()
+  defp replace_valid_byte_range(_doc, _position, _start, _old_end, 0, ""), do: :unchanged
+
+  defp replace_valid_byte_range(
+         doc,
+         position,
+         start_byte,
+         old_end_byte,
+         byte_length,
+         replacement
+       ) do
+    old_end_position = Position.from_point(doc, old_end_byte)
+    new_doc = Document.replace_at_byte_range(doc, start_byte, byte_length, replacement, {0, 0})
+    new_end_byte = start_byte + byte_size(replacement)
+    new_end_position = Position.from_point(new_doc, new_end_byte)
+    new_doc = Document.move_to(new_doc, new_end_position)
+
+    delta =
+      EditDelta.replacement(
+        start_byte,
+        old_end_byte,
+        position,
+        old_end_position,
+        replacement,
+        new_end_position
+      )
+
+    {:edited, new_doc, delta}
+  end
+
+  @spec valid_utf8_boundary?(String.t(), non_neg_integer()) :: boolean()
+  defp valid_utf8_boundary?(content, point) do
+    content
+    |> binary_part(0, point)
+    |> String.valid?()
   end
 
   @doc "Applies multiple range replacements from the end of the document toward the start."

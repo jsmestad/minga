@@ -984,6 +984,74 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "edit delta tracking" do
+    test "version-checked byte range replacement is Unicode-safe and undoable" do
+      {:ok, pid} = BufferProcess.start_link(content: "one café two")
+      version = BufferProcess.version(pid)
+
+      assert {:ok, new_version} =
+               BufferProcess.replace_byte_range_if_version(pid, version, {0, 4}, 5, "tea")
+
+      assert new_version > version
+      assert BufferProcess.content(pid) == "one tea two"
+      assert BufferProcess.cursor(pid) == {0, 7}
+
+      assert :ok = BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "one café two"
+      assert BufferProcess.cursor(pid) == {0, 0}
+    end
+
+    test "version-checked byte range replacement supports zero-width insertion" do
+      {:ok, pid} = BufferProcess.start_link(content: "foo")
+      version = BufferProcess.version(pid)
+
+      assert {:ok, _new_version} =
+               BufferProcess.replace_byte_range_if_version(pid, version, {0, 0}, 0, "x")
+
+      assert BufferProcess.content(pid) == "xfoo"
+      assert BufferProcess.cursor(pid) == {0, 1}
+    end
+
+    test "version-checked byte range replacement refuses stale and read-only edits" do
+      {:ok, pid} = BufferProcess.start_link(content: "foo")
+      stale_version = BufferProcess.version(pid)
+      :ok = BufferProcess.insert_text(pid, "x")
+
+      assert {:error, :stale} =
+               BufferProcess.replace_byte_range_if_version(pid, stale_version, {0, 0}, 3, "bar")
+
+      assert BufferProcess.content(pid) == "xfoo"
+      :ok = BufferProcess.set_read_only(pid, true)
+
+      assert {:error, :read_only} =
+               BufferProcess.replace_byte_range_if_version(
+                 pid,
+                 BufferProcess.version(pid),
+                 {0, 1},
+                 3,
+                 "bar"
+               )
+
+      assert BufferProcess.content(pid) == "xfoo"
+    end
+
+    test "version-checked byte range replacement rejects invalid spans without crashing" do
+      {:ok, pid} = BufferProcess.start_link(content: "café")
+      version = BufferProcess.version(pid)
+
+      assert {:error, :invalid_range} =
+               BufferProcess.replace_byte_range_if_version(pid, version, {0, 9}, 1, "x")
+
+      assert {:error, :invalid_range} =
+               BufferProcess.replace_byte_range_if_version(pid, version, {0, 3}, 1, "x")
+
+      assert {:error, :invalid_range} =
+               BufferProcess.replace_byte_range_if_version(pid, version, {-1, 0}, 1, "x")
+
+      assert BufferProcess.content(pid) == "café"
+      assert BufferProcess.version(pid) == version
+      assert Process.alive?(pid)
+    end
+
     test "insert_char records an insertion delta" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})

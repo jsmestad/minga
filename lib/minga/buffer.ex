@@ -256,6 +256,25 @@ defmodule Minga.Buffer do
   defdelegate replace_content_if_version(server, expected_version, new_content, source \\ :user),
     to: BufferProcess
 
+  @doc "Atomically replaces a half-open byte range as its own undo entry when `expected_version` is current."
+  @spec replace_byte_range_if_version(
+          t(),
+          non_neg_integer(),
+          position(),
+          non_neg_integer(),
+          String.t(),
+          Minga.Buffer.EditSource.t()
+        ) :: {:ok, non_neg_integer()} | {:error, :invalid_range | :read_only | :stale}
+  defdelegate replace_byte_range_if_version(
+                server,
+                expected_version,
+                position,
+                byte_length,
+                replacement,
+                source \\ Minga.Buffer.EditSource.user()
+              ),
+              to: BufferProcess
+
   @doc "Replace generated/internal content, bypassing user read-only restrictions."
   @spec replace_generated_content(t(), String.t()) :: :ok
   defdelegate replace_generated_content(server, new_content), to: BufferProcess

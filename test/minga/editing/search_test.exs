@@ -64,6 +64,33 @@ defmodule Minga.Editing.SearchTest do
     end
   end
 
+  describe "match_at/4" do
+    test "returns the exact match and its byte length" do
+      assert %Match{line: 0, col: 4, length: 5} =
+               Search.match_at("one café", "café", {0, 4})
+    end
+
+    test "does not substitute a nearby match" do
+      assert nil == Search.match_at("foo foo", "foo", {0, 1})
+    end
+
+    test "accepts an overlapping match selected by ordinary navigation" do
+      assert %Match{line: 0, col: 1, length: 2} = Search.match_at("aaa", "aa", {0, 1})
+    end
+
+    test "preserves whole-word context before the selected column" do
+      assert nil == Search.match_at("afoo foo", "foo", {0, 1}, whole_word: true)
+
+      assert %Match{col: 5, length: 3} =
+               Search.match_at("afoo foo", "foo", {0, 5}, whole_word: true)
+    end
+
+    test "returns zero-width regular expression matches without looping" do
+      assert %Match{line: 0, col: 0, length: 0} =
+               Search.match_at("foo", "(?=foo)", {0, 0}, regex: true)
+    end
+  end
+
   # ── find_all_in_range/3 ────────────────────────────────────────────────
 
   describe "find_all_in_range/3" do

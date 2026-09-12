@@ -160,6 +160,32 @@ defmodule Minga.Buffer.Process do
     )
   end
 
+  @doc "Atomically replaces a half-open byte range as its own undo entry when the buffer version is current."
+  @spec replace_byte_range_if_version(
+          GenServer.server(),
+          non_neg_integer(),
+          Document.position(),
+          non_neg_integer(),
+          String.t(),
+          EditSource.t()
+        ) :: {:ok, non_neg_integer()} | {:error, :invalid_range | :read_only | :stale}
+  def replace_byte_range_if_version(
+        server,
+        expected_version,
+        position,
+        byte_length,
+        replacement,
+        source \\ EditSource.user()
+      )
+      when is_integer(expected_version) and expected_version >= 0 and
+             is_integer(byte_length) and byte_length >= 0 and is_binary(replacement) do
+    GenServer.call(
+      server,
+      {:replace_byte_range_if_version, expected_version, position, byte_length, replacement,
+       source}
+    )
+  end
+
   @typedoc "A single text edit: `{start_pos, end_pos, replacement_text}`."
   @type text_edit ::
           {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()},
@@ -1060,6 +1086,45 @@ defmodule Minga.Buffer.Process do
       )
 
     {:reply, :ok, state}
+  end
+
+  def handle_call(
+        {:replace_byte_range_if_version, _version, _position, _length, _text, _source},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call(
+        {:replace_byte_range_if_version, expected_version, position, length, text, source},
+        _from,
+        state
+      ) do
+    if BufState.version(state) == expected_version do
+      case Operation.replace_byte_range(state.document, position, length, text) do
+        :unchanged ->
+          {:reply, {:ok, expected_version}, state}
+
+        {:edited, new_doc, delta} ->
+          undo_source = EditSource.to_undo_source(source)
+
+          new_state =
+            apply_operation(
+              state,
+              {:delta, new_doc, delta},
+              source,
+              {:force_delta, undo_source, :record_delta}
+            )
+
+          {:reply, {:ok, BufState.version(new_state)}, new_state}
+
+        {:error, :invalid_range} = error ->
+          {:reply, error, state}
+      end
+    else
+      {:reply, {:error, :stale}, state}
+    end
   end
 
   def handle_call({:apply_edits, _edits, _source}, _from, %{read_only: true} = state) do
@@ -2355,6 +2420,18 @@ defmodule Minga.Buffer.Process do
        ) do
     state
     |> push_undo(new_buf, undo_source, delta)
+    |> mark_dirty()
+    |> record_edit(delta, source)
+  end
+
+  defp apply_operation(
+         state,
+         {:delta, new_buf, delta},
+         source,
+         {:force_delta, undo_source, :record_delta}
+       ) do
+    state
+    |> push_undo_force(new_buf, undo_source, delta)
     |> mark_dirty()
     |> record_edit(delta, source)
   end

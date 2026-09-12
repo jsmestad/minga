@@ -1,7 +1,13 @@
 defmodule MingaEditor.Frontend.GUISearchTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
+  alias Minga.Buffer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.RenderModel.UI.SearchStateBuilder
+  alias MingaEditor.Session.State
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search, as: SearchData
   alias Minga.Protocol.Opcodes
 
@@ -322,5 +328,248 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       assert result == "foobar baz barfoo"
       assert count == 1
     end
+  end
+
+  describe "production toolbar Replace route" do
+    test "replaces the highlighted middle match before advancing" do
+      ctx = start_editor("foo foo foo")
+      select_first_match(ctx, "foo")
+      send_search_action(ctx, :next)
+
+      assert Buffer.cursor(ctx.buffer) == {0, 4}
+
+      send_search_action(ctx, {:replace, "bar"})
+
+      assert Buffer.content(ctx.buffer) == "foo bar foo"
+      assert Buffer.cursor(ctx.buffer) == {0, 8}
+      assert_search_stats(ctx, 2, 2)
+    end
+
+    test "advances to an adjacent match at the replacement cursor" do
+      ctx = start_editor("foofoo foo")
+      select_first_match(ctx, "foo")
+
+      send_search_action(ctx, {:replace, "bar"})
+
+      assert Buffer.content(ctx.buffer) == "barfoo foo"
+      assert Buffer.cursor(ctx.buffer) == {0, 3}
+      assert_search_stats(ctx, 2, 1)
+    end
+
+    test "replaces an overlapping selected match and advances to the next remaining match" do
+      ctx = start_editor("aaa aa")
+      select_first_match(ctx, "aa")
+      send_search_action(ctx, :next)
+      assert Buffer.cursor(ctx.buffer) == {0, 1}
+
+      send_search_action(ctx, {:replace, "X"})
+
+      assert Buffer.content(ctx.buffer) == "aX aa"
+      assert Buffer.cursor(ctx.buffer) == {0, 3}
+      assert_search_stats(ctx, 1, 1)
+    end
+
+    test "replaces first, last with wraparound, and a single remaining match in order" do
+      first = start_editor("foo foo foo")
+      select_first_match(first, "foo")
+      send_search_action(first, {:replace, "bar"})
+      assert Buffer.content(first.buffer) == "bar foo foo"
+      assert Buffer.cursor(first.buffer) == {0, 4}
+      assert_search_stats(first, 2, 1)
+
+      last = start_editor("foo foo foo")
+      select_first_match(last, "foo")
+      send_search_action(last, :next)
+      send_search_action(last, :next)
+      assert Buffer.cursor(last.buffer) == {0, 8}
+      send_search_action(last, {:replace, "bar"})
+      assert Buffer.content(last.buffer) == "foo foo bar"
+      assert Buffer.cursor(last.buffer) == {0, 0}
+      assert_search_stats(last, 2, 1)
+
+      single = start_editor("foo")
+      Buffer.move_to(single.buffer, {0, 2})
+      send_search_query(single, "foo")
+      send_search_action(single, {:replace, "bar"})
+      assert Buffer.content(single.buffer) == "bar"
+      assert Buffer.cursor(single.buffer) == {0, 3}
+      assert_search_stats(single, 0, 0)
+    end
+
+    test "refuses stale query, active buffer, and content targets instead of choosing a nearby match" do
+      query = start_editor("foo foo")
+      select_first_match(query, "foo")
+      send_search_query(query, "missing")
+      send_search_action(query, {:replace, "bar"})
+      assert Buffer.content(query.buffer) == "foo foo"
+      assert notice_message(query) == "Search match changed; select a match and try again"
+
+      buffer = start_editor("foo foo")
+      select_first_match(buffer, "foo")
+      other = start_supervised!({BufferProcess, content: "x foo"}, id: make_ref())
+      replace_active_buffer(buffer, other)
+      send_search_action(buffer, {:replace, "bar"})
+      assert Buffer.content(other) == "x foo"
+      assert notice_message(buffer) == "Search match changed; select a match and try again"
+
+      content = start_editor("foo foo")
+      select_first_match(content, "foo")
+      :ok = Buffer.replace_content(content.buffer, "x foo")
+      send_search_action(content, {:replace, "bar"})
+      assert Buffer.content(content.buffer) == "x foo"
+      assert notice_message(content) == "Search match changed; select a match and try again"
+    end
+
+    test "preserves literal, case, whole-word, regex, Unicode, and zero-width semantics" do
+      literal = start_editor("a.b axb")
+      Buffer.move_to(literal.buffer, {0, 6})
+      send_search_query(literal, "a.b", 0x03)
+      send_search_action(literal, {:replace, "literal"})
+      assert Buffer.content(literal.buffer) == "literal axb"
+
+      insensitive = start_editor("FOO foo")
+      Buffer.move_to(insensitive.buffer, {0, 6})
+      send_search_query(insensitive, "foo", 0x01)
+      send_search_action(insensitive, {:replace, "bar"})
+      assert Buffer.content(insensitive.buffer) == "bar foo"
+
+      sensitive = start_editor("FOO foo")
+      Buffer.move_to(sensitive.buffer, {0, 2})
+      send_search_query(sensitive, "foo", 0x03)
+      send_search_action(sensitive, {:replace, "bar"})
+      assert Buffer.content(sensitive.buffer) == "FOO bar"
+
+      whole = start_editor("afoo foo")
+      Buffer.move_to(whole.buffer, {0, 7})
+      send_search_query(whole, "foo", 0x05)
+      send_search_action(whole, {:replace, "bar"})
+      assert Buffer.content(whole.buffer) == "afoo bar"
+
+      regex = start_editor("abc123 def")
+      Buffer.move_to(regex.buffer, {0, 9})
+      send_search_query(regex, "\\d+", 0x0B)
+      send_search_action(regex, {:replace, "N"})
+      assert Buffer.content(regex.buffer) == "abcN def"
+
+      unicode = start_editor("café café")
+      Buffer.move_to(unicode.buffer, {0, 9})
+      send_search_query(unicode, "café", 0x03)
+      send_search_action(unicode, {:replace, "茶"})
+      assert Buffer.content(unicode.buffer) == "茶 café"
+
+      zero_width = start_editor("foo foo")
+      Buffer.move_to(zero_width.buffer, {0, 6})
+      send_search_query(zero_width, "(?=foo)", 0x0B)
+      send_search_action(zero_width, {:replace, "x"})
+      assert Buffer.content(zero_width.buffer) == "xfoo foo"
+      assert Buffer.cursor(zero_width.buffer) == {0, 5}
+      assert_search_stats(zero_width, 2, 2)
+    end
+
+    test "creates one exact undo entry and refuses a read-only edit" do
+      ctx = start_editor("foo foo foo")
+      select_first_match(ctx, "foo")
+      send_search_action(ctx, :next)
+      send_search_action(ctx, {:replace, "bar"})
+
+      assert BufferProcess.last_undo_source(ctx.buffer) == :user
+      assert :ok = Buffer.undo(ctx.buffer)
+      assert Buffer.content(ctx.buffer) == "foo foo foo"
+      assert Buffer.cursor(ctx.buffer) == {0, 4}
+      assert BufferProcess.last_undo_source(ctx.buffer) == nil
+
+      read_only = start_editor("foo foo")
+      select_first_match(read_only, "foo")
+      version = Buffer.version(read_only.buffer)
+      :ok = Buffer.set_read_only(read_only.buffer, true)
+      send_search_action(read_only, {:replace, "bar"})
+      assert Buffer.content(read_only.buffer) == "foo foo"
+      assert Buffer.version(read_only.buffer) == version
+      assert notice_message(read_only) == "Buffer is read-only"
+    end
+
+    test "keeps rapid toolbar replacements as separate undo units" do
+      ctx = start_editor("foo foo foo")
+      select_first_match(ctx, "foo")
+
+      send_search_action(ctx, {:replace, "bar"})
+      send_search_action(ctx, {:replace, "bar"})
+      assert Buffer.content(ctx.buffer) == "bar bar foo"
+
+      assert :ok = Buffer.undo(ctx.buffer)
+      assert Buffer.content(ctx.buffer) == "bar foo foo"
+      assert Buffer.cursor(ctx.buffer) == {0, 4}
+    end
+
+    test "keeps Replace All global and navigation exclusive" do
+      ctx = start_editor("foo foo foo")
+      select_first_match(ctx, "foo")
+      send_search_action(ctx, :next)
+      assert Buffer.cursor(ctx.buffer) == {0, 4}
+
+      send_search_action(ctx, {:replace_all, "bar"})
+      assert Buffer.content(ctx.buffer) == "bar bar bar"
+      assert notice_message(ctx) == "3 replacements"
+    end
+  end
+
+  defp select_first_match(ctx, query) do
+    {line, last_col} = last_match_position(Buffer.content(ctx.buffer), query)
+    Buffer.move_to(ctx.buffer, {line, last_col})
+    send_search_query(ctx, query)
+    assert Buffer.cursor(ctx.buffer) == {0, 0}
+  end
+
+  defp last_match_position(content, query) do
+    [last | _] = content |> :binary.matches(query) |> Enum.reverse()
+    {col, _length} = last
+    {0, col}
+  end
+
+  defp send_search_query(ctx, query, flags \\ 0x03) do
+    payload =
+      <<Opcodes.gui_action(), @gui_action_search_query, byte_size(query)::16, query::binary,
+        flags::8>>
+
+    send_decoded_gui_action(ctx, payload)
+  end
+
+  defp send_search_action(ctx, :next) do
+    send_decoded_gui_action(ctx, <<Opcodes.gui_action(), @gui_action_search_next>>)
+  end
+
+  defp send_search_action(ctx, {:replace, replacement}) do
+    payload =
+      <<Opcodes.gui_action(), @gui_action_search_replace, byte_size(replacement)::16,
+        replacement::binary>>
+
+    send_decoded_gui_action(ctx, payload)
+  end
+
+  defp send_search_action(ctx, {:replace_all, replacement}) do
+    payload =
+      <<Opcodes.gui_action(), @gui_action_search_replace_all, byte_size(replacement)::16,
+        replacement::binary>>
+
+    send_decoded_gui_action(ctx, payload)
+  end
+
+  defp send_decoded_gui_action(ctx, payload) do
+    assert {:ok, {:gui_action, action}} = Protocol.decode_event(payload)
+    send(ctx.editor, {:minga_input, {:gui_action, action}})
+    editor_state(ctx)
+  end
+
+  defp assert_search_stats(ctx, count, index) do
+    model = SearchStateBuilder.build(editor_state(ctx).workspace.search, ctx.buffer)
+    assert model.match_count == count
+    assert model.current_index == index
+  end
+
+  defp replace_active_buffer(ctx, buffer) do
+    :sys.replace_state(ctx.editor, fn editor_state ->
+      buffers = Buffers.set_active_override(editor_state.workspace.buffers, buffer)
+      %{editor_state | workspace: State.set_buffers(editor_state.workspace, buffers)}
+    end)
   end
 end
