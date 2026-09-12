@@ -29,6 +29,21 @@ defmodule MingaEditor.Input.InlineEdit do
     end
   end
 
+  @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, text) do
+    case Overlay.active(state, spec()) do
+      %InlineEdit{phase: :input} = edit ->
+        {:handled, Overlay.append_text(state, edit, text, spec())}
+
+      %InlineEdit{} ->
+        {:handled, state}
+
+      nil ->
+        {:passthrough, state}
+    end
+  end
+
   @spec handle_inline_key(state(), InlineEdit.t(), non_neg_integer()) :: state()
   defp handle_inline_key(state, edit, 27), do: InlineEditCommand.reject(state, edit)
   defp handle_inline_key(state, edit, ?n), do: InlineEditCommand.reject(state, edit)

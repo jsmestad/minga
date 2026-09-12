@@ -318,9 +318,11 @@ struct KeyboardInputTests {
     @Test("System command shortcuts are yielded to AppKit")
     @MainActor func systemCommandShortcutsYield() throws {
         guard let quit = keyEvent(keyCode: 12, modifiers: .command, characters: "q", charactersIgnoringModifiers: "q") else { return }
+        guard let paste = keyEvent(keyCode: 9, modifiers: .command, characters: "v", charactersIgnoringModifiers: "v") else { return }
         guard let modifiedQuit = keyEvent(keyCode: 12, modifiers: [.command, .shift], characters: "Q", charactersIgnoringModifiers: "q") else { return }
 
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(quit))
+        #expect(EditorNSView.shouldYieldSystemCommandShortcut(paste))
         #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))
     }
 

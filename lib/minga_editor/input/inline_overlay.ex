@@ -84,6 +84,12 @@ defmodule MingaEditor.Input.InlineOverlay do
     end
   end
 
+  @doc "Appends decoded paste text to an inline overlay prompt in one state transition."
+  @spec append_text(state(), struct(), String.t(), spec()) :: state()
+  def append_text(state, overlay, text, spec) do
+    update(state, spec.state_module.append_input(overlay, text), spec)
+  end
+
   @doc "Deletes one prompt character."
   @spec backspace(state(), struct(), spec()) :: state()
   def backspace(state, overlay, spec) do

@@ -26,6 +26,16 @@ defmodule MingaEditor.Input.BottomPanel do
     end
   end
 
+  @impl true
+  @spec handle_paste(EditorState.t(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, _text) do
+    if BottomPanel.focused?(state.shell_runtime.state.bottom_panel) do
+      {:handled, state}
+    else
+      {:passthrough, state}
+    end
+  end
+
   @spec handle_focused_key(EditorState.t(), BottomPanel.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   defp handle_focused_key(state, panel, ?q, 0) do

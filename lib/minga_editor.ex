@@ -640,9 +640,7 @@ defmodule MingaEditor do
 
   # ── Paste event (bracketed paste from TUI, Cmd+V from GUI) ──
   def handle_info({:minga_input, {:paste_event, text}}, state) do
-    new_state = handle_paste_event(state, text)
-    new_state = Renderer.render_or_async(new_state)
-    {:noreply, new_state}
+    {:noreply, Input.Router.dispatch_paste(state, text)}
   end
 
   # ── File watcher notification ──
@@ -1438,31 +1436,6 @@ defmodule MingaEditor do
   @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()
   defdelegate dispatch_command(state, cmd), to: KeyDispatch
-
-  # ── Paste event routing ───────────────────────────────────────────────────
-
-  @spec handle_paste_event(state(), String.t()) :: state()
-  defp handle_paste_event(state, text) do
-    if state.workspace.agent_ui.panel.input_focused do
-      # Agent input is focused (split panel or full-screen agentic view)
-      Commands.Agent.input_paste(state, text)
-    else
-      handle_paste_event_editor(state, text)
-    end
-  end
-
-  @spec handle_paste_event_editor(state(), String.t()) :: state()
-  defp handle_paste_event_editor(%{workspace: %{buffers: %{active: buf}}} = state, text)
-       when is_pid(buf) do
-    {line, col} = Buffer.cursor(buf)
-    Buffer.apply_edit(buf, line, col, line, col, text)
-    state
-  end
-
-  defp handle_paste_event_editor(state, _text) do
-    Log.info(:editor, "Paste ignored (no active buffer)")
-    state
-  end
 
   # ── Tool picker refresh ─────────────────────────────────────────────
 

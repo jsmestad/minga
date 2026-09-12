@@ -243,6 +243,11 @@ defmodule MingaEditor.KeyDispatch do
 
   # ── Command completion overlay lifecycle ──────────────────────────────────
 
+  @doc false
+  @spec refresh_command_completion(EditorState.t()) :: EditorState.t()
+  def refresh_command_completion(state),
+    do: sync_command_completion_overlay(state, :command, :command)
+
   @spec sync_command_completion_overlay(EditorState.t(), Mode.mode(), Mode.mode()) ::
           EditorState.t()
   defp sync_command_completion_overlay(state, _old_mode, :command) do

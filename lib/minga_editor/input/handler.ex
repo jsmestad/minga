@@ -64,6 +64,13 @@ defmodule MingaEditor.Input.Handler do
             ) :: result()
 
   @doc """
+  Processes a decoded paste event.
+
+  Returns `{:handled, state}` when this handler owns the focused input target, or `{:passthrough, state}` when the paste should continue to the next handler. Handlers without this callback pass paste input through unchanged.
+  """
+  @callback handle_paste(handler_state(), text :: String.t()) :: result()
+
+  @doc """
   Processes a mouse event routed to this handler by the focus tree.
 
   Returns `{:handled, state}` if this handler consumed the mouse event, or `{:passthrough, state}` to bubble to the routed node's ancestors.
@@ -94,5 +101,5 @@ defmodule MingaEditor.Input.Handler do
               click_count :: pos_integer()
             ) :: result()
 
-  @optional_callbacks [handle_key: 3, handle_mouse: 7, handle_mouse_at_node: 8]
+  @optional_callbacks [handle_key: 3, handle_paste: 2, handle_mouse: 7, handle_mouse_at_node: 8]
 end

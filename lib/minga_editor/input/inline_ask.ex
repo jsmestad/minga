@@ -23,6 +23,21 @@ defmodule MingaEditor.Input.InlineAsk do
           MingaEditor.Input.Handler.result()
   def handle_key(state, codepoint, modifiers), do: handle_key(state, codepoint, modifiers, [])
 
+  @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, text) do
+    case Overlay.active(state, spec([])) do
+      %InlineAsk{phase: :input} = ask ->
+        {:handled, Overlay.append_text(state, ask, text, spec([]))}
+
+      %InlineAsk{} ->
+        {:handled, state}
+
+      nil ->
+        {:passthrough, state}
+    end
+  end
+
   @doc false
   @spec handle_key(state(), non_neg_integer(), non_neg_integer(), keyword()) ::
           MingaEditor.Input.Handler.result()

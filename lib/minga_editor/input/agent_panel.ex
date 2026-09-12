@@ -35,6 +35,14 @@ defmodule MingaEditor.Input.AgentPanel do
     state.workspace.agent_ui.panel |> route_panel_key(state, cp, mods)
   end
 
+  @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(%{workspace: %{agent_ui: %{panel: %{input_focused: true}}}} = state, text) do
+    {:handled, AgentCommands.input_paste(state, text)}
+  end
+
+  def handle_paste(state, _text), do: {:passthrough, state}
+
   @spec route_panel_key(UIState.Panel.t(), EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   defp route_panel_key(%{visible: true, input_focused: true}, state, cp, mods) do

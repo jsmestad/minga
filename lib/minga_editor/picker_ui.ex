@@ -318,6 +318,35 @@ defmodule MingaEditor.PickerUI do
 
   def replace_query(state, _generation, _edit_seq, _query), do: state
 
+  @doc "Appends decoded paste text to the current picker query."
+  @spec append_query(state(), String.t()) :: state()
+  def append_query(state, ""), do: state
+
+  def append_query(
+        %{
+          shell_runtime: %{
+            state: %{
+              modal:
+                {:picker,
+                 %{
+                   picker_ui:
+                     %PickerState{
+                       picker: %Picker{} = picker,
+                       action_menu: nil,
+                       acknowledged_query_edit_seq: edit_seq
+                     } = picker_state
+                 }}
+            }
+          }
+        } = state,
+        text
+      ) do
+    query = PickerState.mode_prefix(picker_state) <> picker.query <> text
+    replace_current_query(state, picker_state, query, edit_seq + 1)
+  end
+
+  def append_query(state, _text), do: state
+
   @spec replace_current_query(state(), PickerState.t(), String.t(), non_neg_integer()) ::
           state()
   defp replace_current_query(

@@ -37,6 +37,16 @@ defmodule MingaEditor.Input.Picker do
   end
 
   @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, text) do
+    if ModalOverlay.match(state.shell_runtime.state.modal, :picker) do
+      {:handled, PickerUI.append_query(state, text)}
+    else
+      {:passthrough, state}
+    end
+  end
+
+  @impl true
   @spec handle_mouse_at_node(
           state(),
           FocusNode.t(),
