@@ -36,4 +36,20 @@ defmodule MingaEditor.Input.Prompt do
   def handle_key(state, _cp, _mods) do
     {:passthrough, state}
   end
+
+  @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(
+        %{
+          shell_runtime: %{
+            state: %{modal: {:prompt, %{prompt_ui: %PromptState{handler: handler}}}}
+          }
+        } = state,
+        text
+      )
+      when handler != nil do
+    {:handled, PromptUI.insert_text(state, text)}
+  end
+
+  def handle_paste(state, _text), do: {:passthrough, state}
 end

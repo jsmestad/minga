@@ -72,6 +72,32 @@ defmodule MingaEditor.Input.Router do
   end
 
   @doc """
+  Dispatches a decoded paste event to the focused input owner and runs universal post-action housekeeping.
+  """
+  @spec dispatch_paste(EditorState.t(), String.t()) :: EditorState.t()
+  def dispatch_paste(state, text) do
+    snapshot = capture_snapshot(state)
+
+    state
+    |> route_paste(text)
+    |> post_action_housekeeping(snapshot)
+  end
+
+  @doc """
+  Routes a decoded paste event through shell-provided handlers without universal housekeeping.
+  """
+  @spec route_paste(EditorState.t(), String.t()) :: EditorState.t()
+  def route_paste(state, text) do
+    state = NoticeWorkflow.acknowledge(state)
+
+    if state.session.pending_quit do
+      state
+    else
+      dispatch_paste_split(state, text)
+    end
+  end
+
+  @doc """
   Routes a key press through shell-provided handlers without universal housekeeping.
   """
   @spec route_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
@@ -130,6 +156,33 @@ defmodule MingaEditor.Input.Router do
 
       {:passthrough, state_after_overlays} ->
         dispatch_to_surface(state_after_overlays, codepoint, modifiers)
+    end
+  end
+
+  @spec dispatch_paste_split(EditorState.t(), String.t()) :: EditorState.t()
+  defp dispatch_paste_split(%EditorState{} = state, text) do
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+
+    %{overlay: overlay_handlers, surface: _surface} =
+      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
+
+    case walk_paste_handlers(overlay_handlers, state, text) do
+      {:handled, new_state} ->
+        new_state
+
+      {:passthrough, state_after_overlays} ->
+        dispatch_paste_to_surface(state_after_overlays, text)
+    end
+  end
+
+  @spec dispatch_paste_to_surface(EditorState.t(), String.t()) :: EditorState.t()
+  defp dispatch_paste_to_surface(%EditorState{} = state, text) do
+    %{surface: surface_handlers} =
+      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
+
+    case walk_paste_handlers(surface_handlers, state, text) do
+      {:handled, new_state} -> new_state
+      {:passthrough, new_state} -> new_state
     end
   end
 
@@ -431,6 +484,45 @@ defmodule MingaEditor.Input.Router do
         {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
       end
     end)
+  end
+
+  @spec walk_paste_handlers([MingaEditor.Input.dispatch_handler()], EditorState.t(), String.t()) ::
+          MingaEditor.Input.Handler.result()
+  defp walk_paste_handlers(handlers, state, text) do
+    Enum.reduce_while(handlers, {:passthrough, state}, fn handler, {_status, acc} ->
+      case invoke_paste_handler(handler, acc, text) do
+        {:handled, new_state} -> {:halt, {:handled, new_state}}
+        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
+      end
+    end)
+  end
+
+  @spec invoke_paste_handler(
+          MingaEditor.Input.dispatch_handler(),
+          EditorState.t(),
+          String.t()
+        ) :: MingaEditor.Input.Handler.result()
+  defp invoke_paste_handler({handler, source}, state, text) do
+    Code.ensure_loaded!(handler)
+
+    InvocationContext.with_source(source, fn ->
+      call_paste_handler(handler, state, text)
+    end)
+  end
+
+  defp invoke_paste_handler(handler, state, text) when is_atom(handler) do
+    Code.ensure_loaded!(handler)
+    call_paste_handler(handler, state, text)
+  end
+
+  @spec call_paste_handler(module(), EditorState.t(), String.t()) ::
+          MingaEditor.Input.Handler.result()
+  defp call_paste_handler(handler, state, text) do
+    if function_exported?(handler, :handle_paste, 2) do
+      handler.handle_paste(state, text)
+    else
+      {:passthrough, state}
+    end
   end
 
   @spec invoke_key_handler(

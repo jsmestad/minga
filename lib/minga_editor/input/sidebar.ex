@@ -38,6 +38,15 @@ defmodule MingaEditor.Input.Sidebar do
   end
 
   @impl true
+  @spec handle_paste(EditorState.t(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, _text) do
+    case active_sidebar(state) do
+      nil -> {:passthrough, state}
+      _sidebar -> {:handled, state}
+    end
+  end
+
+  @impl true
   @spec handle_mouse_at_node(
           EditorState.t(),
           Node.t(),

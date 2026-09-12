@@ -34,5 +34,15 @@ defmodule MingaEditor.Commands.SelectAllTest do
       assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
       assert BufferProcess.cursor(buffer) == {0, 4}
     end
+
+    test "places the selection endpoint at the start of a Unicode grapheme" do
+      buffer = start_buffer("a😀b")
+      state = command_state(buffer)
+
+      state = MingaEditor.Commands.execute(state, :select_all)
+
+      assert state.workspace.editing.mode == :visual
+      assert BufferProcess.cursor(buffer) == {0, 5}
+    end
   end
 end

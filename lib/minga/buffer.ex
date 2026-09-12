@@ -187,7 +187,8 @@ defmodule Minga.Buffer do
     to: BufferProcess
 
   @doc "Insert a multi-character string at the cursor."
-  @spec insert_text(t(), String.t(), Minga.Buffer.EditSource.t()) :: :ok
+  @spec insert_text(t(), String.t(), Minga.Buffer.EditSource.t()) ::
+          :ok | {:error, :read_only}
   defdelegate insert_text(server, text, source \\ Minga.Buffer.EditSource.user()),
     to: BufferProcess
 
@@ -200,7 +201,7 @@ defmodule Minga.Buffer do
           non_neg_integer(),
           String.t(),
           Minga.Buffer.EditSource.t()
-        ) :: :ok
+        ) :: :ok | {:error, :read_only}
   defdelegate apply_edit(
                 server,
                 start_line,

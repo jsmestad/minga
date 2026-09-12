@@ -112,9 +112,10 @@ defmodule Minga.Buffer.Process do
   @doc """
   Inserts a string at the current cursor position.
 
-  Each character is inserted sequentially, advancing the cursor.
+  The whole string is inserted in one buffer operation, advancing the cursor to the end.
   """
-  @spec insert_text(GenServer.server(), String.t(), EditSource.t()) :: :ok
+  @spec insert_text(GenServer.server(), String.t(), EditSource.t()) ::
+          :ok | {:error, :read_only}
   def insert_text(server, text, source \\ EditSource.user()) do
     GenServer.call(server, {:insert_text, text, source})
   end
@@ -133,7 +134,7 @@ defmodule Minga.Buffer.Process do
           non_neg_integer(),
           String.t(),
           EditSource.t()
-        ) :: :ok
+        ) :: :ok | {:error, :read_only}
   def apply_edit(
         server,
         start_line,

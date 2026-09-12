@@ -57,4 +57,11 @@ defmodule MingaEditor.Input.ConflictPrompt do
   def handle_key(state, _cp, _mods) do
     {:passthrough, state}
   end
+
+  @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(%{shell_runtime: %{state: %{modal: {:conflict, _}}}} = state, _text),
+    do: {:handled, state}
+
+  def handle_paste(state, _text), do: {:passthrough, state}
 end

@@ -12,6 +12,7 @@ defmodule MingaEditor.Input.ModeFSM do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.FocusTree.Node, as: FocusNode
+  alias MingaEditor.Input.Paste
   alias MingaEditor.Mouse
 
   @impl true
@@ -21,6 +22,10 @@ defmodule MingaEditor.Input.ModeFSM do
     new_state = MingaEditor.do_handle_key(state, codepoint, modifiers)
     {:handled, new_state}
   end
+
+  @impl true
+  @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, text), do: {:handled, Paste.handle(state, text)}
 
   @impl true
   @spec handle_mouse_at_node(

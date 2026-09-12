@@ -137,6 +137,19 @@ defmodule MingaEditor.PromptUI do
     {prompt.label, prompt.text, prompt.cursor}
   end
 
+  @doc "Inserts decoded paste text at the prompt cursor."
+  @spec insert_text(state(), String.t()) :: state()
+  def insert_text(state, ""), do: state
+
+  def insert_text(state, text) do
+    prompt = current_prompt(state)
+    graphemes = String.graphemes(prompt.text)
+    {before, after_} = Enum.split(graphemes, prompt.cursor)
+    new_text = Enum.join(before) <> text <> Enum.join(after_)
+    new_cursor = prompt.cursor + String.length(text)
+    update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
+  end
+
   @doc """
   Applies `fun` to the current PromptState inside the modal and writes
   back via `MingaEditor.Shell.Traditional.ModalWorkflow.transition`, keeping the modal sum type and

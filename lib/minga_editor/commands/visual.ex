@@ -177,7 +177,7 @@ defmodule MingaEditor.Commands.Visual do
 
     last_col =
       case Buffer.lines(buf, last_line, 1) do
-        [text] -> max(byte_size(text) - 1, 0)
+        [text] -> Minga.Buffer.Position.last_character_on_line(text)
         _ -> 0
       end
 

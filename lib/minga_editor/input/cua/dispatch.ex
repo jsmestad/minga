@@ -24,6 +24,7 @@ defmodule MingaEditor.Input.CUA.Dispatch do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.FocusTree.Node, as: FocusNode
+  alias MingaEditor.Input.Paste
   alias MingaEditor.Mouse
   alias MingaEditor.State, as: EditorState
 
@@ -52,6 +53,10 @@ defmodule MingaEditor.Input.CUA.Dispatch do
 
     {:handled, state}
   end
+
+  @impl true
+  @spec handle_paste(EditorState.t(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(state, text), do: {:handled, Paste.handle(state, text)}
 
   @impl true
   @spec handle_mouse_at_node(
