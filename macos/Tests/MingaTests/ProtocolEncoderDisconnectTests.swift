@@ -11,21 +11,21 @@ import Foundation
 @Suite("Encoder: Disconnect Safety")
 struct EncoderDisconnectTests {
 
-    // MARK: - disconnect() drops writes
+    // MARK: - Expected teardown drops later writes
 
-    @Test("disconnect() causes subsequent writes to be silently dropped")
+    @Test("expected teardown causes subsequent writes to be silently dropped")
     func disconnectDropsWrites() {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         // Send one frame before disconnect (should succeed).
         encoder.sendReady(cols: 80, rows: 24)
         #expect(encoder.waitForPendingWritesForTesting())
 
         // Disconnect the encoder.
-        encoder.disconnect()
+        encoder.disconnect(reason: .expectedTeardown)
 
-        // These should be silently dropped, not crash.
+        // Writes after an expected teardown should be silently dropped, not crash.
         encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
         encoder.sendResize(cols: 120, rows: 40)
         encoder.sendMouseEvent(row: 5, col: 10, button: 0, modifiers: 0,
@@ -47,11 +47,11 @@ struct EncoderDisconnectTests {
     @Test("disconnect() is idempotent")
     func disconnectIdempotent() {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
-        encoder.disconnect()
-        encoder.disconnect()
-        encoder.disconnect()
+        encoder.disconnect(reason: .expectedTeardown)
+        encoder.disconnect(reason: .expectedTeardown)
+        encoder.disconnect(reason: .expectedTeardown)
 
         // Should not crash. Writes should still be dropped.
         encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
@@ -67,7 +67,7 @@ struct EncoderDisconnectTests {
     @Test("writing to a closed pipe marks encoder as disconnected")
     func brokenPipeAutoDisconnects() {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         // Close the read end to simulate the BEAM dying.
         // This makes the pipe broken: writes will get EPIPE.
@@ -80,7 +80,7 @@ struct EncoderDisconnectTests {
         // It must NOT crash, throw, or block.
         encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
 
-        // Subsequent writes should be silently dropped (encoder is
+        // Subsequent writes after expected teardown should be silently dropped (encoder is
         // now disconnected). If these crash, the auto-disconnect
         // didn't work.
         encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
@@ -92,7 +92,7 @@ struct EncoderDisconnectTests {
     @Test("encoder survives rapid writes to a broken pipe")
     func brokenPipeRapidWrites() {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         // Close read end to break the pipe.
         pipe.fileHandleForReading.closeFile()
@@ -112,7 +112,7 @@ struct EncoderDisconnectTests {
     @Test("disconnect() is safe to call from a background thread while main thread writes")
     func disconnectFromBackgroundThread() async {
         let pipe = Pipe()
-        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         // Simulate the race: reader thread calls disconnect() while
         // the main thread is still sending keystrokes.
@@ -130,7 +130,7 @@ struct EncoderDisconnectTests {
             group.addTask {
                 // Small yield to let some writes happen first.
                 try? await Task.sleep(nanoseconds: 100_000) // 0.1ms
-                encoder.disconnect()
+                encoder.disconnect(reason: .expectedTeardown)
             }
         }
 
