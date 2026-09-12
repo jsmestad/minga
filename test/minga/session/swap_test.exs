@@ -2,6 +2,7 @@ defmodule Minga.Session.SwapTest do
   use ExUnit.Case, async: true
 
   alias Minga.Session.Swap
+  alias Minga.Session.Swap.Prepared
 
   @moduletag :tmp_dir
 
@@ -85,6 +86,19 @@ defmodule Minga.Session.SwapTest do
       tmp_files = Path.wildcard(Path.join(tmp_dir, "*.tmp"))
       assert tmp_files == []
     end
+
+    test "independent preparations use unique temporary targets", %{tmp_dir: tmp_dir} do
+      opts = swap_opts(tmp_dir)
+      assert {:ok, older} = Swap.prepare("/tmp/generations.ex", "older", opts)
+      assert {:ok, newer} = Swap.prepare("/tmp/generations.ex", "newer", opts)
+
+      refute older.temporary_path == newer.temporary_path
+      assert older.target_path == newer.target_path
+
+      assert :ok = Swap.discard(older)
+      assert :ok = Swap.publish(newer)
+      assert {:ok, _meta, "newer"} = Swap.read(newer.target_path)
+    end
   end
 
   describe "read/1 error cases" do
@@ -122,6 +136,40 @@ defmodule Minga.Session.SwapTest do
     test "is idempotent for non-existent files", %{tmp_dir: tmp_dir} do
       opts = swap_opts(tmp_dir)
       assert :ok = Swap.delete("/tmp/never_existed.ex", opts)
+    end
+
+    test "returns filesystem deletion failures", %{tmp_dir: tmp_dir} do
+      opts = swap_opts(tmp_dir)
+      source_path = "/tmp/delete_failure.ex"
+      target = Swap.swap_path(source_path, opts)
+      File.mkdir_p!(target)
+
+      assert {:error, _reason} = Swap.delete(source_path, opts)
+      assert File.dir?(target)
+    end
+  end
+
+  describe "discard/1" do
+    test "is idempotent when the temporary file no longer exists", %{tmp_dir: tmp_dir} do
+      prepared = %Prepared{
+        temporary_path: Path.join(tmp_dir, "missing.tmp"),
+        target_path: Path.join(tmp_dir, "target.swap")
+      }
+
+      assert :ok = Swap.discard(prepared)
+    end
+
+    test "returns filesystem deletion failures", %{tmp_dir: tmp_dir} do
+      temporary_path = Path.join(tmp_dir, "directory.tmp")
+      File.mkdir_p!(temporary_path)
+
+      prepared = %Prepared{
+        temporary_path: temporary_path,
+        target_path: Path.join(tmp_dir, "target.swap")
+      }
+
+      assert {:error, _reason} = Swap.discard(prepared)
+      assert File.dir?(temporary_path)
     end
   end
 end

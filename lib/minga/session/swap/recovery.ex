@@ -10,6 +10,7 @@ defmodule Minga.Session.Swap.Recovery do
 
   Swap files written by a still-running Minga instance are left alone.
   Corrupt swap files are cleaned up automatically.
+  Recognized generation temporary files are removed only after their owner OS process exits.
   """
 
   alias Minga.Session.Swap
@@ -43,6 +44,8 @@ defmodule Minga.Session.Swap.Recovery do
 
     case File.ls(dir) do
       {:ok, files} ->
+        sweep_orphaned_temporary_files(dir, files, pid_alive?)
+
         files
         |> Enum.filter(&String.ends_with?(&1, ".swap"))
         |> Enum.map(&Path.join(dir, &1))
@@ -112,6 +115,60 @@ defmodule Minga.Session.Swap.Recovery do
       # Original file was deleted. Discard the swap file.
       File.rm(meta.swap_path)
       []
+    end
+  end
+
+  @spec sweep_orphaned_temporary_files(
+          String.t(),
+          [String.t()],
+          (integer() -> boolean())
+        ) :: :ok
+  defp sweep_orphaned_temporary_files(directory, files, pid_alive?) do
+    Enum.each(files, fn filename ->
+      maybe_remove_orphaned_temporary_file(directory, filename, pid_alive?)
+    end)
+  end
+
+  @spec maybe_remove_orphaned_temporary_file(
+          String.t(),
+          String.t(),
+          (integer() -> boolean())
+        ) :: :ok
+  defp maybe_remove_orphaned_temporary_file(directory, filename, pid_alive?) do
+    case Swap.temporary_owner_pid(filename) do
+      {:ok, os_pid} -> remove_temporary_file_if_orphaned(directory, filename, os_pid, pid_alive?)
+      :error -> :ok
+    end
+  end
+
+  @spec remove_temporary_file_if_orphaned(
+          String.t(),
+          String.t(),
+          pos_integer(),
+          (integer() -> boolean())
+        ) :: :ok
+  defp remove_temporary_file_if_orphaned(directory, filename, os_pid, pid_alive?) do
+    if pid_alive?.(os_pid) do
+      :ok
+    else
+      remove_orphaned_temporary_file(Path.join(directory, filename))
+    end
+  end
+
+  @spec remove_orphaned_temporary_file(String.t()) :: :ok
+  defp remove_orphaned_temporary_file(path) do
+    case File.rm(path) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "Failed to remove orphaned swap temporary file #{path}: #{inspect(reason)}"
+        )
     end
   end
 end

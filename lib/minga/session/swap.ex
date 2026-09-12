@@ -31,8 +31,13 @@ defmodule Minga.Session.Swap do
       mtime=1711234567
   """
 
+  @behaviour Minga.Session.Swap.Backend
+
+  alias Minga.Session.Swap.Prepared
+
   @default_swap_dir Path.expand("~/.local/share/minga/swap")
   @magic "MINGA_SWAP_V1\n"
+  @temporary_name_regex ~r/\A[0-9a-v]{52}\.(\d+)\.swap\.\d+\.\d+\.tmp\z/
 
   @typedoc "Metadata parsed from a swap file header."
   @type metadata :: %{
@@ -72,19 +77,35 @@ defmodule Minga.Session.Swap do
   @spec write(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def write(file_path, content, opts \\ [])
       when is_binary(file_path) and is_binary(content) do
+    case prepare(file_path, content, opts) do
+      {:ok, prepared} -> publish(prepared)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
+  Writes a complete swap to a uniquely named temporary file.
+
+  The returned value is not visible to recovery until `publish/1` atomically
+  promotes it. Each preparation uses its own temporary target, so obsolete
+  generations cannot overwrite one another before publication.
+  """
+  @impl Minga.Session.Swap.Backend
+  @spec prepare(String.t(), binary(), keyword()) :: {:ok, Prepared.t()} | {:error, term()}
+  def prepare(file_path, content, opts \\ [])
+      when is_binary(file_path) and is_binary(content) do
     dir = swap_dir(opts)
     os_pid_val = Keyword.get(opts, :os_pid, os_pid())
     target = swap_path(file_path, opts)
-    tmp = target <> ".tmp"
+    tmp = temporary_path(target, Keyword.get(opts, :generation))
 
     header = "path=#{file_path}\nos_pid=#{os_pid_val}\nmtime=#{System.os_time(:second)}"
     header_len = byte_size(header)
     data = <<@magic, header_len::32-big, header::binary, content::binary>>
 
     with :ok <- File.mkdir_p(dir),
-         :ok <- File.write(tmp, data),
-         :ok <- File.rename(tmp, target) do
-      :ok
+         :ok <- File.write(tmp, data) do
+      {:ok, %Prepared{temporary_path: tmp, target_path: target}}
     else
       error ->
         File.rm(tmp)
@@ -92,12 +113,45 @@ defmodule Minga.Session.Swap do
     end
   end
 
+  @doc "Atomically publishes a fully prepared swap file."
+  @impl Minga.Session.Swap.Backend
+  @spec publish(Prepared.t()) :: :ok | {:error, term()}
+  def publish(%Prepared{temporary_path: tmp, target_path: target} = prepared) do
+    case File.rename(tmp, target) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        publish_error(reason, discard(prepared))
+    end
+  end
+
+  @doc "Discards an obsolete prepared swap file."
+  @impl Minga.Session.Swap.Backend
+  @spec discard(Prepared.t()) :: :ok | {:error, term()}
+  def discard(%Prepared{temporary_path: tmp}) do
+    remove_file(tmp)
+  end
+
   @doc "Deletes the swap file for the given source file path, if it exists."
-  @spec delete(String.t(), keyword()) :: :ok
+  @impl Minga.Session.Swap.Backend
+  @spec delete(String.t(), keyword()) :: :ok | {:error, term()}
   def delete(file_path, opts \\ []) when is_binary(file_path) do
-    path = swap_path(file_path, opts)
-    File.rm(path)
-    :ok
+    target = swap_path(file_path, opts)
+
+    case temporary_paths(target) do
+      {:ok, temporary_paths} -> remove_files([target | temporary_paths])
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc "Returns the owner OS PID encoded in a recognized generation temporary filename."
+  @spec temporary_owner_pid(String.t()) :: {:ok, pos_integer()} | :error
+  def temporary_owner_pid(path) when is_binary(path) do
+    case Regex.run(@temporary_name_regex, Path.basename(path), capture: :all_but_first) do
+      [pid_string] -> parse_positive_pid(pid_string)
+      nil -> :error
+    end
   end
 
   @doc """
@@ -132,6 +186,70 @@ defmodule Minga.Session.Swap do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────
+
+  @spec temporary_path(String.t(), term()) :: String.t()
+  defp temporary_path(target, generation) do
+    generation = if is_integer(generation), do: generation, else: 0
+    unique = System.unique_integer([:positive, :monotonic])
+    "#{target}.#{generation}.#{unique}.tmp"
+  end
+
+  @spec publish_error(term(), :ok | {:error, term()}) :: {:error, term()}
+  defp publish_error(reason, :ok), do: {:error, reason}
+
+  defp publish_error(reason, {:error, discard_reason}) do
+    {:error, {:publish_failed, reason, {:discard_failed, discard_reason}}}
+  end
+
+  @spec temporary_paths(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  defp temporary_paths(target) do
+    directory = Path.dirname(target)
+    target_name = Path.basename(target)
+    regex = Regex.compile!("\\A#{Regex.escape(target_name)}\\.\\d+\\.\\d+\\.tmp\\z")
+
+    case File.ls(directory) do
+      {:ok, names} ->
+        paths =
+          names
+          |> Enum.filter(&Regex.match?(regex, &1))
+          |> Enum.map(&Path.join(directory, &1))
+
+        {:ok, paths}
+
+      {:error, :enoent} ->
+        {:ok, []}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec remove_files([String.t()]) :: :ok | {:error, term()}
+  defp remove_files(paths) do
+    Enum.reduce(paths, :ok, fn path, result ->
+      case {result, remove_file(path)} do
+        {:ok, next_result} -> next_result
+        {{:error, _reason} = error, _next_result} -> error
+      end
+    end)
+  end
+
+  @spec remove_file(String.t()) :: :ok | {:error, term()}
+  defp remove_file(path) do
+    case File.rm(path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec parse_positive_pid(String.t()) :: {:ok, pos_integer()} | :error
+  defp parse_positive_pid(pid_string) do
+    case Integer.parse(pid_string) do
+      {pid, ""} when pid > 0 -> {:ok, pid}
+      _ -> :error
+    end
+  end
 
   @spec parse_swap_file(binary(), String.t()) ::
           {:ok, metadata(), binary()} | {:error, :invalid_format}
