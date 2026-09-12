@@ -152,6 +152,53 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     end
   end
 
+  test "real format-on-save rejects formatter output captured before a file reload" do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, packet: :line, active: false, reuseaddr: true])
+
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    {:ok, {_address, port}} = :inet.sockname(listener)
+
+    {state, scheduler, path} =
+      format_on_save_state(
+        "original\n",
+        "stdout-first",
+        "barrier-success",
+        [Integer.to_string(port)]
+      )
+
+    buffer = state.workspace.buffers.active
+    requested_version = Buffer.version(buffer)
+    assert requested_version == 0
+    state = BufferManagement.execute(state, :save)
+
+    {:ok, socket} = :gen_tcp.accept(listener, @effect_timeout)
+    on_exit(fn -> :gen_tcp.close(socket) end)
+    assert {:ok, "ready\n"} = :gen_tcp.recv(socket, 0, @effect_timeout)
+
+    File.write!(path, "reloaded\n")
+    assert :ok = Buffer.reload(buffer)
+    assert Buffer.version(buffer) > requested_version
+    assert Buffer.content(buffer) == "reloaded\n"
+    refute Buffer.dirty?(buffer)
+
+    :ok = :gen_tcp.send(socket, "release\n")
+
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {:completed, result}} = outcome},
+                   @effect_timeout
+
+    assert result.content == "formatted:original\n"
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+    assert Buffer.content(buffer) == "reloaded\n"
+    assert File.read!(path) == "reloaded\n"
+    refute Buffer.dirty?(buffer)
+    assert OperationFeedback.selected(state.feedback.operation_feedback).status == :stale
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Save skipped: buffer changed during formatting"
+  end
+
   test "real format-on-save preserves an empty successful stdout" do
     {state, scheduler, path} = format_on_save_state("original\n", "stderr-first", "empty")
     buffer = state.workspace.buffers.active
@@ -258,7 +305,17 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   @spec format_on_save_state(String.t(), String.t(), String.t()) ::
           {MingaEditor.State.t(), pid(), String.t()}
   defp format_on_save_state(content, order, outcome) do
-    Options.set_for_filetype(:elixir, :formatter, fixture_command(order, outcome))
+    format_on_save_state(content, order, outcome, [])
+  end
+
+  @spec format_on_save_state(String.t(), String.t(), String.t(), [String.t()]) ::
+          {MingaEditor.State.t(), pid(), String.t()}
+  defp format_on_save_state(content, order, outcome, fixture_args) do
+    Options.set_for_filetype(
+      :elixir,
+      :formatter,
+      fixture_command(order, outcome, fixture_args)
+    )
 
     task_supervisor = start_supervised!({Task.Supervisor, []}, id: make_ref())
 
@@ -286,9 +343,13 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   end
 
   @spec fixture_command(String.t(), String.t()) :: String.t()
-  defp fixture_command(order, outcome) do
+  defp fixture_command(order, outcome), do: fixture_command(order, outcome, [])
+
+  @spec fixture_command(String.t(), String.t(), [String.t()]) :: String.t()
+  defp fixture_command(order, outcome, fixture_args) do
     System.find_executable("elixir") <>
-      " " <> Enum.map_join([@fixture, order, outcome], " ", &shell_escape/1)
+      " " <>
+      Enum.map_join([@fixture, order, outcome | fixture_args], " ", &shell_escape/1)
   end
 
   @spec shell_escape(String.t()) :: String.t()

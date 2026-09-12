@@ -133,10 +133,15 @@ defmodule Minga.Buffer.State do
     SaveState.loaded(path, metadata, content)
   end
 
-  @doc "Replaces save tracking with a clean baseline for loaded content."
-  @spec load_saved_content(t(), String.t() | nil, SaveState.metadata(), String.t()) :: t()
-  def load_saved_content(%__MODULE__{} = state, path, metadata, content) do
-    %{state | save_state: SaveState.loaded(path, metadata, content)}
+  @doc "Adopts opened file content as a new saved baseline without resetting revision allocation."
+  @spec open_saved_content(t(), String.t(), SaveState.metadata(), String.t()) :: t()
+  def open_saved_content(%__MODULE__{} = state, path, metadata, content)
+      when is_binary(path) and is_binary(content) do
+    %{
+      state
+      | file_path: path,
+        save_state: SaveState.accept_saved_content(state.save_state, metadata, content)
+    }
   end
 
   @doc "Acknowledges disk metadata without changing dirty, version, or the saved content fingerprint."

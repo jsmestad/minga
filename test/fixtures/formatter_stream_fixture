@@ -1,4 +1,4 @@
-[order, outcome] = System.argv()
+[order, outcome | fixture_args] = System.argv()
 input = IO.binread(:standard_io, :eof)
 
 {stdout, stderr, exit_code} =
@@ -14,6 +14,21 @@ input = IO.binread(:standard_io, :eof)
 
     "large" ->
       {String.duplicate("o", 131_072), String.duplicate("e", 131_072), 0}
+
+    "barrier-success" ->
+      [port] = fixture_args
+
+      {:ok, socket} =
+        :gen_tcp.connect({127, 0, 0, 1}, String.to_integer(port), [
+          :binary,
+          packet: :line,
+          active: false
+        ])
+
+      :ok = :gen_tcp.send(socket, "ready\n")
+      {:ok, "release\n"} = :gen_tcp.recv(socket, 0, 5_000)
+      :ok = :gen_tcp.close(socket)
+      {"formatted:" <> input, "", 0}
   end
 
 write_streams = fn ->
