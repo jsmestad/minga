@@ -98,6 +98,108 @@ defmodule Minga.Buffer.MtimeTest do
   end
 
   @tag :tmp_dir
+  test "reloads allocate unique revisions across undo and redo branches", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "revisions.txt")
+    File.write!(path, "first")
+    buf = start_buffer(file_path: path)
+    initial_version = BufferProcess.version(buf)
+
+    File.write!(path, "second")
+    assert :ok = BufferProcess.reload(buf)
+    first_reload_version = BufferProcess.version(buf)
+    assert first_reload_version > initial_version
+    refute BufferProcess.dirty?(buf)
+
+    assert :ok = BufferProcess.insert_text(buf, "edited ")
+    edit_version = BufferProcess.version(buf)
+    assert edit_version > first_reload_version
+
+    assert :ok = BufferProcess.undo(buf)
+    assert BufferProcess.version(buf) == first_reload_version
+    assert BufferProcess.content(buf) == "second"
+    refute BufferProcess.dirty?(buf)
+
+    assert :ok = BufferProcess.redo(buf)
+    assert BufferProcess.version(buf) == edit_version
+    assert BufferProcess.content(buf) == "edited second"
+    assert BufferProcess.dirty?(buf)
+
+    assert :ok = BufferProcess.undo(buf)
+    assert :ok = BufferProcess.insert_text(buf, "branched ")
+    branch_version = BufferProcess.version(buf)
+    assert branch_version > edit_version
+
+    File.write!(path, "third")
+    assert :ok = BufferProcess.reload(buf)
+    second_reload_version = BufferProcess.version(buf)
+    assert second_reload_version > branch_version
+    assert BufferProcess.content(buf) == "third"
+    refute BufferProcess.dirty?(buf)
+    assert BufferProcess.last_undo_source(buf) == nil
+    assert BufferProcess.last_redo_source(buf) == nil
+
+    assert {:error, :stale} =
+             BufferProcess.replace_content_if_version(buf, initial_version, "obsolete", :lsp)
+
+    assert BufferProcess.content(buf) == "third"
+    assert BufferProcess.version(buf) == second_reload_version
+
+    assert {:ok, formatted_version} =
+             BufferProcess.replace_content_if_version(
+               buf,
+               second_reload_version,
+               "formatted third",
+               :lsp
+             )
+
+    assert formatted_version > second_reload_version
+    assert BufferProcess.content(buf) == "formatted third"
+    assert BufferProcess.dirty?(buf)
+    assert :ok = BufferProcess.undo(buf)
+    assert BufferProcess.content(buf) == "third"
+    refute BufferProcess.dirty?(buf)
+    assert :ok = BufferProcess.redo(buf)
+    assert BufferProcess.content(buf) == "formatted third"
+    assert BufferProcess.dirty?(buf)
+  end
+
+  @tag :tmp_dir
+  test "open preserves revision allocation and failed open or reload leaves state unchanged", %{
+    tmp_dir: tmp_dir
+  } do
+    first_path = Path.join(tmp_dir, "first.txt")
+    second_path = Path.join(tmp_dir, "second.txt")
+    missing_path = Path.join(tmp_dir, "missing.txt")
+    File.write!(first_path, "first")
+    File.write!(second_path, "second")
+    buf = start_buffer(file_path: first_path)
+
+    assert :ok = BufferProcess.insert_text(buf, "edited ")
+    edit_version = BufferProcess.version(buf)
+    assert :ok = BufferProcess.undo(buf)
+    assert BufferProcess.version(buf) == 0
+
+    assert :ok = BufferProcess.open(buf, second_path)
+    opened_version = BufferProcess.version(buf)
+    assert opened_version > edit_version
+    assert BufferProcess.file_path(buf) == second_path
+    assert BufferProcess.content(buf) == "second"
+    refute BufferProcess.dirty?(buf)
+    assert BufferProcess.last_undo_source(buf) == nil
+
+    assert :ok = BufferProcess.move_to(buf, {0, 3})
+    assert :ok = BufferProcess.insert_text(buf, " local")
+    before_failed_open = buffer_snapshot(buf)
+
+    assert {:error, :enoent} = BufferProcess.open(buf, missing_path)
+    assert buffer_snapshot(buf) == before_failed_open
+
+    File.rm!(second_path)
+    assert {:error, :enoent} = BufferProcess.reload(buf)
+    assert buffer_snapshot(buf) == before_failed_open
+  end
+
+  @tag :tmp_dir
   test ":w works when file was deleted on disk", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "deleted.txt")
     File.write!(path, "exists")
@@ -360,5 +462,17 @@ defmodule Minga.Buffer.MtimeTest do
 
   defp start_buffer(opts) do
     start_supervised!({BufferProcess, opts}, id: {:buffer, make_ref()})
+  end
+
+  defp buffer_snapshot(buf) do
+    %{
+      content: BufferProcess.content(buf),
+      cursor: BufferProcess.cursor(buf),
+      version: BufferProcess.version(buf),
+      dirty?: BufferProcess.dirty?(buf),
+      undo_source: BufferProcess.last_undo_source(buf),
+      redo_source: BufferProcess.last_redo_source(buf),
+      file_path: BufferProcess.file_path(buf)
+    }
   end
 end

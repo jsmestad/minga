@@ -81,6 +81,109 @@ defmodule MingaEditor.Commands.FormattingLSPTest do
              "Save skipped: buffer changed during formatting"
   end
 
+  test "format-on-save rejects responses across repeated reloads and then saves a current response" do
+    state = base_state("before\n")
+    buffer = state.workspace.buffers.active
+    path = BufferProcess.file_path(buffer)
+    client = fake_client(self())
+    register_client(buffer, client)
+    assert :ok = BufferProcess.move_to(buffer, {0, 3})
+    requested_version = BufferProcess.version(buffer)
+    assert requested_version == 0
+    continuation = {:save_after_format, buffer, requested_version, :save}
+
+    assert {:pending, state} = Formatting.format_for_save(state, buffer, continuation)
+    assert_receive {:format_request, version_zero_ref, _caller}
+    assert {:ok, version_zero_operation} = LSPState.fetch_format(state.lsp, version_zero_ref)
+    assert version_zero_operation.version == 0
+
+    File.write!(path, "reloaded one\n")
+    assert :ok = BufferProcess.reload(buffer)
+    first_reload_version = BufferProcess.version(buffer)
+    assert first_reload_version > requested_version
+    assert BufferProcess.content(buffer) == "reloaded one\n"
+    refute BufferProcess.dirty?(buffer)
+    before_version_zero_response = buffer_snapshot(buffer)
+
+    stale_edits = [
+      %{
+        "range" => %{
+          "start" => %{"line" => 0, "character" => 0},
+          "end" => %{"line" => 0, "character" => 6}
+        },
+        "newText" => "STALE"
+      }
+    ]
+
+    {state, _effects} =
+      LspEventHandler.handle(state, {:lsp_response, version_zero_ref, {:ok, stale_edits}})
+
+    assert buffer_snapshot(buffer) == before_version_zero_response
+    assert File.read!(path) == "reloaded one\n"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Save skipped: buffer changed during formatting"
+
+    repeated_reload_continuation =
+      {:save_after_format, buffer, first_reload_version, :save}
+
+    assert {:pending, state} =
+             Formatting.format_for_save(state, buffer, repeated_reload_continuation)
+
+    assert_receive {:format_request, repeated_reload_ref, _caller}
+
+    assert {:ok, repeated_reload_operation} =
+             LSPState.fetch_format(state.lsp, repeated_reload_ref)
+
+    assert repeated_reload_operation.version == first_reload_version
+    assert repeated_reload_operation.version > 0
+
+    File.write!(path, "reloaded twice\n")
+    assert :ok = BufferProcess.reload(buffer)
+    second_reload_version = BufferProcess.version(buffer)
+    assert second_reload_version > first_reload_version
+    before_repeated_reload_response = buffer_snapshot(buffer)
+
+    {state, _effects} =
+      LspEventHandler.handle(state, {:lsp_response, repeated_reload_ref, {:ok, stale_edits}})
+
+    assert buffer_snapshot(buffer) == before_repeated_reload_response
+    assert File.read!(path) == "reloaded twice\n"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Save skipped: buffer changed during formatting"
+
+    current_version = BufferProcess.version(buffer)
+    current_continuation = {:save_after_format, buffer, current_version, :save}
+    assert {:pending, state} = Formatting.format_for_save(state, buffer, current_continuation)
+    assert_receive {:format_request, current_ref, _caller}
+
+    current_edits = [
+      %{
+        "range" => %{
+          "start" => %{"line" => 0, "character" => 0},
+          "end" => %{"line" => 0, "character" => 14}
+        },
+        "newText" => "CURRENT"
+      }
+    ]
+
+    {state, _effects} =
+      LspEventHandler.handle(state, {:lsp_response, current_ref, {:ok, current_edits}})
+
+    assert BufferProcess.content(buffer) == "CURRENT\n"
+    assert File.read!(path) == "CURRENT\n"
+    refute BufferProcess.dirty?(buffer)
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) =~ "Wrote"
+
+    assert :ok = BufferProcess.undo(buffer)
+    assert BufferProcess.content(buffer) == "reloaded twice\n"
+    assert BufferProcess.dirty?(buffer)
+    assert :ok = BufferProcess.redo(buffer)
+    assert BufferProcess.content(buffer) == "CURRENT\n"
+    refute BufferProcess.dirty?(buffer)
+  end
+
   test "format save timeout rejects an edit after save intent capture" do
     state = base_state("hello\n")
     buffer = state.workspace.buffers.active
@@ -271,6 +374,17 @@ defmodule MingaEditor.Commands.FormattingLSPTest do
         send(parent, {:format_request, ref, caller})
         fake_client_loop(parent, on_encoding)
     end
+  end
+
+  defp buffer_snapshot(buffer) do
+    %{
+      content: BufferProcess.content(buffer),
+      cursor: BufferProcess.cursor(buffer),
+      version: BufferProcess.version(buffer),
+      dirty?: BufferProcess.dirty?(buffer),
+      undo_source: BufferProcess.last_undo_source(buffer),
+      redo_source: BufferProcess.last_redo_source(buffer)
+    }
   end
 
   defp base_state(content \\ "hello\n") do

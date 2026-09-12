@@ -987,9 +987,8 @@ defmodule Minga.Buffer.Process do
           {mtime, size} = Persistence.file_metadata(state, file_path)
 
           new_state = %{
-            BufState.load_saved_content(state, file_path, {mtime, size}, text)
+            BufState.open_saved_content(state, file_path, {mtime, size}, text)
             | document: Document.new(text),
-              file_path: file_path,
               filetype: filetype,
               options: reseed_options(state, filetype),
               decorations: Decorations.new(),
