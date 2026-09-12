@@ -82,19 +82,13 @@ struct MingaMenuCommands: Commands {
         // our own versions that route through the BEAM.
         CommandGroup(replacing: .textEditing) {
             Button("Undo") {
-                routeTextEditingCommand(.undo) {
-                    encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) // 'u' = vim undo
-                }
+                NativeMenuHistoryRouter.perform(.undo, encoder: encoder)
             }
             .keyboardShortcut("z", modifiers: .command)
-            .disabled(!connected)
             Button("Redo") {
-                routeTextEditingCommand(.redo) {
-                    encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) // Ctrl+R = vim redo
-                }
+                NativeMenuHistoryRouter.perform(.redo, encoder: encoder)
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
-            .disabled(!connected)
 
             Divider()
 
