@@ -48,6 +48,34 @@ private func readString16(_ data: Data, _ offset: Int) -> (String, Int) {
     return (String(data: data.subdata(in: start..<end), encoding: .utf8) ?? "", end)
 }
 
+// MARK: - Application quit
+
+@Suite("Encoder Binary: Application Quit")
+struct EncoderApplicationQuitTests {
+    @Test("application quit request carries its u32 correlation ID")
+    func requestLayout() {
+        let payload = captureFrame {
+            _ = $0.sendApplicationQuitRequest(requestID: 0xA1B2_C3D4)
+        }
+
+        #expect(payload.count == 5)
+        #expect(payload[0] == OP_APPLICATION_QUIT_REQUEST)
+        #expect(readU32(payload, 1) == 0xA1B2_C3D4)
+    }
+
+    @Test("application quit decision carries its correlation ID and decision")
+    func decisionLayout() {
+        let payload = captureFrame {
+            _ = $0.sendApplicationQuitDecision(requestID: 42, decision: ApplicationQuitDecision.discard.rawValue)
+        }
+
+        #expect(payload.count == 6)
+        #expect(payload[0] == OP_APPLICATION_QUIT_DECISION)
+        #expect(readU32(payload, 1) == 42)
+        #expect(payload[5] == ApplicationQuitDecision.discard.rawValue)
+    }
+}
+
 // MARK: - Ready event
 
 @Suite("Encoder Binary: Ready")

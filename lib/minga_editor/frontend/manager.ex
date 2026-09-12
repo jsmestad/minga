@@ -39,6 +39,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   @typedoc "Non-suspending frontend transport admission result."
   @type admission :: :accepted | :unwritable
+  @type lifecycle_admission :: :accepted | :unwritable | :disconnected
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -75,6 +76,17 @@ defmodule MingaEditor.Frontend.Manager do
 
   def send_commands(server, commands) when is_list(commands) do
     GenServer.call(server, {:send_commands, commands}, :infinity)
+  end
+
+  @doc "Attempts one lifecycle command without retaining it after rejection."
+  @spec send_lifecycle_command(GenServer.server() | nil, binary()) :: lifecycle_admission()
+  def send_lifecycle_command(server \\ __MODULE__, command)
+  def send_lifecycle_command(nil, command) when is_binary(command), do: :disconnected
+
+  def send_lifecycle_command(server, command) when is_binary(command) do
+    GenServer.call(server, {:send_lifecycle_command, command}, :infinity)
+  catch
+    :exit, _reason -> :disconnected
   end
 
   @doc """
@@ -194,6 +206,11 @@ defmodule MingaEditor.Frontend.Manager do
 
   def handle_call({:send_commands, commands}, _from, state) do
     {admission, state} = OutputHandler.admit_commands(state, commands)
+    {:reply, admission, state}
+  end
+
+  def handle_call({:send_lifecycle_command, command}, _from, state) do
+    {admission, state} = OutputHandler.admit_lifecycle_command(state, command)
     {:reply, admission, state}
   end
 

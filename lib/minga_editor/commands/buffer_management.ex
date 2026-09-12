@@ -47,15 +47,160 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @type state :: EditorState.t()
   @typep save_result :: {:ok, state()} | {:error, state()}
-  @type save_action :: :save | {:save_quit, Tab.id() | nil} | {:save_as, Buffer.save_intent()}
+  @type save_action ::
+          :save
+          | {:save_quit, Tab.id() | nil}
+          | {:save_as, Buffer.save_intent()}
+          | {:application_quit, non_neg_integer(), [{pid(), String.t()}], String.t()}
   @type save_continuation :: {:save_after_format, pid(), non_neg_integer(), save_action()}
   @type format_terminal ::
           {:committed, non_neg_integer()} | :unchanged | {:failed, term()} | :stale | :canceled
   @typep kill_intent :: :ordinary | :force
 
+  @application_quit_retry_ms 10
+
   @spec execute(state(), Mode.command()) :: state()
 
   # ── Save / quit ───────────────────────────────────────────────────────────
+
+  @doc "Begins a native application-quit handshake without consulting confirm_quit."
+  @spec handle_application_quit_request(state(), non_neg_integer()) :: state()
+  def handle_application_quit_request(%EditorState{} = state, request_id)
+      when request_id in 0..0xFFFFFFFF do
+    case MingaEditor.State.Session.begin_application_quit(state.session, request_id) do
+      {:started, session} ->
+        state = EditorState.accept_application_quit_transition(state, session)
+        dirty_buffers = dirty_application_quit_buffers(state)
+        begin_application_quit_resolution(state, request_id, dirty_buffers)
+
+      {:duplicate, _session} ->
+        repeat_application_quit_response(state, request_id)
+
+      {:stale, _session} ->
+        state
+    end
+  end
+
+  @doc "Applies a correlated decision to the active native application-quit handshake."
+  @spec handle_application_quit_decision(
+          state(),
+          non_neg_integer(),
+          MingaEditor.Frontend.Protocol.application_quit_decision()
+        ) :: state()
+  def handle_application_quit_decision(
+        %EditorState{session: %{application_quit: {:awaiting_decision, request_id}}} = state,
+        request_id,
+        :cancel
+      ) do
+    prepare_application_quit_response(state, request_id, :cancel, :cancelled, 0, "", "")
+  end
+
+  def handle_application_quit_decision(
+        %EditorState{session: %{application_quit: {:awaiting_decision, request_id}}} = state,
+        request_id,
+        :discard
+      ) do
+    prepare_application_quit_response(
+      state,
+      request_id,
+      :discard,
+      :proceeding,
+      0,
+      "",
+      ""
+    )
+  end
+
+  def handle_application_quit_decision(%EditorState{} = state, request_id, :save) do
+    case MingaEditor.State.Session.start_application_quit_save(state.session, request_id) do
+      {:ok, session} ->
+        state = EditorState.accept_application_quit_transition(state, session)
+        save_application_quit_buffers(state, request_id, dirty_application_quit_buffers(state))
+
+      :stale ->
+        state
+    end
+  end
+
+  def handle_application_quit_decision(%EditorState{} = state, _request_id, _decision), do: state
+
+  @doc "Retries one correlated lifecycle response after temporary transport pressure."
+  @spec retry_application_quit_response(
+          state(),
+          non_neg_integer(),
+          MingaEditor.Frontend.Protocol.application_quit_outcome(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: state()
+  def retry_application_quit_response(
+        %EditorState{} = state,
+        request_id,
+        :proceeding,
+        dirty_count,
+        buffer_name,
+        detail
+      ) do
+    case MingaEditor.State.Session.reconcile_application_quit_proceeding(
+           state.session,
+           request_id
+         ) do
+      {:inventory, session} ->
+        state = EditorState.accept_application_quit_transition(state, session)
+
+        begin_application_quit_resolution(
+          state,
+          request_id,
+          dirty_application_quit_buffers(state)
+        )
+
+      {:save, session} ->
+        state = EditorState.accept_application_quit_transition(state, session)
+        save_application_quit_buffers(state, request_id, dirty_application_quit_buffers(state))
+
+      {:discard, _session} ->
+        deliver_application_quit_response(
+          state,
+          request_id,
+          :proceeding,
+          dirty_count,
+          buffer_name,
+          detail
+        )
+
+      :stale ->
+        state
+    end
+  end
+
+  def retry_application_quit_response(
+        %EditorState{session: %{application_quit: {:responding, request_id, _intent, outcome}}} =
+          state,
+        request_id,
+        outcome,
+        dirty_count,
+        buffer_name,
+        detail
+      ) do
+    deliver_application_quit_response(
+      state,
+      request_id,
+      outcome,
+      dirty_count,
+      buffer_name,
+      detail
+    )
+  end
+
+  def retry_application_quit_response(
+        %EditorState{} = state,
+        _request_id,
+        _outcome,
+        _dirty_count,
+        _buffer_name,
+        _detail
+      ),
+      do: state
 
   def execute(%{workspace: %{buffers: %{active: _}}} = state, :save) do
     {_status, state} = save_active_buffer(state)
@@ -2281,6 +2426,336 @@ defmodule MingaEditor.Commands.BufferManagement do
     end)
   end
 
+  @spec begin_application_quit_resolution(state(), non_neg_integer(), [{pid(), String.t()}]) ::
+          state()
+  defp begin_application_quit_resolution(state, request_id, []) do
+    proceed_application_quit(state, request_id, :inventory)
+  end
+
+  defp begin_application_quit_resolution(state, request_id, dirty_buffers) do
+    prepare_application_quit_response(
+      state,
+      request_id,
+      :inventory,
+      :needs_decision,
+      length(dirty_buffers),
+      "",
+      ""
+    )
+  end
+
+  @spec repeat_application_quit_response(state(), non_neg_integer()) :: state()
+  defp repeat_application_quit_response(
+         %{session: %{application_quit: {:awaiting_decision, request_id}}} = state,
+         request_id
+       ) do
+    prepare_application_quit_response(
+      state,
+      request_id,
+      :inventory,
+      :needs_decision,
+      length(dirty_application_quit_buffers(state)),
+      "",
+      ""
+    )
+  end
+
+  defp repeat_application_quit_response(state, _request_id), do: state
+
+  @spec dirty_application_quit_buffers(state()) :: [{pid(), String.t()}]
+  defp dirty_application_quit_buffers(state) do
+    state
+    |> BufferRegistry.buffer_inventory()
+    |> Enum.reduce([], fn buffer, dirty ->
+      try do
+        if Buffer.dirty?(buffer),
+          do: [{buffer, Helpers.buffer_display_name(buffer)} | dirty],
+          else: dirty
+      catch
+        :exit, _reason -> dirty
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  @spec save_application_quit_buffers(state(), non_neg_integer(), [{pid(), String.t()}]) ::
+          state()
+  defp save_application_quit_buffers(state, request_id, []) do
+    case dirty_application_quit_buffers(state) do
+      [] -> proceed_application_quit(state, request_id, :save)
+      dirty_buffers -> save_application_quit_buffers(state, request_id, dirty_buffers)
+    end
+  end
+
+  defp save_application_quit_buffers(state, request_id, [{buffer, name} | rest]) do
+    try do
+      save_application_quit_buffer(state, request_id, buffer, name, rest)
+    catch
+      :exit, reason ->
+        fail_application_quit_save(state, request_id, name, "buffer closed: #{inspect(reason)}")
+    end
+  end
+
+  @spec save_application_quit_buffer(
+          state(),
+          non_neg_integer(),
+          pid(),
+          String.t(),
+          [{pid(), String.t()}]
+        ) :: state()
+  defp save_application_quit_buffer(state, request_id, buffer, name, rest) do
+    case {Buffer.dirty?(buffer), Buffer.file_path(buffer)} do
+      {false, _path} ->
+        save_application_quit_buffers(state, request_id, rest)
+
+      {true, nil} ->
+        fail_application_quit_save(
+          state,
+          request_id,
+          name,
+          "A destination is required. Use :w <filename> before quitting."
+        )
+
+      {true, _path} ->
+        version = Buffer.version(buffer)
+        action = {:application_quit, request_id, rest, name}
+        continuation = {:save_after_format, buffer, version, action}
+
+        case format_application_quit_buffer(state, buffer, continuation) do
+          {:pending, state} ->
+            state
+
+          {:not_configured, state} ->
+            elem(finish_save_continuation(state, continuation, :unchanged), 1)
+
+          {:failed, reason, state} ->
+            fail_application_quit_save(
+              state,
+              request_id,
+              name,
+              application_quit_setup_failure_detail(reason)
+            )
+        end
+    end
+  end
+
+  @spec format_application_quit_buffer(state(), pid(), save_continuation()) ::
+          {:pending, state()}
+          | {:not_configured, state()}
+          | {:failed, Commands.Formatting.application_quit_setup_failure(), state()}
+  defp format_application_quit_buffer(state, buffer, continuation) do
+    if Buffer.get_option(buffer, :format_on_save) do
+      Commands.Formatting.format_for_application_quit(state, buffer, continuation)
+    else
+      {:not_configured, state}
+    end
+  end
+
+  @spec application_quit_setup_failure_detail(
+          Commands.Formatting.application_quit_setup_failure()
+        ) :: String.t()
+  defp application_quit_setup_failure_detail({:formatter_not_found, command}),
+    do: "formatter not found: #{command}"
+
+  defp application_quit_setup_failure_detail(:scheduler_unavailable),
+    do: "formatter scheduler unavailable"
+
+  defp application_quit_setup_failure_detail({:scheduling_rejected, reason}),
+    do: "format was not scheduled: #{reason}"
+
+  @spec proceed_application_quit(
+          state(),
+          non_neg_integer(),
+          MingaEditor.State.Session.application_quit_policy_intent()
+        ) :: state()
+  defp proceed_application_quit(state, request_id, intent) when intent in [:inventory, :save] do
+    prepare_application_quit_response(state, request_id, intent, :proceeding, 0, "", "")
+  end
+
+  @spec fail_application_quit_save(
+          state(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: state()
+  defp fail_application_quit_save(state, request_id, buffer_name, detail) do
+    state = NoticeWorkflow.publish(state, "Quit cancelled: #{buffer_name}: #{detail}")
+
+    prepare_application_quit_response(
+      state,
+      request_id,
+      :save,
+      :save_failed,
+      length(dirty_application_quit_buffers(state)),
+      buffer_name,
+      detail
+    )
+  end
+
+  @spec prepare_application_quit_response(
+          state(),
+          non_neg_integer(),
+          MingaEditor.State.Session.application_quit_policy_intent(),
+          MingaEditor.Frontend.Protocol.application_quit_outcome(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: state()
+  defp prepare_application_quit_response(
+         state,
+         request_id,
+         intent,
+         outcome,
+         dirty_count,
+         buffer_name,
+         detail
+       ) do
+    case MingaEditor.State.Session.prepare_application_quit_response(
+           state.session,
+           request_id,
+           intent,
+           outcome
+         ) do
+      {:ok, session} ->
+        state = EditorState.accept_application_quit_transition(state, session)
+
+        deliver_application_quit_response(
+          state,
+          request_id,
+          outcome,
+          dirty_count,
+          buffer_name,
+          detail
+        )
+
+      :stale ->
+        state
+    end
+  end
+
+  @spec deliver_application_quit_response(
+          state(),
+          non_neg_integer(),
+          MingaEditor.Frontend.Protocol.application_quit_outcome(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: state()
+  defp deliver_application_quit_response(
+         state,
+         request_id,
+         outcome,
+         dirty_count,
+         buffer_name,
+         detail
+       ) do
+    case emit_application_quit_response(
+           state,
+           request_id,
+           outcome,
+           dirty_count,
+           buffer_name,
+           detail
+         ) do
+      {:accepted, state} ->
+        complete_application_quit_response(state, request_id, outcome)
+
+      {:unwritable, state} ->
+        Process.send_after(
+          self(),
+          {:retry_application_quit_response, request_id, outcome, dirty_count, buffer_name,
+           detail},
+          @application_quit_retry_ms
+        )
+
+        state
+
+      {:disconnected, state} ->
+        cancel_unreachable_application_quit(state, request_id)
+    end
+  end
+
+  @spec complete_application_quit_response(
+          state(),
+          non_neg_integer(),
+          MingaEditor.Frontend.Protocol.application_quit_outcome()
+        ) :: state()
+  defp complete_application_quit_response(state, request_id, outcome) do
+    case MingaEditor.State.Session.complete_application_quit_response(
+           state.session,
+           request_id,
+           outcome
+         ) do
+      {:ok, session, intent} ->
+        state
+        |> EditorState.accept_application_quit_transition(session)
+        |> finish_application_quit_response(intent, outcome)
+
+      :stale ->
+        state
+    end
+  end
+
+  @spec finish_application_quit_response(
+          state(),
+          MingaEditor.State.Session.application_quit_policy_intent(),
+          MingaEditor.Frontend.Protocol.application_quit_outcome()
+        ) :: state()
+  defp finish_application_quit_response(state, :discard, :proceeding) do
+    :ok = WaitRequests.cancel_all("discarded after native quit confirmation")
+    shutdown_editor(state)
+  end
+
+  defp finish_application_quit_response(state, intent, :proceeding)
+       when intent in [:inventory, :save],
+       do: shutdown_editor(state)
+
+  defp finish_application_quit_response(state, _intent, _outcome), do: state
+
+  @spec cancel_unreachable_application_quit(state(), non_neg_integer()) :: state()
+  defp cancel_unreachable_application_quit(state, request_id) do
+    case MingaEditor.State.Session.cancel_application_quit(state.session, request_id) do
+      {:ok, session} ->
+        state
+        |> EditorState.accept_application_quit_transition(session)
+        |> NoticeWorkflow.publish("Quit cancelled: native frontend communication is unavailable")
+
+      :stale ->
+        state
+    end
+  end
+
+  @spec emit_application_quit_response(
+          state(),
+          non_neg_integer(),
+          MingaEditor.Frontend.Protocol.application_quit_outcome(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: {MingaEditor.Frontend.Manager.lifecycle_admission(), state()}
+  defp emit_application_quit_response(
+         state,
+         request_id,
+         outcome,
+         dirty_count,
+         buffer_name,
+         detail
+       ) do
+    response =
+      MingaEditor.Frontend.Protocol.encode_application_quit_response(
+        request_id,
+        outcome,
+        dirty_count,
+        buffer_name,
+        detail
+      )
+
+    admission = MingaEditor.Frontend.send_lifecycle_command(state.frontend.port_manager, response)
+    {admission, state}
+  catch
+    :exit, _reason -> {:disconnected, state}
+  end
+
   @spec save_active_buffer(state(), :save | :save_quit) :: save_result() | {:pending, state()}
   defp save_active_buffer(state, action \\ :save)
 
@@ -2646,6 +3121,23 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec finish_save_continuation(state(), save_continuation(), format_terminal()) :: save_result()
   defp finish_save_continuation(
          state,
+         {:save_after_format, buffer, requested_version,
+          {:application_quit, request_id, rest, name}},
+         terminal
+       ) do
+    finish_application_quit_format(
+      state,
+      buffer,
+      requested_version,
+      request_id,
+      rest,
+      name,
+      terminal
+    )
+  end
+
+  defp finish_save_continuation(
+         state,
          {:save_after_format, buf, requested_version, action},
          terminal
        ) do
@@ -2680,6 +3172,75 @@ defmodule MingaEditor.Commands.BufferManagement do
     {:error, NoticeWorkflow.publish(state, "Save skipped: buffer changed during formatting")}
   end
 
+  @spec finish_application_quit_format(
+          state(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [{pid(), String.t()}],
+          String.t(),
+          format_terminal()
+        ) :: save_result()
+  defp finish_application_quit_format(
+         state,
+         buffer,
+         requested_version,
+         request_id,
+         rest,
+         name,
+         :unchanged
+       ),
+       do:
+         save_continued(
+           state,
+           buffer,
+           requested_version,
+           {:application_quit, request_id, rest, name}
+         )
+
+  defp finish_application_quit_format(
+         state,
+         buffer,
+         _requested_version,
+         request_id,
+         rest,
+         name,
+         {:committed, committed_version}
+       ),
+       do:
+         save_continued(
+           state,
+           buffer,
+           committed_version,
+           {:application_quit, request_id, rest, name}
+         )
+
+  defp finish_application_quit_format(
+         state,
+         _buffer,
+         _requested_version,
+         request_id,
+         _rest,
+         name,
+         terminal
+       ) do
+    detail = application_quit_format_failure_detail(terminal)
+    {:error, fail_application_quit_save(state, request_id, name, detail)}
+  end
+
+  @spec application_quit_format_failure_detail(format_terminal()) :: String.t()
+  defp application_quit_format_failure_detail(:stale),
+    do: "buffer changed during formatting"
+
+  defp application_quit_format_failure_detail(:canceled), do: "formatting was cancelled"
+  defp application_quit_format_failure_detail({:failed, :not_alive}), do: "buffer closed"
+
+  defp application_quit_format_failure_detail({:failed, %Minga.Editing.Formatter.Failure{}}),
+    do: "formatter failed"
+
+  defp application_quit_format_failure_detail({:failed, reason}),
+    do: "formatting failed: #{inspect(reason)}"
+
   defp save_continued(state, buf, version, :save) do
     case Buffer.save_if_version(buf, version, save_transform_opts(buf)) do
       :ok ->
@@ -2705,6 +3266,42 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:ok, state} -> {:ok, close_file_tab_or_quit(state, origin_tab_id)}
       error -> error
     end
+  end
+
+  defp save_continued(
+         state,
+         buffer,
+         version,
+         {:application_quit, request_id, rest, name}
+       ) do
+    case Buffer.save_if_version(buffer, version, save_transform_opts(buffer)) do
+      :ok ->
+        {:ok, save_application_quit_buffers(state, request_id, rest)}
+
+      {:error, :stale} ->
+        {:error,
+         fail_application_quit_save(state, request_id, name, "buffer changed before save")}
+
+      {:error, :file_changed} ->
+        {:error,
+         fail_application_quit_save(state, request_id, name, "file changed outside Minga")}
+
+      {:error, :no_file_path} ->
+        {:error,
+         fail_application_quit_save(
+           state,
+           request_id,
+           name,
+           "A destination is required. Use :w <filename> before quitting."
+         )}
+
+      {:error, reason} ->
+        {:error, fail_application_quit_save(state, request_id, name, inspect(reason))}
+    end
+  catch
+    :exit, reason ->
+      {:error,
+       fail_application_quit_save(state, request_id, name, "buffer closed: #{inspect(reason)}")}
   end
 
   defp save_continued(state, buf, version, {:save_as, intent}) do

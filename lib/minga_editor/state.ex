@@ -134,6 +134,14 @@ defmodule MingaEditor.State do
     %{state | appearance: appearance, parser: parser}
   end
 
+  @doc "Accepts the next state of a correlated native application-quit transition."
+  @spec accept_application_quit_transition(t(), EditorSessionState.t()) :: t()
+  def accept_application_quit_transition(
+        %__MODULE__{} = state,
+        %EditorSessionState{} = session
+      ),
+      do: %{state | session: session}
+
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
   @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
   def accept_extension_event_result(

@@ -731,6 +731,38 @@ defmodule MingaEditor do
 
   # ── GUI action events (semantic commands from SwiftUI chrome) ────────────
 
+  def handle_info({:minga_input, {:application_quit_request, request_id}}, state) do
+    new_state = Commands.BufferManagement.handle_application_quit_request(state, request_id)
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:minga_input, {:application_quit_decision, request_id, decision}},
+        state
+      ) do
+    new_state =
+      Commands.BufferManagement.handle_application_quit_decision(state, request_id, decision)
+
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:retry_application_quit_response, request_id, outcome, dirty_count, buffer_name, detail},
+        state
+      ) do
+    new_state =
+      Commands.BufferManagement.retry_application_quit_response(
+        state,
+        request_id,
+        outcome,
+        dirty_count,
+        buffer_name,
+        detail
+      )
+
+    {:noreply, new_state}
+  end
+
   def handle_info({:minga_input, {:gui_action, action}}, state) do
     snapshot = Input.Router.capture_snapshot(state)
 

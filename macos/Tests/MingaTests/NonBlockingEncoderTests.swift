@@ -122,6 +122,26 @@ struct NonBlockingEncoderTests {
         pipe.fileHandleForReading.closeFile()
     }
 
+    @Test("buffer overflow never evicts a pending application quit request")
+    func bufferOverflowPreservesApplicationQuitRequest() throws {
+        let pipe = Pipe()
+        let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting, maxBufferSize: 16)
+        fillPipeUntilWouldBlock(pipe.fileHandleForWriting.fileDescriptor)
+
+        #expect(encoder.sendApplicationQuitRequest(requestID: 42))
+        encoder.sendPasteEvent(text: String(repeating: "x", count: 128))
+
+        #expect(encoder.waitForPendingWritesForTesting())
+
+        let frames = try #require(parseFrames(encoder.bufferedDataForTesting()))
+        #expect(frames.count == 1)
+        #expect(frames[0].first == OP_APPLICATION_QUIT_REQUEST)
+        #expect(encoder.droppedMessageCount == 1)
+
+        pipe.fileHandleForWriting.closeFile()
+        pipe.fileHandleForReading.closeFile()
+    }
+
     @Test("disconnect discards buffered writes")
     func disconnectDiscardsBufferedWrites() {
         let pipe = Pipe()

@@ -346,37 +346,6 @@ final class BEAMProcessManager {
         start()
     }
 
-    /// Sends SIGTERM to the BEAM and waits briefly for clean shutdown.
-    /// Used during Cmd+Q / applicationShouldTerminate.
-    func shutdownGracefully(timeout: TimeInterval = 3.0) {
-        guard let proc = process, proc.isRunning else { return }
-
-        isShuttingDown = true
-
-        // Real quit: release the App Nap / termination assertion so the GUI
-        // process can exit normally once the BEAM has shut down.
-        endBackgroundActivity()
-
-        // SIGTERM triggers orderly OTP shutdown in the BEAM.
-        proc.terminate()
-
-        // Wait on a background thread to avoid blocking the main thread.
-        DispatchQueue.global().async {
-            proc.waitUntilExit()
-        }
-
-        // Safety timeout: if the BEAM hasn't exited after `timeout` seconds,
-        // force kill it. Uses global queue so it fires even if main thread is blocked.
-        let pid = proc.processIdentifier
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-            // Check if the process is still alive via kill(pid, 0).
-            if kill(pid, 0) == 0 {
-                NSLog("BEAMProcessManager: BEAM did not exit in \(timeout)s, sending SIGKILL")
-                kill(pid, SIGKILL)
-            }
-        }
-    }
-
     private static func randomReleaseCookie() -> String {
         UUID().uuidString.replacingOccurrences(of: "-", with: "")
             + UUID().uuidString.replacingOccurrences(of: "-", with: "")

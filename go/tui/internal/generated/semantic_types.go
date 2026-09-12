@@ -24,6 +24,25 @@ const (
 	FrameRejectionReasonUnknown                    FrameRejectionReason = 255
 )
 
+// ApplicationQuitDecision is a generated enum (repr u8).
+type ApplicationQuitDecision uint8
+
+const (
+	ApplicationQuitDecisionSave    ApplicationQuitDecision = 0
+	ApplicationQuitDecisionDiscard ApplicationQuitDecision = 1
+	ApplicationQuitDecisionCancel  ApplicationQuitDecision = 2
+)
+
+// ApplicationQuitOutcome is a generated enum (repr u8).
+type ApplicationQuitOutcome uint8
+
+const (
+	ApplicationQuitOutcomeNeedsDecision ApplicationQuitOutcome = 0
+	ApplicationQuitOutcomeProceeding    ApplicationQuitOutcome = 1
+	ApplicationQuitOutcomeCancelled     ApplicationQuitOutcome = 2
+	ApplicationQuitOutcomeSaveFailed    ApplicationQuitOutcome = 3
+)
+
 // FrameRejectionDisposition is a generated enum (repr u8).
 type FrameRejectionDisposition uint8
 

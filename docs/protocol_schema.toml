@@ -34,7 +34,8 @@ version = "2.0.0"
 # index(2) to stable transcript message_id(4).
 # protocol_version 14 retires the native Tool Manager panel opcode (0x7E) and GUI actions 0x11-0x14. The Tool Manager service and picker command path remain live; stale frontends are rejected by the existing ready handshake.
 # protocol_version 15 retires the unowned gui_change_summary opcode (0x89), change_summary_entry structure, and change_summary_click action. Breadcrumb display stays on gui_breadcrumb; legacy breadcrumb_click inputs still decode and are ignored.
-protocol_version = 15
+# protocol_version 16 adds the correlated native application-quit handshake. AppKit sends application_quit_request/application_quit_decision and the BEAM answers with application_quit_response before it performs orderly shutdown.
+protocol_version = 16
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -135,6 +136,20 @@ framing = "fixed:15"
 
 [[opcodes]]
 category = "input"
+name = "application_quit_request"
+value = 0x0D
+direction = "frontend_to_beam"
+framing = "fixed:5"
+
+[[opcodes]]
+category = "input"
+name = "application_quit_decision"
+value = 0x0E
+direction = "frontend_to_beam"
+framing = "fixed:6"
+
+[[opcodes]]
+category = "input"
 name = "log_message"
 value = 0x60
 direction = "frontend_to_beam"
@@ -224,6 +239,14 @@ name = "set_link_cursor"
 value = 0x19
 direction = "beam_to_frontend"
 framing = "fixed:2"
+
+# Correlated native application-quit response. The len16 payload is request_id(u32) + outcome(u8) + dirty_count(u16) + buffer_name(string16) + detail(string16). Each string is at most 32,000 UTF-8 bytes so the complete payload fits u16. It is an out-of-band lifecycle command and is never part of a render transaction.
+[[opcodes]]
+category = "render"
+name = "application_quit_response"
+value = 0x1A
+direction = "beam_to_frontend"
+framing = "len16"
 
 # protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
 # a frontend's handshake protocol_version does not match the BEAM's, carrying a
@@ -1222,6 +1245,27 @@ values = [
   { name = "invalid_row_splice", value = 14 },
   { name = "resource_policy", value = 15 },
   { name = "unknown", value = 255 },
+]
+
+[[enums]]
+name = "application_quit_decision"
+repr = "u8"
+default = "cancel"
+values = [
+  { name = "save", value = 0 },
+  { name = "discard", value = 1 },
+  { name = "cancel", value = 2 },
+]
+
+[[enums]]
+name = "application_quit_outcome"
+repr = "u8"
+default = "cancelled"
+values = [
+  { name = "needs_decision", value = 0 },
+  { name = "proceeding", value = 1 },
+  { name = "cancelled", value = 2 },
+  { name = "save_failed", value = 3 },
 ]
 
 [[enums]]

@@ -34,6 +34,12 @@ defmodule MingaEditor.Frontend do
   def send_commands(server \\ MingaEditor.Frontend.Manager, commands),
     do: MingaEditor.Frontend.Manager.send_commands(server, commands)
 
+  @doc "Attempts one lifecycle command without retaining it after rejection."
+  @spec send_lifecycle_command(GenServer.server() | nil, binary()) ::
+          MingaEditor.Frontend.Manager.lifecycle_admission()
+  def send_lifecycle_command(server \\ MingaEditor.Frontend.Manager, command),
+    do: MingaEditor.Frontend.Manager.send_lifecycle_command(server, command)
+
   @doc """
   Sends the per-frame render batch and stamps a monotonic send time so the
   frontend emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`)

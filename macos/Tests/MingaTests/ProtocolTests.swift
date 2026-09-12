@@ -92,6 +92,49 @@ private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
+    @Test("Decode application quit response with buffer-specific failure detail")
+    func decodeApplicationQuitResponse() throws {
+        var body = Data()
+        appendWireU32(&body, 0xA1B2_C3D4)
+        body.append(ApplicationQuitResponse.Outcome.saveFailed.rawValue)
+        appendWireU16(&body, 2)
+        appendWireString16(&body, "notes.txt")
+        appendWireString16(&body, "file changed outside Minga")
+
+        var data = Data([OP_APPLICATION_QUIT_RESPONSE])
+        appendWireU16(&data, UInt16(body.count))
+        data.append(body)
+
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .applicationQuitResponse(let response) = command else {
+            Issue.record("Expected .applicationQuitResponse, got \(String(describing: command))")
+            return
+        }
+        #expect(response.requestID == 0xA1B2_C3D4)
+        #expect(response.outcome == .saveFailed)
+        #expect(response.dirtyCount == 2)
+        #expect(response.bufferName == "notes.txt")
+        #expect(response.detail == "file changed outside Minga")
+    }
+
+    @Test("Reject malformed application quit response outcome")
+    func rejectMalformedApplicationQuitOutcome() {
+        let data = Data([
+            OP_APPLICATION_QUIT_RESPONSE,
+            0, 11,
+            0, 0, 0, 1,
+            0xFF,
+            0, 0,
+            0, 0,
+            0, 0
+        ])
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
     @Test("Decode commit_frame command")
     func decodeCommitFrame() throws {
         // commit_frame (#2219): frame_seq:u32 + input_seq:u32. input_seq is the

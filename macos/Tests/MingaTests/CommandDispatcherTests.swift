@@ -169,6 +169,25 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.protocolErrorState.message == "protocol_version mismatch: frontend 1, beam 2")
     }
 
+    @Test("application quit response is delivered outside frame transactions")
+    @MainActor func applicationQuitResponseRouting() {
+        let (dispatcher, _) = makeDispatcher()
+        let expected = ApplicationQuitResponse(
+            requestID: 17,
+            outcome: .needsDecision,
+            dirtyCount: 3,
+            bufferName: "",
+            detail: ""
+        )
+        var received: [ApplicationQuitResponse] = []
+        dispatcher.onApplicationQuitResponse = { received.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.applicationQuitResponse(expected))
+
+        #expect(received == [expected])
+    }
+
     @Test("setWindowBg updates frameState defaultBg")
     @MainActor func setWindowBgCommand() throws {
         let (dispatcher, _) = makeDispatcher()

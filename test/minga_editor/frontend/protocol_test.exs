@@ -153,6 +153,69 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  describe "decode_event/1 — application quit" do
+    test "decodes correlated request and every decision" do
+      assert {:ok, {:application_quit_request, 0xA1B2_C3D4}} =
+               Protocol.decode_event(<<0x0D, 0xA1B2_C3D4::32>>)
+
+      assert {:ok, {:application_quit_decision, 42, :save}} =
+               Protocol.decode_event(<<0x0E, 42::32, 0>>)
+
+      assert {:ok, {:application_quit_decision, 42, :discard}} =
+               Protocol.decode_event(<<0x0E, 42::32, 1>>)
+
+      assert {:ok, {:application_quit_decision, 42, :cancel}} =
+               Protocol.decode_event(<<0x0E, 42::32, 2>>)
+    end
+
+    test "rejects malformed or unknown decisions" do
+      assert {:error, :malformed} = Protocol.decode_event(<<0x0D, 1::16>>)
+      assert {:error, :malformed} = Protocol.decode_event(<<0x0E, 1::32>>)
+      assert {:error, :malformed} = Protocol.decode_event(<<0x0E, 1::32, 3>>)
+    end
+
+    test "encodes a length-prefixed response with failure details" do
+      encoded =
+        Protocol.encode_application_quit_response(
+          0xA1B2_C3D4,
+          :save_failed,
+          2,
+          "notes.txt",
+          "file changed outside Minga"
+        )
+
+      assert <<0x1A, payload_size::16, payload::binary-size(payload_size)>> = encoded
+
+      assert <<0xA1B2_C3D4::32, 3, 2::16, 9::16, "notes.txt", 26::16,
+               "file changed outside Minga">> = payload
+    end
+
+    test "truncates combining-mark strings on valid UTF-8 byte boundaries within u16 payload" do
+      combining = String.duplicate("e\u0301", 20_000)
+
+      encoded =
+        Protocol.encode_application_quit_response(
+          7,
+          :save_failed,
+          1,
+          combining,
+          combining
+        )
+
+      assert <<0x1A, payload_size::16, payload::binary-size(payload_size)>> = encoded
+
+      assert <<7::32, 3, 1::16, name_size::16, name::binary-size(name_size), detail_size::16,
+               detail::binary-size(detail_size)>> = payload
+
+      assert payload_size <= 0xFFFF
+      assert name_size <= 32_000
+      assert detail_size <= 32_000
+      assert String.valid?(name)
+      assert String.valid?(detail)
+      assert name == detail
+    end
+  end
+
   describe "decode_event/1 — paste_event" do
     test "decodes basic multi-line paste" do
       text = "line 1\nline 2\nline 3"
