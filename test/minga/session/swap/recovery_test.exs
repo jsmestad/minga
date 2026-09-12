@@ -1,6 +1,9 @@
 defmodule Minga.Session.Swap.RecoveryTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
+  alias Minga.Session.Swap
   alias Minga.Session.Swap.Recovery
 
   @moduletag :tmp_dir
@@ -83,6 +86,48 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert results == []
       # The file should NOT be deleted
       assert File.exists?(other_file)
+    end
+
+    test "removes only recognized temporary files whose owner is dead", %{tmp_dir: tmp_dir} do
+      dead_pid = 99_991
+      live_pid = 99_992
+
+      assert {:ok, dead_temp} =
+               Swap.prepare("/tmp/dead-temp.ex", "dead", swap_dir: tmp_dir, os_pid: dead_pid)
+
+      assert {:ok, live_temp} =
+               Swap.prepare("/tmp/live-temp.ex", "live", swap_dir: tmp_dir, os_pid: live_pid)
+
+      arbitrary_temp = Path.join(tmp_dir, "notes.tmp")
+      similar_temp = Path.join(tmp_dir, "not-a-swap.#{dead_pid}.swap.1.2.tmp")
+      File.write!(arbitrary_temp, "leave me")
+      File.write!(similar_temp, "leave me too")
+
+      pid_alive? = fn os_pid -> os_pid == live_pid end
+      assert Recovery.scan(scan_opts(tmp_dir, pid_alive?)) == []
+
+      refute File.exists?(dead_temp.temporary_path)
+      assert File.exists?(live_temp.temporary_path)
+      assert File.exists?(arbitrary_temp)
+      assert File.exists?(similar_temp)
+    end
+
+    test "logs failure to remove a recognized orphaned temporary file", %{tmp_dir: tmp_dir} do
+      os_pid = 99_993
+      target = Swap.swap_path("/tmp/removal-failure.ex", swap_dir: tmp_dir, os_pid: os_pid)
+      temporary_path = "#{target}.1.123.tmp"
+      File.mkdir_p!(temporary_path)
+      assert {:error, reason} = File.rm(temporary_path)
+
+      log =
+        capture_log(fn ->
+          assert Recovery.scan(scan_opts(tmp_dir, fn _pid -> false end)) == []
+        end)
+
+      assert log =~ "Failed to remove orphaned swap temporary file"
+      assert log =~ temporary_path
+      assert log =~ inspect(reason)
+      assert File.dir?(temporary_path)
     end
 
     test "finds multiple recoverable swap files", %{tmp_dir: tmp_dir} do

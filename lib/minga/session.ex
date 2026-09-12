@@ -183,8 +183,8 @@ defmodule Minga.Session do
   @spec write_swap(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   defdelegate write_swap(path, content, opts \\ []), to: Minga.Session.Swap, as: :write
 
-  @doc "Deletes the swap file for the given buffer path."
-  @spec delete_swap(String.t(), keyword()) :: :ok
+  @doc "Deletes the swap file for the given buffer path. Returns an error when filesystem cleanup fails."
+  @spec delete_swap(String.t(), keyword()) :: :ok | {:error, term()}
   defdelegate delete_swap(path, opts \\ []), to: Minga.Session.Swap, as: :delete
 
   # ── Swap recovery delegates ───────────────────────────────────────────────

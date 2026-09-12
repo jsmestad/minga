@@ -9,6 +9,7 @@ defmodule Minga.Buffer.State do
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.SaveState
+  alias Minga.Buffer.State.Swap, as: SwapState
   alias Minga.Buffer.UndoHistory
   alias Minga.Core.Decorations
 
@@ -51,10 +52,9 @@ defmodule Minga.Buffer.State do
             face_overrides: %{},
             options: %{},
             explicit_options: MapSet.new(),
-            swap_timer: nil,
+            swap: %SwapState{},
             auto_save_timer: nil,
             auto_save_token: nil,
-            swap_dir: nil,
             events_registry: Minga.Events.default_registry()
 
   @type options_server :: Minga.Config.Options.server()
@@ -77,10 +77,9 @@ defmodule Minga.Buffer.State do
           face_overrides: %{String.t() => keyword()},
           options: %{atom() => term()},
           explicit_options: MapSet.t(atom()),
-          swap_timer: reference() | nil,
+          swap: SwapState.t(),
           auto_save_timer: reference() | nil,
           auto_save_token: reference() | nil,
-          swap_dir: String.t() | nil,
           events_registry: Minga.Events.registry()
         }
 

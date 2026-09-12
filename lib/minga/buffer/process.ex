@@ -34,6 +34,7 @@ defmodule Minga.Buffer.Process do
 
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
+  alias Minga.Buffer.State.Swap, as: SwapState
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
@@ -55,6 +56,10 @@ defmodule Minga.Buffer.Process do
           | {:read_only, boolean()}
           | {:unlisted, boolean()}
           | {:persistent, boolean()}
+          | {:swap_dir, String.t() | nil}
+          | {:swap_backend, module()}
+          | {:swap_backend_options, keyword()}
+          | {:swap_timer_start, SwapState.timer_start()}
           | {:events_registry, Minga.Events.registry()}
 
   @typedoc "Internal state of the buffer server."
@@ -963,7 +968,7 @@ defmodule Minga.Buffer.Process do
           persistent: Keyword.get(opts, :persistent, false),
           options: seed_options(options_server, filetype),
           explicit_options: MapSet.new(),
-          swap_dir: Keyword.get(opts, :swap_dir),
+          swap: opts |> Keyword.put_new(:swap_backend, Minga.Session.Swap) |> SwapState.new(),
           events_registry: Keyword.get(opts, :events_registry, Minga.Events.default_registry())
         }
 
@@ -981,6 +986,7 @@ defmodule Minga.Buffer.Process do
     case Persistence.read_content(state, file_path) do
       {:ok, text} when is_binary(text) ->
         if String.valid?(text) do
+          state = clear_swap(state)
           first_line = text |> String.split("\n", parts: 2) |> List.first("")
           filetype = Language.detect_filetype_from_content(file_path, first_line)
 
@@ -1226,6 +1232,7 @@ defmodule Minga.Buffer.Process do
   def handle_call(:reload, _from, state) do
     case Persistence.read_content(state, state.file_path) do
       {:ok, text} ->
+        state = clear_swap(state)
         {line, col} = Document.cursor(state.document)
         new_buf = Document.new(text)
         line_count = Document.line_count(new_buf)
@@ -1291,9 +1298,12 @@ defmodule Minga.Buffer.Process do
     if old_path == new_path do
       {:reply, :ok, state}
     else
+      state = clear_swap(state)
       unregister_path(state.file_path)
       register_path(new_path)
-      {:reply, :ok, BufState.retarget_path(state, new_path)}
+      state = BufState.retarget_path(state, new_path)
+      state = if BufState.dirty?(state), do: schedule_swap_write(state), else: state
+      {:reply, :ok, state}
     end
   end
 
@@ -1331,6 +1341,7 @@ defmodule Minga.Buffer.Process do
   # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
   # that are read-only to the user but need programmatic content updates.
   def handle_call({:replace_generated_content, new_content}, _from, state) do
+    state = clear_swap(state)
     new_buf = Document.new(new_content)
 
     new_state = %{
@@ -1346,6 +1357,7 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:accept_saved_content, new_content}, _from, state) do
+    state = clear_swap(state)
     new_buf = Document.new(new_content)
     {mtime, size} = Persistence.file_metadata(state, state.file_path)
 
@@ -1909,6 +1921,7 @@ defmodule Minga.Buffer.Process do
     case Persistence.write_content(state, intent.target, content, write_policy(intent)) do
       :ok ->
         {new_mtime, new_size} = Persistence.file_metadata(state, intent.target)
+        state = clear_swap(state)
         unregister_path(state.file_path)
         register_path(intent.target)
 
@@ -2065,21 +2078,33 @@ defmodule Minga.Buffer.Process do
     {:noreply, state}
   end
 
-  @impl true
-  def handle_info(
-        :write_swap,
-        %{buffer_type: :file, file_path: path, swap_dir: dir} = state
-      )
-      when is_binary(path) and is_binary(dir) do
-    if BufState.dirty?(state) do
-      start_swap_write_task(state, path, dir)
+  def handle_info({:write_swap, token}, state) when is_reference(token) do
+    case SwapState.consume_timer(state.swap, token) do
+      {:ok, swap} -> {:noreply, admit_current_swap(%{state | swap: swap})}
+      :stale -> {:noreply, state}
     end
-
-    {:noreply, %{state | swap_timer: nil}}
   end
 
   def handle_info(:write_swap, state) do
-    {:noreply, %{state | swap_timer: nil}}
+    state = cancel_swap_timer(state)
+    {:noreply, admit_current_swap(state)}
+  end
+
+  def handle_info({:swap_prepared, worker, generation, result}, state)
+      when is_pid(worker) and is_integer(generation) do
+    {:noreply, handle_prepared_swap(state, worker, generation, result)}
+  end
+
+  def handle_info({:DOWN, monitor, :process, worker, reason}, state)
+      when is_reference(monitor) and is_pid(worker) do
+    case SwapState.complete_monitor(state.swap, worker, monitor) do
+      {:ok, _generation, pending, swap} ->
+        maybe_log_swap_worker_failure(state, reason)
+        {:noreply, start_pending_swap(%{state | swap: swap}, pending)}
+
+      :unknown ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(
@@ -2106,7 +2131,7 @@ defmodule Minga.Buffer.Process do
   @spec terminate(term(), state()) :: :ok
   def terminate(_reason, state) do
     # Clean up timers and swap files on orderly shutdown (buffer closed, editor quit).
-    state = cancel_auto_save_timer(state)
+    state = state |> cancel_auto_save_timer() |> revoke_swap_writes()
     delete_swap_file(state)
     :ok
   end
@@ -2137,32 +2162,6 @@ defmodule Minga.Buffer.Process do
   end
 
   # ── Private ──
-
-  @spec start_swap_write_task(state(), String.t(), String.t()) :: :ok
-  defp start_swap_write_task(state, path, dir) do
-    content = Document.content(state.document)
-    swap_opts = [swap_dir: dir]
-
-    Task.start(fn ->
-      write_swap_file(path, content, swap_opts)
-    end)
-
-    :ok
-  end
-
-  @spec write_swap_file(String.t(), String.t(), keyword()) :: :ok
-  defp write_swap_file(path, content, swap_opts) do
-    case Minga.Session.write_swap(path, content, swap_opts) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Minga.Log.warning(
-          :editor,
-          "Failed to write swap file for #{Path.basename(path)}: #{inspect(reason)}"
-        )
-    end
-  end
 
   # Defers a :content_replaced broadcast to a subsequent handle_info turn.
   # Broadcasting inside handle_call would deadlock if any subscriber calls
@@ -2454,6 +2453,203 @@ defmodule Minga.Buffer.Process do
 
   @swap_debounce_ms 5_000
 
+  @spec admit_current_swap(state()) :: state()
+  defp admit_current_swap(%{buffer_type: :file, file_path: path} = state)
+       when is_binary(path) do
+    if BufState.dirty?(state) and SwapState.configured?(state.swap) do
+      content = Document.content(state.document)
+
+      case SwapState.admit(state.swap, path, content) do
+        {:start, snapshot, swap} -> start_swap_worker(%{state | swap: swap}, snapshot)
+        {:pending, swap} -> %{state | swap: swap}
+      end
+    else
+      state
+    end
+  end
+
+  defp admit_current_swap(state), do: state
+
+  @spec start_swap_worker(state(), SwapState.snapshot()) :: state()
+  defp start_swap_worker(state, {generation, path, content} = snapshot) do
+    owner = self()
+    backend = SwapState.backend(state.swap)
+    opts = SwapState.backend_options(state.swap, generation)
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        run_swap_preparation(owner, generation, path, content, backend, opts)
+      end)
+
+    %{state | swap: SwapState.worker_started(state.swap, snapshot, worker, monitor)}
+  end
+
+  @spec run_swap_preparation(
+          pid(),
+          SwapState.generation(),
+          String.t(),
+          binary(),
+          module(),
+          keyword()
+        ) :: :ok
+  defp run_swap_preparation(owner, generation, path, content, backend, opts) do
+    owner_monitor = Process.monitor(owner)
+    coordinator = self()
+
+    io_worker =
+      spawn_link(fn ->
+        result = backend.prepare(path, content, opts)
+        send(coordinator, {:swap_prepare_result, result})
+      end)
+
+    receive do
+      {:swap_prepare_result, result} ->
+        Process.demonitor(owner_monitor, [:flush])
+        send(owner, {:swap_prepared, self(), generation, result})
+        :ok
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        Process.exit(io_worker, :kill)
+        :ok
+    end
+  end
+
+  @spec handle_prepared_swap(state(), pid(), SwapState.generation(), term()) :: state()
+  defp handle_prepared_swap(state, worker, generation, {:ok, prepared}) do
+    case SwapState.publication_status(state.swap, worker, generation) do
+      :current ->
+        state
+        |> publish_prepared_swap(prepared)
+        |> handle_publication_result()
+        |> complete_swap_work(worker, generation)
+
+      :obsolete ->
+        discard_prepared_swap(state, prepared)
+        complete_swap_work(state, worker, generation)
+
+      :unknown ->
+        discard_prepared_swap(state, prepared)
+        state
+    end
+  end
+
+  defp handle_prepared_swap(state, worker, generation, {:error, reason}) do
+    if SwapState.publication_status(state.swap, worker, generation) == :current do
+      log_swap_failure(state, reason)
+    end
+
+    complete_swap_work(state, worker, generation)
+  end
+
+  @spec publish_prepared_swap(state(), term()) :: {state(), :ok | {:error, term()}}
+  defp publish_prepared_swap(state, prepared) do
+    backend = SwapState.backend(state.swap)
+    {state, swap_backend_call(fn -> backend.publish(prepared) end)}
+  end
+
+  @spec handle_publication_result({state(), :ok | {:error, term()}}) :: state()
+  defp handle_publication_result({state, :ok}), do: state
+
+  defp handle_publication_result({state, {:error, reason}}) do
+    log_swap_failure(state, reason)
+    :ok = delete_swap_file(state)
+    state
+  end
+
+  @spec discard_prepared_swap(state(), term()) :: :ok
+  defp discard_prepared_swap(state, prepared) do
+    backend = SwapState.backend(state.swap)
+
+    case swap_backend_call(fn -> backend.discard(prepared) end) do
+      :ok -> :ok
+      {:error, reason} -> log_swap_failure(state, {:discard_failed, reason})
+    end
+  end
+
+  @spec complete_swap_work(state(), pid(), SwapState.generation()) :: state()
+  defp complete_swap_work(state, worker, generation) do
+    case SwapState.complete(state.swap, worker, generation) do
+      {:ok, monitor, pending, swap} ->
+        Process.demonitor(monitor, [:flush])
+        start_pending_swap(%{state | swap: swap}, pending)
+
+      :unknown ->
+        state
+    end
+  end
+
+  @spec start_pending_swap(state(), SwapState.snapshot() | nil) :: state()
+  defp start_pending_swap(state, nil), do: state
+  defp start_pending_swap(state, snapshot), do: start_swap_worker(state, snapshot)
+
+  @spec maybe_log_swap_worker_failure(state(), term()) :: :ok
+  defp maybe_log_swap_worker_failure(state, reason) do
+    log_swap_failure(state, {:worker_stopped, reason})
+  end
+
+  @spec log_swap_failure(state(), term()) :: :ok
+  defp log_swap_failure(state, reason) do
+    name = if is_binary(state.file_path), do: Path.basename(state.file_path), else: "buffer"
+    Minga.Log.warning(:editor, "Failed to write swap file for #{name}: #{inspect(reason)}")
+  end
+
+  @spec swap_backend_call((-> term())) :: :ok | {:error, term()}
+  defp swap_backend_call(operation) when is_function(operation, 0) do
+    case operation.() do
+      :ok -> :ok
+      {:error, _reason} = error -> error
+      other -> {:error, {:invalid_backend_result, other}}
+    end
+  rescue
+    exception -> {:error, {exception.__struct__, Exception.message(exception)}}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  @spec revoke_swap_writes(state()) :: state()
+  defp revoke_swap_writes(state) do
+    {timer, active, swap} = SwapState.invalidate(state.swap)
+
+    if is_reference(timer), do: Process.cancel_timer(timer)
+
+    state = %{state | swap: swap}
+    revoke_active_swap(state, active)
+  end
+
+  @spec revoke_active_swap(state(), SwapState.active_work() | nil) :: state()
+  defp revoke_active_swap(state, nil), do: state
+
+  defp revoke_active_swap(state, {{generation, _path, _content}, worker, monitor}) do
+    Process.exit(worker, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+    end
+
+    discard_prepared_message(state, worker, generation)
+    state
+  end
+
+  @spec discard_prepared_message(state(), pid(), SwapState.generation()) :: :ok
+  defp discard_prepared_message(state, worker, generation) do
+    receive do
+      {:swap_prepared, ^worker, ^generation, {:ok, prepared}} ->
+        discard_prepared_swap(state, prepared)
+
+      {:swap_prepared, ^worker, ^generation, {:error, _reason}} ->
+        :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  @spec clear_swap(state()) :: state()
+  defp clear_swap(state) do
+    state = revoke_swap_writes(state)
+    :ok = delete_swap_file(state)
+    state
+  end
+
   @spec mark_dirty(state()) :: state()
   defp mark_dirty(state) do
     state = BufState.mark_dirty(state)
@@ -2466,38 +2662,44 @@ defmodule Minga.Buffer.Process do
     state = BufState.sync_dirty(state)
 
     if BufState.dirty?(state) do
-      schedule_auto_save(state)
+      state |> schedule_swap_write() |> schedule_auto_save()
     else
-      cancel_auto_save_timer(state)
+      state |> clear_swap() |> cancel_auto_save_timer()
     end
   end
 
   @spec mark_saved(state(), Minga.Buffer.SaveState.metadata(), String.t()) :: state()
   defp mark_saved(state, metadata, content) do
+    state = clear_swap(state)
     state = BufState.mark_saved(state, metadata, content)
-    :ok = delete_swap_file(state)
-    state = cancel_swap_timer(state)
     cancel_auto_save_timer(state)
   end
 
   # Schedule a debounced swap file write. Cancels any pending timer
   # so rapid edits only produce one write after 5 seconds of quiet.
   @spec schedule_swap_write(state()) :: state()
-  defp schedule_swap_write(%{buffer_type: :file, file_path: path, swap_dir: dir} = state)
-       when is_binary(path) and is_binary(dir) do
-    state = cancel_swap_timer(state)
-    ref = Process.send_after(self(), :write_swap, @swap_debounce_ms)
-    %{state | swap_timer: ref}
+  defp schedule_swap_write(%{buffer_type: :file, file_path: path} = state)
+       when is_binary(path) do
+    if SwapState.configured?(state.swap) do
+      state = cancel_swap_timer(state)
+      token = make_ref()
+      timer_start = SwapState.timer_start(state.swap)
+      timer = timer_start.(self(), {:write_swap, token}, @swap_debounce_ms)
+      %{state | swap: SwapState.schedule(state.swap, timer, token)}
+    else
+      state
+    end
   end
 
   defp schedule_swap_write(state), do: state
 
   @spec cancel_swap_timer(state()) :: state()
-  defp cancel_swap_timer(%{swap_timer: nil} = state), do: state
+  defp cancel_swap_timer(state) do
+    {timer, swap} = SwapState.take_timer(state.swap)
 
-  defp cancel_swap_timer(%{swap_timer: ref} = state) when is_reference(ref) do
-    Process.cancel_timer(ref)
-    %{state | swap_timer: nil}
+    if is_reference(timer), do: Process.cancel_timer(timer)
+
+    %{state | swap: swap}
   end
 
   @spec apply_option_change(state(), atom()) :: state()
@@ -2642,12 +2844,26 @@ defmodule Minga.Buffer.Process do
   end
 
   @spec delete_swap_file(state()) :: :ok
-  defp delete_swap_file(%{file_path: path, swap_dir: dir})
-       when is_binary(path) and is_binary(dir) do
-    Minga.Session.delete_swap(path, swap_dir: dir)
+  defp delete_swap_file(%{file_path: path} = state) when is_binary(path) do
+    if SwapState.configured?(state.swap) do
+      delete_configured_swap(state, path)
+    else
+      :ok
+    end
   end
 
   defp delete_swap_file(_state), do: :ok
+
+  @spec delete_configured_swap(state(), String.t()) :: :ok
+  defp delete_configured_swap(state, path) do
+    backend = SwapState.backend(state.swap)
+    opts = SwapState.backend_options(state.swap, 0)
+
+    case swap_backend_call(fn -> backend.delete(path, opts) end) do
+      :ok -> :ok
+      {:error, reason} -> log_swap_failure(state, {:delete_failed, reason})
+    end
+  end
 
   # ── Edit delta tracking ──
 
