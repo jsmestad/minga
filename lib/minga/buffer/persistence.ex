@@ -5,8 +5,10 @@ defmodule Minga.Buffer.Persistence do
   `Minga.Buffer.Process` owns the process transaction: undo state, dirty state, events, timers, and registry updates. This module owns the file-system and remote-storage details that make those transactions possible: reading content, writing content, collecting file metadata, fingerprinting saved content, and deciding whether the backing file changed since the buffer last saved or loaded it.
   """
 
+  alias Minga.Buffer.Persistence.LocalWriter
   alias Minga.Buffer.SaveState
   alias Minga.Buffer.State, as: BufState
+  alias Minga.Buffer.State.LocalPersistence
 
   @type storage :: BufState.storage()
   @type metadata :: {mtime :: integer() | nil, size :: non_neg_integer() | nil}
@@ -59,14 +61,13 @@ defmodule Minga.Buffer.Persistence do
           :ok | {:error, term()}
   def write_content(state, file_path, content, policy \\ :replace)
 
-  def write_content(%BufState{storage: :local}, file_path, content, policy) do
-    file_path
-    |> Path.dirname()
-    |> File.mkdir_p()
-    |> case do
-      :ok -> write_local(file_path, content, policy)
-      error -> error
-    end
+  def write_content(
+        %BufState{storage: :local, local_persistence: %LocalPersistence{} = config},
+        file_path,
+        content,
+        policy
+      ) do
+    write_local(config, file_path, content, policy)
   end
 
   def write_content(
@@ -81,9 +82,25 @@ defmodule Minga.Buffer.Persistence do
     :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
   end
 
-  @spec write_local(String.t(), String.t(), write_policy()) :: :ok | {:error, term()}
-  defp write_local(file_path, content, policy) do
-    File.write(file_path, content, write_modes(policy))
+  @spec write_local(LocalPersistence.t(), String.t(), String.t(), write_policy()) ::
+          :ok | {:error, term()}
+  defp write_local(
+         %LocalPersistence{file_system: nil},
+         file_path,
+         content,
+         policy
+       ) do
+    LocalWriter.write(file_path, content, policy)
+  end
+
+  defp write_local(
+         %LocalPersistence{file_system: file_system, file_system_options: opts},
+         file_path,
+         content,
+         policy
+       )
+       when is_atom(file_system) and not is_nil(file_system) do
+    LocalWriter.write(file_path, content, policy, file_system, opts)
   end
 
   @spec write_modes(write_policy()) :: [File.mode()]

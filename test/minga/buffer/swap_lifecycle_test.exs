@@ -27,10 +27,12 @@ defmodule Minga.Buffer.SwapLifecycleTest do
     release_prepare(older_worker, older_generation)
 
     assert_receive {:swap_discarded, ^buffer, ^older_worker, ^older_generation, ^path,
-                    "older dirty content", :ok}
+                    "older dirty content", :ok},
+                   @publication_timeout
 
     assert_receive {:swap_prepare, newest_worker, newest_generation, ^path,
-                    "newest dirty content"}
+                    "newest dirty content"},
+                   @publication_timeout
 
     assert newest_generation > older_generation
     release_prepare(newest_worker, newest_generation)
@@ -56,7 +58,7 @@ defmodule Minga.Buffer.SwapLifecycleTest do
 
     assert :ok = BufferProcess.save(buffer)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
-    assert_receive {:swap_deleted, ^buffer, ^path, :ok}
+    assert_receive {:swap_deleted, ^buffer, ^path, :ok}, @publication_timeout
 
     release_prepare(worker, generation)
     refute_receive {:swap_published, ^buffer, ^worker, ^generation, ^path, _content, _result}, 0
@@ -77,7 +79,7 @@ defmodule Minga.Buffer.SwapLifecycleTest do
     assert :ok = GenServer.stop(buffer, :normal)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
     assert_receive {:DOWN, ^buffer_monitor, :process, ^buffer, :normal}
-    assert_receive {:swap_deleted, ^buffer, ^path, :ok}
+    assert_receive {:swap_deleted, ^buffer, ^path, :ok}, @publication_timeout
 
     release_prepare(worker, generation)
     refute_receive {:swap_published, ^buffer, ^worker, ^generation, ^path, _content, _result}, 0
@@ -131,7 +133,8 @@ defmodule Minga.Buffer.SwapLifecycleTest do
     assert_receive {:DOWN, ^failed_monitor, :process, ^failed_worker, :killed}
 
     assert_receive {:swap_prepare, recovery_worker, recovery_generation, ^path,
-                    "recovered dirty content"}
+                    "recovered dirty content"},
+                   @publication_timeout
 
     assert recovery_generation > failed_generation
     release_prepare(recovery_worker, recovery_generation)
@@ -156,7 +159,8 @@ defmodule Minga.Buffer.SwapLifecycleTest do
     drive_swap_timer(buffer, first_token)
 
     assert_receive {:swap_prepare, first_worker, first_generation, ^path,
-                    "published dirty content"}
+                    "published dirty content"},
+                   @publication_timeout
 
     release_prepare(first_worker, first_generation)
 
@@ -177,7 +181,9 @@ defmodule Minga.Buffer.SwapLifecycleTest do
 
     drive_swap_timer(buffer, undo_token)
 
-    assert_receive {:swap_prepare, undo_worker, undo_generation, ^path, "middle dirty content"}
+    assert_receive {:swap_prepare, undo_worker, undo_generation, ^path, "middle dirty content"},
+                   @publication_timeout
+
     release_prepare(undo_worker, undo_generation)
 
     assert_receive {:swap_published, ^buffer, ^undo_worker, ^undo_generation, ^path,
@@ -202,7 +208,7 @@ defmodule Minga.Buffer.SwapLifecycleTest do
 
     assert :ok = BufferProcess.save(buffer)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
-    assert_receive {:swap_deleted, ^buffer, ^path, :ok}
+    assert_receive {:swap_deleted, ^buffer, ^path, :ok}, @publication_timeout
     refute File.exists?(temporary_path)
   end
 
@@ -230,7 +236,7 @@ defmodule Minga.Buffer.SwapLifecycleTest do
                     "failed publication", {:error, :injected_publish}},
                    @publication_timeout
 
-    assert_receive {:swap_deleted, ^buffer, ^path, :ok}
+    assert_receive {:swap_deleted, ^buffer, ^path, :ok}, @publication_timeout
     refute File.exists?(swap_path)
 
     :ok = BufferProcess.replace_content(buffer, "later recovery content")
@@ -258,9 +264,12 @@ defmodule Minga.Buffer.SwapLifecycleTest do
     release_prepare(obsolete_worker, obsolete_generation, discard: {:error, :injected_discard})
 
     assert_receive {:swap_discarded, ^buffer, ^obsolete_worker, ^obsolete_generation, ^path,
-                    "obsolete content", {:error, :injected_discard}}
+                    "obsolete content", {:error, :injected_discard}},
+                   @publication_timeout
 
-    assert_receive {:swap_prepare, current_worker, current_generation, ^path, "current content"}
+    assert_receive {:swap_prepare, current_worker, current_generation, ^path, "current content"},
+                   @publication_timeout
+
     release_prepare(current_worker, current_generation)
 
     assert_receive {:swap_published, ^buffer, ^current_worker, ^current_generation, ^path,
@@ -285,7 +294,10 @@ defmodule Minga.Buffer.SwapLifecycleTest do
                    @publication_timeout
 
     assert :ok = BufferProcess.save(buffer)
-    assert_receive {:swap_deleted, ^buffer, ^path, {:error, :injected_delete}}
+
+    assert_receive {:swap_deleted, ^buffer, ^path, {:error, :injected_delete}},
+                   @publication_timeout
+
     assert Process.alive?(buffer)
     assert BufferProcess.content(buffer) == "content before save"
   end
@@ -317,7 +329,7 @@ defmodule Minga.Buffer.SwapLifecycleTest do
   defp trigger_swap(buffer, path, content) do
     send(buffer, :write_swap)
     :sys.get_state(buffer)
-    assert_receive {:swap_prepare, worker, generation, ^path, ^content}
+    assert_receive {:swap_prepare, worker, generation, ^path, ^content}, @publication_timeout
     {worker, generation}
   end
 

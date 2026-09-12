@@ -9,6 +9,7 @@ defmodule Minga.Buffer.State do
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.SaveState
+  alias Minga.Buffer.State.LocalPersistence
   alias Minga.Buffer.State.Swap, as: SwapState
   alias Minga.Buffer.UndoHistory
   alias Minga.Core.Decorations
@@ -40,6 +41,7 @@ defmodule Minga.Buffer.State do
             filetype: :text,
             options_server: Minga.Config.Options.default_server(),
             storage: :local,
+            local_persistence: %LocalPersistence{},
             buffer_type: :file,
             save_state: @default_save_state,
             undo_history: @default_undo_history,
@@ -65,6 +67,7 @@ defmodule Minga.Buffer.State do
           filetype: atom(),
           options_server: options_server(),
           storage: storage(),
+          local_persistence: LocalPersistence.t(),
           buffer_type: buffer_type(),
           save_state: SaveState.t(),
           undo_history: UndoHistory.t(),
