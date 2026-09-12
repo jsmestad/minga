@@ -2,7 +2,7 @@
 
 The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends speak the same base transport, input, parser, and diagnostic protocol. Shared visible UI is carried as Semantic UI opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md); the `GUI` name is historical wire terminology, not a product split between GUI and terminal clients. This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading this file plus GUI_PROTOCOL.md for Semantic UI surfaces.
 
-**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands were retired from the protocol in protocol_version 2; the only render-category opcodes that survive are transport-level framing (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`). New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
+**Shared chrome is delivered as Semantic UI, not cells.** The structured opcodes in GUI_PROTOCOL.md are the canonical contract for shared visible chrome (tab bar, status bar, file tree, picker, popups, agent surfaces, and so on). Each frontend decodes these semantic models and renders them with its own surface strategy: SwiftUI views, terminal widgets, GTK widgets, web components, or another future client. The cell-grid `draw_text`/`clear`/region commands were retired from the protocol in protocol_version 2; the surviving render-category opcodes carry transport framing, lifecycle control, and other out-of-band frontend state. New shared chrome must be modeled as a `Minga.RenderModel.UI.*` semantic model and encoded by `Minga.Frontend.Adapter.GUI`, never added as ad-hoc cell draws.
 
 Frontend identity is opaque to Minga product behavior. The BEAM may adapt to declared capabilities such as terminal grid versus desktop window, text measurement, color depth, image support, float support, and Semantic UI support, but it must not special-case Swift, Go, GTK, or another implementation name for product features.
 
@@ -27,7 +27,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 15). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 15 retires the unowned Change Summary command, entry shape, and click action while preserving display-only breadcrumbs and the legacy `breadcrumb_click` decode/no-op compatibility path. See "Protocol Version Negotiation" below.
+**Protocol version:** The schema carries a `protocol_version` integer (currently 16). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 16 adds the correlated native application-quit request, decision, and response messages. See "Protocol Version Negotiation" below.
 
 ---
 
@@ -35,7 +35,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 ### BEAM → Frontend (Render-Transport Commands)
 
-The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the region commands) were retired in protocol_version 2. All visible content now flows through Semantic UI opcodes (see GUI_PROTOCOL.md, `gui_window_content` 0x80). Only transport-level framing survives in this category.
+The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the region commands) were retired in protocol_version 2. All visible content now flows through Semantic UI opcodes (see GUI_PROTOCOL.md, `gui_window_content` 0x80). Only transport and lifecycle control survive in this category.
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
@@ -46,6 +46,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
 | `0x17` | set_window_bg | 4 | Set the default background color |
 | `0x18` | protocol_error | 3 + msg_len | Version-mismatch error; frontend shows it and stops decoding |
+| `0x1A` | application_quit_response | variable | Return the correlated BEAM quit-policy outcome |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
 
 ### BEAM → Frontend (Config Commands)
@@ -87,6 +88,8 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
 | `0x0B` | frame_rejected | 15 | Reject a correlated frame with stable reason and disposition |
 | `0x0C` | window_ref_miss | 15 | Reject a missing row/window reference and identify the affected window |
+| `0x0D` | application_quit_request | 5 | Begin or repeat a correlated native application-quit attempt |
+| `0x0E` | application_quit_decision | 6 | Send Save, Discard, or Cancel for the matching application-quit attempt |
 
 ### Frontend → BEAM (Highlight Responses)
 
@@ -188,6 +191,24 @@ message: [msg_len]u8    human-readable reason
 Total size: 3 + msg_len bytes.
 
 **Behavior:** The frontend displays the message as a blocking error and stops decoding subsequent frames. The BEAM does not stream render frames to a version-mismatched frontend.
+
+### `0x1A` application_quit_response
+
+Correlates the BEAM-owned dirty-buffer and shutdown workflow with an AppKit termination attempt. This lifecycle command is sent outside render transactions.
+
+```
+opcode:          u8  = 0x1A
+payload_len:     u16
+request_id:      u32
+outcome:         u8
+dirty_count:     u16
+buffer_name_len: u16
+buffer_name:     [buffer_name_len]u8 UTF-8 buffer display name
+detail_len:      u16
+detail:          [detail_len]u8 UTF-8 failure detail
+```
+
+Outcome values are `0` needs decision, `1` proceeding, `2` cancelled, and `3` save failed. `needs_decision` carries the authoritative dirty-buffer count. `save_failed` identifies the buffer and failure. Each UTF-8 string is truncated at a valid byte boundary to at most 32,000 bytes, which keeps the complete payload within `u16`. The native frontend must not approve AppKit termination on `proceeding`; it approves only after the matching core process exits.
 
 ---
 
@@ -338,7 +359,7 @@ caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" 
 protocol_version: u16           exact wire-contract version the frontend was generated against
 ```
 
-**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 15. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
+**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 16. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
 
 ### `0x04` mouse_event
 
@@ -392,6 +413,14 @@ Total size: 9 bytes.
 Stable rejection reasons are: 1 truncation, 2 commit sequence mismatch, 3 non-increasing frame sequence, 4 base sequence mismatch, 5 missing theme, 6 incomplete theme, 7 missing window reference, 8 window epoch mismatch, 9 invalid retained rows, 10 missing font resource, 11 transcript desync, 12 decode failure, 13 out-of-transaction command, 14 invalid row splice, 15 resource policy, and 255 unknown.
 
 Disposition values are generated from the shared schema: 1 retryable recovery, 2 targeted replacement, 3 adapted retry, and 4 terminal frontend failure. Ordinary lineage failures remain retryable. Missing retained references use `window_ref_miss` and stay scoped. Resource-policy rejection defaults terminal. An adapted retry is valid only when the producer has one-shot local evidence bound to the rejected generation and frame, a non-zero advertised dimension (`frame_bytes`, `frame_commands`, or `window_rows`), distinct rejected/adapted values, and a concrete adapted intent distinct from the rejected intent; the evidence is deliberately not sent because detailed resource usage belongs only in privacy-safe telemetry. Terminal failure preserves `last_applied_frame_seq`, cancels outstanding credit, and must not emit or request the unchanged frame again. Current macOS and TUI frontends enforce and advertise only the 64 MiB packet-byte ceiling; command-count and window-row dimensions remain zero (unadvertised) until their hard admission checks exist.
+
+### Native application quit (`0x0D`, `0x0E`)
+
+`application_quit_request` is `request_id:u32`. AppKit sends it once from `applicationShouldTerminate` and waits with `.terminateLater`. Repeating the same request ID reuses the pending attempt. A different ID cannot replace one in progress.
+
+`application_quit_decision` is `request_id:u32, decision:u8`, where `0` is Save, `1` is Discard, and `2` is Cancel. The BEAM inventories every registered buffer, including inactive and untitled buffers. It owns saving, discard policy, wait-request cancellation, and orderly shutdown. Native quit does not use the `confirm_quit` option. The frontend owns only the AppKit termination reply and the decision UI.
+
+Cancel and save failure return a matching `application_quit_response`, reject AppKit termination exactly once, and allow a later request. Proceeding is not approval. The native app waits for the matching core process to exit. A stale response, a stale chooser completion, or a response from a replacement connection cannot resolve the current attempt.
 
 ---
 
@@ -763,7 +792,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 15). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, protocol_version 10 widens clipboard and retained-window delta framing, protocol_version 11 makes `begin_frame` generation-aware and adds explicit frame status/retry events, protocol_version 12 appends frame rejection disposition and frontend resource policy, protocol_version 13 changes `agent_tool_toggle` to stable message ids, protocol_version 14 retires the native Tool Manager wire surface, and protocol_version 15 retires the Change Summary command, entry shape, and click action while retaining display-only breadcrumbs and legacy `breadcrumb_click` compatibility. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 16). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, protocol_version 10 widens clipboard and retained-window delta framing, protocol_version 11 makes `begin_frame` generation-aware and adds explicit frame status/retry events, protocol_version 12 appends frame rejection disposition and frontend resource policy, protocol_version 13 changes `agent_tool_toggle` to stable message ids, protocol_version 14 retires the native Tool Manager wire surface, protocol_version 15 retires the Change Summary command, entry shape, and click action while retaining display-only breadcrumbs and legacy `breadcrumb_click` compatibility, and protocol_version 16 adds the correlated native application-quit handshake. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 
@@ -783,7 +812,7 @@ A frontend that receives `protocol_error` should display the message as a blocki
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport commands (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport and lifecycle commands (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`, `application_quit_response`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Go/Bubble Tea) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 

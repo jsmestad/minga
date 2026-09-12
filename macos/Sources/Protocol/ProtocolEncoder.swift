@@ -30,6 +30,9 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     private var connected: Bool = true
     private var writeBuffer = Data()
     private var bufferSize: Int = 0
+    /// Byte offset immediately after the last lifecycle frame that must not be evicted.
+    /// The offset shrinks as the buffer drains and becomes nil after that frame is written.
+    private var protectedWriteEnd: Int?
     private var drainRetryScheduled: Bool = false
     private var droppedCount: UInt64 = 0
 
@@ -51,6 +54,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
             self.connected = false
             self.writeBuffer.removeAll(keepingCapacity: false)
             self.bufferSize = 0
+            self.protectedWriteEnd = nil
         }
     }
 
@@ -212,6 +216,25 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeU32(&buf, 9, lastAppliedFrameSeq)
         writeU16(&buf, 13, windowId)
         writeFrame(buf)
+    }
+
+    /// Begin one correlated native application-quit attempt on the ordered input channel.
+    @discardableResult
+    func sendApplicationQuitRequest(requestID: UInt32) -> Bool {
+        var buf = Data(count: 5)
+        buf[0] = OP_APPLICATION_QUIT_REQUEST
+        writeU32(&buf, 1, requestID)
+        return writeCriticalFrame(buf)
+    }
+
+    /// Send Save, Discard, or Cancel for the matching native application-quit attempt.
+    @discardableResult
+    func sendApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool {
+        var buf = Data(count: 6)
+        buf[0] = OP_APPLICATION_QUIT_DECISION
+        writeU32(&buf, 1, requestID)
+        buf[5] = decision
+        return writeCriticalFrame(buf)
     }
 
     /// Send a mouse event with click count.
@@ -1136,6 +1159,28 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         }
     }
 
+    /// Enqueues a lifecycle frame only when this exact transport is still writable.
+    ///
+    /// The file descriptor is nonblocking, so this ordered queue hop cannot wait on pipe backpressure.
+    /// A false result lets AppKit cancel termination immediately instead of approving a quit that the BEAM never received.
+    private func writeCriticalFrame(_ payload: Data) -> Bool {
+        let enqueue = { [self] () -> Bool in
+            guard connected else { return false }
+            let frame = makeFrame(payload)
+            writeBuffer.append(frame)
+            bufferSize += frame.count
+            protectedWriteEnd = writeBuffer.count
+            dropOldestFramesIfNeeded()
+            drainBuffer()
+            return connected
+        }
+
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return enqueue()
+        }
+        return writeQueue.sync(execute: enqueue)
+    }
+
     private func makeFrame(_ payload: Data) -> Data {
         var frame = Data(count: 4 + payload.count)
         let len = UInt32(payload.count)
@@ -1159,6 +1204,9 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
             if written > 0 {
                 writeBuffer.removeSubrange(0..<written)
                 bufferSize -= written
+                if let end = protectedWriteEnd {
+                    protectedWriteEnd = end > written ? end - written : nil
+                }
                 continue
             }
 
@@ -1179,6 +1227,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
             connected = false
             writeBuffer.removeAll(keepingCapacity: false)
             bufferSize = 0
+            protectedWriteEnd = nil
             return
         }
     }
@@ -1195,6 +1244,11 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     private func dropOldestFramesIfNeeded() {
         guard bufferSize > maxBufferSize else { return }
+
+        if let protectedWriteEnd {
+            dropFramesAfterProtectedWrite(end: protectedWriteEnd)
+            return
+        }
 
         var droppedThisPass: UInt64 = 0
         while bufferSize > maxBufferSize, writeBuffer.count >= 4 {
@@ -1220,6 +1274,31 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         guard droppedThisPass > 0 else { return }
         droppedCount += droppedThisPass
         PortLogger.warn("GUI output buffer exceeded \(maxBufferSize) bytes; dropped \(droppedThisPass) oldest messages (total \(droppedCount))")
+    }
+
+    /// Drops only complete ordinary frames queued after a lifecycle frame.
+    ///
+    /// The protected prefix can include a partially written ordinary frame plus the lifecycle frame.
+    /// Removing any byte from that prefix would corrupt framing or lose the quit handshake, so temporary overflow is allowed until it drains.
+    private func dropFramesAfterProtectedWrite(end protectedEnd: Int) {
+        var droppedThisPass: UInt64 = 0
+
+        while bufferSize > maxBufferSize, writeBuffer.count - protectedEnd >= 4 {
+            let payloadLength = Int(writeBuffer[protectedEnd]) << 24
+                | Int(writeBuffer[protectedEnd + 1]) << 16
+                | Int(writeBuffer[protectedEnd + 2]) << 8
+                | Int(writeBuffer[protectedEnd + 3])
+            let frameLength = 4 + payloadLength
+            guard frameLength > 4, protectedEnd + frameLength <= writeBuffer.count else { break }
+
+            writeBuffer.removeSubrange(protectedEnd..<(protectedEnd + frameLength))
+            bufferSize -= frameLength
+            droppedThisPass += 1
+        }
+
+        guard droppedThisPass > 0 else { return }
+        droppedCount += droppedThisPass
+        PortLogger.warn("GUI output buffer exceeded \(maxBufferSize) bytes; dropped \(droppedThisPass) messages after a lifecycle frame (total \(droppedCount))")
     }
 
     private func setNonBlocking(fd: Int32) {

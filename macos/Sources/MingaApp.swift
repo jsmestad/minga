@@ -213,6 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var protocolReader: ProtocolReader?
     private var encoder: ProtocolEncoder?
     private var dispatcher: CommandDispatcher?
+    private var applicationQuitCoordinator: ApplicationQuitCoordinator?
+    private var applicationQuitAlert: NSAlert?
+    private var coreConnectionIsLive = true
     private var recoveryManager: RecoveryManager?
     private var fontFace: FontFace?
     private var fontManager: FontManager?
@@ -275,13 +278,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.beamManager = manager
 
             manager.onCrash = { [weak self] in
+                let disposition = self?.applicationQuitCoordinator?.coreDidExit()
                 // The editor core died and automatic restart gave up. Present the
                 // recovery surface instead of terminating, and keep the app
                 // responsive (clickable/quittable) while the user decides (#2698).
-                self?.presentEditorCoreStoppedRecovery()
+                if disposition != .approvedTermination {
+                    self?.presentEditorCoreStoppedRecovery()
+                }
             }
-            manager.onNormalExit = {
-                NSApp.terminate(nil)
+            manager.onNormalExit = { [weak self] in
+                let disposition = self?.applicationQuitCoordinator?.coreDidExit() ?? .noPendingQuit
+                if disposition == .noPendingQuit {
+                    NSApp.terminate(nil)
+                }
             }
             manager.onBEAMReady = { [weak self] newReadHandle, newWriteHandle in
                 self?.reconnectProtocol(readHandle: newReadHandle, writeHandle: newWriteHandle)
@@ -323,6 +332,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
         self.dispatcher = disp
+
+        let quitCoordinator = ApplicationQuitCoordinator(
+            sendRequest: { [weak self] requestID in
+                self?.encoder?.sendApplicationQuitRequest(requestID: requestID) ?? false
+            },
+            sendDecision: { [weak self] requestID, decision in
+                self?.encoder?.sendApplicationQuitDecision(
+                    requestID: requestID,
+                    decision: decision.rawValue
+                ) ?? false
+            },
+            presentDecision: { [weak self] dirtyCount, completion in
+                self?.presentApplicationQuitDecision(dirtyCount: dirtyCount, completion: completion)
+            },
+            dismissDecision: { [weak self] in
+                self?.dismissApplicationQuitDecision()
+            },
+            replyToAppKit: { approved in
+                NSApp.reply(toApplicationShouldTerminate: approved)
+            },
+            presentFailure: { [weak self] message in
+                self?.presentApplicationQuitFailure(message)
+            },
+            restoreFocus: { [weak self] in
+                self?.restoreEditorFocus()
+            }
+        )
+        self.applicationQuitCoordinator = quitCoordinator
+        disp.onApplicationQuitResponse = { [weak quitCoordinator] response in
+            quitCoordinator?.receive(response)
+        }
 
         // Wire the latency HUD (ticket #2215) to the recorder. The snapshot is
         // computed outside the stamp/resolve critical sections, so the HUD's
@@ -488,10 +528,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 disconnectEncoder.disconnect()
 
                 DispatchQueue.main.async {
-                    // In bundle mode, BEAMProcessManager handles restart/error.
-                    // In dev mode, our parent (BEAM) exited; shut down.
-                    if self?.beamManager == nil {
-                        NSApp.terminate(nil)
+                    guard let self else { return }
+                    self.coreConnectionIsLive = false
+                    if let manager = self.beamManager {
+                        if manager.hasLiveProcess {
+                            self.applicationQuitCoordinator?.transportDidDisconnect()
+                        }
+                    } else {
+                        // In development mode, protocol EOF means the parent BEAM exited.
+                        let disposition = self.applicationQuitCoordinator?.coreDidExit() ?? .noPendingQuit
+                        if disposition == .noPendingQuit { NSApp.terminate(nil) }
                     }
                 }
             },
@@ -524,31 +570,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // In dev mode (no beamManager), terminate immediately.
-        guard let manager = beamManager, !manager.isShuttingDown else {
-            return .terminateNow
+        let coreIsLive = beamManager.map { !$0.isShuttingDown && $0.hasLiveProcess }
+            ?? coreConnectionIsLive
+        return ApplicationTerminationPolicy.reply(
+            coreIsLive: coreIsLive,
+            coordinator: applicationQuitCoordinator
+        )
+    }
+
+    private func presentApplicationQuitDecision(
+        dirtyCount: UInt16,
+        completion: @escaping (ApplicationQuitDecision) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = dirtyCount == 1
+            ? "Save changes before quitting Minga?"
+            : "Save changes in \(dirtyCount) buffers before quitting Minga?"
+        alert.informativeText = "The editor core will save every modified buffer before Minga quits."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Discard")
+        let cancelButton = alert.addButton(withTitle: "Cancel")
+        cancelButton.keyEquivalent = "\u{1b}"
+        applicationQuitAlert = alert
+
+        let resolve: (NSApplication.ModalResponse) -> Void = { [weak self, weak alert] response in
+            if let self, let alert, self.applicationQuitAlert === alert {
+                self.applicationQuitAlert = nil
+            }
+            switch response {
+            case .alertFirstButtonReturn: completion(.save)
+            case .alertSecondButtonReturn: completion(.discard)
+            default: completion(.cancel)
+            }
         }
 
-        // If the BEAM is already gone (it exited on its own, e.g. a background
-        // death or the user quit the editor core), there is nothing to shut down.
-        // Returning .terminateLater here without a live process to wait on would
-        // wedge the main runloop forever, because shutdownGracefully bails early
-        // and never calls reply(toApplicationShouldTerminate:) (#2698 defect B).
-        guard manager.hasLiveProcess else {
-            return .terminateNow
+        if let window = editorNSView?.window {
+            alert.beginSheetModal(for: window, completionHandler: resolve)
+        } else {
+            resolve(alert.runModal())
         }
+    }
 
-        // In bundle mode, wait for the BEAM to exit cleanly before
-        // allowing the app to terminate. This prevents orphaned BEAM
-        // processes running in the background after the Dock icon disappears.
-        manager.onNormalExit = {
-            NSApp.reply(toApplicationShouldTerminate: true)
+    private func dismissApplicationQuitDecision() {
+        guard let alert = applicationQuitAlert else { return }
+        applicationQuitAlert = nil
+
+        if let sheetParent = alert.window.sheetParent {
+            sheetParent.endSheet(alert.window, returnCode: .abort)
+        } else {
+            NSApp.abortModal()
+            alert.window.orderOut(nil)
         }
-        manager.onCrash = {
-            NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
+    private func presentApplicationQuitFailure(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Minga Did Not Quit"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+
+        if let window = editorNSView?.window {
+            alert.beginSheetModal(for: window) { _ in }
+        } else {
+            alert.runModal()
         }
-        manager.shutdownGracefully(timeout: 3.0)
-        return .terminateLater
+    }
+
+    private func restoreEditorFocus() {
+        guard let editorNSView, let window = editorNSView.window else { return }
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(editorNSView)
     }
 
     /// Presents the recovery surface after the editor core exited and automatic
@@ -710,6 +803,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.encoder = enc
         appState.gui.settingsState.encoder = enc
         PortLogger.setup(encoder: enc)
+        applicationQuitCoordinator?.replaceConnection()
+        coreConnectionIsLive = true
 
         // Capture for the background-thread disconnect callback.
         let disconnectEncoder = enc
@@ -734,8 +829,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 disconnectEncoder.disconnect()
 
                 DispatchQueue.main.async {
-                    if self?.beamManager == nil {
-                        NSApp.terminate(nil)
+                    guard let self else { return }
+                    self.coreConnectionIsLive = false
+                    if let manager = self.beamManager {
+                        if manager.hasLiveProcess {
+                            self.applicationQuitCoordinator?.transportDidDisconnect()
+                        }
+                    } else {
+                        let disposition = self.applicationQuitCoordinator?.coreDidExit() ?? .noPendingQuit
+                        if disposition == .noPendingQuit { NSApp.terminate(nil) }
                     }
                 }
             },

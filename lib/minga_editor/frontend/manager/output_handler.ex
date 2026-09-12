@@ -25,6 +25,18 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     end
   end
 
+  @doc "Attempts one lifecycle command without adding it to retained output."
+  @spec admit_lifecycle_command(State.t(), binary()) :: {Manager.lifecycle_admission(), State.t()}
+  def admit_lifecycle_command(%{port: nil} = state, _command), do: {:disconnected, state}
+
+  def admit_lifecycle_command(state, command) when is_binary(command) do
+    if output_pending?(state.output_pressure) do
+      {:unwritable, state}
+    else
+      {write_batch(state, command), state}
+    end
+  end
+
   @doc "Retries the retained current frame for the matching timer token."
   @spec retry(State.t(), reference()) :: State.t()
   def retry(state, token) do

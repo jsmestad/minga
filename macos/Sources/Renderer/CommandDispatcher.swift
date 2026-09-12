@@ -66,6 +66,7 @@ private enum CommitEffect {
     case agentChatVisibilityChanged(Bool)
     case clipboardWrite(target: UInt8, text: String)
     case extensionRuntime(FrontendExtensionRuntimeMessage)
+    case applicationQuitResponse(ApplicationQuitResponse)
     case infoLog(String)
     case warningLog(String)
     case errorLog(String)
@@ -95,6 +96,9 @@ final class CommandDispatcher {
     /// `ProtocolEncoder.sendRequestKeyframe(...)` so the BEAM re-sends the next
     /// frame as a full keyframe.
     var onRequestKeyframe: ((UInt32) -> Void)?
+
+    /// Delivers the BEAM-owned result for one correlated AppKit quit request.
+    var onApplicationQuitResponse: ((ApplicationQuitResponse) -> Void)?
 
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
@@ -354,6 +358,9 @@ final class CommandDispatcher {
             } else {
                 applyLocal(command)
             }
+
+        case .applicationQuitResponse:
+            applyLocal(command)
 
         default:
             if openFrameSeq != nil {
@@ -841,6 +848,9 @@ final class CommandDispatcher {
             guiState.protocolErrorState.present(message: message)
             effects.append(.errorLog("Protocol error from BEAM: \(message)"))
 
+        case .applicationQuitResponse(let response):
+            effects.append(.applicationQuitResponse(response))
+
         case .setFont(let family, let size, let ligatures, let weight):
             effects.append(.fontChanged(
                 family: family, size: size, ligatures: ligatures, weight: weight
@@ -1266,6 +1276,8 @@ final class CommandDispatcher {
                 handleClipboardWrite(target: target, text: text)
             case .extensionRuntime(let message):
                 guiState.frontendExtensions.dispatch(message)
+            case .applicationQuitResponse(let response):
+                onApplicationQuitResponse?(response)
             case .infoLog(let message):
                 PortLogger.info(message)
             case .warningLog(let message):

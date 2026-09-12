@@ -58,6 +58,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       frame_applied: 0x0A,
       frame_rejected: 0x0B,
       window_ref_miss: 0x0C,
+      application_quit_request: 0x0D,
+      application_quit_decision: 0x0E,
       log_message: 0x60
     )
   end
@@ -73,7 +75,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       set_title: 0x16,
       set_window_bg: 0x17,
       protocol_error: 0x18,
-      set_link_cursor: 0x19
+      set_link_cursor: 0x19,
+      application_quit_response: 0x1A
     )
   end
 

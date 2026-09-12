@@ -63,6 +63,45 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
+  describe "send_lifecycle_command/2" do
+    test "temporary backpressure rejects without retaining and permits correlated retry" do
+      name = unique_name()
+      parent = self()
+      writable = start_supervised!({Agent, fn -> false end}, id: make_ref())
+
+      commander = fn _port, batch, [:nosuspend] ->
+        admitted? = Agent.get(writable, & &1)
+        send(parent, {:lifecycle_attempt, admitted?, batch})
+        admitted?
+      end
+
+      {_pid, _fake_port} = start_connected(name, port_commander: commander)
+      response = Protocol.encode_application_quit_response(41, :needs_decision, 2, "", "")
+
+      assert :unwritable = Manager.send_lifecycle_command(name, response)
+      assert_receive {:lifecycle_attempt, false, ^response}
+      assert Manager.output_pressure(name).control_batches == 0
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+
+      Agent.update(writable, fn _ -> true end)
+      assert :accepted = Manager.send_lifecycle_command(name, response)
+      assert_receive {:lifecycle_attempt, true, ^response}
+    end
+
+    test "disconnected transport rejects without retaining lifecycle output" do
+      name = unique_name()
+      {pid, fake_port} = start_connected(name)
+      response = Protocol.encode_application_quit_response(42, :proceeding, 0, "", "")
+
+      send(pid, {fake_port, :eof})
+      _ = :sys.get_state(pid)
+
+      assert :disconnected = Manager.send_lifecycle_command(name, response)
+      assert Manager.output_pressure(name).control_batches == 0
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+    end
+  end
+
   describe "subscription behavior" do
     test "subscribers receive decoded events" do
       name = unique_name()

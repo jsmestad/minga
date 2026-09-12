@@ -38,6 +38,8 @@ pub const OP_SCROLL_BATCH = opcodes.OP_SCROLL_BATCH;
 pub const OP_FRAME_APPLIED = opcodes.OP_FRAME_APPLIED;
 pub const OP_FRAME_REJECTED = opcodes.OP_FRAME_REJECTED;
 pub const OP_WINDOW_REF_MISS = opcodes.OP_WINDOW_REF_MISS;
+pub const OP_APPLICATION_QUIT_REQUEST = opcodes.OP_APPLICATION_QUIT_REQUEST;
+pub const OP_APPLICATION_QUIT_DECISION = opcodes.OP_APPLICATION_QUIT_DECISION;
 pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
 
 // Render
@@ -47,6 +49,7 @@ pub const OP_SET_CURSOR_SHAPE = opcodes.OP_SET_CURSOR_SHAPE;
 pub const OP_SET_TITLE = opcodes.OP_SET_TITLE;
 pub const OP_SET_WINDOW_BG = opcodes.OP_SET_WINDOW_BG;
 pub const OP_SET_LINK_CURSOR = opcodes.OP_SET_LINK_CURSOR;
+pub const OP_APPLICATION_QUIT_RESPONSE = opcodes.OP_APPLICATION_QUIT_RESPONSE;
 pub const OP_PROTOCOL_ERROR = opcodes.OP_PROTOCOL_ERROR;
 
 // Config
@@ -1259,7 +1262,6 @@ fn guiThemeSize(payload: []const u8) usize {
     if (payload.len < 2) return payload.len;
     return @min(2 + @as(usize, payload[1]) * 4, payload.len);
 }
-
 
 fn guiAgentContextSize(payload: []const u8) usize {
     if (payload.len < 4) return payload.len;
@@ -2844,7 +2846,6 @@ test "commandSize: gui_search_state len16 packet" {
     const data = [_]u8{ OP_GUI_SEARCH_STATE, 0, 6, 1, 0, 5, 0, 3, 0x0F, OP_COMMIT_FRAME };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
-
 
 test "commandSize: gui_notifications len16 packet" {
     const data = [_]u8{ OP_GUI_NOTIFICATIONS, 0, 3, 1, 0, 0, OP_COMMIT_FRAME };

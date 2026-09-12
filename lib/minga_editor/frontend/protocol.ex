@@ -48,10 +48,13 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_frame_applied Opcodes.frame_applied()
   @op_frame_rejected Opcodes.frame_rejected()
   @op_window_ref_miss Opcodes.window_ref_miss()
+  @op_application_quit_request Opcodes.application_quit_request()
+  @op_application_quit_decision Opcodes.application_quit_decision()
   @op_scroll_batch Opcodes.scroll_batch()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_link_cursor Opcodes.set_link_cursor()
+  @op_application_quit_response Opcodes.application_quit_response()
   @op_set_font Opcodes.set_font()
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
@@ -134,6 +137,12 @@ defmodule MingaEditor.Frontend.Protocol do
   """
   @type input_seq :: non_neg_integer()
 
+  @typedoc "A decision from the native application termination prompt."
+  @type application_quit_decision :: :save | :discard | :cancel
+
+  @typedoc "A correlated result in the native application termination handshake."
+  @type application_quit_outcome :: :needs_decision | :proceeding | :cancelled | :save_failed
+
   @typedoc "Stable frontend frame-transaction rejection reason."
   @type frame_rejection_reason ::
           :truncation
@@ -205,6 +214,9 @@ defmodule MingaEditor.Frontend.Protocol do
              last_applied_frame_seq :: non_neg_integer(), window_id :: non_neg_integer()}
           | {:scroll_batch, window_id :: non_neg_integer(), delta_lines :: integer(),
              direction :: :down | :up}
+          | {:application_quit_request, request_id :: non_neg_integer()}
+          | {:application_quit_decision, request_id :: non_neg_integer(),
+             application_quit_decision()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -323,6 +335,33 @@ defmodule MingaEditor.Frontend.Protocol do
   @spec encode_set_link_cursor(boolean()) :: binary()
   def encode_set_link_cursor(active) when is_boolean(active) do
     <<@op_set_link_cursor, if(active, do: 1, else: 0)::8>>
+  end
+
+  @doc "Encodes one correlated native application-quit lifecycle response."
+  @spec encode_application_quit_response(
+          non_neg_integer(),
+          application_quit_outcome(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: binary()
+  def encode_application_quit_response(
+        request_id,
+        outcome,
+        dirty_count,
+        buffer_name \\ "",
+        detail \\ ""
+      )
+      when request_id in 0..0xFFFFFFFF and dirty_count >= 0 and is_binary(buffer_name) and
+             is_binary(detail) do
+    buffer_name = truncate_utf8_bytes(buffer_name, 32_000)
+    detail = truncate_utf8_bytes(detail, 32_000)
+
+    payload =
+      <<request_id::32, encode_application_quit_outcome(outcome)::8, min(dirty_count, 0xFFFF)::16,
+        byte_size(buffer_name)::16, buffer_name::binary, byte_size(detail)::16, detail::binary>>
+
+    <<@op_application_quit_response, byte_size(payload)::16, payload::binary>>
   end
 
   @doc """
@@ -556,6 +595,17 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok, {:window_ref_miss, generation, frame_seq, last_applied, window_id}}
   end
 
+  def decode_event(<<@op_application_quit_request, request_id::32>>) do
+    {:ok, {:application_quit_request, request_id}}
+  end
+
+  def decode_event(<<@op_application_quit_decision, request_id::32, decision::8>>) do
+    case decode_application_quit_decision(decision) do
+      {:ok, decoded} -> {:ok, {:application_quit_decision, request_id, decoded}}
+      :error -> {:error, :malformed}
+    end
+  end
+
   def decode_event(<<@op_scroll_batch, window_id::16, delta_lines::16-signed, direction::8>>) do
     dir = if direction == 0, do: :down, else: :up
     {:ok, {:scroll_batch, window_id, delta_lines, dir}}
@@ -591,6 +641,8 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_frame_applied,
              @op_frame_rejected,
              @op_window_ref_miss,
+             @op_application_quit_request,
+             @op_application_quit_decision,
              @op_scroll_batch
            ] do
     {:error, :malformed}
@@ -602,6 +654,35 @@ defmodule MingaEditor.Frontend.Protocol do
 
   def decode_event(<<>>) do
     {:error, :malformed}
+  end
+
+  @spec encode_application_quit_outcome(application_quit_outcome()) :: 0..3
+  defp encode_application_quit_outcome(:needs_decision), do: 0
+  defp encode_application_quit_outcome(:proceeding), do: 1
+  defp encode_application_quit_outcome(:cancelled), do: 2
+  defp encode_application_quit_outcome(:save_failed), do: 3
+
+  @spec decode_application_quit_decision(non_neg_integer()) ::
+          {:ok, application_quit_decision()} | :error
+  defp decode_application_quit_decision(0), do: {:ok, :save}
+  defp decode_application_quit_decision(1), do: {:ok, :discard}
+  defp decode_application_quit_decision(2), do: {:ok, :cancel}
+  defp decode_application_quit_decision(_decision), do: :error
+
+  @spec truncate_utf8_bytes(String.t(), non_neg_integer()) :: String.t()
+  defp truncate_utf8_bytes(value, maximum) when byte_size(value) <= maximum, do: value
+
+  defp truncate_utf8_bytes(value, maximum) do
+    value
+    |> binary_part(0, maximum)
+    |> trim_invalid_utf8_suffix()
+  end
+
+  @spec trim_invalid_utf8_suffix(binary()) :: String.t()
+  defp trim_invalid_utf8_suffix(value) do
+    if String.valid?(value),
+      do: value,
+      else: value |> binary_part(0, byte_size(value) - 1) |> trim_invalid_utf8_suffix()
   end
 
   @type conceal_span :: Minga.Parser.Protocol.conceal_span()

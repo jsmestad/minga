@@ -10,6 +10,22 @@
 import Foundation
 import MingaProtocol
 
+/// A correlated response from the BEAM-owned native application-quit policy.
+struct ApplicationQuitResponse: Sendable, Equatable {
+    enum Outcome: UInt8, Sendable {
+        case needsDecision = 0
+        case proceeding = 1
+        case cancelled = 2
+        case saveFailed = 3
+    }
+
+    let requestID: UInt32
+    let outcome: Outcome
+    let dirtyCount: UInt16
+    let bufferName: String
+    let detail: String
+}
+
 // `StatusBarUpdate` and its nested types moved to StatusBarUpdate.swift in the
 // MingaProtocol framework. The decoder still constructs it below.
 
@@ -43,6 +59,7 @@ enum RenderCommand: Sendable {
     /// blocking error instead of decoding a stream it cannot parse (ticket
     /// #2237). Wire format: opcode(1) + len(u16) + UTF-8 message.
     case protocolError(message: String)
+    case applicationQuitResponse(ApplicationQuitResponse)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case setFontFallback(families: [String])
     case registerFont(id: UInt8, family: String)
@@ -357,6 +374,46 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
     let rest = offset + 1
 
     switch opcode {
+    case OP_APPLICATION_QUIT_RESPONSE:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLength = Int(try readU16(data, rest))
+        let payloadStart = rest + 2
+        let payloadEnd = payloadStart + payloadLength
+        guard data.count >= payloadEnd, payloadLength >= 11 else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        let requestID = try readU32(data, payloadStart)
+        guard let outcome = ApplicationQuitResponse.Outcome(rawValue: data[payloadStart + 4]) else {
+            throw ProtocolDecodeError.malformed
+        }
+        let dirtyCount = try readU16(data, payloadStart + 5)
+        let nameLength = Int(try readU16(data, payloadStart + 7))
+        let nameStart = payloadStart + 9
+        let nameEnd = nameStart + nameLength
+        guard nameEnd + 2 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+        let detailLength = Int(try readU16(data, nameEnd))
+        let detailStart = nameEnd + 2
+        let detailEnd = detailStart + detailLength
+        guard detailEnd == payloadEnd else { throw ProtocolDecodeError.malformed }
+        guard let bufferName = try decodeUTF8(data[nameStart..<nameEnd]),
+              let detail = try decodeUTF8(data[detailStart..<detailEnd]) else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        return (
+            .applicationQuitResponse(
+                ApplicationQuitResponse(
+                    requestID: requestID,
+                    outcome: outcome,
+                    dirtyCount: dirtyCount,
+                    bufferName: bufferName,
+                    detail: detail
+                )
+            ),
+            3 + payloadLength
+        )
+
     case 0x20: // set_language: buffer_id:4, name_len:2, name
         guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
         let nameLen = Int(try readU16(data, rest + 4))

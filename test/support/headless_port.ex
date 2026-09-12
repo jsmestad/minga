@@ -144,6 +144,12 @@ defmodule Minga.Test.HeadlessPort do
     :accepted
   end
 
+  @doc "Admits one lifecycle command for editor integration tests."
+  @spec send_lifecycle_command(GenServer.server(), binary()) :: :accepted
+  def send_lifecycle_command(server, command) when is_binary(command) do
+    GenServer.call(server, {:send_lifecycle_command, command})
+  end
+
   @doc "Submits commands through the production begin/commit transaction gate."
   @spec send_transaction(
           GenServer.server(),
@@ -447,6 +453,10 @@ defmodule Minga.Test.HeadlessPort do
 
   def handle_call({:send_commands, commands}, _from, state) do
     {:reply, :accepted, apply_commands(state, commands)}
+  end
+
+  def handle_call({:send_lifecycle_command, command}, _from, state) when is_binary(command) do
+    {:reply, :accepted, state}
   end
 
   def handle_call({:send_render_commands, commands, sent_at}, _from, state) do

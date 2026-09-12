@@ -28,6 +28,12 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     func sendPasteEvent(text: String)
     func sendLog(level: UInt8, message: String)
+    /// Begin one correlated native application-quit attempt.
+    @discardableResult
+    func sendApplicationQuitRequest(requestID: UInt32) -> Bool
+    /// Resolve the matching native application-quit attempt: 0 Save, 1 Discard, 2 Cancel.
+    @discardableResult
+    func sendApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool
 
     // GUI actions (semantic commands from SwiftUI chrome)
     func sendSelectTab(id: UInt32)
@@ -171,6 +177,8 @@ public extension InputEncoder {
     func sendFrameApplied(generation: UInt32, frameSeq: UInt32) {}
     func sendFrameRejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: UInt8) {}
     func sendWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16) {}
+    func sendApplicationQuitRequest(requestID: UInt32) -> Bool { false }
+    func sendApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool { false }
 
     /// Default no-op so existing test spies do not need to implement native picker editing.
     func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {}
