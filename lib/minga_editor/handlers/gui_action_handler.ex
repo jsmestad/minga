@@ -843,30 +843,33 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
          {:search_replace, replacement}
        )
        when is_pid(buf) and is_binary(pattern) and pattern != "" do
-    content = Buffer.content(buf)
+    {content, version} = Buffer.content_with_version(buf)
     cursor = Buffer.cursor(buf)
     search_opts = gui_search_opts(state)
 
-    case Minga.Editing.search_next(content, pattern, cursor, :forward, search_opts) do
+    case Minga.Editing.search_match_at(content, pattern, cursor, search_opts) do
       nil ->
-        NoticeWorkflow.publish(state, "No more matches")
+        stale_search_match(state)
 
-      {line, col} ->
-        Buffer.move_to(buf, {line, col})
-        match_len = compute_match_len(content, pattern, line, col, search_opts)
-        new_content = replace_single_match(content, line, col, match_len, replacement)
-        Buffer.replace_content(buf, new_content)
+      %{line: line, col: col, length: length} ->
+        case Buffer.replace_byte_range_if_version(
+               buf,
+               version,
+               {line, col},
+               length,
+               replacement
+             ) do
+          {:ok, _new_version} ->
+            advance_after_search_replace(state, buf, pattern, search_opts, length)
 
-        new_cursor = Buffer.cursor(buf)
-        new_content2 = Buffer.content(buf)
+          {:error, :read_only} ->
+            NoticeWorkflow.publish(state, "Buffer is read-only")
 
-        case Minga.Editing.search_next(new_content2, pattern, new_cursor, :forward, search_opts) do
-          nil ->
-            state
+          {:error, :stale} ->
+            stale_search_match(state)
 
-          {nl, nc} ->
-            Buffer.move_to(buf, {nl, nc})
-            state
+          {:error, :invalid_range} ->
+            stale_search_match(state)
         end
     end
   end
@@ -1932,28 +1935,49 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     )
   end
 
-  @spec replace_single_match(
+  @spec advance_after_search_replace(
+          state(),
+          pid(),
           String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) :: String.t()
-  defp replace_single_match(content, match_line, match_col, match_len, replacement) do
-    lines = :binary.split(content, "\n", [:global])
+          Minga.Editing.Search.search_opts(),
+          non_neg_integer()
+        ) :: state()
+  defp advance_after_search_replace(state, buf, pattern, search_opts, 0) do
+    {content, cursor} = Buffer.content_and_cursor(buf)
+    move_to_next_search_match(state, buf, content, pattern, cursor, search_opts)
+  end
 
-    List.update_at(lines, match_line, fn line ->
-      line_len = byte_size(line)
+  defp advance_after_search_replace(state, buf, pattern, search_opts, _consumed_length) do
+    {content, cursor} = Buffer.content_and_cursor(buf)
 
-      if match_col + match_len <= line_len do
-        before = binary_part(line, 0, match_col)
-        after_match = binary_part(line, match_col + match_len, line_len - match_col - match_len)
-        before <> replacement <> after_match
-      else
-        line
-      end
-    end)
-    |> Enum.join("\n")
+    case Minga.Editing.search_match_at(content, pattern, cursor, search_opts) do
+      nil -> move_to_next_search_match(state, buf, content, pattern, cursor, search_opts)
+      _adjacent_match -> state
+    end
+  end
+
+  @spec move_to_next_search_match(
+          state(),
+          pid(),
+          String.t(),
+          String.t(),
+          Minga.Editing.Search.position(),
+          Minga.Editing.Search.search_opts()
+        ) :: state()
+  defp move_to_next_search_match(state, buf, content, pattern, cursor, search_opts) do
+    case Minga.Editing.search_next(content, pattern, cursor, :forward, search_opts) do
+      nil ->
+        state
+
+      {line, col} ->
+        Buffer.move_to(buf, {line, col})
+        state
+    end
+  end
+
+  @spec stale_search_match(state()) :: state()
+  defp stale_search_match(state) do
+    NoticeWorkflow.publish(state, "Search match changed; select a match and try again")
   end
 
   @spec gui_search_opts(state()) :: Minga.Editing.Search.search_opts()
@@ -1966,43 +1990,4 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp gui_search_opts(_state), do: []
-
-  @spec compute_match_len(
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Minga.Editing.Search.search_opts()
-        ) :: non_neg_integer()
-  defp compute_match_len(_content, pattern, _match_line, _match_col, []),
-    do: byte_size(pattern)
-
-  defp compute_match_len(content, pattern, match_line, match_col, opts) do
-    use_regex = Keyword.get(opts, :regex, false)
-    case_insensitive = not Keyword.get(opts, :case_sensitive, true)
-    whole_word = Keyword.get(opts, :whole_word, false)
-
-    if use_regex or case_insensitive or whole_word do
-      line = content |> :binary.split("\n", [:global]) |> Enum.at(match_line)
-      searchable = binary_part(line, match_col, byte_size(line) - match_col)
-      regex_match_len(pattern, searchable, use_regex, case_insensitive, whole_word)
-    else
-      byte_size(pattern)
-    end
-  end
-
-  @spec regex_match_len(String.t(), String.t(), boolean(), boolean(), boolean()) ::
-          non_neg_integer()
-  defp regex_match_len(pattern, searchable, use_regex, case_insensitive, whole_word) do
-    regex_source = if use_regex, do: pattern, else: Regex.escape(pattern)
-    regex_source = if whole_word, do: "\\b#{regex_source}\\b", else: regex_source
-    regex_opts = if case_insensitive, do: "i", else: ""
-
-    with {:ok, regex} <- Regex.compile(regex_source, regex_opts),
-         [{0, len}] <- Regex.run(regex, searchable, return: :index, capture: :first) do
-      len
-    else
-      _ -> byte_size(pattern)
-    end
-  end
 end

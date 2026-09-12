@@ -122,6 +122,18 @@ defmodule Minga.Editing.Search do
     find_backward(lines, matcher, cursor, Enum.count(lines))
   end
 
+  @doc "Returns the exact match at `position`, including its byte length, or nil."
+  @spec match_at(String.t(), String.t(), position(), search_opts()) :: match() | nil
+  def match_at(content, pattern, position, opts \\ [])
+  def match_at(_content, "", _position, _opts), do: nil
+
+  def match_at(content, pattern, {line, col}, opts) do
+    content
+    |> :binary.split("\n", [:global])
+    |> Enum.at(line)
+    |> match_at_column(pattern, line, col, opts)
+  end
+
   # ── Find all matches in visible range ────────────────────────────────────
 
   @doc """
@@ -171,6 +183,45 @@ defmodule Minga.Editing.Search do
             Match.new(line_num, abs_pos, match_len) | acc
           ])
       end
+    end
+  end
+
+  @spec match_at_column(
+          String.t() | nil,
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          search_opts()
+        ) ::
+          match() | nil
+  defp match_at_column(nil, _pattern, _line, _col, _opts), do: nil
+
+  defp match_at_column(line_text, pattern, line, col, opts) do
+    matcher = compile_matcher(pattern, opts)
+
+    case match_at_position(line_text, matcher, col) do
+      {^col, length} -> Match.new(line, col, length)
+      nil -> nil
+    end
+  end
+
+  @spec match_at_position(String.t(), matcher(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp match_at_position(line_text, matcher, col) when is_binary(matcher) do
+    matcher_size = byte_size(matcher)
+
+    if col + matcher_size <= byte_size(line_text) and
+         binary_part(line_text, col, matcher_size) == matcher do
+      {col, matcher_size}
+    else
+      nil
+    end
+  end
+
+  defp match_at_position(line_text, %Regex{} = matcher, col) do
+    case Regex.run(matcher, line_text, return: :index, capture: :first, offset: col) do
+      [{^col, length}] -> {col, length}
+      _other -> nil
     end
   end
 

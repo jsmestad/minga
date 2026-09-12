@@ -210,6 +210,16 @@ defmodule Minga.Editing do
   def search_next(readable, pattern, pos, direction, opts \\ []),
     do: Minga.Editing.Search.find_next(readable, pattern, pos, direction, opts)
 
+  @doc "Return the exact search match at a position, including its byte length."
+  @spec search_match_at(
+          String.t(),
+          String.t(),
+          Minga.Editing.Search.position(),
+          Minga.Editing.Search.search_opts()
+        ) :: Minga.Editing.Search.match() | nil
+  def search_match_at(readable, pattern, pos, opts \\ []),
+    do: Minga.Editing.Search.match_at(readable, pattern, pos, opts)
+
   @doc "Find all matches for a pattern within a line range."
   @spec search_all_in_range(
           [String.t()],
