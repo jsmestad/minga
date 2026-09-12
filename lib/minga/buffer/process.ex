@@ -27,6 +27,7 @@ defmodule Minga.Buffer.Process do
     Persistence,
     Position,
     Replace,
+    SaveIntent,
     UndoHistory,
     UndoPatch
   }
@@ -270,6 +271,14 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :force_save, @file_io_call_timeout)
   end
 
+  @doc "Captures the target and overwrite policy for an explicit-path save."
+  @spec prepare_save_as(GenServer.server(), String.t(), boolean()) ::
+          {:ok, SaveIntent.t()} | {:error, term()}
+  def prepare_save_as(server, file_path, overwrite)
+      when is_binary(file_path) and is_boolean(overwrite) do
+    GenServer.call(server, {:prepare_save_as, file_path, overwrite}, @file_io_call_timeout)
+  end
+
   @doc "Reloads the buffer from disk, preserving cursor position (clamped). Clears undo/redo history."
   @spec reload(GenServer.server()) :: :ok | {:error, term()}
   def reload(server) do
@@ -283,14 +292,19 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc "Saves the buffer to a specific file path only when the version matches."
-  @spec save_as_if_version(GenServer.server(), non_neg_integer(), String.t(), keyword()) ::
+  @spec save_as_if_version(
+          GenServer.server(),
+          non_neg_integer(),
+          SaveIntent.t(),
+          keyword()
+        ) ::
           :ok | {:error, term()}
-  def save_as_if_version(server, expected_version, file_path, opts \\ [])
-      when is_integer(expected_version) and expected_version >= 0 and is_binary(file_path) and
+  def save_as_if_version(server, expected_version, %SaveIntent{} = intent, opts \\ [])
+      when is_integer(expected_version) and expected_version >= 0 and
              is_list(opts) do
     GenServer.call(
       server,
-      {:save_as_if_version, expected_version, file_path, opts},
+      {:save_as_if_version, expected_version, intent, opts},
       @file_io_call_timeout
     )
   end
@@ -1235,7 +1249,7 @@ defmodule Minga.Buffer.Process do
         {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
         new_state = %{
-          BufState.load_saved_content(state, state.file_path, {new_mtime, new_size}, text)
+          BufState.accept_saved_content(state, {new_mtime, new_size}, text)
           | document: new_buf,
             filetype: filetype,
             options: reseed_options(state, filetype),
@@ -1251,18 +1265,19 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:save_as, file_path}, _from, state) do
-    save_as_reply(state, file_path)
+  def handle_call({:prepare_save_as, file_path, overwrite}, _from, state) do
+    target = Path.expand(file_path)
+    {:reply, prepare_save_intent(state, target, overwrite), state}
   end
 
-  def handle_call({:save_as_if_version, expected_version, file_path, opts}, _from, state) do
-    if BufState.version(state) == expected_version do
-      case apply_save_transforms(state, opts) do
-        {:ok, state} -> save_as_reply(state, file_path)
-        {:error, reason} -> {:reply, {:error, reason}, state}
-      end
-    else
-      {:reply, {:error, :stale}, state}
+  def handle_call({:save_as, file_path}, _from, state) do
+    save_as_reply(state, SaveIntent.overwrite(file_path, self(), state.file_path))
+  end
+
+  def handle_call({:save_as_if_version, expected_version, intent, opts}, _from, state) do
+    case validate_save_intent(state, intent) do
+      :ok -> save_as_if_current_version(state, expected_version, intent, opts)
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -1842,27 +1857,143 @@ defmodule Minga.Buffer.Process do
     {:reply, state.decorations.version, state}
   end
 
-  defp save_as_reply(state, file_path) do
+  @spec prepare_save_intent(state(), String.t(), boolean()) ::
+          {:ok, SaveIntent.t()} | {:error, term()}
+  defp prepare_save_intent(%{file_path: file_path} = state, target, overwrite)
+       when is_binary(file_path) do
+    if Persistence.same_file?(state, file_path, target) do
+      {:ok, SaveIntent.current_file(target, file_path, overwrite, self())}
+    else
+      prepare_other_save_intent(state, target, overwrite)
+    end
+  end
+
+  defp prepare_save_intent(state, target, overwrite) do
+    prepare_other_save_intent(state, target, overwrite)
+  end
+
+  @spec prepare_other_save_intent(state(), String.t(), boolean()) ::
+          {:ok, SaveIntent.t()} | {:error, term()}
+  defp prepare_other_save_intent(state, target, true) do
+    {:ok, SaveIntent.overwrite(target, self(), state.file_path)}
+  end
+
+  defp prepare_other_save_intent(state, target, false) do
+    case Persistence.file_info(state, target) do
+      {:ok, _stat} -> {:error, :file_exists}
+      {:error, :enoent} -> {:ok, SaveIntent.absent(target, self(), state.file_path)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec save_as_reply(state(), SaveIntent.t()) :: {:reply, term(), state()}
+  defp save_as_reply(state, %SaveIntent{} = intent) do
+    if origin_path_matches?(state, intent.origin_path) do
+      save_as_with_matching_origin(state, intent)
+    else
+      {:reply, {:error, :stale}, state}
+    end
+  end
+
+  @spec save_as_with_matching_origin(state(), SaveIntent.t()) :: {:reply, term(), state()}
+  defp save_as_with_matching_origin(state, %SaveIntent{expectation: :current_file} = intent) do
+    if Persistence.same_file?(state, state.file_path, intent.target) do
+      save_current_intent_reply(state, intent)
+    else
+      {:reply, {:error, :stale}, state}
+    end
+  end
+
+  defp save_as_with_matching_origin(state, %SaveIntent{} = intent) do
     content = Document.content(state.document)
 
-    case Persistence.write_content(state, file_path, content) do
+    case Persistence.write_content(state, intent.target, content, write_policy(intent)) do
       :ok ->
-        {new_mtime, new_size} = Persistence.file_metadata(state, file_path)
+        {new_mtime, new_size} = Persistence.file_metadata(state, intent.target)
         unregister_path(state.file_path)
-        register_path(file_path)
+        register_path(intent.target)
 
         first_line = content |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Language.detect_filetype_from_content(file_path, first_line)
+        filetype = Language.detect_filetype_from_content(intent.target, first_line)
 
-        new_state = BufState.adopt_saved_path(state, file_path, filetype)
+        new_state = BufState.adopt_saved_path(state, intent.target, filetype)
         new_state = %{new_state | options: reseed_options(new_state, filetype)}
         new_state = mark_saved(new_state, {new_mtime, new_size}, content)
-        broadcast_buffer_saved(new_state, file_path)
+        broadcast_buffer_saved(new_state, intent.target)
 
+        {:reply, :ok, new_state}
+
+      {:error, :eexist} ->
+        {:reply, {:error, :file_exists}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec save_current_intent_reply(state(), SaveIntent.t()) :: {:reply, term(), state()}
+  defp save_current_intent_reply(state, %SaveIntent{overwrite: true, target: target}) do
+    content = Document.content(state.document)
+
+    case Persistence.write_content(state, target, content) do
+      :ok ->
+        {new_mtime, new_size} = Persistence.file_metadata(state, target)
+        new_state = mark_saved(state, {new_mtime, new_size}, content)
+        broadcast_buffer_saved(new_state, target)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp save_current_intent_reply(state, %SaveIntent{overwrite: false}) do
+    save_current_reply(state)
+  end
+
+  @spec write_policy(SaveIntent.t()) :: Persistence.write_policy()
+  defp write_policy(%SaveIntent{overwrite: false, expectation: :absent}), do: :exclusive_create
+  defp write_policy(%SaveIntent{overwrite: true, expectation: :any}), do: :replace
+
+  @spec validate_save_intent(state(), SaveIntent.t()) ::
+          :ok | {:error, :invalid_save_intent | :stale}
+  defp validate_save_intent(state, intent) do
+    with :ok <- SaveIntent.validate(intent, self()),
+         true <- origin_path_matches?(state, intent.origin_path),
+         true <- target_matches_expectation?(state, intent) do
+      :ok
+    else
+      {:error, :invalid_save_intent} = error -> error
+      false -> {:error, :stale}
+    end
+  end
+
+  @spec target_matches_expectation?(state(), SaveIntent.t()) :: boolean()
+  defp target_matches_expectation?(state, %SaveIntent{expectation: :current_file, target: target}) do
+    Persistence.same_file?(state, state.file_path, target)
+  end
+
+  defp target_matches_expectation?(_state, %SaveIntent{}), do: true
+
+  @spec origin_path_matches?(state(), SaveIntent.origin_path()) :: boolean()
+  defp origin_path_matches?(%{file_path: nil}, nil), do: true
+  defp origin_path_matches?(%{file_path: nil}, _origin_path), do: false
+  defp origin_path_matches?(%{file_path: _current_path}, nil), do: false
+
+  defp origin_path_matches?(%{file_path: current_path} = state, origin_path) do
+    Persistence.same_file?(state, current_path, origin_path)
+  end
+
+  @spec save_as_if_current_version(state(), non_neg_integer(), SaveIntent.t(), keyword()) ::
+          {:reply, term(), state()}
+  defp save_as_if_current_version(state, expected_version, intent, opts) do
+    if BufState.version(state) == expected_version do
+      case apply_save_transforms(state, opts) do
+        {:ok, state} -> save_as_reply(state, intent)
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
+    else
+      {:reply, {:error, :stale}, state}
     end
   end
 

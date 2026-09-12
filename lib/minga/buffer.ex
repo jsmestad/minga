@@ -14,6 +14,7 @@ defmodule Minga.Buffer do
   alias Minga.Buffer.ChangeLog
   alias Minga.Buffer.Document
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.SaveIntent
 
   @type t :: GenServer.server()
   @type server :: t()
@@ -25,6 +26,7 @@ defmodule Minga.Buffer do
   @type boundary :: BufferProcess.boundary()
   @type replace_edit :: BufferProcess.replace_edit()
   @type replace_result :: BufferProcess.replace_result()
+  @type save_intent :: SaveIntent.t()
 
   # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -307,7 +309,11 @@ defmodule Minga.Buffer do
   @spec save_if_version(t(), non_neg_integer(), keyword()) :: :ok | {:error, term()}
   defdelegate save_if_version(server, expected_version, opts \\ []), to: BufferProcess
 
-  @spec save_as_if_version(t(), non_neg_integer(), String.t(), keyword()) ::
+  @spec prepare_save_as(t(), String.t(), boolean()) ::
+          {:ok, save_intent()} | {:error, term()}
+  defdelegate prepare_save_as(server, target, overwrite), to: BufferProcess
+
+  @spec save_as_if_version(t(), non_neg_integer(), save_intent(), keyword()) ::
           :ok | {:error, term()}
   defdelegate save_as_if_version(server, expected_version, target, opts \\ []), to: BufferProcess
 

@@ -29,6 +29,30 @@ defmodule Minga.Buffer.PersistenceTest do
     assert {_mtime, 5} = Persistence.file_metadata(state, path)
   end
 
+  test "exclusive creation preserves a destination that already exists", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "existing.txt")
+    File.write!(path, <<0, 1, 2, 255>>)
+    state = %BufState{document: Document.new(""), storage: :local}
+
+    assert Persistence.write_content(state, path, "replacement", :exclusive_create) ==
+             {:error, :eexist}
+
+    assert File.read!(path) == <<0, 1, 2, 255>>
+  end
+
+  test "exclusive creation creates a destination exactly once", %{tmp_dir: tmp_dir} do
+    path = Path.join([tmp_dir, "new", "created.txt"])
+    state = %BufState{document: Document.new(""), storage: :local}
+
+    assert :ok = Persistence.write_content(state, path, <<0, 255>>, :exclusive_create)
+    assert File.read!(path) == <<0, 255>>
+
+    assert Persistence.write_content(state, path, "later", :exclusive_create) ==
+             {:error, :eexist}
+
+    assert File.read!(path) == <<0, 255>>
+  end
+
   test "changed_since_saved? ignores metadata drift when saved content still matches", %{
     tmp_dir: tmp_dir
   } do

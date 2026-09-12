@@ -8,6 +8,7 @@ defmodule Minga.Buffer.MtimeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.SaveIntent
 
   @tag :tmp_dir
   test ":w returns :file_changed when file size differs on disk", %{tmp_dir: tmp_dir} do
@@ -137,6 +138,224 @@ defmodule Minga.Buffer.MtimeTest do
     assert BufferProcess.buffer_name(buf) == nil
     assert BufferProcess.display_name(buf) == "parser.ex"
     assert BufferProcess.filetype(buf) == :elixir
+  end
+
+  @tag :tmp_dir
+  test "non-forced save intent for the current path preserves external changes", %{
+    tmp_dir: tmp_dir
+  } do
+    path = Path.join(tmp_dir, "same-path.txt")
+    File.write!(path, "original")
+    buf = start_buffer(file_path: path)
+    BufferProcess.insert_text(buf, "local ")
+    version = BufferProcess.version(buf)
+
+    assert {:ok, intent} =
+             BufferProcess.prepare_save_as(buf, Path.join(tmp_dir, "./same-path.txt"), false)
+
+    File.write!(path, <<0, 1, 2, 255>>)
+
+    assert {:error, :file_changed} =
+             BufferProcess.save_as_if_version(buf, version, intent, [])
+
+    assert File.read!(path) == <<0, 1, 2, 255>>
+    assert BufferProcess.content(buf) == "local original"
+    assert BufferProcess.file_path(buf) == path
+    assert BufferProcess.dirty?(buf)
+  end
+
+  @tag :tmp_dir
+  test "non-forced absent-target intent cannot overwrite a file created before commit", %{
+    tmp_dir: tmp_dir
+  } do
+    target = Path.join(tmp_dir, "appeared.txt")
+    buf = start_buffer(content: "local")
+    BufferProcess.insert_text(buf, " edit")
+    version = BufferProcess.version(buf)
+    assert {:ok, intent} = BufferProcess.prepare_save_as(buf, target, false)
+
+    File.write!(target, <<0, 1, 2, 255>>)
+
+    assert {:error, :file_exists} =
+             BufferProcess.save_as_if_version(buf, version, intent, [])
+
+    assert File.read!(target) == <<0, 1, 2, 255>>
+    assert BufferProcess.file_path(buf) == nil
+    assert BufferProcess.content(buf) == " editlocal"
+    assert BufferProcess.dirty?(buf)
+  end
+
+  @tag :tmp_dir
+  test "forced save intent does not grant overwrite consent to a later save", %{tmp_dir: tmp_dir} do
+    target = Path.join(tmp_dir, "forced-target.txt")
+    File.write!(target, "first external")
+    buf = start_buffer(content: "local")
+    BufferProcess.insert_text(buf, "forced ")
+    version = BufferProcess.version(buf)
+    assert {:ok, intent} = BufferProcess.prepare_save_as(buf, target, true)
+
+    assert :ok = BufferProcess.save_as_if_version(buf, version, intent, [])
+    assert File.read!(target) == "forced local"
+
+    File.write!(target, "second external")
+    BufferProcess.insert_text(buf, "later ")
+
+    assert {:error, :file_changed} = BufferProcess.save(buf)
+    assert File.read!(target) == "second external"
+    assert BufferProcess.dirty?(buf)
+  end
+
+  @tag :tmp_dir
+  test "retargeting a buffer invalidates a captured current-file intent", %{tmp_dir: tmp_dir} do
+    source = Path.join(tmp_dir, "source.txt")
+    redirected = Path.join(tmp_dir, "redirected.txt")
+    File.write!(source, "source")
+    buf = start_buffer(file_path: source)
+    BufferProcess.insert_text(buf, "local ")
+    version = BufferProcess.version(buf)
+    assert {:ok, intent} = BufferProcess.prepare_save_as(buf, source, true)
+    assert :ok = BufferProcess.retarget_path(buf, redirected)
+
+    assert {:error, :stale} = BufferProcess.save_as_if_version(buf, version, intent, [])
+    assert File.read!(source) == "source"
+    refute File.exists?(redirected)
+    assert BufferProcess.dirty?(buf)
+  end
+
+  @tag :tmp_dir
+  test "reloading a buffer invalidates a captured save intent even when the old version was clean",
+       %{
+         tmp_dir: tmp_dir
+       } do
+    path = Path.join(tmp_dir, "reload-intent.txt")
+    File.write!(path, "original")
+    buf = start_buffer(file_path: path)
+    version = BufferProcess.version(buf)
+    assert {:ok, intent} = BufferProcess.prepare_save_as(buf, path, true)
+
+    File.write!(path, "reloaded")
+    assert :ok = BufferProcess.reload(buf)
+
+    assert {:error, :stale} = BufferProcess.save_as_if_version(buf, version, intent, [])
+    assert File.read!(path) == "reloaded"
+    assert BufferProcess.content(buf) == "reloaded"
+    refute BufferProcess.dirty?(buf)
+  end
+
+  @tag :tmp_dir
+  test "save intent cannot be committed by another scratch buffer", %{tmp_dir: tmp_dir} do
+    target = Path.join(tmp_dir, "scratch-origin.txt")
+    origin = start_buffer(content: "origin")
+    other = start_buffer(content: "other  ")
+    assert {:ok, intent} = BufferProcess.prepare_save_as(origin, target, false)
+
+    assert {:error, :invalid_save_intent} =
+             BufferProcess.save_as_if_version(other, BufferProcess.version(other), intent,
+               trim_trailing_whitespace: true
+             )
+
+    refute File.exists?(target)
+    assert BufferProcess.content(other) == "other  "
+    assert BufferProcess.file_path(other) == nil
+  end
+
+  @tag :tmp_dir
+  test "save intent cannot be committed by another buffer sharing the same file path", %{
+    tmp_dir: tmp_dir
+  } do
+    path = Path.join(tmp_dir, "shared-origin.txt")
+    File.write!(path, "disk")
+    origin = start_buffer(file_path: path)
+    other = start_buffer(file_path: path)
+    BufferProcess.insert_text(other, "other ")
+    assert {:ok, intent} = BufferProcess.prepare_save_as(origin, path, true)
+
+    assert {:error, :invalid_save_intent} =
+             BufferProcess.save_as_if_version(other, BufferProcess.version(other), intent, [])
+
+    assert File.read!(path) == "disk"
+    assert BufferProcess.content(other) == "other disk"
+    assert BufferProcess.dirty?(other)
+  end
+
+  @tag :tmp_dir
+  test "inconsistent forged save intent policies are rejected before transforms or writes", %{
+    tmp_dir: tmp_dir
+  } do
+    buffer = start_buffer(content: "local  ")
+
+    forged_policies = [
+      {false, :any},
+      {true, :absent}
+    ]
+
+    Enum.each(forged_policies, fn {overwrite, expectation} ->
+      target = Path.join(tmp_dir, "forged-#{overwrite}-#{expectation}.txt")
+      File.write!(target, <<0, 1, 2, 255>>)
+
+      intent = %SaveIntent{
+        target: target,
+        overwrite: overwrite,
+        expectation: expectation,
+        origin_buffer: buffer,
+        origin_path: nil
+      }
+
+      assert {:error, :invalid_save_intent} =
+               BufferProcess.save_as_if_version(buffer, BufferProcess.version(buffer), intent,
+                 trim_trailing_whitespace: true
+               )
+
+      assert File.read!(target) == <<0, 1, 2, 255>>
+      assert BufferProcess.content(buffer) == "local  "
+      assert BufferProcess.file_path(buffer) == nil
+    end)
+  end
+
+  @tag :tmp_dir
+  test "non-forced save through a symlink alias uses current-file conflict policy", %{
+    tmp_dir: tmp_dir
+  } do
+    path = Path.join(tmp_dir, "canonical.txt")
+    alias_path = Path.join(tmp_dir, "alias.txt")
+    File.write!(path, "original")
+    File.ln_s!(path, alias_path)
+    buffer = start_buffer(file_path: path)
+    BufferProcess.insert_text(buffer, "local ")
+    version = BufferProcess.version(buffer)
+
+    assert {:ok, %SaveIntent{expectation: :current_file} = intent} =
+             BufferProcess.prepare_save_as(buffer, alias_path, false)
+
+    assert :ok = BufferProcess.save_as_if_version(buffer, version, intent, [])
+    assert File.read!(path) == "local original"
+    assert File.read!(alias_path) == "local original"
+    assert BufferProcess.file_path(buffer) == path
+    refute BufferProcess.dirty?(buffer)
+  end
+
+  @tag :tmp_dir
+  test "non-forced save through a symlink alias preserves externally changed current file", %{
+    tmp_dir: tmp_dir
+  } do
+    path = Path.join(tmp_dir, "canonical-conflict.txt")
+    alias_path = Path.join(tmp_dir, "alias-conflict.txt")
+    File.write!(path, "original")
+    File.ln_s!(path, alias_path)
+    buffer = start_buffer(file_path: path)
+    BufferProcess.insert_text(buffer, "local ")
+    version = BufferProcess.version(buffer)
+    assert {:ok, intent} = BufferProcess.prepare_save_as(buffer, alias_path, false)
+    File.write!(path, <<0, 1, 2, 255>>)
+
+    assert {:error, :file_changed} =
+             BufferProcess.save_as_if_version(buffer, version, intent, [])
+
+    assert File.read!(path) == <<0, 1, 2, 255>>
+    assert File.read!(alias_path) == <<0, 1, 2, 255>>
+    assert BufferProcess.content(buffer) == "local original"
+    assert BufferProcess.file_path(buffer) == path
+    assert BufferProcess.dirty?(buffer)
   end
 
   defp start_buffer(opts) do

@@ -189,6 +189,72 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
              "Save skipped: formatter failed"
   end
 
+  test "explicit save preserves a destination created while formatting is pending" do
+    Options.set_for_filetype(:elixir, :formatter, fixture_command("stdout-first", "success"))
+
+    on_exit(fn ->
+      Options.reset()
+      Options.set(:clipboard, :none)
+    end)
+
+    task_supervisor = start_supervised!({Task.Supervisor, []}, id: make_ref())
+
+    scheduler =
+      start_supervised!(
+        {EffectScheduler, task_supervisor: task_supervisor, observer: self()},
+        id: make_ref()
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+
+    state =
+      TestHelpers.base_state(content: "", effect_scheduler: scheduler, rendering: :disabled)
+
+    buffer = state.workspace.buffers.active
+    target = Path.join(System.tmp_dir!(), "#{System.unique_integer([:positive])}-pending-save.ex")
+    on_exit(fn -> File.rm(target) end)
+    assert {:ok, _previous} = Buffer.set_option(buffer, :format_on_save, true)
+    assert :ok = Buffer.insert_text(buffer, "local\n")
+
+    state = BufferManagement.execute(state, {:execute_ex_command, {:save_as, [target]}})
+
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {:completed, _result}} = outcome},
+                   @effect_timeout
+
+    File.write!(target, <<0, 1, 2, 255>>)
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+    assert File.read!(target) == <<0, 1, 2, 255>>
+    assert Buffer.content(buffer) == "formatted:local\n"
+    assert Buffer.file_path(buffer) == nil
+    assert Buffer.dirty?(buffer)
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "File exists: #{Path.basename(target)} (use :w! to override)"
+  end
+
+  test "explicit current-path save preserves an external change while formatting is pending" do
+    {state, scheduler, path} = format_on_save_state("original\n", "stdout-first", "success")
+    buffer = state.workspace.buffers.active
+    assert :ok = Buffer.insert_text(buffer, "local ")
+
+    state = BufferManagement.execute(state, {:execute_ex_command, {:save_as, [path]}})
+
+    assert_receive {:effect_result, ^scheduler, %Outcome{value: {:completed, _result}} = outcome},
+                   @effect_timeout
+
+    File.write!(path, <<0, 1, 2, 255>>)
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+    assert File.read!(path) == <<0, 1, 2, 255>>
+    assert Buffer.content(buffer) == "formatted:local original\n"
+    assert Buffer.file_path(buffer) == path
+    assert Buffer.dirty?(buffer)
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "WARNING: File changed on disk. Use :w! to force save."
+  end
+
   @spec format_on_save_state(String.t(), String.t(), String.t()) ::
           {MingaEditor.State.t(), pid(), String.t()}
   defp format_on_save_state(content, order, outcome) do

@@ -84,9 +84,10 @@ defmodule Minga.Buffer.SaveEventsTest do
     target = Path.join(ctx.tmp_dir, "save-as-if-version-stale.txt")
     buffer = start_scratch(ctx)
     version = BufferProcess.version(buffer)
+    assert {:ok, intent} = BufferProcess.prepare_save_as(buffer, target, false)
 
     assert :ok = BufferProcess.insert_text(buffer, "new ")
-    assert {:error, :stale} = BufferProcess.save_as_if_version(buffer, version, target, [])
+    assert {:error, :stale} = BufferProcess.save_as_if_version(buffer, version, intent, [])
 
     refute File.exists?(target)
     assert BufferProcess.dirty?(buffer)
