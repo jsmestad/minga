@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias Minga.Clipboard
   alias Minga.Editing.Completion
   alias Minga.FileWatcher
@@ -24,6 +25,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.CompletionHandling
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
@@ -552,6 +554,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
+  defp dispatch_action(state, {:execute_command, "undo"}),
+    do: execute_history_command(state, :undo)
+
+  defp dispatch_action(state, {:execute_command, "redo"}),
+    do: execute_history_command(state, :redo)
+
   defp dispatch_action(state, {:execute_command, name_str}) do
     command = String.to_existing_atom(name_str)
 
@@ -918,6 +926,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, action) do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
     state
+  end
+
+  @spec execute_history_command(state(), :undo | :redo) :: state()
+  defp execute_history_command(state, command) do
+    state
+    |> Commands.execute(command)
+    |> normalize_command_result()
+    |> CompletionHandling.dismiss()
+    |> SignatureHelpWorkflow.dismiss()
   end
 
   @spec dispatch_to_active_shell(EditorState.t(), term()) :: EditorState.t()

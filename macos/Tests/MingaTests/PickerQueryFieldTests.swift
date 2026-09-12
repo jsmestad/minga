@@ -69,6 +69,85 @@ struct PickerQueryFieldTests {
         #expect(!NativeTextCommandRouter.route(.copy, to: NSTextField()) { _, _ in true })
     }
 
+    @Test("menu undo and redo use semantic editor commands outside native fields")
+    @MainActor func menuUndoRedoEditorFallback() {
+        let encoder = SpyEncoder()
+        let editorResponder = NSView()
+
+        NativeMenuHistoryRouter.route(.undo, encoder: encoder, responder: editorResponder) { _, _ in
+            Issue.record("The editor surface must not use native text history")
+            return true
+        }
+        NativeMenuHistoryRouter.route(.redo, encoder: encoder, responder: editorResponder) { _, _ in
+            Issue.record("The editor surface must not use native text history")
+            return true
+        }
+
+        #expect(encoder.guiActions == [
+            .executeCommand(name: "undo"),
+            .executeCommand(name: "redo")
+        ])
+        #expect(encoder.keyPressCalls.isEmpty)
+    }
+
+    @Test("menu undo and redo remain native for picker and Settings field editors")
+    @MainActor func menuUndoRedoNativeFieldOwnership() {
+        let encoder = SpyEncoder()
+        let pickerQueryFieldEditor = NSTextView()
+        let settingsSearchFieldEditor = NSTextView()
+
+        for fieldEditor in [pickerQueryFieldEditor, settingsSearchFieldEditor] {
+            var routedSelectors: [String] = []
+
+            NativeMenuHistoryRouter.route(.undo, encoder: encoder, responder: fieldEditor) { selector, target in
+                #expect(target === fieldEditor)
+                routedSelectors.append(NSStringFromSelector(selector))
+                return false
+            }
+            NativeMenuHistoryRouter.route(.redo, encoder: encoder, responder: fieldEditor) { selector, target in
+                #expect(target === fieldEditor)
+                routedSelectors.append(NSStringFromSelector(selector))
+                return false
+            }
+
+            #expect(routedSelectors == ["undo:", "redo:"])
+        }
+
+        #expect(encoder.guiActions.isEmpty)
+        #expect(encoder.keyPressCalls.isEmpty)
+    }
+
+    @Test("disconnected editor fallback is harmless")
+    @MainActor func disconnectedEditorFallback() {
+        NativeMenuHistoryRouter.route(.undo, encoder: nil, responder: nil) { _, _ in
+            Issue.record("No native responder is available")
+            return true
+        }
+        NativeMenuHistoryRouter.route(.redo, encoder: nil, responder: NSView()) { _, _ in
+            Issue.record("The editor surface must not use native text history")
+            return true
+        }
+    }
+
+    @Test("disconnected editor preserves native field history ownership")
+    @MainActor func disconnectedNativeFieldOwnership() {
+        let fieldEditor = NSTextView()
+        var routedSelectors: [String] = []
+
+        NativeMenuHistoryRouter.route(.undo, encoder: nil, responder: fieldEditor) { selector, target in
+            #expect(target === fieldEditor)
+            routedSelectors.append(NSStringFromSelector(selector))
+            return true
+        }
+        NativeMenuHistoryRouter.route(.redo, encoder: nil, responder: fieldEditor) { selector, target in
+            #expect(target === fieldEditor)
+            routedSelectors.append(NSStringFromSelector(selector))
+            return true
+        }
+
+        #expect(routedSelectors == ["undo:", "redo:"])
+    }
+
     @Test("query payloads stay within the complete UTF-8 wire limit")
     func queryWireLimit() {
         #expect(PickerQueryReconciler.queryFitsWire(String(repeating: "a", count: Int(UInt16.max))))
