@@ -47,7 +47,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @type state :: EditorState.t()
   @typep save_result :: {:ok, state()} | {:error, state()}
-  @type save_action :: :save | {:save_quit, Tab.id() | nil} | {:save_as, Path.t()}
+  @type save_action :: :save | {:save_quit, Tab.id() | nil} | {:save_as, Buffer.save_intent()}
   @type save_continuation :: {:save_after_format, pid(), non_neg_integer(), save_action()}
   @type format_terminal ::
           {:committed, non_neg_integer()} | :unchanged | {:failed, term()} | :stale | :canceled
@@ -2584,15 +2584,15 @@ defmodule MingaEditor.Commands.BufferManagement do
          overwrite: overwrite
        )
        when is_pid(buf) do
-    target = Path.expand(path)
+    case Buffer.prepare_save_as(buf, Path.expand(path), overwrite) do
+      {:ok, intent} ->
+        write_buffer_as(state, buf, intent)
 
-    if not overwrite and File.exists?(target) and Buffer.file_path(buf) != target do
-      NoticeWorkflow.publish(
-        state,
-        "File exists: #{Path.basename(target)} (use :w! to override)"
-      )
-    else
-      write_buffer_as(state, buf, target)
+      {:error, :file_exists} ->
+        NoticeWorkflow.publish(state, "File exists: #{Path.basename(path)} (use :w! to override)")
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")
     end
   end
 
@@ -2600,11 +2600,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     NoticeWorkflow.publish(state, "No active buffer")
   end
 
-  @spec write_buffer_as(state(), pid(), String.t()) :: state()
-  defp write_buffer_as(state, buf, target) do
-    adopt_target_filetype(buf, target)
+  @spec write_buffer_as(state(), pid(), Buffer.save_intent()) :: state()
+  defp write_buffer_as(state, buf, intent) do
+    adopt_target_filetype(buf, intent.target)
     version = Buffer.version(buf)
-    continuation = {:save_after_format, buf, version, {:save_as, target}}
+    continuation = {:save_after_format, buf, version, {:save_as, intent}}
 
     case maybe_format_on_save(state, buf, continuation) do
       {:pending, state} -> state
@@ -2707,19 +2707,29 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  defp save_continued(state, buf, version, {:save_as, target}) do
-    case Buffer.save_as_if_version(buf, version, target, save_transform_opts(buf)) do
+  defp save_continued(state, buf, version, {:save_as, intent}) do
+    case Buffer.save_as_if_version(buf, version, intent, save_transform_opts(buf)) do
       :ok ->
         state =
           state
           |> MingaEditor.BufferActivation.refresh_presentation()
           |> setup_highlight_or_defer()
-          |> NoticeWorkflow.publish("Wrote #{Path.basename(target)}")
+          |> NoticeWorkflow.publish("Wrote #{Path.basename(intent.target)}")
 
         {:ok, state}
 
       {:error, :stale} ->
         stale_save(state)
+
+      {:error, :file_changed} ->
+        {:error, handle_file_changed_on_save(state, buf)}
+
+      {:error, :file_exists} ->
+        {:error,
+         NoticeWorkflow.publish(
+           state,
+           "File exists: #{Path.basename(intent.target)} (use :w! to override)"
+         )}
 
       {:error, reason} ->
         {:error, NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")}

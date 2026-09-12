@@ -161,7 +161,9 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     state = base_state("old\n")
     buffer = state.workspace.buffers.active
     requested_version = Buffer.version(buffer)
-    continuation = {:save_after_format, buffer, requested_version, {:save_as, target}}
+    assert {:ok, intent} = Buffer.prepare_save_as(buffer, target, false)
+
+    continuation = {:save_after_format, buffer, requested_version, {:save_as, intent}}
 
     assert {:ok, committed_version} =
              Buffer.replace_content_if_version(buffer, requested_version, "FORMATTED\n", :lsp)
@@ -177,6 +179,30 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
 
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
              "Save skipped: buffer changed during formatting"
+  end
+
+  test "save_as continuation remains bound to its originating buffer after activation changes" do
+    target = tmp_path("external-format-origin-buffer.txt")
+    state = base_state("origin\n")
+    origin = state.workspace.buffers.active
+    assert :ok = Buffer.insert_text(origin, "local ")
+    version = Buffer.version(origin)
+    assert {:ok, intent} = Buffer.prepare_save_as(origin, target, false)
+    continuation = {:save_after_format, origin, version, {:save_as, intent}}
+
+    replacement =
+      start_supervised!({BufferProcess, content: "replacement\n"}, id: {:buffer, make_ref()})
+
+    replacement_buffers = state.workspace.buffers |> Buffers.add(replacement)
+    state = %{state | workspace: %{state.workspace | buffers: replacement_buffers}}
+
+    new_state = BufferManagement.continue_after_format(state, continuation, :unchanged)
+
+    assert File.read!(target) == "local origin\n"
+    assert Buffer.file_path(origin) == target
+    assert Buffer.file_path(replacement) == nil
+    assert Buffer.content(replacement) == "replacement\n"
+    assert new_state.workspace.buffers.active == replacement
   end
 
   test "dead buffer failed terminal does not exit the editor continuation" do

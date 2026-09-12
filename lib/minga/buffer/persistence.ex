@@ -12,6 +12,7 @@ defmodule Minga.Buffer.Persistence do
   @type metadata :: {mtime :: integer() | nil, size :: non_neg_integer() | nil}
   @type state_or_storage :: BufState.t() | storage()
   @type saved_content_status :: SaveState.saved_content_status()
+  @type write_policy :: :replace | :exclusive_create
 
   @doc "Loads initial buffer content from storage or returns the supplied scratch content when no path is set."
   @spec load_content(storage(), String.t() | nil, String.t()) ::
@@ -54,23 +55,40 @@ defmodule Minga.Buffer.Persistence do
   end
 
   @doc "Writes file content through the buffer's storage backend."
-  @spec write_content(BufState.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  def write_content(%BufState{storage: :local}, file_path, content) do
+  @spec write_content(BufState.t(), String.t(), String.t(), write_policy()) ::
+          :ok | {:error, term()}
+  def write_content(state, file_path, content, policy \\ :replace)
+
+  def write_content(%BufState{storage: :local}, file_path, content, policy) do
     file_path
     |> Path.dirname()
     |> File.mkdir_p()
     |> case do
-      :ok -> File.write(file_path, content)
+      :ok -> write_local(file_path, content, policy)
       error -> error
     end
   end
 
-  def write_content(%BufState{storage: {:remote, node, _base_path}}, file_path, content) do
-    :erpc.call(node, File, :write, [file_path, content], 10_000)
+  def write_content(
+        %BufState{storage: {:remote, node, _base_path}},
+        file_path,
+        content,
+        policy
+      ) do
+    :erpc.call(node, File, :write, [file_path, content, write_modes(policy)], 10_000)
   catch
     :exit, reason -> remote_unavailable(reason)
     :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
   end
+
+  @spec write_local(String.t(), String.t(), write_policy()) :: :ok | {:error, term()}
+  defp write_local(file_path, content, policy) do
+    File.write(file_path, content, write_modes(policy))
+  end
+
+  @spec write_modes(write_policy()) :: [File.mode()]
+  defp write_modes(:replace), do: []
+  defp write_modes(:exclusive_create), do: [:exclusive]
 
   @doc "Returns `{mtime, size}` for a file, or `{nil, nil}` when metadata cannot be read."
   @spec file_metadata(state_or_storage(), String.t() | nil) :: metadata()
@@ -94,6 +112,32 @@ defmodule Minga.Buffer.Persistence do
     :exit, reason -> remote_unavailable(reason)
     :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
   end
+
+  @doc "Returns true when two path spellings identify the same file in the buffer's storage."
+  @spec same_file?(BufState.t(), String.t() | nil, String.t()) :: boolean()
+  def same_file?(_state, nil, _right), do: false
+
+  def same_file?(state, left, right) do
+    if Path.expand(left) == Path.expand(right) do
+      true
+    else
+      same_storage_identity?(file_info(state, left), file_info(state, right))
+    end
+  end
+
+  @spec same_storage_identity?(
+          {:ok, File.Stat.t()} | {:error, term()},
+          {:ok, File.Stat.t()} | {:error, term()}
+        ) :: boolean()
+  defp same_storage_identity?({:ok, left}, {:ok, right}) do
+    storage_identity(left) == storage_identity(right)
+  end
+
+  defp same_storage_identity?(_left, _right), do: false
+
+  @spec storage_identity(File.Stat.t()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp storage_identity(stat), do: {stat.major_device, stat.minor_device, stat.inode}
 
   @doc "Returns true when the backing file differs from the buffer's saved baseline."
   @spec changed_since_saved?(BufState.t(), integer() | nil, non_neg_integer() | nil) :: boolean()
