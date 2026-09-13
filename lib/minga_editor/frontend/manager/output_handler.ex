@@ -12,14 +12,22 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
 
   @clipboard_write Opcodes.clipboard_write()
 
+  @typedoc "Internal output admission or terminal transport-failure disposition."
+  @type output_result ::
+          {:continue, Manager.admission(), State.t()} | {:transport_failure, State.t()}
+
+  @typedoc "Internal retry disposition."
+  @type retry_result :: {:continue, State.t()} | {:transport_failure, State.t()}
+
   @doc "Attempts one command batch without suspending the Port owner."
-  @spec admit_commands(State.t(), [binary()]) :: {Manager.admission(), State.t()}
-  def admit_commands(%{port: nil} = state, _commands), do: {:unwritable, state}
+  @spec admit_commands(State.t(), [binary()]) :: output_result()
+  def admit_commands(%{port: nil} = state, _commands), do: {:continue, :unwritable, state}
 
   def admit_commands(state, commands) do
     log_frame_transaction_violation(commands)
 
     case PendingFrame.from_commands(commands) do
+      {:ok, _frame} when not state.ready -> {:continue, :unwritable, state}
       {:ok, frame} -> admit_frame(state, frame)
       {:error, _reason} -> admit_control(state, commands)
     end
@@ -38,15 +46,14 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
   end
 
   @doc "Retries the retained current frame for the matching timer token."
-  @spec retry(State.t(), reference()) :: State.t()
+  @spec retry(State.t(), reference()) :: retry_result()
   def retry(state, token) do
     case OutputPressure.consume_retry(state.output_pressure, token) do
       {:ok, output_pressure} ->
-        {_admission, state} = attempt_output(%{state | output_pressure: output_pressure})
-        state
+        retry_result(attempt_output(%{state | output_pressure: output_pressure}))
 
       :stale ->
-        state
+        {:continue, state}
     end
   end
 
@@ -79,29 +86,42 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     do: %{state | port: nil, ready: false, output_pressure: OutputPressure.new()}
 
   @doc "Attempts and, if needed, retains one out-of-band control write."
-  @spec write_control(State.t(), binary()) :: {Manager.admission(), State.t()}
-  def write_control(%{port: nil} = state, _batch), do: {:unwritable, state}
+  @spec write_control(State.t(), binary()) :: output_result()
+  def write_control(%{port: nil} = state, _batch), do: {:continue, :unwritable, state}
   def write_control(state, batch), do: admit_control_batch(state, first_opcode(batch), batch)
 
-  @spec admit_frame(State.t(), PendingFrame.t()) :: {Manager.admission(), State.t()}
+  @spec admit_frame(State.t(), PendingFrame.t()) :: output_result()
   defp admit_frame(state, frame) do
     case OutputPressure.enqueue(state.output_pressure, frame) do
-      {:attempt, output_pressure} -> attempt_output(%{state | output_pressure: output_pressure})
-      {:coalesced, output_pressure} -> {:unwritable, %{state | output_pressure: output_pressure}}
+      {:attempt, output_pressure} ->
+        attempt_output(%{state | output_pressure: output_pressure})
+
+      {:coalesced, output_pressure} ->
+        {:continue, :unwritable, %{state | output_pressure: output_pressure}}
     end
   end
 
-  @spec attempt_output(State.t()) :: {Manager.admission(), State.t()}
+  @spec attempt_output(State.t()) :: output_result()
   defp attempt_output(state) do
     now = System.monotonic_time(:millisecond)
 
-    case expired_current(state, now) do
-      nil -> attempt_next_output(state)
-      failed -> {:unwritable, require_keyframe_recovery(state, failed)}
+    case OutputPressure.classify_timeout(
+           state.output_pressure,
+           now,
+           state.output_failure_ms
+         ) do
+      :continue ->
+        attempt_next_output(state)
+
+      {:recover_frame, failed} ->
+        {:continue, :unwritable, require_keyframe_recovery(state, failed)}
+
+      :transport_failure ->
+        {:transport_failure, fail_transport(state)}
     end
   end
 
-  @spec attempt_next_output(State.t()) :: {Manager.admission(), State.t()}
+  @spec attempt_next_output(State.t()) :: output_result()
   defp attempt_next_output(state) do
     case OutputPressure.next_control(state.output_pressure) do
       nil -> attempt_current(state)
@@ -109,10 +129,10 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     end
   end
 
-  @spec attempt_current(State.t()) :: {Manager.admission(), State.t()}
+  @spec attempt_current(State.t()) :: output_result()
   defp attempt_current(%{output_pressure: %{current: nil}} = state) do
     output_pressure = OutputPressure.settled(state.output_pressure)
-    {:accepted, %{state | output_pressure: output_pressure}}
+    {:continue, :accepted, %{state | output_pressure: output_pressure}}
   end
 
   defp attempt_current(%{output_pressure: %{current: current}} = state) do
@@ -122,7 +142,7 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     end
   end
 
-  @spec current_admitted(State.t()) :: {Manager.admission(), State.t()}
+  @spec current_admitted(State.t()) :: output_result()
   defp current_admitted(state) do
     {admitted, output_pressure} = OutputPressure.admitted(state.output_pressure)
     state = %{state | output_pressure: output_pressure}
@@ -136,42 +156,38 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     end
   end
 
-  @spec admit_successor(State.t(), PendingFrame.t(), PendingFrame.t()) ::
-          {Manager.admission(), State.t()}
+  @spec admit_successor(State.t(), PendingFrame.t(), PendingFrame.t()) :: output_result()
   defp admit_successor(state, successor, admitted) do
     if PendingFrame.follows?(successor, admitted) do
-      {_successor_admission, state} = attempt_output(state)
-      {:accepted, state}
+      preserve_initial_admission(attempt_output(state))
     else
-      {:accepted, require_keyframe_recovery(state, successor)}
+      {:continue, :accepted, require_keyframe_recovery(state, successor)}
     end
   end
 
-  @spec current_unwritable(State.t(), PendingFrame.t()) :: {Manager.admission(), State.t()}
+  @spec current_unwritable(State.t(), PendingFrame.t()) :: output_result()
   defp current_unwritable(state, _current) do
     now = System.monotonic_time(:millisecond)
     retry_or_recover_current(state, now)
   end
 
-  @spec retry_or_recover_current(State.t(), integer()) :: {Manager.admission(), State.t()}
+  @spec retry_or_recover_current(State.t(), integer()) :: output_result()
   defp retry_or_recover_current(state, now) do
-    case expired_current(state, now) do
-      nil -> {:unwritable, ensure_retry(state, now)}
-      failed -> {:unwritable, require_keyframe_recovery(state, failed)}
+    case OutputPressure.classify_timeout(
+           state.output_pressure,
+           now,
+           state.output_failure_ms
+         ) do
+      :continue ->
+        {:continue, :unwritable, ensure_retry(state, now)}
+
+      {:recover_frame, failed} ->
+        {:continue, :unwritable, require_keyframe_recovery(state, failed)}
+
+      :transport_failure ->
+        {:transport_failure, fail_transport(state)}
     end
   end
-
-  @spec expired_current(State.t(), integer()) :: PendingFrame.t() | nil
-  defp expired_current(
-         %{output_pressure: %OutputPressure{current: %PendingFrame{} = current}} = state,
-         now
-       ) do
-    if OutputPressure.expired?(state.output_pressure, now, state.output_failure_ms),
-      do: current,
-      else: nil
-  end
-
-  defp expired_current(%{output_pressure: %OutputPressure{current: nil}}, _now), do: nil
 
   @spec ensure_retry(State.t(), integer()) :: State.t()
   defp ensure_retry(state, now) do
@@ -203,27 +219,27 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     %{state | output_pressure: output_pressure}
   end
 
-  @spec admit_control(State.t(), [binary()]) :: {Manager.admission(), State.t()}
-  defp admit_control(state, []), do: {write_batch(state, <<>>), state}
+  @spec admit_control(State.t(), [binary()]) :: output_result()
+  defp admit_control(state, []), do: {:continue, write_batch(state, <<>>), state}
 
   defp admit_control(state, [first | _commands] = commands),
     do: admit_control_batch(state, first_opcode(first), IO.iodata_to_binary(commands))
 
   @spec admit_control_batch(State.t(), non_neg_integer(), binary()) ::
-          {Manager.admission(), State.t()}
+          output_result()
   defp admit_control_batch(state, opcode, batch) do
     if output_pending?(state.output_pressure) do
       retain_control(state, opcode, batch)
     else
       case write_batch(state, batch) do
-        :accepted -> {:accepted, state}
+        :accepted -> {:continue, :accepted, settle_output(state)}
         :unwritable -> retain_control(state, opcode, batch)
       end
     end
   end
 
   @spec attempt_control(State.t(), OutputPressure.control_key(), binary()) ::
-          {Manager.admission(), State.t()}
+          output_result()
   defp attempt_control(state, key, batch) do
     case write_batch(state, batch) do
       :accepted ->
@@ -236,13 +252,36 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
   end
 
   @spec retain_control(State.t(), non_neg_integer(), binary()) ::
-          {Manager.admission(), State.t()}
+          output_result()
   defp retain_control(state, opcode, batch) do
     key = control_key(opcode, batch)
     output_pressure = OutputPressure.retain_control(state.output_pressure, key, batch)
     state = %{state | output_pressure: output_pressure}
-    {:unwritable, ensure_retry(state, System.monotonic_time(:millisecond))}
+    retry_or_recover_current(state, System.monotonic_time(:millisecond))
   end
+
+  @spec fail_transport(State.t()) :: State.t()
+  defp fail_transport(state) do
+    output_pressure = OutputPressure.fail_transport(state.output_pressure)
+    %{state | output_pressure: output_pressure}
+  end
+
+  @spec settle_output(State.t()) :: State.t()
+  defp settle_output(state) do
+    output_pressure = OutputPressure.settled(state.output_pressure)
+    %{state | output_pressure: output_pressure}
+  end
+
+  @spec retry_result(output_result()) :: retry_result()
+  defp retry_result({:continue, _admission, state}), do: {:continue, state}
+  defp retry_result({:transport_failure, state}), do: {:transport_failure, state}
+
+  @spec preserve_initial_admission(output_result()) :: output_result()
+  defp preserve_initial_admission({:continue, _successor_admission, state}),
+    do: {:continue, :accepted, state}
+
+  defp preserve_initial_admission({:transport_failure, state}),
+    do: {:transport_failure, state}
 
   @spec output_pending?(OutputPressure.t()) :: boolean()
   defp output_pending?(%OutputPressure{current: current} = pressure),
