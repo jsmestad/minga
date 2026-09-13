@@ -11,7 +11,13 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
   @spec reset(State.t(), Intent.t(), non_neg_integer(), integer()) :: {:reply, :ok, State.t()}
   def reset(state, intent, seq, pushed_at) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
-    state = state |> State.reset_frontend(:renderer_restart) |> State.clear_rejection()
+    generation = State.reserve_recovery_generation(state)
+
+    state =
+      state
+      |> State.reset_frontend(generation, :renderer_restart)
+      |> State.clear_rejection()
+
     token = schedule_render()
     attempt = FrameAttempt.new(Intent.force_keyframe(intent), seq, pushed_at)
 
@@ -24,9 +30,10 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
            State.t()}
   def reset_sync(state, intent, seq, pushed_at) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
+    generation = State.reserve_recovery_generation(state)
 
     state
-    |> State.reset_frontend(:renderer_restart)
+    |> State.reset_frontend(generation, :renderer_restart)
     |> State.clear_rejection()
     |> FrameHandler.render_sync(Intent.force_keyframe(intent), seq, pushed_at)
   end
@@ -63,13 +70,14 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
   @spec adapted_transaction(State.t(), Intent.t(), FrameAttempt.t()) :: {:noreply, State.t()}
   defp adapted_transaction(state, adapted_intent, %FrameAttempt{} = rejected_attempt) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
+    generation = State.reserve_recovery_generation(state)
     retry_seq = max(System.unique_integer([:positive, :monotonic]), rejected_attempt.seq + 1)
     retry = FrameAttempt.new(adapted_intent, retry_seq, rejected_attempt.pushed_at)
     token = schedule_render()
 
     state =
       state
-      |> State.reset_frontend()
+      |> State.reset_frontend(generation)
       |> State.schedule_frame(retry, token)
 
     {:noreply, state}
@@ -79,6 +87,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
   @spec transaction(State.t(), FrameAttempt.t()) :: {:noreply, State.t()}
   def transaction(state, %FrameAttempt{} = rejected_attempt) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
+    generation = State.reserve_recovery_generation(state)
 
     retry =
       state
@@ -89,7 +98,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
     state =
       state
-      |> State.reset_frontend()
+      |> State.reset_frontend(generation)
       |> State.schedule_frame(retry, token)
 
     {:noreply, state}

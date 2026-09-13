@@ -25,6 +25,7 @@ defmodule MingaEditor.Renderer.State do
 
   @type editor_ref :: pid() | atom() | nil
   @type pipeline :: (Input.t() -> Input.t())
+  @type generation_reserver :: (-> pos_integer())
 
   @type frame_successor :: FrameAttempt.t()
   @type frame_credit ::
@@ -44,6 +45,7 @@ defmodule MingaEditor.Renderer.State do
           observed_buffers: ObservedBuffers.t(),
           pipeline: pipeline(),
           require_ack?: boolean(),
+          generation_reserver: generation_reserver() | nil,
           rejection_state: RejectionState.t()
         }
 
@@ -57,6 +59,7 @@ defmodule MingaEditor.Renderer.State do
             observed_buffers: ObservedBuffers.new(),
             pipeline: &RenderPipeline.run/1,
             require_ack?: true,
+            generation_reserver: nil,
             rejection_state: RejectionState.new()
 
   @spec new(keyword()) :: t()
@@ -65,9 +68,17 @@ defmodule MingaEditor.Renderer.State do
       editor_pid: Keyword.get(opts, :editor_pid, MingaEditor),
       pipeline: Keyword.get(opts, :pipeline, &RenderPipeline.run/1),
       require_ack?: Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline)),
-      ack_timeout_ms: Keyword.get(opts, :ack_timeout_ms, 2_000)
+      ack_timeout_ms: Keyword.get(opts, :ack_timeout_ms, 2_000),
+      caches: Caches.new(Keyword.get(opts, :recovery_generation, 0)),
+      generation_reserver: Keyword.get(opts, :generation_reserver)
     }
   end
+
+  @doc "Reserves a fresh generation from the live frontend connection owner."
+  @spec reserve_recovery_generation(t()) :: pos_integer()
+  def reserve_recovery_generation(%__MODULE__{generation_reserver: reserver})
+      when is_function(reserver, 0),
+      do: reserver.()
 
   @spec accept_intent(t(), Intent.t()) :: {:accepted, t()} | {:blocked, t()}
   def accept_intent(%__MODULE__{} = state, %Intent{} = intent) do
@@ -308,8 +319,9 @@ defmodule MingaEditor.Renderer.State do
     end
   end
 
-  @spec reset_frontend(t(), ResidentWindowState.hydration_reason()) :: t()
-  def reset_frontend(%__MODULE__{} = state, reason \\ :reset_required) do
+  @spec reset_frontend(t(), non_neg_integer(), ResidentWindowState.hydration_reason()) :: t()
+  def reset_frontend(%__MODULE__{} = state, recovery_generation, reason \\ :reset_required)
+      when is_integer(recovery_generation) and recovery_generation >= 0 do
     residents =
       Map.new(state.resident_windows, fn {id, resident} ->
         hydrated =
@@ -326,7 +338,7 @@ defmodule MingaEditor.Renderer.State do
 
     %{
       state
-      | caches: Caches.reset_frontend_state(state.caches),
+      | caches: Caches.reset_frontend_state(state.caches, recovery_generation),
         font_registry: FontRegistry.require_reregistration(state.font_registry),
         message_store: reset_message_cursor(state.message_store),
         resident_windows: residents

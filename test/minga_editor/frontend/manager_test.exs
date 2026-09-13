@@ -648,6 +648,28 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert_receive {:minga_input, {:frame_applied, 1, 11}}
     end
 
+    test "recovery generation reservations stay above applied connection watermarks" do
+      name = unique_name()
+      {pid, fake_port} = start_connected(name)
+      :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
+
+      assert Manager.reserve_recovery_generation(name) == 1
+      assert Manager.reserve_recovery_generation(name) == 2
+      assert :accepted = Manager.send_render_commands(name, frame_commands(50, 0, 5))
+      send_port_data(pid, fake_port, <<0x0A, 5::32, 50::32>>)
+      assert_receive {:minga_input, {:frame_applied, 5, 50}}
+
+      assert Manager.reserve_recovery_generation(name) == 6
+      send_port_data(pid, fake_port, <<0x0A, 5::32, 50::32>>)
+      refute_receive {:minga_input, {:frame_applied, 5, 50}}, 30
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.minimum_ack_generation == 6
+      assert pressure.last_admitted_generation == 5
+      assert pressure.last_applied_generation == 5
+    end
+
     test "an unwritable font configuration is retained and retried before later frames" do
       name = unique_name()
       parent = self()

@@ -59,6 +59,35 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     assert stats.retained_bytes == 0
   end
 
+  test "recovery reservations are unique above every connection watermark and revoke old frames" do
+    admitted = frame(50, 0, 5)
+    retained = frame(51, 50, 5)
+    replacement = frame(52, 51, 5)
+
+    {:attempt, pressure} = OutputPressure.enqueue(OutputPressure.new(), admitted)
+    assert {^admitted, pressure} = OutputPressure.admitted(pressure)
+    assert {:accepted, pressure} = OutputPressure.acknowledge(pressure, 5, 50)
+    {:attempt, pressure} = OutputPressure.enqueue(pressure, retained)
+    {:coalesced, pressure} = OutputPressure.enqueue(pressure, replacement)
+    pressure = OutputPressure.retain_control(pressure, 1, <<1>>)
+
+    assert {6, pressure} = OutputPressure.reserve_recovery_generation(pressure)
+    assert pressure.current == nil
+    assert pressure.replacement == nil
+    assert pressure.controls == %{1 => <<1>>}
+    assert pressure.last_admitted_generation == 5
+    assert pressure.last_applied_generation == 5
+    assert OutputPressure.acknowledge(pressure, 5, 50) == :stale
+
+    assert {7, pressure} = OutputPressure.reserve_recovery_generation(pressure)
+    assert pressure.minimum_ack_generation == 7
+  end
+
+  test "a fresh connection reserves generation one" do
+    assert {1, pressure} = OutputPressure.reserve_recovery_generation(OutputPressure.new())
+    assert pressure.minimum_ack_generation == 1
+  end
+
   test "frame admission bounds acknowledgements without future acknowledgements moving diagnostics" do
     first = frame(10, 9, 1)
     {:attempt, pressure} = OutputPressure.enqueue(OutputPressure.new(), first)

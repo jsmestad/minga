@@ -107,6 +107,11 @@ defmodule MingaEditor.Frontend.Manager do
   @spec output_pressure(GenServer.server()) :: OutputPressure.stats()
   def output_pressure(server \\ __MODULE__), do: GenServer.call(server, :output_pressure)
 
+  @doc "Atomically reserves the next recovery generation for the live frontend connection."
+  @spec reserve_recovery_generation(GenServer.server()) :: pos_integer()
+  def reserve_recovery_generation(server \\ __MODULE__),
+    do: GenServer.call(server, :reserve_recovery_generation)
+
   @doc "Subscribes the calling process to receive input events."
   @impl MingaEditor.Frontend.Adapter
   @spec subscribe(GenServer.server()) :: :ok
@@ -205,6 +210,13 @@ defmodule MingaEditor.Frontend.Manager do
 
   def handle_call(:output_pressure, _from, state) do
     {:reply, OutputPressure.stats(state.output_pressure), state}
+  end
+
+  def handle_call(:reserve_recovery_generation, _from, state) do
+    {generation, output_pressure} =
+      OutputPressure.reserve_recovery_generation(state.output_pressure)
+
+    {:reply, generation, %{state | output_pressure: output_pressure}}
   end
 
   def handle_call({:send_commands, commands}, _from, state) do
