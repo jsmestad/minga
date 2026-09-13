@@ -938,9 +938,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let owners: [(name: String, path: String, ignored: Set<String>)] = [
-            ("AgentChatState", "Sources/Views/Agent/AgentChatState.swift", [
-                "@ObservationIgnored private var hasTranscript: Bool = false",
-            ]),
+            ("AgentChatState", "Sources/Views/Agent/AgentChatState.swift", []),
             ("AgentContextBarState", "Sources/Views/Agent/AgentContextBarState.swift", []),
             ("BottomPanelState", "Sources/Views/EditorChrome/BottomPanelState.swift", []),
             ("EmptyStateState", "Sources/Views/EditorChrome/EmptyStateState.swift", []),
@@ -981,7 +979,6 @@ struct GUIFrameSwiftUIInvalidationTests {
             ]),
         ]
         let ignoredReasons = [
-            "@ObservationIgnored private var hasTranscript: Bool = false": "cache",
             "@ObservationIgnored private var warnedUnknownKinds: Set<String> = []": "cache",
             "@ObservationIgnored private var showTask: Task<Void, Never>?": "task",
             "@ObservationIgnored private var holdTask: Task<Void, Never>?": "task",

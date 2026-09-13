@@ -434,6 +434,16 @@ struct AgentChatTranscriptTests {
         Wire.ChatMessage(beamId: id, content: .assistant(text: text))
     }
 
+    private func exactTranscriptWeightOracle(
+        _ snapshot: AgentTranscriptSnapshot
+    ) throws -> FrameResourceWeight {
+        var weight = FrameResourceWeight(arrayEntries: snapshot.messages.count)
+        for message in snapshot.messages {
+            weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
+        }
+        return weight
+    }
+
     @Test("full_replace swaps the array and adopts the epoch")
     @MainActor func fullReplace() {
         let state = AgentChatState()
@@ -618,6 +628,54 @@ struct AgentChatTranscriptTests {
         // A later non-truncated frame clears the hint.
         state.applyTranscript(mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 1, messages: [assistant(2, "b")])
         #expect(state.transcriptTruncated == false)
+    }
+
+    @Test("cached weight matches a full oracle after every transcript transition")
+    @MainActor func cachedWeightMatchesOracle() throws {
+        let run = Wire.StyledTextRun(text: "nested", fgR: 1, fgG: 2, fgB: 3, bgR: 4, bgG: 5, bgB: 6, bold: true, italic: false, underline: false, code: true, linkURL: "https://example.test")
+        let block = Wire.AgentMarkdownBlock(id: 1, kind: .paragraph, flags: 0, lines: [[run]], level: 0, indent: 0, ordered: false, ordinal: 0, height: 1, language: "swift", label: "sample", targetPath: "Sources/App.swift", capabilityFlags: 0)
+        let state = AgentChatState()
+
+        state.applyTranscript(mode: 0, epoch: 7, baseCount: 0, messages: [
+            user(1, "question"),
+            Wire.ChatMessage(beamId: 2, content: .assistantMarkdown(blocks: [block])),
+            Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read_file", summary: "Read source", status: 1, isError: false, collapsed: false, autoApprovedScope: 0, durationMs: 12, result: "result", previewKind: 1, previewLines: ["one", "two"])),
+        ])
+        var oracle = try exactTranscriptWeightOracle(state.transcriptSnapshot)
+        #expect(state.transcriptSnapshot.resourceWeight == oracle)
+
+        state.applyTranscript(mode: 1, epoch: 7, baseCount: 3, messages: [assistant(4, "append")])
+        oracle = try exactTranscriptWeightOracle(state.transcriptSnapshot)
+        #expect(state.transcriptSnapshot.resourceWeight == oracle)
+
+        state.applyTranscript(mode: 1, epoch: 7, trimFront: 2, baseCount: 2, messages: [])
+        oracle = try exactTranscriptWeightOracle(state.transcriptSnapshot)
+        #expect(state.transcriptSnapshot.resourceWeight == oracle)
+
+        state.applyTranscript(mode: 1, epoch: 7, baseCount: 1, messages: [assistant(4, "replacement with more text")])
+        oracle = try exactTranscriptWeightOracle(state.transcriptSnapshot)
+        #expect(state.transcriptSnapshot.resourceWeight == oracle)
+    }
+
+    @Test("delta accounting visits no unchanged entries for short and long histories")
+    @MainActor func deltaAccountingSkipsUnchangedHistory() {
+        for messageCount in [100, 10_000] {
+            let state = AgentChatState()
+            let messages = (0..<messageCount).map { index in
+                user(UInt32(index + 1), "resident \(index)")
+            }
+            state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: messages)
+            state.applyTranscript(
+                mode: 1, epoch: 1, baseCount: messageCount - 1,
+                messages: [assistant(UInt32(messageCount), "replaced tail")]
+            )
+
+            let counters = state.transcriptSnapshot.accountingCounters
+            #expect(counters.changedEntriesMeasured == 1)
+            #expect(counters.unchangedEntriesVisited == 0)
+            #expect(counters.retainedEntriesCopied == 0)
+            #expect(counters.sequenceNodesCreated < 256)
+        }
     }
 }
 

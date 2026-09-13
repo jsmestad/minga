@@ -66,7 +66,6 @@ struct GUIObservationGuardrailTests {
     private static let ignoredDeclarationAllowlist: [String: String] = [
         "Sources/Extensions/FrontendExtensionRuntime.swift: @ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder registry storage, not rendered state",
         "Sources/Extensions/FrontendExtensionRuntime.swift: @ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "view-builder registry storage, not rendered state",
-        "Sources/Views/Agent/AgentChatState.swift: @ObservationIgnored private var hasTranscript: Bool = false": "protocol readiness cache, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var holdTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var lastMessage = \"\"": "feedback timing cache; rendered fields remain observed",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var showTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",

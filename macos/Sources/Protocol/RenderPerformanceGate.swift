@@ -359,6 +359,62 @@ public enum RenderPerformanceGate {
     private static func format(_ value: Double) -> String { String(format: "%.2f", value) }
 }
 
+/// Release evidence that unrelated frame staging stays independent of resident transcript size.
+public struct NativeTranscriptAccountingMeasurement: Codable, Equatable, Sendable {
+    /// Stable fixture name used to pair measurements across revisions.
+    public let fixture: String
+    /// Resident transcript message count.
+    public let messageCount: Int
+    /// Exact resident transcript owned UTF-8 byte weight.
+    public let ownedUTF8Bytes: Int
+    /// Median CPU time spent staging a cursor-only or unrelated frame.
+    public let stageCPUP50Ms: Double
+    /// P95 CPU time spent staging a cursor-only or unrelated frame.
+    public let stageCPUP95Ms: Double
+    /// P99 CPU time spent staging a cursor-only or unrelated frame.
+    public let stageCPUP99Ms: Double
+    /// Changed transcript entries measured during the sampled frames, when instrumented.
+    public let changedEntriesMeasured: Int?
+    /// Unchanged transcript entries visited during the sampled frames, when instrumented.
+    public let unchangedEntriesVisited: Int?
+    /// Retained transcript entries copied during the sampled frames, when instrumented.
+    public let retainedEntriesCopied: Int?
+    /// Retained transcript payload bytes copied during the sampled frames, when instrumented.
+    public let retainedUTF8BytesCopied: Int?
+    /// Persistent transcript sequence nodes allocated during the sampled frames, when instrumented.
+    public let sequenceNodeAllocations: Int?
+    /// Number of cursor-only and unrelated frames sampled after warm-up.
+    public let measuredFrameCount: Int
+    /// Swift optimization and active compilation-condition flags used for the executable.
+    public let compilerFlags: [String]
+    /// Source revision supplied by the paired benchmark driver.
+    public let revision: String
+
+    /// Creates one transcript-size fixture measurement.
+    public init(
+        fixture: String, messageCount: Int, ownedUTF8Bytes: Int,
+        stageCPUP50Ms: Double, stageCPUP95Ms: Double, stageCPUP99Ms: Double,
+        changedEntriesMeasured: Int?, unchangedEntriesVisited: Int?, retainedEntriesCopied: Int?,
+        retainedUTF8BytesCopied: Int?, sequenceNodeAllocations: Int?,
+        measuredFrameCount: Int, compilerFlags: [String], revision: String
+    ) {
+        self.fixture = fixture
+        self.messageCount = messageCount
+        self.ownedUTF8Bytes = ownedUTF8Bytes
+        self.stageCPUP50Ms = stageCPUP50Ms
+        self.stageCPUP95Ms = stageCPUP95Ms
+        self.stageCPUP99Ms = stageCPUP99Ms
+        self.changedEntriesMeasured = changedEntriesMeasured
+        self.unchangedEntriesVisited = unchangedEntriesVisited
+        self.retainedEntriesCopied = retainedEntriesCopied
+        self.retainedUTF8BytesCopied = retainedUTF8BytesCopied
+        self.sequenceNodeAllocations = sequenceNodeAllocations
+        self.measuredFrameCount = measuredFrameCount
+        self.compilerFlags = compilerFlags
+        self.revision = revision
+    }
+}
+
 /// End-to-end Release measurement for one native editor rendering batch.
 public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
     /// Median transaction-freeze plus publication duration.
@@ -391,6 +447,8 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
     public let failedOrDiscardedFrameCount: Int
     /// Largest number of native presentation generations simultaneously in flight.
     public let maximumInFlightGenerations: Int
+    /// Cursor-only and unrelated-chrome staging evidence across transcript sizes.
+    public let transcriptAccounting: [NativeTranscriptAccountingMeasurement]?
 
     /// Creates one complete native render measurement.
     public init(
@@ -408,7 +466,8 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
         attemptedFrameCount: Int,
         copyCompletedFrameCount: Int,
         failedOrDiscardedFrameCount: Int,
-        maximumInFlightGenerations: Int
+        maximumInFlightGenerations: Int,
+        transcriptAccounting: [NativeTranscriptAccountingMeasurement]? = nil
     ) {
         self.freezePublicationP50Ms = freezePublicationP50Ms
         self.freezePublicationP95Ms = freezePublicationP95Ms
@@ -425,6 +484,7 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
         self.copyCompletedFrameCount = copyCompletedFrameCount
         self.failedOrDiscardedFrameCount = failedOrDiscardedFrameCount
         self.maximumInFlightGenerations = maximumInFlightGenerations
+        self.transcriptAccounting = transcriptAccounting
     }
 }
 

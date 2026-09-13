@@ -11,6 +11,8 @@ private let viewportRows: UInt16 = 80
 private let viewportCols: UInt16 = 160
 private let warmupFrameCount = 9
 private let measuredFrameCount = 240
+private let transcriptWarmupFrameCount = 12
+private let transcriptMeasuredFrameCount = 120
 
 private final class BenchmarkDrawable: NSObject, CAMetalDrawable {
     let texture: MTLTexture
@@ -260,6 +262,133 @@ private func measureFreezePublication(dispatcher: CommandDispatcher) -> [Double]
     return samples
 }
 
+private struct TranscriptFixture {
+    let name: String
+    let messageCount: Int
+    let textBytesPerMessage: Int
+}
+
+private func transcriptMessages(for fixture: TranscriptFixture) -> [Wire.ChatMessage] {
+    guard fixture.messageCount > 0 else { return [] }
+    let text = String(repeating: "x", count: fixture.textBytesPerMessage)
+    let run = Wire.StyledTextRun(
+        text: text, fgR: 1, fgG: 2, fgB: 3, bgR: 0, bgG: 0, bgB: 0,
+        bold: false, italic: false, underline: false, code: true, linkURL: ""
+    )
+    let block = Wire.AgentMarkdownBlock(
+        id: 1, kind: .paragraph, flags: 0, lines: [[run]], level: 0, indent: 0,
+        ordered: false, ordinal: 0, height: 1, language: "swift", label: "",
+        targetPath: "", capabilityFlags: 0
+    )
+    return (0..<fixture.messageCount).map { index in
+        let id = UInt32(index + 1)
+        switch index % 1_000 {
+        case 0:
+            return Wire.ChatMessage(beamId: id, content: .assistantMarkdown(blocks: [block]))
+        case 1:
+            return Wire.ChatMessage(beamId: id, content: .toolCall(
+                name: "read_file", summary: "fixture", status: 1, isError: false,
+                collapsed: false, autoApprovedScope: 0, durationMs: 1, result: text,
+                previewKind: 1, previewLines: ["fixture.swift"]
+            ))
+        default:
+            return Wire.ChatMessage(beamId: id, content: .user(text: text))
+        }
+    }
+}
+
+@MainActor
+private func measureTranscriptAccounting(
+    fixture: TranscriptFixture
+) throws -> NativeTranscriptAccountingMeasurement {
+    let guiState = GUIState()
+    let dispatcher = CommandDispatcher(cols: viewportCols, rows: viewportRows, guiState: guiState)
+    dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+    dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+    dispatcher.dispatch(.guiAgentTranscript(
+        mode: 0, epoch: 1, truncated: false, trimFront: 0, baseCount: 0,
+        messages: transcriptMessages(for: fixture)
+    ))
+    dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+    precondition(dispatcher.publicationCount == 1, "transcript benchmark seed must publish")
+
+    #if MINGA_TRANSCRIPT_ACCOUNTING
+    let residentWeight = guiState.agentChatState.transcriptSnapshot.resourceWeight
+    #else
+    let residentWeight = try guiState.agentChatState.transcriptSnapshot.exactResourceWeight()
+    #endif
+
+    var samples: [Double] = []
+    samples.reserveCapacity(transcriptMeasuredFrameCount)
+    var frameSeq: UInt32 = 1
+    var changedEntriesMeasured = 0
+    var unchangedEntriesVisited = 0
+    var retainedEntriesCopied = 0
+    let retainedUTF8BytesCopied = 0
+    var sequenceNodeAllocations = 0
+    let totalFrames = transcriptWarmupFrameCount + transcriptMeasuredFrameCount
+    for index in 0..<totalFrames {
+        let nextFrameSeq = frameSeq + 1
+        let start = threadCPUTimeNanoseconds()
+        dispatcher.dispatch(.beginFrame(
+            frameSeq: nextFrameSeq, baseFrameSeq: frameSeq, generation: 1
+        ))
+        if index.isMultiple(of: 2) {
+            dispatcher.dispatch(.setCursorShape(index.isMultiple(of: 4) ? .block : .beam))
+        } else {
+            dispatcher.dispatch(.setTitle("transcript-accounting-\(index)"))
+        }
+        dispatcher.dispatch(.commitFrame(frameSeq: nextFrameSeq, seq: 0))
+        let elapsed = Double(threadCPUTimeNanoseconds() - start) / 1_000_000
+        frameSeq = nextFrameSeq
+
+        #if MINGA_TRANSCRIPT_ACCOUNTING
+        guard let counters = dispatcher.lastTranscriptAccountingCounters else {
+            preconditionFailure("transcript benchmark frame did not publish accounting counters")
+        }
+        changedEntriesMeasured += counters.changedEntriesMeasured
+        unchangedEntriesVisited += counters.unchangedEntriesVisited
+        retainedEntriesCopied += counters.retainedEntriesCopied
+        sequenceNodeAllocations += counters.sequenceNodesCreated
+        #endif
+
+        if index >= transcriptWarmupFrameCount { samples.append(elapsed) }
+    }
+
+    #if MINGA_TRANSCRIPT_ACCOUNTING
+    let measuredChangedEntries: Int? = changedEntriesMeasured
+    let measuredUnchangedVisits: Int? = unchangedEntriesVisited
+    let measuredRetainedCopies: Int? = retainedEntriesCopied
+    let measuredRetainedBytesCopied: Int? = retainedUTF8BytesCopied
+    let measuredSequenceAllocations: Int? = sequenceNodeAllocations
+    let compilerFlags = ["-O", "-DMINGA_SNAPSHOT_RENDERER", "-DMINGA_TRANSCRIPT_ACCOUNTING"]
+    #else
+    let measuredChangedEntries: Int? = nil
+    let measuredUnchangedVisits: Int? = nil
+    let measuredRetainedCopies: Int? = nil
+    let measuredRetainedBytesCopied: Int? = nil
+    let measuredSequenceAllocations: Int? = nil
+    let compilerFlags = ["-O", "-DMINGA_SNAPSHOT_RENDERER"]
+    #endif
+
+    return NativeTranscriptAccountingMeasurement(
+        fixture: fixture.name,
+        messageCount: fixture.messageCount,
+        ownedUTF8Bytes: residentWeight.ownedUTF8Bytes,
+        stageCPUP50Ms: percentile(samples, 0.50),
+        stageCPUP95Ms: percentile(samples, 0.95),
+        stageCPUP99Ms: percentile(samples, 0.99),
+        changedEntriesMeasured: measuredChangedEntries,
+        unchangedEntriesVisited: measuredUnchangedVisits,
+        retainedEntriesCopied: measuredRetainedCopies,
+        retainedUTF8BytesCopied: measuredRetainedBytesCopied,
+        sequenceNodeAllocations: measuredSequenceAllocations,
+        measuredFrameCount: samples.count,
+        compilerFlags: compilerFlags,
+        revision: ProcessInfo.processInfo.environment["MINGA_BENCHMARK_REVISION"] ?? "unknown"
+    )
+}
+
 @MainActor
 private func makeFactories(probe: NativeBenchmarkProbe) -> NativeRenderFactories {
     var factories = NativeRenderFactories.production
@@ -363,6 +492,17 @@ private struct NativeRenderPerformanceMain {
         let dispatcher = CommandDispatcher(cols: viewportCols, rows: viewportRows, guiState: guiState)
         commitKeyframe(dispatcher: dispatcher, content: content, gutter: gutter(geometry: geometry))
         let freezeSamples = measureFreezePublication(dispatcher: dispatcher)
+        let transcriptFixtures = [
+            TranscriptFixture(name: "empty", messageCount: 0, textBytesPerMessage: 0),
+            TranscriptFixture(name: "short-100", messageCount: 100, textBytesPerMessage: 200),
+            TranscriptFixture(name: "medium-1000", messageCount: 1_000, textBytesPerMessage: 200),
+            TranscriptFixture(name: "long-10000", messageCount: 10_000, textBytesPerMessage: 200),
+            TranscriptFixture(name: "near-8mib-cap", messageCount: 8_192, textBytesPerMessage: 1_000),
+        ]
+        var transcriptAccounting: [NativeTranscriptAccountingMeasurement] = []
+        for fixture in transcriptFixtures {
+            transcriptAccounting.append(try measureTranscriptAccounting(fixture: fixture))
+        }
 
         let probe = NativeBenchmarkProbe()
         guard let renderer = CoreTextMetalRenderer(factories: makeFactories(probe: probe)) else {
@@ -416,7 +556,8 @@ private struct NativeRenderPerformanceMain {
             attemptedFrameCount: frames.count,
             copyCompletedFrameCount: frames.filter(\.presented).count,
             failedOrDiscardedFrameCount: frames.filter { !$0.presented }.count,
-            maximumInFlightGenerations: probe.maximumInFlight
+            maximumInFlightGenerations: probe.maximumInFlight,
+            transcriptAccounting: transcriptAccounting
         )
 
         let encoder = JSONEncoder()
@@ -432,9 +573,26 @@ private struct NativeRenderPerformanceMain {
         print("fixture=native-resident-cursor-local-scroll-v1 path=\(rendererPath) device=\(renderer.device.name) os=\(ProcessInfo.processInfo.operatingSystemVersionString) rows=\(residentRowCount) viewport=\(viewportCols)x\(viewportRows) warmup=\(warmupFrameCount) measured=\(measuredFrameCount)")
 
         let failures = NativeRenderPerformanceGate.absoluteFailures(measurement)
-        for failure in failures {
+        var transcriptFailures: [String] = []
+        #if MINGA_TRANSCRIPT_ACCOUNTING
+        for fixture in transcriptAccounting {
+            if fixture.changedEntriesMeasured != 0 {
+                transcriptFailures.append("\(fixture.fixture) measured changed transcript entries in unrelated frames")
+            }
+            if fixture.unchangedEntriesVisited != 0 {
+                transcriptFailures.append("\(fixture.fixture) visited unchanged transcript entries")
+            }
+            if fixture.retainedEntriesCopied != 0 || fixture.retainedUTF8BytesCopied != 0 {
+                transcriptFailures.append("\(fixture.fixture) copied retained transcript payload")
+            }
+            if fixture.sequenceNodeAllocations != 0 {
+                transcriptFailures.append("\(fixture.fixture) allocated transcript sequence nodes")
+            }
+        }
+        #endif
+        for failure in failures + transcriptFailures {
             FileHandle.standardError.write(Data("error: \(failure)\n".utf8))
         }
-        if !failures.isEmpty { exit(1) }
+        if !(failures + transcriptFailures).isEmpty { exit(1) }
     }
 }
