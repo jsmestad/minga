@@ -137,6 +137,49 @@ public final class StatusBarState {
         if self.pendingKeys != data.pendingKeys { self.pendingKeys = data.pendingKeys }
     }
 
+    /// Clears status and mode authority when the BEAM connection is replaced.
+    public func resetProtocolConnection() {
+        contentKind = 0
+        mode = 0
+        cursorLine = 1
+        cursorCol = 1
+        lineCount = 1
+        flags = 0
+        safeMode = false
+        lspStatus = 0
+        gitBranch = ""
+        message = ""
+        filetype = ""
+        errorCount = 0
+        warningCount = 0
+        modelName = ""
+        messageCount = 0
+        sessionStatus = 0
+        infoCount = 0
+        hintCount = 0
+        macroRecording = 0
+        parserStatus = 0
+        agentStatus = 0
+        activeToolName = ""
+        gitAdded = 0
+        gitModified = 0
+        gitDeleted = 0
+        icon = ""
+        iconColorR = 0
+        iconColorG = 0
+        iconColorB = 0
+        filename = ""
+        diagnosticHint = ""
+        backgroundSubagentCount = 0
+        backgroundSubagentLabel = ""
+        indent = .init(kind: 0, size: 2)
+        modelineSegmentsPresent = false
+        modelineLeftSegments = []
+        modelineRightSegments = []
+        selection = .init(mode: 0, size: 0)
+        pendingKeys = ""
+    }
+
     public var modeName: String {
         switch mode {
         case 0: return "NORMAL"

@@ -64,6 +64,15 @@ public final class SettingsState {
         }
     }
 
+    /// Invalidates configuration interactions until the replacement BEAM republishes settings.
+    public func replaceConnection() {
+        encoder = nil
+        isLoading = true
+        themePreviews = []
+        keybindings = []
+        fontPanelCoordinator = nil
+    }
+
     /// Sends a settings query to the BEAM.
     public func query(using encoder: InputEncoder?) {
         self.encoder = encoder

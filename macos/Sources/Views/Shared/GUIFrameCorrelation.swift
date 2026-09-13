@@ -13,12 +13,14 @@ public struct GUIFrameImpact: OptionSet, Sendable, Equatable, Hashable {
     public static let all: GUIFrameImpact = [.shell, .editor, .editorOverlay, .windowOverlay]
 }
 
-/// Identity of a transaction committed by the BEAM.
+/// Identity of a transaction committed by one local BEAM connection.
 public struct GUICommittedFrame: Equatable, Sendable {
+    public let connectionID: UInt64
     public let generation: UInt32
     public let frameSeq: UInt32
 
-    public init(generation: UInt32, frameSeq: UInt32) {
+    public init(connectionID: UInt64 = 0, generation: UInt32, frameSeq: UInt32) {
+        self.connectionID = connectionID
         self.generation = generation
         self.frameSeq = frameSeq
     }

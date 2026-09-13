@@ -152,6 +152,9 @@ final class CommandDispatcher {
     let guiState: GUIState
     private let resourcePolicy: FrameResourcePolicy
 
+    /// Local identity of the BEAM connection whose decoded work may mutate this dispatcher.
+    private(set) var connectionID: UInt64 = 0
+
     /// Records input-to-apply and input-to-presentation as separate milestones.
     /// A committed transaction marks apply only; Metal owns submission/completion.
     let latency = LatencyRecorder()
@@ -185,7 +188,21 @@ final class CommandDispatcher {
 
     /// Promotes the exact captured presentation after its drawable presents successfully.
     func promoteVisibleEditorPresentation(snapshot: CommittedEditorSnapshot, localTransform: EditorLocalPresentationTransform?) {
-        let presentedFrame = editorFrame(for: snapshot)
+        promoteVisibleEditorPresentation(
+            snapshot: snapshot,
+            localTransform: localTransform,
+            connectionID: connectionID
+        )
+    }
+
+    /// Promotes a presentation only when its asynchronous submission belongs to the live connection.
+    func promoteVisibleEditorPresentation(
+        snapshot: CommittedEditorSnapshot,
+        localTransform: EditorLocalPresentationTransform?,
+        connectionID: UInt64
+    ) {
+        guard self.connectionID == connectionID else { return }
+        let presentedFrame = editorFrame(for: snapshot, connectionID: connectionID)
         if let visibleFrame = visibleEditorSnapshot.map(editorFrame(for:)),
            Self.isPresentedFrame(presentedFrame, olderThan: visibleFrame) {
             return
@@ -203,7 +220,11 @@ final class CommandDispatcher {
     }
 
     private func editorFrame(for snapshot: CommittedEditorSnapshot) -> GUICommittedFrame {
-        GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+        editorFrame(for: snapshot, connectionID: connectionID)
+    }
+
+    private func editorFrame(for snapshot: CommittedEditorSnapshot, connectionID: UInt64) -> GUICommittedFrame {
+        GUICommittedFrame(connectionID: connectionID, generation: snapshot.generation, frameSeq: snapshot.frameSeq)
     }
 
     private static func isPresentedFrame(_ lhs: GUICommittedFrame, olderThan rhs: GUICommittedFrame) -> Bool {
@@ -293,6 +314,48 @@ final class CommandDispatcher {
         self.resourcePolicy = resourcePolicy
     }
 
+    /// Installs a replacement BEAM connection and clears every identity-bound protocol authority.
+    func replaceConnection(with connectionID: UInt64) {
+        guard self.connectionID != connectionID else { return }
+
+        latency.replaceConnection()
+        guiState.presentationMetrics.replaceConnection()
+        self.connectionID = connectionID
+
+        let cols = frameState.cols
+        let rows = frameState.rows
+        frameState = FrameState(cols: cols, rows: rows)
+        lastMode = 0
+        lastLineSpacing = 1.0
+        pendingPresentationInputSeq = 0
+        committedEditorSnapshot = nil
+        visibleEditorPresentation = nil
+        pendingEditorPresentationFrame = nil
+
+        openFrameSeq = nil
+        openBaseFrameSeq = 0
+        openGeneration = 0
+        openGenerationIsStale = false
+        transactionBuilder = nil
+        registeredFontIds = [0]
+        lastPublicationOperationCounts = nil
+        lastCommittedFrameSeq = 0
+        lastCommittedGeneration = 0
+        lastTerminalRejection = nil
+        hasCommitted = false
+        resyncRecoveryState = .clean
+
+        fontManager?.resetProtocolRegistrations()
+        guiState.resetProtocolConnection()
+        onLinkCursorChanged?(false)
+        onAgentChatVisibilityChanged?(false)
+    }
+
+    /// Returns true when a queued delivery or asynchronous callback belongs to the live connection.
+    func isCurrentConnection(_ connectionID: UInt64) -> Bool {
+        self.connectionID == connectionID
+    }
+
     /// Entry point from the protocol reader. Routes a decoded command through the
     /// frame-transaction state machine: frame markers open/close transactions,
     /// transaction-scoped commands compile into the prepared builder, and explicitly
@@ -315,6 +378,12 @@ final class CommandDispatcher {
                 resourceWeight: decoded.resourceWeight
             )
         }
+    }
+
+    /// Dispatches one queued packet only when its handoff belongs to the live connection.
+    func dispatch(_ frame: DecodedFrame, connectionID: UInt64) {
+        guard isCurrentConnection(connectionID) else { return }
+        dispatch(frame)
     }
 
     func dispatch(_ command: RenderCommand, opcode: UInt8? = nil) {
@@ -508,6 +577,7 @@ final class CommandDispatcher {
         var finalImpact = transaction.impact
         if clearsResync { finalImpact.formUnion(.windowOverlay) }
         let committed = GUICommittedFrame(
+            connectionID: connectionID,
             generation: transaction.generation,
             frameSeq: transaction.frameSeq
         )
@@ -673,6 +743,12 @@ final class CommandDispatcher {
         }
         PortLogger.error("Protocol decode error: \(failure.error)")
         decodeFailed()
+    }
+
+    /// Applies one queued decode failure only when it belongs to the live connection.
+    func decodedFrameFailed(_ failure: DecodedFrameFailure, connectionID: UInt64) {
+        guard isCurrentConnection(connectionID) else { return }
+        decodedFrameFailed(failure)
     }
 
     /// Surfaced by the protocol reader when `decodeCommands` throws mid-stream.

@@ -215,8 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
-    private var protocolDeliveryTask: Task<Void, Never>?
-    private var protocolEventHandoff: ProtocolEventHandoff?
+    private let protocolEventDelivery = ProtocolEventDelivery()
     private var outboundConnectionState = OutboundConnectionState()
     private var pendingFileURLs: [URL] = []
     private var acceptsOpenRequests = false
@@ -352,6 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resourcePolicy: frameResourcePolicy
         )
         disp.fontManager = fm
+        disp.replaceConnection(with: connectionID)
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
@@ -485,23 +485,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             nsView?.renderFrame()
         }
         disp.onTitleChanged = { [weak appState] title in
-            Task { @MainActor in
-                appState?.windowTitle = title
-            }
+            appState?.windowTitle = title
         }
         disp.onWindowBgChanged = { [weak appState] color in
-            Task { @MainActor in
-                guard let appState else { return }
-                let r = color.redComponent
-                let g = color.greenComponent
-                let b = color.blueComponent
-                let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
-                appState.windowBgIsDark = isDark
-                let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
-                for window in NSApp.windows where window.identifier?.rawValue != "MingaSettingsWindow" {
-                    window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-                    window.backgroundColor = bgColor
-                }
+            guard let appState else { return }
+            let r = color.redComponent
+            let g = color.greenComponent
+            let b = color.blueComponent
+            let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
+            appState.windowBgIsDark = isDark
+            let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
+            for window in NSApp.windows where window.identifier?.rawValue != "MingaSettingsWindow" {
+                window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+                window.backgroundColor = bgColor
             }
         }
 
@@ -516,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start reading protocol commands. One stream consumer preserves the
         // reader's wire order across successful packets and decode failures.
-        let protocolHandoff = installProtocolEventHandoff()
+        let protocolHandoff = installProtocolEventHandoff(connectionID: connectionID)
         let resourcePolicy = frameResourcePolicy
         let reader = ProtocolReader(
             input: protocolInput,
@@ -653,6 +649,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         cancelWorkspaceLifecycleNotifications()
+        protocolEventDelivery.cancel()
         beamManager?.beginAppShutdown()
         encoder?.disconnect(reason: .expectedTeardown)
         protocolReader?.stop()
@@ -793,18 +790,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Replaces the protocol reader and encoder with fresh ones backed by new pipe handles.
     /// Called by BEAMProcessManager.onBEAMReady after a crash restart.
     private func reconnectProtocol(readHandle: FileHandle, writeHandle: FileHandle) {
-        // Stop the old reader (its input pipe is already closed).
-        encoder?.disconnect(reason: .expectedTeardown)
-        protocolReader?.stop()
-
-        // Create new encoder for the new pipe.
         let connectionID = outboundConnectionState.issueID()
-        let enc: ProtocolEncoder
+        let oldEncoder = encoder
+        let oldReader = protocolReader
+        let replacement: ProtocolReconnectWorkflow.Connection
         do {
-            enc = try ProtocolEncoder(
-                output: writeHandle,
+            replacement = try ProtocolReconnectWorkflow.replace(
+                connectionID: connectionID,
+                readHandle: readHandle,
+                writeHandle: writeHandle,
+                oldEncoder: oldEncoder,
+                oldReader: oldReader,
+                resourcePolicy: frameResourcePolicy,
+                invalidate: {
+                    self.protocolEventDelivery.cancel()
+                    self.outboundConnectionState.install(id: connectionID)
+                    self.dispatcher?.replaceConnection(with: connectionID)
+                    self.editorNSView?.invalidateConnection()
+                    self.encoder = nil
+                    self.protocolReader = nil
+                    self.appState.encoder = nil
+                    self.appState.gui.settingsState.encoder = nil
+                    self.applicationQuitCoordinator?.replaceConnection()
+                    self.coreConnectionIsLive = false
+                    PortLogger.clearEncoder()
+                },
                 onTransportFailure: { [weak self] report in
                     self?.handleOutboundTransportFailure(report, connectionID: connectionID)
+                },
+                installEncoder: { encoder in
+                    self.encoder = encoder
+                    self.appState.encoder = encoder
+                    self.appState.gui.settingsState.encoder = encoder
+                    self.editorNSView?.installConnectionEncoder(encoder)
+                    PortLogger.setup(encoder: encoder)
+                },
+                installDelivery: { installedConnectionID in
+                    return self.installProtocolEventHandoff(connectionID: installedConnectionID)
+                },
+                onReaderDisconnect: { [weak self] disconnectedEncoder, disconnectedConnectionID in
+                    Task { @MainActor in
+                        self?.handleOutboundReaderDisconnect(
+                            encoder: disconnectedEncoder,
+                            connectionID: disconnectedConnectionID
+                        )
+                    }
                 }
             )
         } catch let error as OutboundTransportInitializationError {
@@ -817,50 +847,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             return
         }
-        self.encoder = enc
-        appState.encoder = enc
-        appState.gui.settingsState.encoder = enc
-        PortLogger.setup(encoder: enc)
+        self.protocolReader = replacement.reader
 
-        // Capture for the background-thread disconnect callback.
-        let disconnectEncoder = enc
-
-        // Create new reader for the new pipe. Reconnection replaces the one
-        // ordered stream consumer instead of spawning a task per event.
-        let protocolHandoff = installProtocolEventHandoff()
-        let resourcePolicy = frameResourcePolicy
-        let reader = ProtocolReader(
-            input: readHandle,
-            maxPayloadLength: resourcePolicy.wire.payloadBytes,
-            decoder: { [resourcePolicy] data in
-                try decodeFrame(from: data, policy: resourcePolicy)
-            },
-            handler: { frame in
-                protocolHandoff.deliver(frame)
-            },
-            onDecodeFailure: { error in
-                protocolHandoff.deliver(error)
-            },
-            onDisconnect: { [weak self] in
-                Task { @MainActor in
-                    self?.handleOutboundReaderDisconnect(
-                        encoder: disconnectEncoder,
-                        connectionID: connectionID
-                    )
-                }
-            },
-            acquireAdmission: { protocolHandoff.acquireAdmission() },
-            cancelAdmission: { protocolHandoff.cancel() }
-        )
-        reader.start()
-        self.protocolReader = reader
-
-        // Update the editor view's encoder reference so keystrokes
-        // go to the new BEAM process, not the dead pipe.
-        editorNSView?.encoder = enc
-        outboundConnectionState.install(id: connectionID)
         recoveryManager?.transportDidReconnect()
-        applicationQuitCoordinator?.replaceConnection()
         coreConnectionIsLive = true
 
         // Re-send ready event so the new BEAM knows our dimensions.
@@ -868,7 +857,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let gutterPad: CGFloat = (nsView.dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
             let cols = UInt16(max((nsView.bounds.width - gutterPad) / CGFloat(nsView.cellWidth), 1))
             let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
-            enc.sendReady(cols: cols, rows: rows)
+            replacement.encoder.sendReady(cols: cols, rows: rows)
         }
 
         sendCurrentPowerThermalState(reason: "Power state after BEAM reconnect")
@@ -967,28 +956,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Protocol handling
 
-    private func installProtocolEventHandoff() -> ProtocolEventHandoff {
-        // Cancel the old handoff first so its producer cannot deliver stale work.
-        protocolEventHandoff?.cancel()
-        protocolDeliveryTask?.cancel()
-        let handoff = ProtocolEventHandoff()
-        protocolEventHandoff = handoff
-        protocolDeliveryTask = Task { @MainActor [weak self] in
-            for await event in handoff.events {
-                handoff.releaseAdmission()
+    private func installProtocolEventHandoff(connectionID: UInt64) -> ProtocolEventHandoff {
+        protocolEventDelivery.replace(
+            connectionID: connectionID,
+            isCurrent: { [weak self] candidate in
+                self?.outboundConnectionState.isCurrent(candidate) == true
+            },
+            consume: { [weak self] event, eventConnectionID in
                 guard let self else { return }
                 switch event {
                 case .frame(let frame):
-                    self.handleDecodedFrame(frame)
+                    self.handleDecodedFrame(frame, connectionID: eventConnectionID)
                 case .failure(let failure):
-                    self.handleProtocolDecodeFailure(failure)
+                    self.handleProtocolDecodeFailure(failure, connectionID: eventConnectionID)
                 }
             }
-        }
-        return handoff
+        )
     }
 
-    private func handleDecodedFrame(_ frame: DecodedFrame) {
+    private func handleDecodedFrame(_ frame: DecodedFrame, connectionID: UInt64) {
         os_signpost(
             .event,
             log: protocolLog,
@@ -998,12 +984,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frame.metrics.actorHopCount
         )
         guard let dispatcher else { return }
-        dispatcher.dispatch(frame)
+        dispatcher.dispatch(frame, connectionID: connectionID)
     }
 
-    private func handleProtocolDecodeFailure(_ failure: DecodedFrameFailure) {
+    private func handleProtocolDecodeFailure(_ failure: DecodedFrameFailure, connectionID: UInt64) {
         // The packet is transactional: no command from it crossed actor isolation.
-        dispatcher?.decodedFrameFailed(failure)
+        dispatcher?.decodedFrameFailed(failure, connectionID: connectionID)
     }
 
     private func handleOutboundTransportFailure(

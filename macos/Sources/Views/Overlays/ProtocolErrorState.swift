@@ -4,8 +4,7 @@
 /// protocol_version does not match the BEAM's compiled-in version, so the
 /// frontend will never reach ready. Instead of leaving a blank window, the UI
 /// shows a blocking full-window overlay carrying the BEAM-supplied reason
-/// (ticket #2237). Once set, the error latches: a version mismatch is fatal for
-/// this session, so nothing clears it.
+/// (ticket #2237). Once set, the error latches for that protocol connection.
 
 import SwiftUI
 
@@ -20,9 +19,13 @@ public final class ProtocolErrorState {
     /// Whether the blocking error overlay should be shown.
     public var isPresented: Bool { message != nil }
 
-    /// Latches a protocol_error reason. A version mismatch is fatal for the
-    /// session, so this is intentionally one-way: there is no reset.
+    /// Latches a protocol_error reason for the active connection.
     public func present(message: String) {
         self.message = message
+    }
+
+    /// Clears a prior connection's fatal handshake result before replacement admission starts.
+    public func resetConnection() {
+        message = nil
     }
 }

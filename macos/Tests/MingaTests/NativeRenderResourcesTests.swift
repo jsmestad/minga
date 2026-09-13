@@ -3,6 +3,7 @@ import Metal
 import MingaProtocol
 @testable import MingaUI
 import QuartzCore
+import Synchronization
 import Testing
 
 private final class NativeTestDrawable: NSObject, CAMetalDrawable {
@@ -775,6 +776,70 @@ struct NativeRenderResourcesTests {
             .init(frame: committedFrame, domain: .editor, outcome: .presented)
         ])
         #expect(renderer.lastCompletedPresentationGeneration == 1)
+        #expect(renderer.activeResourceSnapshot() != before)
+    }
+
+    @Test("old connection completion retires its slot without presenting or promoting resources")
+    @MainActor func oldConnectionCompletionOnlyRetiresResources() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 64, height: 64, mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        let texture = try #require(device.makeTexture(descriptor: descriptor))
+
+        typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+        var completions: [Completion] = []
+        var presentCalls = 0
+        var promotedConnections: [UInt64] = []
+        let currentConnectionID = Mutex<UInt64>(1)
+        var factories = nativeTestFactories()
+        factories.observeCompletion = { _, completion in completions.append(completion) }
+        factories.present = { _ in presentCalls += 1 }
+        let renderer = try #require(CoreTextMetalRenderer(factories: factories))
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
+        let before = renderer.activeResourceSnapshot()
+        let oldFrame = GUICommittedFrame(connectionID: 1, generation: 9, frameSeq: 90)
+
+        renderer.render(
+            frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
+            drawableProvider: { NativeTestDrawable(texture: texture) },
+            viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+            presentationInputSeq: 1, presentationFrame: oldFrame,
+            connectionID: 1,
+            isPresentationCurrent: { currentConnectionID.withLock { $0 == 1 } },
+            onPresented: { _ in promotedConnections.append(1) }
+        )
+        #expect(renderer.inFlightPresentationCount == 1)
+        #expect(completions.count == 1)
+
+        currentConnectionID.withLock { $0 = 2 }
+        completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(renderer.inFlightPresentationCount == 0)
+        #expect(completions.count == 1)
+        #expect(presentCalls == 0)
+        #expect(promotedConnections.isEmpty)
+        #expect(renderer.activeResourceSnapshot() == before)
+
+        let newFrame = GUICommittedFrame(connectionID: 2, generation: 1, frameSeq: 1)
+        renderer.render(
+            frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
+            drawableProvider: { NativeTestDrawable(texture: texture) },
+            viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
+            presentationInputSeq: 2, presentationFrame: newFrame,
+            connectionID: 2,
+            isPresentationCurrent: { currentConnectionID.withLock { $0 == 2 } },
+            onPresented: { _ in promotedConnections.append(2) }
+        )
+        #expect(completions.count == 2)
+        completions[1](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(completions.count == 3)
+        completions[2](true, Int(MTLCommandBufferStatus.completed.rawValue))
+
+        #expect(renderer.inFlightPresentationCount == 0)
+        #expect(presentCalls == 1)
+        #expect(promotedConnections == [2])
         #expect(renderer.activeResourceSnapshot() != before)
     }
 

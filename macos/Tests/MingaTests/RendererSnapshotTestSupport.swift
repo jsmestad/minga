@@ -109,6 +109,8 @@ extension CoreTextMetalRenderer {
         presentationInputSeq: UInt32 = 0,
         presentationFrame: GUICommittedFrame? = nil,
         latencyRecorder: LatencyRecorder? = nil,
+        connectionID: UInt64 = 0,
+        isPresentationCurrent: @escaping @MainActor () -> Bool = { true },
         onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }
     ) {
         let snapshot = rendererSnapshot(
@@ -135,6 +137,8 @@ extension CoreTextMetalRenderer {
             presentationWindowId: presentationWindowId,
             presentationInputSeq: presentationInputSeq,
             latencyRecorder: latencyRecorder,
+            connectionID: connectionID,
+            isPresentationCurrent: isPresentationCurrent,
             onPresented: onPresented
         )
     }

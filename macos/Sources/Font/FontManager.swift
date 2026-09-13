@@ -70,6 +70,14 @@ final class FontManager {
         PortLogger.info("Registered font '\(name)' at id=\(id)")
     }
 
+    /// Restores protocol font IDs to the startup baseline for a replacement BEAM connection.
+    func resetProtocolRegistrations() {
+        registeredFontFamilies.removeAll(keepingCapacity: true)
+        secondaryFonts.removeAll(keepingCapacity: true)
+        fallbackFamilies.removeAll(keepingCapacity: true)
+        primary.setFallbackFonts([])
+    }
+
     /// Returns the FontFace for a given font_id. Falls back to primary if not found.
     func fontFace(for fontId: UInt8) -> FontFace {
         if fontId == 0 { return primary }

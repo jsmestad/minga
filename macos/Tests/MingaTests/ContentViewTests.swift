@@ -330,6 +330,33 @@ struct ContentViewTests {
         }
     }
 
+    private func appendUInt32(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8((value >> 24) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
+    }
+
+    private func framedKeyframe(generation: UInt32, frameSeq: UInt32) -> Data {
+        var payload = Data([OP_BEGIN_FRAME])
+        appendUInt32(frameSeq, to: &payload)
+        appendUInt32(0, to: &payload)
+        appendUInt32(generation, to: &payload)
+        payload.append(OP_GUI_THEME)
+        payload.append(UInt8(CommandDispatcher.requiredThemeSlots.count))
+        for slot in CommandDispatcher.requiredThemeSlots {
+            payload.append(contentsOf: [slot, slot, slot, slot])
+        }
+        payload.append(OP_COMMIT_FRAME)
+        appendUInt32(frameSeq, to: &payload)
+        appendUInt32(0, to: &payload)
+
+        var framed = Data()
+        appendUInt32(UInt32(payload.count), to: &framed)
+        framed.append(payload)
+        return framed
+    }
+
     private func preciseScrollEvent(
         window: NSWindow,
         locationInWindow: NSPoint,
@@ -838,6 +865,230 @@ struct ContentViewTests {
         #expect(after.selectionDragStarted == before.selectionDragStarted)
         #expect(after.scrollWindowId == before.scrollWindowId)
         #expect(after.scrollOffset == before.scrollOffset)
+
+        editorView.replaceConnection(encoder: SpyEncoder())
+        let replaced = editorView.interactionSnapshot
+        #expect(replaced.hasMarkedText == false)
+        #expect(replaced.markedRange.location == NSNotFound)
+        #expect(replaced.markedRange.length == 0)
+        #expect(replaced.hoverRow == -1)
+        #expect(replaced.hoverCol == -1)
+        #expect(replaced.selectionDragActive == false)
+        #expect(replaced.selectionDragStarted == false)
+        #expect(replaced.scrollWindowId == nil)
+        #expect(replaced.scrollOffset == .zero)
+    }
+
+    @Test("connection replacement consumes old mouse gesture tails and admits fresh gestures")
+    func connectionReplacementGatesMouseGestureTails() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let oldEncoder = SpyEncoder()
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldEncoder)
+        editorView.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let point = NSPoint(x: 20, y: 20)
+        let leftDown = try #require(mouseEvent(type: .leftMouseDown, locationInWindow: point, windowNumber: 0))
+        let leftDrag = try #require(mouseEvent(type: .leftMouseDragged, locationInWindow: point, windowNumber: 0))
+        let leftUp = try #require(mouseEvent(type: .leftMouseUp, locationInWindow: point, windowNumber: 0))
+        let middleDown = try #require(mouseEvent(type: .otherMouseDown, locationInWindow: point, windowNumber: 0))
+        let middleUp = try #require(mouseEvent(type: .otherMouseUp, locationInWindow: point, windowNumber: 0))
+        let rightUp = try #require(mouseEvent(type: .rightMouseUp, locationInWindow: point, windowNumber: 0))
+
+        editorView.mouseDown(with: leftDown)
+        editorView.otherMouseDown(with: middleDown)
+        editorView.beginMousePressForTesting(button: MOUSE_BUTTON_RIGHT)
+        let oldGeneration = editorView.interactionSnapshot.inputConnectionGeneration
+
+        let intermediateEncoder = SpyEncoder()
+        editorView.replaceConnection(encoder: intermediateEncoder)
+        #expect(editorView.interactionSnapshot.consumesLeftGestureTail)
+        #expect(editorView.interactionSnapshot.consumesRightGestureTail)
+        #expect(editorView.interactionSnapshot.consumesMiddleGestureTail)
+
+        let replacementEncoder = SpyEncoder()
+        editorView.replaceConnection(encoder: replacementEncoder)
+        #expect(editorView.interactionSnapshot.consumesLeftGestureTail)
+        #expect(editorView.interactionSnapshot.consumesRightGestureTail)
+        #expect(editorView.interactionSnapshot.consumesMiddleGestureTail)
+
+        editorView.mouseDragged(with: leftDrag)
+        editorView.mouseUp(with: leftUp)
+        editorView.rightMouseUp(with: rightUp)
+        editorView.otherMouseUp(with: middleUp)
+        editorView.performContextMenuActionForTesting("select_all", connectionGeneration: oldGeneration)
+        #expect(intermediateEncoder.mouseEventCalls.isEmpty)
+        #expect(intermediateEncoder.guiActions.isEmpty)
+        #expect(replacementEncoder.mouseEventCalls.isEmpty)
+        #expect(replacementEncoder.guiActions.isEmpty)
+
+        let replacementGeneration = editorView.interactionSnapshot.inputConnectionGeneration
+        editorView.mouseDown(with: leftDown)
+        editorView.mouseUp(with: leftUp)
+        editorView.otherMouseDown(with: middleDown)
+        editorView.otherMouseUp(with: middleUp)
+        editorView.performContextMenuActionForTesting("select_all", connectionGeneration: replacementGeneration)
+
+        #expect(replacementEncoder.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE, MOUSE_PRESS, MOUSE_RELEASE])
+        #expect(replacementEncoder.guiActions == [.executeCommand(name: "select_all")])
+    }
+
+    @Test("production reconnect workflow accepts a lower keyframe from controlled pipes", .timeLimit(.minutes(1)))
+    func productionReconnectAcceptsControlledPipeKeyframe() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        dispatcher.replaceConnection(with: 1)
+        dispatcher.dispatch(.beginFrame(frameSeq: 90, baseFrameSeq: 0, generation: 40))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 90, seq: 0))
+        #expect(dispatcher.lastCommittedFrameSeq == 90)
+
+        let oldOutput = Pipe()
+        let oldEncoder = try ProtocolEncoder(output: oldOutput.fileHandleForWriting)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldEncoder)
+        let replacementInput = Pipe()
+        let replacementOutput = Pipe()
+        let delivery = ProtocolEventDelivery()
+        var currentConnectionID: UInt64 = 1
+        let results = AsyncStream.makeStream(of: FrameTransactionResult.self, bufferingPolicy: .bufferingNewest(1))
+        dispatcher.onTransactionResult = { results.continuation.yield($0) }
+
+        let connection = try ProtocolReconnectWorkflow.replace(
+            connectionID: 2,
+            readHandle: replacementInput.fileHandleForReading,
+            writeHandle: replacementOutput.fileHandleForWriting,
+            oldEncoder: oldEncoder,
+            oldReader: nil,
+            resourcePolicy: .default,
+            invalidate: {
+                delivery.cancel()
+                currentConnectionID = 2
+                dispatcher.replaceConnection(with: 2)
+                editorView.invalidateConnection()
+            },
+            onTransportFailure: { _ in },
+            installEncoder: { encoder in
+                editorView.installConnectionEncoder(encoder)
+            },
+            installDelivery: { connectionID in
+                delivery.replace(
+                    connectionID: connectionID,
+                    isCurrent: { $0 == currentConnectionID },
+                    consume: { event, deliveredConnectionID in
+                        switch event {
+                        case .frame(let frame):
+                            dispatcher.dispatch(frame, connectionID: deliveredConnectionID)
+                        case .failure(let failure):
+                            dispatcher.decodedFrameFailed(failure, connectionID: deliveredConnectionID)
+                        }
+                    }
+                )
+            },
+            onReaderDisconnect: { encoder, _ in
+                encoder.disconnect(reason: .unexpectedPeerClosure)
+            }
+        )
+        #expect(editorView.interactionSnapshot.inputEnabled)
+
+        try replacementInput.fileHandleForWriting.write(contentsOf: framedKeyframe(generation: 1, frameSeq: 1))
+        var iterator = results.stream.makeAsyncIterator()
+        let result = await iterator.next()
+
+        #expect(result == .applied(generation: 1, frameSeq: 1))
+        #expect(dispatcher.lastCommittedGeneration == 1)
+        #expect(dispatcher.lastCommittedFrameSeq == 1)
+        #expect(dispatcher.pendingPresentationFrame()?.connectionID == 2)
+        let replacementSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: replacementSnapshot,
+            localTransform: nil,
+            connectionID: 2
+        )
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+
+        connection.reader.stop()
+        replacementInput.fileHandleForWriting.closeFile()
+        replacementOutput.fileHandleForReading.closeFile()
+    }
+
+    @Test("failed reconnect construction leaves old connection nonsemantic and disconnected")
+    func failedReconnectConstructionInvalidatesOldConnection() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        dispatcher.replaceConnection(with: 1)
+        dispatcher.dispatch(.beginFrame(frameSeq: 90, baseFrameSeq: 0, generation: 40))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 90, seq: 0))
+        let oldSnapshot = try #require(dispatcher.committedEditorSnapshot)
+
+        let oldOutput = Pipe()
+        let oldEncoder = try ProtocolEncoder(output: oldOutput.fileHandleForWriting)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldEncoder)
+        let delivery = ProtocolEventDelivery()
+        var currentConnectionID: UInt64 = 1
+        let oldHandoff = delivery.replace(
+            connectionID: 1,
+            isCurrent: { $0 == currentConnectionID },
+            consume: { event, connectionID in
+                switch event {
+                case .frame(let frame):
+                    dispatcher.dispatch(frame, connectionID: connectionID)
+                case .failure(let failure):
+                    dispatcher.decodedFrameFailed(failure, connectionID: connectionID)
+                }
+            }
+        )
+        #expect(oldHandoff.acquireAdmission())
+        var activeEncoder: InputEncoder? = oldEncoder
+        var installedReplacement = false
+
+        do {
+            _ = try ProtocolReconnectWorkflow.replace(
+                connectionID: 2,
+                readHandle: Pipe().fileHandleForReading,
+                writeHandle: Pipe().fileHandleForWriting,
+                oldEncoder: oldEncoder,
+                oldReader: nil,
+                resourcePolicy: .default,
+                invalidate: {
+                    delivery.cancel()
+                    currentConnectionID = 2
+                    dispatcher.replaceConnection(with: 2)
+                    editorView.invalidateConnection()
+                    activeEncoder = nil
+                },
+                encoderFactory: { _ in
+                    #expect(currentConnectionID == 2)
+                    #expect(dispatcher.committedEditorSnapshot == nil)
+                    #expect(editorView.interactionSnapshot.inputEnabled == false)
+                    throw OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: EIO)
+                },
+                onTransportFailure: { _ in },
+                installEncoder: { encoder in
+                    installedReplacement = true
+                    activeEncoder = encoder
+                    editorView.installConnectionEncoder(encoder)
+                },
+                installDelivery: { _ in
+                    Issue.record("failed construction must not install replacement delivery")
+                    return ProtocolEventHandoff(connectionID: 2)
+                },
+                onReaderDisconnect: { _, _ in }
+            )
+            Issue.record("expected encoder construction failure")
+        } catch let error as OutboundTransportInitializationError {
+            #expect(error == .nonBlockingSetupFailed(errorCode: EIO))
+        }
+
+        #expect(currentConnectionID == 2)
+        #expect(activeEncoder == nil)
+        #expect(installedReplacement == false)
+        #expect(oldHandoff.acquireAdmission() == false)
+        #expect(dispatcher.connectionID == 2)
+        #expect(dispatcher.committedEditorSnapshot == nil)
+        #expect(dispatcher.visibleEditorSnapshot == nil)
+        #expect(editorView.interactionSnapshot.inputEnabled == false)
+        dispatcher.promoteVisibleEditorPresentation(snapshot: oldSnapshot, localTransform: nil, connectionID: 1)
+        #expect(dispatcher.visibleEditorSnapshot == nil)
     }
 
 }

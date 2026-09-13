@@ -78,6 +78,40 @@ public final class GUIState {
         themeBacking.current = replacement
     }
 
+    /// Clears BEAM-owned chrome and editor projections before a replacement connection starts.
+    public func resetProtocolConnection() {
+        themeBacking.current = ThemeColors()
+        windowContentBacking.current = [:]
+        settingsState.replaceConnection()
+        notificationCenterState.update(rawNotifications: [])
+        tabBarState.hide()
+        emptyStateState.hide()
+        workspaceState.hide()
+        sidebarHostState.update(activeId: "", sidebars: [])
+        fileTreeState.hide()
+        gitStatusState.hide()
+        observatoryState.hide()
+        completionState.hide()
+        whichKeyState.hide()
+        breadcrumbState.hide()
+        statusBarState.resetProtocolConnection()
+        feedbackState.cancel()
+        pickerState.hide()
+        agentChatState.hide()
+        bottomPanelState.hide()
+        minibufferState.hide()
+        hoverPopupState.hide()
+        signatureHelpState.hide()
+        floatPopupState.hide()
+        agentContextBarState.hide()
+        editTimelineState.update(visible: false, viewingIndex: 0xFFFF, wireEntries: [], wireFiles: [])
+        extensionOverlayState.update([])
+        extensionPanelState.update([])
+        searchState.hide()
+        protocolErrorState.resetConnection()
+        resyncState.clear()
+    }
+
     /// Native settings panel state.
     public let settingsState = SettingsState()
 

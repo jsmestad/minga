@@ -385,9 +385,11 @@ final class CoreTextMetalRenderer {
                 presentationWindowId: UInt16? = nil,
                 presentationInputSeq: UInt32 = 0,
                 latencyRecorder: LatencyRecorder? = nil,
+                connectionID: UInt64 = 0,
+                isPresentationCurrent: @escaping @MainActor () -> Bool = { true },
                 onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) {
         guard let reservation = presentationGeneration.issue(slotCount: Self.nativeFrameSlotCount) else {
-            let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+            let presentationFrame = GUICommittedFrame(connectionID: connectionID, generation: snapshot.generation, frameSeq: snapshot.frameSeq)
             recordNativeFailure(NativePresentationFailure(
                 phase: .command, dimension: .submission,
                 frameSequence: presentationInputSeq, reason: .unavailable
@@ -406,7 +408,7 @@ final class CoreTextMetalRenderer {
         let metadata = snapshot.metadata
         let themeColors = snapshot.themeColors
         let surfaces = snapshot.surfaces
-        let presentationFrame = GUICommittedFrame(generation: snapshot.generation, frameSeq: snapshot.frameSeq)
+        let presentationFrame = GUICommittedFrame(connectionID: connectionID, generation: snapshot.generation, frameSeq: snapshot.frameSeq)
         let presentedSnapshot = snapshot
         let renderSignpostID = OSSignpostID(log: renderLog)
         os_signpost(.begin, log: renderLog, name: "Frame", signpostID: renderSignpostID)
@@ -1580,6 +1582,7 @@ final class CoreTextMetalRenderer {
             defer {
                 if !presentationSubmitted { self.presentationGeneration.retire(generation) }
             }
+            guard isPresentationCurrent() else { return }
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
             os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID,
                         "commit_to_complete_ms=%{public}.3f", completionLatencyMs)
@@ -1668,6 +1671,7 @@ final class CoreTextMetalRenderer {
             self.factories.observeCompletion(presentationBuffer) { [weak self] copied, _ in
                 guard let self else { return }
                 defer { self.presentationGeneration.retire(generation) }
+                guard isPresentationCurrent() else { return }
                 guard copied else {
                     self.recordNativeFailure(NativePresentationFailure(
                         phase: .completion, dimension: .presentationCopy,
@@ -1743,6 +1747,10 @@ final class CoreTextMetalRenderer {
             completedGeneration: lastCompletedPresentationGeneration
         )
     }
+
+    #if DEBUG
+    var inFlightPresentationCount: Int { presentationGeneration.inFlightCount }
+    #endif
 
     private func recordNativeFailure(
         _ failure: NativePresentationFailure,
