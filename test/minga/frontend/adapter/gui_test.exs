@@ -238,6 +238,61 @@ defmodule Minga.Frontend.Adapter.GUITest do
       decoded = recovery.metal_commands |> hd() |> GUIWindowDecoder.decode()
       assert decoded.rows |> hd() |> Map.fetch!(:text) == "new"
     end
+
+    test "whole-frame acknowledgements keep consecutive row edits incremental" do
+      original = row(0, "original", 1)
+      window = window([original])
+
+      full = GUI.encode(render_model(window), Caches.new())
+      caches = Caches.acknowledge_pending_window_deltas(full.caches)
+
+      first_edit = %{original | text: "first edit", content_hash: 2}
+      first_delta = GUI.encode(render_model(%{window | rows: [first_edit]}), caches)
+      caches = Caches.acknowledge_pending_window_deltas(first_delta.caches)
+
+      second_edit = %{first_edit | text: "second edit", content_hash: 3}
+      second_delta = GUI.encode(render_model(%{window | rows: [second_edit]}), caches)
+
+      assert Enum.map(full.metal_commands, &opcode/1) == [WindowEncoder.opcode()]
+
+      assert Enum.map(first_delta.metal_commands, &opcode/1) == [
+               Minga.Protocol.Opcodes.gui_window_rows_delta()
+             ]
+
+      assert Enum.map(second_delta.metal_commands, &opcode/1) == [
+               Minga.Protocol.Opcodes.gui_window_rows_delta()
+             ]
+    end
+
+    test "acknowledged viewport delta keeps unchanged and changed windows incremental" do
+      row0 = row(0, "zero", 1)
+      row1 = row(1, "one", 2)
+      row2 = row(2, "two", 3)
+      window = window([row0, row1])
+
+      full = GUI.encode(render_model(window), Caches.new())
+      caches = Caches.acknowledge_pending_window_deltas(full.caches)
+
+      scrolled = %{window | rows: [row1, row2], cursor_row: 1}
+      viewport_delta = GUI.encode(render_model(scrolled), caches)
+      caches = Caches.acknowledge_pending_window_deltas(viewport_delta.caches)
+
+      unchanged = GUI.encode(render_model(scrolled), caches)
+      caches = Caches.acknowledge_pending_window_deltas(unchanged.caches)
+
+      changed_row = %{row2 | text: "changed", content_hash: 4}
+      changed = GUI.encode(render_model(%{scrolled | rows: [row1, changed_row]}), caches)
+
+      assert Enum.map(viewport_delta.metal_commands, &opcode/1) == [
+               Minga.Protocol.Opcodes.gui_window_viewport_delta()
+             ]
+
+      refute WindowEncoder.opcode() in Enum.map(unchanged.metal_commands, &opcode/1)
+
+      assert Enum.map(changed.metal_commands, &opcode/1) == [
+               Minga.Protocol.Opcodes.gui_window_rows_delta()
+             ]
+    end
   end
 
   describe "encode_ui/2" do
@@ -280,4 +335,32 @@ defmodule Minga.Frontend.Adapter.GUITest do
   end
 
   defp opcode(<<opcode, _rest::binary>>), do: opcode
+
+  defp render_model(window),
+    do: RenderModel.new([window], %RenderModel.UI{}, Cursor.new(0, 0, :block))
+
+  defp window(rows) do
+    %Window{
+      window_id: 1,
+      content_kind: :buffer,
+      rect: {0, 0, 80, 20},
+      rows: rows,
+      cursor_row: 0,
+      cursor_col: 0,
+      cursor_shape: :block,
+      content_epoch: 1,
+      full_refresh: false
+    }
+  end
+
+  defp row(line, text, hash) do
+    %Row{
+      row_id: Row.stable_id(:normal, line),
+      row_type: :normal,
+      buf_line: line,
+      text: text,
+      spans: [],
+      content_hash: hash
+    }
+  end
 end

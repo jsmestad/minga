@@ -1,6 +1,8 @@
 defmodule MingaEditor.Renderer.Caches do
   @moduledoc "Explicit render-pipeline cache state retained by the renderer."
 
+  alias Minga.Frontend.Adapter.GUI.Caches, as: GUICaches
+
   defstruct chrome_prev_fingerprint: nil,
             chrome_prev_result: nil,
             search_decoration_cache: nil,
@@ -73,7 +75,14 @@ defmodule MingaEditor.Renderer.Caches do
   @spec acknowledge_frame(t(), non_neg_integer(), non_neg_integer()) :: t()
   def acknowledge_frame(%__MODULE__{} = caches, frame_seq, generation)
       when is_integer(frame_seq) and frame_seq >= 0 and is_integer(generation) and generation >= 0 do
-    %{caches | last_acknowledged_frame_seq: frame_seq, recovery_generation: generation}
+    adapter_gui_caches = GUICaches.acknowledge_pending_window_deltas(caches.adapter_gui_caches)
+
+    %{
+      caches
+      | last_acknowledged_frame_seq: frame_seq,
+        recovery_generation: generation,
+        adapter_gui_caches: adapter_gui_caches
+    }
   end
 
   @spec reset_frontend_state(t()) :: t()

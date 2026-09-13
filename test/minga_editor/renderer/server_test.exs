@@ -8,6 +8,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   # Registers a fake shell in the global shell registry for async-render opt-out coverage.
   use ExUnit.Case, async: false
 
+  alias Minga.Frontend.Adapter.GUI.Caches, as: GUICaches
   alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.Layout
@@ -305,6 +306,31 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   describe "frame acknowledgement credit" do
+    test "only a matching frame acknowledgement promotes every pending GUI window delta" do
+      renderer =
+        start_ack_renderer(self(), pipeline: pending_window_delta_probe_pipeline(self()))
+
+      RendererServer.cast_snapshot(renderer, stub_intent(), 9)
+      assert_receive {:pending_window_deltas, 9, [1, 2]}, @async_render_timeout
+
+      assert {:awaiting_ack, lease, nil} = :sys.get_state(renderer).frame_credit
+      assert lease.output.caches.adapter_gui_caches.pending_window_delta_ids == MapSet.new([1, 2])
+
+      RendererServer.frame_status(renderer, {:frame_applied, 2, 9})
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 8})
+
+      unmatched = :sys.get_state(renderer)
+      assert unmatched.caches.adapter_gui_caches.last_window_content_fps == %{}
+      assert {:awaiting_ack, ^lease, nil} = unmatched.frame_credit
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 9})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 9}}, @async_render_timeout
+
+      committed = :sys.get_state(renderer).caches.adapter_gui_caches
+      assert committed.last_window_content_fps == %{1 => 101, 2 => 202}
+      assert committed.pending_window_delta_ids == MapSet.new()
+    end
+
     test "apply advances the base while duplicate, out-of-order, stale, and wrong-generation statuses do not" do
       renderer = start_ack_renderer(self())
 
@@ -335,15 +361,19 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
 
     test "acknowledgement timeout retries the latest pending frame as a fresh-generation keyframe" do
-      renderer = start_ack_renderer(self())
+      renderer =
+        start_ack_renderer(self(), pipeline: first_generation_pending_delta_pipeline(self()))
 
       RendererServer.cast_snapshot(renderer, stub_intent(), 10)
       assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
+      assert pending_lease_window_ids(renderer) == MapSet.new([1, 2])
       RendererServer.cast_snapshot(renderer, stub_intent(), 11)
 
       send(renderer, {:frame_ack_timeout, 1, 10})
 
       assert_receive {:ack_pipeline, 11, 2, 0, true}, @async_render_timeout
+      assert pending_lease_window_ids(renderer) == MapSet.new()
+      assert :sys.get_state(renderer).caches.adapter_gui_caches.last_window_content_fps == %{}
       assert RendererServer.acknowledgement_state(renderer) == {2, 0}
       refute_receive {:render_done, %RenderReceipt{frame_seq: 10}}, 50
     end
@@ -384,10 +414,12 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
 
     test "retryable rejection renders only latest pending intent as a fresh-generation keyframe" do
-      renderer = start_ack_renderer(self())
+      renderer =
+        start_ack_renderer(self(), pipeline: first_generation_pending_delta_pipeline(self()))
 
       RendererServer.cast_snapshot(renderer, stub_intent(), 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+      assert pending_lease_window_ids(renderer) == MapSet.new([1, 2])
       RendererServer.cast_snapshot(renderer, stub_intent(), 21)
 
       RendererServer.frame_status(
@@ -396,6 +428,8 @@ defmodule MingaEditor.Renderer.ServerTest do
       )
 
       assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
+      assert pending_lease_window_ids(renderer) == MapSet.new()
+      assert :sys.get_state(renderer).caches.adapter_gui_caches.last_window_content_fps == %{}
       assert RendererServer.acknowledgement_state(renderer) == {2, 0}
       refute_receive {:ack_pipeline, _, 3, _, _}, 50
       refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
@@ -1192,6 +1226,40 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
+  defp pending_window_delta_probe_pipeline(parent) do
+    fn input ->
+      send(parent, {:pending_window_deltas, input.frame_seq, [1, 2]})
+      input |> put_pending_window_deltas() |> put_emitted_frame_seq()
+    end
+  end
+
+  defp first_generation_pending_delta_pipeline(parent) do
+    acknowledge = acknowledgement_probe_pipeline(parent)
+
+    fn input ->
+      output = acknowledge.(input)
+
+      if input.caches.recovery_generation == 1,
+        do: put_pending_window_deltas(output),
+        else: output
+    end
+  end
+
+  defp put_pending_window_deltas(input) do
+    %GUICaches{} = adapter_gui_caches = input.caches.adapter_gui_caches
+
+    adapter_gui_caches = %GUICaches{
+      adapter_gui_caches
+      | last_window_content_fps: %{1 => 101, 2 => 202},
+        pending_window_delta_ids: MapSet.new([1, 2])
+    }
+
+    %{input | caches: %{input.caches | adapter_gui_caches: adapter_gui_caches}}
+  end
+
+  defp put_emitted_frame_seq(input),
+    do: %{input | caches: %{input.caches | last_emitted_frame_seq: input.frame_seq}}
+
   defp adaptation_probe_pipeline(parent) do
     fn input ->
       keyframe? =
@@ -1368,6 +1436,11 @@ defmodule MingaEditor.Renderer.ServerTest do
     else
       false
     end
+  end
+
+  defp pending_lease_window_ids(renderer) do
+    {:awaiting_ack, lease, _successor} = :sys.get_state(renderer).frame_credit
+    lease.output.caches.adapter_gui_caches.pending_window_delta_ids
   end
 
   defp reject_base_sequence_mismatch(renderer, generation, frame_seq, last_applied) do
