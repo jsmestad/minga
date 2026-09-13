@@ -5,9 +5,10 @@ defmodule Minga.RenderModel.UI.FileTree.Editing do
 
   @type t :: %__MODULE__{
           type: editing_type(),
-          text: String.t()
+          text: String.t(),
+          token: pos_integer()
         }
 
-  @enforce_keys [:type, :text]
-  defstruct [:type, :text]
+  @enforce_keys [:type, :text, :token]
+  defstruct [:type, :text, :token]
 end

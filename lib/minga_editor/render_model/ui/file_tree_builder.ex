@@ -119,7 +119,9 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
 
   @spec editing_model(FileTreeState.editing() | nil) :: FileTreeEditingModel.t() | nil
   defp editing_model(nil), do: nil
-  defp editing_model(%{type: type, text: text}), do: %FileTreeEditingModel{type: type, text: text}
+
+  defp editing_model(%{type: type, text: text, token: token}),
+    do: %FileTreeEditingModel{type: type, text: text, token: token}
 
   @spec row_icon(Row.t()) :: String.t()
   defp row_icon(%Row{directory?: true, name: name}),

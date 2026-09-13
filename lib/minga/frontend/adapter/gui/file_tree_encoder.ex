@@ -52,7 +52,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     writer =
       :gui_file_tree
       |> Writer.new()
-      |> Writer.append(<<2::8>>)
+      |> Writer.append(<<3::8>>)
       |> Writer.uint8(
         :flags,
         file_tree_flags(model.status, model.focused?, model.local_navigation?)
@@ -122,6 +122,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   defp encode_row(%Row{} = row, root, %FileTree{} = model, %Writer{} = writer) do
     editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
     editing_text = if row.editing, do: row.editing.text, else: ""
+    editing_token = if row.editing, do: row.editing.token, else: 0
     {errors, warnings, info, hints} = row.diagnostics
 
     writer =
@@ -148,6 +149,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     |> Writer.string16(:row_name, row.name)
     |> Writer.string8(:row_icon, row.icon)
     |> Writer.uint8(:row_editing_type, editing_type)
+    |> Writer.uint32(:row_editing_token, editing_token)
     |> Writer.string16(:row_editing_text, editing_text)
     |> Writer.rgb24(:row_icon_color, row.icon_color)
     |> Writer.uint8(:row_heat_level, encode_heat_level(row.heat_level))

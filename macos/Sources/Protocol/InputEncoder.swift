@@ -52,7 +52,7 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendFileTreeOpenInSplit(index: UInt16)
     func sendFileTreeNewFile(parentIndex: UInt16)
     func sendFileTreeNewFolder(parentIndex: UInt16)
-    func sendFileTreeEditConfirm(text: String)
+    func sendFileTreeEditConfirm(token: UInt32, text: String)
     func sendFileTreeEditCancel()
     func sendFileTreeDelete(index: UInt16)
     func sendFileTreeRename(index: UInt16)
@@ -256,7 +256,7 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendFileTreeOpenInSplit(index: UInt16) {}
     public func sendFileTreeNewFile(parentIndex: UInt16) {}
     public func sendFileTreeNewFolder(parentIndex: UInt16) {}
-    public func sendFileTreeEditConfirm(text: String) {}
+    public func sendFileTreeEditConfirm(token: UInt32, text: String) {}
     public func sendFileTreeEditCancel() {}
     public func sendFileTreeDelete(index: UInt16) {}
     public func sendFileTreeRename(index: UInt16) {}

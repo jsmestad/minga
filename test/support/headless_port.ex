@@ -1436,7 +1436,7 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec decode_file_tree(binary()) :: map()
   defp decode_file_tree(
-         <<2::8, flags::8, _status::8, selected_len::16, selected::binary-size(selected_len),
+         <<3::8, flags::8, _status::8, selected_len::16, selected::binary-size(selected_len),
            root_len::16, root::binary-size(root_len), width::16, row_count::16, error_len::16,
            error::binary-size(error_len), rest::binary>>
        ) do
@@ -1461,7 +1461,7 @@ defmodule Minga.Test.HeadlessPort do
            _hints::16, guide_count::8, guides::binary-size(guide_count), id_len::16,
            id::binary-size(id_len), path_len::16, _path::binary-size(path_len), rel_len::16,
            _rel::binary-size(rel_len), name_len::16, name::binary-size(name_len), icon_len::8,
-           icon::binary-size(icon_len), editing_type::8, editing_len::16,
+           icon::binary-size(icon_len), editing_type::8, _editing_token::32, editing_len::16,
            editing::binary-size(editing_len), _icon_color::24, _heat_level::8, rest::binary>>,
          remaining,
          acc
@@ -1481,7 +1481,7 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   defp apply_file_tree_selection(nil, payload),
-    do: decode_file_tree(<<2, 0, 0, payload::binary, 0::16, 0::16, 0::16, 0::16>>)
+    do: decode_file_tree(<<3, 0, 0, payload::binary, 0::16, 0::16, 0::16, 0::16>>)
 
   defp apply_file_tree_selection(
          file_tree,

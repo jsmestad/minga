@@ -275,7 +275,15 @@ defmodule MingaEditor.Input.InterruptTest do
             :browse,
             :help,
             :filtering,
-            {:editing, %{index: 0, text: "x", type: :rename, original_name: "old"}}
+            {:editing,
+             %{
+               index: 0,
+               text: "x",
+               type: :rename,
+               original_name: "old",
+               source_path: "/tmp/old",
+               token: 42
+             }}
           ] do
         file_tree =
           %FileTreeState{}

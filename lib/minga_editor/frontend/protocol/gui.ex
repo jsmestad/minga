@@ -261,7 +261,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:open_file, path :: String.t()}
           | {:file_tree_new_file, index :: non_neg_integer()}
           | {:file_tree_new_folder, index :: non_neg_integer()}
-          | {:file_tree_edit_confirm, text :: String.t()}
+          | {:file_tree_edit_confirm, token :: non_neg_integer(), text :: String.t()}
           | :file_tree_edit_cancel
           | :file_tree_collapse_all
           | :file_tree_refresh
@@ -720,9 +720,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(
         @gui_action_file_tree_edit_confirm,
-        <<text_len::16, text::binary-size(text_len)>>
+        <<token::32, text_len::16, text::binary-size(text_len)>>
       ),
-      do: {:ok, {:file_tree_edit_confirm, text}}
+      do: {:ok, {:file_tree_edit_confirm, token, text}}
 
   def decode_gui_action(@gui_action_file_tree_edit_cancel, <<>>),
     do: {:ok, :file_tree_edit_cancel}

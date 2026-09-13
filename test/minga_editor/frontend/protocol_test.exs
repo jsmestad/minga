@@ -889,9 +889,9 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       text = "newfile.txt"
       text_bytes = text
       text_len = byte_size(text_bytes)
-      payload = <<0x07, 0x2D, text_len::16, text_bytes::binary>>
+      payload = <<0x07, 0x2D, 0x01020304::32, text_len::16, text_bytes::binary>>
 
-      assert {:ok, {:gui_action, {:file_tree_edit_confirm, "newfile.txt"}}} =
+      assert {:ok, {:gui_action, {:file_tree_edit_confirm, 0x01020304, "newfile.txt"}}} =
                Protocol.decode_event(payload)
     end
 

@@ -24,12 +24,15 @@ defmodule MingaEditor.State.FileTree do
   point. For rename, this is the entry being renamed.
   """
   @type editing_type :: :new_file | :new_folder | :rename
+  @type edit_token :: 1..4_294_967_295
 
   @type editing :: %{
           index: non_neg_integer(),
           text: String.t(),
           type: editing_type(),
-          original_name: String.t() | nil
+          original_name: String.t() | nil,
+          source_path: String.t() | nil,
+          token: edit_token()
         }
 
   @type clipboard_operation :: ClipboardMark.operation()
@@ -416,20 +419,44 @@ defmodule MingaEditor.State.FileTree do
   @doc """
   Enters inline editing mode at the given index.
 
-  For new file/folder, `initial_text` is empty. For rename,
-  `initial_text` is the current entry name.
+  For new file/folder, `initial_text` is empty.
   """
-  @spec start_editing(t(), non_neg_integer(), editing_type(), String.t()) :: t()
-  def start_editing(%__MODULE__{} = ft, index, type, initial_text \\ "")
-      when type in [:new_file, :new_folder, :rename] and is_integer(index) and index >= 0 do
-    original = if type == :rename, do: initial_text, else: nil
-
-    %{
-      ft
-      | interaction:
-          {:editing, %{index: index, text: initial_text, type: type, original_name: original}}
-    }
+  @spec start_editing(
+          t(),
+          non_neg_integer(),
+          :new_file | :new_folder,
+          edit_token(),
+          String.t()
+        ) :: t()
+  def start_editing(%__MODULE__{} = ft, index, type, token, initial_text \\ "")
+      when type in [:new_file, :new_folder] and is_integer(index) and index >= 0 and
+             is_integer(token) and token > 0 and token <= 4_294_967_295 do
+    admit_edit(ft, index, type, initial_text, nil, token)
   end
+
+  @doc "Enters inline rename mode while retaining the admitted source path as authority."
+  @spec start_rename(t(), non_neg_integer(), FileTree.entry(), edit_token()) :: t()
+  def start_rename(%__MODULE__{} = ft, index, %{path: path, name: name}, token)
+      when is_integer(index) and index >= 0 and is_binary(path) and is_binary(name) and
+             is_integer(token) and token > 0 and token <= 4_294_967_295 do
+    admit_edit(ft, index, :rename, name, Path.expand(path), token)
+  end
+
+  @doc "Accepts native confirmation text only for the currently admitted edit token."
+  @spec accept_edit_confirmation(t(), non_neg_integer(), String.t()) ::
+          {:accepted | :stale, t()}
+  def accept_edit_confirmation(
+        %__MODULE__{interaction: {:editing, %{token: token} = editing}} = ft,
+        token,
+        text
+      )
+      when is_integer(token) and token >= 0 and is_binary(text) do
+    {:accepted, %{ft | interaction: {:editing, %{editing | text: text}}}}
+  end
+
+  def accept_edit_confirmation(%__MODULE__{} = ft, token, text)
+      when is_integer(token) and token >= 0 and is_binary(text),
+      do: {:stale, ft}
 
   @doc "Updates the text being typed in the inline editor."
   @spec update_editing_text(t(), String.t()) :: t()
@@ -439,6 +466,29 @@ defmodule MingaEditor.State.FileTree do
   end
 
   def update_editing_text(%__MODULE__{} = ft, _new_text), do: ft
+
+  @spec admit_edit(
+          t(),
+          non_neg_integer(),
+          editing_type(),
+          String.t(),
+          String.t() | nil,
+          edit_token()
+        ) :: t()
+  defp admit_edit(%__MODULE__{} = ft, index, type, text, source_path, token) do
+    original_name = if type == :rename, do: text, else: nil
+
+    editing = %{
+      index: index,
+      text: text,
+      type: type,
+      original_name: original_name,
+      source_path: source_path,
+      token: token
+    }
+
+    %{ft | interaction: {:editing, editing}}
+  end
 
   @doc "Stores a pending file tree clipboard operation."
   @spec mark_clipboard(t(), String.t(), String.t(), boolean(), clipboard_operation()) :: t()

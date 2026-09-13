@@ -44,6 +44,8 @@ public struct FileTreeEntry: Identifiable {
     public let editingType: UInt8
     /// Pre-filled text for the editing field. Only meaningful when isEditing is true.
     public let editingText: String
+    /// BEAM-owned token for the admitted inline edit. The frontend only echoes it on confirmation.
+    public let editingToken: UInt32
     /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
     public let heatLevel: UInt8
 
@@ -73,6 +75,7 @@ public struct FileTreeEntry: Identifiable {
         path: String,
         editingType: UInt8,
         editingText: String,
+        editingToken: UInt32 = 0,
         heatLevel: UInt8 = 255
     ) {
         self.id = id
@@ -100,6 +103,7 @@ public struct FileTreeEntry: Identifiable {
         self.path = path
         self.editingType = editingType
         self.editingText = editingText
+        self.editingToken = editingToken
         self.heatLevel = heatLevel
     }
 
@@ -130,6 +134,7 @@ public struct FileTreeEntry: Identifiable {
             path: path,
             editingType: editingType,
             editingText: editingText,
+            editingToken: editingToken,
             heatLevel: heatLevel
         )
     }
@@ -311,6 +316,7 @@ public final class FileTreeState {
                 path: entry.path,
                 editingType: entry.editingType,
                 editingText: entry.editingText,
+                editingToken: entry.editingToken,
                 heatLevel: entry.heatLevel
             )
         }

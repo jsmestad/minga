@@ -695,7 +695,7 @@ defmodule Minga.Integration.GUIProtocolTest do
           git_status: :modified,
           depth: 1,
           guides: [true],
-          editing: %Editing{type: :rename, text: "editor_renamed.ex"}
+          editing: %Editing{type: :rename, text: "editor_renamed.ex", token: 0x01020304}
         }
       ]
 
@@ -712,7 +712,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       decoded = round_trip(harness, command, "gui_file_tree")
 
       assert decoded["type"] == "gui_file_tree"
-      assert decoded["version"] == 2
+      assert decoded["version"] == 3
       assert decoded["tree_state"] == 3
       assert decoded["error_reason"] == ""
       assert Bitwise.band(decoded["tree_flags"], 0x01) != 0
@@ -740,6 +740,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert e2["is_active"] == true
       assert e2["is_dirty"] == true
       assert e2["is_editing"] == true
+      assert e2["editing_token"] == 0x01020304
       assert e2["depth"] == 1
       assert e2["git_status"] == 1
     end

@@ -539,15 +539,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: file_tree_edit_confirm. Layout: opcode(1) + action_type(1) + text_len(2) + text(N).
-    func sendFileTreeEditConfirm(text: String) {
+    /// Send a gui_action: file_tree_edit_confirm. Layout: opcode(1) + action_type(1) + edit_token(4) + text_len(2) + text(N).
+    func sendFileTreeEditConfirm(token: UInt32, text: String) {
         let textData = text.data(using: .utf8) ?? Data()
-        var buf = Data(count: 4 + textData.count)
+        var buf = Data(count: 8 + textData.count)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_EDIT_CONFIRM
-        buf[2] = UInt8(textData.count >> 8)
-        buf[3] = UInt8(textData.count & 0xFF)
-        buf.replaceSubrange(4..<(4 + textData.count), with: textData)
+        writeU32(&buf, 2, token)
+        buf[6] = UInt8(textData.count >> 8)
+        buf[7] = UInt8(textData.count & 0xFF)
+        buf.replaceSubrange(8..<(8 + textData.count), with: textData)
         writeFrame(buf)
     }
 

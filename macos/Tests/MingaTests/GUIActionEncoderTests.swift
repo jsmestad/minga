@@ -180,11 +180,11 @@ struct GUIActionEncoderTests {
     func fileTreeEditActions() {
         let spy = SpyEncoder()
         let encoder: InputEncoder = spy
-        encoder.sendFileTreeEditConfirm(text: "newfile.txt")
+        encoder.sendFileTreeEditConfirm(token: 0x01020304, text: "newfile.txt")
         encoder.sendFileTreeEditCancel()
 
         #expect(spy.guiActions == [
-            .fileTreeEditConfirm(text: "newfile.txt"),
+            .fileTreeEditConfirm(token: 0x01020304, text: "newfile.txt"),
             .fileTreeEditCancel
         ])
     }

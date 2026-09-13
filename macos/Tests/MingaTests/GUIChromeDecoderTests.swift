@@ -1473,7 +1473,7 @@ struct GUIFileTreeDecoderTests {
     @Test("Decode semantic gui_file_tree editing row")
     func decodeEditingRow() throws {
         var payload = Data()
-        payload.append(2)
+        payload.append(3)
         payload.append(0x03)
         payload.append(3)
         appendString16(&payload, "/project/ñ📄.txt")
@@ -1494,7 +1494,8 @@ struct GUIFileTreeDecoderTests {
             name: "ñ📄.txt",
             icon: "📄",
             editingType: 2,
-            editingText: "renombré📄.txt"
+            editingText: "renombré📄.txt",
+            editingToken: 0x01020304
         )
 
         var data = Data()
@@ -1513,6 +1514,7 @@ struct GUIFileTreeDecoderTests {
         #expect(entries[0].isEditing == true)
         #expect(entries[0].editingType == 2)
         #expect(entries[0].editingText == "renombré📄.txt")
+        #expect(entries[0].editingToken == 0x01020304)
     }
 
     @Test("Decode semantic gui_file_tree rejects truncated row")
@@ -1557,6 +1559,7 @@ struct GUIFileTreeDecoderTests {
         iconColorB: UInt8 = 0x86,
         editingType: UInt8,
         editingText: String,
+        editingToken: UInt32? = nil,
         heatLevel: UInt8 = 0xFF
     ) {
         appendU32(&data, hash)
@@ -1575,6 +1578,7 @@ struct GUIFileTreeDecoderTests {
         appendString16(&data, name)
         appendString8(&data, icon)
         data.append(editingType)
+        if let editingToken { appendU32(&data, editingToken) }
         appendString16(&data, editingText)
         data.append(iconColorR)
         data.append(iconColorG)

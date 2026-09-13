@@ -382,10 +382,12 @@ public enum Wire {
         public let editingType: UInt8
         /// Pre-filled text for the editing field.
         public let editingText: String
+        /// BEAM-owned token for the admitted inline edit, or zero when no edit is active.
+        public let editingToken: UInt32
         /// Extension-contributed familiarity/heat bucket 0...4, or 255 for none.
         public let heatLevel: UInt8
 
-        public init(pathHash: UInt32, id: String, path: String, isDir: Bool, isExpanded: Bool, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, isEditing: Bool, isLastChild: Bool, depth: UInt8, gitStatus: UInt8, diagnosticErrorCount: UInt16, diagnosticWarningCount: UInt16, diagnosticInfoCount: UInt16, diagnosticHintCount: UInt16, guides: [Bool], icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, name: String, relPath: String, editingType: UInt8, editingText: String, heatLevel: UInt8 = 255) {
+        public init(pathHash: UInt32, id: String, path: String, isDir: Bool, isExpanded: Bool, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, isEditing: Bool, isLastChild: Bool, depth: UInt8, gitStatus: UInt8, diagnosticErrorCount: UInt16, diagnosticWarningCount: UInt16, diagnosticInfoCount: UInt16, diagnosticHintCount: UInt16, guides: [Bool], icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, name: String, relPath: String, editingType: UInt8, editingText: String, editingToken: UInt32 = 0, heatLevel: UInt8 = 255) {
             self.pathHash = pathHash
             self.id = id
             self.path = path
@@ -412,6 +414,7 @@ public enum Wire {
             self.relPath = relPath
             self.editingType = editingType
             self.editingText = editingText
+            self.editingToken = editingToken
             self.heatLevel = heatLevel
         }
     }
