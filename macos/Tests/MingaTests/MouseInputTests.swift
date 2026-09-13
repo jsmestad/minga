@@ -14,6 +14,11 @@ import Foundation
 import AppKit
 import MingaProtocol
 
+@MainActor
+private final class FocusStealingView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+}
+
 @Suite("EditorNSView Mouse Input")
 struct MouseInputTests {
 
@@ -218,18 +223,75 @@ struct MouseInputTests {
 
     // MARK: - Left click
 
-    @Test("claimFirstResponder respects active text input")
-    @MainActor func claimFirstResponderRespectsActiveTextInput() throws {
+    @Test("SwiftUI focus reclaim and window updates yield to native text editing")
+    @MainActor func automaticFocusReclaimYieldsToNativeTextInput() async throws {
         let spy = SpyEncoder()
         guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
 
         #expect(window.makeFirstResponder(textField))
-        #expect(window.firstResponder is NSText)
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+        fieldEditor.setSelectedRange(NSRange(location: 0, length: 0))
 
-        view.reclaimFirstResponderIfNeeded(respectingTextInput: true)
+        view.swiftUIUpdateDidOccur()
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: window)
+        await Task.yield()
+        await Task.yield()
 
-        #expect(window.firstResponder is NSText)
+        #expect(window.firstResponder === fieldEditor)
+        #expect(fieldEditor.selectedRange() == NSRange(location: 0, length: 0))
         #expect(spy.mouseEventCalls.isEmpty)
+    }
+
+    @Test("window updates reclaim focus while detach and reattach invalidate stale work")
+    @MainActor func windowUpdateAndDetachmentLifecycle() async throws {
+        let spy = SpyEncoder()
+        guard let (view, window, _) = makeWindowedView(spy: spy) else { return }
+        let focusStealer = FocusStealingView(frame: NSRect(x: 200, y: 16, width: 100, height: 24))
+        window.contentView?.addSubview(focusStealer)
+        await Task.yield()
+
+        #expect(window.makeFirstResponder(focusStealer))
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: window)
+        await Task.yield()
+        #expect(window.firstResponder === view)
+
+        #expect(window.makeFirstResponder(focusStealer))
+        view.swiftUIUpdateDidOccur()
+        view.removeFromSuperview()
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: window)
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === focusStealer)
+
+        window.contentView?.addSubview(view)
+        await Task.yield()
+        #expect(window.makeFirstResponder(focusStealer))
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: window)
+        await Task.yield()
+        #expect(window.firstResponder === view)
+    }
+
+    @Test("native modal close restoration is immediate for an attached editor and a no-op while detached")
+    @MainActor func nativeModalCloseRestorationLifecycle() throws {
+        let spy = SpyEncoder()
+        guard let (view, window, _) = makeWindowedView(spy: spy) else { return }
+        let focusStealer = FocusStealingView(frame: NSRect(x: 200, y: 16, width: 100, height: 24))
+        window.contentView?.addSubview(focusStealer)
+
+        #expect(window.makeFirstResponder(focusStealer))
+        view.removeFromSuperview()
+        window.orderOut(nil)
+        view.focusPolicy.restoreAfterNativeModal()
+        #expect(!window.isVisible)
+        #expect(window.firstResponder === focusStealer)
+
+        window.contentView?.addSubview(view)
+        #expect(window.makeFirstResponder(focusStealer))
+        window.orderOut(nil)
+        view.focusPolicy.restoreAfterNativeModal()
+        #expect(window.isVisible)
+        #expect(window.isKeyWindow)
+        #expect(window.firstResponder === view)
     }
 
     @Test("mouseDown sends left button press and reclaims first responder")

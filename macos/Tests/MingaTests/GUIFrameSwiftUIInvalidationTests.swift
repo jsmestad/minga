@@ -1042,6 +1042,42 @@ struct GUIFrameSwiftUIInvalidationTests {
         #expect(!treeView.contains(".id(fileTreeState"))
     }
 
+    @Test("EditorFocusPolicy is the sole AppKit focus and overlay observation owner")
+    func editorFocusPolicySourceGuard() throws {
+        let macosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let policy = try String(contentsOf: macosRoot.appendingPathComponent("Sources/Views/Editor/EditorFocusPolicy.swift"), encoding: .utf8)
+        let editorView = try String(contentsOf: macosRoot.appendingPathComponent("Sources/Views/Editor/EditorView.swift"), encoding: .utf8)
+        let editorNSView = try String(contentsOf: macosRoot.appendingPathComponent("Sources/Views/Editor/EditorNSView.swift"), encoding: .utf8)
+        let sourcesRoot = macosRoot.appendingPathComponent("Sources")
+        let sourceEnumerator = try #require(FileManager.default.enumerator(at: sourcesRoot, includingPropertiesForKeys: nil))
+        var firstResponderOwners: Set<String> = []
+        for case let sourceURL as URL in sourceEnumerator where sourceURL.pathExtension == "swift" {
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            if source.contains("makeFirstResponder(") {
+                firstResponderOwners.insert(sourceURL.path.replacingOccurrences(of: sourcesRoot.path + "/", with: ""))
+            }
+        }
+
+        #expect(policy.contains("final class EditorFocusPolicy"))
+        #expect(policy.contains("NSWindow.didUpdateNotification"))
+        #expect(policy.contains("NSEvent.addLocalMonitorForEvents"))
+        #expect(policy.contains("windowUpdateTask"))
+        #expect(policy.contains("deferredReclaimTask"))
+        #expect(editorView.contains("nsView.swiftUIUpdateDidOccur()"))
+        #expect(!editorNSView.contains("FirstResponderGuard"))
+        #expect(!editorNSView.contains("NSEvent.addLocalMonitorForEvents"))
+        #expect(!editorNSView.contains("window.firstResponder is NSText"))
+        #expect(firstResponderOwners == [
+            "Views/Editor/EditorFocusPolicy.swift",
+            "Views/Editor/InlineEditField.swift",
+            "Views/Overlays/PickerQueryField.swift",
+        ])
+        #expect(!FileManager.default.fileExists(atPath: macosRoot.appendingPathComponent("Sources/Views/Shared/MingaWindow.swift").path))
+    }
+
     private func observationProofContentView(gui: GUIState, recorder: FrameProbeRecorder) -> ContentView<ProductionEditorSurface> {
         ContentView(
             gui: gui,

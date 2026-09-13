@@ -20,6 +20,6 @@ struct EditorView: NSViewRepresentable {
         // When SwiftUI updates the view hierarchy (e.g., title change triggers
         // a body re-evaluation), it can steal first responder. Reclaim it unless
         // the user is actively typing in a text field.
-        nsView.claimFirstResponder()
+        nsView.swiftUIUpdateDidOccur()
     }
 }
