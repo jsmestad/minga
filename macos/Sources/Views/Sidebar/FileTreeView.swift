@@ -328,7 +328,7 @@ public struct FileTreeView: View {
             animDuration: animDuration,
             onActivate: onActivate,
             onEditCommit: { text in
-                encoder?.sendFileTreeEditConfirm(text: text)
+                encoder?.sendFileTreeEditConfirm(token: entry.editingToken, text: text)
             },
             onEditCancel: {
                 encoder?.sendFileTreeEditCancel()

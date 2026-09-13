@@ -346,17 +346,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Commands.FileTree.new_folder(state)
   end
 
-  defp dispatch_action(state, {:file_tree_edit_confirm, text}) do
-    case FileTreeState.editing(state.workspace.file_tree) do
-      nil ->
-        state
-
-      %{} ->
-        ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
-        state = %{state | workspace: State.set_file_tree(state.workspace, ft)}
-        Commands.FileTree.confirm_editing(state)
-    end
-  end
+  defp dispatch_action(state, {:file_tree_edit_confirm, token, text}),
+    do: Commands.FileTree.confirm_editing(state, token, text)
 
   defp dispatch_action(state, :file_tree_edit_cancel) do
     Commands.FileTree.cancel_editing(state)

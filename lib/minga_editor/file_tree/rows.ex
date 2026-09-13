@@ -119,7 +119,7 @@ defmodule MingaEditor.FileTree.Rows do
       depth: entry.depth,
       guides: entry.guides,
       last_child?: entry.last_child?,
-      editing: editing_for_index(index, opts.editing)
+      editing: editing_for_entry(index, path, opts.editing)
     )
   end
 
@@ -131,11 +131,16 @@ defmodule MingaEditor.FileTree.Rows do
   defp dirty?(%{dir?: true}, _path, _dirty_paths), do: false
   defp dirty?(_entry, path, dirty_paths), do: MapSet.member?(dirty_paths, path)
 
-  @spec editing_for_index(non_neg_integer(), FileTreeState.editing() | nil) ::
+  @spec editing_for_entry(non_neg_integer(), String.t(), FileTreeState.editing() | nil) ::
           FileTreeState.editing() | nil
-  defp editing_for_index(_index, nil), do: nil
-  defp editing_for_index(index, %{index: index} = editing), do: editing
-  defp editing_for_index(_index, _editing), do: nil
+  defp editing_for_entry(_index, _path, nil), do: nil
+
+  defp editing_for_entry(_index, path, %{type: :rename, source_path: path} = editing),
+    do: editing
+
+  defp editing_for_entry(_index, _path, %{type: :rename}), do: nil
+  defp editing_for_entry(index, _path, %{index: index} = editing), do: editing
+  defp editing_for_entry(_index, _path, _editing), do: nil
 
   @spec diagnostic_map_for_root(String.t(), GenServer.server()) :: %{
           String.t() => Diagnostics.t()

@@ -29,6 +29,13 @@ defmodule MingaEditor.FileTree.Freshness do
   @watcher_retry_base_ms 25
   @watcher_retry_max_ms 1_000
   @watcher_retry_max_attempts 6
+  @max_edit_token 4_294_967_295
+
+  @doc "Allocates a non-zero u32 token for one admitted inline file-tree edit."
+  @spec next_edit_token() :: pos_integer()
+  def next_edit_token do
+    Integer.mod(System.unique_integer([:positive, :monotonic]), @max_edit_token) + 1
+  end
 
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()

@@ -347,10 +347,12 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   defp install_new_entry_edit({:ok, tree}, state, index, type) do
+    token = FileTreeFreshness.next_edit_token()
+
     ft =
       state
       |> file_tree_state()
-      |> FileTreeState.start_editing(index, type)
+      |> FileTreeState.start_editing(index, type, token)
       |> FileTreeState.replace_tree(tree)
 
     state = set_file_tree(state, ft)
@@ -374,12 +376,14 @@ defmodule MingaEditor.Commands.FileTree do
             state
 
           entry ->
+            token = FileTreeFreshness.next_edit_token()
+
             ft =
-              FileTreeState.start_editing(
+              FileTreeState.start_rename(
                 file_tree_state(state),
                 tree.cursor,
-                :rename,
-                entry.name
+                entry,
+                token
               )
 
             set_file_tree(state, ft)
@@ -402,7 +406,17 @@ defmodule MingaEditor.Commands.FileTree do
       %{text: ""} -> cancel_editing(state)
       %{type: :new_file} = editing -> confirm_new_file(state, editing)
       %{type: :new_folder} = editing -> confirm_new_folder(state, editing)
-      %{type: :rename} -> confirm_rename(state)
+      %{type: :rename} = editing -> confirm_rename(state, editing)
+    end
+  end
+
+  @doc "Confirms native inline-edit text when its operation token is still current."
+  @spec confirm_editing(state(), non_neg_integer(), String.t()) :: state()
+  def confirm_editing(state, token, text)
+      when is_integer(token) and token >= 0 and is_binary(text) do
+    case FileTreeState.accept_edit_confirmation(file_tree_state(state), token, text) do
+      {:accepted, file_tree} -> state |> set_file_tree(file_tree) |> confirm_editing()
+      {:stale, _file_tree} -> stale_edit_confirmation(state)
     end
   end
 
@@ -451,20 +465,17 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
-  @spec confirm_rename(state()) :: state()
-  defp confirm_rename(state) do
-    case {FileTreeState.tree(file_tree_state(state)),
-          FileTreeState.editing(file_tree_state(state))} do
-      {%FileTree{} = tree, %{text: text}} ->
-        case FileTree.selected_entry(tree) do
-          nil -> cancel_editing(state)
-          entry -> do_rename(state, entry, text)
-        end
-
-      _ ->
-        cancel_editing(state)
+  @spec confirm_rename(state(), FileTreeState.editing()) :: state()
+  defp confirm_rename(state, %{source_path: source_path, text: text})
+       when is_binary(source_path) do
+    case File.lstat(source_path) do
+      {:ok, _stat} -> do_rename(state, source_path, text)
+      {:error, :enoent} -> stale_rename_target(state, source_path)
+      {:error, reason} -> rename_failed(state, source_path, source_path, reason)
     end
   end
+
+  defp confirm_rename(state, _editing), do: stale_rename_target(state, nil)
 
   @doc """
   Enters delete confirmation mode for the selected file tree entry.
@@ -1344,9 +1355,8 @@ defmodule MingaEditor.Commands.FileTree do
     state
   end
 
-  @spec do_rename(state(), FileTree.entry(), String.t()) :: state()
-  defp do_rename(state, entry, new_name) do
-    old_path = entry.path
+  @spec do_rename(state(), String.t(), String.t()) :: state()
+  defp do_rename(state, old_path, new_name) do
     new_path = Path.join(Path.dirname(old_path), new_name)
 
     if old_path == new_path do
@@ -1370,14 +1380,48 @@ defmodule MingaEditor.Commands.FileTree do
         clear_editing_and_refresh(state)
 
       {:error, reason} ->
-        Log.warning(
-          :editor,
-          "[file-tree] Rename failed: #{old_path} → #{new_path}: #{inspect(reason)}"
-        )
-
-        cancel_editing(state)
+        rename_failed(state, old_path, new_path, reason)
     end
   end
+
+  @spec stale_edit_confirmation(state()) :: state()
+  defp stale_edit_confirmation(state) do
+    Log.warning(:editor, "[file-tree] Ignored stale inline edit confirmation")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "File tree edit is stale; try again"
+    )
+  end
+
+  @spec stale_rename_target(state(), String.t() | nil) :: state()
+  defp stale_rename_target(state, source_path) do
+    Log.warning(:editor, "[file-tree] Rename target is stale: #{inspect(source_path)}")
+
+    state
+    |> cancel_editing()
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Rename target no longer exists")
+  end
+
+  @spec rename_failed(state(), String.t(), String.t(), term()) :: state()
+  defp rename_failed(state, old_path, new_path, reason) do
+    Log.warning(
+      :editor,
+      "[file-tree] Rename failed: #{old_path} → #{new_path}: #{inspect(reason)}"
+    )
+
+    state
+    |> cancel_editing()
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      "Rename failed: #{format_rename_error(reason)}"
+    )
+  end
+
+  @spec format_rename_error(atom() | {:destination_exists, String.t()}) :: String.t()
+  defp format_rename_error({:destination_exists, _path}), do: "destination already exists"
+
+  defp format_rename_error(reason) when is_atom(reason),
+    do: reason |> :file.format_error() |> to_string()
 
   # Counts all files and directories recursively under the given path.
   @spec count_children(String.t()) :: non_neg_integer()

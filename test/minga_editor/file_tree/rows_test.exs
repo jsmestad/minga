@@ -192,14 +192,25 @@ defmodule MingaEditor.FileTree.RowsTest do
       assert row.heat_level == nil
     end
 
-    test "attaches inline editing metadata only to the edited index", %{tmp_dir: tmp_dir} do
+    test "attaches rename editing metadata to its source path after row reordering", %{
+      tmp_dir: tmp_dir
+    } do
       tree = flat_tree(tmp_dir)
-      editing = %{index: 1, text: "renamed.ex", type: :rename, original_name: "beta.ex"}
+      source_path = Path.join(tmp_dir, "beta.ex")
+
+      editing = %{
+        index: 0,
+        text: "renamed.ex",
+        type: :rename,
+        original_name: "beta.ex",
+        source_path: source_path,
+        token: 42
+      }
 
       rows = Rows.from_tree(tree, editing: editing)
 
-      assert Enum.at(rows, 0).editing == nil
-      assert Enum.at(rows, 1).editing == editing
+      assert Enum.find(rows, &(&1.name == "alpha.ex")).editing == nil
+      assert Enum.find(rows, &(&1.name == "beta.ex")).editing == editing
     end
 
     test "preserves nested depth, guides, and last-child metadata", %{tmp_dir: tmp_dir} do

@@ -48,10 +48,10 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
       {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
 
       assert <<@op_gui_file_tree, len::32, payload::binary-size(len)>> = cmd
-      assert <<2::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
+      assert <<3::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
       assert Bitwise.band(tree_flags, 0x01) == 0
       # Row count is preserved (2 rows), proving the data is encoded while hidden.
-      assert <<2::8, _flags::8, _state::8, sel::binary>> = payload
+      assert <<3::8, _flags::8, _state::8, sel::binary>> = payload
 
       assert <<sel_len::16, _selected_id::binary-size(sel_len), root_len::16,
                _root::binary-size(root_len), _tree_width::16, 2::16, _rest::binary>> = sel
@@ -124,7 +124,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
             heat_level: 3,
             depth: 1,
             guides: [true, false],
-            editing: %Editing{type: :rename, text: "renamed.txt"}
+            editing: %Editing{type: :rename, text: "renamed.txt", token: 0x01020304}
           }
         ]
       }
@@ -133,7 +133,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
       assert <<@op_gui_file_tree, payload_len::32, payload::binary-size(payload_len)>> = cmd
       assert payload_len == byte_size(payload)
-      assert <<2::8, tree_flags::8, 3::8, rest::binary>> = payload
+      assert <<3::8, tree_flags::8, 3::8, rest::binary>> = payload
       assert Bitwise.band(tree_flags, 0x01) != 0
       assert Bitwise.band(tree_flags, 0x02) != 0
       assert Bitwise.band(tree_flags, 0x20) != 0
@@ -169,8 +169,8 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
       {name, strings} = take_string16(strings)
       {icon, strings} = take_string8(strings)
 
-      <<2::8, editing_text_len::16, editing_text::binary-size(editing_text_len), 0x9B::8, 0x59::8,
-        0xB6::8, 3::8>> = strings
+      <<2::8, 0x01020304::32, editing_text_len::16, editing_text::binary-size(editing_text_len),
+        0x9B::8, 0x59::8, 0xB6::8, 3::8>> = strings
 
       assert id == row.id
       assert path == row.path
@@ -183,9 +183,9 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
     test "encodes editing type bytes directly" do
       for {editing, expected_type} <- [
-            {%Editing{type: :new_file, text: "new.ex"}, 0},
-            {%Editing{type: :new_folder, text: "src"}, 1},
-            {%Editing{type: :rename, text: "renamed.ex"}, 2},
+            {%Editing{type: :new_file, text: "new.ex", token: 11}, 0},
+            {%Editing{type: :new_folder, text: "src", token: 12}, 1},
+            {%Editing{type: :rename, text: "renamed.ex", token: 13}, 2},
             {nil, 0xFF}
           ] do
         strings = row_strings(%{row("/project/a.ex") | editing: editing})
@@ -196,7 +196,10 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
         {_name, strings} = take_string16(strings)
         {_icon, strings} = take_string8(strings)
 
-        assert <<^expected_type::8, _editing_len::16, _rest::binary>> = strings
+        expected_token = if editing, do: editing.token, else: 0
+
+        assert <<^expected_type::8, ^expected_token::32, _editing_len::16, _rest::binary>> =
+                 strings
       end
     end
 
@@ -210,8 +213,9 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
         {_name, strings} = take_string16(strings)
         {_icon, strings} = take_string8(strings)
 
-        assert <<_editing_type::8, editing_len::16, _editing_text::binary-size(editing_len),
-                 _rgb::binary-size(3), ^expected_byte::8>> = strings
+        assert <<_editing_type::8, _editing_token::32, editing_len::16,
+                 _editing_text::binary-size(editing_len), _rgb::binary-size(3),
+                 ^expected_byte::8>> = strings
       end
     end
 
@@ -247,11 +251,11 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
           status: {:error, "permission denied"}
         })
 
-      assert <<@op_gui_file_tree, _::32, 2::8, empty_flags::8, 2::8, _empty_rest::binary>> = empty
+      assert <<@op_gui_file_tree, _::32, 3::8, empty_flags::8, 2::8, _empty_rest::binary>> = empty
       assert Bitwise.band(empty_flags, 0x01) != 0
       assert Bitwise.band(empty_flags, 0x10) != 0
 
-      assert <<@op_gui_file_tree, _::32, 2::8, loading_flags::8, 1::8, _loading_rest::binary>> =
+      assert <<@op_gui_file_tree, _::32, 3::8, loading_flags::8, 1::8, _loading_rest::binary>> =
                loading
 
       assert Bitwise.band(loading_flags, 0x01) != 0
@@ -259,7 +263,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
       assert <<@op_gui_file_tree, payload_len::32, payload::binary-size(payload_len)>> = error
 
-      assert <<2::8, error_flags::8, 4::8, selected_len::16, _selected::binary-size(selected_len),
+      assert <<3::8, error_flags::8, 4::8, selected_len::16, _selected::binary-size(selected_len),
                root_len::16, _root::binary-size(root_len), 30::16, 0::16, reason_len::16,
                reason::binary-size(reason_len)>> = payload
 
@@ -334,7 +338,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
       {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
 
       assert <<@op_gui_file_tree, len::32, payload::binary-size(len)>> = cmd
-      assert <<2::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
+      assert <<3::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
       assert Bitwise.band(tree_flags, 0x20) != 0
     end
 
@@ -374,7 +378,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
     assert <<@op_gui_file_tree, payload_len::32, payload::binary-size(payload_len)>> = encoded
 
-    assert <<2::8, _tree_flags::8, 3::8, selected_len::16, _selected::binary-size(selected_len),
+    assert <<3::8, _tree_flags::8, 3::8, selected_len::16, _selected::binary-size(selected_len),
              root_len::16, _root::binary-size(root_len), 30::16, 1::16, 0::16, _hash::32,
              _row_flags::16, _depth::8, _git::8, _diag::binary-size(8), 0::8, strings::binary>> =
              payload
@@ -387,7 +391,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
   # raises here, which is exactly the toggle-regression we want to fail on.
   @spec file_tree_header(binary()) :: {non_neg_integer(), non_neg_integer()}
   defp file_tree_header(<<@op_gui_file_tree, len::32, payload::binary-size(len)>>) do
-    <<2::8, flags::8, status_byte::8, _rest::binary>> = payload
+    <<3::8, flags::8, status_byte::8, _rest::binary>> = payload
     {flags, status_byte}
   end
 

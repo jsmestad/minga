@@ -133,18 +133,18 @@ When `visible == 0`, the frontend should hide the Observatory and clear selected
 
 The native file tree receives the same semantic row model that the TUI renderer uses. The BEAM remains the source of truth for row identity, depth, expansion state, git status, diagnostics, guide columns, icons, labels, focus context, inline editing state, and committed file actions. Semantic frontends are not dumb terminals: they may own zero-latency local interaction state, such as transient row selection while the user navigates the already committed row model. On activation, toggle, rename, delete, drag/drop, or another committed intent, the frontend sends a semantic action with stable row identity and the BEAM validates it against the current model.
 
-Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hidden state from an empty entry list. New frontends must ignore that sentinel behavior. `0x93` v2 is the canonical file-tree protocol, and `tree_state` is the only source of truth for hidden, loading, empty, ready, and error states.
+Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hidden state from an empty entry list. New frontends must ignore that sentinel behavior. `0x93` v3 is the canonical file-tree protocol, and `tree_state` is the only source of truth for hidden, loading, empty, ready, and error states.
 
 ```
 opcode(1) + payload_len(4) + payload(payload_len)
 
-Payload v2:
+Payload v3:
   version(1) + tree_flags(1) + tree_state(1) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows...
 
-Payload v1, kept for decoder compatibility, omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v2.
+Payload v2 omitted the per-row `editing_token`. Payload v1 also omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v3.
 
 Per row:
-  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len) + icon_color(3) + heat_level(1)
+  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_token(4) + editing_text_len(2) + editing_text(editing_text_len) + icon_color(3) + heat_level(1)
 
 `heat_level` is an extension-contributed familiarity or heat bucket. Values `0..4` represent cold to warm, and `0xFF` means no heat decoration.
 
@@ -1134,7 +1134,7 @@ opcode(1) + action_type(1) + payload...
 | 0x29 | agent_approve | (empty) | Approve an agent change request |
 | 0x2A | agent_request_changes | (empty) | Request agent changes |
 | 0x2B | agent_dismiss | (empty) | Dismiss agent review UI |
-| 0x2D | file_tree_edit_confirm | text_len(2) + text(text_len) | Confirm file tree inline edit |
+| 0x2D | file_tree_edit_confirm | edit_token(4) + text_len(2) + text(text_len) | Confirm the matching admitted file tree inline edit |
 | 0x2E | file_tree_edit_cancel | (empty) | Cancel file tree inline edit |
 | 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
 | 0x30 | file_tree_delete | index(2) | Delete a file tree entry |

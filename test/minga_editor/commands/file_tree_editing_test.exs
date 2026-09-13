@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   alias Minga.Project.FileTree
   alias MingaEditor.Commands
   alias MingaEditor.Input.FileTreeHandler
+  alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
@@ -148,14 +149,120 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         dir
         |> make_state(events_registry)
         |> select_entry("target.txt")
-        |> Commands.FileTree.rename()
-        |> replace_editing_text("existing.txt")
+        |> start_gui_rename()
 
-      state = Commands.FileTree.confirm_editing(state)
+      token = editing(state).token
+      state = GuiActionHandler.dispatch(state, {:file_tree_edit_confirm, token, "existing.txt"})
 
       assert editing(state) == nil
       assert File.read!(file) == "content"
       assert File.read!(existing) == "existing"
+      assert state.shell_runtime.state.notice.message =~ "Rename failed"
+    end
+
+    test "GUI rename confirmation keeps the admitted path after refresh reorders rows", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      original = Path.join(dir, "b.txt")
+      untouched = Path.join(dir, "c.txt")
+      renamed = Path.join(dir, "renamed.txt")
+      File.write!(original, "b")
+      File.write!(untouched, "c")
+
+      admitted = dir |> make_state(events_registry) |> select_entry("b.txt") |> start_gui_rename()
+      token = editing(admitted).token
+
+      File.write!(Path.join(dir, "a.txt"), "a")
+      refreshed = FileTree.new(dir) |> FileTree.refresh()
+      reordered = admitted |> replace_tree(refreshed) |> select_entry("c.txt")
+
+      assert editing(reordered).source_path == original
+      assert FileTree.selected_entry(tree(reordered)).path == untouched
+
+      result =
+        GuiActionHandler.dispatch(
+          reordered,
+          {:file_tree_edit_confirm, token, "renamed.txt"}
+        )
+
+      assert editing(result) == nil
+      assert File.read!(renamed) == "b"
+      assert File.read!(untouched) == "c"
+      refute File.exists?(original)
+    end
+
+    test "GUI rename confirmation rejects a removed admitted target instead of the selected row",
+         %{
+           tmp_dir: dir,
+           events_registry: events_registry
+         } do
+      original = Path.join(dir, "b.txt")
+      untouched = Path.join(dir, "c.txt")
+      File.write!(original, "b")
+      File.write!(untouched, "c")
+
+      admitted =
+        dir
+        |> make_state(events_registry)
+        |> select_entry("b.txt")
+        |> start_gui_rename()
+
+      token = editing(admitted).token
+      File.rm!(original)
+
+      refreshed = FileTree.new(dir) |> FileTree.refresh()
+      selected_other = replace_tree(admitted, FileTree.select(refreshed, 0))
+
+      result =
+        GuiActionHandler.dispatch(
+          selected_other,
+          {:file_tree_edit_confirm, token, "renamed.txt"}
+        )
+
+      assert editing(result) == nil
+      assert File.read!(untouched) == "c"
+      refute File.exists?(Path.join(dir, "renamed.txt"))
+      assert result.shell_runtime.state.notice.message == "Rename target no longer exists"
+    end
+
+    test "old GUI confirmation cannot submit an edit admitted after cancellation", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      first = Path.join(dir, "first.txt")
+      second = Path.join(dir, "second.txt")
+      File.write!(first, "first")
+      File.write!(second, "second")
+
+      first_edit =
+        dir
+        |> make_state(events_registry)
+        |> select_entry("first.txt")
+        |> start_gui_rename()
+
+      stale_token = editing(first_edit).token
+
+      current_edit =
+        first_edit
+        |> GuiActionHandler.dispatch(:file_tree_edit_cancel)
+        |> select_entry("second.txt")
+        |> start_gui_rename()
+
+      current_token = editing(current_edit).token
+
+      result =
+        GuiActionHandler.dispatch(
+          current_edit,
+          {:file_tree_edit_confirm, stale_token, "wrong.txt"}
+        )
+
+      assert editing(result).token == current_token
+      assert editing(result).text == "second.txt"
+      assert File.read!(first) == "first"
+      assert File.read!(second) == "second"
+      refute File.exists?(Path.join(dir, "wrong.txt"))
+      assert result.shell_runtime.state.notice.message == "File tree edit is stale; try again"
     end
   end
 
@@ -555,6 +662,10 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
     assert index != nil, "Expected #{name} to be visible in the file tree"
 
     replace_tree(state, FileTree.select(tree, index))
+  end
+
+  defp start_gui_rename(%EditorState{} = state) do
+    GuiActionHandler.dispatch(state, {:file_tree_rename, tree(state).cursor})
   end
 
   defp replace_tree(%EditorState{} = state, %FileTree{} = tree) do

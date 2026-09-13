@@ -742,6 +742,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             guard pos + 3 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
             let editingType = data[pos]; pos += 1
+            let editingToken: UInt32
+            if version >= 3 {
+                guard pos + 4 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+                editingToken = try readU32(data, pos)
+                pos += 4
+            } else {
+                editingToken = 0
+            }
             let editingTextLen = Int(try readU16(data, pos)); pos += 2
             guard pos + editingTextLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
             let editingText = try decodeUTF8(data[pos..<(pos + editingTextLen)]) ?? ""
@@ -783,6 +791,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 relPath: relPath,
                 editingType: editingType,
                 editingText: editingText,
+                editingToken: editingToken,
                 heatLevel: heatLevel
             ))
         }

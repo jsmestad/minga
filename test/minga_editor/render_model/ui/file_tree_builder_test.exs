@@ -53,7 +53,15 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
         |> FileTreeState.open(tree, nil)
         |> Map.put(
           :interaction,
-          {:editing, %{index: 0, type: :rename, text: "renamed", original_name: "lib"}}
+          {:editing,
+           %{
+             index: 0,
+             type: :rename,
+             text: "renamed",
+             original_name: "lib",
+             source_path: path,
+             token: 42
+           }}
         )
 
       ctx = build_minimal_context(file_tree: file_tree)
@@ -75,6 +83,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       assert row.guides == [true]
       assert row.editing.type == :rename
       assert row.editing.text == "renamed"
+      assert row.editing.token == 42
       # Named folders resolve to per-folder Devicon colors ("lib" = source blue).
       assert row.icon_color == 0x42A5F5
     end
