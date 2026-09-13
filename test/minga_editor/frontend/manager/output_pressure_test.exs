@@ -75,7 +75,7 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     assert stats.last_applied_frame_seq == 10
   end
 
-  test "control batches coalesce by opcode and are cleared with failed output" do
+  test "control batches coalesce by opcode" do
     first_font = Protocol.encode_set_font("First", 14, true, :regular)
     latest_font = Protocol.encode_set_font("Latest", 16, true, :regular)
     title = Protocol.encode_set_title("Minga")
@@ -87,12 +87,6 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     stats = OutputPressure.stats(pressure)
     assert stats.control_batches == 2
     assert stats.control_bytes == byte_size(latest_font) + byte_size(title)
-
-    failed = frame(11, 10, 3)
-    {:attempt, pressure} = OutputPressure.enqueue(pressure, failed)
-    pressure = OutputPressure.require_recovery(pressure, failed)
-    refute OutputPressure.controls_pending?(pressure)
-    assert OutputPressure.stats(pressure).control_batches == 0
   end
 
   test "unwritable failure timing starts once and retry tokens are correlated" do
@@ -108,6 +102,70 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     assert OutputPressure.consume_retry(pressure, first_token) == :stale
     assert {:ok, pressure} = OutputPressure.consume_retry(pressure, second_token)
     assert pressure.retry_token == nil
+  end
+
+  test "revoking frames preserves controls and the shared unwritable interval" do
+    first = frame(7, 6, 1)
+    replacement = frame(8, 7, 1)
+    control = Protocol.encode_set_title("Minga")
+    token = make_ref()
+
+    {:attempt, pressure} = OutputPressure.enqueue(OutputPressure.new(), first)
+    {:coalesced, pressure} = OutputPressure.enqueue(pressure, replacement)
+
+    pressure =
+      pressure
+      |> OutputPressure.retain_control(Opcodes.set_title(), control)
+      |> OutputPressure.mark_unwritable(100, token)
+      |> OutputPressure.revoke_frames()
+
+    assert pressure.current == nil
+    assert pressure.replacement == nil
+    assert pressure.controls == %{Opcodes.set_title() => control}
+    assert pressure.unwritable_since == 100
+    assert pressure.retry_token == token
+  end
+
+  test "expired retained controls take terminal precedence over frame recovery" do
+    frame = frame(7, 6, 1)
+    control = Protocol.encode_set_title("Minga")
+    token = make_ref()
+
+    {:attempt, frame_only} = OutputPressure.enqueue(OutputPressure.new(), frame)
+    frame_only = OutputPressure.mark_unwritable(frame_only, 100, token)
+    assert OutputPressure.classify_timeout(frame_only, 150, 50) == {:recover_frame, frame}
+
+    with_control =
+      frame_only
+      |> OutputPressure.retain_control(Opcodes.set_title(), control)
+
+    assert OutputPressure.classify_timeout(with_control, 150, 50) == :transport_failure
+
+    control_only =
+      OutputPressure.new()
+      |> OutputPressure.retain_control(Opcodes.set_title(), control)
+      |> OutputPressure.mark_unwritable(100, token)
+
+    assert OutputPressure.classify_timeout(control_only, 149, 50) == :continue
+    assert OutputPressure.classify_timeout(control_only, 150, 50) == :transport_failure
+  end
+
+  test "terminal transport failure clears retained output and invalidates retry correlation" do
+    frame = frame(7, 6, 1)
+    control = Protocol.encode_set_title("Minga")
+    token = make_ref()
+
+    {:attempt, pressure} = OutputPressure.enqueue(OutputPressure.new(), frame)
+
+    pressure =
+      pressure
+      |> OutputPressure.retain_control(Opcodes.set_title(), control)
+      |> OutputPressure.mark_unwritable(100, token)
+      |> OutputPressure.fail_transport()
+
+    assert OutputPressure.consume_retry(pressure, token) == :stale
+    assert OutputPressure.classify_timeout(pressure, 200, 50) == :continue
+    assert OutputPressure.stats(pressure).total_retained_bytes == 0
   end
 
   defp frame(frame_seq, base_frame_seq, generation) do

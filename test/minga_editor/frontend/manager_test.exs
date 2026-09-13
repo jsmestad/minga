@@ -2,6 +2,8 @@ defmodule MingaEditor.Frontend.ManagerTest do
   # Connected-mode tests use real OS ports, so this mixed module remains serialized.
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias MingaEditor.Frontend.Manager
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -152,26 +154,124 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert_receive {:minga_input, {:ready, 120, 40}}
     end
 
-    test "ready with a mismatched protocol_version stays not ready (no silent desync)" do
+    test "an admitted mismatch control revokes frames and invalidates their retry" do
       name = unique_name()
       parent = self()
+      outcomes = start_supervised!({Agent, fn -> [false, true] end}, id: make_ref())
 
       commander = fn _port, batch, [:nosuspend] ->
-        send(parent, {:port_command, batch})
-        true
+        admitted? =
+          Agent.get_and_update(outcomes, fn
+            [outcome | rest] -> {outcome, rest}
+            [] -> {true, []}
+          end)
+
+        send(parent, {:port_command, admitted?, batch})
+        admitted?
       end
 
-      {pid, fake_port} = start_connected(name, port_commander: commander)
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 60_000
+        )
+
       :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
+      assert_receive {:minga_input, {:ready, 80, 24}}
+
+      old_frame_commands = frame_commands(1, 0, 1)
+      old_frame_batch = IO.iodata_to_binary(old_frame_commands)
+      assert :unwritable = Manager.send_render_commands(name, old_frame_commands)
+      assert_receive {:port_command, false, ^old_frame_batch}
+      old_retry_token = :sys.get_state(pid).output_pressure.retry_token
 
       bad = Minga.Protocol.Opcodes.protocol_version() + 99
       ready = ready_packet(120, 40, bad)
       send_port_data(pid, fake_port, ready)
 
       refute Manager.ready?(name)
-      assert_receive {:port_command, <<0x18, _::binary>> = protocol_error}
+      assert_receive {:port_command, true, <<0x18, _::binary>> = protocol_error}
       assert protocol_error =~ "this frontend speaks protocol v#{bad}"
       refute_receive {:minga_input, {:ready, 120, 40}}, 50
+
+      pressure = :sys.get_state(pid).output_pressure
+      assert pressure.current == nil
+      assert pressure.replacement == nil
+      assert pressure.retry_token == nil
+      assert pressure.unwritable_since == nil
+
+      later_frame_commands = frame_commands(2, 1, 1)
+      later_frame_batch = IO.iodata_to_binary(later_frame_commands)
+      assert :unwritable = Manager.send_render_commands(name, later_frame_commands)
+      send(pid, {:retry_frontend_output, old_retry_token})
+      _state = :sys.get_state(pid)
+
+      refute_received {:port_command, _admitted, ^old_frame_batch}
+      refute_received {:port_command, _admitted, ^later_frame_batch}
+      refute_received {:port_command, _admitted, _other_batch}
+      refute_received {:minga_input, {:request_keyframe, _, _}}
+    end
+
+    test "a mismatch revokes an already retained frame before retrying its control" do
+      name = unique_name()
+      parent = self()
+      writable = start_supervised!({Agent, fn -> false end}, id: make_ref())
+
+      commander = fn _port, batch, [:nosuspend] ->
+        admitted? = Agent.get(writable, & &1)
+        send(parent, {:mismatch_output_attempt, admitted?, batch})
+        admitted?
+      end
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 60_000
+        )
+
+      :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
+      assert_receive {:minga_input, {:ready, 80, 24}}
+
+      old_frame_commands = frame_commands(1, 0, 1)
+      old_frame_batch = IO.iodata_to_binary(old_frame_commands)
+      assert :unwritable = Manager.send_render_commands(name, old_frame_commands)
+      assert_receive {:mismatch_output_attempt, false, ^old_frame_batch}
+
+      old_pressure = :sys.get_state(pid).output_pressure
+      old_retry_token = old_pressure.retry_token
+      old_unwritable_since = old_pressure.unwritable_since
+
+      bad = Minga.Protocol.Opcodes.protocol_version() + 99
+      send_port_data(pid, fake_port, ready_packet(120, 40, bad))
+      refute Manager.ready?(name)
+
+      assert_receive {:mismatch_output_attempt, false, <<0x18, _::binary>> = protocol_error}
+      mismatch_pressure = :sys.get_state(pid).output_pressure
+      assert mismatch_pressure.current == nil
+      assert mismatch_pressure.replacement == nil
+      assert mismatch_pressure.retry_token == old_retry_token
+      assert mismatch_pressure.unwritable_since == old_unwritable_since
+
+      later_frame_commands = frame_commands(2, 1, 1)
+      later_frame_batch = IO.iodata_to_binary(later_frame_commands)
+      assert :unwritable = Manager.send_render_commands(name, later_frame_commands)
+      refute_received {:mismatch_output_attempt, _admitted, ^later_frame_batch}
+      refute_received {:mismatch_output_attempt, _admitted, _other_batch}
+
+      Agent.update(writable, fn _ -> true end)
+      send(pid, {:retry_frontend_output, old_retry_token})
+      _state = :sys.get_state(pid)
+
+      assert_received {:mismatch_output_attempt, true, ^protocol_error}
+      refute_received {:mismatch_output_attempt, _admitted, ^old_frame_batch}
+      refute_received {:mismatch_output_attempt, _admitted, ^later_frame_batch}
+      refute_received {:minga_input, {:request_keyframe, _, _}}
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+      refute Manager.ready?(name)
     end
 
     test "short unversioned ready is rejected without marking the frontend ready" do
@@ -285,9 +385,121 @@ defmodule MingaEditor.Frontend.ManagerTest do
   end
 
   describe "output pressure" do
-    test "the output failure budget clears retained controls and stops retries per generation" do
+    test "a control-only timeout reports once, invalidates its timer, and stops attempts" do
       name = unique_name()
-      transport = start_supervised!({Agent, fn -> %{attempts: 0, writable: false} end})
+      attempts = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.update(attempts, &(&1 + 1))
+        false
+      end
+
+      {pid, _fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 0
+        )
+
+      :ok = Manager.subscribe(name)
+      clipboard = ProtocolGUI.encode_clipboard_write("retained clipboard", :general)
+
+      assert :unwritable = Manager.send_commands(name, [clipboard])
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
+
+      log =
+        capture_log(fn ->
+          send(pid, {:retry_frontend_output, retry_token})
+          _state = :sys.get_state(pid)
+          send(pid, {:retry_frontend_output, retry_token})
+          _state = :sys.get_state(pid)
+        end)
+
+      assert log =~ "Frontend output transport remained unwritable with retained control messages"
+
+      assert [["Frontend output transport remained unwritable"]] =
+               Regex.scan(~r/Frontend output transport remained unwritable/, log)
+
+      refute_received {:minga_input, {:request_keyframe, _, _}}
+      refute_received {:minga_input, {:frame_applied, _, _}}
+      assert Agent.get(attempts, & &1) == 1
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.current_bytes == 0
+      assert pressure.replacement_bytes == 0
+      assert pressure.control_batches == 0
+      assert pressure.total_retained_bytes == 0
+      assert :unwritable = Manager.send_commands(name, [clipboard])
+      assert Agent.get(attempts, & &1) == 1
+    end
+
+    test "a frame-plus-control timeout fails the transport without requesting a keyframe" do
+      name = unique_name()
+      attempts = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.update(attempts, &(&1 + 1))
+        false
+      end
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 0
+        )
+
+      :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 0, 1))
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_set_title("title")])
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
+
+      send(pid, {:retry_frontend_output, retry_token})
+      _state = :sys.get_state(pid)
+
+      refute_received {:minga_input, {:request_keyframe, _, _}}
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+      assert Agent.get(attempts, & &1) == 1
+    end
+
+    test "a frame-only timeout keeps correlated keyframe recovery" do
+      name = unique_name()
+      attempts = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.update(attempts, &(&1 + 1))
+        false
+      end
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 0
+        )
+
+      :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 0, 1))
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
+
+      send(pid, {:retry_frontend_output, retry_token})
+      _state = :sys.get_state(pid)
+
+      assert_received {:minga_input, {:request_keyframe, 0, 1}}
+      assert Agent.get(attempts, & &1) == 1
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.minimum_ack_generation == 2
+      assert pressure.total_retained_bytes == 0
+    end
+
+    test "temporary control pressure drains before the failure budget" do
+      name = unique_name()
+
+      transport =
+        start_supervised!({Agent, fn -> %{attempts: 0, writable: false} end}, id: make_ref())
 
       commander = fn _port, _batch, [:nosuspend] ->
         Agent.get_and_update(transport, fn state ->
@@ -295,55 +507,127 @@ defmodule MingaEditor.Frontend.ManagerTest do
         end)
       end
 
+      {pid, _fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 1_000
+        )
+
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_set_title("title")])
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
+      Agent.update(transport, &%{&1 | writable: true})
+
+      send(pid, {:retry_frontend_output, retry_token})
+      state = :sys.get_state(pid)
+
+      assert state.port != nil
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+      assert Agent.get(transport, & &1.attempts) == 2
+    end
+
+    test "a protocol-mismatch response timeout stays not-ready and terminates transport" do
+      name = unique_name()
+      attempts = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.update(attempts, &(&1 + 1))
+        false
+      end
+
       {pid, fake_port} =
         start_connected(name,
           port_commander: commander,
-          output_retry_ms: 1,
-          output_failure_ms: 5
+          output_retry_ms: 60_000,
+          output_failure_ms: 0
         )
 
       :ok = Manager.subscribe(name)
-      title = Protocol.encode_set_title("Retained title")
+      bad_version = Minga.Protocol.Opcodes.protocol_version() + 1
+      send_port_data(pid, fake_port, ready_packet(80, 24, bad_version))
+      refute Manager.ready?(name)
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
 
-      assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 0, 1))
-      assert :unwritable = Manager.send_commands(name, [title])
-      assert_receive {:minga_input, {:request_keyframe, 0, 1}}, 1_000
+      send(pid, {:retry_frontend_output, retry_token})
+      _state = :sys.get_state(pid)
 
-      pressure = Manager.output_pressure(name)
-      assert pressure.current_bytes == 0
-      assert pressure.replacement_bytes == 0
-      assert pressure.control_batches == 0
-      assert pressure.total_retained_bytes == 0
+      refute Manager.ready?(name)
+      refute_received {:minga_input, {:ready, _, _}}
+      refute_received {:minga_input, {:request_keyframe, _, _}}
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+      assert Agent.get(attempts, & &1) == 1
+    end
 
-      attempts_after_recovery = Agent.get(transport, & &1.attempts)
-      refute_receive {:minga_input, {:request_keyframe, 0, 1}}, 30
-      assert Agent.get(transport, & &1.attempts) == attempts_after_recovery
+    test "a concurrent port exit after terminal failure is ignored" do
+      name = unique_name()
+      attempts = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
 
-      assert :unwritable = Manager.send_render_commands(name, frame_commands(12, 0, 2))
-      assert_receive {:minga_input, {:request_keyframe, 0, 2}}, 1_000
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.update(attempts, &(&1 + 1))
+        false
+      end
 
-      Agent.update(transport, &%{&1 | writable: true})
-      assert :accepted = Manager.send_render_commands(name, frame_commands(13, 0, 3))
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 0
+        )
 
-      send_port_data(pid, fake_port, <<0x0A, 1::32, 11::32>>)
-      send_port_data(pid, fake_port, <<0x0A, 2::32, 12::32>>)
-      refute_receive {:minga_input, {:frame_applied, _, _}}, 30
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_set_title("title")])
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
 
-      send_port_data(pid, fake_port, <<0x0A, 3::32, 13::32>>)
-      assert_receive {:minga_input, {:frame_applied, 3, 13}}
+      log =
+        capture_log(fn ->
+          send(pid, {:retry_frontend_output, retry_token})
+          send(pid, {fake_port, {:exit_status, 1}})
+          _state = :sys.get_state(pid)
+        end)
 
-      pressure = Manager.output_pressure(name)
-      assert pressure.minimum_ack_generation == 3
-      assert pressure.last_admitted_generation == 3
-      assert pressure.last_admitted_frame_seq == 13
-      assert pressure.last_applied_generation == 3
-      assert pressure.last_applied_frame_seq == 13
+      assert [["Frontend output transport remained unwritable"]] =
+               Regex.scan(~r/Frontend output transport remained unwritable/, log)
+
+      refute log =~ "Renderer: crashed"
+      assert Agent.get(attempts, & &1) == 1
+    end
+
+    test "a port exit before the timeout invalidates the pending retry" do
+      name = unique_name()
+      attempts = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.update(attempts, &(&1 + 1))
+        false
+      end
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 0
+        )
+
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_set_title("title")])
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
+
+      log =
+        capture_log(fn ->
+          send(pid, {fake_port, {:exit_status, 1}})
+          send(pid, {:retry_frontend_output, retry_token})
+          _state = :sys.get_state(pid)
+        end)
+
+      assert [["Renderer: crashed"]] = Regex.scan(~r/Renderer: crashed/, log)
+      refute log =~ "Frontend output transport remained unwritable"
+      assert Agent.get(attempts, & &1) == 1
+      assert Manager.output_pressure(name).total_retained_bytes == 0
     end
 
     test "future acknowledgements do not poison correlation for later admitted frames" do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
       :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
 
       assert :accepted = Manager.send_render_commands(name, frame_commands(10, 0, 1))
       send_port_data(pid, fake_port, <<0x0A, 1::32, 10::32>>)
@@ -375,12 +659,14 @@ defmodule MingaEditor.Frontend.ManagerTest do
         admitted?
       end
 
-      {_pid, _fake_port} =
+      {pid, fake_port} =
         start_connected(name,
           port_commander: commander,
           output_retry_ms: 20,
           output_failure_ms: 1_000
         )
+
+      mark_ready(name, pid, fake_port)
 
       font_command = Protocol.encode_set_font("Fira Code", 15, true, :regular)
       frame_commands = frame_commands(10, 0, 1)
@@ -485,7 +771,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
         end)
       end
 
-      {_pid, _fake_port} =
+      {pid, fake_port} =
         start_connected(name,
           port_commander: commander,
           output_retry_ms: 20,
@@ -493,6 +779,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
         )
 
       :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
       assert :unwritable = Manager.send_render_commands(name, frame_commands(10, 9, 1))
       assert :unwritable = Manager.send_render_commands(name, frame_commands(12, 11, 1))
       assert_receive {:minga_input, {:request_keyframe, 0, 1}}, 1_000
@@ -527,6 +814,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       assert_receive {:pressure_port, port}
       :ok = Manager.subscribe(name)
+      mark_ready(name, pid, port)
       payload = :binary.copy(<<0>>, 128 * 1_024)
 
       results =
@@ -550,6 +838,151 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       {:message_queue_len, queue_len} = Process.info(pid, :message_queue_len)
       assert queue_len <= 1
+    end
+  end
+
+  describe "transport failure lifecycle" do
+    test "spawn mode restarts the manager and downstream children through rest-for-one" do
+      renderer_path = temporary_renderer_path()
+      name = unique_name()
+      parent = self()
+
+      opener = fn _spec, _opts ->
+        port = Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+        send(parent, {:spawn_port_opened, port})
+        port
+      end
+
+      commander = fn _port, _batch, [:nosuspend] -> false end
+
+      manager_child =
+        {Manager,
+         name: name,
+         renderer_path: renderer_path,
+         port_opener: opener,
+         port_commander: commander,
+         output_retry_ms: 60_000,
+         output_failure_ms: 0}
+
+      probe_child = %{
+        id: :transport_failure_probe,
+        start:
+          {Agent, :start_link,
+           [
+             fn ->
+               send(parent, {:probe_started, self()})
+               :ready
+             end
+           ]}
+      }
+
+      {:ok, supervisor} =
+        Supervisor.start_link([manager_child, probe_child], strategy: :rest_for_one)
+
+      Process.unlink(supervisor)
+      on_exit(fn -> stop_if_alive(supervisor) end)
+
+      assert_receive {:spawn_port_opened, _first_port}
+      assert_receive {:probe_started, first_probe}
+      first_manager = Process.whereis(name)
+      manager_ref = Process.monitor(first_manager)
+
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_set_title("title")])
+      retry_token = :sys.get_state(first_manager).output_pressure.retry_token
+      send(first_manager, {:retry_frontend_output, retry_token})
+
+      assert_receive {:DOWN, ^manager_ref, :process, ^first_manager,
+                      :frontend_output_transport_failure}
+
+      assert_receive {:spawn_port_opened, _replacement_port}
+      assert_receive {:probe_started, replacement_probe}
+      replacement_manager = Process.whereis(name)
+
+      assert replacement_manager != first_manager
+      assert replacement_probe != first_probe
+      assert Process.alive?(replacement_manager)
+      assert Process.alive?(replacement_probe)
+    end
+
+    test "a failed spawn-mode restart terminates the supervising generation" do
+      renderer_path = temporary_renderer_path()
+      name = unique_name()
+      opens = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+      opener = fn _spec, _opts ->
+        case Agent.get_and_update(opens, fn count -> {count, count + 1} end) do
+          0 -> Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+          _restart -> raise "replacement transport unavailable"
+        end
+      end
+
+      manager_child =
+        {Manager,
+         name: name,
+         renderer_path: renderer_path,
+         port_opener: opener,
+         port_commander: fn _port, _batch, [:nosuspend] -> false end,
+         output_retry_ms: 60_000,
+         output_failure_ms: 0}
+
+      {:ok, supervisor} =
+        Supervisor.start_link([manager_child],
+          strategy: :rest_for_one,
+          max_restarts: 1,
+          max_seconds: 5
+        )
+
+      Process.unlink(supervisor)
+      supervisor_ref = Process.monitor(supervisor)
+      manager = Process.whereis(name)
+
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_set_title("title")])
+      retry_token = :sys.get_state(manager).output_pressure.retry_token
+      send(manager, {:retry_frontend_output, retry_token})
+
+      assert_receive {:DOWN, ^supervisor_ref, :process, ^supervisor, :shutdown}
+      assert Agent.get(opens, & &1) >= 2
+      assert Process.whereis(name) == nil
+    end
+
+    @tag :heavy
+    test "connected mode exits the BEAM with failure status" do
+      script = ~S'''
+      Application.put_env(:minga, :start_editor, true)
+      {:ok, _apps} = Application.ensure_all_started(:telemetry)
+
+      opener = fn _spec, _opts ->
+        Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+      end
+
+      {:ok, manager} =
+        MingaEditor.Frontend.Manager.start_link(
+          name: :isolated_transport_failure_manager,
+          renderer_path: "/nonexistent",
+          port_mode: :connected,
+          port_opener: opener,
+          port_commander: fn _port, _batch, [:nosuspend] -> false end,
+          output_retry_ms: 1,
+          output_failure_ms: 0
+        )
+
+      :unwritable =
+        MingaEditor.Frontend.Manager.send_commands(manager, [
+          MingaEditor.Frontend.Protocol.encode_set_title("timeout")
+        ])
+
+      receive do
+      after
+        2_000 -> System.halt(99)
+      end
+      '''
+
+      {output, status} = run_isolated_elixir(script)
+
+      assert status == 1
+
+      assert [["Frontend output transport remained unwritable"]] =
+               Regex.scan(~r/Frontend output transport remained unwritable/, output)
     end
   end
 
@@ -683,6 +1116,11 @@ defmodule MingaEditor.Frontend.ManagerTest do
     send(pid, {port, {:data, payload}})
   end
 
+  defp mark_ready(server, pid, port) do
+    send_port_data(pid, port, ready_packet(80, 24))
+    assert Manager.ready?(server)
+  end
+
   defp ready_packet(width, height, version \\ Minga.Protocol.Opcodes.protocol_version()) do
     capabilities = <<0, 2, 1, 0, 0, 0, 1, 1, 64 * 1024 * 1024::32, 0::32, 0::32>>
     <<0x03, width::16, height::16, 2, 20, capabilities::binary, version::16>>
@@ -721,5 +1159,26 @@ defmodule MingaEditor.Frontend.ManagerTest do
       <<0x70, payload::binary>>,
       Protocol.encode_commit_frame(frame_seq)
     ]
+  end
+
+  defp temporary_renderer_path do
+    path = Path.join(System.tmp_dir!(), "minga-renderer-#{System.unique_integer([:positive])}")
+    File.write!(path, "")
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  defp stop_if_alive(pid) do
+    if Process.alive?(pid), do: Supervisor.stop(pid)
+  end
+
+  defp run_isolated_elixir(script) do
+    elixir = System.find_executable("elixir") || raise "elixir executable not found"
+
+    code_path_args =
+      :code.get_path()
+      |> Enum.flat_map(fn path -> ["-pa", List.to_string(path)] end)
+
+    System.cmd(elixir, code_path_args ++ ["-e", script], stderr_to_stdout: true)
   end
 end

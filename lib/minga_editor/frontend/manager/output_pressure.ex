@@ -15,6 +15,7 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
             last_applied_frame_seq: 0
 
   @type control_key :: non_neg_integer() | {non_neg_integer(), non_neg_integer()}
+  @type timeout_disposition :: :continue | {:recover_frame, PendingFrame.t()} | :transport_failure
 
   @type t :: %__MODULE__{
           current: PendingFrame.t() | nil,
@@ -82,6 +83,11 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
   def control_admitted(%__MODULE__{} = pressure, key),
     do: %{pressure | controls: Map.delete(pressure.controls, key)}
 
+  @doc "Drops retained frames while preserving controls and the shared unwritable interval."
+  @spec revoke_frames(t()) :: t()
+  def revoke_frames(%__MODULE__{} = pressure),
+    do: %{pressure | current: nil, replacement: nil}
+
   @doc "Clears the unwritable interval after every retained batch drains."
   @spec settled(t()) :: t()
   def settled(%__MODULE__{current: nil, replacement: nil, controls: controls} = pressure)
@@ -121,6 +127,14 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
 
   def expired?(%__MODULE__{}, _now, _failure_ms), do: false
 
+  @doc "Classifies an expired shared interval, giving retained controls terminal precedence."
+  @spec classify_timeout(t(), integer(), non_neg_integer()) :: timeout_disposition()
+  def classify_timeout(%__MODULE__{} = pressure, now, failure_ms) do
+    if expired?(pressure, now, failure_ms),
+      do: classify_expired_output(pressure),
+      else: :continue
+  end
+
   @doc "Advances after the current frame is admitted and returns the admitted frame."
   @spec admitted(t()) :: {PendingFrame.t(), t()}
   def admitted(%__MODULE__{current: %PendingFrame{} = current} = pressure) do
@@ -138,15 +152,31 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
 
   @doc "Drops retained output and requires acknowledgements from the next generation."
   @spec require_recovery(t(), PendingFrame.t()) :: t()
-  def require_recovery(%__MODULE__{} = pressure, %PendingFrame{} = failed) do
+  def require_recovery(
+        %__MODULE__{controls: controls} = pressure,
+        %PendingFrame{} = failed
+      )
+      when map_size(controls) == 0 do
+    %{
+      pressure
+      | current: nil,
+        replacement: nil,
+        unwritable_since: nil,
+        retry_token: nil,
+        minimum_ack_generation: max(pressure.minimum_ack_generation, failed.generation + 1)
+    }
+  end
+
+  @doc "Drops retained output and invalidates retry correlation after terminal transport failure."
+  @spec fail_transport(t()) :: t()
+  def fail_transport(%__MODULE__{} = pressure) do
     %{
       pressure
       | current: nil,
         replacement: nil,
         controls: %{},
         unwritable_since: nil,
-        retry_token: nil,
-        minimum_ack_generation: max(pressure.minimum_ack_generation, failed.generation + 1)
+        retry_token: nil
     }
   end
 
@@ -218,6 +248,15 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
 
   defp admission_watermark(pressure, %PendingFrame{}),
     do: {pressure.last_admitted_generation, pressure.last_admitted_frame_seq}
+
+  @spec classify_expired_output(t()) :: timeout_disposition()
+  defp classify_expired_output(%__MODULE__{controls: controls}) when map_size(controls) > 0,
+    do: :transport_failure
+
+  defp classify_expired_output(%__MODULE__{current: %PendingFrame{} = current}),
+    do: {:recover_frame, current}
+
+  defp classify_expired_output(%__MODULE__{}), do: :continue
 
   @spec put_control(t(), control_key(), binary()) :: t()
   defp put_control(pressure, key, batch),

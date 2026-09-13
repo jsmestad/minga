@@ -15,7 +15,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   Both modes use identical `{:packet, 4}` framing. The protocol layer (event decoding, render commands, subscriber broadcasting) is the same.
 
-  Output admission always uses `Port.command/3` with `:nosuspend`. If the transport is unwritable, the manager retains one current frame and one latest coalesced replacement, retries within a short budget, then requests correlated keyframe recovery. Synchronous admission calls keep frame binaries out of the manager mailbox while leaving the process free to receive frontend input between attempts.
+  Output admission always uses `Port.command/3` with `:nosuspend`. If the transport is unwritable, the manager retains one current frame and one latest coalesced replacement and retries within a short budget. An expired frame-only interval requests correlated keyframe recovery. An expired interval with retained controls terminates the failed transport instead of discarding one-shot effects. Synchronous admission calls keep frame binaries out of the manager mailbox while leaving the process free to receive frontend input between attempts.
 
   Subscribers register via `subscribe/1` and receive messages as:
 
@@ -40,6 +40,8 @@ defmodule MingaEditor.Frontend.Manager do
   @typedoc "Non-suspending frontend transport admission result."
   @type admission :: :accepted | :unwritable
   @type lifecycle_admission :: :accepted | :unwritable | :disconnected
+
+  @transport_failure_reason :frontend_output_transport_failure
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -165,7 +167,8 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @impl true
-  @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
+  @spec handle_call(term(), GenServer.from(), state()) ::
+          {:reply, term(), state()} | {:stop, term(), term(), state()}
   def handle_call({:subscribe, pid}, _from, state) do
     Process.monitor(pid)
     subscribers = [pid | state.subscribers] |> Enum.uniq()
@@ -205,8 +208,9 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   def handle_call({:send_commands, commands}, _from, state) do
-    {admission, state} = OutputHandler.admit_commands(state, commands)
-    {:reply, admission, state}
+    state
+    |> OutputHandler.admit_commands(commands)
+    |> consume_output_call()
   end
 
   def handle_call({:send_lifecycle_command, command}, _from, state) do
@@ -216,12 +220,14 @@ defmodule MingaEditor.Frontend.Manager do
 
   def handle_call({:send_render_commands, commands, sent_at}, _from, state) do
     Telemetry.hop_latency(:send_commands, sent_at)
-    {admission, state} = OutputHandler.admit_commands(state, commands)
-    {:reply, admission, state}
+
+    state
+    |> OutputHandler.admit_commands(commands)
+    |> consume_output_call()
   end
 
   @impl true
-  @spec handle_info(term(), state()) :: {:noreply, state()}
+  @spec handle_info(term(), state()) :: {:noreply, state()} | {:stop, term(), state()}
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
       {:ok, {:ready, width, height, caps, protocol_version}} ->
@@ -258,8 +264,11 @@ defmodule MingaEditor.Frontend.Manager do
     end
   end
 
-  def handle_info({:retry_frontend_output, token}, state),
-    do: {:noreply, OutputHandler.retry(state, token)}
+  def handle_info({:retry_frontend_output, token}, state) do
+    state
+    |> OutputHandler.retry(token)
+    |> consume_output_info()
+  end
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
     Minga.Log.info(:port, "Renderer: exited normally")
@@ -380,7 +389,7 @@ defmodule MingaEditor.Frontend.Manager do
           pos_integer(),
           MingaEditor.Frontend.Capabilities.t(),
           non_neg_integer()
-        ) :: {:noreply, state()}
+        ) :: {:noreply, state()} | {:stop, :frontend_output_transport_failure, state()}
   defp handle_ready(state, width, height, caps, protocol_version) do
     expected = Minga.Protocol.Opcodes.protocol_version()
 
@@ -396,7 +405,7 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @spec reject_protocol_mismatch(state(), non_neg_integer(), non_neg_integer()) ::
-          {:noreply, state()}
+          {:noreply, state()} | {:stop, :frontend_output_transport_failure, state()}
   defp reject_protocol_mismatch(state, expected, actual) do
     message =
       "Protocol version mismatch: this frontend speaks protocol v#{actual} but the editor " <>
@@ -404,17 +413,69 @@ defmodule MingaEditor.Frontend.Manager do
 
     Minga.Log.error(:port, message)
 
-    state =
-      if state.port do
-        {_admission, state} =
-          OutputHandler.write_control(state, Protocol.encode_protocol_error(message))
+    reject_protocol_mismatch_output(state, Protocol.encode_protocol_error(message))
+  end
 
-        state
-      else
-        state
-      end
+  @spec reject_protocol_mismatch_output(state(), binary()) ::
+          {:noreply, state()} | {:stop, :frontend_output_transport_failure, state()}
+  defp reject_protocol_mismatch_output(%{port: nil} = state, _command),
+    do: {:noreply, %{state | ready: false}}
 
-    {:noreply, %{state | ready: false}}
+  defp reject_protocol_mismatch_output(state, command) do
+    output_pressure = OutputPressure.revoke_frames(state.output_pressure)
+    state = %{state | ready: false, output_pressure: output_pressure}
+
+    case OutputHandler.write_control(state, command) do
+      {:continue, _admission, state} -> {:noreply, state}
+      {:transport_failure, state} -> terminate_transport_info(state)
+    end
+  end
+
+  @spec consume_output_call(OutputHandler.output_result()) ::
+          {:reply, admission(), state()} | {:stop, term(), admission(), state()}
+  defp consume_output_call({:continue, admission, state}), do: {:reply, admission, state}
+
+  defp consume_output_call({:transport_failure, state}),
+    do: terminate_transport_call(state)
+
+  @spec consume_output_info(OutputHandler.retry_result()) ::
+          {:noreply, state()} | {:stop, term(), state()}
+  defp consume_output_info({:continue, state}), do: {:noreply, state}
+  defp consume_output_info({:transport_failure, state}), do: terminate_transport_info(state)
+
+  @spec terminate_transport_call(state()) ::
+          {:reply, admission(), state()} | {:stop, term(), admission(), state()}
+  defp terminate_transport_call(%{port_mode: :spawn} = state) do
+    state = report_transport_failure(state)
+    {:stop, @transport_failure_reason, :unwritable, state}
+  end
+
+  defp terminate_transport_call(%{port_mode: :connected} = state) do
+    state = report_transport_failure(state)
+    maybe_stop_system(1)
+    {:reply, :unwritable, state}
+  end
+
+  @spec terminate_transport_info(state()) :: {:noreply, state()} | {:stop, term(), state()}
+  defp terminate_transport_info(%{port_mode: :spawn} = state) do
+    state = report_transport_failure(state)
+    {:stop, @transport_failure_reason, state}
+  end
+
+  defp terminate_transport_info(%{port_mode: :connected} = state) do
+    state = report_transport_failure(state)
+    maybe_stop_system(1)
+    {:noreply, state}
+  end
+
+  @spec report_transport_failure(state()) :: state()
+  defp report_transport_failure(state) do
+    Minga.Log.error(
+      :port,
+      "Frontend output transport remained unwritable with retained control messages"
+    )
+
+    OutputHandler.disconnect(state)
   end
 
   @spec broadcast([pid()], term()) :: :ok
