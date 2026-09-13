@@ -58,6 +58,7 @@
 		2388D1CC8878556958DA4A0D /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		23DA463A92D1EC2F7BFA5B5A /* CoreTextMetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */; };
 		245180E7A0626A8C48245493 /* IMEComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 048C53BF025A1476EE8BC1A7 /* IMEComposition.swift */; };
+		247F1059888D82BA97C4130C /* ProtocolReconnectWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF2B83FE6608CF9E43F6D85 /* ProtocolReconnectWorkflow.swift */; };
 		25B21FDC79D3F65CAA270C99 /* Instrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */; };
 		25D865A5AD887E5F31FA162D /* LatencyHUDStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA53378E05335BC93B342123 /* LatencyHUDStateTests.swift */; };
 		26DAAF2C2CCC2713AD30C539 /* LineTextureAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4742DDE225F256A140177301 /* LineTextureAtlas.swift */; };
@@ -124,6 +125,7 @@
 		537AA754C723E8F02ED14D32 /* ExtensionOverlayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C85068F0199E155E5349C53 /* ExtensionOverlayState.swift */; };
 		53EDC20DDE726C337975B053 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
 		5589E3C37EC68A39756A9591 /* SettingsState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BBC8154E1D48CE215F2F25 /* SettingsState.swift */; };
+		55C4605A80EC94917BAB995E /* ProtocolReconnectWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF2B83FE6608CF9E43F6D85 /* ProtocolReconnectWorkflow.swift */; };
 		569B5AC209C6D76E75E30A62 /* PickerQueryReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CCBC56FFB1C80D5AE32755F /* PickerQueryReconciler.swift */; };
 		581390BB65F36B77E59F6D9F /* GUIColorSlots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6154F8ABA71694035D38ED2 /* GUIColorSlots.swift */; };
 		5BDFA810F3F8E12C3B476F0E /* BlinkingCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD70D674B039905BFB212246 /* BlinkingCursor.swift */; };
@@ -134,6 +136,7 @@
 		604EA0D182B756909D021DC6 /* PreviewRegistry+GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */; };
 		615049EC1AF720C119D63438 /* ExtensionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089C5163F2C513D3DC21E7C /* ExtensionPanelView.swift */; };
 		6184BD99497BC7DED163F04F /* ProtocolSemanticDecode.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */; };
+		61941A357A330038DA991A66 /* ProtocolReconnectWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF2B83FE6608CF9E43F6D85 /* ProtocolReconnectWorkflow.swift */; };
 		619712AD984E8EA2ED68AE2C /* PreviewRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17B2A4D2BADE64E249073E1 /* PreviewRegistry.swift */; };
 		61CF67858355FFF4962D9D99 /* ThemeColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */; };
 		61D00C1763BF9CE0587A9A5F /* PreparedFrameTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F23F8D48BE810AB3FD81B5A /* PreparedFrameTransaction.swift */; };
@@ -177,6 +180,7 @@
 		764CA69DC904E5F1288EE12A /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A84E92F596D0DDF8FF11049 /* MinibufferView.swift */; };
 		7680EFD077E0B916411123FA /* SymbolsNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */; };
 		770CB643A97CD034494278F9 /* MingaIPC in Resources */ = {isa = PBXBuildFile; fileRef = 3BE22623414F870C4F22F87C /* MingaIPC */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		775368A81EB94B6A4332A575 /* ProtocolReconnectWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF2B83FE6608CF9E43F6D85 /* ProtocolReconnectWorkflow.swift */; };
 		77668ADDD66C267D11ACF44C /* PreviewRegistry+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF40BCB1722FAD446E1E6E52 /* PreviewRegistry+Chrome.swift */; };
 		778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */; };
 		78621BB35169CCFF26C753DD /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E89640A29C207B9040DC67 /* EditorView.swift */; };
@@ -558,6 +562,7 @@
 		37AA0E8F5D7D411B92E9E3FA /* FloatPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatPopupOverlay.swift; sourceTree = "<group>"; };
 		3AB492F643770698E3E7F419 /* ProtocolCommandSizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCommandSizeTests.swift; sourceTree = "<group>"; };
 		3BE22623414F870C4F22F87C /* MingaIPC */ = {isa = PBXFileReference; includeInIndex = 0; path = MingaIPC; sourceTree = BUILT_PRODUCTS_DIR; };
+		3BF2B83FE6608CF9E43F6D85 /* ProtocolReconnectWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolReconnectWorkflow.swift; sourceTree = "<group>"; };
 		3C85068F0199E155E5349C53 /* ExtensionOverlayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionOverlayState.swift; sourceTree = "<group>"; };
 		3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolSchemaTests.swift; sourceTree = "<group>"; };
 		3E23DC6E0ACB156F21293E87 /* PortLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortLogger.swift; sourceTree = "<group>"; };
@@ -1038,6 +1043,7 @@
 				7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */,
 				BB164EE3CF13E41E95FFD9AA /* ProtocolEventHandoff.swift */,
 				4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */,
+				3BF2B83FE6608CF9E43F6D85 /* ProtocolReconnectWorkflow.swift */,
 				08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */,
 				1D563A97B0CB496D7906B53D /* RenderPerformanceGate.swift */,
 				8D450D75A36486FD84AD6BB8 /* StatusBarUpdate.swift */,
@@ -1625,6 +1631,7 @@
 				9F7CBB6787243AC4F0F1E8B7 /* ProtocolEventHandoff.swift in Sources */,
 				2C176B25F957ABFA236A1F31 /* ProtocolOpcodes.generated.swift in Sources */,
 				364C48575BB95C9CA535A9C8 /* ProtocolReader.swift in Sources */,
+				61941A357A330038DA991A66 /* ProtocolReconnectWorkflow.swift in Sources */,
 				CED32F817C08FC30D21E09AC /* ProtocolSemanticDecode.generated.swift in Sources */,
 				8A0B62C670C71DB327CE1A29 /* RecoveryManager.swift in Sources */,
 				8927F727EB04B303B4CDF61F /* RendererComplexityGate.swift in Sources */,
@@ -1684,6 +1691,7 @@
 				C4E49841C01BA2B55FF5DBE0 /* ProtocolEventHandoff.swift in Sources */,
 				3535A85D824D23299BA91A86 /* ProtocolOpcodes.generated.swift in Sources */,
 				DDA57E6CD5801C79E241BC90 /* ProtocolReader.swift in Sources */,
+				55C4605A80EC94917BAB995E /* ProtocolReconnectWorkflow.swift in Sources */,
 				6184BD99497BC7DED163F04F /* ProtocolSemanticDecode.generated.swift in Sources */,
 				D39F23DB142B71508F6DE03C /* RecoveryManager.swift in Sources */,
 				CB84C04D898F6ADE2B2B0619 /* RendererComplexityGate.swift in Sources */,
@@ -1744,6 +1752,7 @@
 				F6774D86515DEFEFD0F3894B /* ProtocolEventHandoff.swift in Sources */,
 				6AFA24DC3EE21023636C136A /* ProtocolOpcodes.generated.swift in Sources */,
 				4451B7F61D8FB50D964406A0 /* ProtocolReader.swift in Sources */,
+				247F1059888D82BA97C4130C /* ProtocolReconnectWorkflow.swift in Sources */,
 				A911CF7DE0346417471AF27A /* ProtocolSemanticDecode.generated.swift in Sources */,
 				FD4F1E64AF19C8199D4AAEAA /* RecoveryManager.swift in Sources */,
 				E4E516B424E1EFD1FE7E3305 /* RendererComplexityGate.swift in Sources */,
@@ -1967,6 +1976,7 @@
 				B5D79AA3EB89928091967F73 /* ProtocolEventHandoff.swift in Sources */,
 				647346FE3161B2C2FC4A5436 /* ProtocolOpcodes.generated.swift in Sources */,
 				FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */,
+				775368A81EB94B6A4332A575 /* ProtocolReconnectWorkflow.swift in Sources */,
 				F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */,
 				B7EA51EE1C9145223251B68C /* ProtocolSemanticDecode.generated.swift in Sources */,
 				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
