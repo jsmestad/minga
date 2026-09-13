@@ -78,7 +78,7 @@ defmodule MingaEditor.Frontend.Emit do
       {:error, error} ->
         Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
-        {Caches.reset_frontend_state(caches), ctx}
+        {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx}
 
       {:ok, encoded_frame} ->
         emit_encoded_frame(
@@ -169,7 +169,7 @@ defmodule MingaEditor.Frontend.Emit do
     error in [Minga.Protocol.EncodingError, Minga.Frontend.Adapter.GUI.EncodingError] ->
       Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
-      {Caches.reset_frontend_state(caches), ctx}
+      {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx}
   end
 
   # The async render path threads Renderer.Server's monotonic seq through the

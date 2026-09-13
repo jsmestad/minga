@@ -88,6 +88,24 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
   def revoke_frames(%__MODULE__{} = pressure),
     do: %{pressure | current: nil, replacement: nil}
 
+  @doc "Reserves the next recovery generation and revokes frames from the superseded generation."
+  @spec reserve_recovery_generation(t()) :: {pos_integer(), t()}
+  def reserve_recovery_generation(%__MODULE__{} = pressure) do
+    generation =
+      max(
+        pressure.minimum_ack_generation,
+        max(pressure.last_admitted_generation, pressure.last_applied_generation)
+      ) + 1
+
+    {generation,
+     %{
+       pressure
+       | current: nil,
+         replacement: nil,
+         minimum_ack_generation: generation
+     }}
+  end
+
   @doc "Clears the unwritable interval after every retained batch drains."
   @spec settled(t()) :: t()
   def settled(%__MODULE__{current: nil, replacement: nil, controls: controls} = pressure)

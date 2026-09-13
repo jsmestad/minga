@@ -405,7 +405,11 @@ defmodule MingaEditor.Input.RouterTest do
       renderer =
         start_supervised!(
           {RendererServer,
-           name: nil, editor_pid: self(), pipeline: acknowledged_probe(self()), require_ack?: true}
+           name: nil,
+           editor_pid: self(),
+           pipeline: acknowledged_probe(self()),
+           require_ack?: true,
+           generation_reserver: generation_reserver()}
         )
 
       state = async_state(renderer)
@@ -425,6 +429,11 @@ defmodule MingaEditor.Input.RouterTest do
       assert second_seq > first_seq
       assert RendererServer.acknowledgement_state(renderer) == {1, first_seq}
     end
+  end
+
+  defp generation_reserver do
+    counter = :atomics.new(1, [])
+    fn -> :atomics.add_get(counter, 1, 1) end
   end
 
   describe "dispatch_mouse/7" do

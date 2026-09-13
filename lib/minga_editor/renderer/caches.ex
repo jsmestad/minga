@@ -15,7 +15,7 @@ defmodule MingaEditor.Renderer.Caches do
             last_link_cursor: nil,
             last_emitted_frame_seq: 0,
             last_acknowledged_frame_seq: 0,
-            recovery_generation: 1,
+            recovery_generation: 0,
             last_frame_keyframe?: false,
             adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
 
@@ -37,8 +37,10 @@ defmodule MingaEditor.Renderer.Caches do
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
 
-  @spec new() :: t()
-  def new, do: %__MODULE__{}
+  @spec new(non_neg_integer()) :: t()
+  def new(recovery_generation \\ 0)
+      when is_integer(recovery_generation) and recovery_generation >= 0,
+      do: %__MODULE__{recovery_generation: recovery_generation}
 
   @spec reset_frame_rows_rasterized(t()) :: t()
   def reset_frame_rows_rasterized(%__MODULE__{} = caches),
@@ -85,8 +87,9 @@ defmodule MingaEditor.Renderer.Caches do
     }
   end
 
-  @spec reset_frontend_state(t()) :: t()
-  def reset_frontend_state(%__MODULE__{} = caches) do
+  @spec reset_frontend_state(t(), non_neg_integer()) :: t()
+  def reset_frontend_state(%__MODULE__{} = caches, recovery_generation)
+      when is_integer(recovery_generation) and recovery_generation >= 0 do
     %{
       caches
       | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
@@ -95,7 +98,7 @@ defmodule MingaEditor.Renderer.Caches do
         last_link_cursor: nil,
         last_emitted_frame_seq: 0,
         last_acknowledged_frame_seq: 0,
-        recovery_generation: caches.recovery_generation + 1
+        recovery_generation: recovery_generation
     }
   end
 end

@@ -11,6 +11,8 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias Minga.Frontend.Adapter.GUI.Caches, as: GUICaches
   alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.Frontend.ResourcePolicy
+  alias MingaEditor.Frontend.Manager
+  alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
@@ -32,6 +34,53 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.State.Windows
 
   @async_render_timeout 5_000
+
+  defmodule RecoveryForwarder do
+    @moduledoc false
+
+    use GenServer
+
+    alias MingaEditor.Frontend.Manager
+    alias MingaEditor.Renderer.Server, as: RendererServer
+
+    @spec start_link(keyword()) :: GenServer.on_start()
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl true
+    @spec init(keyword()) :: {:ok, keyword()}
+    def init(opts) do
+      :ok = Manager.subscribe(Keyword.fetch!(opts, :manager))
+      {:ok, opts}
+    end
+
+    @impl true
+    def handle_info({:minga_input, {:ready, width, height}}, opts) do
+      if Agent.get(Keyword.fetch!(opts, :active), & &1) do
+        :ok =
+          RendererServer.reset_connection(
+            Keyword.fetch!(opts, :renderer),
+            Keyword.fetch!(opts, :intent),
+            Keyword.fetch!(opts, :frame_seq)
+          )
+
+        send(Keyword.fetch!(opts, :parent), {:replayed_ready, self(), width, height})
+      end
+
+      {:noreply, opts}
+    end
+
+    def handle_info({:minga_input, {:frame_applied, generation, frame_seq}} = message, opts) do
+      RendererServer.frame_status(
+        Keyword.fetch!(opts, :renderer),
+        {:frame_applied, generation, frame_seq}
+      )
+
+      send(Keyword.fetch!(opts, :parent), {:forwarded, self(), message})
+      {:noreply, opts}
+    end
+
+    def handle_info(_message, opts), do: {:noreply, opts}
+  end
 
   setup do
     MingaEditor.Shell.Registry.reset_for_test()
@@ -306,6 +355,137 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   describe "frame acknowledgement credit" do
+    test "rest-for-one renderer replacement reserves beyond the surviving connection and acknowledges its first keyframe" do
+      parent = self()
+      manager_name = unique_process_name(:generation_manager)
+      renderer_name = unique_process_name(:generation_renderer)
+      active = start_supervised!({Agent, fn -> false end}, id: make_ref())
+
+      opener = fn _spec, _opts ->
+        port = Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+        send(parent, {:recovery_port, port})
+        port
+      end
+
+      commander = fn _port, batch, [:nosuspend] ->
+        send(parent, {:wire_batch, batch})
+        true
+      end
+
+      manager_child =
+        {Manager,
+         name: manager_name,
+         renderer_path: "/nonexistent",
+         port_mode: :connected,
+         port_opener: opener,
+         port_commander: commander}
+
+      renderer_child =
+        {RendererServer,
+         name: renderer_name,
+         editor_pid: parent,
+         frontend_manager: manager_name,
+         pipeline: connected_ack_pipeline(manager_name),
+         require_ack?: true,
+         ack_timeout_ms: 60_000}
+
+      forwarder_child = %{
+        id: RecoveryForwarder,
+        start:
+          {RecoveryForwarder, :start_link,
+           [
+             [
+               manager: manager_name,
+               renderer: renderer_name,
+               active: active,
+               parent: parent,
+               intent: stub_intent(),
+               frame_seq: 60
+             ]
+           ]}
+      }
+
+      {:ok, supervisor} =
+        Supervisor.start_link([manager_child, renderer_child, forwarder_child],
+          strategy: :rest_for_one
+        )
+
+      Process.unlink(supervisor)
+      on_exit(fn -> if Process.alive?(supervisor), do: Supervisor.stop(supervisor) end)
+
+      assert_receive {:recovery_port, port}, @async_render_timeout
+      manager = Process.whereis(manager_name)
+      send(manager, {port, {:data, ready_packet(80, 24)}})
+      assert Manager.ready?(manager_name)
+
+      assert :accepted =
+               Manager.send_render_commands(manager_name, connected_frame_commands(50, 0, 5))
+
+      assert_receive {:wire_batch, _generation_five_batch}, @async_render_timeout
+      send(manager, {port, {:data, <<0x0A, 5::32, 50::32>>}})
+      assert Manager.output_pressure(manager_name).last_applied_generation == 5
+
+      Agent.update(active, fn _ -> true end)
+      first_renderer = Process.whereis(renderer_name)
+      first_ref = Process.monitor(first_renderer)
+      Process.exit(first_renderer, :kill)
+
+      assert_receive {:DOWN, ^first_ref, :process, ^first_renderer, :killed},
+                     @async_render_timeout
+
+      assert_receive {:replayed_ready, replacement_forwarder, 80, 24}, @async_render_timeout
+      replacement_renderer = Process.whereis(renderer_name)
+      assert replacement_renderer != first_renderer
+
+      assert_receive {:wire_batch, recovery_batch}, @async_render_timeout
+      assert {60, 0, recovery_generation} = frame_header(recovery_batch)
+      assert recovery_generation > 5
+
+      send(manager, {port, {:data, <<0x0A, 5::32, 50::32>>}})
+      refute_receive {:forwarded, ^replacement_forwarder, _message}, 30
+
+      send(manager, {port, {:data, <<0x0A, recovery_generation::32, 60::32>>}})
+
+      assert_receive {:forwarded, ^replacement_forwarder,
+                      {:minga_input, {:frame_applied, ^recovery_generation, 60}}},
+                     @async_render_timeout
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 60, keyframe?: true}},
+                     @async_render_timeout
+
+      refute_receive {:wire_batch, _timeout_catch_up}, 50
+      assert RendererServer.acknowledgement_state(renderer_name) == {recovery_generation, 60}
+
+      send(manager, {port, {:data, ready_packet(80, 24)}})
+      assert_receive {:replayed_ready, ^replacement_forwarder, 80, 24}, @async_render_timeout
+      assert_receive {:wire_batch, duplicate_ready_batch}, @async_render_timeout
+      assert {60, 0, duplicate_ready_generation} = frame_header(duplicate_ready_batch)
+      assert duplicate_ready_generation > recovery_generation
+
+      RendererServer.request_recovery(renderer_name)
+      assert_receive {:wire_batch, concurrent_recovery_batch}, @async_render_timeout
+
+      assert {concurrent_frame_seq, 0, concurrent_recovery_generation} =
+               frame_header(concurrent_recovery_batch)
+
+      assert concurrent_frame_seq > 60
+      assert concurrent_recovery_generation > duplicate_ready_generation
+
+      send(manager, {port, {:data, <<0x0A, duplicate_ready_generation::32, 60::32>>}})
+      refute_receive {:forwarded, ^replacement_forwarder, _message}, 30
+
+      send(
+        manager,
+        {port, {:data, <<0x0A, concurrent_recovery_generation::32, concurrent_frame_seq::32>>}}
+      )
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^concurrent_frame_seq}},
+                     @async_render_timeout
+
+      assert RendererServer.acknowledgement_state(renderer_name) ==
+               {concurrent_recovery_generation, concurrent_frame_seq}
+    end
+
     test "only a matching frame acknowledgement promotes every pending GUI window delta" do
       renderer =
         start_ack_renderer(self(), pipeline: pending_window_delta_probe_pipeline(self()))
@@ -1193,13 +1373,22 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   defp start_renderer(editor_pid, opts \\ []) do
-    opts = Keyword.merge([name: nil, editor_pid: editor_pid], opts)
+    opts =
+      [name: nil, editor_pid: editor_pid]
+      |> Keyword.merge(opts)
+      |> Keyword.put_new_lazy(:generation_reserver, &generation_reserver/0)
+
     start_supervised!({RendererServer, opts})
   end
 
   defp start_ack_renderer(editor_pid, opts \\ []) do
     pipeline = Keyword.get(opts, :pipeline, acknowledgement_probe_pipeline(editor_pid))
     start_renderer(editor_pid, Keyword.merge(opts, pipeline: pipeline, require_ack?: true))
+  end
+
+  defp generation_reserver do
+    counter = :atomics.new(1, [])
+    fn -> :atomics.add_get(counter, 1, 1) end
   end
 
   defp acknowledgement_probe_pipeline(parent) do
@@ -1442,6 +1631,50 @@ defmodule MingaEditor.Renderer.ServerTest do
     {:awaiting_ack, lease, _successor} = :sys.get_state(renderer).frame_credit
     lease.output.caches.adapter_gui_caches.pending_window_delta_ids
   end
+
+  defp connected_ack_pipeline(manager) do
+    fn input ->
+      generation = input.caches.recovery_generation
+      frame_seq = input.frame_seq
+      base_frame_seq = input.caches.last_acknowledged_frame_seq
+
+      :accepted =
+        Manager.send_render_commands(
+          manager,
+          connected_frame_commands(frame_seq, base_frame_seq, generation)
+        )
+
+      %{
+        input
+        | caches: %{
+            input.caches
+            | last_emitted_frame_seq: frame_seq,
+              last_frame_keyframe?: base_frame_seq == 0
+          }
+      }
+    end
+  end
+
+  defp connected_frame_commands(frame_seq, base_frame_seq, generation) do
+    [
+      Protocol.encode_begin_frame(frame_seq, base_frame_seq, generation),
+      Protocol.encode_commit_frame(frame_seq)
+    ]
+  end
+
+  defp frame_header(
+         <<_opcode, frame_seq::32, base_frame_seq::32, generation::32, _rest::binary>>
+       ),
+       do: {frame_seq, base_frame_seq, generation}
+
+  defp ready_packet(width, height) do
+    capabilities = <<0, 2, 1, 0, 0, 0, 1, 1, 64 * 1024 * 1024::32, 0::32, 0::32>>
+    version = Minga.Protocol.Opcodes.protocol_version()
+    <<0x03, width::16, height::16, 2, 20, capabilities::binary, version::16>>
+  end
+
+  defp unique_process_name(prefix),
+    do: String.to_atom("#{prefix}_#{System.unique_integer([:positive])}")
 
   defp reject_base_sequence_mismatch(renderer, generation, frame_seq, last_applied) do
     RendererServer.frame_status(

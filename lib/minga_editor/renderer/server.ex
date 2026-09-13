@@ -10,6 +10,7 @@ defmodule MingaEditor.Renderer.Server do
   use GenServer
 
   alias MingaEditor.Frontend.ResourcePolicy
+  alias MingaEditor.Frontend.Manager, as: FrontendManager
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.FrameHandler
   alias MingaEditor.Renderer.RecoveryHandler
@@ -114,7 +115,18 @@ defmodule MingaEditor.Renderer.Server do
 
   @impl true
   @spec init(keyword()) :: {:ok, t()}
-  def init(opts), do: {:ok, State.new(opts)}
+  def init(opts) do
+    generation_reserver = generation_reserver(opts)
+    recovery_generation = generation_reserver.()
+
+    {:ok,
+     State.new(
+       Keyword.merge(opts,
+         generation_reserver: generation_reserver,
+         recovery_generation: recovery_generation
+       )
+     )}
+  end
 
   @impl true
   def handle_call(:rendering?, _from, state), do: {:reply, State.rendering?(state), state}
@@ -161,4 +173,27 @@ defmodule MingaEditor.Renderer.Server do
 
   @spec monotonic_now() :: integer()
   defp monotonic_now, do: System.monotonic_time(:microsecond)
+
+  @spec generation_reserver(keyword()) :: State.generation_reserver()
+  defp generation_reserver(opts) do
+    case Keyword.fetch(opts, :generation_reserver) do
+      {:ok, reserver} when is_function(reserver, 0) ->
+        reserver
+
+      :error ->
+        default_generation_reserver(opts)
+    end
+  end
+
+  @spec default_generation_reserver(keyword()) :: State.generation_reserver()
+  defp default_generation_reserver(opts) do
+    require_ack? = Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline))
+
+    if require_ack? do
+      manager = Keyword.get(opts, :frontend_manager, FrontendManager)
+      fn -> FrontendManager.reserve_recovery_generation(manager) end
+    else
+      fn -> 1 end
+    end
+  end
 end
