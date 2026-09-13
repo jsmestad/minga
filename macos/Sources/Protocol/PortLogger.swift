@@ -50,6 +50,11 @@ public final class PortLogger: Sendable {
         shared.state.withLock { $0 = encoder }
     }
 
+    /// Removes a disconnected protocol encoder before replacement construction begins.
+    public static func clearEncoder() {
+        shared.state.withLock { $0 = nil }
+    }
+
     private static func send(level: UInt8, message: String) {
         let encoder: (any InputEncoder)? = shared.state.withLock { $0 }
         encoder?.sendLog(level: level, message: message)

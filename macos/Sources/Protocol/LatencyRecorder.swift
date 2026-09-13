@@ -37,6 +37,7 @@ public final class LatencyRecorder: @unchecked Sendable {
         case nativeResourceFailure = "native_resource_failure"
         case dropped
         case gpuFailure = "gpu_failure"
+        case connectionReplaced = "connection_replaced"
     }
 
     /// Percentile summary for one latency milestone.
@@ -158,6 +159,18 @@ public final class LatencyRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         guard removePending(seq) != nil else { return }
         discardCounts[reason, default: 0] &+= 1
+    }
+
+    /// Retires all unresolved input samples when their BEAM connection is replaced.
+    public func replaceConnection() {
+        lock.lock()
+        defer { lock.unlock() }
+        let count = pending.count
+        pending.removeAll(keepingCapacity: true)
+        pendingOrder.removeAll(keepingCapacity: true)
+        if count > 0 {
+            discardCounts[.connectionReplaced, default: 0] &+= UInt64(count)
+        }
     }
 
     /// Returns an immutable percentile and discard-count snapshot.

@@ -14,6 +14,7 @@ public final class GUIFramePresentationMetrics {
         case hidden
         case unavailable
         case failed
+        case connectionReplaced = "connection_replaced"
     }
 
     public struct Sample: Equatable, Sendable {
@@ -43,6 +44,13 @@ public final class GUIFramePresentationMetrics {
                 record(frame: prior.frame, domain: domain, outcome: .superseded)
             }
             pending[domain] = Pending(frame: frame, started: .now, submitted: false)
+        }
+    }
+
+    /// Retires every pending native presentation when its BEAM connection is replaced.
+    public func replaceConnection() {
+        for domain in Self.domains {
+            discard(domain: domain, outcome: .connectionReplaced)
         }
     }
 
@@ -91,7 +99,7 @@ public final class GUIFramePresentationMetrics {
 
     /// Resolves a ticket that cannot reach its domain's native presentation path.
     public func discard(domain: GUIFrameImpact, outcome: Outcome, frame: GUICommittedFrame? = nil) {
-        guard outcome == .superseded || outcome == .hidden || outcome == .unavailable || outcome == .failed,
+        guard outcome == .superseded || outcome == .hidden || outcome == .unavailable || outcome == .failed || outcome == .connectionReplaced,
               let ticket = pending[domain], frame == nil || ticket.frame == frame else { return }
         resolveDiscard(domain: domain, ticket: ticket, outcome: outcome)
     }

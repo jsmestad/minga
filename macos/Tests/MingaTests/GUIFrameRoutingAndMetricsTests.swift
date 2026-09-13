@@ -195,6 +195,31 @@ struct GUIFramePresentationMetricsTests {
         ])
     }
 
+    @Test("reused generation and sequence cannot resolve across connections")
+    @MainActor func reusedIdentityStaysConnectionCorrelated() throws {
+        let metrics = GUIFramePresentationMetrics()
+        let old = GUICommittedFrame(connectionID: 1, generation: 7, frameSeq: 30)
+        let replacement = GUICommittedFrame(connectionID: 2, generation: 7, frameSeq: 30)
+
+        metrics.beginCommitted(frame: old, impact: .editor)
+        metrics.replaceConnection()
+        metrics.beginCommitted(frame: replacement, impact: .editor)
+
+        metrics.recordMetalSubmission(presentationFrame: old)
+        metrics.recordMetalPresented(presentationFrame: old)
+        #expect(metrics.snapshot() == [
+            .init(frame: old, domain: .editor, outcome: .connectionReplaced)
+        ])
+
+        metrics.recordMetalSubmission(presentationFrame: replacement)
+        metrics.recordMetalPresented(presentationFrame: replacement)
+        #expect(metrics.snapshot() == [
+            .init(frame: old, domain: .editor, outcome: .connectionReplaced),
+            .init(frame: replacement, domain: .editor, outcome: .submitted),
+            .init(frame: replacement, domain: .editor, outcome: .presented),
+        ])
+    }
+
     @Test("successful native draw and Metal milestones keep committed frame identity")
     @MainActor func successfulOutcomes() throws {
         let frame = GUICommittedFrame(generation: 2, frameSeq: 8)
@@ -216,7 +241,8 @@ struct GUIFramePresentationMetricsTests {
             .init(frame: second, domain: .shell, outcome: .hidden),
             .init(frame: first, domain: .editor, outcome: .unavailable),
             .init(frame: first, domain: .editorOverlay, outcome: .failed),
-            .init(frame: first, domain: .windowOverlay, outcome: .superseded)
+            .init(frame: first, domain: .windowOverlay, outcome: .superseded),
+            .init(frame: first, domain: .editor, outcome: .connectionReplaced)
         ])
     }
 
@@ -262,6 +288,8 @@ struct GUIFramePresentationMetricsTests {
         metrics.discard(domain: .editor, outcome: .unavailable, frame: first)
         metrics.discard(domain: .editorOverlay, outcome: .failed, frame: first)
         metrics.discard(domain: .windowOverlay, outcome: .superseded, frame: first)
+        metrics.beginCommitted(frame: first, impact: .editor)
+        metrics.replaceConnection()
         return metrics.snapshot()
     }
 }

@@ -65,6 +65,17 @@ final class EditorNSView: MTKView {
 
     /// Whether the current right-click was consumed by a native context menu.
     private var contextMenuShownForRightClick = false
+    private weak var activeContextMenu: NSMenu?
+
+    /// Local input identity and press ownership prevent a gesture started on one
+    /// BEAM connection from sending its drag, release, or menu action to another.
+    private var inputConnectionGeneration: UInt64 = 0
+    private var leftMousePressActive = false
+    private var rightMousePressActive = false
+    private var middleMousePressActive = false
+    private var consumeLeftGestureTail = false
+    private var consumeRightGestureTail = false
+    private var consumeMiddleGestureTail = false
 
     /// IME composition state (marked text tracking).
     private var imeComposition = IMEComposition()
@@ -545,6 +556,55 @@ final class EditorNSView: MTKView {
         needsDisplay = true
     }
 
+    /// Discards every local interaction tied to the replaced BEAM and disables input.
+    func invalidateConnection() {
+        self.encoder = NullInputEncoder()
+        inputConnectionGeneration &+= 1
+        consumeLeftGestureTail = consumeLeftGestureTail || leftMousePressActive || leftMouseDownPoint != nil || isDraggingScrollIndicator
+        consumeRightGestureTail = consumeRightGestureTail || rightMousePressActive || contextMenuShownForRightClick
+        consumeMiddleGestureTail = consumeMiddleGestureTail || middleMousePressActive
+        leftMousePressActive = false
+        rightMousePressActive = false
+        middleMousePressActive = false
+        activeContextMenu?.cancelTracking()
+        activeContextMenu = nil
+        contextMenuShownForRightClick = false
+        imeComposition.clear()
+        lastMoveRow = -1
+        lastMoveCol = -1
+        isMouseInGutter = false
+        gutterHoverWindowId = nil
+        gutterHoverRow = nil
+        leftMouseDownPoint = nil
+        leftMouseDragStarted = false
+        thumbDragSession = nil
+        isDraggingScrollIndicator = false
+        scrollIndicatorDragOffset = nil
+        hardResetSmoothScroll()
+        cancelSpaceGrace()
+        spacePending = false
+        spaceKeyDown = false
+        lastCommandHeld = false
+        clearOptimisticTextInputMode()
+        cancelResizeFlushTask()
+        resizeBookkeeping = LiveResizeBookkeeping()
+        dividerDragState = .none
+        setDividerCursorState(.none)
+        setLinkCursorActive(false)
+        hideDropHighlight()
+    }
+
+    /// Enables input only after replacement transport construction succeeds.
+    func installConnectionEncoder(_ encoder: InputEncoder) {
+        self.encoder = encoder
+    }
+
+    /// Atomically replaces the input connection for callers that already own a valid encoder.
+    func replaceConnection(encoder: InputEncoder) {
+        invalidateConnection()
+        installConnectionEncoder(encoder)
+    }
+
     /// Previous cursor position for accessibility change detection.
     private var lastAccessibilityCursorRow: UInt16 = 0
     private var lastAccessibilityCursorCol: UInt16 = 0
@@ -585,6 +645,7 @@ final class EditorNSView: MTKView {
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.takePresentationInputSeq()
         let localScrollPresentation = localScrollPresentation
+        let connectionID = dispatcher.connectionID
         coreTextRenderer.render(snapshot: committedSnapshot, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
                                 isMouseInGutter: validMouseInGutter,
@@ -606,8 +667,16 @@ final class EditorNSView: MTKView {
                                 presentationWindowId: localScrollPresentation?.windowId,
                                 presentationInputSeq: presentationInputSeq,
                                 latencyRecorder: dispatcher.latency,
+                                connectionID: connectionID,
+                                isPresentationCurrent: { [weak dispatcher] in
+                                    dispatcher?.isCurrentConnection(connectionID) == true
+                                },
                                 onPresented: { [weak self, localScrollPresentation] snapshot in
-                                    self?.promotePresentedSnapshot(snapshot, localScrollPresentation: localScrollPresentation)
+                                    self?.promotePresentedSnapshot(
+                                        snapshot,
+                                        localScrollPresentation: localScrollPresentation,
+                                        connectionID: connectionID
+                                    )
                                 })
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
@@ -618,8 +687,17 @@ final class EditorNSView: MTKView {
         os_signpost(.event, log: renderLog, name: "DrawComplete")
     }
 
-    private func promotePresentedSnapshot(_ snapshot: CommittedEditorSnapshot, localScrollPresentation: LocalScrollPresentation?) {
-        dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: localScrollPresentation)
+    private func promotePresentedSnapshot(
+        _ snapshot: CommittedEditorSnapshot,
+        localScrollPresentation: LocalScrollPresentation?,
+        connectionID: UInt64
+    ) {
+        guard dispatcher.isCurrentConnection(connectionID) else { return }
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: snapshot,
+            localTransform: localScrollPresentation,
+            connectionID: connectionID
+        )
         let cursor = snapshot.activeSurface.map { ($0.content.cursorRow, $0.content.cursorCol) } ?? (0, 0)
         if cursor.0 != lastAccessibilityCursorRow || cursor.1 != lastAccessibilityCursorCol {
             lastAccessibilityCursorRow = cursor.0
@@ -1689,6 +1767,8 @@ final class EditorNSView: MTKView {
         // guard gates every geometry-hit-testing handler below; press/release pairs
         // that straddle a resize are completed by viewWillStartLiveResize instead.
         guard !inLiveResize else { return }
+        consumeLeftGestureTail = false
+        leftMousePressActive = true
         reclaimFirstResponderIfNeeded()
 
         // Scroll indicator track: intercept clicks on the right edge.
@@ -1723,7 +1803,13 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if consumeLeftGestureTail {
+            consumeLeftGestureTail = false
+            leftMousePressActive = false
+            return
+        }
         guard !inLiveResize else { return }
+        leftMousePressActive = false
         if isDraggingScrollIndicator {
             isDraggingScrollIndicator = false
             scrollIndicatorDragOffset = nil
@@ -1749,6 +1835,8 @@ final class EditorNSView: MTKView {
         // Dropped during a live resize (see mouseDown). The matching rightMouseUp stays
         // ungated so a press that straddles the resize still delivers its release.
         guard !inLiveResize else { return }
+        consumeRightGestureTail = false
+        rightMousePressActive = true
         reclaimFirstResponderIfNeeded()
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
@@ -1757,10 +1845,21 @@ final class EditorNSView: MTKView {
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_PRESS, clickCount: cc)
         contextMenuShownForRightClick = true
-        NSMenu.popUpContextMenu(buildEditorContextMenu(), with: event, for: self)
+        let menu = buildEditorContextMenu(connectionGeneration: inputConnectionGeneration)
+        activeContextMenu = menu
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+        if activeContextMenu === menu {
+            activeContextMenu = nil
+        }
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        if consumeRightGestureTail {
+            consumeRightGestureTail = false
+            rightMousePressActive = false
+            return
+        }
+        rightMousePressActive = false
         if contextMenuShownForRightClick {
             contextMenuShownForRightClick = false
             return
@@ -1772,37 +1871,53 @@ final class EditorNSView: MTKView {
                                eventType: MOUSE_RELEASE)
     }
 
-    private func buildEditorContextMenu() -> NSMenu {
+    private struct EditorContextMenuAction {
+        let name: String
+        let connectionGeneration: UInt64
+    }
+
+    private func buildEditorContextMenu(connectionGeneration: UInt64) -> NSMenu {
         let menu = NSMenu(title: "Editor")
         menu.autoenablesItems = false
-        addEditorMenuItem("Cut", action: "cut", to: menu)
-        addEditorMenuItem("Copy", action: "copy", to: menu)
-        addEditorMenuItem("Paste", action: "paste", to: menu)
-        addEditorMenuItem("Select All", action: "select_all", to: menu)
+        addEditorMenuItem("Cut", action: "cut", connectionGeneration: connectionGeneration, to: menu)
+        addEditorMenuItem("Copy", action: "copy", connectionGeneration: connectionGeneration, to: menu)
+        addEditorMenuItem("Paste", action: "paste", connectionGeneration: connectionGeneration, to: menu)
+        addEditorMenuItem("Select All", action: "select_all", connectionGeneration: connectionGeneration, to: menu)
         menu.addItem(.separator())
 
         let hasLsp = statusBarState?.hasLsp ?? false
-        addEditorMenuItem("Go to Definition", action: "goto_definition", to: menu, enabled: hasLsp)
-        addEditorMenuItem("Peek Definition", action: "peek_definition", to: menu, enabled: hasLsp)
-        addEditorMenuItem("Find References", action: "find_references", to: menu, enabled: hasLsp)
-        addEditorMenuItem("Rename Symbol", action: "rename_symbol", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Go to Definition", action: "goto_definition", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
+        addEditorMenuItem("Peek Definition", action: "peek_definition", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
+        addEditorMenuItem("Find References", action: "find_references", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
+        addEditorMenuItem("Rename Symbol", action: "rename_symbol", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
         menu.addItem(.separator())
 
-        addEditorMenuItem("Toggle Comment", action: "toggle_comment_line", to: menu)
-        addEditorMenuItem("Format Document", action: "format_buffer", to: menu)
+        addEditorMenuItem("Toggle Comment", action: "toggle_comment_line", connectionGeneration: connectionGeneration, to: menu)
+        addEditorMenuItem("Format Document", action: "format_buffer", connectionGeneration: connectionGeneration, to: menu)
         return menu
     }
 
-    private func addEditorMenuItem(_ title: String, action: String, to menu: NSMenu, enabled: Bool = true) {
+    private func addEditorMenuItem(
+        _ title: String,
+        action: String,
+        connectionGeneration: UInt64,
+        to menu: NSMenu,
+        enabled: Bool = true
+    ) {
         let item = NSMenuItem(title: title, action: #selector(handleEditorContextMenuItem(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = action
+        item.representedObject = EditorContextMenuAction(name: action, connectionGeneration: connectionGeneration)
         item.isEnabled = enabled
         menu.addItem(item)
     }
 
     @objc private func handleEditorContextMenuItem(_ sender: NSMenuItem) {
-        guard let action = sender.representedObject as? String else { return }
+        guard let action = sender.representedObject as? EditorContextMenuAction else { return }
+        performEditorContextMenuAction(action.name, connectionGeneration: action.connectionGeneration)
+    }
+
+    private func performEditorContextMenuAction(_ action: String, connectionGeneration: UInt64) {
+        guard connectionGeneration == inputConnectionGeneration, !consumeRightGestureTail else { return }
 
         switch action {
         case "cut":
@@ -1825,6 +1940,8 @@ final class EditorNSView: MTKView {
         // Dropped during a live resize (see mouseDown). otherMouseUp stays ungated so a
         // press that straddles the resize still delivers its release.
         guard !inLiveResize else { return }
+        consumeMiddleGestureTail = false
+        middleMousePressActive = true
         reclaimFirstResponderIfNeeded()
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
@@ -1833,6 +1950,12 @@ final class EditorNSView: MTKView {
     }
 
     override func otherMouseUp(with event: NSEvent) {
+        if consumeMiddleGestureTail {
+            consumeMiddleGestureTail = false
+            middleMousePressActive = false
+            return
+        }
+        middleMousePressActive = false
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
                                modifiers: modifierBits(from: event.modifierFlags),
@@ -1840,6 +1963,7 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !consumeLeftGestureTail else { return }
         guard !inLiveResize else { return }
         if isDraggingScrollIndicator {
             let point = convert(event.locationInWindow, from: nil)
@@ -2031,6 +2155,11 @@ final class EditorNSView: MTKView {
         let selectionDragStarted: Bool
         let scrollWindowId: UInt16?
         let scrollOffset: CGPoint
+        let inputConnectionGeneration: UInt64
+        let consumesLeftGestureTail: Bool
+        let consumesRightGestureTail: Bool
+        let consumesMiddleGestureTail: Bool
+        let inputEnabled: Bool
     }
 
     /// Read-only test seam for native interaction ownership across SwiftUI publication.
@@ -2043,8 +2172,30 @@ final class EditorNSView: MTKView {
             selectionDragActive: isSelectionDragActive,
             selectionDragStarted: leftMouseDragStarted,
             scrollWindowId: localScrollPresentation?.windowId,
-            scrollOffset: localScrollPresentation?.offset ?? .zero
+            scrollOffset: localScrollPresentation?.offset ?? .zero,
+            inputConnectionGeneration: inputConnectionGeneration,
+            consumesLeftGestureTail: consumeLeftGestureTail,
+            consumesRightGestureTail: consumeRightGestureTail,
+            consumesMiddleGestureTail: consumeMiddleGestureTail,
+            inputEnabled: !(encoder is NullInputEncoder)
         )
+    }
+
+    func performContextMenuActionForTesting(_ action: String, connectionGeneration: UInt64) {
+        performEditorContextMenuAction(action, connectionGeneration: connectionGeneration)
+    }
+
+    func beginMousePressForTesting(button: UInt8) {
+        switch button {
+        case MOUSE_BUTTON_LEFT:
+            leftMousePressActive = true
+        case MOUSE_BUTTON_RIGHT:
+            rightMousePressActive = true
+        case MOUSE_BUTTON_MIDDLE:
+            middleMousePressActive = true
+        default:
+            break
+        }
     }
 
     func scrollTrackLineForTesting(y: CGFloat) -> UInt32 {

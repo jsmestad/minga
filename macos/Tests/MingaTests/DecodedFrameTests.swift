@@ -330,6 +330,68 @@ struct ProtocolReaderDecodeIsolationTests {
 
 @Suite("Ordered protocol event handoff")
 struct ProtocolEventHandoffTests {
+    @Test("handoff keeps immutable connection identity")
+    func keepsConnectionIdentity() {
+        let old = ProtocolEventHandoff(connectionID: 41)
+        let replacement = ProtocolEventHandoff(connectionID: 42)
+
+        #expect(old.connectionID == 41)
+        #expect(replacement.connectionID == 42)
+        old.cancel()
+        replacement.cancel()
+    }
+
+    @Test("production delivery replacement admits only current connection events")
+    @MainActor func replacementDeliveryRejectsOldEvents() async throws {
+        let delivery = ProtocolEventDelivery()
+        var currentConnectionID: UInt64 = 1
+        var receivedConnectionIDs: [UInt64] = []
+        let frame = try decodeFrame(from: Data([OP_SET_WINDOW_BG, 1, 2, 3]))
+        let old = delivery.replace(
+            connectionID: 1,
+            isCurrent: { $0 == currentConnectionID },
+            consume: { _, connectionID in receivedConnectionIDs.append(connectionID) }
+        )
+        #expect(old.acquireAdmission())
+
+        currentConnectionID = 2
+        await withCheckedContinuation { continuation in
+            let replacement = delivery.replace(
+                connectionID: 2,
+                isCurrent: { $0 == currentConnectionID },
+                consume: { _, connectionID in
+                    receivedConnectionIDs.append(connectionID)
+                    continuation.resume()
+                }
+            )
+            old.deliver(frame)
+            #expect(old.acquireAdmission() == false)
+            #expect(replacement.acquireAdmission())
+            replacement.deliver(frame)
+        }
+
+        #expect(receivedConnectionIDs == [2])
+        delivery.cancel()
+    }
+
+    @Test("repeated replacement and shutdown cancel the exact active delivery")
+    @MainActor func repeatedReplacementAndShutdownAreIdempotent() {
+        let delivery = ProtocolEventDelivery()
+        let first = delivery.replace(connectionID: 1, isCurrent: { _ in true }, consume: { _, _ in })
+        let second = delivery.replace(connectionID: 2, isCurrent: { _ in true }, consume: { _, _ in })
+        let third = delivery.replace(connectionID: 3, isCurrent: { _ in true }, consume: { _, _ in })
+
+        #expect(first.acquireAdmission() == false)
+        #expect(second.acquireAdmission() == false)
+        #expect(third.acquireAdmission())
+        #expect(delivery.activeConnectionID == 3)
+
+        delivery.cancel()
+        delivery.cancel()
+        #expect(delivery.activeConnectionID == nil)
+        #expect(third.acquireAdmission() == false)
+    }
+
     @Test("multiple decoded packets reach one main-actor consumer in wire order")
     func preservesPacketOrder() async throws {
         let packets = [

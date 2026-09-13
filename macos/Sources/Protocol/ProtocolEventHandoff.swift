@@ -1,11 +1,14 @@
 /// Capacity-one, ordered delivery of decoded protocol events to the main actor.
 
 import Foundation
+import MingaProtocol
+import MingaUI
 
 /// A single-producer/single-consumer admission handoff. The producer must own
 /// the sole slot before reading a payload. The consumer releases it immediately
 /// after dequeue, so payload memory cannot accumulate behind the main actor.
 final class ProtocolEventHandoff: @unchecked Sendable {
+    let connectionID: UInt64
     let events: AsyncStream<DecodedFrameEvent>
 
     private let continuation: AsyncStream<DecodedFrameEvent>.Continuation
@@ -13,7 +16,8 @@ final class ProtocolEventHandoff: @unchecked Sendable {
     private var slotOccupied = false
     private var cancelled = false
 
-    init() {
+    init(connectionID: UInt64 = 0) {
+        self.connectionID = connectionID
         let pair = AsyncStream.makeStream(
             of: DecodedFrameEvent.self,
             bufferingPolicy: .bufferingOldest(1)
@@ -65,4 +69,44 @@ final class ProtocolEventHandoff: @unchecked Sendable {
     }
 
     func finish() { cancel() }
+}
+
+/// Owns the single main-actor consumer for the current protocol connection.
+@MainActor
+final class ProtocolEventDelivery {
+    typealias CurrentConnection = @MainActor (UInt64) -> Bool
+    typealias Consumer = @MainActor (DecodedFrameEvent, UInt64) -> Void
+
+    private var handoff: ProtocolEventHandoff?
+    private var task: Task<Void, Never>?
+    private(set) var activeConnectionID: UInt64?
+
+    /// Replaces any earlier consumer and returns the capacity-one handoff for the new reader.
+    func replace(
+        connectionID: UInt64,
+        isCurrent: @escaping CurrentConnection,
+        consume: @escaping Consumer
+    ) -> ProtocolEventHandoff {
+        cancel()
+        let handoff = ProtocolEventHandoff(connectionID: connectionID)
+        self.handoff = handoff
+        activeConnectionID = connectionID
+        task = Task { @MainActor in
+            for await event in handoff.events {
+                handoff.releaseAdmission()
+                guard !Task.isCancelled, isCurrent(handoff.connectionID) else { continue }
+                consume(event, handoff.connectionID)
+            }
+        }
+        return handoff
+    }
+
+    /// Cancels queued delivery and wakes any reader waiting for admission. Idempotent.
+    func cancel() {
+        handoff?.cancel()
+        task?.cancel()
+        handoff = nil
+        task = nil
+        activeConnectionID = nil
+    }
 }

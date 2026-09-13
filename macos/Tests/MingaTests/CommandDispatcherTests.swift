@@ -1705,6 +1705,174 @@ struct CommandDispatcherStagingTests {
         )
     }
 
+    private func decodedFrame(_ commands: [RenderCommand]) throws -> DecodedFrame {
+        let decoded = try commands.map { command in
+            DecodedCommand(
+                command: command,
+                opcode: 0,
+                resourceWeight: try FrameResourceWeight.measuringOwnedPayload(command)
+            )
+        }
+        return DecodedFrame(
+            commands: decoded,
+            resourceWeight: .init(),
+            metrics: FrameDecodeMetrics(
+                packetBytes: 0, bytesCopied: 0, allocations: 0,
+                decodeDuration: .zero, actorHopCount: 0
+            )
+        )
+    }
+
+    @Test("replacement connection clears frame authority and accepts a lower keyframe")
+    @MainActor func replacementConnectionAcceptsLowerKeyframe() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        dispatcher.replaceConnection(with: 1)
+
+        dispatcher.dispatch(.registerFont(id: 7, family: "Menlo"))
+        dispatcher.dispatch(.beginFrame(frameSeq: 90, baseFrameSeq: 0, generation: 40))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("old.ex")]))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 90, seq: 0))
+        dispatcher.dispatch(.protocolError(message: "old handshake failed"))
+        #expect(gui.protocolErrorState.isPresented)
+        let oldSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: oldSnapshot, localTransform: nil, connectionID: 1
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 91, baseFrameSeq: 1, generation: 40))
+        dispatcher.dispatch(.commitFrame(frameSeq: 91, seq: 0))
+        #expect(gui.resyncState.pending)
+        dispatcher.dispatch(.beginFrame(frameSeq: 92, baseFrameSeq: 0, generation: 40))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("staged-old.ex")]))
+        #expect(dispatcher.openFrameSeq == 92)
+
+        dispatcher.replaceConnection(with: 2)
+
+        #expect(dispatcher.connectionID == 2)
+        #expect(dispatcher.frameState.cols == 80)
+        #expect(dispatcher.frameState.rows == 24)
+        #expect(dispatcher.openFrameSeq == nil)
+        #expect(dispatcher.lastCommittedGeneration == 0)
+        #expect(dispatcher.lastCommittedFrameSeq == 0)
+        #expect(dispatcher.committedEditorSnapshot == nil)
+        #expect(dispatcher.visibleEditorSnapshot == nil)
+        #expect(dispatcher.pendingPresentationFrame() == nil)
+        #expect(gui.resyncState.pending == false)
+        #expect(gui.themeColors.hasAppliedTheme == false)
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(gui.windowContents.isEmpty)
+        #expect(gui.protocolErrorState.isPresented == false)
+
+        let lateOld = try decodedFrame([
+            .beginFrame(frameSeq: 93, baseFrameSeq: 90, generation: 40),
+            .guiTabBar(activeIndex: 0, tabs: [tab("late-old.ex")]),
+            .commitFrame(frameSeq: 93, seq: 0),
+        ])
+        dispatcher.dispatch(lateOld, connectionID: 1)
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: oldSnapshot, localTransform: nil, connectionID: 1
+        )
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(dispatcher.visibleEditorSnapshot == nil)
+
+        let firstNew = try decodedFrame([
+            .beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1),
+            .guiTheme(slots: completeThemeSlots()),
+            .guiTabBar(activeIndex: 0, tabs: [tab("new.ex")]),
+            .guiWindowContent(data: try windowContent()),
+            .commitFrame(frameSeq: 1, seq: 0),
+        ])
+        dispatcher.dispatch(firstNew, connectionID: 2)
+
+        #expect(dispatcher.lastCommittedGeneration == 1)
+        #expect(dispatcher.lastCommittedFrameSeq == 1)
+        #expect(gui.tabBarState.tabs.first?.label == "new.ex")
+        #expect(results.last == .applied(generation: 1, frameSeq: 1))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(fontId: 7)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .missingFontResource(fontId: 7)
+        ))
+    }
+
+    @Test("late old title and background effects cannot overwrite replacement chrome")
+    @MainActor func lateOldChromeEffectsAreRejected() throws {
+        let (dispatcher, _) = makeDispatcher()
+        var title = ""
+        var background = NSColor.clear
+        dispatcher.onTitleChanged = { title = $0 }
+        dispatcher.onWindowBgChanged = { background = $0 }
+        dispatcher.replaceConnection(with: 1)
+
+        let old = try decodedFrame([
+            .setTitle("old"),
+            .setWindowBg(r: 255, g: 0, b: 0),
+        ])
+        dispatcher.dispatch(old, connectionID: 1)
+        #expect(title == "old")
+        #expect(background.redComponent == 1)
+
+        dispatcher.replaceConnection(with: 2)
+        let replacement = try decodedFrame([
+            .setTitle("replacement"),
+            .setWindowBg(r: 0, g: 0, b: 255),
+        ])
+        dispatcher.dispatch(replacement, connectionID: 2)
+        #expect(title == "replacement")
+        #expect(background.blueComponent == 1)
+
+        dispatcher.dispatch(old, connectionID: 1)
+        #expect(title == "replacement")
+        #expect(background.redComponent == 0)
+        #expect(background.blueComponent == 1)
+    }
+
+    @Test("late old failure and presentation cannot disturb replacement connection")
+    @MainActor func lateOldCallbacksCannotDisturbReplacement() throws {
+        let (dispatcher, _) = makeDispatcher()
+        dispatcher.replaceConnection(with: 1)
+        dispatcher.dispatch(.beginFrame(frameSeq: 80, baseFrameSeq: 0, generation: 30))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 80, seq: 0))
+        let oldSnapshot = try #require(dispatcher.committedEditorSnapshot)
+
+        dispatcher.replaceConnection(with: 2)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
+
+        dispatcher.decodedFrameFailed(
+            DecodedFrameFailure(error: .unknownOpcode(0xFF), envelope: nil),
+            connectionID: 1
+        )
+        #expect(dispatcher.openFrameSeq == 1)
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let newSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        let pending = try #require(dispatcher.pendingPresentationFrame())
+
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: oldSnapshot, localTransform: nil, connectionID: 1
+        )
+        #expect(dispatcher.visibleEditorSnapshot == nil)
+        #expect(dispatcher.pendingPresentationFrame() == pending)
+
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: newSnapshot, localTransform: nil, connectionID: 2
+        )
+        #expect(dispatcher.visibleEditorSnapshot?.generation == 1)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(dispatcher.pendingPresentationFrame() == nil)
+    }
+
     private func overlayDelta(windowId: UInt16 = 7, epoch: UInt32 = 42) -> GUIWindowOverlayDelta {
         GUIWindowOverlayDelta(
             windowId: windowId, contentEpoch: epoch, cursorVisible: true,
