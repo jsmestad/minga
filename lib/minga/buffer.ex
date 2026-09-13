@@ -215,6 +215,23 @@ defmodule Minga.Buffer do
               ),
               to: BufferProcess
 
+  @doc "Replace complete lines, adding a separator only when the replacement needs one before an unselected following line."
+  @spec replace_lines(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          Minga.Buffer.EditSource.t()
+        ) :: :ok | {:error, :read_only}
+  defdelegate replace_lines(
+                server,
+                start_line,
+                end_line,
+                new_text,
+                source \\ Minga.Buffer.EditSource.user()
+              ),
+              to: BufferProcess
+
   @doc "Apply a batch of edits atomically (for LSP workspace edits)."
   @spec apply_edits(t(), [text_edit()], Minga.Buffer.EditSource.t()) ::
           :ok | {:error, :read_only}

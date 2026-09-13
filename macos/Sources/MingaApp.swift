@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dispatcher: CommandDispatcher?
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
+    private var inputRejectionAlert: NSAlert?
     private var coreConnectionIsLive = true
     private var recoveryManager: RecoveryManager?
     private var fontFace: FontFace?
@@ -322,6 +323,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 output: protocolOutput,
                 onTransportFailure: { [weak self] report in
                     self?.handleOutboundTransportFailure(report, connectionID: connectionID)
+                },
+                onInputRejection: { [weak self] rejection in
+                    self?.handleOutboundInputRejection(rejection, connectionID: connectionID)
                 }
             )
         } catch let error as OutboundTransportInitializationError {
@@ -803,6 +807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 oldReader: oldReader,
                 resourcePolicy: frameResourcePolicy,
                 invalidate: {
+                    self.dismissInputRejection()
                     self.protocolEventDelivery.cancel()
                     self.outboundConnectionState.install(id: connectionID)
                     self.dispatcher?.replaceConnection(with: connectionID)
@@ -817,6 +822,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onTransportFailure: { [weak self] report in
                     self?.handleOutboundTransportFailure(report, connectionID: connectionID)
+                },
+                onInputRejection: { [weak self] rejection in
+                    self?.handleOutboundInputRejection(rejection, connectionID: connectionID)
                 },
                 installEncoder: { encoder in
                     self.encoder = encoder
@@ -992,11 +1000,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dispatcher?.decodedFrameFailed(failure, connectionID: connectionID)
     }
 
+    private func handleOutboundInputRejection(_ rejection: OutboundInputRejection, connectionID: UInt64) {
+        guard outboundConnectionState.isCurrent(connectionID), coreConnectionIsLive,
+              inputRejectionAlert == nil else { return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Paste Is Too Large"
+        alert.informativeText = rejection.userFacingMessage
+        alert.addButton(withTitle: "OK")
+        inputRejectionAlert = alert
+
+        let finish: @MainActor (NSApplication.ModalResponse) -> Void = { [weak self, weak alert] _ in
+            guard let self, let alert, self.inputRejectionAlert === alert else { return }
+            self.inputRejectionAlert = nil
+            self.restoreEditorFocus()
+        }
+        if let window = editorNSView?.window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
+        }
+    }
+
     private func handleOutboundTransportFailure(
         _ report: OutboundTransportFailureReport,
         connectionID: UInt64
     ) {
         guard outboundConnectionState.acceptFailure(for: connectionID) else { return }
+        dismissInputRejection()
         coreConnectionIsLive = false
         applicationQuitCoordinator?.transportDidDisconnect()
         encoder = nil
@@ -1022,6 +1054,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
         guard outboundConnectionState.isCurrent(connectionID) else { return }
         encoder.disconnect(reason: .unexpectedPeerClosure)
+    }
+
+    private func dismissInputRejection() {
+        guard let alert = inputRejectionAlert else { return }
+        inputRejectionAlert = nil
+        if let window = alert.window.sheetParent {
+            window.endSheet(alert.window, returnCode: .abort)
+        } else {
+            NSApp.abortModal()
+            alert.window.orderOut(nil)
+        }
     }
 
     private func presentOutboundTransportInitializationFailure(
