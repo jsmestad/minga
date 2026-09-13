@@ -139,7 +139,8 @@ private func makeControlledEncoder(
     maxBufferSize: Int = 1_024 * 1_024,
     maximumPayloadSize: Int = 1_024 * 1_024,
     nonBlockingSetupOperation: @escaping ProtocolEncoder.NonBlockingSetupOperation = { _ in nil },
-    onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void = { _ in }
+    onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void = { _ in },
+    onInputRejection: @escaping @MainActor @Sendable (OutboundInputRejection) -> Void = { _ in }
 ) -> ProtocolEncoder {
     let pipe = Pipe()
     return try! ProtocolEncoder(
@@ -151,7 +152,8 @@ private func makeControlledEncoder(
         writeOperation: { _, pointer, count in
             writer.write(pointer: pointer, count: count)
         },
-        onTransportFailure: onTransportFailure
+        onTransportFailure: onTransportFailure,
+        onInputRejection: onInputRejection
     )
 }
 
@@ -279,7 +281,7 @@ struct NonBlockingEncoderTests {
     }
 
     @Test("the maximum legal paste frame fits at exact capacity")
-    func maximumLegalPasteFitsCapacity() {
+    func maximumLegalPasteFitsCapacity() throws {
         let writer = ControlledWriter()
         let maximumPastePayloadSize = 3 + Int(UInt16.max)
         let maximumPasteFrameSize = 4 + maximumPastePayloadSize
@@ -289,9 +291,62 @@ struct NonBlockingEncoderTests {
             maximumPayloadSize: maximumPastePayloadSize
         )
 
-        encoder.sendPasteEvent(text: String(repeating: "x", count: Int(UInt16.max)))
+        let text = String(repeating: "x", count: Int(UInt16.max) - 2) + "é"
+        encoder.sendPasteEvent(text: text)
         #expect(encoder.waitForPendingWritesForTesting())
         #expect(encoder.bufferedByteCount == maximumPasteFrameSize)
+        writer.allowAllWrites()
+        #expect(encoder.waitForPendingWritesForTesting())
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames.count == 1)
+        let frame = try #require(frames.first)
+        #expect(frame.prefix(3) == Data([OP_PASTE_EVENT, 0xFF, 0xFF]))
+        #expect(String(data: frame.dropFirst(3), encoding: .utf8) == text)
+    }
+
+    @Test("oversized paste rejects all bytes without disconnecting", .timeLimit(.minutes(1)))
+    @MainActor
+    func oversizedPasteDoesNotTruncateOrDisconnect() async throws {
+        let writer = ControlledWriter()
+        let failures = TransportFailureCapture()
+        let rejections = AsyncStream.makeStream(of: OutboundInputRejection.self, bufferingPolicy: .bufferingNewest(1))
+        defer { rejections.continuation.finish() }
+        let encoder = makeControlledEncoder(
+            writer: writer,
+            onTransportFailure: { failures.append($0) },
+            onInputRejection: {
+                MainActor.assertIsolated()
+                rejections.continuation.yield($0)
+            }
+        )
+        var iterator = rejections.stream.makeAsyncIterator()
+
+        for text in [String(repeating: "x", count: 65_536), String(repeating: "x", count: 65_534) + "é"] {
+            encoder.sendPasteEvent(text: text)
+            let rejection = await iterator.next()
+            #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
+            #expect(encoder.waitForPendingWritesForTesting())
+            #expect(encoder.bufferedByteCount == 0)
+            #expect(writer.writtenData().isEmpty)
+        }
+
+        encoder.sendPasteEvent(text: "é\n")
+        #expect(encoder.waitForPendingWritesForTesting())
+        let acceptedFrame = encoder.bufferedDataForTesting()
+        #expect(acceptedFrame.isEmpty == false)
+        encoder.sendPasteEvent(text: String(repeating: "x", count: 65_536))
+        let rejection = await iterator.next()
+        #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
+        #expect(encoder.bufferedDataForTesting() == acceptedFrame)
+        encoder.sendPasteEvent(text: "ok")
+        writer.allowAllWrites()
+        #expect(encoder.waitForPendingWritesForTesting())
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames == [
+            Data([OP_PASTE_EVENT, 0, 3, 0xC3, 0xA9, 0x0A]),
+            Data([OP_PASTE_EVENT, 0, 2, 0x6F, 0x6B])
+        ])
+        #expect(failures.failures.isEmpty)
     }
 
     @Test("production capacity admits the maximum legal protocol frame")

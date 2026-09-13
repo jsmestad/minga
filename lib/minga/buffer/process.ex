@@ -160,6 +160,19 @@ defmodule Minga.Buffer.Process do
     )
   end
 
+  @doc "Replaces complete lines, adding a separator only when the replacement needs one before an unselected following line."
+  @spec replace_lines(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          EditSource.t()
+        ) :: :ok | {:error, :read_only}
+  def replace_lines(server, start_line, end_line, new_text, source \\ EditSource.user())
+      when start_line >= 0 and end_line >= 0 and is_binary(new_text) do
+    GenServer.call(server, {:replace_lines, start_line, end_line, new_text, source})
+  end
+
   @doc "Atomically replaces a half-open byte range as its own undo entry when the buffer version is current."
   @spec replace_byte_range_if_version(
           GenServer.server(),
@@ -1074,6 +1087,31 @@ defmodule Minga.Buffer.Process do
   def handle_call({:apply_edit, from_pos, to_pos, new_text, source}, _from, state) do
     {:edited, new_doc, delta} =
       Operation.replace_range(state.document, from_pos, to_pos, new_text)
+
+    undo_source = EditSource.to_undo_source(source)
+
+    state =
+      apply_operation(
+        state,
+        {:delta, new_doc, delta},
+        source,
+        {:delta, undo_source, :record_delta}
+      )
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call(
+        {:replace_lines, _start_line, _end_line, _text, _source},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:replace_lines, start_line, end_line, new_text, source}, _from, state) do
+    {:edited, new_doc, delta} =
+      Operation.replace_lines(state.document, start_line, end_line, new_text)
 
     undo_source = EditSource.to_undo_source(source)
 

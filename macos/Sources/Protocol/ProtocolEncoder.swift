@@ -55,6 +55,18 @@ struct OutboundTransportFailureReport: Equatable, Sendable {
     }
 }
 
+/// An input action rejected before transport admission; the connection remains usable.
+enum OutboundInputRejection: Equatable, Sendable {
+    case pasteTooLarge(limitBytes: Int, attemptedBytes: Int)
+
+    var userFacingMessage: String {
+        switch self {
+        case .pasteTooLarge(let limitBytes, let attemptedBytes):
+            return "Minga did not insert the clipboard text. Its UTF-8 encoding is \(attemptedBytes) bytes; the current limit is \(limitBytes) bytes."
+        }
+    }
+}
+
 enum OutboundTransportInitializationError: Error, Equatable {
     case nonBlockingSetupFailed(errorCode: Int32)
 
@@ -100,6 +112,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     private let retryDelay: DispatchTimeInterval?
     private let writeOperation: WriteOperation
     private let onTransportFailure: @MainActor @Sendable (OutboundTransportFailureReport) -> Void
+    private let onInputRejection: @MainActor @Sendable (OutboundInputRejection) -> Void
     private let maximumWriteCallsPerDrainPass = 32
 
     /// All mutable transport state is confined to `writeQueue`.
@@ -122,7 +135,8 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeOperation: @escaping WriteOperation = { fileDescriptor, pointer, count in
             Darwin.write(fileDescriptor, pointer, count)
         },
-        onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void = { _ in }
+        onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void = { _ in },
+        onInputRejection: @escaping @MainActor @Sendable (OutboundInputRejection) -> Void = { _ in }
     ) throws {
         if let errorCode = nonBlockingSetupOperation(output.fileDescriptor) {
             throw OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: errorCode)
@@ -133,6 +147,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         self.retryDelay = retryDelay
         self.writeOperation = writeOperation
         self.onTransportFailure = onTransportFailure
+        self.onInputRejection = onInputRejection
         writeQueue.setSpecific(key: writeQueueKey, value: ())
     }
 
@@ -363,14 +378,21 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Send a paste event to the BEAM containing the full pasted text.
     /// Layout: opcode(1) + text_len(2, big-endian) + text(text_len).
     /// Text is UTF-8 encoded. Maximum length is 65535 bytes (UInt16.max).
+    /// Oversized input is rejected in full without changing transport state.
     func sendPasteEvent(text: String) {
-        let utf8 = Array(text.utf8)
-        let textLen = min(utf8.count, Int(UInt16.max))
+        let textLen = text.utf8.count
+        guard textLen <= Int(UInt16.max) else {
+            let onInputRejection = self.onInputRejection
+            Task { @MainActor in
+                onInputRejection(.pasteTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: textLen))
+            }
+            return
+        }
         var buf = Data(count: 3 + textLen)
         buf[0] = OP_PASTE_EVENT
         writeU16(&buf, 1, UInt16(textLen))
         if textLen > 0 {
-            buf.replaceSubrange(3..<(3 + textLen), with: utf8[0..<textLen])
+            buf.replaceSubrange(3..<(3 + textLen), with: text.utf8)
         }
         writeFrame(buf)
     }

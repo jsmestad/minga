@@ -7,6 +7,7 @@ enum ProtocolReconnectWorkflow {
     struct EncoderRequest {
         let output: FileHandle
         let onTransportFailure: @MainActor @Sendable (OutboundTransportFailureReport) -> Void
+        let onInputRejection: @MainActor @Sendable (OutboundInputRejection) -> Void
     }
 
     struct Connection {
@@ -29,10 +30,12 @@ enum ProtocolReconnectWorkflow {
         encoderFactory: EncoderFactory = { request in
             try ProtocolEncoder(
                 output: request.output,
-                onTransportFailure: request.onTransportFailure
+                onTransportFailure: request.onTransportFailure,
+                onInputRejection: request.onInputRejection
             )
         },
         onTransportFailure: @escaping @MainActor @Sendable (OutboundTransportFailureReport) -> Void,
+        onInputRejection: @escaping @MainActor @Sendable (OutboundInputRejection) -> Void,
         installEncoder: @MainActor (ProtocolEncoder) -> Void,
         installDelivery: DeliveryInstaller,
         onReaderDisconnect: @escaping @Sendable (ProtocolEncoder, UInt64) -> Void
@@ -43,7 +46,8 @@ enum ProtocolReconnectWorkflow {
 
         let encoder = try encoderFactory(EncoderRequest(
             output: writeHandle,
-            onTransportFailure: onTransportFailure
+            onTransportFailure: onTransportFailure,
+            onInputRejection: onInputRejection
         ))
         installEncoder(encoder)
 

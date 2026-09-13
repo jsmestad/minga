@@ -37,6 +37,65 @@ defmodule Minga.Buffer.OperationTest do
     end
   end
 
+  describe "replace_lines/4" do
+    test "includes the selected line separator when the replacement already provides one" do
+      doc = Document.new("zero\none\nthree")
+
+      assert {:edited, new_doc, delta} = Operation.replace_lines(doc, 1, 1, "Z\n")
+      assert Document.content(new_doc) == "zero\nZ\nthree"
+      assert Document.cursor(new_doc) == {2, 0}
+      assert delta.start_byte == 5
+      assert delta.old_end_byte == 9
+      assert delta.new_end_byte == 7
+      assert delta.start_position == {1, 0}
+      assert delta.old_end_position == {2, 0}
+      assert delta.new_end_position == {2, 0}
+      assert delta.inserted_text == "Z\n"
+    end
+
+    test "adds one separator when an unselected following line exists" do
+      doc = Document.new("zero\none\nthree")
+
+      assert {:edited, new_doc, delta} = Operation.replace_lines(doc, 1, 1, "é")
+      assert Document.content(new_doc) == "zero\né\nthree"
+      assert Document.cursor(new_doc) == {1, 2}
+      assert delta.start_byte == 5
+      assert delta.old_end_byte == 9
+      assert delta.new_end_byte == 8
+      assert delta.new_end_position == {2, 0}
+      assert delta.inserted_text == "é\n"
+    end
+
+    test "preserves the trailing empty line when it follows the selection" do
+      doc = Document.new("zero\none\n")
+
+      assert {:edited, new_doc, delta} = Operation.replace_lines(doc, 1, 1, "Z")
+      assert Document.content(new_doc) == "zero\nZ\n"
+      assert delta.inserted_text == "Z\n"
+    end
+
+    test "normalizes a reversed multiline selection" do
+      doc = Document.new("zero\none\ntwo\nthree")
+
+      assert {:edited, new_doc, _delta} = Operation.replace_lines(doc, 2, 1, "Z")
+      assert Document.content(new_doc) == "zero\nZ\nthree"
+    end
+
+    test "uses the replacement exactly when the selection reaches EOF" do
+      doc = Document.new("zero\none")
+
+      assert {:edited, no_newline_doc, no_newline_delta} =
+               Operation.replace_lines(doc, 1, 1, "Z")
+
+      assert Document.content(no_newline_doc) == "zero\nZ"
+      assert no_newline_delta.inserted_text == "Z"
+
+      assert {:edited, newline_doc, newline_delta} = Operation.replace_lines(doc, 1, 1, "Z\n")
+      assert Document.content(newline_doc) == "zero\nZ\n"
+      assert newline_delta.inserted_text == "Z\n"
+    end
+  end
+
   describe "delete_forward/1" do
     test "returns exclusive old end byte and position for a multi-byte grapheme" do
       doc = Document.new("aébc") |> Document.move_to({0, 1})

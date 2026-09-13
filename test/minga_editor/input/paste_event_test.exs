@@ -157,6 +157,22 @@ defmodule MingaEditor.Input.PasteEventTest do
 
       assert Buffer.content(ctx.buffer) == "zero\nZ\nthree"
       assert editor_mode(ctx) == :normal
+      assert Buffer.cursor(ctx.buffer) == {1, 1}
+
+      send_key_sync(ctx, ?i)
+      send_key_sync(ctx, ?Q)
+
+      assert Buffer.content(ctx.buffer) == "zero\nZQ\nthree"
+    end
+
+    test "does not duplicate the separator after a linewise replacement ending in newline" do
+      ctx = start_editor("zero\none\nthree")
+      select(ctx, {1, 0}, {1, 0}, :line)
+
+      paste(ctx, "Z\n")
+
+      assert Buffer.content(ctx.buffer) == "zero\nZ\nthree"
+      assert editor_mode(ctx) == :normal
     end
 
     test "replaces a selected empty middle line without joining the following line" do
@@ -176,6 +192,38 @@ defmodule MingaEditor.Input.PasteEventTest do
       paste(ctx, "Z")
 
       assert Buffer.content(ctx.buffer) == "zero\nZ\nthree"
+      assert editor_mode(ctx) == :normal
+    end
+
+    test "replaces reversed linewise selections with multiline Unicode text" do
+      ctx = start_editor("zero\none\ntwo\nthree")
+      select(ctx, {2, 0}, {1, 0}, :line)
+
+      paste(ctx, "λ\nβ")
+
+      assert Buffer.content(ctx.buffer) == "zero\nλ\nβ\nthree"
+      assert editor_mode(ctx) == :normal
+    end
+
+    test "replaces a linewise selection at EOF without adding a separator" do
+      without_newline = start_editor("zero\none")
+      select(without_newline, {1, 0}, {1, 0}, :line)
+      paste(without_newline, "Z")
+      assert Buffer.content(without_newline.buffer) == "zero\nZ"
+
+      with_newline = start_editor("zero\none")
+      select(with_newline, {1, 0}, {1, 0}, :line)
+      paste(with_newline, "Z\n")
+      assert Buffer.content(with_newline.buffer) == "zero\nZ\n"
+    end
+
+    test "replaces an empty final line without changing the preceding separator" do
+      ctx = start_editor("zero\n")
+      select(ctx, {1, 0}, {1, 0}, :line)
+
+      paste(ctx, "é")
+
+      assert Buffer.content(ctx.buffer) == "zero\né"
       assert editor_mode(ctx) == :normal
     end
 
@@ -237,6 +285,20 @@ defmodule MingaEditor.Input.PasteEventTest do
       assert Buffer.version(ctx.buffer) == version
     end
 
+    test "read-only failure preserves a linewise selection with no undo entry" do
+      ctx = start_editor("zero\none\nthree")
+      select(ctx, {1, 0}, {1, 0}, :line)
+      Buffer.set_read_only(ctx.buffer, true)
+      version = Buffer.version(ctx.buffer)
+
+      paste(ctx, "Z\n")
+
+      assert Buffer.content(ctx.buffer) == "zero\none\nthree"
+      assert Buffer.cursor(ctx.buffer) == {1, 0}
+      assert editor_mode(ctx) == :visual
+      assert Buffer.version(ctx.buffer) == version
+    end
+
     test "paste is one isolated Undo and Redo step" do
       ctx = start_editor("abcd")
       select(ctx, {0, 1}, {0, 2}, :char)
@@ -251,6 +313,22 @@ defmodule MingaEditor.Input.PasteEventTest do
       assert Buffer.redo(ctx.buffer) == :ok
       assert Buffer.content(ctx.buffer) == "aXYZd"
       assert Buffer.cursor(ctx.buffer) == {0, 4}
+    end
+
+    test "linewise paste is one isolated Undo and Redo step" do
+      ctx = start_editor("zero\none\nthree")
+      select(ctx, {1, 0}, {1, 0}, :line)
+
+      paste(ctx, "Z\n")
+      assert Buffer.content(ctx.buffer) == "zero\nZ\nthree"
+
+      assert Buffer.undo(ctx.buffer) == :ok
+      assert Buffer.content(ctx.buffer) == "zero\none\nthree"
+      assert Buffer.cursor(ctx.buffer) == {1, 0}
+
+      assert Buffer.redo(ctx.buffer) == :ok
+      assert Buffer.content(ctx.buffer) == "zero\nZ\nthree"
+      assert Buffer.cursor(ctx.buffer) == {2, 0}
     end
   end
 

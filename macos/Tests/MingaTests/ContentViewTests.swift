@@ -951,6 +951,8 @@ struct ContentViewTests {
         var currentConnectionID: UInt64 = 1
         let results = AsyncStream.makeStream(of: FrameTransactionResult.self, bufferingPolicy: .bufferingNewest(1))
         dispatcher.onTransactionResult = { results.continuation.yield($0) }
+        let rejections = AsyncStream.makeStream(of: OutboundInputRejection.self, bufferingPolicy: .bufferingNewest(1))
+        defer { rejections.continuation.finish() }
 
         let connection = try ProtocolReconnectWorkflow.replace(
             connectionID: 2,
@@ -966,6 +968,7 @@ struct ContentViewTests {
                 editorView.invalidateConnection()
             },
             onTransportFailure: { _ in },
+            onInputRejection: { rejections.continuation.yield($0) },
             installEncoder: { encoder in
                 editorView.installConnectionEncoder(encoder)
             },
@@ -987,6 +990,12 @@ struct ContentViewTests {
                 encoder.disconnect(reason: .unexpectedPeerClosure)
             }
         )
+        #expect(editorView.interactionSnapshot.inputEnabled)
+
+        connection.encoder.sendPasteEvent(text: String(repeating: "x", count: 65_536))
+        var rejectionIterator = rejections.stream.makeAsyncIterator()
+        let rejection = await rejectionIterator.next()
+        #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
         #expect(editorView.interactionSnapshot.inputEnabled)
 
         try replacementInput.fileHandleForWriting.write(contentsOf: framedKeyframe(generation: 1, frameSeq: 1))
@@ -1063,6 +1072,7 @@ struct ContentViewTests {
                     throw OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: EIO)
                 },
                 onTransportFailure: { _ in },
+                onInputRejection: { _ in },
                 installEncoder: { encoder in
                     installedReplacement = true
                     activeEncoder = encoder

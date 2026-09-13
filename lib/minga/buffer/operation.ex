@@ -60,6 +60,60 @@ defmodule Minga.Buffer.Operation do
     {:edited, new_doc, delta}
   end
 
+  @doc "Replaces complete lines, adding a separator only when the replacement needs one before an unselected following line."
+  @spec replace_lines(Document.t(), non_neg_integer(), non_neg_integer(), String.t()) :: result()
+  def replace_lines(%Document{} = doc, start_line, end_line, replacement)
+      when start_line >= 0 and end_line >= 0 and is_binary(replacement) do
+    selection = Selection.linewise(doc, start_line, end_line)
+    %Span{start: start_byte, stop: old_end_byte} = selection.span
+
+    effective_replacement =
+      normalize_linewise_replacement(
+        replacement,
+        unselected_line_follows?(doc, start_line, end_line)
+      )
+
+    new_doc =
+      Document.replace_at_byte_range(
+        doc,
+        start_byte,
+        old_end_byte - start_byte,
+        effective_replacement,
+        {0, 0}
+      )
+
+    cursor_byte = start_byte + byte_size(replacement)
+    new_end_byte = start_byte + byte_size(effective_replacement)
+    cursor_position = Position.from_point(new_doc, cursor_byte)
+    new_end_position = Position.from_point(new_doc, new_end_byte)
+    new_doc = Document.move_to(new_doc, cursor_position)
+
+    delta =
+      EditDelta.replacement(
+        start_byte,
+        old_end_byte,
+        Position.from_point(doc, start_byte),
+        Position.from_point(doc, old_end_byte),
+        effective_replacement,
+        new_end_position
+      )
+
+    {:edited, new_doc, delta}
+  end
+
+  @spec unselected_line_follows?(Document.t(), non_neg_integer(), non_neg_integer()) :: boolean()
+  defp unselected_line_follows?(%Document{} = doc, start_line, end_line) do
+    last_selected_line = min(max(start_line, end_line), Document.line_count(doc) - 1)
+    last_selected_line + 1 < Document.line_count(doc)
+  end
+
+  @spec normalize_linewise_replacement(String.t(), boolean()) :: String.t()
+  defp normalize_linewise_replacement(replacement, true) do
+    if String.ends_with?(replacement, "\n"), do: replacement, else: replacement <> "\n"
+  end
+
+  defp normalize_linewise_replacement(replacement, false), do: replacement
+
   @doc "Replaces a half-open byte range beginning at an editor position."
   @spec replace_byte_range(Document.t(), Document.position(), non_neg_integer(), String.t()) ::
           byte_range_result()
