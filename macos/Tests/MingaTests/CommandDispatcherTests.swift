@@ -2834,7 +2834,7 @@ struct CommandDispatcherStagingTests {
         )])
     }
 
-    @Test("semantic staging bounds the resulting transcript before mapping")
+    @Test("resource rejection preserves the complete resident transcript snapshot")
     @MainActor func stagingBoundsResultingTranscript() throws {
         let staging = FrameResourceWeight(
             commands: .max, ownedUTF8Bytes: 5, arrayEntries: .max,
@@ -2855,17 +2855,65 @@ struct CommandDispatcherStagingTests {
             mode: 0, epoch: 1, truncated: false, trimFront: 0, baseCount: 0,
             messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "seed"))]
         ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let baseline = gui.agentChatState.transcriptSnapshot
+        let baselineEpoch = gui.agentChatState.transcriptEpoch
+        let baselineTruncated = gui.agentChatState.transcriptTruncated
+        let baselinePromptVersion = gui.agentChatState.promptVersion
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiAgentTranscript(
             mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 1,
             messages: [Wire.ChatMessage(beamId: 2, content: .assistant(text: "more"))]
         ))
-        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.dispatch(.guiAgentChat(
+            visible: true, status: 1, model: "would-publish", thinkingLevel: "high",
+            prompt: "would-publish", promptLineCount: 1, promptCursorLine: 0,
+            promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1,
+            promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
+            helpVisible: false, helpGroups: []
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
-        #expect(gui.agentChatState.messages.isEmpty)
-        #expect(results == [.rejected(
-            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+        #expect(gui.agentChatState.messages.map(\.id) == [1])
+        #expect(gui.agentChatState.transcriptEpoch == baselineEpoch)
+        #expect(gui.agentChatState.transcriptTruncated == baselineTruncated)
+        #expect(gui.agentChatState.promptVersion == baselinePromptVersion)
+        #expect(gui.agentChatState.transcriptSnapshot.resourceWeight == baseline.resourceWeight)
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
             reason: .resourcePolicy
-        )])
+        ))
+    }
+
+    @Test("cursor-only staging performs zero transcript accounting work")
+    @MainActor func cursorOnlyStagingSkipsResidentTranscript() {
+        for messageCount in [100, 10_000] {
+            let (dispatcher, _) = makeDispatcher()
+            let messages = (0..<messageCount).map { index in
+                Wire.ChatMessage(
+                    beamId: UInt32(index + 1),
+                    content: .user(text: "resident message \(index)")
+                )
+            }
+
+            dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+            dispatcher.dispatch(.guiAgentTranscript(
+                mode: 0, epoch: 1, truncated: false, trimFront: 0,
+                baseCount: 0, messages: messages
+            ))
+            dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+            #expect(dispatcher.lastTranscriptAccountingCounters?.changedEntriesMeasured == messageCount)
+
+            dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+            dispatcher.dispatch(.setCursorShape(.beam))
+            dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+            #expect(dispatcher.lastTranscriptAccountingCounters == AgentTranscriptAccountingCounters())
+        }
     }
 
     @Test("resource failure in a later packet terminally rejects the open frame")
@@ -3058,6 +3106,10 @@ struct CommandDispatcherStagingTests {
             }
 
             let baselinePublications = dispatcher.publicationCount
+            let baselineTranscript = gui.agentChatState.transcriptSnapshot
+            let baselineEpoch = gui.agentChatState.transcriptEpoch
+            let baselineTruncated = gui.agentChatState.transcriptTruncated
+            let baselinePromptVersion = gui.agentChatState.promptVersion
             let frameSeq = UInt32(index > 0 ? 2 : 1)
             let baseSeq = UInt32(index > 0 ? 1 : 0)
             dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseSeq, generation: 1))
@@ -3070,6 +3122,10 @@ struct CommandDispatcherStagingTests {
             #expect(gui.tabBarState.tabs.first?.label == (index > 0 ? "baseline.ex" : nil))
             #expect(results.last == .rejected(generation: 1, frameSeq: frameSeq, lastAppliedFrameSeq: UInt32(index > 0 ? 1 : 0), reason: invalid.1))
             #expect(gui.agentChatState.messages.map(\.id) == (index > 0 ? [1] : []))
+            #expect(gui.agentChatState.transcriptEpoch == baselineEpoch)
+            #expect(gui.agentChatState.transcriptTruncated == baselineTruncated)
+            #expect(gui.agentChatState.promptVersion == baselinePromptVersion)
+            #expect(gui.agentChatState.transcriptSnapshot.resourceWeight == baselineTranscript.resourceWeight)
         }
     }
 

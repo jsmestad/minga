@@ -212,6 +212,8 @@ struct PreparedFrameTransaction {
     /// Non-nil only when resident window content changed or a keyframe authoritatively pruned it. The IDs scope scroll-reset reconciliation to content that actually changed.
     let residentProjectionWindowIds: Set<UInt16>?
     let operationCounts: PreparedFrameOperationCounts
+    /// Transcript preparation work performed by this frame. Unrelated frames stay zeroed.
+    let transcriptAccountingCounters: AgentTranscriptAccountingCounters
 }
 
 /// Coalesces repeated updates to the same semantic state during staging. This is
@@ -299,6 +301,7 @@ struct PreparedFrameTransactionBuilder {
     private var changedTranscript: AgentTranscriptSnapshot?
     private var themeWeight = FrameResourceWeight()
     private var transcriptWeight = FrameResourceWeight()
+    private var transcriptAccountingCounters = AgentTranscriptAccountingCounters()
     private var stagingWeight = FrameResourceWeight()
     private var rejection: PreparedFrameRejection?
     private let stagingLimit: FrameResourceWeight
@@ -331,7 +334,7 @@ struct PreparedFrameTransactionBuilder {
         self.residentLimit = residentLimit
 
         do {
-            transcriptWeight = try committedTranscript.exactResourceWeight()
+            transcriptWeight = committedTranscript.resourceWeight
             stagingWeight = transcriptWeight
             for content in workingWindows.values {
                 stagingWeight = try stagingWeight.adding(content.exactResourceWeight())
@@ -526,7 +529,8 @@ struct PreparedFrameTransactionBuilder {
                 resources: resourceCommands.isEmpty ? 0 : 1,
                 focus: focusCommands.isEmpty ? 0 : 1,
                 metadata: metadataCommands.isEmpty ? 0 : 1
-            )
+            ),
+            transcriptAccountingCounters: transcriptAccountingCounters
         )
         return .success(transaction)
     }
@@ -692,45 +696,24 @@ struct PreparedFrameTransactionBuilder {
         mode: UInt8, epoch: UInt32, truncated: Bool,
         trimFront: Int, baseCount: Int, messages: [Wire.ChatMessage]
     ) {
-        let nextTranscriptWeight: FrameResourceWeight
-        let nextStagingWeight: FrameResourceWeight
-        do {
-            nextTranscriptWeight = try workingTranscript.resourceWeightAfterPreparing(
-                mode: mode, epoch: epoch, trimFront: trimFront,
-                baseCount: baseCount, messages: messages
-            )
-            nextStagingWeight = try prospectiveStagingWeight(
-                removing: transcriptWeight, adding: nextTranscriptWeight
-            )
-            guard nextStagingWeight.firstExceeded(limit: stagingLimit) == nil else {
-                rejection = .resourcePolicy
-                return
-            }
-        } catch let failure as AgentTranscriptPreparationFailure {
-            switch failure {
-            case .beforeSeed: rejection = .transcriptBeforeSeed
-            case .epochMismatch: rejection = .transcriptEpochMismatch
-            case .desynced: rejection = .transcriptDesynced
-            }
-            return
-        } catch {
-            rejection = .resourcePolicy
-            return
-        }
-
         switch AgentChatState.prepareTranscript(
             from: workingTranscript, mode: mode, epoch: epoch,
             truncated: truncated, trimFront: trimFront,
             baseCount: baseCount, messages: messages
         ) {
         case .success(let prepared):
-            stagingWeight = nextStagingWeight
-            transcriptWeight = nextTranscriptWeight
+            guard replaceStagingWeight(
+                removing: transcriptWeight,
+                adding: prepared.resourceWeight
+            ) else { return }
+            transcriptWeight = prepared.resourceWeight
+            transcriptAccountingCounters.add(prepared.accountingCounters)
             workingTranscript = prepared
             changedTranscript = prepared
         case .failure(.beforeSeed): rejection = .transcriptBeforeSeed
         case .failure(.epochMismatch): rejection = .transcriptEpochMismatch
         case .failure(.desynced): rejection = .transcriptDesynced
+        case .failure(.resourcePolicy): rejection = .resourcePolicy
         }
     }
 

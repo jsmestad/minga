@@ -270,6 +270,9 @@ final class CommandDispatcher {
     /// Cost of the most recently published frame in changed-domain operations.
     private(set) var lastPublicationOperationCounts: PreparedFrameOperationCounts?
 
+    /// Transcript accounting work performed by the most recently published frame.
+    private(set) var lastTranscriptAccountingCounters: AgentTranscriptAccountingCounters?
+
     /// frame_seq of the last transaction this dispatcher committed cleanly.
     /// Doubles as the delta base validator and the `last_good_frame_seq` carried
     /// by `request_keyframe` on invalidation. 0 until the first clean commit.
@@ -339,6 +342,7 @@ final class CommandDispatcher {
         transactionBuilder = nil
         registeredFontIds = [0]
         lastPublicationOperationCounts = nil
+        lastTranscriptAccountingCounters = nil
         lastCommittedFrameSeq = 0
         lastCommittedGeneration = 0
         lastTerminalRejection = nil
@@ -629,6 +633,7 @@ final class CommandDispatcher {
         guiState.presentationMetrics.beginCommitted(frame: committed, impact: finalImpact)
         publicationCount += 1
         lastPublicationOperationCounts = transaction.operationCounts
+        lastTranscriptAccountingCounters = transaction.transcriptAccountingCounters
     }
 
     private func applyLocal(_ command: RenderCommand) {

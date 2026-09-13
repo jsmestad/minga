@@ -64,9 +64,14 @@ build_revision() {
 
 measure_revision() {
   local side=$1 pair=$2 source_root=$3 build_dir=$4
-  local output="$work_dir/$side-$pair.json" status=0
+  local output="$work_dir/$side-$pair.json" status=0 revision
+  if [[ "$side" == base ]]; then
+    revision=$base_sha
+  else
+    revision=$head_sha
+  fi
   echo "::group::Measure native Metal benchmark $side pair $pair"
-  MINGA_NATIVE_RENDER_ROOT="$source_root" "$runner" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
+  MINGA_NATIVE_RENDER_ROOT="$source_root" MINGA_BENCHMARK_REVISION="$revision" "$runner" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
   if (( status != 0 )); then
     find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'minga-native-render-performance*.ips' -mmin -10 -print -exec cp {} "$artifact_dir/" \; -exec cat {} \; 2>/dev/null || true
     if command -v lldb >/dev/null; then
@@ -108,7 +113,7 @@ compare_pairs() {
   MINGA_NATIVE_RENDER_ROOT="$head_source" "$runner" --compare "$head_build" "${args[@]}" 2>&1 | tee -a "$metrics_file"
 }
 
-if ! build_revision "$head_sha" head "$head_source" "$head_build" MINGA_SNAPSHOT_RENDERER; then
+if ! build_revision "$head_sha" head "$head_source" "$head_build" "MINGA_SNAPSHOT_RENDERER MINGA_TRANSCRIPT_ACCOUNTING"; then
   echo "HEAD native Metal benchmark could not be built" >&2
   exit 1
 fi
@@ -122,7 +127,7 @@ git cat-file -e "$base_sha^{commit}" 2>/dev/null || {
   echo "error: merge-base $base_sha is unavailable for required native paired gate" >&2
   exit 1
 }
-if ! build_revision "$base_sha" base "$base_source" "$base_build" MINGA_LEGACY_FRAGMENTED_RENDERER; then
+if ! build_revision "$base_sha" base "$base_source" "$base_build" MINGA_SNAPSHOT_RENDERER; then
   echo "merge-base native Metal benchmark could not be built" >&2
   exit 1
 fi

@@ -33,6 +33,315 @@ public enum ChatMessageEntry: Identifiable {
     }
 }
 
+/// Deterministic work counters for transcript preparation.
+public struct AgentTranscriptAccountingCounters: Sendable, Equatable {
+    /// New or replacement entries measured reflectively for exact resource weight.
+    public var changedEntriesMeasured = 0
+    /// Unchanged resident entries visited while preparing a transcript operation.
+    public var unchangedEntriesVisited = 0
+    /// Unchanged resident entry values copied while preparing a transcript operation.
+    public var retainedEntriesCopied = 0
+    /// Persistent sequence nodes copied or created for bounded collection bookkeeping.
+    public var sequenceNodesCreated = 0
+
+    /// Creates zeroed counters.
+    public init() {}
+
+    /// Accumulates work across every transcript operation staged in one frame.
+    public mutating func add(_ other: AgentTranscriptAccountingCounters) {
+        changedEntriesMeasured += other.changedEntriesMeasured
+        unchangedEntriesVisited += other.unchangedEntriesVisited
+        retainedEntriesCopied += other.retainedEntriesCopied
+        sequenceNodesCreated += other.sequenceNodesCreated
+    }
+}
+
+private struct WeightedChatMessageEntry {
+    let message: ChatMessageEntry
+    let resourceWeight: FrameResourceWeight
+}
+
+private func addingKnownValid(
+    _ left: FrameResourceWeight,
+    _ right: FrameResourceWeight
+) -> FrameResourceWeight {
+    do {
+        return try left.adding(right)
+    } catch {
+        preconditionFailure("validated transcript resource weight overflowed")
+    }
+}
+
+/// Immutable node in the resident transcript's persistent implicit treap.
+private final class AgentTranscriptNode {
+    let entry: WeightedChatMessageEntry
+    let priority: UInt64
+    let left: AgentTranscriptNode?
+    let right: AgentTranscriptNode?
+    let count: Int
+    let resourceWeight: FrameResourceWeight
+
+    init(
+        entry: WeightedChatMessageEntry,
+        priority: UInt64,
+        left: AgentTranscriptNode?,
+        right: AgentTranscriptNode?
+    ) {
+        self.entry = entry
+        self.priority = priority
+        self.left = left
+        self.right = right
+        count = (left?.count ?? 0) + 1 + (right?.count ?? 0)
+        resourceWeight = addingKnownValid(
+            addingKnownValid(
+                left?.resourceWeight ?? FrameResourceWeight(),
+                entry.resourceWeight
+            ),
+            addingKnownValid(
+                FrameResourceWeight(arrayEntries: 1),
+                right?.resourceWeight ?? FrameResourceWeight()
+            )
+        )
+    }
+}
+
+/// Read-only resident transcript entries with stable value semantics.
+///
+/// The underlying persistent tree lets transcript preparation retain unchanged
+/// history without copying it. Integer indexes remain stable within a snapshot.
+public struct AgentTranscriptMessages: BidirectionalCollection {
+    public typealias Index = Int
+    public typealias Element = ChatMessageEntry
+
+    /// In-order iterator that visits each resident entry once.
+    public struct Iterator: IteratorProtocol {
+        private var stack: [AgentTranscriptNode] = []
+
+        fileprivate init(root: AgentTranscriptNode?) {
+            pushLeftSpine(root)
+        }
+
+        public mutating func next() -> ChatMessageEntry? {
+            guard let node = stack.popLast() else { return nil }
+            pushLeftSpine(node.right)
+            return node.entry.message
+        }
+
+        private mutating func pushLeftSpine(_ root: AgentTranscriptNode?) {
+            var node = root
+            while let current = node {
+                stack.append(current)
+                node = current.left
+            }
+        }
+    }
+
+    fileprivate let root: AgentTranscriptNode?
+
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { root?.count ?? 0 }
+    public var count: Int { root?.count ?? 0 }
+
+    public func index(after index: Int) -> Int { index + 1 }
+    public func index(before index: Int) -> Int { index - 1 }
+
+    public func makeIterator() -> Iterator { Iterator(root: root) }
+
+    public subscript(index: Int) -> ChatMessageEntry {
+        precondition(index >= startIndex && index < endIndex, "transcript index out of bounds")
+        var remaining = index
+        var node = root
+        while let current = node {
+            let leftCount = current.left?.count ?? 0
+            if remaining < leftCount {
+                node = current.left
+            } else if remaining == leftCount {
+                return current.entry.message
+            } else {
+                remaining -= leftCount + 1
+                node = current.right
+            }
+        }
+        preconditionFailure("valid transcript index was not present")
+    }
+}
+
+private struct AgentTranscriptStore {
+    private(set) var root: AgentTranscriptNode?
+    private(set) var nextOrdinal: UInt64
+
+    init() {
+        root = nil
+        nextOrdinal = 0
+    }
+
+    var count: Int { root?.count ?? 0 }
+    var messages: AgentTranscriptMessages { AgentTranscriptMessages(root: root) }
+
+    var resourceWeight: FrameResourceWeight { root?.resourceWeight ?? FrameResourceWeight() }
+
+    static func replacingAll(
+        _ messages: [ChatMessageEntry],
+        counters: inout AgentTranscriptAccountingCounters
+    ) throws -> AgentTranscriptStore {
+        var store = AgentTranscriptStore()
+        let entries = try measuredEntries(messages, counters: &counters)
+        store.root = try store.build(entries, counters: &counters)
+        return store
+    }
+
+    func replacingResidentRange(
+        trimFront: Int,
+        baseCount: Int,
+        with messages: [ChatMessageEntry],
+        counters: inout AgentTranscriptAccountingCounters
+    ) throws -> AgentTranscriptStore {
+        var ordinal = nextOrdinal
+        var sequenceCounters = counters
+        let (_, remainder) = Self.split(root, at: trimFront, counters: &sequenceCounters)
+        let (kept, _) = Self.split(remainder, at: baseCount, counters: &sequenceCounters)
+        let entries = try Self.measuredEntries(messages, counters: &sequenceCounters)
+
+        var appendedWeight = FrameResourceWeight(arrayEntries: entries.count)
+        for entry in entries {
+            appendedWeight = try appendedWeight.adding(entry.resourceWeight)
+        }
+        _ = try (kept?.resourceWeight ?? FrameResourceWeight()).adding(appendedWeight)
+
+        var appended: AgentTranscriptNode?
+        for entry in entries {
+            let node = Self.makeNode(
+                entry: entry,
+                priority: Self.priority(for: ordinal),
+                left: nil,
+                right: nil,
+                counters: &sequenceCounters
+            )
+            appended = Self.merge(appended, node, counters: &sequenceCounters)
+            ordinal &+= 1
+        }
+
+        let nextRoot = Self.merge(kept, appended, counters: &sequenceCounters)
+        counters = sequenceCounters
+        return AgentTranscriptStore(root: nextRoot, nextOrdinal: ordinal)
+    }
+
+    private init(root: AgentTranscriptNode?, nextOrdinal: UInt64) {
+        self.root = root
+        self.nextOrdinal = nextOrdinal
+    }
+
+    private mutating func build(
+        _ entries: [WeightedChatMessageEntry],
+        counters: inout AgentTranscriptAccountingCounters
+    ) throws -> AgentTranscriptNode? {
+        var payloadWeight = FrameResourceWeight(arrayEntries: entries.count)
+        for entry in entries {
+            payloadWeight = try payloadWeight.adding(entry.resourceWeight)
+        }
+        _ = payloadWeight
+
+        var result: AgentTranscriptNode?
+        for entry in entries {
+            let node = Self.makeNode(
+                entry: entry,
+                priority: Self.priority(for: nextOrdinal),
+                left: nil,
+                right: nil,
+                counters: &counters
+            )
+            result = Self.merge(result, node, counters: &counters)
+            nextOrdinal &+= 1
+        }
+        return result
+    }
+
+    private static func measuredEntries(
+        _ messages: [ChatMessageEntry],
+        counters: inout AgentTranscriptAccountingCounters
+    ) throws -> [WeightedChatMessageEntry] {
+        var entries: [WeightedChatMessageEntry] = []
+        entries.reserveCapacity(messages.count)
+        for message in messages {
+            entries.append(WeightedChatMessageEntry(
+                message: message,
+                resourceWeight: try FrameResourceWeight.measuringOwnedPayload(message)
+            ))
+            counters.changedEntriesMeasured += 1
+        }
+        return entries
+    }
+
+    private static func makeNode(
+        entry: WeightedChatMessageEntry,
+        priority: UInt64,
+        left: AgentTranscriptNode?,
+        right: AgentTranscriptNode?,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> AgentTranscriptNode {
+        counters.sequenceNodesCreated += 1
+        return AgentTranscriptNode(
+            entry: entry, priority: priority, left: left, right: right
+        )
+    }
+
+    private static func split(
+        _ node: AgentTranscriptNode?,
+        at index: Int,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> (AgentTranscriptNode?, AgentTranscriptNode?) {
+        guard let node else { return (nil, nil) }
+        let leftCount = node.left?.count ?? 0
+        if index <= leftCount {
+            let (before, after) = split(node.left, at: index, counters: &counters)
+            return (
+                before,
+                makeNode(
+                    entry: node.entry, priority: node.priority,
+                    left: after, right: node.right, counters: &counters
+                )
+            )
+        }
+        let (before, after) = split(
+            node.right, at: index - leftCount - 1, counters: &counters
+        )
+        return (
+            makeNode(
+                entry: node.entry, priority: node.priority,
+                left: node.left, right: before, counters: &counters
+            ),
+            after
+        )
+    }
+
+    private static func merge(
+        _ left: AgentTranscriptNode?,
+        _ right: AgentTranscriptNode?,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> AgentTranscriptNode? {
+        guard let left else { return right }
+        guard let right else { return left }
+        if left.priority <= right.priority {
+            return makeNode(
+                entry: left.entry, priority: left.priority, left: left.left,
+                right: merge(left.right, right, counters: &counters), counters: &counters
+            )
+        }
+        return makeNode(
+            entry: right.entry, priority: right.priority,
+            left: merge(left, right.left, counters: &counters), right: right.right,
+            counters: &counters
+        )
+    }
+
+    private static func priority(for ordinal: UInt64) -> UInt64 {
+        var value = ordinal &+ 0x9E37_79B9_7F4A_7C15
+        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+        return value ^ (value >> 31)
+    }
+}
+
 /// A group of keybindings for the help overlay cheatsheet.
 public struct HelpGroup: Identifiable {
     public init(title: String, bindings: [(key: String, description: String)]) {
@@ -48,45 +357,64 @@ public struct HelpGroup: Identifiable {
 /// Value-semantic resident transcript used to validate and prepare a complete
 /// frame before any GUI state is published.
 public struct AgentTranscriptSnapshot {
-    let messages: [ChatMessageEntry]
+    fileprivate let store: AgentTranscriptStore
     let epoch: UInt32
     let hasTranscript: Bool
     let truncated: Bool
     let promptVersion: Int
+    /// Work performed to prepare the operation that created this snapshot.
+    public let accountingCounters: AgentTranscriptAccountingCounters
 
-    /// Exact retained payload weight of the resident transcript.
-    public func exactResourceWeight() throws -> FrameResourceWeight {
-        var weight = FrameResourceWeight(arrayEntries: messages.count)
-        for message in messages {
-            weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
-        }
-        return weight
+    /// Resident messages in presentation order.
+    public var messages: AgentTranscriptMessages { store.messages }
+
+    /// Exact retained payload weight, including the top-level transcript collection.
+    public var resourceWeight: FrameResourceWeight { store.resourceWeight }
+
+    fileprivate init(
+        store: AgentTranscriptStore,
+        epoch: UInt32,
+        hasTranscript: Bool,
+        truncated: Bool,
+        promptVersion: Int,
+        accountingCounters: AgentTranscriptAccountingCounters
+    ) {
+        self.store = store
+        self.epoch = epoch
+        self.hasTranscript = hasTranscript
+        self.truncated = truncated
+        self.promptVersion = promptVersion
+        self.accountingCounters = accountingCounters
     }
 
-    /// Computes the exact resulting transcript weight without materializing mapped messages.
-    public func resourceWeightAfterPreparing(
-        mode: UInt8, epoch: UInt32, trimFront: Int, baseCount: Int,
-        messages transcriptMessages: [Wire.ChatMessage]
-    ) throws -> FrameResourceWeight {
-        var weight: FrameResourceWeight
-        if mode == 0 {
-            weight = FrameResourceWeight(arrayEntries: transcriptMessages.count)
-        } else {
-            guard hasTranscript else { throw AgentTranscriptPreparationFailure.beforeSeed }
-            guard epoch == self.epoch else { throw AgentTranscriptPreparationFailure.epochMismatch }
-            guard trimFront >= 0, baseCount >= 0,
-                  messages.count >= trimFront + baseCount else {
-                throw AgentTranscriptPreparationFailure.desynced
-            }
-            weight = FrameResourceWeight(arrayEntries: baseCount + transcriptMessages.count)
-            for message in messages[trimFront ..< (trimFront + baseCount)] {
-                weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
-            }
-        }
-        for message in transcriptMessages {
-            weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
-        }
-        return weight
+    fileprivate static func seeded(
+        messages: [ChatMessageEntry],
+        epoch: UInt32 = 0,
+        hasTranscript: Bool = false,
+        truncated: Bool = false,
+        promptVersion: Int = 0
+    ) throws -> AgentTranscriptSnapshot {
+        var counters = AgentTranscriptAccountingCounters()
+        let store = try AgentTranscriptStore.replacingAll(messages, counters: &counters)
+        return AgentTranscriptSnapshot(
+            store: store,
+            epoch: epoch,
+            hasTranscript: hasTranscript,
+            truncated: truncated,
+            promptVersion: promptVersion,
+            accountingCounters: counters
+        )
+    }
+
+    fileprivate func withPromptVersion(_ promptVersion: Int) -> AgentTranscriptSnapshot {
+        AgentTranscriptSnapshot(
+            store: store,
+            epoch: epoch,
+            hasTranscript: hasTranscript,
+            truncated: truncated,
+            promptVersion: promptVersion,
+            accountingCounters: accountingCounters
+        )
     }
 }
 
@@ -95,6 +423,7 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
     case beforeSeed
     case epochMismatch
     case desynced
+    case resourcePolicy
 }
 
 @MainActor
@@ -106,7 +435,14 @@ public final class AgentChatState {
         self.model = model
         self.thinkingLevel = thinkingLevel
         self.prompt = prompt
-        self.messages = messages
+        do {
+            transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
+                messages: messages,
+                promptVersion: promptVersion
+            )
+        } catch {
+            preconditionFailure("preview transcript resource accounting overflowed")
+        }
         self.helpVisible = helpVisible
         self.helpGroups = helpGroups
         self.promptVersion = promptVersion
@@ -122,29 +458,41 @@ public final class AgentChatState {
     public var model: String = ""
     public var thinkingLevel: String = "medium"
     public var prompt: String = ""
-    // private(set): the resident array must only change together with its epoch
-    // bookkeeping (applyTranscript/update/hide/seed), never by direct assignment.
-    public private(set) var messages: [ChatMessageEntry] = []
+    // The resident sequence, epoch, truncation, and exact weight are one value.
+    // Publishing swaps that value only after the complete frame is accepted.
+    private var transcriptSnapshotStorage: AgentTranscriptSnapshot
+
+    /// Resident transcript entries in presentation order.
+    public var messages: AgentTranscriptMessages { transcriptSnapshotStorage.messages }
 
     /// Seeds the message list directly for previews and view tests. Production
     /// mutation goes through `applyTranscript`; this bypasses the epoch
     /// bookkeeping on purpose and must not be called on a live transcript.
     public func seed(messages: [ChatMessageEntry]) {
-        self.messages = messages
+        do {
+            transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
+                messages: messages,
+                promptVersion: promptVersion
+            )
+        } catch {
+            preconditionFailure("preview transcript resource accounting overflowed")
+        }
     }
 
     /// Transcript epoch of the resident stream currently held in `messages` (0x86).
     /// A `full_replace` carrying a new epoch swaps the array wholesale and adopts
     /// the epoch; an `append` must match this epoch or it is dropped as stale.
-    public private(set) var transcriptEpoch: UInt32 = 0
+    public var transcriptEpoch: UInt32 { transcriptSnapshotStorage.epoch }
 
     /// Whether a `full_replace` has seeded the resident transcript. Appends before
     /// the first full_replace are dropped until a full_replace arrives.
-    @ObservationIgnored private var hasTranscript: Bool = false
+    private var hasTranscript: Bool {
+        transcriptSnapshotStorage.hasTranscript
+    }
 
     /// True when older messages sit outside the resident byte-cap window (0x86
     /// `truncated` flag). A UI hint that the visible history is not the full session.
-    public private(set) var transcriptTruncated: Bool = false
+    public var transcriptTruncated: Bool { transcriptSnapshotStorage.truncated }
 
     public var helpVisible: Bool = false
     public var helpGroups: [HelpGroup] = []
@@ -262,6 +610,8 @@ public final class AgentChatState {
         case droppedEpochMismatch
         /// The store is shorter than `trim_front + base_count` (GUI_PROTOCOL.md 0x86).
         case droppedDesynced
+        /// Exact resource accounting overflowed while preparing the operation.
+        case droppedResourcePolicy
     }
 
     @discardableResult
@@ -287,18 +637,15 @@ public final class AgentChatState {
         case .failure(.desynced):
             PortLogger.warn("transcript append desynced dropped (resident \(messages.count), trimFront \(trimFront), baseCount \(baseCount), epoch \(epoch))")
             return .droppedDesynced
+        case .failure(.resourcePolicy):
+            PortLogger.error("transcript resource accounting failed (epoch \(epoch))")
+            return .droppedResourcePolicy
         }
     }
 
     /// Captures the resident transcript as a value for frame-level validation.
     public var transcriptSnapshot: AgentTranscriptSnapshot {
-        AgentTranscriptSnapshot(
-            messages: messages,
-            epoch: transcriptEpoch,
-            hasTranscript: hasTranscript,
-            truncated: transcriptTruncated,
-            promptVersion: promptVersion
-        )
+        transcriptSnapshotStorage.withPromptVersion(promptVersion)
     }
 
     /// Validates and applies one full or append transcript operation without mutating presented state.
@@ -311,15 +658,22 @@ public final class AgentChatState {
         baseCount: Int,
         messages transcriptMessages: [Wire.ChatMessage]
     ) -> Result<AgentTranscriptSnapshot, AgentTranscriptPreparationFailure> {
-        let mapped = transcriptMessages.map(Self.mapMessage)
+        var counters = AgentTranscriptAccountingCounters()
         if mode == 0 {
-            return .success(AgentTranscriptSnapshot(
-                messages: mapped,
-                epoch: epoch,
-                hasTranscript: true,
-                truncated: truncated,
-                promptVersion: current.promptVersion + 1
-            ))
+            do {
+                let mapped = transcriptMessages.map(Self.mapMessage)
+                let store = try AgentTranscriptStore.replacingAll(mapped, counters: &counters)
+                return .success(AgentTranscriptSnapshot(
+                    store: store,
+                    epoch: epoch,
+                    hasTranscript: true,
+                    truncated: truncated,
+                    promptVersion: current.promptVersion + 1,
+                    accountingCounters: counters
+                ))
+            } catch {
+                return .failure(.resourcePolicy)
+            }
         }
         guard current.hasTranscript else { return .failure(.beforeSeed) }
         guard epoch == current.epoch else { return .failure(.epochMismatch) }
@@ -328,22 +682,30 @@ public final class AgentChatState {
               current.messages.count >= trimFront + baseCount else {
             return .failure(.desynced)
         }
-        let kept = current.messages[trimFront ..< (trimFront + baseCount)]
-        return .success(AgentTranscriptSnapshot(
-            messages: Array(kept) + mapped,
-            epoch: current.epoch,
-            hasTranscript: true,
-            truncated: truncated,
-            promptVersion: current.promptVersion + 1
-        ))
+        do {
+            let mapped = transcriptMessages.map(Self.mapMessage)
+            let store = try current.store.replacingResidentRange(
+                trimFront: trimFront,
+                baseCount: baseCount,
+                with: mapped,
+                counters: &counters
+            )
+            return .success(AgentTranscriptSnapshot(
+                store: store,
+                epoch: current.epoch,
+                hasTranscript: true,
+                truncated: truncated,
+                promptVersion: current.promptVersion + 1,
+                accountingCounters: counters
+            ))
+        } catch {
+            return .failure(.resourcePolicy)
+        }
     }
 
     /// Installs a transcript snapshot that was fully validated before frame publication.
     public func publishTranscript(_ snapshot: AgentTranscriptSnapshot) {
-        messages = snapshot.messages
-        transcriptEpoch = snapshot.epoch
-        hasTranscript = snapshot.hasTranscript
-        transcriptTruncated = snapshot.truncated
+        transcriptSnapshotStorage = snapshot
         promptVersion = snapshot.promptVersion
     }
 
@@ -377,11 +739,15 @@ public final class AgentChatState {
 
     public func hide() {
         visible = false
-        messages = []
         helpVisible = false
         helpGroups = []
-        transcriptEpoch = 0
-        hasTranscript = false
-        transcriptTruncated = false
+        do {
+            transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
+                messages: [],
+                promptVersion: promptVersion
+            )
+        } catch {
+            preconditionFailure("empty transcript resource accounting overflowed")
+        }
     }
 }
