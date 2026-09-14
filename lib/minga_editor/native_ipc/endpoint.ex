@@ -5,6 +5,7 @@ defmodule MingaEditor.NativeIPC.Endpoint do
   alias MingaEditor.NativeIPC.RuntimeEntry
 
   @max_frame 65_536
+  @listen_backlog 64
   @descriptor_version 1
 
   @enforce_keys [:listener, :identity, :descriptor_path]
@@ -70,6 +71,7 @@ defmodule MingaEditor.NativeIPC.Endpoint do
       {:active, false},
       {:packet, 4},
       {:packet_size, @max_frame},
+      {:backlog, @listen_backlog},
       {:reuseaddr, true}
     ])
   end

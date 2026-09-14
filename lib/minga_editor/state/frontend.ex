@@ -8,6 +8,7 @@ defmodule MingaEditor.State.Frontend do
   """
 
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.NativeIPC.NativePresentationObservation
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.Viewport
 
@@ -21,6 +22,7 @@ defmodule MingaEditor.State.Frontend do
           terminal_viewport: Viewport.t(),
           capabilities: Capabilities.t(),
           resource_pressure: ResourcePressure.t(),
+          native_presentation: NativePresentationObservation.t() | nil,
           last_input_seq: non_neg_integer()
         }
 
@@ -30,6 +32,7 @@ defmodule MingaEditor.State.Frontend do
             terminal_viewport: Viewport.new(24, 80),
             capabilities: %Capabilities{},
             resource_pressure: ResourcePressure.new(),
+            native_presentation: nil,
             last_input_seq: 0
 
   @doc "Builds frontend state from editor startup options."
@@ -54,6 +57,11 @@ defmodule MingaEditor.State.Frontend do
   def accept_capabilities(%__MODULE__{} = frontend, %Capabilities{} = capabilities),
     do: %{frontend | capabilities: capabilities}
 
+  @doc "Clears connection-scoped native presentation evidence."
+  @spec clear_native_presentation(t()) :: t()
+  def clear_native_presentation(%__MODULE__{} = frontend),
+    do: %{frontend | native_presentation: nil}
+
   @doc "Records the terminal viewport reported by the active frontend."
   @spec resize_terminal(t(), Viewport.t()) :: t()
   def resize_terminal(%__MODULE__{} = frontend, %Viewport{} = viewport),
@@ -66,6 +74,14 @@ defmodule MingaEditor.State.Frontend do
     pressure = ResourcePressure.update(frontend.resource_pressure, low_power?, thermal_state)
     %{frontend | resource_pressure: pressure}
   end
+
+  @doc "Records the latest native presentation proven by the connected frontend."
+  @spec observe_native_presentation(t(), NativePresentationObservation.t()) :: t()
+  def observe_native_presentation(
+        %__MODULE__{} = frontend,
+        %NativePresentationObservation{} = observation
+      ),
+      do: %{frontend | native_presentation: observation}
 
   @doc "Correlates the next committed frame with the latest frontend input."
   @spec correlate_input(t(), non_neg_integer()) :: t()

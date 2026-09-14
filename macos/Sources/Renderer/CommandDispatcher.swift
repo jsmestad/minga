@@ -182,6 +182,7 @@ final class CommandDispatcher {
         get { operationReadiness.onResult }
         set { operationReadiness.onResult = newValue }
     }
+    var onNativePresentationObservation: ((NativePresentationEvidence) -> Void)?
     var requestPresentationFocus: (() -> Bool)?
 
     /// Claims the newest applied input sequence for one Metal submission.
@@ -276,6 +277,17 @@ final class CommandDispatcher {
               visibleEditorSnapshot?.generation == snapshot.generation,
               visibleEditorSnapshot?.frameSeq == snapshot.frameSeq
         else { return }
+        if let target = snapshot.metadata.presentationTarget {
+            onNativePresentationObservation?(NativePresentationEvidence(
+                targetToken: target.token,
+                applicationRevision: target.applicationRevision,
+                generation: snapshot.generation,
+                frameSeq: snapshot.frameSeq,
+                windowID: target.windowID,
+                focusReady: focusReady,
+                boundary: .metalDrawableCompleted
+            ))
+        }
         operationReadiness.observePresented(snapshot, focusReady: focusReady)
     }
 

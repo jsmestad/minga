@@ -34,6 +34,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   alias Minga.Protocol.Opcodes
   alias MingaEditor.NativeIPC.OperationNativeResult
+  alias MingaEditor.NativeIPC.NativePresentationObservation
   alias MingaEditor.NativeIPC.OperationReceipt
   alias MingaEditor.NativeIPC.OperationReceipt.Evidence
   alias MingaEditor.PresentationTarget
@@ -63,6 +64,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
   @op_operation_native_result Opcodes.operation_native_result()
+  @op_native_presentation_observation Opcodes.native_presentation_observation()
   @op_presentation_target Opcodes.presentation_target()
   @op_presentation_operation Opcodes.presentation_operation()
 
@@ -225,6 +227,7 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:application_quit_decision, request_id :: non_neg_integer(),
              application_quit_decision()}
           | {:operation_native_result, OperationNativeResult.t()}
+          | {:native_presentation_observation, NativePresentationObservation.t()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -679,6 +682,28 @@ defmodule MingaEditor.Frontend.Protocol do
     end
   end
 
+  def decode_event(
+        <<@op_native_presentation_observation, target_token::unsigned-64,
+          application_revision::32, generation::32, frame_seq::32, window_id::16, focus_ready::8>>
+      ) do
+    case decode_boolean(focus_ready) do
+      {:ok, focus} ->
+        {:ok,
+         {:native_presentation_observation,
+          %NativePresentationObservation{
+            target_token: target_token,
+            application_revision: application_revision,
+            generation: generation,
+            frame_seq: frame_seq,
+            window_id: window_id,
+            focus_ready: focus
+          }}}
+
+      :error ->
+        {:error, :malformed}
+    end
+  end
+
   def decode_event(<<@op_scroll_batch, window_id::16, delta_lines::16-signed, direction::8>>) do
     dir = if direction == 0, do: :down, else: :up
     {:ok, {:scroll_batch, window_id, delta_lines, dir}}
@@ -717,7 +742,8 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_application_quit_request,
              @op_application_quit_decision,
              @op_scroll_batch,
-             @op_operation_native_result
+             @op_operation_native_result,
+             @op_native_presentation_observation
            ] do
     {:error, :malformed}
   end

@@ -41,7 +41,9 @@ version = "2.0.0"
 # to the exact BEAM-owned picker snapshot rendered by a native frontend.
 # protocol_version 19 adds correlated local-operation presentation targets,
 # expectations, and native readiness outcomes (#3324).
-protocol_version = 19
+# protocol_version 20 adds continuous native presentation observations for
+# semantic inspection without inferring visibility from committed BEAM state.
+protocol_version = 20
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -163,6 +165,13 @@ name = "operation_native_result"
 value = 0x0F
 direction = "frontend_to_beam"
 framing = "fixed:57"
+
+[[opcodes]]
+category = "input"
+name = "native_presentation_observation"
+value = 0x1D
+direction = "frontend_to_beam"
+framing = "fixed:24"
 
 [[opcodes]]
 category = "input"

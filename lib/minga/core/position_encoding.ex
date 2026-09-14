@@ -51,6 +51,80 @@ defmodule Minga.Core.PositionEncoding do
     {line, byte_col}
   end
 
+  @doc "Converts an exact external column to a byte column without clamping invalid positions."
+  @spec exact_byte_column(String.t(), non_neg_integer(), encoding()) ::
+          {:ok, non_neg_integer()} | {:error, :column_out_of_range | :column_not_boundary}
+  def exact_byte_column(line_text, column, encoding)
+      when is_binary(line_text) and is_integer(column) and column >= 0 and
+             encoding in [:utf8, :utf16, :utf32] do
+    exact_byte_column_for_encoding(line_text, column, encoding)
+  end
+
+  @spec exact_byte_column_for_encoding(String.t(), non_neg_integer(), encoding()) ::
+          {:ok, non_neg_integer()} | {:error, :column_out_of_range | :column_not_boundary}
+  defp exact_byte_column_for_encoding(line_text, column, :utf8) do
+    if column <= byte_size(line_text) and utf8_boundary?(line_text, column),
+      do: {:ok, column},
+      else: exact_utf8_error(line_text, column)
+  end
+
+  defp exact_byte_column_for_encoding(line_text, column, :utf32),
+    do: exact_codepoint_column(line_text, column, 0)
+
+  defp exact_byte_column_for_encoding(line_text, column, :utf16),
+    do: exact_utf16_column(line_text, column, 0)
+
+  @spec exact_utf8_error(String.t(), non_neg_integer()) ::
+          {:error, :column_out_of_range | :column_not_boundary}
+  defp exact_utf8_error(line_text, column) when column > byte_size(line_text),
+    do: {:error, :column_out_of_range}
+
+  defp exact_utf8_error(_line_text, _column), do: {:error, :column_not_boundary}
+
+  @spec utf8_boundary?(String.t(), non_neg_integer()) :: boolean()
+  defp utf8_boundary?(_line_text, 0), do: true
+
+  defp utf8_boundary?(line_text, column) when column == byte_size(line_text), do: true
+
+  defp utf8_boundary?(line_text, column) do
+    <<_prefix::binary-size(^column), byte, _rest::binary>> = line_text
+    Bitwise.band(byte, 0xC0) != 0x80
+  end
+
+  @spec exact_codepoint_column(String.t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :column_out_of_range}
+  defp exact_codepoint_column(_line_text, 0, byte_offset), do: {:ok, byte_offset}
+  defp exact_codepoint_column("", _remaining, _byte_offset), do: {:error, :column_out_of_range}
+
+  defp exact_codepoint_column(<<codepoint::utf8, rest::binary>>, remaining, byte_offset) do
+    exact_codepoint_column(rest, remaining - 1, byte_offset + byte_size(<<codepoint::utf8>>))
+  end
+
+  @spec exact_utf16_column(String.t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :column_out_of_range | :column_not_boundary}
+  defp exact_utf16_column(_line_text, 0, byte_offset), do: {:ok, byte_offset}
+  defp exact_utf16_column("", _remaining, _byte_offset), do: {:error, :column_out_of_range}
+
+  defp exact_utf16_column(<<codepoint::utf8, rest::binary>>, remaining, byte_offset) do
+    units = utf16_units_for_codepoint(codepoint)
+    exact_utf16_step(rest, remaining, byte_offset, codepoint, units)
+  end
+
+  @spec exact_utf16_step(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          1 | 2
+        ) :: {:ok, non_neg_integer()} | {:error, :column_out_of_range | :column_not_boundary}
+  defp exact_utf16_step(_rest, remaining, _byte_offset, _codepoint, units)
+       when remaining < units,
+       do: {:error, :column_not_boundary}
+
+  defp exact_utf16_step(rest, remaining, byte_offset, codepoint, units) do
+    exact_utf16_column(rest, remaining - units, byte_offset + byte_size(<<codepoint::utf8>>))
+  end
+
   @spec normalize_encoding(String.t()) :: encoding() | nil
   defp normalize_encoding("utf-8"), do: :utf8
   defp normalize_encoding("utf-16"), do: :utf16

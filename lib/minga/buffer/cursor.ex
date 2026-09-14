@@ -70,7 +70,7 @@ defmodule Minga.Buffer.Cursor do
     line = min(target_line, tuple_size(line_starts) - 1)
     {line_start, line_length} = Lines.span(line_starts, line, text_size)
     line_text = binary_part(text, line_start, line_length)
-    column = target_column |> min(line_length) |> caret_column(line_text)
+    column = caret_column(line_text, min(target_column, line_length))
     point = line_start + column
     before = binary_part(text, 0, point)
     after_ = binary_part(text, point, text_size - point)
@@ -83,6 +83,23 @@ defmodule Minga.Buffer.Cursor do
         cursor_col: column,
         line_offsets: line_starts
     }
+  end
+
+  @doc "Returns whether a byte column is an exact editor caret boundary in a line."
+  @spec caret_boundary?(String.t(), non_neg_integer()) :: boolean()
+  def caret_boundary?(line_text, column) when is_binary(line_text) and column >= 0,
+    do: column <= byte_size(line_text) and caret_column(line_text, column) == column
+
+  @doc "Clamps a byte column to the nearest preceding editor caret boundary in a line."
+  @spec caret_column(String.t(), non_neg_integer()) :: non_neg_integer()
+  def caret_column(_line_text, 0), do: 0
+
+  def caret_column(line_text, target_column) when target_column >= byte_size(line_text) do
+    byte_size(line_text)
+  end
+
+  def caret_column(line_text, target_column) do
+    previous_caret_stop(line_text, target_column, 0)
   end
 
   @doc "Splits the character immediately before a caret from the preceding text."
@@ -98,17 +115,6 @@ defmodule Minga.Buffer.Cursor do
   @doc "Returns the character immediately after a caret."
   @spec next_character(String.t()) :: {String.t(), String.t()} | nil
   def next_character(text), do: String.next_grapheme(text)
-
-  @spec caret_column(non_neg_integer(), String.t()) :: non_neg_integer()
-  defp caret_column(0, _line_text), do: 0
-
-  defp caret_column(target_column, line_text) when target_column >= byte_size(line_text) do
-    byte_size(line_text)
-  end
-
-  defp caret_column(target_column, line_text) do
-    previous_caret_stop(line_text, target_column, 0)
-  end
 
   @spec previous_caret_stop(String.t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   defp previous_caret_stop(text, target_column, current_column) do

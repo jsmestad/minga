@@ -74,6 +74,46 @@ Terminal outcomes are explicit. `rejected` means the BEAM could not apply the re
 
 Receipts are intentionally bounded. Minga accepts at most 64 active operations and 64 waiters, retains at most 128 terminal receipts for 60 seconds, and converts an operation that receives no native result within 30 seconds to `indeterminate`. Expired receipts retain no view or frame resources. The receipt includes `last_visible` when a newer attempted presentation fails, so callers can distinguish the failed target from the prior valid target, application revision, and frame.
 
+## Inspect and navigate the native editor
+
+Use `minga-ipc inspect` to obtain exact semantic targets before you navigate. The helper authenticates through the same private descriptor and AF_UNIX endpoint as `open-ready`.
+
+```bash
+"$MINGA_IPC" capabilities
+"$MINGA_IPC" inspect --choice-limit 25
+```
+
+`capabilities` lists the finite command set, coordinate convention, page limits, receipt outcomes, and 64 KiB response limit. `inspect` returns two separate views. `authoritative` is current BEAM state, including tabs, panes, buffer identities and revisions, cursor positions, bounded viewport lines, and picker choices. `presented` is the last editor frame that the macOS frontend proved at the Metal completion boundary, including native focus evidence. A committed BEAM target can be newer than the last proven native presentation.
+
+Copy identity, ids, revisions, and opaque target tokens from one inspection response. Do not derive or cache tokens across a core restart.
+
+```bash
+"$MINGA_IPC" select-tab --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --tab-id 2 --target-token "$TAB_TOKEN"
+"$MINGA_IPC" focus-pane --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --tab-id 2 --pane-id 4 --target-token "$PANE_TOKEN"
+"$MINGA_IPC" goto-location --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --tab-id 2 --pane-id 4 --target-token "$PANE_TOKEN" --buffer-id "$BUFFER_ID" --buffer-revision 17 --line 12 --column 6
+"$MINGA_IPC" activate-picker-choice --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --target-token "$PICKER_TOKEN" --picker-generation 31 --activation-id 5 --choice-kind item
+```
+
+Successful navigation prints the terminal receipt as JSON. Native editor targets normally finish as `ready`; picker activation finishes as `applied` because the BEAM-owned picker workflow is the terminal boundary.
+
+```json
+{"type":"completed","receipt":{"kind":"focus_pane","outcome":"ready","result_code":"ready","target":{"requested_token":"761","token":"928","tab_id":2,"window_id":4},"evidence":{"boundary":"metal_drawable_completed","focus_ready":true}}}
+```
+
+A stale target returns a nonzero helper status and a structured rejection that can be inspected without replaying the action.
+
+```json
+{"type":"completed","receipt":{"kind":"goto_location","outcome":"rejected","result_code":"stale_revision","rejection":{"code":"stale_revision","stale_target":true}}}
+```
+
+Lines are one-based. Columns are zero-based UTF-16 code-unit offsets. `goto-location` rejects a line outside the document, a column outside the line, and any column that is not an exact Minga caret boundary, including positions inside surrogate pairs, combining sequences, and joined emoji. It does not clamp or redirect the request. Picker activation uses the same item or Actions entry route as native UI activation.
+
+Inspection is bounded. The first response includes at most eight tabs, eight panes across that page, eight viewport lines per pane, and the requested picker choice page up to 25 choices. When `truncation.tabs`, `truncation.panes`, or `truncation.picker_choices` is true, pass the corresponding opaque value from `continuations.tabs`, `continuations.panes[tab_id]`, or `continuations.picker_choices` back to `inspect --continuation`. A continuation is valid only for the inspection revision that created it. Minga rejects it as stale after any relevant tab, pane, buffer, or picker change.
+
+Every navigation command applies against the exact inspected target inside the serialized Editor process. An old app or core identity is rejected before admission. A removed tab or pane, replaced buffer or picker, outdated buffer revision, or missing offered choice produces a terminal `rejected` receipt with `result_code` and `rejection.code`. `rejection.stale_target` tells callers that a fresh inspection is required. Receipt lookup and wait observe the admitted operation and never replay it.
+
+The endpoint accepts only the documented typed commands. It does not accept arbitrary code, selectors, key sequences, or accessibility queries. Requests and responses retain the existing 64 KiB frame limit. Invalid field types, zero-valued one-based ids, unsupported commands, and oversized responses fail explicitly.
+
 ## Launch
 
 ```bash

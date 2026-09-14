@@ -61,6 +61,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       application_quit_request: 0x0D,
       application_quit_decision: 0x0E,
       operation_native_result: 0x0F,
+      native_presentation_observation: 0x1D,
       log_message: 0x60
     )
   end

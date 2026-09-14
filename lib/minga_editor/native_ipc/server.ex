@@ -12,6 +12,7 @@ defmodule MingaEditor.NativeIPC.Server do
   alias MingaEditor.NativeIPC.OperationNativeResult
   alias MingaEditor.NativeIPC.OperationReceipt
   alias MingaEditor.NativeIPC.OperationReceipt.Evidence
+  alias MingaEditor.NativeIPC.OperationReceipt.Target
   alias MingaEditor.NativeIPC.RuntimeEntry
   alias MingaEditor.NativeIPC.Server.State
 
@@ -42,6 +43,16 @@ defmodule MingaEditor.NativeIPC.Server do
               GenServer.server(),
               GenServer.server() ->
                 :ok | {:error, term()})}
+          | {:inspect_request,
+             (Identity.t(), String.t() | nil, pos_integer(), GenServer.server() ->
+                {:ok, map()} | {:error, term()})}
+          | {:navigation_request,
+             (Identity.t(),
+              MingaEditor.NativeIPC.NavigationCommand.t(),
+              OperationReceipt.t(),
+              GenServer.server(),
+              GenServer.server() ->
+                :ok | {:error, term()})}
           | {:kill_checker, (pos_integer() -> boolean())}
 
   @spec start_link([start_opt()]) :: GenServer.on_start()
@@ -62,11 +73,31 @@ defmodule MingaEditor.NativeIPC.Server do
   def admit_operation(server, path, target_token),
     do: GenServer.call(server, {:admit_operation, path, target_token})
 
+  @doc "Admits one typed semantic navigation receipt."
+  @spec admit_navigation_operation(
+          GenServer.server(),
+          OperationReceipt.kind(),
+          Target.t(),
+          :editor_visible_focused | :beam_applied
+        ) :: {:ok, OperationReceipt.t()} | {:error, :operation_capacity}
+  def admit_navigation_operation(server, kind, target, postcondition),
+    do: GenServer.call(server, {:admit_navigation_operation, kind, target, postcondition})
+
   @doc "Records successful BEAM application for one admitted operation."
-  @spec operation_applied(GenServer.server(), pos_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec operation_applied(
+          GenServer.server(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) ::
           {:ok, OperationReceipt.t()} | {:error, :unknown_operation}
-  def operation_applied(server, operation_id, window_id, revision),
-    do: GenServer.call(server, {:operation_applied, operation_id, window_id, revision})
+  def operation_applied(server, operation_id, window_id, revision, presentation_token \\ nil),
+    do:
+      GenServer.call(
+        server,
+        {:operation_applied, operation_id, window_id, revision, presentation_token}
+      )
 
   @doc "Records one terminal operation outcome. Duplicate terminal reports are idempotent."
   @spec finish_operation(
@@ -142,6 +173,8 @@ defmodule MingaEditor.NativeIPC.Server do
         :open_wait,
         :open_request,
         :open_receipt,
+        :inspect_request,
+        :navigation_request,
         :kill_checker
       ])
 
@@ -174,8 +207,33 @@ defmodule MingaEditor.NativeIPC.Server do
     end
   end
 
-  def handle_call({:operation_applied, operation_id, window_id, revision}, _from, state) do
-    case OperationLedger.applied(state.ledger, operation_id, window_id, revision, now_ms()) do
+  def handle_call({:admit_navigation_operation, kind, target, postcondition}, _from, state) do
+    case OperationLedger.admit_operation(
+           state.ledger,
+           state.endpoint.identity,
+           kind,
+           target,
+           postcondition,
+           now_ms()
+         ) do
+      {:ok, receipt, ledger} -> {:reply, {:ok, receipt}, %{state | ledger: ledger}}
+      {:error, reason, ledger} -> {:reply, {:error, reason}, %{state | ledger: ledger}}
+    end
+  end
+
+  def handle_call(
+        {:operation_applied, operation_id, window_id, revision, presentation_token},
+        _from,
+        state
+      ) do
+    case OperationLedger.applied(
+           state.ledger,
+           operation_id,
+           window_id,
+           revision,
+           now_ms(),
+           presentation_token
+         ) do
       {:ok, receipt, ledger} -> {:reply, {:ok, receipt}, %{state | ledger: ledger}}
       {:error, reason, ledger} -> {:reply, {:error, reason}, %{state | ledger: ledger}}
     end

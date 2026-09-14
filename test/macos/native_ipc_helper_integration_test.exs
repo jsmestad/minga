@@ -78,6 +78,31 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
       :ok
     end
 
+    inspect_request = fn identity, continuation, choice_limit, _editor ->
+      send(owner, {:inspected, continuation, choice_limit})
+
+      {:ok,
+       %{
+         "version" => 1,
+         "type" => "inspection",
+         "app_instance_id" => identity.app_instance_id,
+         "core_instance_id" => identity.core_instance_id,
+         "revision" => "19",
+         "authoritative" => %{
+           "active_tab_id" => 7,
+           "active_pane_id" => 11,
+           "tabs" => []
+         },
+         "presented" => %{"status" => "committed_not_native_observed"}
+       }}
+    end
+
+    navigation_request = fn identity, command, receipt, receipt_server, _editor ->
+      send(owner, {:navigated, identity, command, receipt})
+      {:ok, _applied} = Server.operation_applied(receipt_server, receipt.operation_id, 11, 20)
+      Server.finish_operation(receipt_server, receipt.operation_id, :applied)
+    end
+
     sleeper =
       Port.open({:spawn_executable, ~c"/bin/sleep"}, [
         :binary,
@@ -103,6 +128,8 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
          wait_tracker: tracker,
          open_wait: open_wait,
          open_receipt: open_receipt,
+         inspect_request: inspect_request,
+         navigation_request: navigation_request,
          kill_checker: fn ^app_pid -> true end}
       )
 
@@ -118,9 +145,12 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
       File.rm_rf!(runtime_dir)
     end)
 
+    descriptor = runtime_dir |> Path.join("current.json") |> File.read!() |> JSON.decode!()
+
     %{
       app_pid: app_pid,
       buffer: buffer,
+      descriptor: descriptor,
       helper: helper,
       runtime_parent: runtime_parent,
       supervisor: supervisor,
@@ -152,6 +182,48 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
                "different-nonce",
                "--allow-launch-conflict"
              ])
+  end
+
+  test "packaged helper exposes finite capabilities and bounded inspection", ctx do
+    assert {capabilities_output, 0} = run_helper(ctx.helper, ["capabilities"])
+    capabilities = JSON.decode!(capabilities_output)
+    assert capabilities["type"] == "capabilities"
+    assert "goto_location" in capabilities["commands"]
+    assert capabilities["limits"]["maximum_frame_bytes"] == 65_536
+
+    assert {inspection_output, 0} =
+             run_helper(ctx.helper, ["inspect", "--continuation=page-token", "--choice-limit=9"])
+
+    inspection = JSON.decode!(inspection_output)
+    assert inspection["type"] == "inspection"
+    assert inspection["revision"] == "19"
+    assert inspection["authoritative"]["active_pane_id"] == 11
+    assert_receive {:inspected, "page-token", 9}
+  end
+
+  test "packaged helper submits an exact semantic target and returns its receipt", ctx do
+    args = [
+      "select-tab",
+      "--app-instance-id=#{ctx.descriptor["app_instance_id"]}",
+      "--core-instance-id=#{ctx.descriptor["core_instance_id"]}",
+      "--target-token=12345",
+      "--tab-id=7",
+      "--deadline-ms=1000"
+    ]
+
+    assert {output, 0} = run_helper(ctx.helper, args)
+    result = JSON.decode!(output)
+    assert result["type"] == "completed"
+    assert result["receipt"]["kind"] == "select_tab"
+    assert result["receipt"]["outcome"] == "applied"
+    assert result["receipt"]["target"]["tab_id"] == 7
+
+    assert_receive {:navigated, identity, command, receipt}
+    assert identity.app_instance_id == ctx.descriptor["app_instance_id"]
+    assert identity.core_instance_id == ctx.descriptor["core_instance_id"]
+    assert command.kind == :select_tab
+    assert command.target_token == 12_345
+    assert receipt.operation_id |> Integer.to_string() == result["receipt"]["operation_id"]
   end
 
   test "packaged wait observes acceptance, completion, and acknowledgement", ctx do

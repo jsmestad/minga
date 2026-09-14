@@ -82,6 +82,28 @@ struct OperationProtocolTests {
         #expect(readU32(payload, 53) == 43)
     }
 
+    @Test("encodes continuous native presentation evidence in fixed layout")
+    func encodeNativePresentationObservation() {
+        let pipe = Pipe()
+        let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
+        let evidence = NativePresentationEvidence(targetToken: 72, applicationRevision: 44, generation: 3, frameSeq: 10, windowID: 4, focusReady: true, boundary: .metalDrawableCompleted)
+
+        encoder.sendNativePresentationObservation(evidence)
+        #expect(encoder.waitForPendingWritesForTesting())
+        pipe.fileHandleForWriting.closeFile()
+        let framed = pipe.fileHandleForReading.readDataToEndOfFile()
+        let payload = framed.subdata(in: 4..<framed.count)
+
+        #expect(payload.count == 24)
+        #expect(payload[0] == OP_NATIVE_PRESENTATION_OBSERVATION)
+        #expect(readU64(payload, 1) == 72)
+        #expect(readU32(payload, 9) == 44)
+        #expect(readU32(payload, 13) == 3)
+        #expect(readU32(payload, 17) == 10)
+        #expect(readU16(payload, 21) == 4)
+        #expect(payload[23] == 1)
+    }
+
     private func appendU16(_ data: inout Data, _ value: UInt16) {
         var bigEndian = value.bigEndian
         withUnsafeBytes(of: &bigEndian) { data.append(contentsOf: $0) }
