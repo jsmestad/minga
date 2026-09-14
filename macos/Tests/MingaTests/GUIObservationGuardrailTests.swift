@@ -186,6 +186,7 @@ struct GUIObservationGuardrailTests {
                 "Sources/Views/Shared/GUIFramePresentationMetrics.swift",
                 "Sources/Renderer/CommandDispatcher.swift",
                 "Sources/Renderer/CoreTextMetalRenderer.swift",
+                "Sources/Renderer/OperationReadiness.swift",
                 "Sources/Views/Editor/EditorNSView.swift",
             ],
             "GUIFrameImpact": [
