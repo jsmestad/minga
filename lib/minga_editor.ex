@@ -37,7 +37,12 @@ defmodule MingaEditor do
   alias MingaEditor.Observatory
   alias MingaEditor.NativeIPC.OperationNativeResult
   alias MingaEditor.NativeIPC.OperationReceipt
+  alias MingaEditor.NativeIPC.Identity, as: NativeIPCIdentity
+  alias MingaEditor.NativeIPC.Navigation, as: NativeIPCNavigation
+  alias MingaEditor.NativeIPC.NavigationCommand
+  alias MingaEditor.NativeIPC.NativePresentationObservation
   alias MingaEditor.NativeIPC.Server, as: NativeIPCServer
+  alias MingaEditor.PresentationTarget
   alias MingaEditor.Frontend.Protocol, as: FrontendProtocol
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
@@ -144,6 +149,33 @@ defmodule MingaEditor do
     GenServer.call(
       server,
       {:open_native_receipt, path, editor_mode?, receipt, receipt_server},
+      15_000
+    )
+  end
+
+  @doc "Returns one bounded semantic inspection from the serialized Editor owner."
+  @spec native_inspect(
+          NativeIPCIdentity.t(),
+          String.t() | nil,
+          pos_integer(),
+          GenServer.server()
+        ) :: {:ok, map()} | {:error, atom()}
+  def native_inspect(identity, continuation, choice_limit, server \\ __MODULE__) do
+    GenServer.call(server, {:native_inspect, identity, continuation, choice_limit}, 15_000)
+  end
+
+  @doc "Applies one exact semantic navigation request and records its receipt."
+  @spec native_navigation(
+          NativeIPCIdentity.t(),
+          NavigationCommand.t(),
+          OperationReceipt.t(),
+          GenServer.server(),
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  def native_navigation(identity, command, receipt, receipt_server, server \\ __MODULE__) do
+    GenServer.call(
+      server,
+      {:native_navigation, identity, command, receipt, receipt_server},
       15_000
     )
   end
@@ -384,6 +416,18 @@ defmodule MingaEditor do
     handle_open_native_receipt(state, path, editor_mode?, receipt, receipt_server)
   end
 
+  def handle_call({:native_inspect, identity, continuation, choice_limit}, _from, state) do
+    {:reply, NativeIPCNavigation.inspect(state, identity, continuation, choice_limit), state}
+  end
+
+  def handle_call(
+        {:native_navigation, identity, command, receipt, receipt_server},
+        _from,
+        state
+      ) do
+    handle_native_navigation(state, identity, command, receipt, receipt_server)
+  end
+
   def handle_call(
         {:open_wait, path, editor_mode?, request_id, waiter, wait_tracker},
         _from,
@@ -541,6 +585,122 @@ defmodule MingaEditor do
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec handle_native_navigation(
+          state(),
+          NativeIPCIdentity.t(),
+          NavigationCommand.t(),
+          OperationReceipt.t(),
+          GenServer.server()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp handle_native_navigation(state, identity, command, receipt, receipt_server) do
+    case NativeIPCNavigation.apply(state, identity, command) do
+      {:ok, applied_state, postcondition} ->
+        apply_navigation_receipt(applied_state, receipt, receipt_server, postcondition)
+
+      {:error, reason} ->
+        :ok =
+          NativeIPCServer.finish_operation(
+            receipt_server,
+            receipt.operation_id,
+            :rejected,
+            nil,
+            nil,
+            Atom.to_string(reason)
+          )
+
+        {:reply, :ok, state}
+    end
+  end
+
+  @spec apply_navigation_receipt(
+          state(),
+          OperationReceipt.t(),
+          GenServer.server(),
+          :editor_visible_focused | :beam_applied
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp apply_navigation_receipt(state, receipt, receipt_server, :beam_applied) do
+    revision =
+      MingaEditor.State.RenderCorrelation.latest_intent_revision(state.render.render_correlation) +
+        1
+
+    with {:ok, _applied_receipt} <-
+           NativeIPCServer.operation_applied(
+             receipt_server,
+             receipt.operation_id,
+             state.workspace.windows.active,
+             revision
+           ),
+         :ok <-
+           NativeIPCServer.finish_operation(
+             receipt_server,
+             receipt.operation_id,
+             :applied
+           ) do
+      {:reply, :ok, Renderer.render_or_async(state)}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp apply_navigation_receipt(state, receipt, receipt_server, :editor_visible_focused) do
+    revision =
+      MingaEditor.State.RenderCorrelation.latest_intent_revision(state.render.render_correlation) +
+        1
+
+    case PresentationTarget.from_editor_state(state) do
+      %PresentationTarget{} = target ->
+        with {:ok, applied_receipt} <-
+               NativeIPCServer.operation_applied(
+                 receipt_server,
+                 receipt.operation_id,
+                 target.window_id,
+                 revision,
+                 target.token
+               ),
+             :accepted <-
+               MingaEditor.Frontend.send_commands(
+                 state.frontend.port_manager,
+                 [FrontendProtocol.encode_presentation_operation(applied_receipt)]
+               ) do
+          {:reply, :ok, Renderer.render_or_async(state)}
+        else
+          :unwritable ->
+            NativeIPCServer.finish_operation(
+              receipt_server,
+              receipt.operation_id,
+              :presentation_failed
+            )
+
+            {:reply, :ok, Renderer.render_or_async(state)}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      nil ->
+        with {:ok, _applied_receipt} <-
+               NativeIPCServer.operation_applied(
+                 receipt_server,
+                 receipt.operation_id,
+                 state.workspace.windows.active,
+                 revision
+               ),
+             :ok <-
+               NativeIPCServer.finish_operation(
+                 receipt_server,
+                 receipt.operation_id,
+                 :unavailable,
+                 nil,
+                 nil,
+                 "target has no native editor presentation"
+               ) do
+          {:reply, :ok, Renderer.render_or_async(state)}
+        else
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
     end
   end
 
@@ -844,6 +1004,17 @@ defmodule MingaEditor do
       )
 
       {:noreply, state}
+  end
+
+  def handle_info(
+        {:minga_input,
+         {:native_presentation_observation, %NativePresentationObservation{} = observation}},
+        state
+      ) do
+    frontend =
+      MingaEditor.State.Frontend.observe_native_presentation(state.frontend, observation)
+
+    {:noreply, %{state | frontend: frontend}}
   end
 
   def handle_info(

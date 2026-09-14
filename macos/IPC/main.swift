@@ -740,7 +740,184 @@ private func printJSON(_ object: [String: Any]) throws {
 
 private func receiptStatus(_ response: [String: Any]) -> Int32 {
     guard let receipt = response["receipt"] as? [String: Any] else { return 1 }
-    return receipt["outcome"] as? String == "ready" ? 0 : 1
+    let outcome = receipt["outcome"] as? String
+    return outcome == "ready" || outcome == "applied" ? 0 : 1
+}
+
+private func semanticRequest(
+    object: [String: Any], waitsForReceipt: Bool, deadlineMilliseconds: Int = 15_000
+) throws -> Int32 {
+    let descriptor = try loadDescriptor()
+    let fd = try authenticatedConnection(descriptor, expectedNonce: nil)
+    defer { close(fd) }
+    let monitor = try AppExitMonitor(appPID: descriptor.appPID)
+    try sendJSON(fd, object)
+    let deadline = MonotonicDeadline.after(
+        nanoseconds: UInt64(deadlineMilliseconds + 1_000) * 1_000_000
+    )
+    let first = try receiveJSON(fd, deadline: deadline, appMonitor: monitor)
+    if !waitsForReceipt {
+        try printJSON(first)
+        return first["type"] as? String == "error" ? 1 : 0
+    }
+    guard first["type"] as? String == "accepted",
+          let acceptedReceipt = first["receipt"] as? [String: Any]
+    else {
+        try printJSON(first)
+        return 1
+    }
+    do {
+        var terminal = try receiveJSON(fd, deadline: deadline, appMonitor: monitor)
+        if terminal["type"] as? String == "progress" {
+            terminal = try receiveJSON(fd, deadline: deadline, appMonitor: monitor)
+        }
+        if terminal["receipt"] == nil { terminal["receipt"] = acceptedReceipt }
+        try printJSON(terminal)
+        return receiptStatus(terminal)
+    } catch {
+        return try printPostAdmissionFailure(error: error, receipt: acceptedReceipt)
+    }
+}
+
+private func optionValues(_ args: [String]) throws -> [String: String] {
+    var values: [String: String] = [:]
+    var index = 1
+    while index < args.count {
+        let argument = args[index]
+        guard argument.hasPrefix("--") else {
+            throw IPCError.operational("invalid semantic argument: \(argument)")
+        }
+        let body = String(argument.dropFirst(2))
+        if let equals = body.firstIndex(of: "=") {
+            let name = String(body[..<equals])
+            guard values[name] == nil else {
+                throw IPCError.operational("duplicate semantic option: --\(name)")
+            }
+            values[name] = String(body[body.index(after: equals)...])
+            index += 1
+        } else {
+            guard index + 1 < args.count else {
+                throw IPCError.operational("missing value for --\(body)")
+            }
+            guard values[body] == nil else {
+                throw IPCError.operational("duplicate semantic option: --\(body)")
+            }
+            values[body] = args[index + 1]
+            index += 2
+        }
+    }
+    return values
+}
+
+private func requiredOption(_ values: [String: String], _ name: String) throws -> String {
+    guard let value = values[name], !value.isEmpty else {
+        throw IPCError.operational("semantic command requires --\(name)")
+    }
+    return value
+}
+
+private func positiveIntegerOption(_ values: [String: String], _ name: String) throws -> Int {
+    guard let value = try integerOption(values, name), value > 0 else {
+        throw IPCError.operational("--\(name) must be a positive integer")
+    }
+    return value
+}
+
+private func validateOptions(_ values: [String: String], allowed: Set<String>) throws {
+    if let unknown = values.keys.first(where: { !allowed.contains($0) }) {
+        throw IPCError.operational("unknown semantic option: --\(unknown)")
+    }
+}
+
+private func integerOption(
+    _ values: [String: String], _ name: String, required: Bool = true
+) throws -> Int? {
+    guard let encoded = values[name] else {
+        if required { throw IPCError.operational("semantic command requires --\(name)") }
+        return nil
+    }
+    guard let value = Int(encoded), value >= 0 else {
+        throw IPCError.operational("--\(name) must be a non-negative integer")
+    }
+    return value
+}
+
+private func semanticCommand(_ args: [String], command: String) throws -> Int32 {
+    let values = try optionValues(args)
+    if command == "capabilities" {
+        guard values.isEmpty else { throw IPCError.operational("capabilities does not accept arguments") }
+        return try semanticRequest(
+            object: ["version": version, "type": "capabilities"], waitsForReceipt: false
+        )
+    }
+    if command == "inspect" {
+        try validateOptions(values, allowed: ["continuation", "choice-limit"])
+        var request: [String: Any] = ["version": version, "type": "inspect"]
+        if let continuation = values["continuation"] { request["continuation"] = continuation }
+        if let limit = try integerOption(values, "choice-limit", required: false) {
+            guard limit > 0, limit <= 25 else {
+                throw IPCError.operational("--choice-limit must be between 1 and 25")
+            }
+            request["choice_limit"] = limit
+        }
+        return try semanticRequest(object: request, waitsForReceipt: false)
+    }
+
+    let commonOptions: Set<String> = [
+        "app-instance-id", "core-instance-id", "target-token", "deadline-ms",
+    ]
+    let commandOptions: Set<String>
+    switch command {
+    case "select-tab":
+        commandOptions = ["tab-id"]
+    case "focus-pane":
+        commandOptions = ["tab-id", "pane-id"]
+    case "goto-location":
+        commandOptions = ["tab-id", "pane-id", "buffer-id", "buffer-revision", "line", "column"]
+    case "activate-picker-choice":
+        commandOptions = ["picker-generation", "activation-id", "choice-kind"]
+    default:
+        throw IPCError.operational("unknown semantic command")
+    }
+    try validateOptions(values, allowed: commonOptions.union(commandOptions))
+
+    var request: [String: Any] = [
+        "version": version,
+        "type": command.replacingOccurrences(of: "-", with: "_"),
+        "app_instance_id": try requiredOption(values, "app-instance-id"),
+        "core_instance_id": try requiredOption(values, "core-instance-id"),
+        "target_token": try requiredOption(values, "target-token"),
+    ]
+    switch command {
+    case "select-tab":
+        request["tab_id"] = try positiveIntegerOption(values, "tab-id")
+    case "focus-pane":
+        request["tab_id"] = try positiveIntegerOption(values, "tab-id")
+        request["pane_id"] = try positiveIntegerOption(values, "pane-id")
+    case "goto-location":
+        request["tab_id"] = try positiveIntegerOption(values, "tab-id")
+        request["pane_id"] = try positiveIntegerOption(values, "pane-id")
+        request["buffer_id"] = try requiredOption(values, "buffer-id")
+        request["buffer_revision"] = try integerOption(values, "buffer-revision")!
+        request["line"] = try positiveIntegerOption(values, "line")
+        request["column"] = try integerOption(values, "column")!
+    case "activate-picker-choice":
+        request["picker_generation"] = try positiveIntegerOption(values, "picker-generation")
+        request["activation_id"] = try positiveIntegerOption(values, "activation-id")
+        let choiceKind = try requiredOption(values, "choice-kind")
+        guard choiceKind == "item" || choiceKind == "action" else {
+            throw IPCError.operational("--choice-kind must be item or action")
+        }
+        request["choice_kind"] = choiceKind
+    default:
+        throw IPCError.operational("unknown semantic command")
+    }
+    let deadline = try integerOption(values, "deadline-ms", required: false) ?? 15_000
+    guard deadline > 0, deadline <= 30_000 else {
+        throw IPCError.operational("--deadline-ms must be between 1 and 30000")
+    }
+    request["deadline_ms"] = deadline
+    return try semanticRequest(object: request, waitsForReceipt: true, deadlineMilliseconds: deadline)
 }
 
 private func postAdmissionResult(error: Error, receipt: [String: Any]) -> String {
@@ -979,6 +1156,9 @@ private func main() -> Int32 {
                 appInstanceID: parsed.appInstanceID, coreInstanceID: parsed.coreInstanceID,
                 operationID: parsed.operationID, deadlineMilliseconds: parsed.deadlineMilliseconds
             )
+        case "capabilities", "inspect", "focus-pane", "select-tab", "goto-location",
+             "activate-picker-choice":
+            return try semanticCommand(args, command: command)
         default:
             throw IPCError.operational("unknown minga-ipc command: \(command)")
         }

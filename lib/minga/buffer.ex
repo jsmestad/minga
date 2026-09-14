@@ -122,6 +122,21 @@ defmodule Minga.Buffer do
   @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
   defdelegate content_with_version(server), to: BufferProcess
 
+  @doc "Bounded metadata, cursor, and viewport lines captured in one buffer call."
+  @spec inspection_snapshot(t(), non_neg_integer(), pos_integer()) ::
+          Minga.Buffer.InspectionSnapshot.t()
+  defdelegate inspection_snapshot(server, viewport_start, viewport_count), to: BufferProcess
+
+  @doc "Captures bounded inspection data using the live cursor or an explicit window cursor."
+  @spec inspection_snapshot(t(), non_neg_integer(), pos_integer(), :live | position()) ::
+          Minga.Buffer.InspectionSnapshot.t()
+  defdelegate inspection_snapshot(server, viewport_start, viewport_count, cursor_source),
+    to: BufferProcess
+
+  @doc "Returns the buffer content revision and cursor as one inspection freshness marker."
+  @spec inspection_marker(t()) :: {non_neg_integer(), position()}
+  defdelegate inspection_marker(server), to: BufferProcess
+
   @doc "Content and cursor position in a single call (avoids two round-trips)."
   @spec content_and_cursor(t()) :: {String.t(), position()}
   defdelegate content_and_cursor(server), to: BufferProcess
@@ -167,6 +182,24 @@ defmodule Minga.Buffer do
   @doc "Move the cursor to an exact position."
   @spec move_to(t(), position()) :: :ok
   defdelegate move_to(server, pos), to: BufferProcess
+
+  @doc "Moves to an exact one-based line and zero-based UTF-16 column only at the expected buffer revision."
+  @spec move_to_utf16_if_version(t(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
+          {:ok, position()}
+          | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary}
+  defdelegate move_to_utf16_if_version(server, version, line, column), to: BufferProcess
+
+  @doc "Resolves an exact UTF-16 caret position without moving the cursor."
+  @spec resolve_utf16_position_if_version(
+          t(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, position()}
+          | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary}
+  defdelegate resolve_utf16_position_if_version(server, version, line, column),
+    to: BufferProcess
 
   @doc "Apply a cursor motion inside the buffer process."
   @spec apply_motion(t(), motion_fun()) :: :ok

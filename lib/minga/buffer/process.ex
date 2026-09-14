@@ -22,6 +22,7 @@ defmodule Minga.Buffer.Process do
     ChangeLog,
     Cursor,
     Document,
+    InspectionSnapshot,
     Lines,
     Operation,
     Persistence,
@@ -39,6 +40,7 @@ defmodule Minga.Buffer.Process do
   alias Minga.Buffer.State.Swap, as: SwapState
   alias Minga.Config
   alias Minga.Core.Decorations
+  alias Minga.Core.PositionEncoding
   alias Minga.Core.Unicode
   alias Minga.Events
   alias Minga.Language
@@ -291,6 +293,36 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:move_to, pos})
   end
 
+  @doc "Moves to an exact external UTF-16 position only while the expected content revision is current."
+  @spec move_to_utf16_if_version(
+          GenServer.server(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, Document.position()}
+          | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary}
+  def move_to_utf16_if_version(server, version, line, column)
+      when is_integer(version) and version >= 0 and is_integer(line) and line > 0 and
+             is_integer(column) and column >= 0 do
+    GenServer.call(server, {:move_to_utf16_if_version, version, line, column})
+  end
+
+  @doc "Resolves an exact external UTF-16 position without moving the cursor."
+  @spec resolve_utf16_position_if_version(
+          GenServer.server(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, Document.position()}
+          | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary}
+  def resolve_utf16_position_if_version(server, version, line, column)
+      when is_integer(version) and version >= 0 and is_integer(line) and line > 0 and
+             is_integer(column) and column >= 0 do
+    GenServer.call(server, {:resolve_utf16_position_if_version, version, line, column})
+  end
+
   @doc "Applies a cursor motion inside the buffer process."
   @spec apply_motion(GenServer.server(), motion_fun()) :: :ok
   def apply_motion(server, motion_fn) when is_function(motion_fn, 2) do
@@ -413,6 +445,39 @@ defmodule Minga.Buffer.Process do
   def content_with_version(server) do
     GenServer.call(server, :content_with_version)
   end
+
+  @doc "Returns bounded semantic inspection data from one coherent buffer state."
+  @spec inspection_snapshot(GenServer.server(), non_neg_integer(), pos_integer()) ::
+          InspectionSnapshot.t()
+  def inspection_snapshot(server, viewport_start, viewport_count)
+      when is_integer(viewport_start) and viewport_start >= 0 and is_integer(viewport_count) and
+             viewport_count > 0 do
+    GenServer.call(server, {:inspection_snapshot, viewport_start, viewport_count})
+  end
+
+  @doc "Returns one coherent inspection snapshot using the live or supplied window cursor."
+  @spec inspection_snapshot(
+          GenServer.server(),
+          non_neg_integer(),
+          pos_integer(),
+          :live | Document.position()
+        ) :: InspectionSnapshot.t()
+  def inspection_snapshot(server, viewport_start, viewport_count, :live)
+      when is_integer(viewport_start) and viewport_start >= 0 and is_integer(viewport_count) and
+             viewport_count > 0 do
+    GenServer.call(server, {:inspection_snapshot, viewport_start, viewport_count, :live})
+  end
+
+  def inspection_snapshot(server, viewport_start, viewport_count, {line, column} = cursor)
+      when is_integer(viewport_start) and viewport_start >= 0 and is_integer(viewport_count) and
+             viewport_count > 0 and is_integer(line) and line >= 0 and is_integer(column) and
+             column >= 0 do
+    GenServer.call(server, {:inspection_snapshot, viewport_start, viewport_count, cursor})
+  end
+
+  @doc "Returns a coherent content revision and cursor marker for semantic inspection freshness."
+  @spec inspection_marker(GenServer.server()) :: {non_neg_integer(), Document.position()}
+  def inspection_marker(server), do: GenServer.call(server, :inspection_marker)
 
   @doc "Returns the byte offset for the start of a given line."
   @spec byte_offset_for_line(GenServer.server(), non_neg_integer()) :: non_neg_integer()
@@ -1288,6 +1353,23 @@ defmodule Minga.Buffer.Process do
     {:reply, :ok, %{state | document: new_buf}}
   end
 
+  def handle_call(
+        {:move_to_utf16_if_version, expected_version, one_based_line, utf16_column},
+        _from,
+        state
+      ) do
+    move_to_utf16_reply(state, expected_version, one_based_line, utf16_column)
+  end
+
+  def handle_call(
+        {:resolve_utf16_position_if_version, expected_version, one_based_line, utf16_column},
+        _from,
+        state
+      ) do
+    result = resolve_utf16_position(state, expected_version, one_based_line, utf16_column)
+    {:reply, result, state}
+  end
+
   def handle_call({:apply_motion, motion_fn}, _from, state) when is_function(motion_fn, 2) do
     cursor = Document.cursor(state.document)
     new_pos = motion_fn.(state.document, cursor)
@@ -1501,6 +1583,22 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:content_with_version, _from, state) do
     {:reply, {Document.content(state.document), BufState.version(state)}, state}
+  end
+
+  def handle_call({:inspection_snapshot, viewport_start, viewport_count}, _from, state) do
+    inspection_snapshot_reply(state, viewport_start, viewport_count, :live)
+  end
+
+  def handle_call(
+        {:inspection_snapshot, viewport_start, viewport_count, cursor_source},
+        _from,
+        state
+      ) do
+    inspection_snapshot_reply(state, viewport_start, viewport_count, cursor_source)
+  end
+
+  def handle_call(:inspection_marker, _from, state) do
+    {:reply, {BufState.version(state), Document.cursor(state.document)}, state}
   end
 
   def handle_call({:byte_offset_for_line, line}, _from, state) do
@@ -1974,6 +2072,88 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:decorations_version, _from, state) do
     {:reply, state.decorations.version, state}
+  end
+
+  @spec move_to_utf16_reply(state(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
+          {:reply,
+           {:ok, Document.position()}
+           | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary},
+           state()}
+  defp move_to_utf16_reply(state, expected_version, one_based_line, utf16_column) do
+    case resolve_utf16_position(state, expected_version, one_based_line, utf16_column) do
+      {:ok, position} ->
+        document = Cursor.place(state.document, position)
+        {:reply, {:ok, Document.cursor(document)}, %{state | document: document}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec resolve_utf16_position(
+          state(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, Document.position()}
+          | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary}
+  defp resolve_utf16_position(state, expected_version, line, column) do
+    resolve_utf16_position_for(
+      {state, BufState.version(state), Document.line_count(state.document)},
+      expected_version,
+      line,
+      column
+    )
+  end
+
+  @spec resolve_utf16_position_for(
+          {state(), non_neg_integer(), pos_integer()},
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, Document.position()}
+          | {:error, :stale | :line_out_of_range | :column_out_of_range | :column_not_boundary}
+  defp resolve_utf16_position_for(
+         {_state, actual_version, _line_count},
+         expected_version,
+         _line,
+         _column
+       )
+       when expected_version != actual_version,
+       do: {:error, :stale}
+
+  defp resolve_utf16_position_for(
+         {_state, _actual_version, line_count},
+         _expected_version,
+         line,
+         _column
+       )
+       when line > line_count,
+       do: {:error, :line_out_of_range}
+
+  defp resolve_utf16_position_for(
+         {state, _actual_version, _line_count},
+         _version,
+         one_based_line,
+         utf16_column
+       ) do
+    zero_based_line = one_based_line - 1
+    line_text = Document.line_at(state.document, zero_based_line)
+
+    case PositionEncoding.exact_byte_column(line_text, utf16_column, :utf16) do
+      {:ok, byte_column} -> exact_caret_position(line_text, zero_based_line, byte_column)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec exact_caret_position(String.t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, Document.position()} | {:error, :column_not_boundary}
+  defp exact_caret_position(line_text, line, column) do
+    if Cursor.caret_boundary?(line_text, column),
+      do: {:ok, {line, column}},
+      else: {:error, :column_not_boundary}
   end
 
   @spec prepare_save_intent(state(), String.t(), boolean()) ::
@@ -2986,6 +3166,39 @@ defmodule Minga.Buffer.Process do
   end
 
   # ── Edit delta tracking ──
+
+  @spec inspection_snapshot_reply(
+          state(),
+          non_neg_integer(),
+          pos_integer(),
+          :live | Document.position()
+        ) :: {:reply, InspectionSnapshot.t(), state()}
+  defp inspection_snapshot_reply(state, viewport_start, viewport_count, cursor_source) do
+    cursor = inspection_cursor(state.document, cursor_source)
+    {cursor_line, _cursor_column} = cursor
+
+    snapshot = %InspectionSnapshot{
+      version: BufState.version(state),
+      line_count: Document.line_count(state.document),
+      cursor: cursor,
+      cursor_line_text: Document.line_at(state.document, cursor_line),
+      display_name: display_name_from_state(state),
+      file_path: state.file_path,
+      viewport_start: viewport_start,
+      viewport_lines: Document.lines(state.document, viewport_start, viewport_count)
+    }
+
+    {:reply, snapshot, state}
+  end
+
+  @spec inspection_cursor(Document.t(), :live | Document.position()) :: Document.position()
+  defp inspection_cursor(document, :live), do: Document.cursor(document)
+
+  defp inspection_cursor(document, {requested_line, requested_column}) do
+    line = min(requested_line, Document.line_count(document) - 1)
+    line_text = Document.line_at(document, line)
+    {line, Cursor.caret_column(line_text, requested_column)}
+  end
 
   @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do

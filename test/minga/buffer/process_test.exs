@@ -267,6 +267,72 @@ defmodule Minga.Buffer.ProcessTest do
       refute BufferProcess.dirty?(pid)
     end
 
+    test "move_to_utf16_if_version uses one-based lines and exact UTF-16 boundaries" do
+      {:ok, pid} = BufferProcess.start_link(content: "one\na😀b")
+      version = Buffer.version(pid)
+
+      assert {:ok, {1, 5}} = Buffer.move_to_utf16_if_version(pid, version, 2, 3)
+      assert Buffer.cursor(pid) == {1, 5}
+      refute Buffer.dirty?(pid)
+
+      assert {:error, :column_not_boundary} =
+               Buffer.move_to_utf16_if_version(pid, version, 2, 2)
+
+      assert {:error, :column_out_of_range} =
+               Buffer.move_to_utf16_if_version(pid, version, 2, 5)
+
+      assert {:error, :line_out_of_range} =
+               Buffer.move_to_utf16_if_version(pid, version, 3, 0)
+
+      assert Buffer.cursor(pid) == {1, 5}
+    end
+
+    test "move_to_utf16_if_version rejects a stale version without moving" do
+      {:ok, pid} = BufferProcess.start_link(content: "hello")
+      stale_version = Buffer.version(pid)
+      :ok = Buffer.insert_text(pid, "!")
+
+      assert {:error, :stale} = Buffer.move_to_utf16_if_version(pid, stale_version, 1, 3)
+      assert Buffer.cursor(pid) == {0, 1}
+    end
+
+    test "move_to_utf16_if_version rejects codepoint boundaries inside grapheme clusters" do
+      {:ok, combining} = BufferProcess.start_link(content: "ae\u0301b")
+      combining_version = Buffer.version(combining)
+
+      assert {:error, :column_not_boundary} =
+               Buffer.move_to_utf16_if_version(combining, combining_version, 1, 2)
+
+      assert {:ok, {0, 4}} =
+               Buffer.move_to_utf16_if_version(combining, combining_version, 1, 3)
+
+      assert Buffer.cursor(combining) == {0, 4}
+
+      {:ok, zwj} = BufferProcess.start_link(content: "x👩‍💻y")
+      zwj_version = Buffer.version(zwj)
+
+      for inside_grapheme <- [3, 4] do
+        assert {:error, :column_not_boundary} =
+                 Buffer.move_to_utf16_if_version(zwj, zwj_version, 1, inside_grapheme)
+      end
+
+      assert {:ok, {0, 12}} = Buffer.move_to_utf16_if_version(zwj, zwj_version, 1, 6)
+      assert Buffer.cursor(zwj) == {0, 12}
+    end
+
+    test "resolve_utf16_position_if_version validates without moving" do
+      {:ok, pid} = BufferProcess.start_link(content: "ae\u0301b")
+      version = Buffer.version(pid)
+
+      assert {:ok, {0, 4}} = Buffer.resolve_utf16_position_if_version(pid, version, 1, 3)
+      assert Buffer.cursor(pid) == {0, 0}
+
+      assert {:error, :column_not_boundary} =
+               Buffer.resolve_utf16_position_if_version(pid, version, 1, 2)
+
+      assert Buffer.cursor(pid) == {0, 0}
+    end
+
     test "apply_motion runs the motion function inside the buffer process" do
       parent = self()
       pid = start_supervised!({BufferProcess, content: "alpha\nbeta"})

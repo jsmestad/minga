@@ -3,6 +3,7 @@ defmodule MingaEditor.Frontend.OperationProtocolTest do
 
   alias Minga.Protocol.Opcodes
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.NativeIPC.NativePresentationObservation
   alias MingaEditor.NativeIPC.OperationNativeResult
   alias MingaEditor.NativeIPC.OperationReceipt
   alias MingaEditor.NativeIPC.OperationReceipt.Evidence
@@ -19,7 +20,7 @@ defmodule MingaEditor.Frontend.OperationProtocolTest do
   end
 
   test "presentation operation encodes scoped operation and the applied target revision" do
-    target = %Target{token: 18, path: "/tmp/protocol.txt", window_id: 3}
+    target = %Target{token: 18, kind: :open, path: "/tmp/protocol.txt", window_id: 3}
 
     receipt = %OperationReceipt{
       app_instance_id: "app",
@@ -88,6 +89,27 @@ defmodule MingaEditor.Frontend.OperationProtocolTest do
 
     assert {:error, :malformed} =
              Protocol.decode_event(binary_part(valid, 0, byte_size(valid) - 1))
+  end
+
+  test "native presentation observation decodes exact continuous evidence" do
+    opcode = Opcodes.native_presentation_observation()
+    payload = <<opcode, 72::unsigned-64, 44::32, 3::32, 10::32, 4::16, 1>>
+
+    assert {:ok,
+            {:native_presentation_observation, %NativePresentationObservation{} = observation}} =
+             Protocol.decode_event(payload)
+
+    assert observation == %NativePresentationObservation{
+             target_token: 72,
+             application_revision: 44,
+             generation: 3,
+             frame_seq: 10,
+             window_id: 4,
+             focus_ready: true
+           }
+
+    assert {:error, :malformed} = Protocol.decode_event(put_byte(payload, 23, 2))
+    assert {:error, :malformed} = Protocol.decode_event(binary_part(payload, 0, 23))
   end
 
   defp put_byte(binary, offset, value) do

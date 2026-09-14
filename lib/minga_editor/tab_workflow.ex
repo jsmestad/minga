@@ -11,8 +11,9 @@ defmodule MingaEditor.TabWorkflow do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
-  alias MingaEditor.Remote.EventReplay
   alias MingaEditor.HighlightSync
+  alias MingaEditor.NativeIPC.NavigationFinalizer
+  alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ModalWorkflow
@@ -25,6 +26,10 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.WorkspaceWorkflow
+
+  @opaque staged_switch ::
+            {:unchanged, EditorState.t()}
+            | {:switched, EditorState.t(), EditorState.t(), Tab.t(), pid() | nil}
 
   @doc "Switches tabs and performs the external work requested by the pure transition result."
   @spec switch(EditorState.t(), Tab.id()) :: EditorState.t()
@@ -49,6 +54,50 @@ defmodule MingaEditor.TabWorkflow do
 
         WorkspaceWorkflow.persist_changes(candidate, transitioned)
     end
+  end
+
+  @doc "Stages the pure root transition for an already validated tab target."
+  @spec stage_switch(EditorState.t(), Tab.id()) :: staged_switch()
+  def stage_switch(%EditorState{} = state, target_id) do
+    case switch_target(state, target_id) do
+      :unchanged ->
+        {:unchanged, state}
+
+      :accepted ->
+        persistence_base = stash_active_workspace_agent_ui(state)
+        old_buffer = persistence_base.workspace.buffers.active
+
+        {transitioned, {:switched, %Tab{} = target}} =
+          EditorState.switch_tab(persistence_base, target_id)
+
+        {:switched, persistence_base, transitioned, target, old_buffer}
+    end
+  end
+
+  @doc "Returns the effect-free state produced by a staged tab switch."
+  @spec staged_state(staged_switch()) :: EditorState.t()
+  def staged_state({:unchanged, state}), do: state
+  def staged_state({:switched, _base, state, _target, _old_buffer}), do: state
+
+  @doc "Runs the presentation and persistence effects for an accepted staged switch."
+  @spec commit_staged_switch(staged_switch(), EditorState.t()) :: EditorState.t()
+  def commit_staged_switch({:unchanged, _staged_state}, %EditorState{} = accepted_state),
+    do: accepted_state
+
+  def commit_staged_switch(
+        {:switched, persistence_base, _staged_state, target, old_buffer},
+        %EditorState{} = accepted_state
+      ) do
+    accepted_state
+    |> NavigationFinalizer.run(:tab_presentation, &finish_switch(&1, target))
+    |> NavigationFinalizer.run(
+      :tab_highlight,
+      &HighlightSync.ensure_active_buffer_presentation(&1, old_buffer)
+    )
+    |> NavigationFinalizer.run(
+      :workspace_persistence,
+      &WorkspaceWorkflow.persist_changes(persistence_base, &1)
+    )
   end
 
   @doc "Restores a context and synchronizes its workspace-backed agent presentation."

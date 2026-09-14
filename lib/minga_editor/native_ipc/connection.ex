@@ -3,6 +3,8 @@ defmodule MingaEditor.NativeIPC.Connection do
 
   alias Minga.Frontend.WaitRequestCompletion
   alias MingaEditor.NativeIPC.Identity
+  alias MingaEditor.NativeIPC.Navigation
+  alias MingaEditor.NativeIPC.NavigationCommand
   alias MingaEditor.NativeIPC.OperationReceipt
   alias MingaEditor.NativeIPC.OperationReceipt.Target
   alias MingaEditor.NativeIPC.Server
@@ -11,6 +13,7 @@ defmodule MingaEditor.NativeIPC.Connection do
   @handshake_timeout 5_000
   @completion_ack_timeout 2_000
   @maximum_operation_deadline_ms 30_000
+  @maximum_frame_bytes 65_536
 
   @spec serve(port(), Identity.t(), keyword()) :: :ok
   def serve(socket, identity, opts) do
@@ -90,6 +93,76 @@ defmodule MingaEditor.NativeIPC.Connection do
       core_instance_id: identity.core_instance_id,
       app_pid: identity.app_pid
     })
+  end
+
+  defp dispatch(
+         socket,
+         %{"version" => @version, "type" => "capabilities"} = command,
+         identity,
+         _opts
+       ) do
+    case validate_request_keys(command, ["version", "type"]) do
+      :ok -> send_json(socket, Navigation.capabilities(identity))
+      {:error, reason} -> send_error(socket, reason)
+    end
+  end
+
+  defp dispatch(
+         socket,
+         %{"version" => @version, "type" => "inspect"} = command,
+         identity,
+         opts
+       ) do
+    editor = Keyword.get(opts, :editor_server, MingaEditor)
+    inspect_request = Keyword.get(opts, :inspect_request, &MingaEditor.native_inspect/4)
+
+    case inspect_arguments(command) do
+      {:ok, continuation, choice_limit} ->
+        case inspect_request.(identity, continuation, choice_limit, editor) do
+          {:ok, inspection} -> send_json(socket, inspection)
+          {:error, reason} -> send_error(socket, reason)
+        end
+
+      {:error, reason} ->
+        send_error(socket, reason)
+    end
+  catch
+    :exit, reason -> send_error(socket, {:editor_unavailable, reason})
+  end
+
+  defp dispatch(
+         socket,
+         %{"version" => @version, "type" => type} = command,
+         identity,
+         opts
+       )
+       when type in ["focus_pane", "select_tab", "goto_location", "activate_picker_choice"] do
+    with {:ok, deadline_ms} <- navigation_operation_deadline(command),
+         {:ok, navigation} <- NavigationCommand.parse(command),
+         :ok <- validate_command_identity(navigation, identity),
+         {:ok, receipt_server} <- receipt_server(opts),
+         {:ok, receipt} <-
+           Server.admit_navigation_operation(
+             receipt_server,
+             navigation.kind,
+             NavigationCommand.receipt_target(navigation),
+             navigation_postcondition(navigation)
+           ) do
+      deadline_at_ms = System.monotonic_time(:millisecond) + deadline_ms
+      :ok = send_receipt(socket, "accepted", receipt)
+      apply_navigation(navigation, identity, receipt, receipt_server, opts)
+      send_current_receipt(socket, receipt_server, receipt.operation_id)
+
+      await_operation_terminal(
+        socket,
+        identity,
+        receipt.operation_id,
+        remaining_deadline_ms(deadline_at_ms),
+        receipt_server
+      )
+    else
+      {:error, reason} -> send_error(socket, reason)
+    end
   end
 
   defp dispatch(
@@ -319,6 +392,113 @@ defmodule MingaEditor.NativeIPC.Connection do
         nil,
         Exception.format_exit(reason)
       )
+  end
+
+  @spec apply_navigation(
+          NavigationCommand.t(),
+          Identity.t(),
+          OperationReceipt.t(),
+          GenServer.server(),
+          keyword()
+        ) :: :ok
+  defp apply_navigation(navigation, identity, receipt, receipt_server, opts) do
+    editor = Keyword.get(opts, :editor_server, MingaEditor)
+    request = Keyword.get(opts, :navigation_request, &MingaEditor.native_navigation/5)
+
+    case request.(identity, navigation, receipt, receipt_server, editor) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Server.finish_operation(
+          receipt_server,
+          receipt.operation_id,
+          :indeterminate,
+          nil,
+          nil,
+          inspect(reason)
+        )
+    end
+  catch
+    :exit, reason ->
+      Server.finish_operation(
+        receipt_server,
+        receipt.operation_id,
+        :indeterminate,
+        nil,
+        nil,
+        Exception.format_exit(reason)
+      )
+  end
+
+  @spec validate_command_identity(NavigationCommand.t(), Identity.t()) ::
+          :ok | {:error, :app_replaced | :core_replaced}
+  defp validate_command_identity(
+         %NavigationCommand{app_instance_id: app, core_instance_id: core},
+         %Identity{app_instance_id: app, core_instance_id: core}
+       ),
+       do: :ok
+
+  defp validate_command_identity(
+         %NavigationCommand{app_instance_id: app},
+         %Identity{app_instance_id: current_app}
+       )
+       when app != current_app,
+       do: {:error, :app_replaced}
+
+  defp validate_command_identity(%NavigationCommand{}, %Identity{}), do: {:error, :core_replaced}
+
+  @spec navigation_postcondition(NavigationCommand.t()) ::
+          :editor_visible_focused | :beam_applied
+  defp navigation_postcondition(%NavigationCommand{kind: :activate_picker_choice}),
+    do: :beam_applied
+
+  defp navigation_postcondition(%NavigationCommand{}), do: :editor_visible_focused
+
+  @spec inspect_arguments(map()) ::
+          {:ok, String.t() | nil, pos_integer()} | {:error, :invalid_inspect_request}
+  defp inspect_arguments(command) do
+    with :ok <-
+           validate_request_keys(
+             command,
+             ["version", "type", "continuation", "choice_limit"],
+             :invalid_inspect_request
+           ),
+         {:ok, continuation} <- inspect_continuation(Map.get(command, "continuation")),
+         {:ok, choice_limit} <- inspect_choice_limit(Map.get(command, "choice_limit", 25)) do
+      {:ok, continuation, choice_limit}
+    end
+  end
+
+  @spec validate_request_keys(map(), [String.t()], atom()) :: :ok | {:error, atom()}
+  defp validate_request_keys(command, allowed, reason \\ :invalid_navigation_request) do
+    if Enum.all?(Map.keys(command), &(&1 in allowed)), do: :ok, else: {:error, reason}
+  end
+
+  @spec inspect_continuation(term()) ::
+          {:ok, String.t() | nil} | {:error, :invalid_inspect_request}
+  defp inspect_continuation(nil), do: {:ok, nil}
+  defp inspect_continuation(value) when is_binary(value), do: {:ok, value}
+  defp inspect_continuation(_value), do: {:error, :invalid_inspect_request}
+
+  @spec inspect_choice_limit(term()) ::
+          {:ok, pos_integer()} | {:error, :invalid_inspect_request}
+  defp inspect_choice_limit(value) when is_integer(value) and value > 0 and value <= 25,
+    do: {:ok, value}
+
+  defp inspect_choice_limit(_value), do: {:error, :invalid_inspect_request}
+
+  @spec navigation_operation_deadline(map()) ::
+          {:ok, pos_integer()} | {:error, :invalid_navigation_request}
+  defp navigation_operation_deadline(command) do
+    case Map.get(command, "deadline_ms", 10_000) do
+      value
+      when is_integer(value) and value > 0 and value <= @maximum_operation_deadline_ms ->
+        {:ok, value}
+
+      _value ->
+        {:error, :invalid_navigation_request}
+    end
   end
 
   @spec await_operation_terminal(
@@ -570,9 +750,22 @@ defmodule MingaEditor.NativeIPC.Connection do
     send_json(socket, %{
       version: @version,
       type: "error",
+      code: error_code(reason),
+      stale_target: stale_target_error?(reason),
       message: error_message(reason)
     })
   end
+
+  @spec error_code(term()) :: String.t()
+  defp error_code(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp error_code(_reason), do: "request_failed"
+
+  @spec stale_target_error?(term()) :: boolean()
+  defp stale_target_error?(reason)
+       when reason in [:app_replaced, :core_replaced, :stale_continuation],
+       do: true
+
+  defp stale_target_error?(_reason), do: false
 
   @spec send_receipt(port(), String.t(), OperationReceipt.t()) :: :ok
   defp send_receipt(socket, type, receipt) do
@@ -601,10 +794,26 @@ defmodule MingaEditor.NativeIPC.Connection do
 
   @spec send_json(port(), map()) :: :ok
   defp send_json(socket, value) do
-    case :gen_tcp.send(socket, JSON.encode!(value)) do
+    payload = JSON.encode!(value)
+    payload = bounded_response(payload)
+
+    case :gen_tcp.send(socket, payload) do
       :ok -> :ok
       {:error, _reason} -> :ok
     end
+  end
+
+  @spec bounded_response(binary()) :: binary()
+  defp bounded_response(payload) when byte_size(payload) <= @maximum_frame_bytes, do: payload
+
+  defp bounded_response(_payload) do
+    JSON.encode!(%{
+      version: @version,
+      type: "error",
+      code: "response_too_large",
+      stale_target: false,
+      message: "IPC response exceeds 64 KiB; request a smaller bounded page"
+    })
   end
 
   @spec secure_equal?(term(), String.t()) :: boolean()

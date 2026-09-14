@@ -4,6 +4,7 @@ defmodule MingaEditor.NativeIPC.OperationLedger do
   alias MingaEditor.NativeIPC.Identity
   alias MingaEditor.NativeIPC.OperationReceipt
   alias MingaEditor.NativeIPC.OperationReceipt.Evidence
+  alias MingaEditor.NativeIPC.OperationReceipt.Target
   alias MingaEditor.NativeIPC.OperationNativeResult
 
   @max_active 64
@@ -61,11 +62,63 @@ defmodule MingaEditor.NativeIPC.OperationLedger do
     end
   end
 
-  @spec applied(t(), pos_integer(), non_neg_integer(), non_neg_integer(), integer()) ::
+  @spec admit_operation(
+          t(),
+          Identity.t(),
+          OperationReceipt.kind(),
+          Target.t(),
+          :editor_visible_focused | :beam_applied,
+          integer()
+        ) :: {:ok, OperationReceipt.t(), t()} | {:error, :operation_capacity, t()}
+  def admit_operation(
+        %__MODULE__{} = ledger,
+        %Identity{} = identity,
+        kind,
+        target,
+        postcondition,
+        now_ms
+      ) do
+    ledger = expire_terminal(ledger, now_ms)
+
+    if map_size(ledger.active) >= @max_active do
+      {:error, :operation_capacity, ledger}
+    else
+      operation_id = unique_id(ledger)
+
+      receipt =
+        OperationReceipt.admit_operation(
+          identity.app_instance_id,
+          identity.core_instance_id,
+          operation_id,
+          kind,
+          target,
+          postcondition,
+          now_ms
+        )
+
+      {:ok, receipt, %{ledger | active: Map.put(ledger.active, operation_id, receipt)}}
+    end
+  end
+
+  @spec applied(
+          t(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          integer(),
+          non_neg_integer() | nil
+        ) ::
           {:ok, OperationReceipt.t(), t()} | {:error, :unknown_operation, t()}
-  def applied(%__MODULE__{} = ledger, operation_id, window_id, revision, now_ms) do
+  def applied(
+        %__MODULE__{} = ledger,
+        operation_id,
+        window_id,
+        revision,
+        now_ms,
+        presentation_token \\ nil
+      ) do
     update_active(ledger, operation_id, fn receipt ->
-      OperationReceipt.applied(receipt, window_id, revision, now_ms)
+      OperationReceipt.applied(receipt, window_id, revision, now_ms, presentation_token)
     end)
   end
 
@@ -163,6 +216,12 @@ defmodule MingaEditor.NativeIPC.OperationLedger do
            outcome: :ready,
            evidence: %Evidence{boundary: :metal_drawable_completed, focus_ready: true}
          }
+       ),
+       do: true
+
+  defp valid_native_outcome?(
+         %OperationReceipt{postcondition: :beam_applied},
+         %OperationNativeResult{outcome: :ready}
        ),
        do: true
 

@@ -218,6 +218,7 @@ defmodule MingaEditor.State do
       state.frontend
       |> FrontendState.resize_terminal(viewport)
       |> FrontendState.accept_capabilities(capabilities)
+      |> FrontendState.clear_native_presentation()
 
     state = reset_frontend_render_state(%{state | frontend: frontend})
     render = RenderState.invalidate_layout(state.render)

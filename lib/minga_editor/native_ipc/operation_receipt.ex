@@ -10,13 +10,32 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
   defmodule Target do
     @moduledoc "Core-scoped semantic target for one presentation postcondition."
 
-    @enforce_keys [:token, :path, :window_id]
-    defstruct [:token, :path, :window_id]
+    @type kind ::
+            :open | :focus_pane | :select_tab | :goto_location | :activate_picker_choice
+
+    @enforce_keys [:token, :kind, :window_id]
+    defstruct [
+      :token,
+      :requested_token,
+      :kind,
+      :path,
+      :window_id,
+      :tab_id,
+      :buffer_id,
+      :picker_generation,
+      :activation_id
+    ]
 
     @type t :: %__MODULE__{
             token: non_neg_integer(),
-            path: String.t(),
-            window_id: non_neg_integer()
+            requested_token: non_neg_integer() | nil,
+            kind: kind(),
+            path: String.t() | nil,
+            window_id: non_neg_integer(),
+            tab_id: pos_integer() | nil,
+            buffer_id: non_neg_integer() | nil,
+            picker_generation: pos_integer() | nil,
+            activation_id: pos_integer() | nil
           }
 
     @doc "Derives the opaque wire token for one canonical target path."
@@ -25,6 +44,10 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
       <<token::unsigned-64, _rest::binary>> = :crypto.hash(:sha256, path)
       token
     end
+
+    @doc "Returns a target correlated to its applied pane."
+    @spec with_window_id(t(), non_neg_integer()) :: t()
+    def with_window_id(%__MODULE__{} = target, window_id), do: %{target | window_id: window_id}
   end
 
   defmodule Evidence do
@@ -61,9 +84,11 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
           }
   end
 
+  @type kind :: :focus_pane | :select_tab | :goto_location | :activate_picker_choice
   @type phase :: :admitted | :applied | :terminal
   @type outcome ::
           :ready
+          | :applied
           | :rejected
           | :presentation_failed
           | :hidden
@@ -95,6 +120,7 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
     :application_revision,
     :evidence,
     :last_visible,
+    :result_code,
     :detail,
     :admitted_at_ms,
     :applied_at_ms,
@@ -105,14 +131,15 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
           app_instance_id: String.t(),
           core_instance_id: String.t(),
           operation_id: pos_integer(),
-          kind: :open,
+          kind: :open | kind(),
           target: Target.t(),
-          postcondition: :editor_visible_focused,
+          postcondition: :editor_visible_focused | :beam_applied,
           phase: phase(),
           outcome: outcome() | nil,
           application_revision: non_neg_integer() | nil,
           evidence: Evidence.t() | nil,
           last_visible: Evidence.t() | nil,
+          result_code: String.t() | nil,
           detail: String.t() | nil,
           admitted_at_ms: integer(),
           applied_at_ms: integer() | nil,
@@ -127,17 +154,60 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
       core_instance_id: core_instance_id,
       operation_id: operation_id,
       kind: :open,
-      target: %Target{token: token, path: path, window_id: 0},
+      target: %Target{token: token, kind: :open, path: path, window_id: 0},
       postcondition: :editor_visible_focused,
       phase: :admitted,
       admitted_at_ms: now_ms
     }
   end
 
+  @doc "Admits one typed semantic operation against an exact core-scoped target."
+  @spec admit_operation(
+          String.t(),
+          String.t(),
+          pos_integer(),
+          kind(),
+          Target.t(),
+          :editor_visible_focused | :beam_applied,
+          integer()
+        ) :: t()
+  def admit_operation(
+        app_instance_id,
+        core_instance_id,
+        operation_id,
+        kind,
+        target,
+        postcondition,
+        now_ms
+      ) do
+    %__MODULE__{
+      app_instance_id: app_instance_id,
+      core_instance_id: core_instance_id,
+      operation_id: operation_id,
+      kind: kind,
+      target: target,
+      postcondition: postcondition,
+      phase: :admitted,
+      admitted_at_ms: now_ms
+    }
+  end
+
   @doc "Records the exact BEAM target after the open operation applies."
-  @spec applied(t(), non_neg_integer(), non_neg_integer(), integer()) :: t()
-  def applied(%__MODULE__{phase: :admitted} = receipt, window_id, revision, now_ms) do
-    target = %{receipt.target | window_id: window_id}
+  @spec applied(t(), non_neg_integer(), non_neg_integer(), integer(), non_neg_integer() | nil) ::
+          t()
+  def applied(receipt, window_id, revision, now_ms, presentation_token \\ nil)
+
+  def applied(
+        %__MODULE__{phase: :admitted} = receipt,
+        window_id,
+        revision,
+        now_ms,
+        presentation_token
+      ) do
+    target =
+      receipt.target
+      |> Target.with_window_id(window_id)
+      |> maybe_install_presentation_token(presentation_token)
 
     %{
       receipt
@@ -148,7 +218,15 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
     }
   end
 
-  def applied(%__MODULE__{} = receipt, _window_id, _revision, _now_ms), do: receipt
+  def applied(%__MODULE__{} = receipt, _window_id, _revision, _now_ms, _presentation_token),
+    do: receipt
+
+  @spec maybe_install_presentation_token(Target.t(), non_neg_integer() | nil) :: Target.t()
+  defp maybe_install_presentation_token(target, nil), do: target
+
+  defp maybe_install_presentation_token(%Target{} = target, presentation_token) do
+    %{target | requested_token: target.requested_token || target.token, token: presentation_token}
+  end
 
   @doc "Moves a nonterminal receipt to one terminal result exactly once."
   @spec finish(
@@ -167,6 +245,7 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
         outcome: outcome,
         evidence: evidence,
         last_visible: last_visible,
+        result_code: terminal_code(outcome, detail),
         detail: detail,
         terminal_at_ms: now_ms
     }
@@ -191,6 +270,8 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
       "application_revision" => receipt.application_revision,
       "evidence" => evidence_map(receipt.evidence),
       "last_visible" => evidence_map(receipt.last_visible),
+      "result_code" => receipt.result_code,
+      "rejection" => rejection_map(receipt),
       "detail" => receipt.detail,
       "admitted_at_ms" => receipt.admitted_at_ms,
       "applied_at_ms" => receipt.applied_at_ms,
@@ -202,8 +283,14 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
   defp target_map(%Target{} = target) do
     %{
       "token" => Integer.to_string(target.token),
+      "requested_token" => encode_integer(target.requested_token),
+      "kind" => Atom.to_string(target.kind),
       "path" => target.path,
-      "window_id" => target.window_id
+      "window_id" => target.window_id,
+      "tab_id" => target.tab_id,
+      "buffer_id" => encode_integer(target.buffer_id),
+      "picker_generation" => target.picker_generation,
+      "activation_id" => target.activation_id
     }
   end
 
@@ -225,4 +312,38 @@ defmodule MingaEditor.NativeIPC.OperationReceipt do
   @spec encode_atom(atom() | nil) :: String.t() | nil
   defp encode_atom(nil), do: nil
   defp encode_atom(value), do: Atom.to_string(value)
+
+  @spec encode_integer(non_neg_integer() | nil) :: String.t() | nil
+  defp encode_integer(nil), do: nil
+  defp encode_integer(value), do: Integer.to_string(value)
+
+  @spec terminal_code(outcome(), String.t() | nil) :: String.t()
+  defp terminal_code(:rejected, detail) when is_binary(detail), do: detail
+  defp terminal_code(outcome, _detail), do: Atom.to_string(outcome)
+
+  @spec rejection_map(t()) :: map() | nil
+  defp rejection_map(%__MODULE__{outcome: :rejected, result_code: code}) do
+    %{"code" => code, "stale_target" => stale_target_code?(code)}
+  end
+
+  defp rejection_map(%__MODULE__{}), do: nil
+
+  @spec stale_target_code?(String.t() | nil) :: boolean()
+  defp stale_target_code?(code)
+       when code in [
+              "app_replaced",
+              "core_replaced",
+              "tab_not_found",
+              "pane_not_found",
+              "target_replaced",
+              "buffer_unavailable",
+              "buffer_replaced",
+              "stale_revision",
+              "picker_not_open",
+              "picker_replaced",
+              "choice_not_found"
+            ],
+       do: true
+
+  defp stale_target_code?(_code), do: false
 end

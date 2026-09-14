@@ -50,6 +50,42 @@ defmodule Minga.Frontend.NativeIPCTest do
       :ok
     end
 
+    inspect_request = fn identity, continuation, choice_limit, _editor ->
+      send(owner, {:inspect_request, continuation, choice_limit})
+
+      {:ok,
+       %{
+         "version" => 1,
+         "type" => "inspection",
+         "app_instance_id" => identity.app_instance_id,
+         "core_instance_id" => identity.core_instance_id,
+         "revision" => "7",
+         "authoritative" => %{"tabs" => []},
+         "presented" => %{"status" => "committed_not_native_observed"}
+       }}
+    end
+
+    navigation_request = fn identity, command, receipt, receipt_server, _editor ->
+      send(owner, {:navigation_request, identity, command, receipt})
+
+      case command do
+        %{tab_id: 99} ->
+          :ok =
+            Server.finish_operation(
+              receipt_server,
+              receipt.operation_id,
+              :rejected,
+              nil,
+              nil,
+              "tab_not_found"
+            )
+
+        _command ->
+          {:ok, _applied} = Server.operation_applied(receipt_server, receipt.operation_id, 1, 8)
+          :ok = Server.finish_operation(receipt_server, receipt.operation_id, :applied)
+      end
+    end
+
     euid = File.stat!(File.cwd!()).uid
     app_pid = System.pid() |> String.to_integer()
 
@@ -69,6 +105,8 @@ defmodule Minga.Frontend.NativeIPCTest do
          open_wait: open_wait,
          open_request: open_request,
          open_receipt: open_receipt,
+         inspect_request: inspect_request,
+         navigation_request: navigation_request,
          kill_checker: fn ^app_pid -> true end}
       )
 
@@ -229,6 +267,307 @@ defmodule Minga.Frontend.NativeIPCTest do
     send_json(bad_socket, %{hello(ctx.descriptor) | "token" => String.duplicate("x", 43)})
     assert %{"type" => "error", "message" => "authentication failed"} = recv_json(bad_socket)
     assert {:error, :closed} = :gen_tcp.recv(bad_socket, 0, 1_000)
+  end
+
+  test "reports finite semantic capabilities and bounded inspection", ctx do
+    capabilities_socket = connect(ctx.descriptor)
+    send_json(capabilities_socket, hello(ctx.descriptor))
+    send_json(capabilities_socket, %{"version" => 1, "type" => "capabilities"})
+
+    assert %{
+             "type" => "capabilities",
+             "commands" => commands,
+             "limits" => %{"maximum_frame_bytes" => 65_536}
+           } = recv_json(capabilities_socket)
+
+    assert "goto_location" in commands
+    assert "activate_picker_choice" in commands
+    :gen_tcp.close(capabilities_socket)
+
+    inspect_socket = connect(ctx.descriptor)
+    send_json(inspect_socket, hello(ctx.descriptor))
+
+    send_json(inspect_socket, %{
+      "version" => 1,
+      "type" => "inspect",
+      "continuation" => "page-token",
+      "choice_limit" => 9
+    })
+
+    assert %{
+             "type" => "inspection",
+             "app_instance_id" => "app-instance-1234567890",
+             "core_instance_id" => core_id,
+             "revision" => "7"
+           } = recv_json(inspect_socket)
+
+    assert core_id == ctx.descriptor["core_instance_id"]
+    assert_receive {:inspect_request, "page-token", 9}
+    :gen_tcp.close(inspect_socket)
+  end
+
+  test "rejects malformed inspect fields before calling the Editor", ctx do
+    for invalid <- [
+          %{"continuation" => 7},
+          %{"choice_limit" => 0},
+          %{"choice_limit" => 26},
+          %{"choice_limit" => "9"},
+          %{"unexpected" => true}
+        ] do
+      socket = connect(ctx.descriptor)
+      send_json(socket, hello(ctx.descriptor))
+      send_json(socket, Map.merge(%{"version" => 1, "type" => "inspect"}, invalid))
+
+      assert %{
+               "type" => "error",
+               "code" => "invalid_inspect_request",
+               "stale_target" => false
+             } = recv_json(socket)
+
+      assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
+    end
+
+    refute_receive {:inspect_request, _, _}
+  end
+
+  test "rejects malformed navigation fields before admission", ctx do
+    before_counts = Server.operation_counts(server(ctx.supervisor))
+
+    invalid_commands = [
+      %{
+        "type" => "goto_location",
+        "tab_id" => 1,
+        "pane_id" => 1,
+        "target_token" => "1",
+        "buffer_id" => "2",
+        "buffer_revision" => 0,
+        "line" => 0,
+        "column" => 0
+      },
+      %{
+        "type" => "goto_location",
+        "tab_id" => 1,
+        "pane_id" => 1,
+        "target_token" => "1",
+        "buffer_id" => "2",
+        "buffer_revision" => 0,
+        "line" => 1,
+        "column" => -1
+      },
+      %{
+        "type" => "focus_pane",
+        "tab_id" => "one",
+        "pane_id" => 1,
+        "target_token" => "1"
+      },
+      %{
+        "type" => "select_tab",
+        "tab_id" => 1,
+        "target_token" => "1",
+        "deadline_ms" => "soon"
+      },
+      %{
+        "type" => "select_tab",
+        "tab_id" => 1,
+        "target_token" => "1",
+        "deadline_ms" => 30_001
+      },
+      %{
+        "type" => "select_tab",
+        "tab_id" => 1,
+        "target_token" => "1",
+        "unexpected" => true
+      }
+    ]
+
+    for invalid <- invalid_commands do
+      socket = connect(ctx.descriptor)
+      send_json(socket, hello(ctx.descriptor))
+
+      send_json(
+        socket,
+        Map.merge(
+          %{
+            "version" => 1,
+            "app_instance_id" => ctx.descriptor["app_instance_id"],
+            "core_instance_id" => ctx.descriptor["core_instance_id"]
+          },
+          invalid
+        )
+      )
+
+      assert %{
+               "type" => "error",
+               "code" => "invalid_navigation_request",
+               "stale_target" => false
+             } = recv_json(socket)
+    end
+
+    assert Server.operation_counts(server(ctx.supervisor)) == before_counts
+    refute_receive {:navigation_request, _, _, _}
+  end
+
+  test "admits one typed semantic operation and returns its non-replayed receipt", ctx do
+    socket = connect(ctx.descriptor)
+    send_json(socket, hello(ctx.descriptor))
+
+    send_json(socket, %{
+      "version" => 1,
+      "type" => "select_tab",
+      "app_instance_id" => ctx.descriptor["app_instance_id"],
+      "core_instance_id" => ctx.descriptor["core_instance_id"],
+      "tab_id" => 4,
+      "target_token" => "9223372036854775811",
+      "deadline_ms" => 1_000
+    })
+
+    assert %{"type" => "accepted", "receipt" => accepted} = recv_json(socket)
+    assert accepted["kind"] == "select_tab"
+    assert accepted["target"]["token"] == "9223372036854775811"
+
+    assert_receive {:navigation_request, identity, command, receipt}
+    assert identity.core_instance_id == ctx.descriptor["core_instance_id"]
+    assert command.kind == :select_tab
+    assert command.tab_id == 4
+    assert receipt.operation_id |> Integer.to_string() == accepted["operation_id"]
+
+    assert %{"type" => "progress", "receipt" => %{"outcome" => "applied"}} =
+             recv_json(socket)
+
+    assert %{"type" => "completed", "receipt" => completed} = recv_json(socket)
+    assert completed["operation_id"] == accepted["operation_id"]
+    :gen_tcp.close(socket)
+
+    lookup = connect(ctx.descriptor)
+    send_json(lookup, hello(ctx.descriptor))
+
+    send_json(lookup, %{
+      "version" => 1,
+      "type" => "operation_lookup",
+      "app_instance_id" => ctx.descriptor["app_instance_id"],
+      "core_instance_id" => ctx.descriptor["core_instance_id"],
+      "operation_id" => accepted["operation_id"]
+    })
+
+    assert %{"type" => "receipt", "receipt" => ^completed} = recv_json(lookup)
+    refute_receive {:navigation_request, _, _, _}
+  end
+
+  test "concurrent semantic clients keep exact targets and independent receipts", ctx do
+    results =
+      1..8
+      |> Task.async_stream(
+        fn tab_id ->
+          socket = connect(ctx.descriptor)
+          send_json(socket, hello(ctx.descriptor))
+
+          send_json(socket, %{
+            "version" => 1,
+            "type" => "select_tab",
+            "app_instance_id" => ctx.descriptor["app_instance_id"],
+            "core_instance_id" => ctx.descriptor["core_instance_id"],
+            "tab_id" => tab_id,
+            "target_token" => Integer.to_string(10_000 + tab_id),
+            "deadline_ms" => 1_000
+          })
+
+          %{"type" => "accepted", "receipt" => accepted} = recv_json(socket)
+          %{"type" => "progress", "receipt" => %{"outcome" => "applied"}} = recv_json(socket)
+          %{"type" => "completed", "receipt" => completed} = recv_json(socket)
+          :gen_tcp.close(socket)
+          {tab_id, accepted, completed}
+        end,
+        max_concurrency: 8,
+        ordered: false,
+        timeout: 5_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.map(results, &elem(&1, 0)) |> Enum.sort() == Enum.to_list(1..8)
+
+    operation_ids =
+      Enum.map(results, fn {tab_id, accepted, completed} ->
+        assert accepted["target"]["tab_id"] == tab_id
+        assert accepted["target"]["token"] == Integer.to_string(10_000 + tab_id)
+        assert completed["operation_id"] == accepted["operation_id"]
+        accepted["operation_id"]
+      end)
+
+    assert operation_ids |> Enum.uniq() |> length() == 8
+
+    commands =
+      Enum.map(1..8, fn _index ->
+        assert_receive {:navigation_request, _identity, command, receipt}
+        {command.tab_id, command.target_token, receipt.operation_id}
+      end)
+
+    assert Enum.map(commands, &elem(&1, 0)) |> Enum.sort() == Enum.to_list(1..8)
+    assert Enum.map(commands, &elem(&1, 1)) |> Enum.sort() == Enum.to_list(10_001..10_008)
+    assert Enum.map(commands, &elem(&1, 2)) |> Enum.uniq() |> length() == 8
+  end
+
+  test "rejects stale command identity before admission", ctx do
+    before_counts = Server.operation_counts(server(ctx.supervisor))
+    socket = connect(ctx.descriptor)
+    send_json(socket, hello(ctx.descriptor))
+
+    send_json(socket, %{
+      "version" => 1,
+      "type" => "focus_pane",
+      "app_instance_id" => ctx.descriptor["app_instance_id"],
+      "core_instance_id" => "old-core",
+      "tab_id" => 1,
+      "pane_id" => 1,
+      "target_token" => "1"
+    })
+
+    assert %{
+             "type" => "error",
+             "code" => "core_replaced",
+             "stale_target" => true,
+             "message" => message
+           } = recv_json(socket)
+
+    assert message =~ "core_replaced"
+    assert Server.operation_counts(server(ctx.supervisor)) == before_counts
+    refute_receive {:navigation_request, _, _, _}
+  end
+
+  test "returns a stable structured stale-target rejection after admission", ctx do
+    socket = connect(ctx.descriptor)
+    send_json(socket, hello(ctx.descriptor))
+
+    send_json(socket, %{
+      "version" => 1,
+      "type" => "select_tab",
+      "app_instance_id" => ctx.descriptor["app_instance_id"],
+      "core_instance_id" => ctx.descriptor["core_instance_id"],
+      "tab_id" => 99,
+      "target_token" => "100"
+    })
+
+    assert %{"type" => "accepted", "receipt" => accepted} = recv_json(socket)
+    assert_receive {:navigation_request, _, %{tab_id: 99}, _}
+
+    assert %{
+             "type" => "progress",
+             "receipt" => %{
+               "phase" => "terminal",
+               "outcome" => "rejected",
+               "result_code" => "tab_not_found",
+               "rejection" => %{"code" => "tab_not_found", "stale_target" => true}
+             }
+           } = recv_json(socket)
+
+    assert %{
+             "type" => "completed",
+             "receipt" => %{
+               "operation_id" => operation_id,
+               "result_code" => "tab_not_found"
+             }
+           } = recv_json(socket)
+
+    assert operation_id == accepted["operation_id"]
   end
 
   test "native opens allow files and directories while wait remains file-only", ctx do
@@ -407,6 +746,15 @@ defmodule Minga.Frontend.NativeIPCTest do
       launch_nonce: "launch-nonce-123456",
       token: unique_secret(32)
     }
+  end
+
+  defp server(supervisor) do
+    supervisor
+    |> Supervisor.which_children()
+    |> Enum.find_value(fn
+      {MingaEditor.NativeIPC.Server, pid, :worker, _modules} -> pid
+      _child -> nil
+    end)
   end
 
   defp unique_secret(bytes),

@@ -359,6 +359,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onOperationNativeResult = { [weak self] result in
             self?.encoder?.sendOperationNativeResult(result)
         }
+        disp.onNativePresentationObservation = { [weak self] evidence in
+            self?.encoder?.sendNativePresentationObservation(evidence)
+        }
         disp.requestPresentationFocus = { [weak self] in
             self?.editorNSView?.focusPolicy.requestPresentationFocus() == true
         }

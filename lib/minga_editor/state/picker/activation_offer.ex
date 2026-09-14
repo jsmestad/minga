@@ -47,6 +47,10 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
     Enum.map(actions, &elem(&1, 0))
   end
 
+  @doc "Returns the exact bounded action window represented by this offer."
+  @spec offered_actions(t()) :: [action_entry()]
+  def offered_actions(%__MODULE__{actions: actions}), do: actions
+
   @doc "Resolves an item only when both opaque identity components match this offer."
   @spec resolve_item(t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, non_neg_integer(), Item.t()} | :error

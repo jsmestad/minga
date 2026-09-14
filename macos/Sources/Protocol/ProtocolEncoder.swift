@@ -86,6 +86,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     private enum CoalescingClass: Equatable, Sendable {
         case viewportResize
+        case nativePresentationObservation
     }
 
     private enum DeliveryPolicy: Equatable, Sendable {
@@ -308,6 +309,18 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
             writeU32(&buf, 53, lastVisible.applicationRevision)
         }
         writeFrame(buf)
+    }
+
+    func sendNativePresentationObservation(_ evidence: NativePresentationEvidence) {
+        var buf = Data(count: 24)
+        buf[0] = OP_NATIVE_PRESENTATION_OBSERVATION
+        writeU64(&buf, 1, evidence.targetToken)
+        writeU32(&buf, 9, evidence.applicationRevision)
+        writeU32(&buf, 13, evidence.generation)
+        writeU32(&buf, 17, evidence.frameSeq)
+        writeU16(&buf, 21, evidence.windowID)
+        buf[23] = evidence.focusReady ? 1 : 0
+        writeFrame(buf, deliveryPolicy: .coalescing(.nativePresentationObservation))
     }
 
     func sendFrameRejected(

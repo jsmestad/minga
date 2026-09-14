@@ -3,6 +3,7 @@ defmodule MingaEditor.WindowFocus do
 
   alias Minga.Buffer
   alias MingaEditor.HighlightSync
+  alias MingaEditor.NativeIPC.NavigationFinalizer
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
@@ -14,6 +15,7 @@ defmodule MingaEditor.WindowFocus do
   @type focus_failure ::
           :window_not_found | :cursor_source_mismatch | :buffer_unavailable | :target_mismatch
   @type focus_result :: {:ok, state()} | {:error, focus_failure()}
+  @opaque prepared_buffer_focus :: {EditorState.t(), pid() | nil}
 
   @doc "Focuses a window after saving and restoring its buffer cursor state."
   @spec focus(state(), Window.id()) :: state()
@@ -58,6 +60,69 @@ defmodule MingaEditor.WindowFocus do
     case target_buffer_available(target_buffer) do
       :ok -> focus_matching_buffer(state, target_id, target_buffer)
       {:error, :buffer_unavailable} = error -> error
+    end
+  end
+
+  @doc "Prepares an effect-free exact focus transition without changing the target cursor."
+  @spec prepare_buffer_focus_result(state(), Window.id(), pid()) ::
+          {:ok, prepared_buffer_focus()} | {:error, focus_failure()}
+  def prepare_buffer_focus_result(%EditorState{} = state, target_id, target_buffer)
+      when is_pid(target_buffer) do
+    with :ok <- target_buffer_available(target_buffer),
+         {:ok, %Window{content: {:buffer, ^target_buffer}}} <-
+           fetch_window(state.workspace.windows, target_id) do
+      prepare_matching_buffer_focus(state, target_id, target_buffer)
+    else
+      {:ok, %Window{}} -> {:error, :target_mismatch}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc "Returns the effect-free editor state from a prepared focus transition."
+  @spec prepared_buffer_focus_state(prepared_buffer_focus()) :: EditorState.t()
+  def prepared_buffer_focus_state({state, _old_buffer}), do: state
+
+  @doc "Runs presentation effects for an accepted prepared focus transition."
+  @spec commit_prepared_buffer_focus(prepared_buffer_focus(), EditorState.t()) :: EditorState.t()
+  def commit_prepared_buffer_focus(
+        {_staged_state, old_buffer},
+        %EditorState{} = accepted_state
+      ) do
+    accepted_state
+    |> NavigationFinalizer.run(:pane_presentation, &blur_bottom_panel/1)
+    |> NavigationFinalizer.run(
+      :pane_highlight,
+      &HighlightSync.ensure_active_buffer_presentation(&1, old_buffer)
+    )
+  end
+
+  @spec prepare_matching_buffer_focus(state(), Window.id(), pid()) ::
+          {:ok, prepared_buffer_focus()} | {:error, focus_failure()}
+  defp prepare_matching_buffer_focus(
+         %EditorState{workspace: %{windows: %{active: target_id}}} = state,
+         target_id,
+         target_buffer
+       ) do
+    prepared_buffer_focus_result(state, state.workspace.buffers.active, target_buffer)
+  end
+
+  defp prepare_matching_buffer_focus(state, target_id, target_buffer) do
+    windows = state.workspace.windows
+    old_buffer = state.workspace.buffers.active
+
+    with {:ok, old_window} <- fetch_window(windows, windows.active),
+         {:ok, outgoing_cursor} <- outgoing_cursor(old_window, old_buffer) do
+      workspace = SessionState.focus_window(state.workspace, target_id, outgoing_cursor)
+      prepared_buffer_focus_result(%{state | workspace: workspace}, old_buffer, target_buffer)
+    end
+  end
+
+  @spec prepared_buffer_focus_result(EditorState.t(), pid() | nil, pid()) ::
+          {:ok, prepared_buffer_focus()} | {:error, :cursor_source_mismatch}
+  defp prepared_buffer_focus_result(state, old_buffer, target_buffer) do
+    case verify_focused_buffer({:ok, state}, target_buffer) do
+      {:ok, verified} -> {:ok, {verified, old_buffer}}
+      {:error, :cursor_source_mismatch} = error -> error
     end
   end
 
