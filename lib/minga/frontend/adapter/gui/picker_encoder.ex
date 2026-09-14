@@ -51,6 +51,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       model.filtered_count,
       model.total_count,
       model.marked_count,
+      model.activation_generation,
       model.has_preview?,
       model.items,
       model.action_menu,
@@ -117,7 +118,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       total_count: model.total_count,
       has_preview: if(model.has_preview?, do: 1, else: 0),
       title: model.title,
-      marked_count: model.marked_count
+      marked_count: model.marked_count,
+      activation_generation: model.activation_generation
     }
   end
 
@@ -125,7 +127,12 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   defp to_wire_action_menu(nil), do: %{visible: 0}
 
   defp to_wire_action_menu(%ActionMenu{} = menu) do
-    %{visible: 1, selected_index: menu.selected_index, actions: menu.actions}
+    %{
+      visible: 1,
+      selected_index: menu.selected_index,
+      actions: menu.actions,
+      activation_ids: menu.activation_ids
+    }
   end
 
   @spec to_wire_load_status(Picker.load_status()) :: map()

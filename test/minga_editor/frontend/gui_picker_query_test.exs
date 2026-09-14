@@ -7,6 +7,8 @@ defmodule MingaEditor.Frontend.GUIPickerQueryTest do
 
   @op_gui_action Opcodes.gui_action()
   @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
+  @gui_action_picker_item_activate Opcodes.gui_action_picker_item_activate()
+  @gui_action_picker_action_activate Opcodes.gui_action_picker_action_activate()
 
   test "decodes a correlated native picker query" do
     query = "café"
@@ -32,5 +34,15 @@ defmodule MingaEditor.Frontend.GUIPickerQueryTest do
 
     assert {:ok, {:gui_action, {:picker_query_changed, 9, 4, "src"}}} =
              Protocol.decode_event(binary)
+  end
+
+  test "decodes exact picker item and action activation identities" do
+    assert {:ok, {:picker_item_activate, 7, 11}} =
+             ProtocolGUI.decode_gui_action(@gui_action_picker_item_activate, <<7::32, 11::32>>)
+
+    assert {:ok, {:picker_action_activate, 13, 17}} =
+             ProtocolGUI.decode_gui_action(@gui_action_picker_action_activate, <<13::32, 17::32>>)
+
+    assert :error = ProtocolGUI.decode_gui_action(@gui_action_picker_item_activate, <<7::32>>)
   end
 end

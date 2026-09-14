@@ -279,7 +279,8 @@ defmodule Minga.Test.ProtocolGolden do
           total_count: 100,
           has_preview: 1,
           title: "Files",
-          marked_count: 3
+          marked_count: 3,
+          activation_generation: 0
         }
       },
       %{
@@ -293,7 +294,8 @@ defmodule Minga.Test.ProtocolGolden do
           total_count: 100,
           has_preview: 0,
           title: "",
-          marked_count: 3
+          marked_count: 3,
+          activation_generation: 0
         }
       },
       # Short-section tolerance fixtures (ticket #2225). The Elixir encoder always
@@ -315,7 +317,8 @@ defmodule Minga.Test.ProtocolGolden do
           total_count: 100,
           has_preview: 1,
           title: "Files",
-          marked_count: 0
+          marked_count: 0,
+          activation_generation: 0
         }
       },
       %{
@@ -331,7 +334,8 @@ defmodule Minga.Test.ProtocolGolden do
           total_count: 100,
           has_preview: 1,
           title: "",
-          marked_count: 0
+          marked_count: 0,
+          activation_generation: 0
         }
       }
     ]
@@ -378,7 +382,8 @@ defmodule Minga.Test.ProtocolGolden do
         label: "file.ex",
         description: "desc",
         annotation: "ann",
-        match_positions: [1, 4]
+        match_positions: [1, 4],
+        activation_id: 23
       },
       %{
         # two_line sets bit 0, marked sets bit 1 => 0b11 = 3
@@ -387,7 +392,8 @@ defmodule Minga.Test.ProtocolGolden do
         label: "x",
         description: "",
         annotation: "",
-        match_positions: []
+        match_positions: [],
+        activation_id: 0
       }
     ]
 
@@ -402,7 +408,8 @@ defmodule Minga.Test.ProtocolGolden do
       label: "bmax",
       description: "",
       annotation: "",
-      match_positions: Enum.to_list(0..254)
+      match_positions: Enum.to_list(0..254),
+      activation_id: 0xFFFF_FFFF
     }
 
     payload = section_body(picker_command(picker_model(items)), 0x03)
@@ -433,29 +440,39 @@ defmodule Minga.Test.ProtocolGolden do
 
   @spec picker_action_menu_fixtures() :: [fixture()]
   defp picker_action_menu_fixtures do
-    visible_menu = %Picker.ActionMenu{actions: ["Open", "Delete"], selected_index: 1}
-    empty_menu = %Picker.ActionMenu{actions: [], selected_index: 5}
+    visible_menu = %Picker.ActionMenu{
+      actions: ["Open", "Delete"],
+      activation_ids: [29, 31],
+      selected_index: 1
+    }
+
+    empty_menu = %Picker.ActionMenu{actions: [], activation_ids: [], selected_index: 5}
 
     [
       %{
         name: "action_menu_hidden",
         decoder: "GuiPickerActionMenu",
         payload: section_body(picker_command(%{picker_model([]) | action_menu: nil}), 0x04),
-        expected: %{visible: 0, selected_index: 0, actions: []}
+        expected: %{visible: 0, selected_index: 0, actions: [], activation_ids: []}
       },
       %{
         name: "action_menu_visible",
         decoder: "GuiPickerActionMenu",
         payload:
           section_body(picker_command(%{picker_model([]) | action_menu: visible_menu}), 0x04),
-        expected: %{visible: 1, selected_index: 1, actions: ["Open", "Delete"]}
+        expected: %{
+          visible: 1,
+          selected_index: 1,
+          actions: ["Open", "Delete"],
+          activation_ids: [29, 31]
+        }
       },
       %{
         name: "action_menu_empty_actions",
         decoder: "GuiPickerActionMenu",
         payload:
           section_body(picker_command(%{picker_model([]) | action_menu: empty_menu}), 0x04),
-        expected: %{visible: 1, selected_index: 5, actions: []}
+        expected: %{visible: 1, selected_index: 5, actions: [], activation_ids: []}
       }
     ]
   end

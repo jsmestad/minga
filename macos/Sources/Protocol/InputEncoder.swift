@@ -47,6 +47,8 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendTabMoveRight(id: UInt32)
     func sendHoverOpenAction()
     func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String)
+    func sendPickerItemActivate(generation: UInt32, activationID: UInt32)
+    func sendPickerActionActivate(generation: UInt32, activationID: UInt32)
     func sendFileTreeClick(index: UInt16)
     func sendFileTreeToggle(index: UInt16)
     func sendFileTreeOpenInSplit(index: UInt16)
@@ -182,6 +184,8 @@ public extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement native picker editing.
     func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {}
+    func sendPickerItemActivate(generation: UInt32, activationID: UInt32) {}
+    func sendPickerActionActivate(generation: UInt32, activationID: UInt32) {}
 
     /// Default no-op so existing test spies do not need to implement settings actions.
     func sendConfigQuery() {}

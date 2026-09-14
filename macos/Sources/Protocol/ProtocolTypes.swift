@@ -488,17 +488,19 @@ public enum Wire {
         public let description: String
         public let annotation: String
         public let matchPositions: [UInt16]  // 0-based character indices of matched chars in label
+        public let activationID: UInt32
 
         public var isTwoLine: Bool { flags & 0x01 != 0 }
         public var isMarked: Bool { flags & 0x02 != 0 }
 
-        public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16]) {
+        public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16], activationID: UInt32 = 0) {
             self.iconColor = iconColor
             self.flags = flags
             self.label = label
             self.description = description
             self.annotation = annotation
             self.matchPositions = matchPositions
+            self.activationID = activationID
         }
     }
 
@@ -506,10 +508,12 @@ public enum Wire {
     public struct PickerActionMenu: Sendable {
         public let selectedIndex: UInt8
         public let actions: [String]
+        public let activationIDs: [UInt32]
 
-        public init(selectedIndex: UInt8, actions: [String]) {
+        public init(selectedIndex: UInt8, actions: [String], activationIDs: [UInt32] = []) {
             self.selectedIndex = selectedIndex
             self.actions = actions
+            self.activationIDs = activationIDs
         }
     }
 

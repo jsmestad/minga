@@ -165,12 +165,21 @@ public struct PickerOverlay: View {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 0) {
                         ForEach(state.items) { item in
-                            PickerItemRow(
-                                item: item,
-                                isSelected: item.id == state.effectiveSelectedIndex,
-                                query: state.query,
-                                itemHeight: itemHeight
-                            )
+                            Button {
+                                guard item.activation.isAvailable else { return }
+                                encoder?.sendPickerItemActivate(generation: item.activation.generation, activationID: item.activation.activationID)
+                            } label: {
+                                PickerItemRow(
+                                    item: item,
+                                    isSelected: item.id == state.effectiveSelectedIndex,
+                                    query: state.query,
+                                    itemHeight: itemHeight
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            .accessibilityLabel(Text(item.displayLabel))
                         }
                     }
                 }
@@ -210,22 +219,31 @@ public struct PickerOverlay: View {
                 .fill(theme.popupBorder.opacity(0.3))
                 .frame(height: 1)
 
-            ForEach(Array(menu.actions.enumerated()), id: \.offset) { idx, action in
-                let isSelected = idx == menu.selectedIndex
+            ForEach(menu.entries) { entry in
+                let isSelected = entry.id == menu.selectedIndex
 
-                HStack {
-                    Text(action)
-                        .font(.system(size: 13))
-                        .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
-                    Spacer()
+                Button {
+                    guard entry.activation.isAvailable else { return }
+                    encoder?.sendPickerActionActivate(generation: entry.activation.generation, activationID: entry.activation.activationID)
+                } label: {
+                    HStack {
+                        Text(entry.label)
+                            .font(.system(size: 13))
+                            .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        isSelected
+                            ? RoundedRectangle(cornerRadius: 4).fill(theme.accent).padding(.horizontal, 4)
+                            : nil
+                    )
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    isSelected
-                        ? RoundedRectangle(cornerRadius: 4).fill(theme.accent).padding(.horizontal, 4)
-                        : nil
-                )
+                .buttonStyle(.plain)
+                .focusable(false)
+                .accessibilityLabel(Text(entry.label))
             }
         }
         .frame(width: 200)

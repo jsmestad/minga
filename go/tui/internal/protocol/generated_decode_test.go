@@ -177,7 +177,7 @@ func TestDecodeGuiEditTimelineFieldsWithFiles(t *testing.T) {
 func TestDecodePickerItemU16MatchPositions(t *testing.T) {
 	bytes := []byte{
 		0xAA, 0xBB, 0xCC, 0, 0, 7, 'f', 'i', 'l', 'e', '.', 'e', 'x', 0, 4, 'd', 'e',
-		's', 'c', 0, 3, 'a', 'n', 'n', 2, 0, 1, 0, 4,
+		's', 'c', 0, 3, 'a', 'n', 'n', 2, 0, 1, 0, 4, 0, 0, 0, 23,
 	}
 	item, consumed, err := generated.DecodePickerItem(bytes, 0, len(bytes))
 	if err != nil {
@@ -192,12 +192,15 @@ func TestDecodePickerItemU16MatchPositions(t *testing.T) {
 	if !reflect.DeepEqual(item.MatchPositions, []uint16{1, 4}) {
 		t.Fatalf("match_positions: %v", item.MatchPositions)
 	}
+	if item.ActivationID != 23 {
+		t.Fatalf("activation_id: %d", item.ActivationID)
+	}
 }
 
 func TestDecodePickerItemEmptyMatchPositions(t *testing.T) {
 	// match_positions present but count==0: icon(0), flags(0), label "x",
 	// empty desc/ann, count 0.
-	bytes := []byte{0, 0, 0, 0, 0, 1, 'x', 0, 0, 0, 0, 0}
+	bytes := []byte{0, 0, 0, 0, 0, 1, 'x', 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	item, consumed, err := generated.DecodePickerItem(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -211,7 +214,7 @@ func TestDecodePickerItemEmptyMatchPositions(t *testing.T) {
 }
 
 func TestDecodePickerHeaderFullLayout(t *testing.T) {
-	bytes := []byte{1, 0, 2, 0, 10, 0, 100, 1, 0, 5, 'F', 'i', 'l', 'e', 's', 0, 3}
+	bytes := []byte{1, 0, 2, 0, 10, 0, 100, 1, 0, 5, 'F', 'i', 'l', 'e', 's', 0, 3, 0, 0, 0, 19}
 	h, consumed, err := generated.DecodeGuiPickerHeader(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -219,7 +222,7 @@ func TestDecodePickerHeaderFullLayout(t *testing.T) {
 	if consumed != len(bytes) {
 		t.Fatalf("consumed %d, want %d", consumed, len(bytes))
 	}
-	if h.SelectedIndex != 2 || h.FilteredCount != 10 || h.TotalCount != 100 || h.HasPreview != 1 || h.Title != "Files" || h.MarkedCount != 3 {
+	if h.SelectedIndex != 2 || h.FilteredCount != 10 || h.TotalCount != 100 || h.HasPreview != 1 || h.Title != "Files" || h.MarkedCount != 3 || h.ActivationGeneration != 19 {
 		t.Fatalf("header mismatch: %+v", h)
 	}
 }
@@ -262,7 +265,7 @@ func TestDecodePickerHeaderOmitsTitleAndMarkedCount(t *testing.T) {
 }
 
 func TestDecodeActionMenuStringActions(t *testing.T) {
-	bytes := []byte{1, 1, 2, 0, 4, 'O', 'p', 'e', 'n', 0, 6, 'D', 'e', 'l', 'e', 't', 'e'}
+	bytes := []byte{1, 1, 2, 0, 4, 'O', 'p', 'e', 'n', 0, 6, 'D', 'e', 'l', 'e', 't', 'e', 2, 0, 0, 0, 29, 0, 0, 0, 31}
 	m, consumed, err := generated.DecodeGuiPickerActionMenu(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -273,12 +276,15 @@ func TestDecodeActionMenuStringActions(t *testing.T) {
 	if m.Visible != 1 || m.SelectedIndex != 1 || !reflect.DeepEqual(m.Actions, []string{"Open", "Delete"}) {
 		t.Fatalf("action menu mismatch: %+v", m)
 	}
+	if !reflect.DeepEqual(m.ActivationIds, []uint32{29, 31}) {
+		t.Fatalf("activation_ids: %v", m.ActivationIds)
+	}
 }
 
 func TestDecodeActionMenuEmptyActions(t *testing.T) {
 	// visible with zero actions: the []string tail is present but empty.
-	m, consumed, err := generated.DecodeGuiPickerActionMenu([]byte{1, 5, 0}, 0, 3)
-	if err != nil || consumed != 3 || m.Visible != 1 || m.SelectedIndex != 5 || len(m.Actions) != 0 {
+	m, consumed, err := generated.DecodeGuiPickerActionMenu([]byte{1, 5, 0, 0}, 0, 4)
+	if err != nil || consumed != 4 || m.Visible != 1 || m.SelectedIndex != 5 || len(m.Actions) != 0 || len(m.ActivationIds) != 0 {
 		t.Fatalf("empty action menu: m=%+v consumed=%d err=%v", m, consumed, err)
 	}
 }

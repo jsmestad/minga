@@ -99,7 +99,8 @@ struct DecodedFrameTests {
             0, 1, 0x61,
             0, 1, 0x62,
             0, 1, 0x63,
-            1, 0, 2
+            1, 0, 2,
+            0, 0, 0, 1
         ])
         var packet = Data([OP_GUI_PICKER, 1, 0x03, 0, UInt8(items.count)])
         packet.append(items)

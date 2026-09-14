@@ -207,13 +207,25 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["selection_size"] = Int(update.selection.size)
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration):
         let itemArray = items.map { i -> [String: Any] in
-            ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }]
+            ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }, "activation_id": Int(i.activationID)]
         }
-        var result: [String: Any] = ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "filtered_count": Int(filteredCount), "total_count": Int(totalCount), "marked_count": Int(markedCount), "title": title, "query": query, "query_generation": Int(queryGeneration), "acknowledged_query_edit_seq": Int(acknowledgedQueryEditSeq), "mode_prefix": modePrefix, "has_preview": hasPreview, "items": itemArray]
+        var result: [String: Any] = ["type": "gui_picker", "visible": visible]
+        result["selected_index"] = Int(selectedIndex)
+        result["filtered_count"] = Int(filteredCount)
+        result["total_count"] = Int(totalCount)
+        result["marked_count"] = Int(markedCount)
+        result["title"] = title
+        result["query"] = query
+        result["query_generation"] = Int(queryGeneration)
+        result["acknowledged_query_edit_seq"] = Int(acknowledgedQueryEditSeq)
+        result["activation_generation"] = Int(activationGeneration)
+        result["mode_prefix"] = modePrefix
+        result["has_preview"] = hasPreview
+        result["items"] = itemArray
         if let am = actionMenu {
-            result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions]
+            result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions, "activation_ids": am.activationIDs]
         }
         switch loadStatus {
         case .ready: result["load_status"] = "ready"

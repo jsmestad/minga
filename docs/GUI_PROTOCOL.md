@@ -371,10 +371,10 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 
 | Section ID | Name | Content |
 |-----------|------|--------|
-| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count |
+| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count, activation_generation |
 | 0x02 | Query | query string, native editing generation, acknowledged native edit sequence |
 | 0x03 | Items | item_count + items (positional per item) |
-| 0x04 | ActionMenu | visible flag + selected + actions |
+| 0x04 | ActionMenu | visible flag + selected + actions + activation IDs |
 | 0x05 | ModePrefix | mode prefix string |
 
 ```
@@ -387,6 +387,7 @@ Each section:
 Header section 0x01 payload:
   visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
   + has_preview(1) + title_len(2) + title(title_len) + marked_count(2)
+  + activation_generation(4)
 
 Query section 0x02 payload:
   query_len(2) + query(query_len) + generation(4) + acknowledged_edit_seq(4)
@@ -397,13 +398,14 @@ Items section 0x03 payload:
 Per item:
   icon_color(3) + flags(1) + label_len(2) + label(label_len)
   + desc_len(2) + desc(desc_len) + annotation_len(2) + annotation(annotation_len)
-  + match_pos_count(1) + match_positions(match_pos_count * 2)
+  + match_pos_count(1) + match_positions(match_pos_count * 2) + activation_id(4)
 
 ActionMenu section 0x04 payload:
   action_visible(1)
   When action_visible == 1:
     selected_action(1) + action_count(1) + actions...
     Per action: name_len(2) + name(name_len)
+    + activation_id_count(1) + activation_ids(activation_id_count * 4)
 
 ModePrefix section 0x05 payload:
   mode_prefix_len(2) + mode_prefix(mode_prefix_len)
@@ -418,6 +420,7 @@ has_preview indicates whether the picker source supports preview (triggers split
 filtered_count and total_count enable "X/Y" display in the search field.
 marked_count is authoritative across the full picker item set, including marked items hidden by the current filter or item limit.
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
+activation_generation and activation IDs form opaque identities for the exact bounded result and action set in this picker snapshot. Native frontends must return those values unchanged and must not derive authority from row positions, labels, paths, or source action names.
 mode prefix badges show switched picker sources like command, buffer, or project search.
 
 Native frontends may optimistically edit the query with a platform text control so caret movement, selection, paste, cut, copy, undo, and IME composition remain local and immediate. Query semantics remain BEAM-owned. The frontend sends each complete field value with the current `generation` and a monotonically increasing edit sequence. The BEAM echoes the accepted sequence as `acknowledged_edit_seq`; the frontend must not replace a newer unacknowledged local value with an older echo. A new generation replaces all pending local edits.
@@ -1161,6 +1164,8 @@ opcode(1) + action_type(1) + payload...
 | 0x5C | chat_scrolled_away_from_bottom | (empty) | Reader left the transcript bottom; pauses BEAM-side auto-follow (pin flag only, no offset move) |
 | 0x5D | chat_returned_to_bottom | (empty) | Reader returned to the transcript bottom; re-pins auto-follow (pin flag only, no offset move) |
 | 0x5F | picker_query_changed | generation(4) + edit_seq(4) + query_len(2) + query | Replace the native picker's complete query when the edit belongs to the active generation and is newer than the last acknowledged edit |
+| 0x60 | picker_item_activate | activation_generation(4) + activation_id(4) | Activate the exact picker item offered by the current BEAM-owned picker snapshot |
+| 0x61 | picker_action_activate | activation_generation(4) + activation_id(4) | Activate the exact Actions entry offered by the current BEAM-owned picker snapshot |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

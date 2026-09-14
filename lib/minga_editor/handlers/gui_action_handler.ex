@@ -889,6 +889,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:search_replace_all, _}), do: state
 
+  defp dispatch_action(state, {:picker_item_activate, generation, activation_id}) do
+    case PickerUI.activate_item(state, generation, activation_id) do
+      {new_state, {:execute_command, command}} -> MingaEditor.dispatch_command(new_state, command)
+      new_state -> new_state
+    end
+  end
+
+  defp dispatch_action(state, {:picker_action_activate, generation, activation_id}) do
+    PickerUI.activate_action(state, generation, activation_id)
+  end
+
   defp dispatch_action(state, :search_dismiss) do
     %{
       state

@@ -42,7 +42,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
         picker_modal(
           picker,
           Minga.Test.RenderModelPickerPreviewSource,
-          {[{"Open", :open}], 0},
+          {[{"Open", :open}], 0, item},
           ">",
           :loading
         )
@@ -62,6 +62,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.mode_prefix == ">"
       assert model.load_status == :loading
       assert model.action_menu.actions == ["Open"]
+      assert model.action_menu.activation_ids == [1]
       assert model.action_menu.selected_index == 0
       # The builder emits wire-shaped item maps: flags packs two_line (bit 0)
       # and marked (bit 1), description/annotation default to "", icon_color
@@ -73,7 +74,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
                  label: "One",
                  description: "First result",
                  annotation: "enter",
-                 match_positions: [0, 2]
+                 match_positions: [0, 2],
+                 activation_id: 1
                }
              ] = model.items
 
@@ -166,16 +168,18 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   defp picker_modal(picker, source, action_menu, mode_prefix, load_status) do
     {:picker,
      %{
-       picker_ui: %PickerUIState{
-         picker: picker,
-         source: source,
-         callback_source: nil,
-         action_menu: action_menu,
-         source_switch: source_switch(mode_prefix, source),
-         load_status: load_status,
-         query_generation: 7,
-         acknowledged_query_edit_seq: 11
-       }
+       picker_ui:
+         %PickerUIState{
+           picker: picker,
+           source: source,
+           callback_source: nil,
+           action_menu: action_menu,
+           source_switch: source_switch(mode_prefix, source),
+           load_status: load_status,
+           query_generation: 7,
+           acknowledged_query_edit_seq: 11
+         }
+         |> PickerUIState.refresh_activation_offer()
      }}
   end
 

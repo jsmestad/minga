@@ -514,6 +514,20 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    func sendPickerItemActivate(generation: UInt32, activationID: UInt32) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_ITEM_ACTIVATE])
+        appendU32(&buf, generation)
+        appendU32(&buf, activationID)
+        writeFrame(buf)
+    }
+
+    func sendPickerActionActivate(generation: UInt32, activationID: UInt32) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_ACTION_ACTIVATE])
+        appendU32(&buf, generation)
+        appendU32(&buf, activationID)
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: file_tree_click. Layout: opcode(1) + action_type(1) + index(2).
     func sendFileTreeClick(index: UInt16) {
         var buf = Data(count: 4)

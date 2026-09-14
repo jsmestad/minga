@@ -8,45 +8,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.RenderModel.UI.Picker.ActionMenu
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.State.Picker.ActivationOffer
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.ProjectFileCandidate
 
-  @max_items 100
   @preview_max_lines 50
   @binary_preview_message "Binary file preview unavailable"
 
   @spec build(Context.t()) :: PickerModel.t()
   def build(ctx) do
     case get_in_modal(ctx) do
-      {:picker,
-       %{
-         picker_ui:
-           picker_ui =
-               %PickerState{
-                 picker: picker,
-                 source: source,
-                 callback_source: callback_source,
-                 action_menu: action_menu,
-                 load_status: load_status,
-                 query_generation: query_generation,
-                 acknowledged_query_edit_seq: acknowledged_query_edit_seq
-               }
-       }}
+      {:picker, %{picker_ui: %PickerState{picker: picker} = picker_state}}
       when picker != nil ->
-        mode_prefix = PickerState.mode_prefix(picker_ui)
-        query_correlation = {query_generation, acknowledged_query_edit_seq}
-
-        build_open(
-          ctx,
-          picker,
-          source,
-          callback_source,
-          action_menu,
-          mode_prefix,
-          load_status,
-          query_correlation
-        )
+        build_open(ctx, picker_state)
 
       _ ->
         %PickerModel{}
@@ -57,34 +32,35 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp get_in_modal(%Context{intent: %{frame: %{shell_state: %{modal: modal}}}}), do: modal
   defp get_in_modal(_ctx), do: nil
 
-  @spec build_open(
-          Context.t(),
-          Picker.t(),
-          module() | nil,
-          MingaEditor.State.Picker.callback_source(),
-          term(),
-          String.t(),
-          PickerModel.load_status(),
-          {non_neg_integer(), non_neg_integer()}
-        ) ::
-          PickerModel.t()
+  @spec build_open(Context.t(), PickerState.t()) :: PickerModel.t()
   defp build_open(
          ctx,
-         picker,
-         source,
-         callback_source,
-         action_menu,
-         mode_prefix,
-         load_status,
-         {query_generation, acknowledged_query_edit_seq}
+         %PickerState{
+           picker: %Picker{} = picker,
+           source: source,
+           callback_source: callback_source,
+           action_menu: action_menu,
+           load_status: load_status,
+           query_generation: query_generation,
+           acknowledged_query_edit_seq: acknowledged_query_edit_seq,
+           activation_offer: activation_offer
+         } = picker_state
        ) do
     has_preview = source != nil and Picker.Source.gui_preview?(source, callback_source)
 
-    items =
-      picker.filtered
-      |> Enum.take(@max_items)
+    offered_items = ActivationOffer.offered_items(activation_offer)
+
+    enriched_items =
+      offered_items
+      |> Enum.map(&elem(&1, 2))
       |> enrich_for_display(source, callback_source, picker.query)
-      |> Enum.map(&item_model(picker, &1))
+
+    items =
+      offered_items
+      |> Enum.zip(enriched_items)
+      |> Enum.map(fn {{activation_id, _index, _offered_item}, item} ->
+        item_model(picker, item, activation_id)
+      end)
 
     preview_lines = if has_preview, do: build_picker_preview(ctx)
 
@@ -95,13 +71,14 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       query_generation: query_generation,
       acknowledged_query_edit_seq: acknowledged_query_edit_seq,
       selected_index: picker.selected,
-      filtered_count: Enum.count(picker.filtered),
-      total_count: Enum.count(picker.items),
+      filtered_count: length(picker.filtered),
+      total_count: length(picker.items),
       marked_count: Picker.marked_count(picker),
+      activation_generation: activation_offer.generation,
       has_preview?: has_preview,
       items: items,
-      action_menu: action_menu_model(action_menu),
-      mode_prefix: mode_prefix,
+      action_menu: action_menu_model(action_menu, activation_offer),
+      mode_prefix: PickerState.mode_prefix(picker_state),
       load_status: load_status,
       preview_lines: preview_lines
     }
@@ -134,15 +111,16 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   # defaulting. (The source `description` is already typed non-nil with a ""
   # default, so it needs no defaulting.) Wire limits are enforced by the adapter,
   # which rejects oversized values without changing this semantic model.
-  @spec item_model(Picker.t(), Picker.Item.t()) :: PickerModel.item()
-  defp item_model(picker, item) do
+  @spec item_model(Picker.t(), Picker.Item.t(), non_neg_integer()) :: PickerModel.item()
+  defp item_model(picker, item, activation_id) do
     %{
       icon_color: item.icon_color || 0,
       flags: item_flags(item, Picker.marked?(picker, item)),
       label: item.label,
       description: item.description,
       annotation: item.annotation || "",
-      match_positions: item.match_positions
+      match_positions: item.match_positions,
+      activation_id: activation_id
     }
   end
 
@@ -153,11 +131,15 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     bor(two_line, marked <<< 1)
   end
 
-  @spec action_menu_model(term()) :: ActionMenu.t() | nil
-  defp action_menu_model(nil), do: nil
+  @spec action_menu_model(term(), ActivationOffer.t()) :: ActionMenu.t() | nil
+  defp action_menu_model(nil, _activation_offer), do: nil
 
-  defp action_menu_model({actions, selected}) do
-    %ActionMenu{actions: Enum.map(actions, fn {name, _id} -> name end), selected_index: selected}
+  defp action_menu_model({actions, selected, _item}, activation_offer) do
+    %ActionMenu{
+      actions: Enum.map(actions, fn {name, _id} -> name end),
+      activation_ids: ActivationOffer.action_activation_ids(activation_offer),
+      selected_index: selected
+    }
   end
 
   # Build preview content for the currently selected picker item.

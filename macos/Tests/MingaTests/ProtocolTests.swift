@@ -1008,6 +1008,8 @@ final class SpyEncoder: InputEncoder, Sendable {
         case tabMoveLeft(id: UInt32)
         case tabMoveRight(id: UInt32)
         case hoverOpenAction
+        case pickerItemActivate(generation: UInt32, activationID: UInt32)
+        case pickerActionActivate(generation: UInt32, activationID: UInt32)
         case fileTreeClick(index: UInt16)
         case fileTreeToggle(index: UInt16)
         case fileTreeOpenInSplit(index: UInt16)
@@ -1113,6 +1115,8 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendTabMoveLeft(id: UInt32) { state.withLock { $0.guiActions.append(.tabMoveLeft(id: id)) } }
     func sendTabMoveRight(id: UInt32) { state.withLock { $0.guiActions.append(.tabMoveRight(id: id)) } }
     func sendHoverOpenAction() { state.withLock { $0.guiActions.append(.hoverOpenAction) } }
+    func sendPickerItemActivate(generation: UInt32, activationID: UInt32) { state.withLock { $0.guiActions.append(.pickerItemActivate(generation: generation, activationID: activationID)) } }
+    func sendPickerActionActivate(generation: UInt32, activationID: UInt32) { state.withLock { $0.guiActions.append(.pickerActionActivate(generation: generation, activationID: activationID)) } }
     func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
     func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }
     func sendFileTreeOpenInSplit(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeOpenInSplit(index: index)) } }
