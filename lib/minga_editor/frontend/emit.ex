@@ -133,6 +133,7 @@ defmodule MingaEditor.Frontend.Emit do
 
     commands =
       [Protocol.encode_begin_frame(frame_seq, base_frame_seq, caches.recovery_generation)] ++
+        presentation_target_commands(ctx) ++
         flush_font_registration_commands() ++
         encoded_frame.metal_commands ++
         encoded_frame.chrome_commands ++
@@ -171,6 +172,16 @@ defmodule MingaEditor.Frontend.Emit do
 
       {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx}
   end
+
+  @spec presentation_target_commands(ctx()) :: [binary()]
+  defp presentation_target_commands(%{intent: %{frame: %{presentation_target: nil}}}), do: []
+
+  defp presentation_target_commands(%{intent: %{frame: %{presentation_target: target}}} = ctx) do
+    [Protocol.encode_presentation_target(target, target_revision(ctx))]
+  end
+
+  @spec target_revision(ctx()) :: non_neg_integer()
+  defp target_revision(%{intent: %{revision: revision}}), do: revision
 
   # The async render path threads Renderer.Server's monotonic seq through the
   # context; sync/headless paths leave it nil, so we mint a fresh monotonic value

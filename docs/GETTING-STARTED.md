@@ -44,6 +44,36 @@ brew install jsmestad/minga/minga
 
 On macOS, `minga FILE_OR_DIRECTORY` opens or reuses Minga.app. Use `minga --tui FILE_OR_DIRECTORY` (or the installed `minga-tui` command) for an explicit standalone terminal session. Terminal-only commands such as `--headless`, `attach`, `sessions`, `detach`, `kill-session`, and `login --manual` select the standalone runtime automatically. If Minga.app is missing or damaged, normal GUI opens fail with an installation error rather than silently falling back to a new TUI editor.
 
+## Wait for a native editor result
+
+Use the bundled `minga-ipc open-ready` command when an automation needs to know that one file open reached the editor's native interaction boundary. The ordinary `minga` command, and the existing `minga-ipc open` and `minga-ipc wait` commands, keep their semantic-only completion behavior.
+
+```bash
+MINGA_IPC="/Applications/Minga.app/Contents/Resources/bin/minga-ipc"
+"$MINGA_IPC" open-ready --deadline-ms=10000 /absolute/path/to/notes.md
+```
+
+The command writes one JSON result to standard output and exits zero only when `receipt.outcome` is `ready`. Save the identity fields if a separate process must inspect the completed receipt later.
+
+```json
+{"receipt":{"app_instance_id":"...","core_instance_id":"...","operation_id":"...","phase":"terminal","outcome":"ready","target":{"path":"/absolute/path/to/notes.md","window_id":1},"application_revision":42,"evidence":{"boundary":"metal_drawable_completed","focus_ready":true},"detail":null}}
+```
+
+```bash
+"$MINGA_IPC" wait-receipt --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --operation-id "$OPERATION_ID" --deadline-ms 10000
+"$MINGA_IPC" receipt --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --operation-id "$OPERATION_ID"
+```
+
+`wait-receipt` only observes the original operation. It never opens the file again. A waiter has a finite deadline from 1 through 30,000 milliseconds. Disconnecting, cancelling, or timing out a waiter releases only that wait. It does not undo or repeat an editor action that the BEAM already applied.
+
+The receipt separates three facts: `admitted` means the local service accepted the request, `applied` means the BEAM opened the exact target and recorded its semantic revision, and terminal `ready` means the matching editor target reached its native boundary with the required focus. The result includes the target token, pane, revision, renderer generation, frame sequence, and focus evidence so a newer unrelated frame cannot satisfy the request.
+
+`metal_drawable_completed` is the strongest boundary the current editor surface can prove. CoreText and Metal completed the matching drawable submission, and the editor focus policy passed when focus was requested. It is not a claim that macOS composited pixels to a physical display. SwiftUI and AppKit surfaces that cannot prove their own requested readiness return `unavailable` instead of borrowing editor evidence.
+
+Terminal outcomes are explicit. `rejected` means the BEAM could not apply the request. `presentation_failed`, `hidden`, and `unavailable` distinguish failed rendering, a hidden surface, and a missing native prerequisite. `superseded` means a newer target replaced the requested target before it became ready. `timeout` and `cancelled` describe the wait rather than the editor action. `app_replaced`, `core_replaced`, `expired`, and `unknown` mean the supplied receipt identity cannot be observed in the current generation. Failed receipts include a machine-readable outcome and may include a human-readable `detail`. After admission, even timeout or transport failure output preserves the accepted receipt identity. A lost response can leave execution indeterminate, so look up the saved receipt before deciding whether to retry.
+
+Receipts are intentionally bounded. Minga accepts at most 64 active operations and 64 waiters, retains at most 128 terminal receipts for 60 seconds, and converts an operation that receives no native result within 30 seconds to `indeterminate`. Expired receipts retain no view or frame resources. The receipt includes `last_visible` when a newer attempted presentation fails, so callers can distinguish the failed target from the prior valid target, application revision, and frame.
+
 ## Launch
 
 ```bash

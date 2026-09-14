@@ -33,6 +33,10 @@ defmodule MingaEditor.Frontend.Protocol do
   """
 
   alias Minga.Protocol.Opcodes
+  alias MingaEditor.NativeIPC.OperationNativeResult
+  alias MingaEditor.NativeIPC.OperationReceipt
+  alias MingaEditor.NativeIPC.OperationReceipt.Evidence
+  alias MingaEditor.PresentationTarget
 
   @op_key_press Opcodes.key_press()
   @op_resize Opcodes.resize()
@@ -58,6 +62,9 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_set_font Opcodes.set_font()
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
+  @op_operation_native_result Opcodes.operation_native_result()
+  @op_presentation_target Opcodes.presentation_target()
+  @op_presentation_operation Opcodes.presentation_operation()
 
   alias Minga.Parser.StructuralNavResult
   alias MingaEditor.Frontend.Capabilities
@@ -217,6 +224,7 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:application_quit_request, request_id :: non_neg_integer()}
           | {:application_quit_decision, request_id :: non_neg_integer(),
              application_quit_decision()}
+          | {:operation_native_result, OperationNativeResult.t()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -299,6 +307,26 @@ defmodule MingaEditor.Frontend.Protocol do
   def encode_commit_frame(frame_seq, input_seq \\ 0)
       when is_integer(frame_seq) and frame_seq >= 0 and is_integer(input_seq) and input_seq >= 0 do
     <<@op_commit_frame, u32(frame_seq)::32, u32(input_seq)::32>>
+  end
+
+  @doc "Encodes the exact active editor target represented by one frame."
+  @spec encode_presentation_target(PresentationTarget.t(), non_neg_integer()) :: binary()
+  def encode_presentation_target(%PresentationTarget{} = target, revision) do
+    <<@op_presentation_target, target.token::unsigned-64, target.window_id::16, u32(revision)::32,
+      if(target.focus_required, do: 1, else: 0)::8>>
+  end
+
+  @doc "Registers a core-scoped native readiness expectation outside the frame transaction."
+  @spec encode_presentation_operation(OperationReceipt.t()) :: binary()
+  def encode_presentation_operation(%OperationReceipt{
+        operation_id: operation_id,
+        target: target,
+        application_revision: revision,
+        postcondition: :editor_visible_focused,
+        phase: :applied
+      }) do
+    <<@op_presentation_operation, operation_id::unsigned-64, target.token::unsigned-64,
+      target.window_id::16, u32(revision)::32, 1::8>>
   end
 
   @spec u32(non_neg_integer()) :: non_neg_integer()
@@ -606,6 +634,51 @@ defmodule MingaEditor.Frontend.Protocol do
     end
   end
 
+  def decode_event(
+        <<@op_operation_native_result, operation_id::unsigned-64, target_token::unsigned-64,
+          generation::32, frame_seq::32, window_id::16, outcome_code::8, focus_ready::8,
+          boundary_code::8, application_revision::32, last_token::unsigned-64,
+          last_generation::32, last_frame_seq::32, last_window_id::16, last_focus_ready::8,
+          last_application_revision::32>>
+      ) do
+    with {:ok, outcome} <- decode_native_outcome(outcome_code),
+         {:ok, boundary} <- decode_evidence_boundary(boundary_code),
+         {:ok, focus} <- decode_boolean(focus_ready),
+         {:ok, last_focus} <- decode_boolean(last_focus_ready) do
+      evidence = %Evidence{
+        target_token: target_token,
+        application_revision: application_revision,
+        boundary: boundary,
+        generation: generation,
+        frame_seq: frame_seq,
+        window_id: window_id,
+        focus_ready: focus
+      }
+
+      last_visible =
+        last_visible_evidence(
+          last_token,
+          last_generation,
+          last_frame_seq,
+          last_window_id,
+          last_focus,
+          last_application_revision
+        )
+
+      {:ok,
+       {:operation_native_result,
+        %OperationNativeResult{
+          operation_id: operation_id,
+          target_token: target_token,
+          outcome: outcome,
+          evidence: evidence,
+          last_visible: last_visible
+        }}}
+    else
+      :error -> {:error, :malformed}
+    end
+  end
+
   def decode_event(<<@op_scroll_batch, window_id::16, delta_lines::16-signed, direction::8>>) do
     dir = if direction == 0, do: :down, else: :up
     {:ok, {:scroll_batch, window_id, delta_lines, dir}}
@@ -643,7 +716,8 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_window_ref_miss,
              @op_application_quit_request,
              @op_application_quit_decision,
-             @op_scroll_batch
+             @op_scroll_batch,
+             @op_operation_native_result
            ] do
     {:error, :malformed}
   end
@@ -654,6 +728,63 @@ defmodule MingaEditor.Frontend.Protocol do
 
   def decode_event(<<>>) do
     {:error, :malformed}
+  end
+
+  @spec decode_native_outcome(non_neg_integer()) ::
+          {:ok, :ready | :presentation_failed | :hidden | :unavailable | :superseded} | :error
+  defp decode_native_outcome(0), do: {:ok, :ready}
+  defp decode_native_outcome(1), do: {:ok, :presentation_failed}
+  defp decode_native_outcome(2), do: {:ok, :hidden}
+  defp decode_native_outcome(3), do: {:ok, :unavailable}
+  defp decode_native_outcome(4), do: {:ok, :superseded}
+  defp decode_native_outcome(_code), do: :error
+
+  @spec decode_evidence_boundary(non_neg_integer()) ::
+          {:ok, Evidence.boundary()} | :error
+  defp decode_evidence_boundary(0), do: {:ok, :none}
+  defp decode_evidence_boundary(1), do: {:ok, :metal_drawable_completed}
+  defp decode_evidence_boundary(_code), do: :error
+
+  @spec decode_boolean(non_neg_integer()) :: {:ok, boolean()} | :error
+  defp decode_boolean(0), do: {:ok, false}
+  defp decode_boolean(1), do: {:ok, true}
+  defp decode_boolean(_value), do: :error
+
+  @spec last_visible_evidence(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          non_neg_integer()
+        ) :: Evidence.t() | nil
+  defp last_visible_evidence(
+         0,
+         _generation,
+         _frame_seq,
+         _window_id,
+         _focus_ready,
+         _application_revision
+       ),
+       do: nil
+
+  defp last_visible_evidence(
+         token,
+         generation,
+         frame_seq,
+         window_id,
+         focus_ready,
+         application_revision
+       ) do
+    %Evidence{
+      target_token: token,
+      application_revision: application_revision,
+      boundary: :metal_drawable_completed,
+      generation: generation,
+      frame_seq: frame_seq,
+      window_id: window_id,
+      focus_ready: focus_ready
+    }
   end
 
   @spec encode_application_quit_outcome(application_quit_outcome()) :: 0..3

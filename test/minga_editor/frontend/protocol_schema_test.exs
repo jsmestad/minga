@@ -60,6 +60,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       window_ref_miss: 0x0C,
       application_quit_request: 0x0D,
       application_quit_decision: 0x0E,
+      operation_native_result: 0x0F,
       log_message: 0x60
     )
   end
@@ -76,7 +77,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       set_window_bg: 0x17,
       protocol_error: 0x18,
       set_link_cursor: 0x19,
-      application_quit_response: 0x1A
+      application_quit_response: 0x1A,
+      presentation_target: 0x1B,
+      presentation_operation: 0x1C
     )
   end
 

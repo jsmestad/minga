@@ -48,6 +48,10 @@ enum RenderCommand: Sendable {
     /// by batch_end). The frontend presents the frame and resolves keystroke latency
     /// here. 0 means "no correlation".
     case commitFrame(frameSeq: UInt32, seq: UInt32)
+    /// Frame-scoped semantic identity. This is presentation correlation, not display telemetry.
+    case presentationTarget(PresentationTarget)
+    /// Out-of-band registration for one authenticated local operation.
+    case presentationOperation(PresentationOperation)
     case setCursorShape(CursorShape)
     case setTitle(String)
     case setWindowBg(r: UInt8, g: UInt8, b: UInt8)
@@ -499,6 +503,35 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let frameSeq = try readU32(data, rest)
         let seq = try readU32(data, rest + 4)
         return (.commitFrame(frameSeq: frameSeq, seq: seq), 9)
+
+    case OP_PRESENTATION_TARGET:
+        guard data.count >= rest + 15 else { throw ProtocolDecodeError.malformed }
+        let focus = data[rest + 14]
+        guard focus <= 1 else { throw ProtocolDecodeError.malformed }
+        return (
+            .presentationTarget(PresentationTarget(
+                token: try readU64(data, rest),
+                windowID: try readU16(data, rest + 8),
+                applicationRevision: try readU32(data, rest + 10),
+                focusRequired: focus == 1
+            )),
+            16
+        )
+
+    case OP_PRESENTATION_OPERATION:
+        guard data.count >= rest + 23 else { throw ProtocolDecodeError.malformed }
+        let postcondition = data[rest + 22]
+        guard postcondition == 1 else { throw ProtocolDecodeError.malformed }
+        return (
+            .presentationOperation(PresentationOperation(
+                operationID: try readU64(data, rest),
+                targetToken: try readU64(data, rest + 8),
+                windowID: try readU16(data, rest + 16),
+                applicationRevision: try readU32(data, rest + 18),
+                focusRequired: true
+            )),
+            24
+        )
 
     case OP_SET_CURSOR_SHAPE:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

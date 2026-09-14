@@ -94,6 +94,36 @@ final class EditorFocusPolicy {
         return window.firstResponder is NSText
     }
 
+    /// Activates the app and returns whether the requested editor focus postcondition now holds.
+    func requestPresentationFocus() -> Bool {
+        guard let window = attachedWindow,
+              let editorView,
+              editorView.window === window
+        else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        if !nativeTextEditingIsActive(), window.firstResponder !== editorView {
+            window.makeFirstResponder(editorView)
+        }
+        return presentationFocusReady()
+    }
+
+    /// Reclaims and verifies the AppKit responder state required by a native open receipt.
+    func presentationFocusReady() -> Bool {
+        guard let window = attachedWindow,
+              let editorView,
+              editorView.window === window,
+              window.isVisible,
+              !window.isMiniaturized,
+              window.isKeyWindow,
+              !nativeTextEditingIsActive()
+        else { return false }
+        if window.firstResponder !== editorView {
+            window.makeFirstResponder(editorView)
+        }
+        return window.firstResponder === editorView
+    }
+
     /// Routes one overlay event through the editor's existing responder methods when policy permits.
     func routeAgentOverlayEvent(_ event: NSEvent) -> NSEvent? {
         guard agentOverlayVisible,

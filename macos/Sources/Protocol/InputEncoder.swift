@@ -148,6 +148,7 @@ public protocol InputEncoder: AnyObject, Sendable {
 
     // Scroll batching
     func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8)
+    func sendOperationNativeResult(_ result: NativeOperationResult)
 
     // Edit timeline actions
     func sendTimelineNavigate(index: UInt16)
@@ -212,6 +213,7 @@ public extension InputEncoder {
     func sendFontSizeAdjust(direction: UInt8) {}
 
     func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {}
+    func sendOperationNativeResult(_ result: NativeOperationResult) {}
 
     /// Default no-op so existing test spies do not need to implement timeline actions.
     func sendTimelineNavigate(index: UInt16) {}

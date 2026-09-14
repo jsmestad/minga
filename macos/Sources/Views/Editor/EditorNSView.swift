@@ -247,6 +247,9 @@ final class EditorNSView: MTKView {
         (layer as? CAMetalLayer)?.maximumDrawableCount = 3
 
         coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        coreTextRenderer.onNativePresentationFailure = { [weak dispatcher] frame, outcome in
+            dispatcher?.nativePresentationFailed(frame: frame, outcome: outcome)
+        }
         scrollAnimationsReduceMotionDisabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
@@ -606,7 +609,7 @@ final class EditorNSView: MTKView {
         // Reject known non-presentable states before claiming an input sequence.
         // The renderer acquires a drawable only after its offscreen candidate completes.
         if let reason = presentationPreflightDiscardReason() {
-            dispatcher.discardPendingPresentation(reason: reason)
+            handlePresentationPreflightFailure(reason)
             return
         }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
@@ -690,6 +693,15 @@ final class EditorNSView: MTKView {
             localTransform: localScrollPresentation,
             connectionID: connectionID
         )
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            self.dispatcher.resolvePresentedOperation(
+                snapshot: snapshot,
+                focusReady: self.focusPolicy.presentationFocusReady(),
+                connectionID: connectionID
+            )
+        }
         let cursor = snapshot.activeSurface.map { ($0.content.cursorRow, $0.content.cursorCol) } ?? (0, 0)
         if cursor.0 != lastAccessibilityCursorRow || cursor.1 != lastAccessibilityCursorCol {
             lastAccessibilityCursorRow = cursor.0
@@ -963,6 +975,16 @@ final class EditorNSView: MTKView {
 
     @objc private func windowPresentationAvailabilityDidChange(_ notification: Notification) {
         if let reason = presentationPreflightDiscardReason() {
+            handlePresentationPreflightFailure(reason)
+        } else {
+            renderFrame()
+        }
+    }
+
+    private func handlePresentationPreflightFailure(_ reason: LatencyRecorder.DiscardReason) {
+        if reason == .occluded {
+            dispatcher.deferOccludedPresentation()
+        } else {
             dispatcher.discardPendingPresentation(reason: reason)
         }
     }

@@ -732,6 +732,157 @@ private func completionStatus(_ response: [String: Any]) -> Int32 {
     return code == 0 ? 0 : 1
 }
 
+private func printJSON(_ object: [String: Any]) throws {
+    let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    FileHandle.standardOutput.write(data)
+    FileHandle.standardOutput.write(Data("\n".utf8))
+}
+
+private func receiptStatus(_ response: [String: Any]) -> Int32 {
+    guard let receipt = response["receipt"] as? [String: Any] else { return 1 }
+    return receipt["outcome"] as? String == "ready" ? 0 : 1
+}
+
+private func postAdmissionResult(error: Error, receipt: [String: Any]) -> String {
+    let acceptedAppID = receipt["app_instance_id"] as? String
+    let acceptedCoreID = receipt["core_instance_id"] as? String
+    if let current = try? loadDescriptor() {
+        if current.appInstanceID != acceptedAppID { return "app_replaced" }
+        if current.coreInstanceID != acceptedCoreID { return "core_replaced" }
+    }
+    if case IPCError.appExited = error { return "app_replaced" }
+    if case IPCError.transient = error { return "timeout" }
+    return "indeterminate"
+}
+
+private func printPostAdmissionFailure(error: Error, receipt: [String: Any]) throws -> Int32 {
+    try printJSON([
+        "version": version,
+        "type": "operation_result",
+        "result": postAdmissionResult(error: error, receipt: receipt),
+        "receipt": receipt,
+    ])
+    return (error as? IPCError)?.probeStatus ?? 1
+}
+
+private func openReady(
+    path: String,
+    editorMode: Bool,
+    expectedNonce: String?,
+    allowLaunchConflict: Bool,
+    deadlineMilliseconds: Int
+) throws -> Int32 {
+    let startupDeadline = MonotonicDeadline.after(nanoseconds: startupTimeoutNanoseconds)
+    let (descriptor, fd) = try connectionForRequest(
+        expectedNonce: expectedNonce,
+        allowLaunchConflict: allowLaunchConflict,
+        deadline: startupDeadline
+    )
+    defer { close(fd) }
+    let monitor = try AppExitMonitor(appPID: descriptor.appPID)
+    try sendJSON(fd, [
+        "version": version,
+        "type": "open_ready",
+        "path": path,
+        "editor": editorMode,
+        "deadline_ms": deadlineMilliseconds,
+    ])
+    let receiptDeadline = MonotonicDeadline.after(
+        nanoseconds: UInt64(deadlineMilliseconds + 1_000) * 1_000_000
+    )
+    let accepted = try receiveJSON(fd, deadline: receiptDeadline, appMonitor: monitor)
+    guard accepted["type"] as? String == "accepted",
+          let acceptedReceipt = accepted["receipt"] as? [String: Any]
+    else { throw IPCError.insecure("invalid operation receipt acceptance") }
+
+    do {
+        var response = try receiveJSON(fd, deadline: receiptDeadline, appMonitor: monitor)
+        if response["type"] as? String == "progress" {
+            response = try receiveJSON(fd, deadline: receiptDeadline, appMonitor: monitor)
+        }
+        guard response["type"] as? String == "completed" || response["type"] as? String == "operation_result" else {
+            throw IPCError.insecure("invalid operation receipt completion")
+        }
+        if response["receipt"] == nil { response["receipt"] = acceptedReceipt }
+        try printJSON(response)
+        return receiptStatus(response)
+    } catch {
+        return try printPostAdmissionFailure(error: error, receipt: acceptedReceipt)
+    }
+}
+
+private func observeReceipt(
+    commandType: String,
+    appInstanceID: String,
+    coreInstanceID: String,
+    operationID: String,
+    deadlineMilliseconds: Int
+) throws -> Int32 {
+    let descriptor = try loadDescriptor()
+    let fd = try authenticatedConnection(descriptor, expectedNonce: nil)
+    defer { close(fd) }
+    let monitor = try AppExitMonitor(appPID: descriptor.appPID)
+    try sendJSON(fd, [
+        "version": version,
+        "type": commandType,
+        "app_instance_id": appInstanceID,
+        "core_instance_id": coreInstanceID,
+        "operation_id": operationID,
+        "deadline_ms": deadlineMilliseconds,
+    ])
+    let deadline = MonotonicDeadline.after(
+        nanoseconds: UInt64(deadlineMilliseconds + 1_000) * 1_000_000
+    )
+    let response = try receiveJSON(fd, deadline: deadline, appMonitor: monitor)
+    try printJSON(response)
+    return receiptStatus(response)
+}
+
+private struct ReceiptArguments {
+    let appInstanceID: String
+    let coreInstanceID: String
+    let operationID: String
+    let deadlineMilliseconds: Int
+}
+
+private func parseReceiptArguments(_ args: [String]) throws -> ReceiptArguments {
+    var appInstanceID: String?
+    var coreInstanceID: String?
+    var operationID: String?
+    var deadlineMilliseconds = 15_000
+    var index = 1
+    while index < args.count {
+        switch args[index] {
+        case "--app-instance-id" where index + 1 < args.count:
+            appInstanceID = args[index + 1]
+            index += 2
+        case "--core-instance-id" where index + 1 < args.count:
+            coreInstanceID = args[index + 1]
+            index += 2
+        case "--operation-id" where index + 1 < args.count:
+            operationID = args[index + 1]
+            index += 2
+        case "--deadline-ms" where index + 1 < args.count:
+            guard let value = Int(args[index + 1]), value > 0, value <= 30_000 else {
+                throw IPCError.operational("--deadline-ms must be between 1 and 30000")
+            }
+            deadlineMilliseconds = value
+            index += 2
+        default:
+            throw IPCError.operational("invalid receipt argument: \(args[index])")
+        }
+    }
+    guard let appInstanceID, let coreInstanceID, let operationID else {
+        throw IPCError.operational("receipt commands require app, core, and operation identity")
+    }
+    return ReceiptArguments(
+        appInstanceID: appInstanceID,
+        coreInstanceID: coreInstanceID,
+        operationID: operationID,
+        deadlineMilliseconds: deadlineMilliseconds
+    )
+}
+
 private func parseRequestArguments(
     _ args: [String], command: String
 ) throws -> (Bool, String?, Bool, [String]) {
@@ -803,6 +954,30 @@ private func main() -> Int32 {
                 editorMode: editorMode,
                 expectedNonce: expectedNonce,
                 allowLaunchConflict: allowLaunchConflict
+            )
+        case "open-ready":
+            let (editorMode, expectedNonce, allowLaunchConflict, paths) = try parseRequestArguments(
+                args.filter { !$0.hasPrefix("--deadline-ms=") }, command: command
+            )
+            guard paths.count == 1 else { throw IPCError.operational("open-ready accepts exactly one file path") }
+            let deadline = args.compactMap { argument -> Int? in
+                guard argument.hasPrefix("--deadline-ms=") else { return nil }
+                return Int(argument.dropFirst("--deadline-ms=".count))
+            }.first ?? 15_000
+            guard deadline > 0, deadline <= 30_000 else {
+                throw IPCError.operational("--deadline-ms must be between 1 and 30000")
+            }
+            return try openReady(
+                path: paths[0], editorMode: editorMode,
+                expectedNonce: expectedNonce, allowLaunchConflict: allowLaunchConflict,
+                deadlineMilliseconds: deadline
+            )
+        case "receipt", "wait-receipt":
+            let parsed = try parseReceiptArguments(args)
+            return try observeReceipt(
+                commandType: command == "receipt" ? "operation_lookup" : "operation_wait",
+                appInstanceID: parsed.appInstanceID, coreInstanceID: parsed.coreInstanceID,
+                operationID: parsed.operationID, deadlineMilliseconds: parsed.deadlineMilliseconds
             )
         default:
             throw IPCError.operational("unknown minga-ipc command: \(command)")

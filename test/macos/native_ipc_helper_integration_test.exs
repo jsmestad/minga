@@ -13,6 +13,9 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
   @helper_timeout 10_000
 
   alias MingaEditor.NativeIPC.Supervisor, as: IPCSupervisor
+  alias MingaEditor.NativeIPC.OperationNativeResult
+  alias MingaEditor.NativeIPC.OperationReceipt.Evidence
+  alias MingaEditor.NativeIPC.Server
   alias Minga.Frontend.WaitRequests
 
   setup do
@@ -70,6 +73,11 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
       end
     end
 
+    open_receipt = fn path, editor_mode?, receipt, receipt_server, _editor ->
+      send(owner, {:receipt_opened, path, editor_mode?, receipt, receipt_server})
+      :ok
+    end
+
     sleeper =
       Port.open({:spawn_executable, ~c"/bin/sleep"}, [
         :binary,
@@ -94,6 +102,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
          launch_nonce: "integration-launch-nonce",
          wait_tracker: tracker,
          open_wait: open_wait,
+         open_receipt: open_receipt,
          kill_checker: fn ^app_pid -> true end}
       )
 
@@ -199,6 +208,100 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     assert {_, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(ctx.app_pid)])
     assert {output, 1} = Task.await(task, @helper_timeout)
     assert output =~ "Minga.app exited"
+  end
+
+  test "packaged helper reports the exact terminal readiness receipt", ctx do
+    target = Path.join(ctx.runtime_parent, "minga-ipc-helper-ready.txt")
+
+    task =
+      Task.async(fn -> run_helper(ctx.helper, ["open-ready", "--deadline-ms=1000", target]) end)
+
+    assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
+    assert {:ok, applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
+    assert applied.application_revision == 7
+
+    assert :ok =
+             Server.finish_native_operation(
+               server,
+               native_result(receipt, 3, 2, 11, true)
+             )
+
+    assert {output, 0} = Task.await(task, @helper_timeout)
+    result = JSON.decode!(output)
+    assert result["type"] == "completed"
+    assert result["receipt"]["outcome"] == "ready"
+    assert result["receipt"]["target"]["path"] == target
+    assert result["receipt"]["target"]["window_id"] == 3
+    assert result["receipt"]["application_revision"] == 7
+    assert result["receipt"]["evidence"]["frame_seq"] == 11
+  end
+
+  test "open-ready preserves lookup identity after the endpoint disconnects", ctx do
+    target = Path.join(ctx.runtime_parent, "minga-ipc-helper-receipt-disconnect.txt")
+
+    task =
+      Task.async(fn -> run_helper(ctx.helper, ["open-ready", "--deadline-ms=1000", target]) end)
+
+    assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
+    assert {:ok, _applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
+    assert :ok = Supervisor.stop(ctx.supervisor)
+
+    assert {output, 3} = Task.await(task, @helper_timeout)
+    result = JSON.decode!(output)
+    assert result["type"] == "operation_result"
+    assert result["result"] == "indeterminate"
+    assert result["receipt"]["app_instance_id"] == receipt.app_instance_id
+    assert result["receipt"]["core_instance_id"] == receipt.core_instance_id
+    assert result["receipt"]["operation_id"] == Integer.to_string(receipt.operation_id)
+  end
+
+  test "receipt wait timeout releases its waiter without rolling back BEAM application", ctx do
+    target = Path.join(ctx.runtime_parent, "minga-ipc-helper-timeout.txt")
+
+    task =
+      Task.async(fn -> run_helper(ctx.helper, ["open-ready", "--deadline-ms=100", target]) end)
+
+    assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
+    assert {:ok, _applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
+
+    assert {output, 1} = Task.await(task, @helper_timeout)
+
+    assert %{"type" => "operation_result", "result" => "timeout", "receipt" => result_receipt} =
+             JSON.decode!(output)
+
+    assert result_receipt["app_instance_id"] == receipt.app_instance_id
+    assert result_receipt["core_instance_id"] == receipt.core_instance_id
+    assert result_receipt["operation_id"] == Integer.to_string(receipt.operation_id)
+
+    assert {:ok, persisted} =
+             Server.lookup_operation(
+               server,
+               receipt.app_instance_id,
+               receipt.core_instance_id,
+               receipt.operation_id
+             )
+
+    assert persisted.phase == :applied
+    assert Server.operation_counts(server).waiters == 0
+  end
+
+  defp native_result(receipt, window_id, generation, frame_seq, focus_ready) do
+    evidence = %Evidence{
+      target_token: receipt.target.token,
+      application_revision: receipt.application_revision,
+      boundary: :metal_drawable_completed,
+      generation: generation,
+      frame_seq: frame_seq,
+      window_id: window_id,
+      focus_ready: focus_ready
+    }
+
+    %OperationNativeResult{
+      operation_id: receipt.operation_id,
+      target_token: receipt.target.token,
+      outcome: :ready,
+      evidence: evidence
+    }
   end
 
   defp run_helper(helper, args) do

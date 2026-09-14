@@ -35,6 +35,10 @@ defmodule MingaEditor do
   alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
 
   alias MingaEditor.Observatory
+  alias MingaEditor.NativeIPC.OperationNativeResult
+  alias MingaEditor.NativeIPC.OperationReceipt
+  alias MingaEditor.NativeIPC.Server, as: NativeIPCServer
+  alias MingaEditor.Frontend.Protocol, as: FrontendProtocol
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
@@ -125,6 +129,23 @@ defmodule MingaEditor do
   def open_native(path, editor_mode?, server \\ __MODULE__)
       when is_binary(path) and is_boolean(editor_mode?) do
     GenServer.call(server, {:open_native, path, editor_mode?}, 15_000)
+  end
+
+  @doc "Opens one native IPC target and starts its correlated presentation receipt."
+  @spec open_native_receipt(
+          String.t(),
+          boolean(),
+          OperationReceipt.t(),
+          GenServer.server(),
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  def open_native_receipt(path, editor_mode?, receipt, receipt_server, server \\ __MODULE__)
+      when is_binary(path) and is_boolean(editor_mode?) do
+    GenServer.call(
+      server,
+      {:open_native_receipt, path, editor_mode?, receipt, receipt_server},
+      15_000
+    )
   end
 
   @doc "Opens and target-binds a native IPC wait request."
@@ -356,6 +377,14 @@ defmodule MingaEditor do
   end
 
   def handle_call(
+        {:open_native_receipt, path, editor_mode?, receipt, receipt_server},
+        _from,
+        state
+      ) do
+    handle_open_native_receipt(state, path, editor_mode?, receipt, receipt_server)
+  end
+
+  def handle_call(
         {:open_wait, path, editor_mode?, request_id, waiter, wait_tracker},
         _from,
         state
@@ -457,6 +486,61 @@ defmodule MingaEditor do
         {:error, reason} ->
           {:reply, {:error, reason}, state}
       end
+    end
+  end
+
+  @spec handle_open_native_receipt(
+          state(),
+          String.t(),
+          boolean(),
+          OperationReceipt.t(),
+          GenServer.server()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp handle_open_native_receipt(state, path, editor_mode?, receipt, receipt_server) do
+    case BufferRegistry.open_file_by_path_result(state, path) do
+      {:ok, opened_state} ->
+        opened_state = apply_native_editor_mode(opened_state, editor_mode?)
+        apply_open_receipt(opened_state, receipt, receipt_server)
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec apply_open_receipt(state(), OperationReceipt.t(), GenServer.server()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp apply_open_receipt(state, receipt, receipt_server) do
+    window_id = state.workspace.windows.active
+
+    revision =
+      MingaEditor.State.RenderCorrelation.latest_intent_revision(state.render.render_correlation) +
+        1
+
+    with {:ok, applied_receipt} <-
+           NativeIPCServer.operation_applied(
+             receipt_server,
+             receipt.operation_id,
+             window_id,
+             revision
+           ),
+         :accepted <-
+           MingaEditor.Frontend.send_commands(
+             state.frontend.port_manager,
+             [FrontendProtocol.encode_presentation_operation(applied_receipt)]
+           ) do
+      {:reply, :ok, Renderer.render_or_async(state)}
+    else
+      :unwritable ->
+        NativeIPCServer.finish_operation(
+          receipt_server,
+          receipt.operation_id,
+          :presentation_failed
+        )
+
+        {:reply, :ok, Renderer.render_or_async(state)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -734,6 +818,32 @@ defmodule MingaEditor do
   def handle_info({:minga_input, {:application_quit_request, request_id}}, state) do
     new_state = Commands.BufferManagement.handle_application_quit_request(state, request_id)
     {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:minga_input, {:operation_native_result, %OperationNativeResult{} = result}},
+        state
+      ) do
+    case NativeIPCServer.finish_native_operation(result) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Log.error(
+          :port,
+          "Rejected native operation result operation=#{result.operation_id} target=#{result.target_token} revision=#{result.evidence.application_revision}: #{inspect(reason)}"
+        )
+    end
+
+    {:noreply, state}
+  catch
+    :exit, reason ->
+      Log.error(
+        :port,
+        "Native receipt store exited while recording operation=#{result.operation_id} target=#{result.target_token}: #{Exception.format_exit(reason)}"
+      )
+
+      {:noreply, state}
   end
 
   def handle_info(

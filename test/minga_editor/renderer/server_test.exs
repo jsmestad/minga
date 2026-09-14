@@ -1791,7 +1791,8 @@ defmodule MingaEditor.Renderer.ServerTest do
       force_keyframe?: false,
       line_spacing: 1.0,
       cursor_animate: nil,
-      gui_config_state: nil
+      gui_config_state: nil,
+      presentation_target: nil
     }
   end
 

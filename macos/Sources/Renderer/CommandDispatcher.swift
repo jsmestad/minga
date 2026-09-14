@@ -159,6 +159,9 @@ final class CommandDispatcher {
     /// A committed transaction marks apply only; Metal owns submission/completion.
     let latency = LatencyRecorder()
 
+    /// Correlates exact presentation postconditions without depending on telemetry.
+    let operationReadiness = OperationReadinessTracker()
+
     /// Input sequence attached to the newest applied frame awaiting a draw.
     private var pendingPresentationInputSeq: UInt32 = 0
 
@@ -173,6 +176,13 @@ final class CommandDispatcher {
 
     /// The committed editor frame identity awaiting Metal presentation, owned by the editor lifecycle rather than telemetry.
     private var pendingEditorPresentationFrame: GUICommittedFrame?
+    private var openPresentationTarget: PresentationTarget?
+
+    var onOperationNativeResult: ((NativeOperationResult) -> Void)? {
+        get { operationReadiness.onResult }
+        set { operationReadiness.onResult = newValue }
+    }
+    var requestPresentationFocus: (() -> Bool)?
 
     /// Claims the newest applied input sequence for one Metal submission.
     func takePresentationInputSeq() -> UInt32 {
@@ -234,13 +244,43 @@ final class CommandDispatcher {
 
     /// Discards an applied frame that cannot acquire a drawable/presentation path.
     func discardPendingPresentation(reason: LatencyRecorder.DiscardReason) {
+        discardPendingPresentationSample(reason: reason)
+        let outcome: GUIFramePresentationMetrics.Outcome = reason == .hidden ? .hidden : .unavailable
+        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome, frame: pendingEditorPresentationFrame)
+        operationReadiness.discard(
+            frame: pendingEditorPresentationFrame,
+            outcome: reason == .hidden ? .hidden : .unavailable
+        )
+        pendingEditorPresentationFrame = nil
+    }
+
+    /// Drops latency telemetry while retaining the exact committed frame for an event-driven occlusion retry.
+    func deferOccludedPresentation() {
+        discardPendingPresentationSample(reason: .occluded)
+    }
+
+    private func discardPendingPresentationSample(reason: LatencyRecorder.DiscardReason) {
         if pendingPresentationInputSeq != 0 {
             latency.discard(seq: pendingPresentationInputSeq, reason: reason)
             pendingPresentationInputSeq = 0
         }
-        let outcome: GUIFramePresentationMetrics.Outcome = reason == .hidden ? .hidden : .unavailable
-        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome, frame: pendingEditorPresentationFrame)
-        pendingEditorPresentationFrame = nil
+    }
+
+    /// Resolves readiness only after the exact committed snapshot reaches the Metal completion boundary.
+    func resolvePresentedOperation(
+        snapshot: CommittedEditorSnapshot,
+        focusReady: Bool,
+        connectionID: UInt64
+    ) {
+        guard self.connectionID == connectionID,
+              visibleEditorSnapshot?.generation == snapshot.generation,
+              visibleEditorSnapshot?.frameSeq == snapshot.frameSeq
+        else { return }
+        operationReadiness.observePresented(snapshot, focusReady: focusReady)
+    }
+
+    func nativePresentationFailed(frame: GUICommittedFrame, outcome: NativeOperationResult.Outcome) {
+        operationReadiness.discard(frame: frame, outcome: outcome)
     }
 
     // MARK: - Frame transaction staging (#2219 child D)
@@ -334,6 +374,8 @@ final class CommandDispatcher {
         committedEditorSnapshot = nil
         visibleEditorPresentation = nil
         pendingEditorPresentationFrame = nil
+        openPresentationTarget = nil
+        operationReadiness.replaceConnection()
 
         openFrameSeq = nil
         openBaseFrameSeq = 0
@@ -435,6 +477,23 @@ final class CommandDispatcher {
         case .applicationQuitResponse:
             applyLocal(command)
 
+        case .presentationOperation(let operation):
+            let focusReady = requestPresentationFocus?() ?? false
+            operationReadiness.register(operation, currentFocusReady: focusReady)
+
+        case .presentationTarget(let target):
+            if openFrameSeq != nil {
+                openPresentationTarget = target
+                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
+            } else {
+                reject(
+                    .outOfTransactionCommand(opcode: opcode),
+                    frameSeq: nil,
+                    logReason: "presentation_target outside a transaction",
+                    sourceOpcode: opcode
+                )
+            }
+
         default:
             if openFrameSeq != nil {
                 // Inside a transaction: compile into typed domain updates.
@@ -471,6 +530,7 @@ final class CommandDispatcher {
         openBaseFrameSeq = baseFrameSeq
         openGeneration = generation
         openGenerationIsStale = hasCommitted && generation < lastCommittedGeneration
+        openPresentationTarget = nil
         // Seed the builder from the prior committed editor snapshot — the single
         // semantic authority — never from the resident-window backing or mutable
         // FrameState mirrors (#2999 AC6). Base-0 keyframes start empty regardless.
@@ -559,6 +619,7 @@ final class CommandDispatcher {
             openFrameSeq = nil
             self.transactionBuilder = nil
             publish(transaction, clearsResync: clearsResync)
+            openPresentationTarget = nil
         }
 
         os_signpost(.event, log: renderLog, name: "SemanticApply", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
@@ -600,6 +661,7 @@ final class CommandDispatcher {
         if let snapshot = transaction.editorSnapshot {
             frameState = snapshot.frameState
             committedEditorSnapshot = snapshot
+            operationReadiness.observeCommitted(snapshot)
             if finalImpact.contains(.editor) {
                 pendingEditorPresentationFrame = committed
             }
@@ -678,10 +740,13 @@ final class CommandDispatcher {
     ) {
         let opcodeContext = sourceOpcode.map { String(format: ", opcode=0x%02X", $0) } ?? ""
         let rejectedFrameSeq = frameSeq ?? 0
+        let rejectedPresentationTarget = openPresentationTarget
         openFrameSeq = nil
         openBaseFrameSeq = 0
         transactionBuilder = nil
         openGenerationIsStale = false
+        openPresentationTarget = nil
+        operationReadiness.reject(target: rejectedPresentationTarget)
 
         if case .missingWindowReference(let windowId) = rejection {
             // A row/window reference miss has a targeted BEAM recovery path. Keep
@@ -901,6 +966,10 @@ final class CommandDispatcher {
             // The editor-global cursor shape is frozen into the committed
             // snapshot's metadata during freeze; publication does not mirror it
             // back into FrameState (#2999 AC6).
+            break
+
+        case .presentationTarget, .presentationOperation:
+            // Correlation commands are consumed by staging or the readiness owner.
             break
 
         case .beginFrame, .commitFrame:

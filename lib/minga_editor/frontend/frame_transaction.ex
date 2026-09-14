@@ -18,10 +18,11 @@ defmodule MingaEditor.Frontend.FrameTransaction do
     Opcodes.set_font_fallback(),
     Opcodes.register_font(),
     Opcodes.gui_config_state(),
-    Opcodes.clipboard_write()
+    Opcodes.clipboard_write(),
+    Opcodes.presentation_operation()
   ]
 
-  @retired_frame_body_opcodes [0x12, 0x13, 0x14, 0x1A, 0x1B, 0x1C]
+  @retired_frame_body_opcodes [0x12, 0x13, 0x14, 0x1A]
 
   @type frame_seq :: non_neg_integer()
   @type state :: :outside | {:inside, frame_seq()}

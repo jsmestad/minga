@@ -22,6 +22,7 @@ const (
 	OPWindowRefMiss           byte = 0x0C
 	OPApplicationQuitRequest  byte = 0x0D
 	OPApplicationQuitDecision byte = 0x0E
+	OPOperationNativeResult   byte = 0x0F
 	OPLogMessage              byte = 0x60
 
 	// Render
@@ -32,6 +33,8 @@ const (
 	OPSetWindowBg             byte = 0x17
 	OPSetLinkCursor           byte = 0x19
 	OPApplicationQuitResponse byte = 0x1A
+	OPPresentationTarget      byte = 0x1B
+	OPPresentationOperation   byte = 0x1C
 	OPProtocolError           byte = 0x18
 
 	// Config

@@ -3,10 +3,14 @@ defmodule MingaEditor.NativeIPC.Connection do
 
   alias Minga.Frontend.WaitRequestCompletion
   alias MingaEditor.NativeIPC.Identity
+  alias MingaEditor.NativeIPC.OperationReceipt
+  alias MingaEditor.NativeIPC.OperationReceipt.Target
+  alias MingaEditor.NativeIPC.Server
 
   @version 1
   @handshake_timeout 5_000
   @completion_ack_timeout 2_000
+  @maximum_operation_deadline_ms 30_000
 
   @spec serve(port(), Identity.t(), keyword()) :: :ok
   def serve(socket, identity, opts) do
@@ -140,7 +144,102 @@ defmodule MingaEditor.NativeIPC.Connection do
     end
   end
 
+  defp dispatch(
+         socket,
+         %{"version" => @version, "type" => "open_ready", "path" => path} = command,
+         identity,
+         opts
+       )
+       when is_binary(path) do
+    editor_mode? = Map.get(command, "editor", false) == true
+    deadline_ms = operation_deadline(command)
+    deadline_at_ms = System.monotonic_time(:millisecond) + deadline_ms
+
+    with {:ok, expanded} <- absolute_path(path),
+         :ok <- validate_wait_target(expanded),
+         {:ok, receipt_server} <- receipt_server(opts),
+         {:ok, receipt} <-
+           Server.admit_operation(receipt_server, expanded, Target.token_for_path(expanded)) do
+      :ok = send_receipt(socket, "accepted", receipt)
+      apply_receipt_open(expanded, editor_mode?, receipt, receipt_server, opts)
+      send_current_receipt(socket, receipt_server, receipt.operation_id)
+
+      await_operation_terminal(
+        socket,
+        identity,
+        receipt.operation_id,
+        remaining_deadline_ms(deadline_at_ms),
+        receipt_server
+      )
+    else
+      {:error, reason} -> send_error(socket, reason)
+    end
+  end
+
+  defp dispatch(
+         socket,
+         %{
+           "version" => @version,
+           "type" => "operation_lookup",
+           "app_instance_id" => app_id,
+           "core_instance_id" => core_id,
+           "operation_id" => operation_id
+         },
+         _identity,
+         opts
+       ) do
+    with {:ok, receipt_server} <- receipt_server(opts),
+         {:ok, parsed_id} <- parse_operation_id(operation_id),
+         {:ok, receipt} <- Server.lookup_operation(receipt_server, app_id, core_id, parsed_id) do
+      send_receipt(socket, "receipt", receipt)
+    else
+      {:error, reason} -> send_operation_observation(socket, "lookup", reason)
+    end
+  end
+
+  defp dispatch(
+         socket,
+         %{
+           "version" => @version,
+           "type" => "operation_wait",
+           "app_instance_id" => app_id,
+           "core_instance_id" => core_id,
+           "operation_id" => operation_id
+         } = command,
+         _identity,
+         opts
+       ) do
+    with {:ok, receipt_server} <- receipt_server(opts),
+         {:ok, parsed_id} <- parse_operation_id(operation_id) do
+      await_operation(
+        socket,
+        app_id,
+        core_id,
+        parsed_id,
+        operation_deadline(command),
+        receipt_server
+      )
+    else
+      {:error, reason} -> send_operation_observation(socket, "wait", reason)
+    end
+  end
+
   defp dispatch(socket, _command, _identity, _opts), do: send_error(socket, :unsupported_command)
+
+  @spec send_current_receipt(port(), GenServer.server(), pos_integer()) :: :ok
+  defp send_current_receipt(socket, receipt_server, operation_id) do
+    identity = Server.identity(receipt_server)
+
+    case Server.lookup_operation(
+           receipt_server,
+           identity.app_instance_id,
+           identity.core_instance_id,
+           operation_id
+         ) do
+      {:ok, current} -> send_receipt(socket, "progress", current)
+      {:error, _reason} -> :ok
+    end
+  end
 
   @spec monitor_wait_tracker(keyword()) :: {:ok, pid(), reference()} | {:error, atom()}
   defp monitor_wait_tracker(opts) do
@@ -184,6 +283,164 @@ defmodule MingaEditor.NativeIPC.Connection do
   catch
     :exit, reason -> {:error, {:editor_unavailable, reason}}
   end
+
+  @spec apply_receipt_open(
+          String.t(),
+          boolean(),
+          OperationReceipt.t(),
+          GenServer.server(),
+          keyword()
+        ) :: :ok
+  defp apply_receipt_open(path, editor_mode?, receipt, receipt_server, opts) do
+    editor = Keyword.get(opts, :editor_server, MingaEditor)
+    open_receipt = Keyword.get(opts, :open_receipt, &MingaEditor.open_native_receipt/5)
+
+    case open_receipt.(path, editor_mode?, receipt, receipt_server, editor) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Server.finish_operation(
+          receipt_server,
+          receipt.operation_id,
+          :rejected,
+          nil,
+          nil,
+          inspect(reason)
+        )
+    end
+  catch
+    :exit, reason ->
+      Server.finish_operation(
+        receipt_server,
+        receipt.operation_id,
+        :indeterminate,
+        nil,
+        nil,
+        Exception.format_exit(reason)
+      )
+  end
+
+  @spec await_operation_terminal(
+          port(),
+          Identity.t(),
+          pos_integer(),
+          pos_integer(),
+          GenServer.server()
+        ) :: :ok
+  defp await_operation_terminal(socket, identity, operation_id, deadline_ms, receipt_server) do
+    await_operation(
+      socket,
+      identity.app_instance_id,
+      identity.core_instance_id,
+      operation_id,
+      deadline_ms,
+      receipt_server
+    )
+  end
+
+  @spec await_operation(
+          port(),
+          String.t(),
+          String.t(),
+          pos_integer(),
+          pos_integer(),
+          GenServer.server()
+        ) :: :ok
+  defp await_operation(socket, app_id, core_id, operation_id, deadline_ms, receipt_server) do
+    ref = make_ref()
+
+    case Server.await_operation(receipt_server, app_id, core_id, operation_id, self(), ref) do
+      {:ready, receipt} -> send_receipt(socket, "completed", receipt)
+      :waiting -> receive_operation_wait(socket, receipt_server, ref, operation_id, deadline_ms)
+      {:error, reason} -> send_operation_observation(socket, "wait", reason)
+    end
+  end
+
+  @spec receive_operation_wait(
+          port(),
+          GenServer.server(),
+          reference(),
+          pos_integer(),
+          pos_integer()
+        ) :: :ok
+  defp receive_operation_wait(socket, receipt_server, ref, operation_id, deadline_ms) do
+    :ok = :inet.setopts(socket, active: :once)
+
+    receive do
+      {:operation_receipt, ^ref, receipt} ->
+        send_receipt(socket, "completed", receipt)
+
+      {:tcp, ^socket, payload} ->
+        cancel_operation_wait(receipt_server, ref)
+        receive_wait_control(socket, payload, operation_id)
+
+      {:tcp_closed, ^socket} ->
+        cancel_operation_wait(receipt_server, ref)
+
+      {:tcp_error, ^socket, _reason} ->
+        cancel_operation_wait(receipt_server, ref)
+    after
+      deadline_ms ->
+        cancel_operation_wait(receipt_server, ref)
+        send_operation_observation(socket, "wait", :timeout)
+    end
+  end
+
+  @spec receive_wait_control(port(), binary(), pos_integer()) :: :ok
+  defp receive_wait_control(socket, payload, operation_id) do
+    case decode_object(payload) do
+      {:ok, %{"version" => @version, "type" => "cancel_wait", "operation_id" => id}} ->
+        case parse_operation_id(id) do
+          {:ok, ^operation_id} -> send_operation_observation(socket, "wait", :cancelled)
+          _other -> send_error(socket, :invalid_cancel_identity)
+        end
+
+      _other ->
+        send_error(socket, :invalid_wait_control)
+    end
+  end
+
+  @spec cancel_operation_wait(GenServer.server(), reference()) :: :ok
+  defp cancel_operation_wait(receipt_server, ref) do
+    Server.cancel_operation_wait(receipt_server, ref)
+  catch
+    :exit, _reason -> :ok
+  end
+
+  @spec receipt_server(keyword()) ::
+          {:ok, GenServer.server()} | {:error, :receipt_store_unavailable}
+  defp receipt_server(opts) do
+    case Keyword.get(opts, :receipt_server) do
+      nil -> {:error, :receipt_store_unavailable}
+      server -> {:ok, server}
+    end
+  end
+
+  @spec operation_deadline(map()) :: pos_integer()
+  defp operation_deadline(command) do
+    case Map.get(command, "deadline_ms", 15_000) do
+      value when is_integer(value) and value > 0 -> min(value, @maximum_operation_deadline_ms)
+      _other -> 15_000
+    end
+  end
+
+  @spec remaining_deadline_ms(integer()) :: pos_integer()
+  defp remaining_deadline_ms(deadline_at_ms) do
+    max(deadline_at_ms - System.monotonic_time(:millisecond), 1)
+  end
+
+  @spec parse_operation_id(term()) :: {:ok, pos_integer()} | {:error, :invalid_operation_id}
+  defp parse_operation_id(value) when is_integer(value) and value > 0, do: {:ok, value}
+
+  defp parse_operation_id(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, ""} when parsed > 0 -> {:ok, parsed}
+      _other -> {:error, :invalid_operation_id}
+    end
+  end
+
+  defp parse_operation_id(_value), do: {:error, :invalid_operation_id}
 
   @spec absolute_path(String.t()) :: {:ok, String.t()} | {:error, atom()}
   defp absolute_path(path) do
@@ -314,6 +571,25 @@ defmodule MingaEditor.NativeIPC.Connection do
       version: @version,
       type: "error",
       message: error_message(reason)
+    })
+  end
+
+  @spec send_receipt(port(), String.t(), OperationReceipt.t()) :: :ok
+  defp send_receipt(socket, type, receipt) do
+    send_json(socket, %{
+      version: @version,
+      type: type,
+      receipt: OperationReceipt.to_map(receipt)
+    })
+  end
+
+  @spec send_operation_observation(port(), String.t(), atom()) :: :ok
+  defp send_operation_observation(socket, observation, reason) do
+    send_json(socket, %{
+      version: @version,
+      type: "operation_result",
+      observation: observation,
+      result: Atom.to_string(reason)
     })
   end
 

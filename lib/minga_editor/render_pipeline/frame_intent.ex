@@ -32,7 +32,8 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
     :force_keyframe?,
     :line_spacing,
     :cursor_animate,
-    :gui_config_state
+    :gui_config_state,
+    :presentation_target
   ]
 
   @enforce_keys @fields
@@ -64,7 +65,8 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
           force_keyframe?: boolean(),
           line_spacing: number() | nil,
           cursor_animate: boolean() | nil,
-          gui_config_state: term()
+          gui_config_state: term(),
+          presentation_target: MingaEditor.PresentationTarget.t() | nil
         }
 
   @spec from_editor_state(EditorState.t()) :: t()
@@ -96,7 +98,8 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
       line_spacing:
         Minga.Config.Options.get(state.interaction.options_server, :line_spacing) || 1.0,
       cursor_animate: Minga.Config.Options.get(state.interaction.options_server, :cursor_animate),
-      gui_config_state: state.appearance.gui_config_state
+      gui_config_state: state.appearance.gui_config_state,
+      presentation_target: MingaEditor.PresentationTarget.from_editor_state(state)
     }
   end
 
