@@ -155,9 +155,8 @@ final class EditorNSView: MTKView {
         let rows: UInt16
     }
 
-    /// First responder guard that prevents SwiftUI from stealing keyboard focus.
-    /// Installed when the view moves to a window.
-    private var firstResponderGuard: FirstResponderGuard?
+    /// View-owned AppKit focus and overlay key-routing policy.
+    private(set) lazy var focusPolicy = EditorFocusPolicy(editorView: self)
 
     /// Window currently registered for key/resign notifications.
     private weak var observedWindow: NSWindow?
@@ -167,13 +166,7 @@ final class EditorNSView: MTKView {
     /// by the NSView layer. A local key event monitor forwards keyboard
     /// events to keyDown since opacity(0) disconnects normal event
     /// delivery from the SwiftUI hosting layer.
-    public private(set) var agentChatVisible: Bool = false
-
-    /// Local event monitor that forwards keyboard events to keyDown
-    /// when the agent chat overlay is visible. Installed/removed by
-    /// setAgentChatVisible. This is Apple's documented API for event
-    /// interception when NSWindow subclassing isn't available.
-    private var agentKeyMonitor: Any?
+    var agentChatVisible: Bool { focusPolicy.agentOverlayVisible }
 
     /// Border overlay shown during file drag-and-drop hover.
     private var dropHighlightLayer: CAShapeLayer?
@@ -290,8 +283,7 @@ final class EditorNSView: MTKView {
         dividerDragState = .none
         setDividerCursorState(.none)
         removeWindowObservers()
-        removeAgentKeyMonitor()
-        firstResponderGuard = nil
+        focusPolicy.detach()
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -785,11 +777,11 @@ final class EditorNSView: MTKView {
 
         measureTrafficLightPosition(in: window)
         installWindowObserversIfNeeded(for: window)
+        focusPolicy.attach(to: window)
 
         registerForDraggedTypes([.fileURL])
 
         updateTrackingArea()
-        claimFirstResponder()
         observeScrollerStyle()
         observeAccessibilityChanges()
         resetCursorBlink()
@@ -903,7 +895,6 @@ final class EditorNSView: MTKView {
         )
         onFullScreenChanged?(window.styleMask.contains(.fullScreen))
 
-        firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
     }
 
     /// Removes key-window notifications from the previously observed window.
@@ -943,27 +934,13 @@ final class EditorNSView: MTKView {
         self.observedWindow = nil
     }
 
-    /// Claim first responder after a short delay so SwiftUI's layout pass
-    /// completes first. Without the async dispatch, SwiftUI can immediately
-    /// reassign first responder to its own focus system.
-    func claimFirstResponder() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.reclaimFirstResponderIfNeeded(respectingTextInput: true)
-        }
-    }
-
-    /// Reclaims first responder immediately when pointer interaction returns to the editor.
-    func reclaimFirstResponderIfNeeded(respectingTextInput: Bool = false) {
-        guard let window else { return }
-        if respectingTextInput, window.firstResponder is NSText { return }
-        if window.firstResponder !== self {
-            window.makeFirstResponder(self)
-        }
+    /// Notifies the AppKit focus owner that SwiftUI updated the hosted editor view.
+    func swiftUIUpdateDidOccur() {
+        focusPolicy.swiftUIUpdateDidOccur()
     }
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
-        claimFirstResponder()
+        focusPolicy.windowDidBecomeKey()
         resetCursorBlink()
     }
 
@@ -1408,66 +1385,7 @@ final class EditorNSView: MTKView {
     /// keyboard events to keyDown. SwiftUI text selection still works
     /// because the monitor yields to NSText field editors.
     func setAgentChatVisible(_ visible: Bool) {
-        agentChatVisible = visible
-
-        if visible {
-            installAgentKeyMonitor()
-        } else {
-            removeAgentKeyMonitor()
-            claimFirstResponder()
-        }
-    }
-
-    /// Installs a local key event monitor that forwards keyboard events
-    /// to EditorNSView when the agent chat overlay is visible. This is
-    /// needed because SwiftUI's opacity(0) on the NSViewRepresentable
-    /// parent disconnects the underlying NSView from event delivery.
-    ///
-    /// Uses Apple's NSEvent.addLocalMonitorForEvents API, the documented
-    /// approach for event interception when NSWindow subclassing isn't
-    /// available. Chosen over NSPanel child windows (coordinate coupling,
-    /// focus model mismatch, rendering seam on resize) and NSWindow
-    /// sendEvent override (not possible with SwiftUI App lifecycle).
-    ///
-    /// Monitors keyDown, keyUp, and flagsChanged:
-    /// - keyDown: all typing, Cmd+key combos (fires before responder chain,
-    ///   so it catches performKeyEquivalent events too)
-    /// - keyUp: needed for space leader chord cleanup (spacePending flag)
-    /// - flagsChanged: bare modifier presses (no-op today, future-proofing)
-    /// - Key repeat events arrive as keyDown with isARepeat=true and are
-    ///   handled correctly by the existing keyDown space leader code path
-    private func installAgentKeyMonitor() {
-        guard agentKeyMonitor == nil else { return }
-        agentKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
-            guard let self, self.agentChatVisible else { return event }
-            if event.type == .keyDown, Self.shouldYieldSystemCommandShortcut(event) {
-                return event
-            }
-            // Yield to active text field editors (SwiftUI text selection).
-            // The FirstResponderGuard also yields to NSText, but the
-            // monitor fires before the responder chain so we check here too.
-            if let window = self.window, window.firstResponder is NSText {
-                return event
-            }
-            switch event.type {
-            case .keyDown:
-                self.keyDown(with: event)
-            case .keyUp:
-                self.keyUp(with: event)
-            case .flagsChanged:
-                self.flagsChanged(with: event)
-            default:
-                return event
-            }
-            return nil // consumed
-        }
-    }
-
-    private func removeAgentKeyMonitor() {
-        if let monitor = agentKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            agentKeyMonitor = nil
-        }
+        focusPolicy.agentOverlayVisibilityDidChange(visible)
     }
 
     // MARK: - Keyboard
@@ -1477,49 +1395,7 @@ final class EditorNSView: MTKView {
     /// the appropriate command to the BEAM, so the end result is the same
     /// but the menu item highlights visually.
     static func shouldYieldSystemCommandShortcut(_ event: NSEvent) -> Bool {
-        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-
-        // Bare Cmd+key: system shortcuts and menu bar items
-        if mods == .command {
-            switch event.charactersIgnoringModifiers {
-            case "q", "h", "m":
-                return true
-            case "n", "o", "s", "w":
-                return true
-            case "z", "x", "c", "v", "a", "f":
-                return true
-            case "b", ",":
-                return true
-            case "=", "+", "-", "0":
-                return true
-            default:
-                return false
-            }
-        }
-
-        // Cmd+Shift variants: Redo (Cmd+Shift+Z), font size (Cmd+Shift+=)
-        if mods == [.command, .shift] {
-            switch event.charactersIgnoringModifiers {
-            case "z", "Z":
-                return true
-            case "=", "+":
-                return true
-            default:
-                return false
-            }
-        }
-
-        // Cmd+Ctrl+F: Toggle Full Screen
-        if mods == [.command, .control] {
-            switch event.charactersIgnoringModifiers {
-            case "f":
-                return true
-            default:
-                return false
-            }
-        }
-
-        return false
+        EditorFocusPolicy.shouldYieldSystemCommandShortcut(event)
     }
 
     /// Intercept key equivalents (Cmd+key, etc.) before AppKit/SwiftUI
@@ -1533,7 +1409,7 @@ final class EditorNSView: MTKView {
         // When a field editor (NSTextView) is active (e.g., workspace rename
         // TextField, or any SwiftUI text input), yield so the field editor
         // handles Cmd+A, Cmd+C, Cmd+Z, etc. through the normal responder chain.
-        if let window, window.firstResponder is NSText {
+        if focusPolicy.nativeTextEditingIsActive() {
             return false
         }
 
@@ -1769,7 +1645,7 @@ final class EditorNSView: MTKView {
         guard !inLiveResize else { return }
         consumeLeftGestureTail = false
         leftMousePressActive = true
-        reclaimFirstResponderIfNeeded()
+        focusPolicy.pointerReturnedToEditor()
 
         // Scroll indicator track: intercept clicks on the right edge.
         let point = convert(event.locationInWindow, from: nil)
@@ -1837,7 +1713,7 @@ final class EditorNSView: MTKView {
         guard !inLiveResize else { return }
         consumeRightGestureTail = false
         rightMousePressActive = true
-        reclaimFirstResponderIfNeeded()
+        focusPolicy.pointerReturnedToEditor()
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
@@ -1942,7 +1818,7 @@ final class EditorNSView: MTKView {
         guard !inLiveResize else { return }
         consumeMiddleGestureTail = false
         middleMousePressActive = true
-        reclaimFirstResponderIfNeeded()
+        focusPolicy.pointerReturnedToEditor()
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
                                modifiers: modifierBits(from: event.modifierFlags),
@@ -3699,7 +3575,7 @@ extension EditorNSView {
             encoder.sendOpenFile(path: url.path)
         }
 
-        claimFirstResponder()
+        focusPolicy.fileDropDidComplete()
         return true
     }
 

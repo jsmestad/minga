@@ -384,7 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.presentApplicationQuitFailure(message)
             },
             restoreFocus: { [weak self] in
-                self?.restoreEditorFocus()
+                self?.editorNSView?.focusPolicy.restoreAfterNativeModal()
             }
         )
         self.applicationQuitCoordinator = quitCoordinator
@@ -633,12 +633,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             alert.runModal()
         }
-    }
-
-    private func restoreEditorFocus() {
-        guard let editorNSView, let window = editorNSView.window else { return }
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(editorNSView)
     }
 
     /// Presents the recovery surface after the editor core exited and automatic
@@ -1014,7 +1008,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let finish: @MainActor (NSApplication.ModalResponse) -> Void = { [weak self, weak alert] _ in
             guard let self, let alert, self.inputRejectionAlert === alert else { return }
             self.inputRejectionAlert = nil
-            self.restoreEditorFocus()
+            self.editorNSView?.focusPolicy.restoreAfterNativeModal()
         }
         if let window = editorNSView?.window {
             alert.beginSheetModal(for: window, completionHandler: finish)

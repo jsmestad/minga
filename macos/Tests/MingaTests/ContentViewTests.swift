@@ -1101,4 +1101,65 @@ struct ContentViewTests {
         #expect(dispatcher.visibleEditorSnapshot == nil)
     }
 
+    @Test("SwiftUI editor updates preserve sidebar field-editor selection and IME composition")
+    func swiftUIUpdatePreservesNativeSidebarEditing() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: SpyEncoder())
+        let root = VStack {
+            Text(gui.tabBarState.tabs.first?.label ?? "no tab")
+            EditorView(editorNSView: editorView)
+        }
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let hostingView = NSHostingView(rootView: root)
+        hostingView.frame = frame
+        let sidebarField = NSTextField(frame: NSRect(x: 12, y: 20, width: 180, height: 24))
+        let container = NSView(frame: frame)
+        container.addSubview(hostingView)
+        container.addSubview(sidebarField)
+        let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+
+        sidebarField.stringValue = "compose here"
+        #expect(window.makeFirstResponder(sidebarField))
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+        fieldEditor.setSelectedRange(NSRange(location: 2, length: 4))
+        fieldEditor.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        let selectedRange = fieldEditor.selectedRange()
+        let markedRange = fieldEditor.markedRange()
+
+        gui.tabBarState.update(activeIndex: 0, entries: [Wire.TabEntry(
+            id: 1,
+            groupId: 0,
+            isActive: true,
+            isDirty: false,
+            isAgent: false,
+            hasAttention: false,
+            agentStatus: 0,
+            isPinned: false,
+            tintColorRGB: 0,
+            icon: "",
+            label: "updated.ex"
+        )])
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+        await Task.yield()
+
+        #expect(window.firstResponder === fieldEditor)
+        #expect(fieldEditor.hasMarkedText())
+        #expect(fieldEditor.selectedRange() == selectedRange)
+        #expect(fieldEditor.markedRange() == markedRange)
+    }
+
 }

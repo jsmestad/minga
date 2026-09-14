@@ -45,23 +45,41 @@ struct KeyboardInputTests {
                             coreTextRenderer: ctRenderer, fontManager: fm)
     }
 
+    @MainActor
+    private func makeWindowedView(spy: SpyEncoder) -> (view: EditorNSView, window: NSWindow, textField: NSTextField)? {
+        guard let view = makeView(spy: spy) else { return nil }
+        view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        let container = NSView(frame: view.frame)
+        let textField = NSTextField(frame: NSRect(x: 16, y: 16, width: 180, height: 24))
+        container.addSubview(view)
+        container.addSubview(textField)
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        return (view, window, textField)
+    }
+
     /// Creates a key event with the given keyCode and modifiers.
     private func keyEvent(
+        type: NSEvent.EventType = .keyDown,
         keyCode: UInt16,
         modifiers: NSEvent.ModifierFlags = [],
         characters: String = "",
-        charactersIgnoringModifiers: String = ""
+        charactersIgnoringModifiers: String = "",
+        isRepeat: Bool = false,
+        windowNumber: Int = 0,
+        location: NSPoint = .zero
     ) -> NSEvent? {
         NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
+            with: type,
+            location: location,
             modifierFlags: modifiers,
             timestamp: 0,
-            windowNumber: 0,
+            windowNumber: windowNumber,
             context: nil,
             characters: characters,
             charactersIgnoringModifiers: charactersIgnoringModifiers,
-            isARepeat: false,
+            isARepeat: isRepeat,
             keyCode: keyCode
         )
     }
@@ -324,6 +342,49 @@ struct KeyboardInputTests {
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(quit))
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(paste))
         #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))
+    }
+
+    @Test("agent overlay routes key down, repeat, key up, and modifiers exactly once while yielding native input and system shortcuts")
+    @MainActor func agentOverlayRoutesCompleteKeySequences() async throws {
+        let spy = SpyEncoder()
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
+        view.setAgentChatVisible(true)
+        #expect(window.makeFirstResponder(view))
+
+        let escape = try #require(keyEvent(keyCode: 53, windowNumber: window.windowNumber))
+        let repeatEscape = try #require(keyEvent(keyCode: 53, isRepeat: true, windowNumber: window.windowNumber))
+        let spaceDown = try #require(keyEvent(keyCode: 49, characters: " ", charactersIgnoringModifiers: " ", windowNumber: window.windowNumber))
+        let spaceUp = try #require(keyEvent(type: .keyUp, keyCode: 49, characters: " ", charactersIgnoringModifiers: " ", windowNumber: window.windowNumber))
+        let commandChanged = try #require(keyEvent(type: .flagsChanged, keyCode: 55, modifiers: .command, windowNumber: window.windowNumber, location: NSPoint(x: 40, y: 40)))
+        let quit = try #require(keyEvent(keyCode: 12, modifiers: .command, characters: "q", charactersIgnoringModifiers: "q", windowNumber: window.windowNumber))
+
+        #expect(view.focusPolicy.routeAgentOverlayEvent(escape) == nil)
+        #expect(view.focusPolicy.routeAgentOverlayEvent(repeatEscape) == nil)
+        #expect(view.focusPolicy.routeAgentOverlayEvent(spaceDown) == nil)
+        #expect(view.focusPolicy.routeAgentOverlayEvent(spaceUp) == nil)
+        #expect(view.focusPolicy.routeAgentOverlayEvent(commandChanged) == nil)
+        #expect(view.focusPolicy.routeAgentOverlayEvent(quit) === quit)
+        #expect(spy.keyPressCalls.map(\.codepoint) == [27, 27, 0x20])
+        #expect(spy.mouseEventCalls.count == 1)
+
+        view.setAgentChatVisible(false)
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === view)
+
+        view.setAgentChatVisible(true)
+        #expect(window.makeFirstResponder(textField))
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+        let callsBeforeNativeInput = spy.keyPressCalls.count
+        #expect(view.focusPolicy.routeAgentOverlayEvent(escape) === escape)
+        #expect(window.firstResponder === fieldEditor)
+        #expect(spy.keyPressCalls.count == callsBeforeNativeInput)
+
+        view.setAgentChatVisible(false)
+        await Task.yield()
+        await Task.yield()
+        #expect(view.focusPolicy.routeAgentOverlayEvent(escape) === escape)
+        #expect(window.firstResponder === fieldEditor)
     }
 
     @Test("Text input modes treat space as literal")
