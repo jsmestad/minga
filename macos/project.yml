@@ -48,6 +48,8 @@ targets:
         type: file
       - path: Sources/Protocol/FrontendExtensionRuntimeMessage.swift
         type: file
+      - path: Sources/Protocol/OperationReceiptTypes.swift
+        type: file
     settings:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
@@ -141,6 +143,7 @@ targets:
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          - "Protocol/OperationReceiptTypes.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/InputEncoder.swift"
           - "Protocol/PortLogger.swift"

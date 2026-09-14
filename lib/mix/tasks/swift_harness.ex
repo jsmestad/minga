@@ -26,6 +26,7 @@ defmodule Mix.Tasks.Swift.Harness do
     "macos/Sources/Protocol/StatusBarUpdate.swift",
     "macos/Sources/Protocol/GUIColorSlots.swift",
     "macos/Sources/Protocol/FrameResourcePolicy.swift",
+    "macos/Sources/Protocol/OperationReceiptTypes.swift",
     "macos/Sources/Renderer/WindowContent.swift",
     "macos/Sources/Renderer/ResidentRowStore.swift",
     "macos/Sources/Renderer/ResidentRenderPreparation.swift",

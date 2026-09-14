@@ -2580,6 +2580,26 @@ struct CommandDispatcherStagingTests {
         #expect(readyCount == 1)
     }
 
+    @Test("a delta frame without a presentation target clears the prior file identity")
+    @MainActor func targetlessDeltaClearsPresentationTarget() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let target = PresentationTarget(
+            token: 41, windowID: 2, applicationRevision: 7, focusRequired: true
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.presentationTarget(target))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.metadata.presentationTarget == target)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.setCursorShape(.beam))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(dispatcher.committedEditorSnapshot?.metadata.presentationTarget == nil)
+    }
+
     @Test("focused direct owner observes one committed update")
     @MainActor func focusedObservationIsAtomic() throws {
         let (dispatcher, gui) = makeDispatcher()
@@ -3525,5 +3545,58 @@ struct CommandDispatcherPresentationSampleTests {
 
         #expect(dispatcher.takePresentationInputSeq() == 0)
         #expect(dispatcher.latency.snapshot().discardCounts[.occluded] == 1)
+    }
+
+    @Test("transient occlusion retains the committed frame for an event-driven retry")
+    @MainActor func occlusionDefersPendingPresentation() throws {
+        let dispatcher = makeDispatcher()
+        let seq = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: seq)
+
+        let pendingFrame = dispatcher.pendingPresentationFrame()
+        dispatcher.deferOccludedPresentation()
+
+        #expect(dispatcher.takePresentationInputSeq() == 0)
+        #expect(dispatcher.latency.snapshot().discardCounts[.occluded] == 1)
+        #expect(dispatcher.pendingPresentationFrame() == pendingFrame)
+    }
+
+    @Test("occlusion preserves exact operation correlation until retry or supersession")
+    @MainActor func occlusionPreservesOperationCorrelation() throws {
+        let dispatcher = makeDispatcher()
+        var results: [NativeOperationResult] = []
+        dispatcher.onOperationNativeResult = { results.append($0) }
+        let firstOperation = PresentationOperation(
+            operationID: 1, targetToken: 11, windowID: 2, applicationRevision: 8, focusRequired: true
+        )
+        let firstTarget = PresentationTarget(
+            token: 11, windowID: 2, applicationRevision: 8, focusRequired: true
+        )
+        dispatcher.operationReadiness.register(firstOperation)
+        dispatcher.operationReadiness.observeCommitted(target: firstTarget, generation: 3, frameSeq: 5)
+
+        dispatcher.deferOccludedPresentation()
+        #expect(results.isEmpty)
+
+        dispatcher.operationReadiness.observePresented(
+            target: firstTarget, generation: 3, frameSeq: 5, focusReady: true
+        )
+        #expect(results.count == 1)
+        #expect(results.first?.operationID == 1)
+        #expect(results.first?.outcome == .ready)
+
+        let secondOperation = PresentationOperation(
+            operationID: 2, targetToken: 12, windowID: 2, applicationRevision: 9, focusRequired: true
+        )
+        dispatcher.operationReadiness.register(secondOperation)
+        dispatcher.operationReadiness.observeCommitted(
+            target: PresentationTarget(
+                token: 13, windowID: 2, applicationRevision: 10, focusRequired: true
+            ),
+            generation: 3,
+            frameSeq: 6
+        )
+        #expect(results.last?.operationID == 2)
+        #expect(results.last?.outcome == .superseded)
     }
 }

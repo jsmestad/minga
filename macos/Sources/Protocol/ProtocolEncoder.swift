@@ -287,6 +287,29 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    func sendOperationNativeResult(_ result: NativeOperationResult) {
+        var buf = Data(count: 57)
+        buf[0] = OP_OPERATION_NATIVE_RESULT
+        writeU64(&buf, 1, result.operationID)
+        writeU64(&buf, 9, result.targetToken)
+        writeU32(&buf, 17, result.evidence.generation)
+        writeU32(&buf, 21, result.evidence.frameSeq)
+        writeU16(&buf, 25, result.evidence.windowID)
+        buf[27] = result.outcome.rawValue
+        buf[28] = result.evidence.focusReady ? 1 : 0
+        buf[29] = result.evidence.boundary.rawValue
+        writeU32(&buf, 30, result.evidence.applicationRevision)
+        if let lastVisible = result.lastVisible {
+            writeU64(&buf, 34, lastVisible.targetToken)
+            writeU32(&buf, 42, lastVisible.generation)
+            writeU32(&buf, 46, lastVisible.frameSeq)
+            writeU16(&buf, 50, lastVisible.windowID)
+            buf[52] = lastVisible.focusReady ? 1 : 0
+            writeU32(&buf, 53, lastVisible.applicationRevision)
+        }
+        writeFrame(buf)
+    }
+
     func sendFrameRejected(
         generation: UInt32,
         frameSeq: UInt32,
@@ -1542,6 +1565,17 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[offset + 1] = UInt8((value >> 16) & 0xFF)
         buf[offset + 2] = UInt8((value >> 8) & 0xFF)
         buf[offset + 3] = UInt8(value & 0xFF)
+    }
+
+    private func writeU64(_ buf: inout Data, _ offset: Int, _ value: UInt64) {
+        buf[offset] = UInt8((value >> 56) & 0xFF)
+        buf[offset + 1] = UInt8((value >> 48) & 0xFF)
+        buf[offset + 2] = UInt8((value >> 40) & 0xFF)
+        buf[offset + 3] = UInt8((value >> 32) & 0xFF)
+        buf[offset + 4] = UInt8((value >> 24) & 0xFF)
+        buf[offset + 5] = UInt8((value >> 16) & 0xFF)
+        buf[offset + 6] = UInt8((value >> 8) & 0xFF)
+        buf[offset + 7] = UInt8(value & 0xFF)
     }
 
     private func writeI16(_ buf: inout Data, _ offset: Int, _ value: Int16) {

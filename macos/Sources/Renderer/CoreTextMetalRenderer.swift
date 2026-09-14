@@ -133,6 +133,8 @@ final class CoreTextMetalRenderer {
     private(set) var lastNativePresentationFailure: NativePresentationFailure?
     /// Domain-frame presentation telemetry owned by the GUI state.
     weak var presentationMetrics: GUIFramePresentationMetrics?
+    /// Correctness callback for an exact committed frame that failed before the Metal completion boundary.
+    var onNativePresentationFailure: ((GUICommittedFrame, NativeOperationResult.Outcome) -> Void)?
     /// Generation of the last GPU-completed presentation whose candidate resources were promoted.
     private(set) var lastCompletedPresentationGeneration: UInt64 = 0
     private let bgPipeline: MTLRenderPipelineState
@@ -1778,6 +1780,9 @@ final class CoreTextMetalRenderer {
             presentationMetrics?.discard(
                 domain: .editor, outcome: outcome, frame: presentationFrame
             )
+            let receiptOutcome: NativeOperationResult.Outcome =
+                recorded.reason == .unavailable ? .unavailable : .presentationFailed
+            onNativePresentationFailure?(presentationFrame, receiptOutcome)
         }
     }
 

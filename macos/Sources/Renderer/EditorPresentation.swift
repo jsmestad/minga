@@ -51,6 +51,8 @@ struct EditorSnapshotMetadata: Sendable {
     var splitBorderColor: UInt32 = 0
     var verticalSeparators: [Wire.VerticalSeparator] = []
     var horizontalSeparators: [Wire.HorizontalSeparator] = []
+    /// Core-scoped identity and semantic revision for the exact active editor target in this frame.
+    var presentationTarget: PresentationTarget?
 
     static let empty = EditorSnapshotMetadata()
 }

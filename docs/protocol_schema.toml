@@ -39,7 +39,9 @@ version = "2.0.0"
 # admitted BEAM operation token and carries that token on gui_file_tree v3 rows.
 # protocol_version 18 adds opaque picker item/action activation identities tied
 # to the exact BEAM-owned picker snapshot rendered by a native frontend.
-protocol_version = 18
+# protocol_version 19 adds correlated local-operation presentation targets,
+# expectations, and native readiness outcomes (#3324).
+protocol_version = 19
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -152,6 +154,16 @@ value = 0x0E
 direction = "frontend_to_beam"
 framing = "fixed:6"
 
+# Native readiness result for one core-scoped local operation. The fixed payload
+# identifies both the attempted target/frame/revision and the last-good visible
+# target/frame/revision.
+[[opcodes]]
+category = "input"
+name = "operation_native_result"
+value = 0x0F
+direction = "frontend_to_beam"
+framing = "fixed:57"
+
 [[opcodes]]
 category = "input"
 name = "log_message"
@@ -251,6 +263,27 @@ name = "application_quit_response"
 value = 0x1A
 direction = "beam_to_frontend"
 framing = "len16"
+
+# Frame-scoped identity of the BEAM semantic target represented by the editor
+# snapshot. The token is opaque and core-local. fixed:16 = opcode +
+# target_token(u64) + window_id(u16) + application_revision(u32) + focus_required(u8).
+[[opcodes]]
+category = "render"
+name = "presentation_target"
+value = 0x1B
+direction = "beam_to_frontend"
+framing = "fixed:16"
+
+# Out-of-band registration of one admitted local operation. It may complete as
+# a verified no-op against the last visible snapshot or wait for a later frame
+# carrying the same presentation target. fixed:24 = opcode + operation_id(u64)
+# + target_token(u64) + window_id(u16) + application_revision(u32) + postcondition(u8).
+[[opcodes]]
+category = "render"
+name = "presentation_operation"
+value = 0x1C
+direction = "beam_to_frontend"
+framing = "fixed:24"
 
 # protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
 # a frontend's handshake protocol_version does not match the BEAM's, carrying a

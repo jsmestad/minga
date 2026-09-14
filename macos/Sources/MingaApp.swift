@@ -356,6 +356,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         disp.fontManager = fm
         disp.replaceConnection(with: connectionID)
+        disp.onOperationNativeResult = { [weak self] result in
+            self?.encoder?.sendOperationNativeResult(result)
+        }
+        disp.requestPresentationFocus = { [weak self] in
+            self?.editorNSView?.focusPolicy.requestPresentationFocus() == true
+        }
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }

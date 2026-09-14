@@ -6,6 +6,7 @@ defmodule Minga.Frontend.NativeIPCTest do
 
   alias MingaEditor.NativeIPC.Endpoint
   alias MingaEditor.NativeIPC.Identity
+  alias MingaEditor.NativeIPC.Server
   alias MingaEditor.NativeIPC.Supervisor, as: IPCSupervisor
   alias Minga.Frontend.WaitRequests
 
@@ -43,6 +44,12 @@ defmodule Minga.Frontend.NativeIPCTest do
       :ok
     end
 
+    open_receipt = fn path, editor_mode?, receipt, receipt_server, _editor ->
+      {:ok, _applied} = Server.operation_applied(receipt_server, receipt.operation_id, 3, 7)
+      send(owner, {:receipt_opened, path, editor_mode?, receipt, receipt_server})
+      :ok
+    end
+
     euid = File.stat!(File.cwd!()).uid
     app_pid = System.pid() |> String.to_integer()
 
@@ -61,6 +68,7 @@ defmodule Minga.Frontend.NativeIPCTest do
          wait_tracker: tracker,
          open_wait: open_wait,
          open_request: open_request,
+         open_receipt: open_receipt,
          kill_checker: fn ^app_pid -> true end}
       )
 
@@ -346,6 +354,48 @@ defmodule Minga.Frontend.NativeIPCTest do
 
     assert :ok = Supervisor.stop(ctx.supervisor)
     assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
+  end
+
+  test "cancelling an operation wait reports cancellation and preserves the applied action",
+       ctx do
+    target = Path.join(ctx.runtime_parent, "cancelled-operation-wait.txt")
+    socket = connect(ctx.descriptor)
+    send_json(socket, hello(ctx.descriptor))
+
+    send_json(socket, %{
+      "version" => 1,
+      "type" => "open_ready",
+      "path" => target,
+      "deadline_ms" => 5_000
+    })
+
+    assert %{"type" => "accepted", "receipt" => accepted} = recv_json(socket)
+    assert_receive {:receipt_opened, ^target, false, receipt, server}, 1_000
+    assert accepted["operation_id"] == Integer.to_string(receipt.operation_id)
+    assert %{"type" => "progress", "receipt" => %{"phase" => "applied"}} = recv_json(socket)
+
+    send_json(socket, %{
+      "version" => 1,
+      "type" => "cancel_wait",
+      "operation_id" => Integer.to_string(receipt.operation_id)
+    })
+
+    assert %{
+             "type" => "operation_result",
+             "observation" => "wait",
+             "result" => "cancelled"
+           } = recv_json(socket)
+
+    assert {:ok, persisted} =
+             Server.lookup_operation(
+               server,
+               receipt.app_instance_id,
+               receipt.core_instance_id,
+               receipt.operation_id
+             )
+
+    assert persisted.phase == :applied
+    assert Server.operation_counts(server).waiters == 0
   end
 
   defp endpoint_base(ctx) do

@@ -20,7 +20,8 @@ extension GUIFrameImpact {
              .registerFont:
             return [.editor, .editorOverlay]
 
-        case .setCursorShape, .setLinkCursor, .guiGutterSeparator, .guiCursorline,
+        case .setCursorShape, .setLinkCursor, .presentationTarget,
+             .guiGutterSeparator, .guiCursorline,
              .guiGutter, .guiIndentGuides, .guiCursorAnimation,
              .guiSplitSeparators, .guiAgentTranscript:
             return .editor
@@ -44,7 +45,7 @@ extension GUIFrameImpact {
         case .guiBottomPanel, .guiExtensionPanel:
             return [.shell, .windowOverlay]
 
-        case .beginFrame, .commitFrame, .setTitle, .setWindowBg,
+        case .beginFrame, .commitFrame, .presentationOperation, .setTitle, .setWindowBg,
              .clipboardWrite, .guiConfigState:
             return []
 
@@ -421,7 +422,7 @@ struct PreparedFrameTransactionBuilder {
                 weight: resourceWeight, domain: .overlay
             )
 
-        case .setTitle, .setWindowBg, .guiGutterSeparator, .guiCursorline,
+        case .setTitle, .setWindowBg, .presentationTarget, .guiGutterSeparator, .guiCursorline,
              .guiLineSpacing, .guiCursorAnimation, .guiSplitSeparators,
              .guiStatusBar, .clipboardWrite:
             stageReplacing(
@@ -447,7 +448,7 @@ struct PreparedFrameTransactionBuilder {
                 weight: resourceWeight, domain: .chrome
             )
 
-        case .beginFrame, .commitFrame, .applicationQuitResponse:
+        case .beginFrame, .commitFrame, .presentationOperation, .applicationQuitResponse:
             break
         }
     }
@@ -600,6 +601,9 @@ struct PreparedFrameTransactionBuilder {
     /// while the cursor shape persists, matching the removed `FrameState` seeding.
     private func preparedMetadata() -> EditorSnapshotMetadata {
         var metadata = committedMetadata
+        // The BEAM emits a target only when this frame has one. Never inherit a
+        // file identity into an untitled or non-buffer delta frame.
+        metadata.presentationTarget = nil
         if baseFrameSeq == 0 {
             metadata.gutterCol = 0
             metadata.splitBorderColor = 0
@@ -620,6 +624,8 @@ struct PreparedFrameTransactionBuilder {
                 metadata.splitBorderColor = borderColor
                 metadata.verticalSeparators = verticals
                 metadata.horizontalSeparators = horizontals
+            case .presentationTarget(let target):
+                metadata.presentationTarget = target
             default:
                 break
             }
@@ -896,6 +902,8 @@ private extension RenderCommand {
         case .guiSidebars: 54
         case .guiEmptyState: 55
         case .applicationQuitResponse: 56
+        case .presentationTarget: 57
+        case .presentationOperation: 58
         }
     }
 }

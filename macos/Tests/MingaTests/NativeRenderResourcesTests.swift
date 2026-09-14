@@ -1193,12 +1193,14 @@ struct NativeRenderResourcesTests {
     @Test("nil late-acquired drawable failure is typed and leaves resources untouched")
     @MainActor func nilDrawableIsAtomic() {
         var reports: [NativePresentationFailure] = []
+        var receiptOutcomes: [NativeOperationResult.Outcome] = []
         var factories = nativeTestFactories()
         factories.observeCompletion = { _, completion in
             completion(true, Int(MTLCommandBufferStatus.completed.rawValue))
         }
         factories.reportFailure = { reports.append($0) }
         guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
+        renderer.onNativePresentationFailure = { _, outcome in receiptOutcomes.append(outcome) }
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         renderer.setupRenderers(fontManager: fontManager)
         let before = renderer.activeResourceSnapshot()
@@ -1206,12 +1208,14 @@ struct NativeRenderResourcesTests {
         renderer.render(
             frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
             drawableProvider: { nil }, viewportSize: CGSize(width: 64, height: 64),
-            contentScale: 1, presentationInputSeq: 305
+            contentScale: 1, presentationInputSeq: 305,
+            presentationFrame: GUICommittedFrame(generation: 2, frameSeq: 305)
         )
 
         #expect(reports.count == 1)
         #expect(reports.first?.phase == .drawable)
         #expect(reports.first?.frameSequence == 305)
+        #expect(receiptOutcomes == [.unavailable])
         #expect(renderer.activeResourceSnapshot() == before)
     }
 
