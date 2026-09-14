@@ -194,7 +194,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
           picker =
             Enum.reduce(1..19, picker_ui.picker, fn _n, acc -> PickerData.move_down(acc) end)
 
-          %{picker_ui | picker: picker}
+          MingaEditor.State.Picker.update_picker(picker_ui, picker)
         end)
 
       max_height = max(div(24 * 7, 10), 5)

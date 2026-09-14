@@ -1429,6 +1429,66 @@ struct BottomPanelViewTests {
     }
 }
 
+// MARK: - PickerOverlay
+
+@Suite("PickerOverlay semantic activation")
+struct PickerOverlayActivationTests {
+    @Test("a retained nonselected result reports its original offered identity")
+    @MainActor func retainedResultActivation() throws {
+        let spy = SpyEncoder()
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 2,
+            markedCount: 0, title: "Test", query: "", hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0, label: "First", description: "", annotation: "", matchPositions: [], activationID: 41),
+                Wire.PickerItem(iconColor: 0, flags: 0, label: "Second", description: "", annotation: "", matchPositions: [], activationID: 73),
+            ],
+            actionMenu: nil, activationGeneration: 99
+        )
+        let sut = PickerOverlay(state: state, encoder: spy).environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        let second = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Second" })
+
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Test", query: "third", hasPreview: false,
+            rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "Third", description: "", annotation: "", matchPositions: [], activationID: 5)],
+            actionMenu: nil, activationGeneration: 100
+        )
+        try second.tap()
+
+        #expect(spy.guiActions == [.pickerItemActivate(generation: 99, activationID: 73)])
+    }
+
+    @Test("a retained Actions entry reports its original offered identity")
+    @MainActor func retainedActionActivation() throws {
+        let spy = SpyEncoder()
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Test", query: "", hasPreview: false,
+            rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "File", description: "", annotation: "", matchPositions: [], activationID: 1)],
+            actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Delete"], activationIDs: [11, 27]),
+            activationGeneration: 101
+        )
+        let sut = PickerOverlay(state: state, encoder: spy).environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        let delete = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Delete" })
+
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Test", query: "", hasPreview: false,
+            rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "File", description: "", annotation: "", matchPositions: [], activationID: 2)],
+            actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Delete"], activationIDs: [12, 28]),
+            activationGeneration: 102
+        )
+        try delete.tap()
+
+        #expect(spy.guiActions == [.pickerActionActivate(generation: 101, activationID: 27)])
+    }
+}
+
 // MARK: - ViewInspector query helper
 
 /// Namespace for ViewInspector query types.

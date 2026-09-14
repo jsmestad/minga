@@ -16,6 +16,7 @@ defmodule MingaEditor.Input.Picker do
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.UI.Picker, as: PickerData
   alias MingaEditor.UI.Picker.Source
 
@@ -78,11 +79,11 @@ defmodule MingaEditor.Input.Picker do
     case button do
       :wheel_down ->
         new_picker = PickerData.move_down(picker)
-        {:handled, PickerUI.update_picker(state, &%{&1 | picker: new_picker})}
+        {:handled, PickerUI.update_picker(state, &PickerState.update_picker(&1, new_picker))}
 
       :wheel_up ->
         new_picker = PickerData.move_up(picker)
-        {:handled, PickerUI.update_picker(state, &%{&1 | picker: new_picker})}
+        {:handled, PickerUI.update_picker(state, &PickerState.update_picker(&1, new_picker))}
 
       :left ->
         {:handled, handle_picker_left_click(state, node, picker, source, row)}

@@ -1453,7 +1453,8 @@ struct GUIFrameSwiftUIInvalidationTests {
             modePrefix: "",
             loadStatus: .ready,
             queryGeneration: 0,
-            acknowledgedQueryEditSeq: 0
+            acknowledgedQueryEditSeq: 0,
+            activationGeneration: 0
         )
     }
 

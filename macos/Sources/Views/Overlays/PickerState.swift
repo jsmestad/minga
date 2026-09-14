@@ -7,9 +7,22 @@
 import SwiftUI
 import MingaProtocol
 
+public struct PickerActivationIdentity: Equatable, Sendable {
+    public init(generation: UInt32, activationID: UInt32) {
+        self.generation = generation
+        self.activationID = activationID
+    }
+
+    public let generation: UInt32
+    public let activationID: UInt32
+
+    public var isAvailable: Bool { generation != 0 && activationID != 0 }
+}
+
 public struct PickerItem: Identifiable {
-    public init(id: Int, iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isTwoLine: Bool, isMarked: Bool) {
+    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isTwoLine: Bool, isMarked: Bool) {
         self.id = id
+        self.activation = activation
         self.iconColor = iconColor
         self.label = label
         self.description = description
@@ -19,6 +32,7 @@ public struct PickerItem: Identifiable {
         self.isMarked = isMarked
     }
     public let id: Int
+    public let activation: PickerActivationIdentity
     public let iconColor: UInt32
     public let label: String
     public let description: String
@@ -60,14 +74,28 @@ public struct PickerItem: Identifiable {
     }
 }
 
+public struct PickerActionEntry: Identifiable {
+    public init(id: Int, label: String, activation: PickerActivationIdentity) {
+        self.id = id
+        self.label = label
+        self.activation = activation
+    }
+
+    public let id: Int
+    public let label: String
+    public let activation: PickerActivationIdentity
+}
+
 /// Action menu state for the picker (C-o menu).
 public struct PickerActionMenu {
-    public init(selectedIndex: Int, actions: [String]) {
+    public init(selectedIndex: Int, entries: [PickerActionEntry]) {
         self.selectedIndex = selectedIndex
-        self.actions = actions
+        self.entries = entries
     }
+
     public let selectedIndex: Int
-    public let actions: [String]
+    public let entries: [PickerActionEntry]
+    public var actions: [String] { entries.map(\.label) }
 }
 
 /// A line of preview content with styled segments.
@@ -138,7 +166,7 @@ public final class PickerState {
     public var previewLines: [PreviewLine] = []
     public var actionMenu: PickerActionMenu? = nil
 
-    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0) {
         self.visible = visible
         self.selectedIndex = Int(selectedIndex)
         self.previewSelectedIndex = nil
@@ -155,6 +183,10 @@ public final class PickerState {
         self.items = rawItems.enumerated().map { i, item in
             PickerItem(
                 id: i,
+                activation: PickerActivationIdentity(
+                    generation: activationGeneration,
+                    activationID: item.activationID
+                ),
                 iconColor: item.iconColor,
                 label: item.label,
                 description: item.description,
@@ -167,7 +199,16 @@ public final class PickerState {
         if let am = actionMenu {
             self.actionMenu = PickerActionMenu(
                 selectedIndex: Int(am.selectedIndex),
-                actions: am.actions
+                entries: am.actions.enumerated().map { index, label in
+                    PickerActionEntry(
+                        id: index,
+                        label: label,
+                        activation: PickerActivationIdentity(
+                            generation: activationGeneration,
+                            activationID: index < am.activationIDs.count ? am.activationIDs[index] : 0
+                        )
+                    )
+                }
             )
         } else {
             self.actionMenu = nil

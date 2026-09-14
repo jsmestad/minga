@@ -109,6 +109,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x5C       | chat_scrolled_away_from_bottom |
   | 0x5D       | chat_returned_to_bottom |
   | 0x5F       | picker_query_changed    |
+  | 0x60       | picker_item_activate    |
+  | 0x61       | picker_action_activate  |
 
   """
 
@@ -202,6 +204,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_chat_scrolled_away_from_bottom Opcodes.gui_action_chat_scrolled_away_from_bottom()
   @gui_action_chat_returned_to_bottom Opcodes.gui_action_chat_returned_to_bottom()
   @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
+  @gui_action_picker_item_activate Opcodes.gui_action_picker_item_activate()
+  @gui_action_picker_action_activate Opcodes.gui_action_picker_action_activate()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
   @gui_action_search_prev Opcodes.gui_action_search_prev()
@@ -322,6 +326,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:font_size_adjust, direction :: :decrease | :increase | :reset}
           | {:picker_query_changed, generation :: non_neg_integer(),
              edit_seq :: non_neg_integer(), query :: String.t()}
+          | {:picker_item_activate, generation :: non_neg_integer(),
+             activation_id :: non_neg_integer()}
+          | {:picker_action_activate, generation :: non_neg_integer(),
+             activation_id :: non_neg_integer()}
           | {:search_query, query :: String.t(), flags :: non_neg_integer()}
           | :search_next
           | :search_prev
@@ -961,6 +969,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ) do
     {:ok, {:picker_query_changed, generation, edit_seq, query}}
   end
+
+  def decode_gui_action(
+        @gui_action_picker_item_activate,
+        <<generation::32, activation_id::32>>
+      ),
+      do: {:ok, {:picker_item_activate, generation, activation_id}}
+
+  def decode_gui_action(
+        @gui_action_picker_action_activate,
+        <<generation::32, activation_id::32>>
+      ),
+      do: {:ok, {:picker_action_activate, generation, activation_id}}
 
   def decode_gui_action(
         @gui_action_search_query,

@@ -597,6 +597,11 @@ func DecodePickerItem(data []byte, offset int, windowEnd int) (PickerItem, int, 
 		matchPositions = append(matchPositions, decodeU16(data, pos))
 		pos += 2
 	}
+	if err := decodeRequireWindow(windowEnd, pos+4, "activation_id"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	activationID := decodeU32(data, pos)
+	pos += 4
 	return PickerItem{
 		IconColor:      iconColor,
 		Flags:          flags,
@@ -604,6 +609,7 @@ func DecodePickerItem(data []byte, offset int, windowEnd int) (PickerItem, int, 
 		Description:    description,
 		Annotation:     annotation,
 		MatchPositions: matchPositions,
+		ActivationID:   activationID,
 	}, pos, nil
 }
 
@@ -917,6 +923,7 @@ func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHea
 	pos++
 	var title string
 	var markedCount uint16
+	var activationGeneration uint32
 	if pos+2 <= windowEnd {
 		titleLen := int(decodeU16(data, pos))
 		if pos+2+titleLen <= windowEnd {
@@ -925,17 +932,22 @@ func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHea
 			if pos+2 <= windowEnd {
 				markedCount = decodeU16(data, pos)
 				pos += 2
+				if pos+4 <= windowEnd {
+					activationGeneration = decodeU32(data, pos)
+					pos += 4
+				}
 			}
 		}
 	}
 	return GuiPickerHeader{
-		Visible:       visible,
-		SelectedIndex: selectedIndex,
-		FilteredCount: filteredCount,
-		TotalCount:    totalCount,
-		HasPreview:    hasPreview,
-		Title:         title,
-		MarkedCount:   markedCount,
+		Visible:              visible,
+		SelectedIndex:        selectedIndex,
+		FilteredCount:        filteredCount,
+		TotalCount:           totalCount,
+		HasPreview:           hasPreview,
+		Title:                title,
+		MarkedCount:          markedCount,
+		ActivationGeneration: activationGeneration,
 	}, pos, nil
 }
 
@@ -990,6 +1002,7 @@ func DecodeGuiPickerActionMenu(data []byte, offset int, windowEnd int) (GuiPicke
 	pos++
 	var selectedIndex uint8
 	var actions []string
+	var activationIds []uint32
 	if visible == 1 {
 		if err := decodeRequireWindow(windowEnd, pos+1, "selected_index"); err != nil {
 			return GuiPickerActionMenu{}, offset, err
@@ -1010,11 +1023,25 @@ func DecodeGuiPickerActionMenu(data []byte, offset int, windowEnd int) (GuiPicke
 			pos = nextPos
 			actions = append(actions, item)
 		}
+		if err := decodeRequireWindow(windowEnd, pos+1, "activation_ids count"); err != nil {
+			return GuiPickerActionMenu{}, offset, err
+		}
+		activationIdsCount := int(data[pos])
+		pos += 1
+		if err := decodeRequireWindow(windowEnd, pos+activationIdsCount*4, "activation_ids"); err != nil {
+			return GuiPickerActionMenu{}, offset, err
+		}
+		activationIds = make([]uint32, 0, activationIdsCount)
+		for i := 0; i < activationIdsCount; i++ {
+			activationIds = append(activationIds, decodeU32(data, pos))
+			pos += 4
+		}
 	}
 	return GuiPickerActionMenu{
 		Visible:       visible,
 		SelectedIndex: selectedIndex,
 		Actions:       actions,
+		ActivationIds: activationIds,
 	}, pos, nil
 }
 

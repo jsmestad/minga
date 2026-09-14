@@ -428,20 +428,20 @@ defmodule MingaEditor.PickerUI do
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel}}}}}
+            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
           }
         } =
           state,
         @escape,
         _mods
       ) do
-    update_picker(state, &%{&1 | action_menu: nil})
+    update_picker(state, &PickerState.close_action_menu/1)
   end
 
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel}}}}}
+            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
           }
         } =
           state,
@@ -449,7 +449,7 @@ defmodule MingaEditor.PickerUI do
         mods
       )
       when band(mods, @ctrl) != 0 do
-    update_picker(state, &%{&1 | action_menu: nil})
+    update_picker(state, &PickerState.close_action_menu/1)
   end
 
   # Enter in action menu → execute selected action
@@ -457,25 +457,20 @@ defmodule MingaEditor.PickerUI do
         %{
           shell_runtime: %{
             state: %{
-              modal:
-                {:picker,
-                 %{picker_ui: %{action_menu: {actions, sel}, picker: picker, source: source}}}
+              modal: {:picker, %{picker_ui: %{action_menu: {actions, sel, item}, source: source}}}
             }
           }
         } = state,
         @enter,
         _mods
       ) do
-    case {Enum.at(actions, sel), Picker.selected_item(picker)} do
-      {nil, _} ->
-        update_picker(state, &%{&1 | action_menu: nil})
+    case Enum.at(actions, sel) do
+      nil ->
+        update_picker(state, &PickerState.close_action_menu/1)
 
-      {_, nil} ->
-        update_picker(state, &%{&1 | action_menu: nil})
-
-      {{_name, action_id}, item} ->
+      {_name, action_id} ->
         state
-        |> update_picker(&%{&1 | action_menu: nil})
+        |> update_picker(&PickerState.close_action_menu/1)
         |> run_source_action_and_close(source, action_id, item)
     end
   end
@@ -484,7 +479,7 @@ defmodule MingaEditor.PickerUI do
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {actions, sel}}}}}
+            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
           }
         } = state,
         cp,
@@ -493,15 +488,14 @@ defmodule MingaEditor.PickerUI do
       when (cp == ?j and band(mods, @ctrl) != 0) or
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
-    new_sel = rem(sel + 1, Enum.count(actions))
-    update_picker(state, &%{&1 | action_menu: {actions, new_sel}})
+    update_picker(state, &PickerState.move_action_menu_selection(&1, :next))
   end
 
   # Arrow up / C-k / C-p in action menu → move selection up
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {actions, sel}}}}}
+            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
           }
         } = state,
         cp,
@@ -510,15 +504,14 @@ defmodule MingaEditor.PickerUI do
       when (cp == ?k and band(mods, @ctrl) != 0) or
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
-    new_sel = if sel == 0, do: Enum.count(actions) - 1, else: sel - 1
-    update_picker(state, &%{&1 | action_menu: {actions, new_sel}})
+    update_picker(state, &PickerState.move_action_menu_selection(&1, :previous))
   end
 
   # Ignore all other keys while action menu is open
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel}}}}}
+            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
           }
         } =
           state,
@@ -596,7 +589,7 @@ defmodule MingaEditor.PickerUI do
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
     new_picker = Picker.move_down(picker)
-    state = update_picker(state, &%{&1 | picker: new_picker})
+    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
     maybe_preview_selection(state)
   end
 
@@ -610,7 +603,7 @@ defmodule MingaEditor.PickerUI do
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
     new_picker = Picker.move_up(picker)
-    state = update_picker(state, &%{&1 | picker: new_picker})
+    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
     maybe_preview_selection(state)
   end
 
@@ -622,7 +615,7 @@ defmodule MingaEditor.PickerUI do
       )
       when band(mods, @ctrl) != 0 do
     new_picker = Picker.page_down(picker)
-    state = update_picker(state, &%{&1 | picker: new_picker})
+    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
     maybe_preview_selection(state)
   end
 
@@ -634,7 +627,7 @@ defmodule MingaEditor.PickerUI do
       )
       when band(mods, @alt) != 0 do
     new_picker = Picker.page_up(picker)
-    state = update_picker(state, &%{&1 | picker: new_picker})
+    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
     maybe_preview_selection(state)
   end
 
@@ -645,7 +638,7 @@ defmodule MingaEditor.PickerUI do
         _mods
       ) do
     new_picker = picker |> Picker.toggle_mark() |> Picker.move_down()
-    update_picker(state, &%{&1 | picker: new_picker})
+    update_picker(state, &PickerState.update_picker(&1, new_picker))
   end
 
   # C-o → open action menu for the selected item
@@ -678,7 +671,7 @@ defmodule MingaEditor.PickerUI do
 
         case actions do
           [] -> state
-          actions -> update_picker(state, &%{&1 | action_menu: {actions, 0}})
+          actions -> update_picker(state, &PickerState.open_action_menu(&1, actions, item))
         end
     end
   end
@@ -762,6 +755,76 @@ defmodule MingaEditor.PickerUI do
 
   # Ignore all other keys
   def handle_key(state, _cp, _mods), do: state
+
+  @doc "Activates the exact picker item offered to a native frontend."
+  @spec activate_item(state(), non_neg_integer(), non_neg_integer()) ::
+          state() | {state(), action()}
+  def activate_item(
+        %{
+          shell_runtime: %{
+            state: %{
+              modal:
+                {:picker,
+                 %{
+                   picker_ui:
+                     %PickerState{
+                       picker: %Picker{} = picker,
+                       source: source,
+                       callback_source: callback_source
+                     } = picker_state
+                 }}
+            }
+          }
+        } = state,
+        generation,
+        activation_id
+      ) do
+    case PickerState.resolve_item_activation(picker_state, generation, activation_id) do
+      {:ok, index, item} ->
+        selected_picker = Picker.select_index(picker, index)
+        state = update_picker(state, &PickerState.update_picker(&1, selected_picker))
+        select_item(state, selected_picker, item, source, callback_source)
+
+      :error ->
+        stale_activation(state)
+    end
+  end
+
+  def activate_item(state, _generation, _activation_id), do: stale_activation(state)
+
+  @doc "Activates the exact source action offered to a native frontend."
+  @spec activate_action(state(), non_neg_integer(), non_neg_integer()) :: state()
+  def activate_action(
+        %{
+          shell_runtime: %{
+            state: %{
+              modal: {:picker, %{picker_ui: %PickerState{source: source} = picker_state}}
+            }
+          }
+        } = state,
+        generation,
+        activation_id
+      ) do
+    case PickerState.resolve_action_activation(picker_state, generation, activation_id) do
+      {:ok, {_name, action_id}, item} ->
+        state
+        |> update_picker(&PickerState.close_action_menu/1)
+        |> run_source_action_and_close(source, action_id, item)
+
+      :error ->
+        stale_activation(state)
+    end
+  end
+
+  def activate_action(state, _generation, _activation_id), do: stale_activation(state)
+
+  @spec stale_activation(state()) :: state()
+  defp stale_activation(state) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Picker choice changed; select it again"
+    )
+  end
 
   @spec run_source_action_and_close(EditorState.t(), module(), term(), Picker.item()) ::
           EditorState.t()
@@ -984,7 +1047,7 @@ defmodule MingaEditor.PickerUI do
     ctx = Context.from_editor_state(state)
     refreshed = Picker.replace_items(picker, Source.candidates(source, ctx, callback_source))
 
-    update_picker(state, &%{&1 | picker: refreshed})
+    update_picker(state, &PickerState.update_picker(&1, refreshed))
   end
 
   @doc """

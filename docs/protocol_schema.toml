@@ -37,7 +37,9 @@ version = "2.0.0"
 # protocol_version 16 adds the correlated native application-quit handshake. AppKit sends application_quit_request/application_quit_decision and the BEAM answers with application_quit_response before it performs orderly shutdown.
 # protocol_version 17 correlates file-tree inline edit confirmations with the
 # admitted BEAM operation token and carries that token on gui_file_tree v3 rows.
-protocol_version = 17
+# protocol_version 18 adds opaque picker item/action activation identities tied
+# to the exact BEAM-owned picker snapshot rendered by a native frontend.
+protocol_version = 18
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1188,6 +1190,14 @@ value = 0x5D
 name = "picker_query_changed"
 value = 0x5F
 
+[[gui_actions]]
+name = "picker_item_activate"
+value = 0x60
+
+[[gui_actions]]
+name = "picker_action_activate"
+value = 0x61
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -1558,6 +1568,7 @@ fields = [
   { name = "annotation", type = "string16" },
   # u8-counted list of u16 fuzzy-match highlight indices into the label.
   { name = "match_positions", type = "counted_array", count_type = "u8", element = "u16" },
+  { name = "activation_id", type = "u32" },
 ]
 
 [[structures]]
@@ -2034,6 +2045,7 @@ fields = [
   { name = "has_preview", type = "u8" },
   { name = "title", type = "string16", optional = true },
   { name = "marked_count", type = "u16", optional = true },
+  { name = "activation_generation", type = "u32", optional = true },
 ]
 
 [[sections]]
@@ -2065,6 +2077,7 @@ fields = [{ name = "visible", type = "u8" }]
 conditional_tail = { guard = "visible == 1", fields = [
   { name = "selected_index", type = "u8" },
   { name = "actions", type = "counted_array", count_type = "u8", element = "string16" },
+  { name = "activation_ids", type = "counted_array", count_type = "u8", element = "u32" },
 ] }
 
 [[sections]]

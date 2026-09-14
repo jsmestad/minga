@@ -47,7 +47,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             label: "One",
             description: "First",
             annotation: "open",
-            match_positions: [0, 2]
+            match_positions: [0, 2],
+            activation_id: 23
           }
         ],
         action_menu: %ActionMenu{actions: ["Open"], selected_index: 0},
@@ -64,7 +65,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
 
       # Header (0x01)
       <<1::8, selected::16, filtered::16, total::16, has_preview::8, title_len::16,
-        title::binary-size(title_len), marked::16>> = sections[0x01]
+        title::binary-size(title_len), marked::16, activation_generation::32>> = sections[0x01]
 
       assert selected == 0
       assert filtered == 1
@@ -72,6 +73,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert has_preview == 1
       assert title == "Pick"
       assert marked == 1
+      assert activation_generation == model.activation_generation
 
       # Query (0x02): text plus native-edit generation and acknowledgement.
       assert <<1::16, "o", 7::32, 11::32>> = sections[0x02]
@@ -79,7 +81,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       # Items (0x03): one item, flags 3, icon color, match positions [0, 2]
       <<1::16, icon_color::24, flags::8, label_len::16, label::binary-size(label_len),
         desc_len::16, desc::binary-size(desc_len), ann_len::16, ann::binary-size(ann_len),
-        pos_count::8, pos_rest::binary>> = sections[0x03]
+        pos_count::8, first_pos::16, second_pos::16, activation_id::32>> = sections[0x03]
 
       assert icon_color == 0x123456
       assert flags == 3
@@ -87,10 +89,11 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert desc == "First"
       assert ann == "open"
       assert pos_count == 2
-      assert <<0::16, 2::16>> = pos_rest
+      assert {first_pos, second_pos} == {0, 2}
+      assert activation_id == 23
 
       # Action menu (0x04): visible, selected 0, one action "Open"
-      assert <<1::8, 0::8, 1::8, 4::16, "Open">> = sections[0x04]
+      assert <<1::8, 0::8, 1::8, 4::16, "Open", 0::8>> = sections[0x04]
 
       # Mode prefix (0x05)
       assert <<1::16, ">">> = sections[0x05]
@@ -120,7 +123,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             label: "One",
             description: "",
             annotation: "",
-            match_positions: [0]
+            match_positions: [0],
+            activation_id: 1
           }
         ],
         action_menu: %ActionMenu{actions: ["open"], selected_index: 0},
@@ -222,7 +226,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
           label: "One",
           description: "",
           annotation: "",
-          match_positions: []
+          match_positions: [],
+          activation_id: 1
         }
       ]
     }

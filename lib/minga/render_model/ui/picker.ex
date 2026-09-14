@@ -19,7 +19,8 @@ defmodule Minga.RenderModel.UI.Picker do
           label: String.t(),
           description: String.t(),
           annotation: String.t(),
-          match_positions: [non_neg_integer()]
+          match_positions: [non_neg_integer()],
+          activation_id: non_neg_integer()
         }
 
   @type t :: %__MODULE__{
@@ -32,6 +33,7 @@ defmodule Minga.RenderModel.UI.Picker do
           filtered_count: non_neg_integer(),
           total_count: non_neg_integer(),
           marked_count: non_neg_integer(),
+          activation_generation: non_neg_integer(),
           has_preview?: boolean(),
           items: [item()],
           action_menu: ActionMenu.t() | nil,
@@ -49,6 +51,7 @@ defmodule Minga.RenderModel.UI.Picker do
             filtered_count: 0,
             total_count: 0,
             marked_count: 0,
+            activation_generation: 0,
             has_preview?: false,
             items: [],
             action_menu: nil,

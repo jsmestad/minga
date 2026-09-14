@@ -264,6 +264,7 @@ type PickerItem struct {
 	Description    string
 	Annotation     string
 	MatchPositions []uint16
+	ActivationID   uint32
 }
 
 type WhichKeyBinding struct {
@@ -503,13 +504,14 @@ type GuiWindowRowsDeltaHeader struct {
 }
 
 type GuiPickerHeader struct {
-	Visible       uint8
-	SelectedIndex uint16
-	FilteredCount uint16
-	TotalCount    uint16
-	HasPreview    uint8
-	Title         string
-	MarkedCount   uint16
+	Visible              uint8
+	SelectedIndex        uint16
+	FilteredCount        uint16
+	TotalCount           uint16
+	HasPreview           uint8
+	Title                string
+	MarkedCount          uint16
+	ActivationGeneration uint32
 }
 
 type GuiPickerQuery struct {
@@ -522,6 +524,7 @@ type GuiPickerActionMenu struct {
 	Visible       uint8
 	SelectedIndex uint8
 	Actions       []string
+	ActivationIds []uint32
 }
 
 type GuiPickerModePrefix struct {

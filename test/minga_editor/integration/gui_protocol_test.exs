@@ -572,7 +572,8 @@ defmodule Minga.Integration.GUIProtocolTest do
             label: "editor.ex",
             description: "lib",
             annotation: "",
-            match_positions: [0, 1, 2]
+            match_positions: [0, 1, 2],
+            activation_id: 23
           }
         ],
         action_menu: nil,

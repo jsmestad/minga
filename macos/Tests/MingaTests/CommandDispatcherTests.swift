@@ -778,7 +778,7 @@ struct CommandDispatcherRoutingTests {
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
                                         hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready,
-                                        queryGeneration: 7, acknowledgedQueryEditSeq: 11))
+                                        queryGeneration: 7, acknowledgedQueryEditSeq: 11, activationGeneration: 13))
 
         #expect(gui.pickerState.visible == true)
         #expect(gui.pickerState.title == "Find File")
@@ -795,11 +795,11 @@ struct CommandDispatcherRoutingTests {
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
                                         hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready,
-                                        queryGeneration: 7, acknowledgedQueryEditSeq: 11))
+                                        queryGeneration: 7, acknowledgedQueryEditSeq: 11, activationGeneration: 13))
         dispatcher.applyForTesting(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, markedCount: 0, title: "", query: "",
                                         hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready,
-                                        queryGeneration: 0, acknowledgedQueryEditSeq: 0))
+                                        queryGeneration: 0, acknowledgedQueryEditSeq: 0, activationGeneration: 0))
 
         #expect(gui.pickerState.visible == false)
         #expect(gui.pickerState.items.isEmpty)

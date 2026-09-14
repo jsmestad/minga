@@ -180,6 +180,17 @@ defmodule MingaEditor.UI.Picker do
     %{picker | selected: max(sel - max, 0)}
   end
 
+  @doc "Selects the filtered item at `index`; an out-of-range index leaves the picker unchanged."
+  @spec select_index(t(), non_neg_integer()) :: t()
+  def select_index(%__MODULE__{filtered: filtered} = picker, index) when index >= 0 do
+    case Enum.fetch(filtered, index) do
+      {:ok, _item} -> %{picker | selected: index}
+      :error -> picker
+    end
+  end
+
+  def select_index(%__MODULE__{} = picker, _index), do: picker
+
   # ── Accessors ───────────────────────────────────────────────────────────────
 
   @doc "Returns the currently selected item, or nil if no items match."

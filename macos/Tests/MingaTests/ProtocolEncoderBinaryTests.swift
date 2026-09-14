@@ -372,6 +372,23 @@ struct EncoderGUIActionTests {
         #expect(end == payload.count)
     }
 
+    @Test("picker semantic activations encode the offered generation and identity")
+    func pickerActivationLayouts() {
+        let item = captureFrame { $0.sendPickerItemActivate(generation: 17, activationID: 23) }
+        #expect(item.count == 10)
+        #expect(item[0] == OP_GUI_ACTION)
+        #expect(item[1] == GUI_ACTION_PICKER_ITEM_ACTIVATE)
+        #expect(readU32(item, 2) == 17)
+        #expect(readU32(item, 6) == 23)
+
+        let action = captureFrame { $0.sendPickerActionActivate(generation: 29, activationID: 31) }
+        #expect(action.count == 10)
+        #expect(action[0] == OP_GUI_ACTION)
+        #expect(action[1] == GUI_ACTION_PICKER_ACTION_ACTIVATE)
+        #expect(readU32(action, 2) == 29)
+        #expect(readU32(action, 6) == 31)
+    }
+
     @Test("tab_reorder encodes action type, tab ID, and visible index")
     func tabReorderLayout() {
         let payload = captureFrame { $0.sendTabReorder(id: 42, newIndex: 3) }

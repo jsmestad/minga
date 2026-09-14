@@ -193,7 +193,11 @@ defmodule MingaEditor.PickerUITest do
     def candidates(_ctx), do: []
 
     @impl true
-    def on_select(%Item{id: id}, state), do: Map.put(state, :selected_item_id, id)
+    def on_select(%Item{id: id}, state) do
+      state
+      |> Map.put(:selected_item_id, id)
+      |> Map.update(:selection_count, 1, &(&1 + 1))
+    end
 
     @impl true
     def on_cancel(state), do: state
@@ -208,6 +212,32 @@ defmodule MingaEditor.PickerUITest do
       do: Map.put(state, :action_item_id, {:delete, id})
 
     def on_action(_action, _item, state), do: state
+  end
+
+  defmodule FailingActionSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    alias MingaEditor.UI.Picker.Item
+
+    @impl true
+    def title, do: "Failing action"
+
+    @impl true
+    def candidates(_ctx), do: []
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def actions(_item), do: [{"Fail", :fail}]
+
+    @impl true
+    def on_action(:fail, %Item{id: id}, %MingaEditor.State{} = state) do
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Action failed for #{id}")
+    end
   end
 
   defmodule NoCancelSource do
@@ -511,7 +541,9 @@ defmodule MingaEditor.PickerUITest do
       state = picker_state_with_buffers(["alpha", "beta", "gamma"])
 
       new_state = PickerUI.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
-      {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} = new_state.shell_runtime.state.modal
+
+      {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
+        new_state.shell_runtime.state.modal
 
       assert actions == [
                {"Kill all marked",
@@ -610,7 +642,7 @@ defmodule MingaEditor.PickerUITest do
       assert {:handled, menu_state} =
                PickerInput.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
 
-      assert {:picker, %{picker_ui: %{action_menu: {[{"Open", :open}], 0}}}} =
+      assert {:picker, %{picker_ui: %{action_menu: {[{"Open", :open}], 0, _item}}}} =
                menu_state.shell_runtime.state.modal
 
       model =
@@ -659,7 +691,7 @@ defmodule MingaEditor.PickerUITest do
 
       menu_state = PickerUI.handle_key(picker_state, ?o, MingaEditor.Input.mod_ctrl())
 
-      assert {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} =
+      assert {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
                menu_state.shell_runtime.state.modal
 
       assert Enum.map(actions, &elem(&1, 0)) == ["Open", "Delete"]
@@ -696,6 +728,191 @@ defmodule MingaEditor.PickerUITest do
       assert Enum.map(refreshed_picker.filtered, & &1.id) == [:new]
       assert refreshed_picker.query == "config"
       assert refreshed_picker.selected == 0
+    end
+  end
+
+  describe "semantic picker activation" do
+    test "command palette dispatch executes the exact nonselected command" do
+      first = %Item{id: :new_tab, label: "New tab"}
+      second = %Item{id: :toggle_file_tree, label: "Toggle file tree"}
+      picker = Picker.new([first, second], title: "Commands")
+
+      picker_state =
+        %PickerState{
+          picker: picker,
+          source: MingaEditor.UI.Picker.CommandSource,
+          restore: 0
+        }
+        |> PickerState.refresh_activation_offer()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+
+      assert MingaEditor.Shell.Traditional.SidebarWorkflow.active_id(state) == nil
+      generation = picker_state.activation_offer.generation
+      result = GuiActionHandler.dispatch(state, {:picker_item_activate, generation, 2})
+
+      assert result.shell_runtime.state.modal == :none
+      assert MingaEditor.Shell.Traditional.SidebarWorkflow.active_id(result) == "file_tree"
+    end
+
+    @tag :tmp_dir
+    test "file finder dispatch opens the exact nonselected file", %{tmp_dir: tmp_dir} do
+      first_path = Path.join(tmp_dir, "first.txt")
+      second_path = Path.join(tmp_dir, "second.txt")
+      File.write!(first_path, "first")
+      File.write!(second_path, "second")
+      {:ok, root} = Root.directory(tmp_dir)
+      {:ok, first} = ProjectFileCandidate.new(root, "first.txt")
+      {:ok, second} = ProjectFileCandidate.new(root, "second.txt")
+
+      picker =
+        Picker.new(
+          [
+            %Item{id: first, label: "first.txt"},
+            %Item{id: second, label: "second.txt"}
+          ],
+          title: "Find file"
+        )
+
+      picker_state =
+        %PickerState{picker: picker, source: FileSource, restore: 0}
+        |> PickerState.refresh_activation_offer()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+
+      generation = picker_state.activation_offer.generation
+      result = GuiActionHandler.dispatch(state, {:picker_item_activate, generation, 2})
+      on_exit(fn -> stop_added_buffers(result, state) end)
+
+      assert result.shell_runtime.state.modal == :none
+      assert Minga.Buffer.file_path(result.workspace.buffers.active) == second_path
+    end
+
+    test "GUI dispatch activates the exact nonselected offered item once" do
+      first = %Item{id: :first, label: "first"}
+      second = %Item{id: :second, label: "second"}
+      picker = Picker.new([first, second], title: "Test")
+
+      picker_state =
+        %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
+        |> PickerState.refresh_activation_offer()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+
+      generation = picker_state.activation_offer.generation
+      result = GuiActionHandler.dispatch(state, {:picker_item_activate, generation, 2})
+
+      assert result.shell_runtime.state.modal == :none
+      assert Map.get(result, :selected_item_id) == :second
+      assert Map.get(result, :selection_count) == 1
+
+      repeated = GuiActionHandler.dispatch(result, {:picker_item_activate, generation, 2})
+
+      assert Map.get(repeated, :selected_item_id) == :second
+      assert Map.get(repeated, :selection_count) == 1
+
+      assert repeated.shell_runtime.state.notice.message ==
+               "Picker choice changed; select it again"
+    end
+
+    test "stale item activation remains visible and preserves the current query" do
+      picker = Picker.new([%Item{id: :first, label: "first"}], title: "Test")
+
+      picker_state =
+        %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
+        |> PickerState.refresh_activation_offer()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+
+      generation = picker_state.activation_offer.generation
+      edited = PickerUI.handle_key(state, ?f, 0)
+      {:picker, %{picker_ui: replaced_picker}} = edited.shell_runtime.state.modal
+      refute replaced_picker.activation_offer.generation == generation
+      result = GuiActionHandler.dispatch(edited, {:picker_item_activate, generation, 1})
+
+      assert {:picker, %{picker_ui: %{picker: current}}} = result.shell_runtime.state.modal
+      assert current.query == "f"
+      assert result.shell_runtime.state.notice.message == "Picker choice changed; select it again"
+      refute Map.has_key?(result, :selected_item_id)
+    end
+
+    test "GUI dispatch activates the exact action captured when the menu opened" do
+      item = %Item{id: :first, label: "first"}
+      picker = Picker.new([item], title: "Test")
+
+      picker_state =
+        %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
+        |> PickerState.refresh_activation_offer()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+        |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+
+      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
+      generation = live_picker.activation_offer.generation
+      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, 2})
+
+      assert result.shell_runtime.state.modal == :none
+      assert Map.get(result, :action_item_id) == {:delete, :first}
+    end
+
+    test "action activation retains the item captured when the menu opened" do
+      first = %Item{id: :first, label: "first"}
+      second = %Item{id: :second, label: "second"}
+      picker = Picker.new([first, second], title: "Test")
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open(
+          {:picker,
+           PickerPayload.new(
+             %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
+             |> PickerState.refresh_activation_offer()
+           )}
+        )
+        |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+        |> PickerUI.update_picker(fn picker_state ->
+          PickerState.update_picker(picker_state, Picker.select_index(picker_state.picker, 1))
+        end)
+
+      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
+      generation = live_picker.activation_offer.generation
+      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, 2})
+
+      assert result.shell_runtime.state.modal == :none
+      assert Map.get(result, :action_item_id) == {:delete, :first}
+    end
+
+    test "action activation preserves the source's existing visible failure behavior" do
+      item = %Item{id: :first, label: "first"}
+      picker = Picker.new([item], title: "Test")
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open(
+          {:picker,
+           PickerPayload.new(
+             %PickerState{picker: picker, source: FailingActionSource, restore: 0}
+             |> PickerState.refresh_activation_offer()
+           )}
+        )
+        |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+
+      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
+      generation = live_picker.activation_offer.generation
+      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, 1})
+
+      assert result.shell_runtime.state.modal == :none
+      assert result.shell_runtime.state.notice.message == "Action failed for first"
     end
   end
 

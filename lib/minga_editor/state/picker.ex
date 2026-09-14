@@ -6,9 +6,15 @@ defmodule MingaEditor.State.Picker do
   the buffer index to restore on cancel, and the action-menu overlay state.
   """
 
-  @typedoc "Action menu state: `{actions, selected_index}` or nil when closed."
+  alias MingaEditor.State.Picker.ActivationOffer
+
+  @typedoc "Action menu state: `{actions, selected_index, captured_item}` or nil when closed."
   @type action_menu ::
-          {[MingaEditor.UI.Picker.Source.action_entry()], non_neg_integer()} | nil
+          {[MingaEditor.UI.Picker.Source.action_entry()], non_neg_integer(),
+           MingaEditor.UI.Picker.Item.t()}
+          | nil
+
+  @type action_menu_direction :: :next | :previous
 
   @typedoc "Async loading status for sources that fetch candidates in the background."
   @type load_status :: :ready | :loading | {:error, String.t()}
@@ -51,7 +57,8 @@ defmodule MingaEditor.State.Picker do
           load_status: load_status(),
           fetch_revision: fetch_revision(),
           query_generation: query_generation(),
-          acknowledged_query_edit_seq: query_edit_seq()
+          acknowledged_query_edit_seq: query_edit_seq(),
+          activation_offer: ActivationOffer.t()
         }
 
   defstruct picker: nil,
@@ -66,7 +73,8 @@ defmodule MingaEditor.State.Picker do
             load_status: :ready,
             fetch_revision: nil,
             query_generation: 0,
-            acknowledged_query_edit_seq: 0
+            acknowledged_query_edit_seq: 0,
+            activation_offer: %ActivationOffer{generation: 1}
 
   @doc "Builds the semantic state for an asynchronous picker before fetching starts."
   @spec loading(
@@ -97,7 +105,9 @@ defmodule MingaEditor.State.Picker do
   @spec begin_query_session(t()) :: t()
   def begin_query_session(%__MODULE__{} = ps) do
     generation = Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1
+
     %{ps | query_generation: generation, acknowledged_query_edit_seq: 0}
+    |> refresh_activation_offer()
   end
 
   @doc "Returns whether a native query edit belongs to this picker and is newer than its acknowledgement."
@@ -124,6 +134,7 @@ defmodule MingaEditor.State.Picker do
       )
       when edit_seq > acknowledged_edit_seq do
     %{ps | picker: picker, acknowledged_query_edit_seq: edit_seq}
+    |> refresh_activation_offer()
   end
 
   def accept_query_edit(%__MODULE__{} = ps, _picker, _edit_seq), do: ps
@@ -149,6 +160,80 @@ defmodule MingaEditor.State.Picker do
   @spec update_picker(t(), MingaEditor.UI.Picker.t()) :: t()
   def update_picker(%__MODULE__{} = ps, picker) do
     %{ps | picker: picker}
+    |> refresh_activation_offer()
+  end
+
+  @doc "Opens the source action menu for the exact item or marked set captured by `actions`."
+  @spec open_action_menu(
+          t(),
+          [MingaEditor.UI.Picker.Source.action_entry()],
+          MingaEditor.UI.Picker.Item.t()
+        ) :: t()
+  def open_action_menu(%__MODULE__{} = ps, [_first | _rest] = actions, item) do
+    %{ps | action_menu: {actions, 0, item}}
+    |> refresh_activation_offer()
+  end
+
+  def open_action_menu(%__MODULE__{} = ps, [], _item), do: ps
+
+  @doc "Moves the action-menu selection when the menu is open."
+  @spec move_action_menu_selection(t(), action_menu_direction()) :: t()
+  def move_action_menu_selection(
+        %__MODULE__{action_menu: {[], _selected, _item}} = ps,
+        _direction
+      ),
+      do: ps
+
+  def move_action_menu_selection(
+        %__MODULE__{action_menu: {[_first | _rest] = actions, selected, item}} = ps,
+        :next
+      ) do
+    next_selected = rem(selected + 1, length(actions))
+
+    %{ps | action_menu: {actions, next_selected, item}}
+    |> refresh_activation_offer()
+  end
+
+  def move_action_menu_selection(
+        %__MODULE__{action_menu: {[_first | _rest] = actions, selected, item}} = ps,
+        :previous
+      ) do
+    previous_selected = if selected == 0, do: length(actions) - 1, else: selected - 1
+
+    %{ps | action_menu: {actions, previous_selected, item}}
+    |> refresh_activation_offer()
+  end
+
+  def move_action_menu_selection(%__MODULE__{action_menu: nil} = ps, _direction), do: ps
+
+  @doc "Closes the source action menu if it is open."
+  @spec close_action_menu(t()) :: t()
+  def close_action_menu(%__MODULE__{action_menu: nil} = ps), do: ps
+
+  def close_action_menu(%__MODULE__{} = ps) do
+    %{ps | action_menu: nil}
+    |> refresh_activation_offer()
+  end
+
+  @doc "Replaces the activation offer after any result or action-menu transition."
+  @spec refresh_activation_offer(t()) :: t()
+  def refresh_activation_offer(%__MODULE__{picker: picker, action_menu: action_menu} = ps) do
+    %{ps | activation_offer: ActivationOffer.new(picker, action_menu)}
+  end
+
+  @doc "Resolves an exact item identity from the current activation offer."
+  @spec resolve_item_activation(t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer(), MingaEditor.UI.Picker.Item.t()} | :error
+  def resolve_item_activation(%__MODULE__{activation_offer: offer}, generation, activation_id) do
+    ActivationOffer.resolve_item(offer, generation, activation_id)
+  end
+
+  @doc "Resolves an exact action identity from the current activation offer."
+  @spec resolve_action_activation(t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, MingaEditor.UI.Picker.Source.action_entry(), MingaEditor.UI.Picker.Item.t()}
+          | :error
+  def resolve_action_activation(%__MODULE__{activation_offer: offer}, generation, activation_id) do
+    ActivationOffer.resolve_action(offer, generation, activation_id)
   end
 
   @doc "Returns the visible prefix for a switched source."
@@ -196,6 +281,7 @@ defmodule MingaEditor.State.Picker do
         load_status: :ready,
         fetch_revision: nil
     }
+    |> refresh_activation_offer()
   end
 
   @doc """
@@ -208,13 +294,19 @@ defmodule MingaEditor.State.Picker do
   @spec begin_fetch(t()) :: {t(), reference()}
   def begin_fetch(%__MODULE__{} = ps) do
     revision = make_ref()
-    {%{ps | fetch_revision: revision, load_status: :loading}, revision}
+
+    state =
+      %{ps | fetch_revision: revision, load_status: :loading}
+      |> refresh_activation_offer()
+
+    {state, revision}
   end
 
   @doc "Accepts normalized candidates for the current asynchronous fetch."
   @spec complete_fetch(t(), MingaEditor.UI.Picker.t()) :: t()
   def complete_fetch(%__MODULE__{} = ps, picker) do
     %{ps | picker: picker, load_status: :ready}
+    |> refresh_activation_offer()
   end
 
   @doc "Records a user-visible failure for the current asynchronous fetch."

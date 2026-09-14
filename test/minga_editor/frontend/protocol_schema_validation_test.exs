@@ -469,7 +469,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         label: "file.ex",
         description: "desc",
         annotation: "ann",
-        match_positions: [1, 4]
+        match_positions: [1, 4],
+        activation_id: 23
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
@@ -479,10 +480,10 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
 
       # count(u16), then one picker_item: icon_color(u24) + flags(u8) +
       # label(string16) + description(string16) + annotation(string16) +
-      # match_positions(u8-counted u16).
+      # match_positions(u8-counted u16) + activation_id(u32).
       assert items_payload ==
                <<1::16, 0xAA, 0xBB, 0xCC, 0::8, 7::16, "file.ex", 4::16, "desc", 3::16, "ann",
-                 2::8, 1::16, 4::16>>
+                 2::8, 1::16, 4::16, 23::32>>
     end
 
     test "picker_item flags pack two_line (bit 0) and marked (bit 1)" do
@@ -493,7 +494,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         label: "x",
         description: "",
         annotation: "",
-        match_positions: []
+        match_positions: [],
+        activation_id: 0
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
@@ -502,7 +504,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       items_payload = extract_section_payload(sections_binary, section_count, 0x03)
 
       # count(1), icon_color(0), flags(0b11 = 3), label "x", empty desc/ann, 0 positions.
-      assert items_payload == <<1::16, 0::24, 3::8, 1::16, "x", 0::16, 0::16, 0::8>>
+      assert items_payload ==
+               <<1::16, 0::24, 3::8, 1::16, "x", 0::16, 0::16, 0::8, 0::32>>
     end
 
     test "schema models every section the picker encoder emits", %{sections: sections} do
@@ -514,7 +517,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         label: "x",
         description: "",
         annotation: "",
-        match_positions: []
+        match_positions: [],
+        activation_id: 0
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
@@ -539,6 +543,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         filtered_count: 10,
         total_count: 100,
         marked_count: 3,
+        activation_generation: 19,
         has_preview?: true,
         items: []
       }
@@ -549,8 +554,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       header = extract_section_payload(sections_binary, section_count, 0x01)
 
       # visible(u8=1), selected_index(u16), filtered_count(u16), total_count(u16),
-      # has_preview(u8), title(string16), marked_count(u16). total_count is u16.
-      assert header == <<1::8, 2::16, 10::16, 100::16, 1::8, 5::16, "Files", 3::16>>
+      # has_preview(u8), title(string16), marked_count(u16), activation_generation(u32).
+      assert header ==
+               <<1::8, 2::16, 10::16, 100::16, 1::8, 5::16, "Files", 3::16, 19::32>>
     end
 
     test "query section encodes text and native edit correlation" do
@@ -570,15 +576,20 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     end
 
     test "action_menu section encodes the visible conditional tail" do
-      menu = %Picker.ActionMenu{selected_index: 1, actions: ["Open", "Delete"]}
+      menu = %Picker.ActionMenu{
+        selected_index: 1,
+        actions: ["Open", "Delete"],
+        activation_ids: [29, 31]
+      }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
         PickerEncoder.encode_command(%Picker{visible?: true, action_menu: menu, items: []})
 
       payload = extract_section_payload(sections_binary, section_count, 0x04)
 
-      # visible(u8=1), then selected_index(u8), action count(u8), each action string16.
-      assert payload == <<1::8, 1::8, 2::8, 4::16, "Open", 6::16, "Delete">>
+      # visible, selected index, labels, then the parallel opaque activation IDs.
+      assert payload ==
+               <<1::8, 1::8, 2::8, 4::16, "Open", 6::16, "Delete", 2::8, 29::32, 31::32>>
     end
 
     test "hidden action_menu encodes only the visible byte" do

@@ -1833,6 +1833,7 @@ struct GUIPickerDecoderTests {
         appendString16(&items, "lib/minga/editor.ex")
         appendString16(&items, "500 lines")
         items.append(2); appendU16(&items, 0); appendU16(&items, 1)
+        appendU32(&items, 23)
         // Item 2
         appendRGB(&items, 0x98, 0xBE, 0x65)
         items.append(0x02) // marked
@@ -1840,6 +1841,7 @@ struct GUIPickerDecoderTests {
         appendString16(&items, "lib/minga/buffer/edit_delta.ex")
         appendString16(&items, "")
         items.append(0)
+        appendU32(&items, 29)
 
         // Section 0x04: Action menu
         var actionMenu = Data()
@@ -1848,6 +1850,9 @@ struct GUIPickerDecoderTests {
         actionMenu.append(2) // count
         appendString16(&actionMenu, "Open")
         appendString16(&actionMenu, "Split Right")
+        actionMenu.append(2)
+        appendU32(&actionMenu, 31)
+        appendU32(&actionMenu, 37)
 
         // Section 0x05: Mode prefix
         var modePrefix = Data()
@@ -1865,7 +1870,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -1884,11 +1889,13 @@ struct GUIPickerDecoderTests {
         #expect(decodedItems[0].label == "editor.ex")
         #expect(decodedItems[0].isTwoLine == true)
         #expect(decodedItems[0].matchPositions == [0, 1])
+        #expect(decodedItems[0].activationID == 23)
         #expect(decodedItems[1].label == "edit_delta.ex")
         #expect(decodedItems[1].isMarked == true)
 
         #expect(decodedMenu != nil)
         #expect(decodedMenu?.actions == ["Open", "Split Right"])
+        #expect(decodedMenu?.activationIDs == [31, 37])
     }
 
     @Test("Decode gui_picker hidden")
@@ -1898,7 +1905,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
@@ -1941,7 +1948,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
