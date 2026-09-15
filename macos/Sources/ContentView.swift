@@ -1133,10 +1133,10 @@ public struct ContentView<EditorSurface: View>: View {
             feedbackState: input.feedbackState,
             encoder: encoder,
             isFileTreeVisible: input.fileTreeState.visible,
-            isGitStatusVisible: input.gitStatusState.visible,
+            isGitStatusVisible: input.gitStatusState.snapshot.visible,
             isBottomPanelVisible: input.bottomPanelState.visible,
             isAgentChatVisible: input.agentChatState.visible,
-            gitSyncing: input.gitStatusState.syncing
+            gitSyncing: input.gitStatusState.snapshot.syncing
         )
     }
 

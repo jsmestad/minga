@@ -121,7 +121,7 @@ public enum PreviewFixtures {
             lastCommitMessage: "feat(editor): add preview host target",
             stashCount: 1
         )
-        state.commitMessage = "feat(macos): polish preview snapshots"
+        state.updateDraft("feat(macos): polish preview snapshots")
     }
 
     public static func populateTabBar(_ state: TabBarState) {

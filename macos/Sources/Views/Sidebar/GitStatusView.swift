@@ -42,14 +42,14 @@ public struct GitStatusView: View {
     public var body: some View {
         VStack(spacing: 0) {
             // Toast banner
-            if let toast = state.toastMessage {
-                toastBanner(message: toast, level: state.toastLevel, action: state.toastAction)
+            if let toast = state.snapshot.toastMessage {
+                toastBanner(message: toast, level: state.snapshot.toastLevel, action: state.snapshot.toastAction)
             }
 
             Group {
-                if state.repoState == .notARepo {
+                if state.snapshot.repoState == .notARepo {
                     notARepoView
-                } else if state.repoState == .loading {
+                } else if state.snapshot.repoState == .loading {
                     loadingView
                 } else if state.isClean {
                     cleanView
@@ -63,7 +63,7 @@ public struct GitStatusView: View {
             .layoutPriority(0)
 
             // Git actions are available for any normal repo. A clean tree can still be ahead/behind, and amend does not require file changes.
-            if state.repoState == .normal {
+            if state.snapshot.repoState == .normal {
                 commitArea
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
@@ -156,7 +156,7 @@ public struct GitStatusView: View {
             .padding(.top, 2)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .clipped()
-            .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
+            .animation(.easeInOut(duration: animDuration), value: state.snapshot.entriesRevision)
         } else {
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
@@ -166,7 +166,7 @@ public struct GitStatusView: View {
                     sectionBlock(.untracked)
                 }
                 .padding(.top, 2)
-                .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
+                .animation(.easeInOut(duration: animDuration), value: state.snapshot.entriesRevision)
             }
         }
     }
@@ -176,7 +176,7 @@ public struct GitStatusView: View {
         let entries = state.entries(for: section)
         if !entries.isEmpty {
             sectionHeader(section, count: entries.count)
-            if !state.collapsedSections.contains(section) {
+            if !state.session.collapsedSections.contains(section) {
                 ForEach(entries) { entry in
                     fileRow(entry)
                 }
@@ -188,7 +188,7 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private func sectionHeader(_ section: GitStatusSection, count: Int) -> some View {
-        let isCollapsed = state.collapsedSections.contains(section)
+        let isCollapsed = state.session.collapsedSections.contains(section)
         let isHovered = hoveredSection == section
 
         HStack(spacing: 4) {
@@ -225,14 +225,10 @@ public struct GitStatusView: View {
         .frame(height: sectionHeaderHeight)
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint(state.collapsedSections.contains(section) ? "Double tap to expand" : "Double tap to collapse")
+        .accessibilityHint(state.session.collapsedSections.contains(section) ? "Double tap to expand" : "Double tap to collapse")
         .onTapGesture {
             withAnimation(.easeInOut(duration: animDuration)) {
-                if state.collapsedSections.contains(section) {
-                    state.collapsedSections.remove(section)
-                } else {
-                    state.collapsedSections.insert(section)
-                }
+                state.toggleSection(section)
             }
         }
         .onHover { isHovered in
@@ -406,8 +402,8 @@ public struct GitStatusView: View {
     }
 
     private func fullPath(for entry: GitStatusEntry) -> String {
-        guard !state.entryBasePath.isEmpty else { return entry.path }
-        return URL(fileURLWithPath: state.entryBasePath).appendingPathComponent(entry.path).path
+        guard !state.snapshot.entryBasePath.isEmpty else { return entry.path }
+        return URL(fileURLWithPath: state.snapshot.entryBasePath).appendingPathComponent(entry.path).path
     }
 
     @ViewBuilder
@@ -434,7 +430,7 @@ public struct GitStatusView: View {
                 // Amend toggle
                 HStack {
                     Toggle(isOn: Binding(
-                        get: { state.amendMode },
+                        get: { state.session.amendMode },
                         set: { state.setAmendMode($0) }
                     )) {
                         Text("Amend")
@@ -448,7 +444,7 @@ public struct GitStatusView: View {
 
                 // Commit message input with character counter
                 ZStack(alignment: .topLeading) {
-                    if state.commitMessage.isEmpty {
+                    if state.session.draft.isEmpty {
                         Text("Commit message\u{2026}")
                             .font(.system(size: 12))
                             .foregroundStyle(theme.treeDisabledFg)
@@ -456,7 +452,10 @@ public struct GitStatusView: View {
                             .padding(.vertical, 6)
                     }
 
-                    TextEditor(text: Bindable(state).commitMessage)
+                    TextEditor(text: Binding(
+                        get: { state.session.draft },
+                        set: { state.updateDraft($0) }
+                    ))
                         .padding(.vertical, 6)
                         .font(.system(size: 12))
                         .foregroundStyle(theme.treeFg)
@@ -477,13 +476,13 @@ public struct GitStatusView: View {
 
                 // Push / Pull / Fetch row
                 HStack(spacing: 4) {
-                    if state.behind > 0 {
-                        miniButton(systemName: "arrow.down.circle", label: "Pull \(state.behind)") {
+                    if state.snapshot.behind > 0 {
+                        miniButton(systemName: "arrow.down.circle", label: "Pull \(state.snapshot.behind)") {
                             encoder?.sendGitPull()
                         }
                     }
-                    if state.ahead > 0 {
-                        miniButton(systemName: "arrow.up.circle", label: "Push \(state.ahead)") {
+                    if state.snapshot.ahead > 0 {
+                        miniButton(systemName: "arrow.up.circle", label: "Push \(state.snapshot.ahead)") {
                             encoder?.sendGitPush()
                         }
                     }
@@ -495,20 +494,18 @@ public struct GitStatusView: View {
 
                 // Commit / Amend button
                 Button {
-                    let message = state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !message.isEmpty else { return }
-                    if state.amendMode {
-                        encoder?.sendGitCommitAmend(message: message)
-                    } else {
-                        encoder?.sendGitCommit(message: message)
+                    guard let submission = state.submit() else { return }
+                    switch submission.action {
+                    case .commit:
+                        encoder?.sendGitCommit(message: submission.message)
+                    case .amend:
+                        encoder?.sendGitCommitAmend(message: submission.message)
                     }
-                    state.commitMessage = ""
-                    state.amendMode = false
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: state.amendMode ? "pencil" : "checkmark")
+                        Image(systemName: state.session.amendMode ? "pencil" : "checkmark")
                             .font(.system(size: 10, weight: .semibold))
-                        Text(state.amendMode ? "Amend" : "Commit")
+                        Text(state.session.amendMode ? "Amend" : "Commit")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -531,11 +528,11 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private var charCounter: some View {
-        let firstLine = state.commitMessage.components(separatedBy: "\n").first ?? ""
+        let firstLine = state.session.draft.components(separatedBy: "\n").first ?? ""
         let count = firstLine.count
         let color = subjectCountColor(count)
 
-        if !state.commitMessage.isEmpty {
+        if !state.session.draft.isEmpty {
             Text("\(count)")
                 .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(color)
@@ -556,7 +553,7 @@ public struct GitStatusView: View {
     }
 
     private var commitBorderColor: Color {
-        let firstLine = state.commitMessage.components(separatedBy: "\n").first ?? ""
+        let firstLine = state.session.draft.components(separatedBy: "\n").first ?? ""
         if firstLine.count >= 72 {
             return theme.gutterErrorFg.opacity(0.5)
         } else if firstLine.count >= 50 {
@@ -566,23 +563,19 @@ public struct GitStatusView: View {
     }
 
     private var commitButtonEnabled: Bool {
-        let hasMessage = !state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if state.amendMode {
-            return hasMessage
-        }
-        return !state.stagedEntries.isEmpty && hasMessage
+        state.canSubmit
     }
 
     private var commitButtonHelp: String {
-        if state.amendMode {
-            return state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if state.session.amendMode {
+            return state.session.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Enter a commit message"
                 : "Amend the previous commit"
         }
-        if state.stagedEntries.isEmpty {
+        if state.snapshot.stagedEntries.isEmpty {
             return "Stage files before committing"
         }
-        if state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if state.session.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Enter a commit message"
         }
         return "Commit staged changes"
@@ -648,7 +641,7 @@ public struct GitStatusView: View {
         .padding(.horizontal, 6)
         .padding(.top, 4)
         .transition(.move(edge: .top).combined(with: .opacity))
-        .animation(.easeInOut(duration: 0.2), value: state.toastMessage)
+        .animation(.easeInOut(duration: 0.2), value: state.snapshot.toastMessage)
     }
 
     // MARK: - Status formatting

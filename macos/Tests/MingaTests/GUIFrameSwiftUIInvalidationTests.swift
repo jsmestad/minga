@@ -265,7 +265,7 @@ private struct ObservationOwnerProbeMatrix: View {
             ObservationOwnerProbe(point: .agent, owner: agentContext, materialize: { $0.task }, recorder: recorder)
             ObservationOwnerProbe(point: .extensionOverlay, owner: extensionOverlay, materialize: { $0.entries.first?.content ?? "" }, recorder: recorder)
             ObservationOwnerProbe(point: .extensionRuntime, owner: extensionRuntime, materialize: { $0.activeExtensionIDs.joined(separator: ",") }, recorder: recorder)
-            ObservationOwnerProbe(point: .gitStatus, owner: gitStatus, materialize: { "\($0.branchName)|\($0.totalCount)" }, recorder: recorder)
+            ObservationOwnerProbe(point: .gitStatus, owner: gitStatus, materialize: { "\($0.snapshot.branchName)|\($0.totalCount)" }, recorder: recorder)
             ObservationOwnerProbe(point: .messages, owner: messages, materialize: {
                 "\($0.filteredEntries.last?.text ?? "")|\($0.isAutoScrolling)|\($0.hasNewEntries)"
             }, recorder: recorder)

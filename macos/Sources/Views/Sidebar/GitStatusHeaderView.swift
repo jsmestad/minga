@@ -35,13 +35,13 @@ public struct GitStatusHeaderView: View {
                 .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(theme.treeDirFg.opacity(0.7))
 
-            Text(state.branchName.isEmpty ? "No branch" : state.branchName)
+            Text(state.snapshot.branchName.isEmpty ? "No branch" : state.snapshot.branchName)
                 .font(.system(size: 12, weight: .regular))
                 .foregroundStyle(theme.tabActiveFg.opacity(0.7))
                 .lineLimit(1)
                 .truncationMode(.middle)
 
-            if state.syncing {
+            if state.snapshot.syncing {
                 ProgressView()
                     .controlSize(.mini)
                     .scaleEffect(0.7)
@@ -50,11 +50,11 @@ public struct GitStatusHeaderView: View {
 
             Spacer(minLength: 4)
 
-            if state.stashCount > 0 {
+            if state.snapshot.stashCount > 0 {
                 stashBadge
             }
 
-            if state.ahead > 0 || state.behind > 0 {
+            if state.snapshot.ahead > 0 || state.snapshot.behind > 0 {
                 aheadBehindBadge
             }
         }
@@ -63,7 +63,7 @@ public struct GitStatusHeaderView: View {
     }
 
     private var stashBadge: some View {
-        Text("Stashes: \(state.stashCount)")
+        Text("Stashes: \(state.snapshot.stashCount)")
             .font(.system(size: 10, weight: .medium).monospacedDigit())
             .foregroundStyle(theme.tabActiveFg.opacity(0.7))
     }
@@ -71,20 +71,20 @@ public struct GitStatusHeaderView: View {
     @ViewBuilder
     private var aheadBehindBadge: some View {
         HStack(spacing: 3) {
-            if state.ahead > 0 {
+            if state.snapshot.ahead > 0 {
                 HStack(spacing: 1) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 8, weight: .bold))
-                    Text("\(state.ahead)")
+                    Text("\(state.snapshot.ahead)")
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
                 .foregroundStyle(theme.gitAddedFg)
             }
-            if state.behind > 0 {
+            if state.snapshot.behind > 0 {
                 HStack(spacing: 1) {
                     Image(systemName: "arrow.down")
                         .font(.system(size: 8, weight: .bold))
-                    Text("\(state.behind)")
+                    Text("\(state.snapshot.behind)")
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                 }
                 .foregroundStyle(theme.gutterErrorFg)
