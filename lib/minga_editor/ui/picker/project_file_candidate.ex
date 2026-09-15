@@ -9,26 +9,36 @@ defmodule MingaEditor.UI.Picker.ProjectFileCandidate do
   """
 
   alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
 
   @enforce_keys [:root, :path]
-  defstruct [:root, :path]
+  defstruct [:root, :path, :activation_id]
 
   @typedoc "A project file choice tied to the workspace that produced it."
-  @type t :: %__MODULE__{root: Root.t(), path: String.t()}
+  @type t :: %__MODULE__{
+          root: Root.t(),
+          path: String.t(),
+          activation_id: WorkspaceSnapshot.activation_id() | nil
+        }
 
   @typedoc "Why a project file candidate could not be constructed or resolved."
   @type error :: Root.file_error() | :empty_path
 
   @doc "Builds a candidate from an authorized directory root and a workspace-relative path."
-  @spec new(Root.t(), String.t()) :: {:ok, t()} | {:error, error()}
-  def new(%Root{kind: :directory} = root, path) when is_binary(path) do
+  @spec new(Root.t(), String.t(), WorkspaceSnapshot.activation_id() | nil) ::
+          {:ok, t()} | {:error, error()}
+  def new(root, path, activation_id \\ nil)
+
+  def new(%Root{kind: :directory} = root, path, activation_id)
+      when is_binary(path) and (is_nil(activation_id) or is_integer(activation_id)) do
     case Path.type(path) do
-      :relative -> safe_candidate(root, Path.safe_relative(path))
+      :relative -> safe_candidate(root, Path.safe_relative(path), activation_id)
       _absolute_or_volume_relative -> {:error, :absolute_path}
     end
   end
 
-  def new(%Root{}, path) when is_binary(path), do: {:error, :not_a_directory_root}
+  def new(%Root{}, path, _activation_id) when is_binary(path),
+    do: {:error, :not_a_directory_root}
 
   @doc "Resolves the candidate through its captured authorized root."
   @spec resolve(t()) :: {:ok, String.t()} | {:error, error()}
@@ -50,9 +60,16 @@ defmodule MingaEditor.UI.Picker.ProjectFileCandidate do
     end
   end
 
-  @spec safe_candidate(Root.t(), {:ok, String.t()} | :error) ::
+  @spec safe_candidate(
+          Root.t(),
+          {:ok, String.t()} | :error,
+          WorkspaceSnapshot.activation_id() | nil
+        ) ::
           {:ok, t()} | {:error, :empty_path | :parent_traversal}
-  defp safe_candidate(_root, {:ok, ""}), do: {:error, :empty_path}
-  defp safe_candidate(root, {:ok, path}), do: {:ok, %__MODULE__{root: root, path: path}}
-  defp safe_candidate(_root, :error), do: {:error, :parent_traversal}
+  defp safe_candidate(_root, {:ok, ""}, _activation_id), do: {:error, :empty_path}
+
+  defp safe_candidate(root, {:ok, path}, activation_id),
+    do: {:ok, %__MODULE__{root: root, path: path, activation_id: activation_id}}
+
+  defp safe_candidate(_root, :error, _activation_id), do: {:error, :parent_traversal}
 end

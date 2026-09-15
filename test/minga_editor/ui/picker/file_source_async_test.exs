@@ -1,8 +1,9 @@
 defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
   @moduledoc "Tests FileSource behavior that does not mutate the global project singleton."
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias Minga.Project
   alias Minga.Project.Root
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Session.State, as: SessionState
@@ -14,6 +15,12 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
 
   @moduletag :tmp_dir
 
+  setup do
+    original_workspace = Project.snapshot()
+    on_exit(fn -> restore_project(original_workspace) end)
+    :ok
+  end
+
   test "on_bulk_select opens all marked project-relative files", %{tmp_dir: tmp_dir} do
     project = Path.join(tmp_dir, "bulk_project_#{:erlang.unique_integer([:positive])}")
     lib = Path.join(project, "lib")
@@ -22,6 +29,7 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     File.write!(Path.join(lib, "two.ex"), "two")
 
     {:ok, root} = Root.directory(project)
+    activation_id = activate_project!(root).activation_id
 
     state =
       TestHelpers.base_state(content: "initial")
@@ -32,8 +40,8 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     state =
       FileSource.on_bulk_select(
         [
-          %Item{id: candidate!(root, "lib/one.ex"), label: "one.ex"},
-          %Item{id: candidate!(root, "lib/two.ex"), label: "two.ex"}
+          %Item{id: candidate!(root, "lib/one.ex", activation_id), label: "one.ex"},
+          %Item{id: candidate!(root, "lib/two.ex", activation_id), label: "two.ex"}
         ],
         state
       )
@@ -68,6 +76,14 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     assert FileSource.candidates(context) == []
   end
 
+  test "async fetch preserves an explicit project service failure" do
+    context =
+      TestHelpers.base_state(content: "loose file")
+      |> Context.from_editor_state(%{project_error: "Project service is unavailable"})
+
+    assert FileSource.async_fetch(context) == {:error, "Project service is unavailable"}
+  end
+
   test "selection uses the candidate root after the file tree changes", %{tmp_dir: tmp_dir} do
     original_root = Path.join(tmp_dir, "original")
     current_tree_root = Path.join(tmp_dir, "current")
@@ -76,13 +92,14 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     File.write!(Path.join(original_root, "same.txt"), "original")
     File.write!(Path.join(current_tree_root, "same.txt"), "current")
     {:ok, root} = Root.directory(original_root)
+    activation_id = activate_project!(root).activation_id
 
     state =
       TestHelpers.base_state(content: "initial")
       |> set_file_tree(%FileTree{project_root: current_tree_root})
 
     initial_pids = state.workspace.buffers.list
-    item = %Item{id: candidate!(root, "same.txt"), label: "same.txt"}
+    item = %Item{id: candidate!(root, "same.txt", activation_id), label: "same.txt"}
     state = FileSource.on_select(item, state)
     new_pids = Enum.reject(state.workspace.buffers.list, &Enum.member?(initial_pids, &1))
     on_exit(fn -> Enum.each(new_pids, &stop_pid/1) end)
@@ -161,10 +178,40 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     end
   end
 
-  @spec candidate!(Root.t(), String.t()) :: ProjectFileCandidate.t()
-  defp candidate!(root, path) do
-    {:ok, candidate} = ProjectFileCandidate.new(root, path)
+  @spec candidate!(Root.t(), String.t(), Minga.Project.WorkspaceSnapshot.activation_id() | nil) ::
+          ProjectFileCandidate.t()
+  defp candidate!(root, path, activation_id \\ nil) do
+    {:ok, candidate} = ProjectFileCandidate.new(root, path, activation_id)
     candidate
+  end
+
+  @spec activate_project!(Root.t()) :: Minga.Project.WorkspaceSnapshot.t()
+  defp activate_project!(%Root{path: path} = root) do
+    Minga.Events.subscribe(:project_rebuilt)
+    assert {:ok, snapshot} = Project.activate(root)
+
+    if snapshot.rebuilding? do
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^path}},
+                     5_000
+    end
+
+    _ = :sys.get_state(Project)
+    Project.snapshot()
+  end
+
+  @spec restore_project(Minga.Project.WorkspaceSnapshot.t() | nil) :: :ok
+  defp restore_project(nil) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    :ok
+  end
+
+  defp restore_project(%Minga.Project.WorkspaceSnapshot{root: root}) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    _ = Project.activate(root)
+    :ok
   end
 
   @spec set_file_tree(MingaEditor.State.t(), FileTree.t()) :: MingaEditor.State.t()

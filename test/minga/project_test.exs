@@ -139,6 +139,29 @@ defmodule Minga.ProjectTest do
              } = Project.snapshot(name)
     end
 
+    test "failed discovery records an explicit inventory error instead of installing an empty result",
+         %{tmp_dir: tmp} do
+      project = Path.join(tmp, "failed_discovery")
+      File.mkdir_p!(project)
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+      Minga.Events.subscribe(:project_rebuilt)
+
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      worker = flush(name).rebuild_pid
+      :ok = Minga.Project.SlowFileFind.complete(worker, {:error, "permission denied"})
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                     1_000
+
+      assert %WorkspaceSnapshot{
+               files: [],
+               rebuilding?: false,
+               inventory_error: "permission denied"
+             } = Project.snapshot(name)
+    end
+
     test "rapid rerooting cannot install a superseded worker result", %{tmp_dir: tmp} do
       first = Path.join(tmp, "snapshot_first")
       second = Path.join(tmp, "snapshot_second")
@@ -325,7 +348,13 @@ defmodule Minga.ProjectTest do
 
       assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
       state = flush(name)
-      assert %WorkspaceSnapshot{root: %Root{path: ^root}, rebuilding?: false} = state.workspace
+
+      assert %WorkspaceSnapshot{
+               root: %Root{path: ^root},
+               rebuilding?: false,
+               inventory_error: "Project file cache rebuild timed out"
+             } = state.workspace
+
       assert state.rebuild_pid == nil
     end
 

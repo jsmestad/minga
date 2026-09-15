@@ -38,6 +38,7 @@ defmodule MingaEditor.UI.Picker do
   defstruct items: [],
             candidates: [],
             query: "",
+            match_query: "",
             selected: 0,
             filtered: [],
             max_visible: 10,
@@ -67,6 +68,7 @@ defmodule MingaEditor.UI.Picker do
           items: [Item.t()],
           candidates: [Candidate.t()],
           query: String.t(),
+          match_query: String.t(),
           selected: non_neg_integer(),
           filtered: [Item.t()],
           max_visible: pos_integer(),
@@ -91,6 +93,7 @@ defmodule MingaEditor.UI.Picker do
       max_visible: max_visible,
       filtered: items,
       query: "",
+      match_query: "",
       selected: 0
     })
   end
@@ -123,7 +126,7 @@ defmodule MingaEditor.UI.Picker do
   @doc "Appends a character to the query and refilters."
   @spec type_char(t(), String.t()) :: t()
   def type_char(%__MODULE__{query: query} = picker, char) when is_binary(char) do
-    refilter(%{picker | query: query <> char})
+    filter(picker, query <> char)
   end
 
   @doc "Removes the last character from the query and refilters."
@@ -132,13 +135,20 @@ defmodule MingaEditor.UI.Picker do
 
   def backspace(%__MODULE__{query: query} = picker) do
     new_query = String.slice(query, 0, String.length(query) - 1)
-    refilter(%{picker | query: new_query})
+    filter(picker, new_query)
   end
 
   @doc "Sets the query to an exact value and refilters."
   @spec filter(t(), String.t()) :: t()
   def filter(%__MODULE__{} = picker, query) when is_binary(query) do
-    refilter(%{picker | query: query})
+    filter_with_match_query(picker, query, query)
+  end
+
+  @doc "Sets visible query text while filtering against a source-owned match query."
+  @spec filter_with_match_query(t(), String.t(), String.t()) :: t()
+  def filter_with_match_query(%__MODULE__{} = picker, query, match_query)
+      when is_binary(query) and is_binary(match_query) do
+    refilter(%{picker | query: query, match_query: match_query})
   end
 
   # ── Navigation ──────────────────────────────────────────────────────────────
@@ -341,13 +351,13 @@ defmodule MingaEditor.UI.Picker do
   # Empty query: no scoring, just present the leading slice of the (already
   # source-ordered) items, bounded so huge sources don't materialize every item.
   @spec refilter(t()) :: t()
-  defp refilter(%__MODULE__{items: items, query: ""} = picker) do
+  defp refilter(%__MODULE__{items: items, match_query: ""} = picker) do
     filtered = bounded_unscored(items, result_limit(picker))
     %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
   end
 
-  defp refilter(%__MODULE__{candidates: candidates, query: query} = picker) do
-    case split_query(query) do
+  defp refilter(%__MODULE__{candidates: candidates, match_query: match_query} = picker) do
+    case split_query(match_query) do
       [] ->
         filtered = bounded_unscored(picker.items, result_limit(picker))
 
@@ -361,7 +371,7 @@ defmodule MingaEditor.UI.Picker do
         filtered =
           candidates
           |> Scorer.top_k(segments, result_limit(picker))
-          |> Enum.map(&highlight_winner(&1, query))
+          |> Enum.map(&highlight_winner(&1, match_query))
 
         %{
           picker

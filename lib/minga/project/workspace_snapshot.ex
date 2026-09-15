@@ -10,7 +10,7 @@ defmodule Minga.Project.WorkspaceSnapshot do
   alias Minga.Project.Root
 
   @enforce_keys [:root, :activation_id, :files, :rebuilding?]
-  defstruct [:root, :activation_id, :files, :rebuilding?]
+  defstruct [:root, :activation_id, :files, :rebuilding?, inventory_error: nil]
 
   @typedoc "A monotonic identity assigned to one explicit workspace activation."
   @type activation_id :: pos_integer()
@@ -20,7 +20,8 @@ defmodule Minga.Project.WorkspaceSnapshot do
           root: Root.t(),
           activation_id: activation_id(),
           files: [String.t()],
-          rebuilding?: boolean()
+          rebuilding?: boolean(),
+          inventory_error: String.t() | nil
         }
 
   @doc "Installs a directory root with a fresh activation identity and an empty inventory."
@@ -43,13 +44,19 @@ defmodule Minga.Project.WorkspaceSnapshot do
   @doc "Marks discovery as running for this workspace."
   @spec begin_rebuild(t()) :: t()
   def begin_rebuild(%__MODULE__{} = snapshot) do
-    %{snapshot | rebuilding?: true}
+    %{snapshot | rebuilding?: true, inventory_error: nil}
   end
 
   @doc "Installs one completed workspace-relative inventory atomically."
   @spec complete_rebuild(t(), [String.t()]) :: t()
   def complete_rebuild(%__MODULE__{} = snapshot, files) when is_list(files) do
-    %{snapshot | files: files, rebuilding?: false}
+    %{snapshot | files: files, rebuilding?: false, inventory_error: nil}
+  end
+
+  @doc "Records a failed discovery while retaining the last installed inventory."
+  @spec fail_rebuild(t(), String.t()) :: t()
+  def fail_rebuild(%__MODULE__{} = snapshot, message) when is_binary(message) do
+    %{snapshot | rebuilding?: false, inventory_error: message}
   end
 
   @doc "Marks discovery as stopped while retaining the current cached inventory."

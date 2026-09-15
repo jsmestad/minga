@@ -28,7 +28,7 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     on_exit(fn -> restore_project(original_workspace) end)
   end
 
-  test "delayed file actions stay tied to Project A and stale delete is harmless after switching to B",
+  test "delayed Project A actions are rejected after switching to B and stale delete is harmless",
        %{
          tmp_dir: tmp_dir
        } do
@@ -84,10 +84,10 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
 
     single_picker_state = open_single_picker(rerooted_state, items_by_path["single.txt"])
     single_state = PickerUI.handle_key(single_picker_state, 13, 0)
-    on_exit(fn -> stop_added_buffers(single_state, rerooted_state) end)
 
-    assert Minga.Buffer.file_path(single_state.workspace.buffers.active) ==
-             Path.join(project_a, "single.txt")
+    assert {:picker, _payload} = single_state.shell_runtime.state.modal
+    assert Minga.Buffer.file_path(single_state.workspace.buffers.active) == nil
+    assert single_state.shell_runtime.state.notice.message =~ "Project changed"
 
     assert File.read!(Path.join(project_b, "single.txt")) == "B:single.txt"
 
@@ -118,29 +118,17 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     marked_items = [items_by_path["marked/one.txt"], items_by_path["marked/two.txt"]]
     marked_state = open_marked_picker(rerooted_state, marked_items)
     entered_state = PickerUI.handle_key(marked_state, 13, 0)
-    on_exit(fn -> stop_added_buffers(entered_state, rerooted_state) end)
 
-    assert opened_paths(entered_state, rerooted_state) == [
-             Path.join(project_a, "marked/one.txt"),
-             Path.join(project_a, "marked/two.txt")
-           ]
-
-    assert Minga.Buffer.file_path(entered_state.workspace.buffers.active) ==
-             Path.join(project_a, "marked/two.txt")
+    assert opened_paths(entered_state, rerooted_state) == []
+    assert Minga.Buffer.file_path(entered_state.workspace.buffers.active) == nil
 
     bulk_items = [items_by_path["bulk/one.txt"], items_by_path["bulk/two.txt"]]
     bulk_state = open_marked_picker(rerooted_state, bulk_items)
     menu_state = PickerUI.handle_key(bulk_state, ?o, MingaEditor.Input.mod_ctrl())
     bulk_opened_state = PickerUI.handle_key(menu_state, 13, 0)
-    on_exit(fn -> stop_added_buffers(bulk_opened_state, rerooted_state) end)
 
-    assert opened_paths(bulk_opened_state, rerooted_state) == [
-             Path.join(project_a, "bulk/one.txt"),
-             Path.join(project_a, "bulk/two.txt")
-           ]
-
-    assert Minga.Buffer.file_path(bulk_opened_state.workspace.buffers.active) ==
-             Path.join(project_a, "bulk/two.txt")
+    assert opened_paths(bulk_opened_state, rerooted_state) == []
+    assert Minga.Buffer.file_path(bulk_opened_state.workspace.buffers.active) == nil
 
     assert Project.frecency_scores() == %{}
 
@@ -153,13 +141,14 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     assert Enum.sort(project_b_files) == Enum.sort(relative_paths)
 
     activate_project!(root_a)
-    assert "single.txt" in Project.recent_files()
-    assert Project.frecency_scores()["single.txt"] > 0
+    assert Project.recent_files() == ["marked/two.txt"]
+    refute Map.has_key?(Project.frecency_scores(), "single.txt")
   end
 
-  test "a stale nested-root candidate attributes a new buffer open only to its captured root", %{
-    tmp_dir: tmp_dir
-  } do
+  test "a stale nested-root candidate cannot open or attribute a buffer after activation changes",
+       %{
+         tmp_dir: tmp_dir
+       } do
     project_b = Path.join(tmp_dir, "live_project")
 
     project_a =
@@ -175,9 +164,12 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     File.write!(absolute_path, "nested")
     {:ok, root_a} = Root.directory(project_a)
     {:ok, root_b} = Root.directory(project_b)
-    {:ok, stale_candidate} = ProjectFileCandidate.new(root_a, relative_path)
 
-    activate_project!(root_a)
+    snapshot_a = activate_project!(root_a)
+
+    {:ok, stale_candidate} =
+      ProjectFileCandidate.new(root_a, relative_path, snapshot_a.activation_id)
+
     existing_score = Map.get(Project.frecency_scores(), relative_path, 0)
     activate_project!(root_b)
 
@@ -191,19 +183,19 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
         initial_state
       )
 
-    on_exit(fn -> stop_added_buffers(selected_state, initial_state) end)
     _ = :sys.get_state(Project)
 
-    assert Minga.Buffer.file_path(selected_state.workspace.buffers.active) == absolute_path
+    assert Minga.Buffer.file_path(selected_state.workspace.buffers.active) == nil
+    assert selected_state.shell_runtime.state.notice.message =~ "Project changed"
     assert Project.recent_files() == []
     assert Project.frecency_scores() == %{}
 
     activate_project!(root_a)
-    assert Project.recent_files() == [relative_path]
-    assert Project.frecency_scores()[relative_path] == existing_score + 100
+    assert Project.recent_files() == []
+    assert Map.get(Project.frecency_scores(), relative_path, 0) == existing_score
   end
 
-  @spec activate_project!(Root.t()) :: :ok
+  @spec activate_project!(Root.t()) :: Minga.Project.WorkspaceSnapshot.t()
   defp activate_project!(%Root{path: path} = root) do
     Minga.Events.subscribe(:project_rebuilt)
     assert {:ok, snapshot} = Project.activate(root)
@@ -215,7 +207,7 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     end
 
     _ = :sys.get_state(Project)
-    :ok
+    Project.snapshot()
   end
 
   @spec restore_project(Minga.Project.WorkspaceSnapshot.t() | nil) :: :ok
@@ -305,21 +297,5 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     result_state.workspace.buffers.list
     |> Enum.reject(&MapSet.member?(initial_buffers, &1))
     |> Enum.map(&Minga.Buffer.file_path/1)
-  end
-
-  @spec stop_added_buffers(MingaEditor.State.t(), MingaEditor.State.t()) :: :ok
-  defp stop_added_buffers(result_state, initial_state) do
-    initial_buffers = MapSet.new(initial_state.workspace.buffers.list)
-
-    result_state.workspace.buffers.list
-    |> Enum.reject(&MapSet.member?(initial_buffers, &1))
-    |> Enum.each(&stop_pid/1)
-  end
-
-  @spec stop_pid(pid()) :: :ok
-  defp stop_pid(pid) do
-    GenServer.stop(pid)
-  catch
-    :exit, _ -> :ok
   end
 end

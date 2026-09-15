@@ -17,16 +17,20 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.DirectorySource
+  alias MingaEditor.UI.Picker.FileSource
+  alias MingaEditor.UI.Picker.FilesystemContext
   alias MingaEditor.UI.Picker.Source
 
   @enforce_keys [:source, :callback_source, :context, :revision]
-  defstruct [:source, :callback_source, :context, :revision]
+  defstruct [:source, :callback_source, :context, :revision, :fetch_identity]
 
   @type t :: %__MODULE__{
           source: module(),
           callback_source: ContributionCleanup.contribution_source() | nil,
           context: Context.t(),
-          revision: reference()
+          revision: reference(),
+          fetch_identity: term() | nil
         }
 
   @typedoc "Normalized data allowed to cross from the picker worker to the Editor."
@@ -46,7 +50,8 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
       source: source,
       callback_source: callback_source,
       context: context,
-      revision: revision
+      revision: revision,
+      fetch_identity: fetch_identity(source, context)
     }
 
     build_request(effect, source, callback_source)
@@ -100,7 +105,13 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   @spec apply_result(EditorState.t(), t(), tuple(), Outcome.t()) ::
           {EditorState.t(), Outcome.t()}
   defp apply_result(state, effect, result, outcome) do
-    case PickerUI.apply_fetch_result(state, effect.source, effect.revision, result) do
+    case PickerUI.apply_fetch_result(
+           state,
+           effect.source,
+           effect.revision,
+           effect.fetch_identity,
+           result
+         ) do
       {:ok, state} -> {state, outcome}
       :stale -> {state, Outcome.stale(outcome, :picker_closed_or_replaced)}
     end
@@ -115,4 +126,15 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   defp failure_message({:picker_source_throw, value}), do: "Source failed: #{inspect(value)}"
   defp failure_message(reason) when is_binary(reason), do: reason
   defp failure_message(reason), do: "Picker fetch failed: #{inspect(reason)}"
+
+  @spec fetch_identity(module(), Context.t()) :: term() | nil
+  defp fetch_identity(
+         DirectorySource,
+         %Context{picker_ui: %{context: %FilesystemContext{query: %{identity: identity}}}}
+       ),
+       do: identity
+
+  defp fetch_identity(FileSource, %Context{} = context), do: FileSource.fetch_identity(context)
+
+  defp fetch_identity(_source, %Context{}), do: nil
 end

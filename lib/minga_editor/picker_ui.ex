@@ -28,7 +28,12 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.State.BufferLifecycle
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.DirectorySource
   alias MingaEditor.UI.Picker.FetchEffect
+  alias MingaEditor.UI.Picker.FileSource
+  alias MingaEditor.UI.Picker.FilesystemContext
+  alias MingaEditor.UI.Picker.FilesystemQuery
+  alias MingaEditor.UI.Picker.FindFileSession
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
 
@@ -118,7 +123,7 @@ defmodule MingaEditor.PickerUI do
       FetchEffect.request(
         source_module,
         picker_state.callback_source,
-        Context.from_editor_state(state, context),
+        Context.from_editor_state(new_state),
         revision
       )
 
@@ -132,8 +137,11 @@ defmodule MingaEditor.PickerUI do
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     callback_source = Source.source_identity(source_module)
 
+    source_context = Context.from_editor_state(state, context)
+
     picker =
       Picker.new([], title: Source.title(source_module, callback_source), max_visible: max_vis)
+      |> filter_initial_query(source_module, context)
 
     new_state = clear_whichkey(state)
     layout = MingaEditor.UI.Picker.Source.layout(source_module, callback_source)
@@ -149,7 +157,8 @@ defmodule MingaEditor.PickerUI do
         layout
       )
 
-    {picker_state, revision} = PickerState.begin_fetch(picker_state)
+    {picker_state, revision} =
+      PickerState.begin_fetch(picker_state, fetch_identity(source_module, source_context))
 
     new_state =
       MingaEditor.Shell.Traditional.ModalWorkflow.open(
@@ -177,7 +186,8 @@ defmodule MingaEditor.PickerUI do
   @spec fetch_admission_failure(state(), module(), reference(), term()) :: state()
   defp fetch_admission_failure(state, source, revision, reason) do
     message = "Picker fetch not scheduled: #{inspect(reason)}"
-    {:ok, state} = apply_fetch_result(state, source, revision, {:error, message})
+    identity = picker_state(state).fetch_identity
+    {:ok, state} = apply_fetch_result(state, source, revision, identity, {:error, message})
     state
   end
 
@@ -192,7 +202,24 @@ defmodule MingaEditor.PickerUI do
   @spec apply_fetch_result(state(), module(), reference(), fetch_result()) ::
           {:ok, state()} | :stale
   def apply_fetch_result(state, source_module, revision, {:ok, items, candidates, meta}) do
-    case live_picker(state, source_module, revision) do
+    apply_fetch_result(state, source_module, revision, nil, {:ok, items, candidates, meta})
+  end
+
+  def apply_fetch_result(state, source_module, revision, {:error, reason}) do
+    apply_fetch_result(state, source_module, revision, nil, {:error, reason})
+  end
+
+  @doc "Applies a fetch result guarded by both scheduler revision and source identity."
+  @spec apply_fetch_result(state(), module(), reference(), term() | nil, fetch_result()) ::
+          {:ok, state()} | :stale
+  def apply_fetch_result(
+        state,
+        source_module,
+        revision,
+        fetch_identity,
+        {:ok, items, candidates, meta}
+      ) do
+    case live_fetch(state, source_module, revision, fetch_identity, meta) do
       {:ok, payload} ->
         picker_state = payload.picker_ui
         picker = Picker.put_candidates(picker_state.picker, items, candidates)
@@ -212,8 +239,8 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  def apply_fetch_result(state, source_module, revision, {:error, reason}) do
-    case live_picker(state, source_module, revision) do
+  def apply_fetch_result(state, source_module, revision, fetch_identity, {:error, reason}) do
+    case live_fetch(state, source_module, revision, fetch_identity, nil) do
       {:ok, payload} ->
         picker_state = payload.picker_ui
         new_picker_state = PickerState.fail_fetch(picker_state, reason)
@@ -229,22 +256,43 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  @spec live_picker(state(), module(), reference()) :: {:ok, PickerPayload.t()} | :stale
+  @spec live_fetch(state(), module(), reference(), term() | nil, Source.fetch_meta() | nil) ::
+          {:ok, PickerPayload.t()} | :stale
+  defp live_fetch(state, source_module, revision, fetch_identity, meta) do
+    with {:ok, payload} <- live_picker(state, source_module, revision, fetch_identity),
+         true <- current_source_fetch?(source_module, fetch_identity, meta) do
+      {:ok, payload}
+    else
+      _closed_replaced_or_changed -> :stale
+    end
+  end
+
+  @spec current_source_fetch?(module(), term() | nil, Source.fetch_meta() | nil) :: boolean()
+  defp current_source_fetch?(FileSource, fetch_identity, meta),
+    do: FileSource.current_fetch?(fetch_identity, meta)
+
+  defp current_source_fetch?(_source, _fetch_identity, _meta), do: true
+
+  @spec live_picker(state(), module(), reference(), term() | nil) ::
+          {:ok, PickerPayload.t()} | :stale
   defp live_picker(
          %{shell_runtime: %{state: %{modal: modal}}},
          source_module,
-         revision
+         revision,
+         fetch_identity
        ) do
     case modal do
       {:picker, %PickerPayload{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
-        if PickerState.current_fetch?(picker_ui, revision), do: {:ok, payload}, else: :stale
+        if PickerState.current_fetch?(picker_ui, revision, fetch_identity),
+          do: {:ok, payload},
+          else: :stale
 
       _ ->
         :stale
     end
   end
 
-  defp live_picker(_state, _source_module, _revision), do: :stale
+  defp live_picker(_state, _source_module, _revision, _fetch_identity), do: :stale
 
   defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
@@ -351,6 +399,37 @@ defmodule MingaEditor.PickerUI do
           state()
   defp replace_current_query(
          state,
+         %PickerState{source: DirectorySource, context: %FilesystemContext{} = context} =
+           picker_state,
+         query,
+         edit_seq
+       ) do
+    update_filesystem_query(state, picker_state, context, query, edit_seq)
+  end
+
+  defp replace_current_query(
+         state,
+         %PickerState{
+           source: FileSource,
+           context: %{find_file_session: %FindFileSession{} = session}
+         } = picker_state,
+         query,
+         edit_seq
+       ) do
+    if FilesystemQuery.explicit_path_intent?(query) do
+      switch_to_directory_query(
+        state,
+        picker_state,
+        FilesystemQuery.parse(session, query),
+        edit_seq
+      )
+    else
+      replace_project_query(state, picker_state, query, edit_seq)
+    end
+  end
+
+  defp replace_current_query(
+         state,
          %PickerState{
            picker: %Picker{} = picker,
            source_switch: {:switched, _original_source, mode_prefix}
@@ -382,6 +461,169 @@ defmodule MingaEditor.PickerUI do
         install_query_edit(state, picker, query, edit_seq)
     end
   end
+
+  @spec replace_project_query(state(), PickerState.t(), String.t(), non_neg_integer()) :: state()
+  defp replace_project_query(state, %PickerState{picker: picker} = picker_state, query, edit_seq) do
+    case String.next_grapheme(query) do
+      {prefix, remaining_query} ->
+        case maybe_switch_mode(state, picker_state, prefix) do
+          {:switched, new_state} ->
+            install_switched_query_edit(new_state, remaining_query, edit_seq)
+
+          :no_switch ->
+            install_query_edit(state, picker, query, edit_seq)
+        end
+
+      nil ->
+        install_query_edit(state, picker, query, edit_seq)
+    end
+  end
+
+  @spec update_filesystem_query(
+          state(),
+          PickerState.t(),
+          FilesystemContext.t(),
+          String.t(),
+          non_neg_integer()
+        ) :: state()
+  defp update_filesystem_query(state, picker_state, context, query, edit_seq) do
+    session = context.query.session
+
+    if FindFileSession.project_backed?(session) and
+         not FilesystemQuery.explicit_path_intent?(query) do
+      restore_project_query(state, picker_state, session, query, edit_seq)
+    else
+      next_query = filesystem_query(session, query)
+
+      if picker_state.load_status == :ready and
+           FilesystemQuery.same_directory?(context.query, next_query) do
+        reuse_directory_listing(state, picker_state, next_query, edit_seq)
+      else
+        switch_to_directory_query(state, picker_state, next_query, edit_seq)
+      end
+    end
+  end
+
+  @spec filesystem_query(FindFileSession.t(), String.t()) :: FilesystemQuery.t()
+  defp filesystem_query(%FindFileSession{project_root: nil} = session, ""),
+    do: FilesystemQuery.initial(session)
+
+  defp filesystem_query(%FindFileSession{} = session, query),
+    do: FilesystemQuery.parse(session, query)
+
+  @spec reuse_directory_listing(
+          state(),
+          PickerState.t(),
+          FilesystemQuery.t(),
+          non_neg_integer()
+        ) :: state()
+  defp reuse_directory_listing(
+         state,
+         %PickerState{picker: picker} = picker_state,
+         next_query,
+         edit_seq
+       ) do
+    rebound =
+      picker
+      |> Picker.replace_items(DirectorySource.rebind(picker.items, next_query))
+      |> Picker.filter_with_match_query(next_query.text, FilesystemQuery.filter_text(next_query))
+
+    next_context = FilesystemContext.new(next_query)
+
+    update_picker(state, fn _current ->
+      picker_state
+      |> PickerState.put_context(next_context)
+      |> PickerState.accept_query_edit(rebound, edit_seq)
+      |> PickerState.invalidate_fetch()
+    end)
+  end
+
+  @spec switch_to_directory_query(
+          state(),
+          PickerState.t(),
+          FilesystemQuery.t(),
+          non_neg_integer()
+        ) :: state()
+  defp switch_to_directory_query(state, picker_state, query, edit_seq) do
+    state = cancel_current_fetch(state)
+    callback_source = Source.source_identity(DirectorySource)
+    target = {DirectorySource, callback_source, Source.layout(DirectorySource, callback_source)}
+    picker = empty_query_picker(state, DirectorySource, callback_source, query)
+    context = FilesystemContext.new(query)
+
+    loading =
+      picker_state
+      |> PickerState.retarget_with_context(picker, target, context)
+      |> PickerState.accept_query_edit(picker, edit_seq)
+      |> PickerState.begin_fetch(query.identity)
+
+    {loading_picker_state, revision} = loading
+    loading_state = update_picker(state, fn _current -> loading_picker_state end)
+
+    request =
+      FetchEffect.request(
+        DirectorySource,
+        callback_source,
+        Context.from_editor_state(loading_state),
+        revision
+      )
+
+    schedule_fetch(loading_state, request, DirectorySource, revision)
+  end
+
+  @spec restore_project_query(
+          state(),
+          PickerState.t(),
+          FindFileSession.t(),
+          String.t(),
+          non_neg_integer()
+        ) :: state()
+  defp restore_project_query(state, picker_state, session, query, edit_seq) do
+    state = cancel_current_fetch(state)
+    callback_source = Source.source_identity(FileSource)
+    target = {FileSource, callback_source, Source.layout(FileSource, callback_source)}
+    picker = empty_query_picker(state, FileSource, callback_source, query)
+    context = FindFileSession.project_context(session)
+
+    {loading_picker_state, revision} =
+      picker_state
+      |> PickerState.retarget_with_context(picker, target, context)
+      |> PickerState.accept_query_edit(picker, edit_seq)
+      |> PickerState.begin_fetch()
+
+    loading_state = update_picker(state, fn _current -> loading_picker_state end)
+
+    request =
+      FetchEffect.request(
+        FileSource,
+        callback_source,
+        Context.from_editor_state(loading_state),
+        revision
+      )
+
+    schedule_fetch(loading_state, request, FileSource, revision)
+  end
+
+  @spec empty_query_picker(
+          state(),
+          module(),
+          PickerState.callback_source(),
+          String.t() | FilesystemQuery.t()
+        ) ::
+          Picker.t()
+  defp empty_query_picker(state, source, callback_source, query) do
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
+
+    picker = Picker.new([], title: Source.title(source, callback_source), max_visible: max_vis)
+    filter_empty_picker(picker, query)
+  end
+
+  @spec filter_empty_picker(Picker.t(), String.t() | FilesystemQuery.t()) :: Picker.t()
+  defp filter_empty_picker(picker, %FilesystemQuery{} = query) do
+    Picker.filter_with_match_query(picker, query.text, FilesystemQuery.filter_text(query))
+  end
+
+  defp filter_empty_picker(picker, query) when is_binary(query), do: Picker.filter(picker, query)
 
   @spec install_switched_query_edit(state(), String.t(), non_neg_integer()) :: state()
   defp install_switched_query_edit(state, "", edit_seq),
@@ -708,6 +950,31 @@ defmodule MingaEditor.PickerUI do
           shell_runtime: %{
             state: %{
               modal:
+                {:picker,
+                 %{
+                   picker_ui:
+                     %PickerState{
+                       picker: %Picker{} = picker,
+                       source: DirectorySource,
+                       acknowledged_query_edit_seq: edit_seq
+                     } = picker_state
+                 }}
+            }
+          }
+        } = state,
+        cp,
+        _mods
+      )
+      when cp in [8, 127] do
+    next_query = String.slice(picker.query, 0, max(String.length(picker.query) - 1, 0))
+    replace_current_query(state, picker_state, next_query, edit_seq + 1)
+  end
+
+  def handle_key(
+        %{
+          shell_runtime: %{
+            state: %{
+              modal:
                 {:picker, %{picker_ui: %PickerState{picker: %Picker{} = picker} = picker_state}}
             }
           }
@@ -829,12 +1096,35 @@ defmodule MingaEditor.PickerUI do
   @spec run_source_action_and_close(EditorState.t(), module(), term(), Picker.item()) ::
           EditorState.t()
   defp run_source_action_and_close(state, source, action_id, item) do
+    run_source_action(state, source, action_id, item)
+  end
+
+  @spec run_source_action(EditorState.t(), module(), term(), Picker.item()) :: EditorState.t()
+  defp run_source_action(state, DirectorySource, :open, item) do
+    select_single_item(state, item, DirectorySource, current_callback_source(state))
+  end
+
+  defp run_source_action(state, source, action_id, item) do
     callback_source = current_callback_source(state)
     new_state = state |> restore_picker_origin() |> close()
     run_action(source, action_id, item, new_state, callback_source)
   end
 
   @spec type_printable_char(EditorState.t(), PickerState.t(), String.t()) :: EditorState.t()
+  defp type_printable_char(
+         state,
+         %PickerState{
+           picker: picker,
+           source: source,
+           acknowledged_query_edit_seq: edit_seq
+         } = picker_state,
+         char
+       )
+       when source in [DirectorySource, FileSource] do
+    query = PickerState.mode_prefix(picker_state) <> picker.query <> char
+    replace_current_query(state, picker_state, query, edit_seq + 1)
+  end
+
   defp type_printable_char(state, %PickerState{picker: picker} = picker_state, char) do
     case maybe_switch_mode(state, picker_state, char) do
       {:switched, new_state} ->
@@ -869,12 +1159,46 @@ defmodule MingaEditor.PickerUI do
           PickerState.callback_source()
         ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
   defp select_single_item(state, item, source, callback_source) do
-    if Picker.Source.keep_open_on_select?(source, callback_source) do
-      new_state = Source.on_select(source, item, state, callback_source)
-      refresh_items(new_state)
-    else
-      run_select_and_close(state, item, source, callback_source)
+    context = picker_state(state).context
+
+    case Source.selection_disposition(source, item, context, callback_source) do
+      :accept ->
+        if Picker.Source.keep_open_on_select?(source, callback_source) do
+          new_state = Source.on_select(source, item, state, callback_source)
+          refresh_items(new_state)
+        else
+          run_select_and_close(state, item, source, callback_source)
+        end
+
+      {:stay_open, next_context} ->
+        stay_open_selection(state, source, next_context)
+
+      {:reject, message} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
     end
+  end
+
+  @spec stay_open_selection(EditorState.t(), module(), term()) :: EditorState.t()
+  defp stay_open_selection(
+         state,
+         DirectorySource,
+         %FilesystemContext{query: query}
+       ) do
+    picker_state = picker_state(state)
+
+    switch_to_directory_query(
+      state,
+      picker_state,
+      query,
+      picker_state.acknowledged_query_edit_seq
+    )
+  end
+
+  defp stay_open_selection(state, _source, _context) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Picker source cannot keep this selection open"
+    )
   end
 
   @spec run_select_and_close(
@@ -883,6 +1207,16 @@ defmodule MingaEditor.PickerUI do
           module(),
           PickerState.callback_source()
         ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp run_select_and_close(state, item, DirectorySource, _callback_source) do
+    case DirectorySource.open(item, state) do
+      {:ok, new_state} ->
+        close(new_state)
+
+      {:error, new_state, message} ->
+        update_picker(new_state, &PickerState.fail_fetch(&1, message))
+    end
+  end
+
   defp run_select_and_close(state, item, source, callback_source) do
     new_state = state |> restore_picker_origin() |> close()
     new_state = Source.on_select(source, item, new_state, callback_source)
@@ -1044,10 +1378,24 @@ defmodule MingaEditor.PickerUI do
           }
         } = state
       ) do
-    ctx = Context.from_editor_state(state)
-    refreshed = Picker.replace_items(picker, Source.candidates(source, ctx, callback_source))
+    if Source.async?(source, callback_source) do
+      refresh_async_items(state, source, callback_source)
+    else
+      ctx = Context.from_editor_state(state)
+      refreshed = Picker.replace_items(picker, Source.candidates(source, ctx, callback_source))
+      update_picker(state, &PickerState.update_picker(&1, refreshed))
+    end
+  end
 
-    update_picker(state, &PickerState.update_picker(&1, refreshed))
+  @spec refresh_async_items(state(), module(), PickerState.callback_source()) :: state()
+  defp refresh_async_items(state, source, callback_source) do
+    state = cancel_current_fetch(state)
+    current = picker_state(state)
+    context = Context.from_editor_state(state)
+    {loading, revision} = PickerState.begin_fetch(current, fetch_identity(source, context))
+    loading_state = update_picker(state, fn _current -> loading end)
+    request = FetchEffect.request(source, callback_source, context, revision)
+    schedule_fetch(loading_state, request, source, revision)
   end
 
   @doc """
@@ -1208,4 +1556,28 @@ defmodule MingaEditor.PickerUI do
       state
     end
   end
+
+  @spec initial_query(module(), term()) :: String.t()
+  defp initial_query(DirectorySource, %FilesystemContext{query: query}), do: query.text
+  defp initial_query(_source, _context), do: ""
+
+  @spec filter_initial_query(Picker.t(), module(), term()) :: Picker.t()
+  defp filter_initial_query(picker, DirectorySource, %FilesystemContext{query: query}) do
+    Picker.filter_with_match_query(picker, query.text, FilesystemQuery.filter_text(query))
+  end
+
+  defp filter_initial_query(picker, source, context) do
+    Picker.filter(picker, initial_query(source, context))
+  end
+
+  @spec fetch_identity(module(), Context.t()) :: term() | nil
+  defp fetch_identity(
+         DirectorySource,
+         %Context{picker_ui: %{context: %FilesystemContext{query: query}}}
+       ),
+       do: query.identity
+
+  defp fetch_identity(FileSource, %Context{} = context), do: FileSource.fetch_identity(context)
+
+  defp fetch_identity(_source, %Context{}), do: nil
 end
