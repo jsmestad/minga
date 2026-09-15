@@ -9,7 +9,7 @@ extension PreviewRegistry {
     static func gitStatusPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = gitStatusState()
-        state.commitMessage = "feat(macos): polish preview snapshots"
+        state.updateDraft("feat(macos): polish preview snapshots")
 
         return GitStatusView(
             state: state,
@@ -83,7 +83,7 @@ extension PreviewRegistry {
             lastCommitMessage: "feat(agent): restructure session manager",
             stashCount: 0
         )
-        state.commitMessage = ""
+        state.updateDraft("")
 
         return GitStatusView(
             state: state,
@@ -124,7 +124,7 @@ extension PreviewRegistry {
             lastCommitMessage: "wip: large refactor across multiple subsystems",
             stashCount: 3
         )
-        state.commitMessage = "feat(editor): comprehensive render pipeline overhaul"
+        state.updateDraft("feat(editor): comprehensive render pipeline overhaul")
 
         return GitStatusView(
             state: state,

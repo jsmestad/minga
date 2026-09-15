@@ -22,6 +22,18 @@ private func currentModifierBitsForTest() -> UInt8 {
     return mods
 }
 
+@MainActor
+private func publishGitStatus(
+    _ state: GitStatusState,
+    repoState: GitRepoState = .normal,
+    branchName: String = "main",
+    entries: [GitStatusEntry] = [],
+    lastCommitMessage: String = "",
+    stashCount: UInt16 = 0
+) {
+    state.update(repoState: repoState, branchName: branchName, ahead: 0, behind: 0, syncing: false, entries: entries, toast: nil, entryBasePath: "/repo", lastCommitMessage: lastCommitMessage, stashCount: stashCount)
+}
+
 // MARK: - ActivityBar
 
 @Suite("ActivityBar View Structure")
@@ -63,9 +75,10 @@ struct ActivityBarViewTests {
     @Test("Git badge falls back to full total count without narrowing")
     @MainActor func gitBadgeUsesLargeTotalCount() throws {
         let guiState = GUIState()
-        guiState.gitStatusState.changedEntries = (0..<70_000).map { index in
+        let entries = (0..<70_000).map { index in
             GitStatusEntry(pathHash: UInt32(index), section: .changed, status: .modified, path: "file_\(index).ex")
         }
+        publishGitStatus(guiState.gitStatusState, entries: entries)
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
         let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -191,7 +204,7 @@ struct GitStatusViewEmptyStateTests {
     @Test("Not-a-repo state shows explanation text")
     @MainActor func notARepo() throws {
         let state = GitStatusState()
-        state.repoState = .notARepo
+        publishGitStatus(state, repoState: .notARepo)
 
         let sut = GitStatusView(state: state, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -204,7 +217,7 @@ struct GitStatusViewEmptyStateTests {
     @Test("Loading state shows loading indicator text")
     @MainActor func loading() throws {
         let state = GitStatusState()
-        state.repoState = .loading
+        publishGitStatus(state, repoState: .loading)
 
         let sut = GitStatusView(state: state, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -217,8 +230,7 @@ struct GitStatusViewEmptyStateTests {
     @Test("Clean repo shows working-tree-clean message")
     @MainActor func cleanRepo() throws {
         let state = GitStatusState()
-        state.repoState = .normal
-        state.branchName = "main"
+        publishGitStatus(state)
         // No entries = clean
 
         let sut = GitStatusView(state: state, encoder: nil)
@@ -239,8 +251,7 @@ struct GitStatusViewBranchHeaderTests {
     @Test("Branch header shows project and branch name")
     @MainActor func showsBranchName() throws {
         let state = GitStatusState()
-        state.repoState = .normal
-        state.branchName = "feat/sidebar-polish"
+        publishGitStatus(state, branchName: "feat/sidebar-polish")
 
         let sut = GitStatusHeaderView(state: state, projectName: "minga", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
@@ -254,8 +265,7 @@ struct GitStatusViewBranchHeaderTests {
     @Test("Empty branch name falls back to 'No branch'")
     @MainActor func fallbackBranchName() throws {
         let state = GitStatusState()
-        state.repoState = .normal
-        state.branchName = ""
+        publishGitStatus(state, branchName: "")
 
         let sut = GitStatusHeaderView(state: state, projectName: "minga", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
@@ -268,9 +278,7 @@ struct GitStatusViewBranchHeaderTests {
     @Test("Branch header shows stash count when present")
     @MainActor func showsStashCount() throws {
         let state = GitStatusState()
-        state.repoState = .normal
-        state.branchName = "main"
-        state.stashCount = 2
+        publishGitStatus(state, stashCount: 2)
 
         let sut = GitStatusHeaderView(state: state, projectName: "minga", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
@@ -633,20 +641,13 @@ struct GitStatusViewSectionTests {
     @Test("All four section labels render when entries exist in each section")
     @MainActor func allSectionLabelsRender() throws {
         let state = GitStatusState()
-        state.repoState = .normal
-        state.branchName = "main"
-        state.stagedEntries = [
+        let entries = [
             GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/a.ex"),
-        ]
-        state.changedEntries = [
             GitStatusEntry(pathHash: 2, section: .changed, status: .modified, path: "lib/b.ex"),
-        ]
-        state.untrackedEntries = [
             GitStatusEntry(pathHash: 3, section: .untracked, status: .untracked, path: "lib/c.ex"),
-        ]
-        state.conflictedEntries = [
             GitStatusEntry(pathHash: 4, section: .conflicted, status: .conflicted, path: "lib/d.ex"),
         ]
+        publishGitStatus(state, entries: entries)
 
         let sut = GitStatusView(state: state, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -667,22 +668,20 @@ struct GitStatusViewSectionTests {
         state.update(repoState: .normal, branchName: "main", ahead: 0, behind: 0, syncing: false, entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "feat: previous subject", stashCount: 0)
 
         state.setAmendMode(true)
-        #expect(state.commitMessage == "feat: previous subject")
+        #expect(state.session.draft == "feat: previous subject")
 
         state.setAmendMode(false)
-        state.commitMessage = "fix: user typed subject"
+        state.updateDraft("fix: user typed subject")
         state.setAmendMode(true)
-        #expect(state.commitMessage == "fix: user typed subject")
+        #expect(state.session.draft == "fix: user typed subject")
     }
 
     @Test("File entries show status letter and filename")
     @MainActor func fileEntriesShowStatusAndName() throws {
         let state = GitStatusState()
-        state.repoState = .normal
-        state.branchName = "main"
-        state.changedEntries = [
+        publishGitStatus(state, entries: [
             GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/minga/editor.ex"),
-        ]
+        ])
 
         let sut = GitStatusView(state: state, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -691,6 +690,70 @@ struct GitStatusViewSectionTests {
 
         #expect(strings.contains("M"))
         #expect(strings.contains("editor.ex"))
+    }
+
+    @Test("Draft and collapsed sections survive Git sidebar view reconstruction")
+    @MainActor func localSessionSurvivesViewReconstruction() throws {
+        let state = GitStatusState()
+        publishGitStatus(state, entries: [
+            GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/staged.ex"),
+            GitStatusEntry(pathHash: 2, section: .changed, status: .modified, path: "lib/changed.ex"),
+        ], lastCommitMessage: "previous subject")
+        state.updateDraft("typed subject\n\nbody")
+        state.setAmendMode(true)
+        state.toggleSection(.changed)
+
+        let firstView = GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+            .environment(\.themeColors, ThemeColors())
+        let firstStrings = try firstView.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(firstStrings.contains("staged.ex"))
+        #expect(!firstStrings.contains("changed.ex"))
+
+        let reconstructedView = GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+            .environment(\.themeColors, ThemeColors())
+        let reconstructedStrings = try reconstructedView.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(reconstructedStrings.contains("staged.ex"))
+        #expect(!reconstructedStrings.contains("changed.ex"))
+        #expect(state.session.draft == "typed subject\n\nbody")
+        #expect(state.session.amendMode == true)
+        #expect(state.session.collapsedSections == [.changed])
+    }
+
+    @Test("Commit button sends captured normal and amend submissions and resets only draft state")
+    @MainActor func commitButtonUsesOwnerSubmission() throws {
+        let state = GitStatusState()
+        publishGitStatus(state, branchName: "feature/local-session", entries: [
+            GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/staged.ex"),
+        ])
+        state.updateDraft("  commit subject  ")
+        state.toggleSection(.staged)
+        let spy = SpyEncoder()
+        let view = GitStatusView(state: state, encoder: spy, usesPreviewEagerLayout: true)
+            .environment(\.themeColors, ThemeColors())
+        let buttons = try view.inspect().findAll(ViewType.Button.self)
+        let commitButton = try #require(buttons.last)
+
+        try commitButton.tap()
+
+        #expect(spy.guiActions == [.gitCommit(message: "commit subject")])
+        #expect(state.session.draft.isEmpty)
+        #expect(state.session.amendMode == false)
+        #expect(state.session.collapsedSections == [.staged])
+        #expect(state.snapshot.branchName == "feature/local-session")
+
+        state.updateDraft("amended subject")
+        state.setAmendMode(true)
+        let amendView = GitStatusView(state: state, encoder: spy, usesPreviewEagerLayout: true)
+            .environment(\.themeColors, ThemeColors())
+        let amendButton = try #require(amendView.inspect().findAll(ViewType.Button.self).last)
+
+        try amendButton.tap()
+
+        #expect(spy.guiActions == [.gitCommit(message: "commit subject"), .gitCommitAmend(message: "amended subject")])
+        #expect(state.session.draft.isEmpty)
+        #expect(state.session.amendMode == false)
+        #expect(state.session.collapsedSections == [.staged])
+        #expect(state.snapshot.branchName == "feature/local-session")
     }
 }
 

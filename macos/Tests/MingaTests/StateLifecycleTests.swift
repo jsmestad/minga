@@ -881,6 +881,87 @@ struct MessagesContentStateLifecycleTests {
     }
 }
 
+// MARK: - GitStatusState
+
+@Suite("GitStatusState Lifecycle")
+struct GitStatusStateLifecycleTests {
+    @Test("published refresh and hide/show preserve the local session")
+    @MainActor func publishedRefreshPreservesSession() {
+        let state = GitStatusState()
+        publish(state, branchName: "main", lastCommitMessage: "old subject")
+        state.updateDraft("typed subject\n\nbody")
+        state.setAmendMode(true)
+        state.toggleSection(.changed)
+
+        publish(state, branchName: "feature/new", lastCommitMessage: "new subject")
+        state.hide()
+        publish(state, branchName: "feature/new", lastCommitMessage: "new subject")
+
+        #expect(state.snapshot.branchName == "feature/new")
+        #expect(state.snapshot.lastCommitMessage == "new subject")
+        #expect(state.session.draft == "typed subject\n\nbody")
+        #expect(state.session.amendMode == true)
+        #expect(state.session.collapsedSections == [.changed])
+    }
+
+    @Test("amend prefill handles empty, whitespace, typed, multiline, and repeated toggles")
+    @MainActor func amendPrefillMatrix() {
+        let empty = GitStatusState()
+        publish(empty, lastCommitMessage: "previous subject")
+        empty.setAmendMode(true)
+        empty.setAmendMode(true)
+        #expect(empty.session.draft == "previous subject")
+
+        let whitespace = GitStatusState()
+        publish(whitespace, lastCommitMessage: "previous subject")
+        whitespace.updateDraft(" \n\t")
+        whitespace.setAmendMode(true)
+        #expect(whitespace.session.draft == "previous subject")
+
+        let typed = GitStatusState()
+        publish(typed, lastCommitMessage: "previous subject")
+        typed.updateDraft("typed subject\n\nbody")
+        typed.setAmendMode(true)
+        typed.setAmendMode(false)
+        typed.setAmendMode(true)
+        #expect(typed.session.draft == "typed subject\n\nbody")
+    }
+
+    @Test("normal and amend submissions capture intent before resetting only draft state")
+    @MainActor func submissionTransitions() {
+        let normal = GitStatusState()
+        let staged = GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/a.ex")
+        publish(normal, entries: [staged], lastCommitMessage: "previous subject")
+        normal.updateDraft("  normal subject\n\nbody  ")
+        normal.toggleSection(.staged)
+        let publishedBeforeSubmit = normal.snapshot
+
+        #expect(normal.submit() == GitCommitSubmission(action: .commit, message: "normal subject\n\nbody"))
+        #expect(normal.session.draft.isEmpty)
+        #expect(normal.session.amendMode == false)
+        #expect(normal.session.collapsedSections == [.staged])
+        #expect(normal.snapshot == publishedBeforeSubmit)
+
+        let amend = GitStatusState()
+        publish(amend, entries: [], lastCommitMessage: "previous subject")
+        amend.setAmendMode(true)
+        #expect(amend.submit() == GitCommitSubmission(action: .amend, message: "previous subject"))
+        #expect(amend.session.draft.isEmpty)
+        #expect(amend.session.amendMode == false)
+
+        let unavailable = GitStatusState()
+        publish(unavailable, entries: [])
+        unavailable.updateDraft("not staged")
+        #expect(unavailable.submit() == nil)
+        #expect(unavailable.session.draft == "not staged")
+    }
+
+    @MainActor
+    private func publish(_ state: GitStatusState, branchName: String = "main", entries: [GitStatusEntry] = [], lastCommitMessage: String = "") {
+        state.update(repoState: .normal, branchName: branchName, ahead: 0, behind: 0, syncing: false, entries: entries, toast: nil, entryBasePath: "/repo", lastCommitMessage: lastCommitMessage, stashCount: 0)
+    }
+}
+
 // MARK: - StatusBarState
 
 @Suite("StatusBarState Lifecycle")
