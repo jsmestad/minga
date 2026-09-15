@@ -62,6 +62,42 @@ defmodule Minga.LSP.ClientTest do
       assert Client.server_name(client) == :mock_lsp
     end
 
+    test "stores the configured diagnostics destination in client state", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      assert :sys.get_state(client).diagnostics == diag_server
+      assert {:dictionary, dictionary} = Process.info(client, :dictionary)
+      refute Keyword.has_key?(dictionary, :diagnostics_server)
+    end
+
+    test "uses the supervised diagnostics service by default" do
+      uri = "file:///tmp/default-diagnostics-#{System.unique_integer([:positive])}.ex"
+      Minga.Events.subscribe(:diagnostics_updated)
+
+      client =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Client, server_config: MockLSPServer.server_config(), root_path: System.tmp_dir!()},
+            id: :default_diagnostics_lsp_client
+          )
+        )
+
+      wait_until_ready(client)
+      assert :sys.get_state(client).diagnostics == Diagnostics
+
+      Client.did_open(client, uri, "elixir", "content")
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri}},
+                     @event_timeout
+
+      assert [_diagnostic] = Diagnostics.for_uri(uri)
+      Client.did_close(client, uri)
+      _state = :sys.get_state(client)
+      assert Diagnostics.for_uri(uri) == []
+    end
+
     test "server stderr output does not break stdio protocol", %{diag_server: diag_server} do
       root_path = Path.join(System.tmp_dir!(), "stderr_lsp_#{System.unique_integer([:positive])}")
       File.mkdir_p!(root_path)
@@ -193,6 +229,55 @@ defmodule Minga.LSP.ClientTest do
                      @event_timeout
 
       assert Diagnostics.for_uri(diag_server, @uri) == []
+    end
+
+    test "two clients publish and clear only their configured diagnostics destination", %{
+      client: first_client,
+      diag_server: first_diagnostics
+    } do
+      uri = "file:///tmp/independent-diagnostics-#{System.unique_integer([:positive])}.ex"
+
+      second_diagnostics =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Diagnostics, name: :second_lsp_diagnostics},
+            id: :second_lsp_diagnostics
+          )
+        )
+
+      second_client =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Client,
+             server_config: MockLSPServer.server_config(),
+             root_path: System.tmp_dir!(),
+             diagnostics: second_diagnostics},
+            id: :second_diagnostics_lsp_client
+          )
+        )
+
+      wait_until_ready(second_client)
+      Minga.Events.subscribe(:diagnostics_updated)
+
+      Client.did_open(first_client, uri, "elixir", "first")
+      Client.did_open(second_client, uri, "elixir", "second")
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri}},
+                     @event_timeout
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri}},
+                     @event_timeout
+
+      assert [_diagnostic] = Diagnostics.for_uri(first_diagnostics, uri)
+      assert [_diagnostic] = Diagnostics.for_uri(second_diagnostics, uri)
+
+      Client.did_close(first_client, uri)
+      _state = :sys.get_state(first_client)
+
+      assert Diagnostics.for_uri(first_diagnostics, uri) == []
+      assert [_diagnostic] = Diagnostics.for_uri(second_diagnostics, uri)
     end
 
     test "binds independent wire versions to exact buffer revisions", %{client: client} do

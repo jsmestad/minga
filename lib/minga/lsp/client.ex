@@ -435,10 +435,9 @@ defmodule Minga.LSP.Client do
           root_path: root_path,
           port: port,
           encoding: :utf16,
+          diagnostics: diagnostics,
           started_at: System.monotonic_time(:second)
         }
-
-        Process.put(:diagnostics_server, diagnostics)
 
         broadcast_status_changed(server_config.name, :starting, root_path)
         send(self(), :send_initialize)
@@ -602,8 +601,7 @@ defmodule Minga.LSP.Client do
         "textDocument" => %{"uri" => uri}
       })
 
-      diag_server = Process.get(:diagnostics_server, Diagnostics)
-      Diagnostics.clear(diag_server, state.server_config.name, uri)
+      Diagnostics.clear(state.diagnostics, state.server_config.name, uri)
       state = %{state | open_documents: Map.delete(state.open_documents, uri)}
       {:noreply, state}
     else
@@ -893,8 +891,7 @@ defmodule Minga.LSP.Client do
         convert_diagnostic(raw, uri, state)
       end)
 
-    diag_server = Process.get(:diagnostics_server, Diagnostics)
-    Diagnostics.publish(diag_server, state.server_config.name, uri, diagnostics)
+    Diagnostics.publish(state.diagnostics, state.server_config.name, uri, diagnostics)
     state
   end
 
