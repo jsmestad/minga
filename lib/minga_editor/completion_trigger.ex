@@ -4,7 +4,9 @@ defmodule MingaEditor.CompletionTrigger do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.CursorContext
   alias Minga.LSP.Client
+  alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SyncServer
 
   @debounce_ms 100
@@ -40,8 +42,8 @@ defmodule MingaEditor.CompletionTrigger do
   def generation(%__MODULE__{gen: gen}), do: gen
 
   @doc "Checks whether the given character should trigger completion."
-  @spec maybe_trigger(t(), String.t(), pid()) :: {t(), [tracking_fact()]}
-  def maybe_trigger(%__MODULE__{} = bridge, char, buffer_pid) do
+  @spec maybe_trigger(t(), String.t(), pid(), CursorContext.t()) :: {t(), [tracking_fact()]}
+  def maybe_trigger(%__MODULE__{} = bridge, char, buffer_pid, %CursorContext{} = context) do
     clients = SyncServer.clients_for_buffer(buffer_pid)
 
     case clients do
@@ -51,7 +53,7 @@ defmodule MingaEditor.CompletionTrigger do
       _ ->
         trigger_chars = clients |> Enum.flat_map(&get_trigger_characters/1) |> Enum.uniq()
         [first_client | _] = clients
-        handle_char_type(bridge, char, trigger_chars, clients, first_client, buffer_pid)
+        handle_char_type(bridge, char, trigger_chars, clients, first_client, buffer_pid, context)
     end
   end
 
@@ -64,10 +66,12 @@ defmodule MingaEditor.CompletionTrigger do
         } = bridge,
         gen
       ) do
-    if buffer_version(buffer_pid) == version do
-      send_completion_requests(bridge, clients, buffer_pid, gen, trigger_pos)
-    else
-      {%__MODULE__{bridge | phase: :idle}, []}
+    case cursor_context(buffer_pid) do
+      %CursorContext{version: ^version} = context ->
+        send_completion_requests(bridge, clients, buffer_pid, gen, trigger_pos, context)
+
+      _ ->
+        {%__MODULE__{bridge | phase: :idle}, []}
     end
   end
 
@@ -81,76 +85,111 @@ defmodule MingaEditor.CompletionTrigger do
   end
 
   @doc "Returns the text typed since the trigger position (for prefix filtering)."
-  @spec get_typed_since_trigger(pid(), position()) :: String.t()
-  def get_typed_since_trigger(buffer_pid, {trigger_line, trigger_col}) do
-    {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buffer_pid)
-
-    if cursor_line == trigger_line and cursor_col > trigger_col do
-      lines = String.split(content, "\n")
-
-      case Enum.at(lines, cursor_line) do
-        nil -> ""
-        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
-      end
-    else
-      ""
-    end
+  @spec get_typed_since_trigger(pid() | CursorContext.t(), position()) :: String.t()
+  def get_typed_since_trigger(buffer_pid, trigger_position) when is_pid(buffer_pid) do
+    buffer_pid
+    |> Buffer.cursor_context()
+    |> get_typed_since_trigger(trigger_position)
   catch
     :exit, _ -> ""
   end
 
-  @spec handle_char_type(t(), String.t(), [String.t()], [pid()], pid(), pid()) ::
+  def get_typed_since_trigger(%CursorContext{} = context, trigger_position) do
+    CursorContext.text_since(context, trigger_position) || ""
+  end
+
+  @spec handle_char_type(t(), String.t(), [String.t()], [pid()], pid(), pid(), CursorContext.t()) ::
           {t(), [tracking_fact()]}
-  defp handle_char_type(bridge, char, trigger_chars, clients, first_client, buffer_pid) do
-    classify_char(bridge, char, char in trigger_chars, clients, first_client, buffer_pid)
+  defp handle_char_type(bridge, char, trigger_chars, clients, first_client, buffer_pid, context) do
+    classify_char(
+      bridge,
+      char,
+      char in trigger_chars,
+      clients,
+      first_client,
+      buffer_pid,
+      context
+    )
   end
 
-  defp classify_char(bridge, _char, true = _is_trigger, clients, _first_client, buffer_pid) do
+  defp classify_char(
+         bridge,
+         _char,
+         true = _is_trigger,
+         clients,
+         _first_client,
+         buffer_pid,
+         context
+       ) do
     bridge = cancel_debounce(bridge)
-    send_completion_requests(bridge, clients, buffer_pid, bridge.gen + 1, nil)
+    send_completion_requests(bridge, clients, buffer_pid, bridge.gen + 1, nil, context)
   end
 
-  defp classify_char(bridge, char, false = _is_trigger, clients, _first_client, buffer_pid) do
+  defp classify_char(
+         bridge,
+         char,
+         false = _is_trigger,
+         clients,
+         _first_client,
+         buffer_pid,
+         context
+       ) do
     if identifier_char?(char) do
-      schedule_debounced_trigger(bridge, clients, buffer_pid)
+      schedule_debounced_trigger(bridge, clients, buffer_pid, context)
     else
       {dismiss(bridge), []}
     end
   end
 
-  @spec send_completion_requests(t(), [pid()], pid(), non_neg_integer(), position() | nil) ::
+  @spec send_completion_requests(
+          t(),
+          [pid()],
+          pid(),
+          non_neg_integer(),
+          position() | nil,
+          CursorContext.t()
+        ) ::
           {t(), [tracking_fact()]}
-  defp send_completion_requests(%__MODULE__{} = bridge, [], _buffer_pid, _gen, _trigger_pos),
-    do: {bridge, []}
+  defp send_completion_requests(
+         %__MODULE__{} = bridge,
+         [],
+         _buffer_pid,
+         _gen,
+         _trigger_pos,
+         _context
+       ),
+       do: {bridge, []}
 
   defp send_completion_requests(
          %__MODULE__{} = bridge,
          clients,
          buffer_pid,
          gen,
-         captured_trigger_pos
+         captured_trigger_pos,
+         %CursorContext{} = context
        ) do
-    file_path = Buffer.file_path(buffer_pid)
-    version = buffer_version(buffer_pid)
-
-    case {file_path, version} do
-      {nil, _version} ->
+    case context do
+      %CursorContext{file_path: nil} ->
         {bridge, []}
 
-      {_path, :stale} ->
-        {bridge, []}
-
-      {path, version} ->
+      %CursorContext{file_path: path, version: version} ->
         uri = SyncServer.path_to_uri(path)
-        {line, col} = get_cursor_position(buffer_pid)
+        {line, col} = CursorContext.position(context)
         trigger_pos = captured_trigger_pos || {line, col}
 
-        params = %{
-          "textDocument" => %{"uri" => uri},
-          "position" => %{"line" => line, "character" => col}
-        }
+        refs =
+          Enum.map(clients, fn client ->
+            position =
+              PositionEncoding.to_lsp(
+                {line, col},
+                context.line_text,
+                client_encoding(client)
+              )
 
-        refs = Enum.map(clients, &Client.request(&1, "textDocument/completion", params))
+            params = %{"textDocument" => %{"uri" => uri}, "position" => position}
+            Client.request(client, "textDocument/completion", params)
+          end)
+
         facts = tracking_facts(refs, clients, buffer_pid, version, gen, trigger_pos)
 
         {%__MODULE__{bridge | phase: {:pending, trigger_pos}, gen: gen}, facts}
@@ -175,40 +214,57 @@ defmodule MingaEditor.CompletionTrigger do
     end)
   end
 
-  @spec schedule_debounced_trigger(t(), [pid()], pid()) :: {t(), [tracking_fact()]}
-  defp schedule_debounced_trigger(%__MODULE__{} = bridge, clients, buffer_pid) do
+  @spec schedule_debounced_trigger(t(), [pid()], pid(), CursorContext.t()) ::
+          {t(), [tracking_fact()]}
+  defp schedule_debounced_trigger(
+         %__MODULE__{} = bridge,
+         clients,
+         buffer_pid,
+         %CursorContext{} = context
+       ) do
     bridge = cancel_debounce(bridge)
-    {line, col} = get_cursor_position(buffer_pid)
-    prefix_len = identifier_prefix_length(buffer_pid, line, col)
-    schedule_debounced_trigger(bridge, clients, buffer_pid, {line, col}, prefix_len)
+    prefix = identifier_prefix(context.line_prefix)
+
+    schedule_debounced_trigger(
+      bridge,
+      clients,
+      buffer_pid,
+      CursorContext.position(context),
+      byte_size(prefix),
+      String.length(prefix),
+      context.version
+    )
   end
 
-  @spec schedule_debounced_trigger(t(), [pid()], pid(), position(), non_neg_integer()) ::
+  @spec schedule_debounced_trigger(
+          t(),
+          [pid()],
+          pid(),
+          position(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           {t(), [tracking_fact()]}
   defp schedule_debounced_trigger(
          %__MODULE__{} = bridge,
          clients,
          buffer_pid,
          {line, col},
-         prefix_len
+         prefix_bytes,
+         prefix_graphemes,
+         version
        )
-       when is_integer(prefix_len) and prefix_len >= 2 do
+       when is_integer(prefix_graphemes) and prefix_graphemes >= 2 do
     gen = bridge.gen + 1
-    trigger_pos = {line, col - prefix_len}
+    trigger_pos = {line, col - prefix_bytes}
+    timer = Process.send_after(self(), {:completion_debounce, gen}, @debounce_ms)
 
-    case buffer_version(buffer_pid) do
-      :stale ->
-        {bridge, []}
-
-      version ->
-        timer = Process.send_after(self(), {:completion_debounce, gen}, @debounce_ms)
-
-        {%__MODULE__{
-           bridge
-           | phase: {:debounced, timer, clients, buffer_pid, version, trigger_pos},
-             gen: gen
-         }, []}
-    end
+    {%__MODULE__{
+       bridge
+       | phase: {:debounced, timer, clients, buffer_pid, version, trigger_pos},
+         gen: gen
+     }, []}
   end
 
   defp schedule_debounced_trigger(
@@ -216,7 +272,9 @@ defmodule MingaEditor.CompletionTrigger do
          _clients,
          _buffer_pid,
          _position,
-         _prefix_len
+         _prefix_bytes,
+         _prefix_graphemes,
+         _version
        ),
        do: {bridge, []}
 
@@ -240,40 +298,31 @@ defmodule MingaEditor.CompletionTrigger do
     :exit, _ -> ["."]
   end
 
-  @spec get_cursor_position(pid()) :: position()
-  defp get_cursor_position(buffer_pid) do
-    {_content, {line, col}} = Buffer.content_and_cursor(buffer_pid)
-    {line, col}
-  end
-
-  @spec buffer_version(pid()) :: non_neg_integer() | :stale
-  defp buffer_version(buffer_pid) do
-    Buffer.version(buffer_pid)
+  @spec cursor_context(pid()) :: CursorContext.t() | :stale
+  defp cursor_context(buffer_pid) do
+    Buffer.cursor_context(buffer_pid)
   catch
     :exit, _ -> :stale
   end
 
-  @spec identifier_prefix_length(pid(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp identifier_prefix_length(buffer_pid, line, col) do
-    {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
-    lines = String.split(content, "\n")
+  @spec client_encoding(pid()) :: Minga.LSP.PositionEncoding.encoding()
+  defp client_encoding(client) do
+    Client.encoding(client)
+  catch
+    :exit, _ -> :utf16
+  end
 
-    case Enum.at(lines, line) do
-      nil ->
-        0
-
-      line_text ->
-        prefix = String.slice(line_text, 0, col)
-
-        prefix
-        |> String.graphemes()
-        |> Enum.reverse()
-        |> Enum.take_while(&identifier_char?/1)
-        |> Enum.count()
-    end
+  @spec identifier_prefix(String.t()) :: String.t()
+  defp identifier_prefix(line_prefix) do
+    line_prefix
+    |> String.graphemes()
+    |> Enum.reverse()
+    |> Enum.take_while(&identifier_char?/1)
+    |> Enum.reverse()
+    |> Enum.join()
   end
 
   @spec identifier_char?(String.t()) :: boolean()
-  defp identifier_char?(<<c>>) when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_, do: true
-  defp identifier_char?(_), do: false
+  defp identifier_char?(grapheme) when is_binary(grapheme),
+    do: String.match?(grapheme, ~r/^[\p{L}\p{N}\p{M}_]+$/u)
 end

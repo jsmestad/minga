@@ -285,10 +285,10 @@ defmodule Minga.Buffer.Lines do
 
     case {start >= gap, line_end <= gap} do
       {_, true} ->
-        binary_part(before, start, length)
+        before |> binary_part(start, length) |> :binary.copy()
 
       {true, _} ->
-        binary_part(after_, start - gap, length)
+        after_ |> binary_part(start - gap, length) |> :binary.copy()
 
       _ ->
         before_len = gap - start

@@ -9,6 +9,7 @@ defmodule MingaEditor.CompletionHandling do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.CursorContext
   alias Minga.Config
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
@@ -21,6 +22,7 @@ defmodule MingaEditor.CompletionHandling do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
   alias Minga.LSP.Client
+  alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SyncServer
 
   @resolve_debounce_ms 150
@@ -254,7 +256,7 @@ defmodule MingaEditor.CompletionHandling do
   defp accept_text(%{workspace: %{buffers: %{active: buf}}} = state, completion, text)
        when is_pid(buf) do
     {trigger_line, trigger_col} = completion.trigger_position
-    {_content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buf)
+    %CursorContext{line: cursor_line, byte_column: cursor_col} = Buffer.cursor_context(buf)
 
     if cursor_line == trigger_line and cursor_col > trigger_col do
       Buffer.apply_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
@@ -294,28 +296,36 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec do_update(EditorState.t(), pid(), non_neg_integer()) :: EditorState.t()
   defp do_update(state, buf, codepoint) do
-    state = update_filter(state, buf)
-
-    state =
-      case config_completion_context(buf) do
-        :none ->
-          maybe_trigger(state, buf, codepoint)
-
-        context ->
-          maybe_trigger_config_completion(state, buf, context)
-      end
-
-    maybe_trigger_signature_help(state, buf, codepoint)
+    case buffer_value(buf, &Buffer.cursor_context/1) do
+      %CursorContext{} = context -> do_update(state, buf, context, codepoint)
+      :stale -> state
+    end
   end
 
-  @spec update_filter(EditorState.t(), pid()) :: EditorState.t()
-  defp update_filter(state, buf) do
+  @spec do_update(EditorState.t(), pid(), CursorContext.t(), non_neg_integer()) :: EditorState.t()
+  defp do_update(state, buf, context, codepoint) do
+    state = update_filter(state, context)
+
+    state =
+      case config_completion_context(context) do
+        :none ->
+          maybe_trigger(state, buf, context, codepoint)
+
+        config_context ->
+          maybe_trigger_config_completion(state, context, config_context)
+      end
+
+    maybe_trigger_signature_help(state, buf, context, codepoint)
+  end
+
+  @spec update_filter(EditorState.t(), CursorContext.t()) :: EditorState.t()
+  defp update_filter(state, context) do
     case ModalWorkflow.completion(state) do
       nil ->
         state
 
       %Completion{} = completion ->
-        prefix = completion_prefix(buf, completion.trigger_position)
+        prefix = completion_prefix(context, completion.trigger_position)
         apply_filter(state, completion, prefix)
     end
   end
@@ -334,8 +344,9 @@ defmodule MingaEditor.CompletionHandling do
     end
   end
 
-  @spec maybe_trigger(EditorState.t(), pid(), non_neg_integer()) :: EditorState.t()
-  defp maybe_trigger(state, buf, codepoint) do
+  @spec maybe_trigger(EditorState.t(), pid(), CursorContext.t(), non_neg_integer()) ::
+          EditorState.t()
+  defp maybe_trigger(state, buf, context, codepoint) do
     case codepoint_to_char(codepoint) do
       nil ->
         state
@@ -345,7 +356,8 @@ defmodule MingaEditor.CompletionHandling do
           CompletionTrigger.maybe_trigger(
             ModalWorkflow.completion_trigger(state),
             char,
-            buf
+            buf,
+            context
           )
 
         state
@@ -360,26 +372,18 @@ defmodule MingaEditor.CompletionHandling do
   @type config_context :: :option_name | {:option_value, atom()} | :filetype | :none
 
   @doc false
-  @spec config_completion_context(pid()) :: config_context()
-  def config_completion_context(buf) do
-    file_path = Buffer.file_path(buf)
-
-    if config_file?(file_path) do
-      {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buf)
-      lines = String.split(content, "\n")
-
-      case Enum.at(lines, cursor_line) do
-        nil -> :none
-        line_text -> detect_config_context(line_text, cursor_col)
-      end
-    else
-      :none
-    end
+  @spec config_completion_context(pid() | CursorContext.t()) :: config_context()
+  def config_completion_context(buf) when is_pid(buf) do
+    buf |> Buffer.cursor_context() |> config_completion_context()
   end
 
-  @spec config_file?(String.t() | nil) :: boolean()
-  defp config_file?(nil), do: false
+  def config_completion_context(%CursorContext{file_path: nil}), do: :none
 
+  def config_completion_context(%CursorContext{file_path: file_path} = context) do
+    if config_file?(file_path), do: detect_from_prefix(context.line_prefix), else: :none
+  end
+
+  @spec config_file?(String.t()) :: boolean()
   defp config_file?(path) do
     case Path.basename(path) do
       ".minga.exs" -> true
@@ -409,7 +413,12 @@ defmodule MingaEditor.CompletionHandling do
   """
   @spec detect_config_context(String.t(), non_neg_integer()) :: config_context()
   def detect_config_context(line_text, cursor_col) do
-    before_cursor = String.slice(line_text, 0, cursor_col)
+    before_cursor = binary_part(line_text, 0, min(cursor_col, byte_size(line_text)))
+    detect_from_prefix(before_cursor)
+  end
+
+  @spec detect_from_prefix(String.t()) :: config_context()
+  defp detect_from_prefix(before_cursor) do
     trimmed = String.trim_leading(before_cursor)
     detect_from_trimmed(trimmed)
   end
@@ -454,32 +463,36 @@ defmodule MingaEditor.CompletionHandling do
     ArgumentError -> nil
   end
 
-  @spec maybe_trigger_config_completion(EditorState.t(), pid(), active_config_context()) ::
+  @spec maybe_trigger_config_completion(
+          EditorState.t(),
+          CursorContext.t(),
+          active_config_context()
+        ) ::
           EditorState.t()
-  defp maybe_trigger_config_completion(state, buf, context) do
+  defp maybe_trigger_config_completion(state, cursor_context, context) do
     if ModalWorkflow.completion(state) != nil do
       # Already showing a completion; update_filter handles narrowing.
       state
     else
       case config_items_for_context(context) do
         [] -> state
-        items -> build_config_completion(state, buf, items, context)
+        items -> build_config_completion(state, cursor_context, items, context)
       end
     end
   end
 
   @spec build_config_completion(
           EditorState.t(),
-          pid(),
+          CursorContext.t(),
           [Completion.item()],
           active_config_context()
         ) :: EditorState.t()
-  defp build_config_completion(state, buf, items, context) do
-    {cursor_line, cursor_col} = Buffer.cursor(buf)
-    trigger_col = config_trigger_col(buf, cursor_line, cursor_col, context)
+  defp build_config_completion(state, cursor_context, items, context) do
+    {cursor_line, _cursor_col} = CursorContext.position(cursor_context)
+    trigger_col = config_trigger_col(cursor_context, context)
     completion = Completion.new(items, {cursor_line, trigger_col})
 
-    prefix = config_prefix(buf, cursor_line, trigger_col, cursor_col)
+    prefix = CursorContext.text_since(cursor_context, {cursor_line, trigger_col}) || ""
     completion = Completion.filter(completion, prefix)
 
     if Completion.active?(completion) do
@@ -514,13 +527,10 @@ defmodule MingaEditor.CompletionHandling do
 
   defp config_items_for_context(:filetype), do: Config.filetype_completions()
 
-  @spec config_trigger_col(pid(), non_neg_integer(), non_neg_integer(), active_config_context()) ::
-          non_neg_integer()
-  defp config_trigger_col(buf, cursor_line, cursor_col, context) do
-    {content, _cursor} = Buffer.content_and_cursor(buf)
-    lines = String.split(content, "\n")
-    line_text = Enum.at(lines, cursor_line) || ""
-    before_cursor = String.slice(line_text, 0, cursor_col)
+  @spec config_trigger_col(CursorContext.t(), active_config_context()) :: non_neg_integer()
+  defp config_trigger_col(%CursorContext{} = cursor_context, context) do
+    before_cursor = cursor_context.line_prefix
+    cursor_col = cursor_context.byte_column
 
     case context do
       :option_name ->
@@ -546,37 +556,10 @@ defmodule MingaEditor.CompletionHandling do
     end
   end
 
-  @spec config_prefix(pid(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          String.t()
-  defp config_prefix(buf, cursor_line, trigger_col, cursor_col) do
-    if cursor_col > trigger_col do
-      {content, _cursor} = Buffer.content_and_cursor(buf)
-      lines = String.split(content, "\n")
-
-      case Enum.at(lines, cursor_line) do
-        nil -> ""
-        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
-      end
-    else
-      ""
-    end
-  end
-
-  @spec completion_prefix(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t() | nil
-  defp completion_prefix(buf, {trigger_line, trigger_col}) do
-    {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buf)
-
-    if cursor_line == trigger_line and cursor_col >= trigger_col do
-      lines = String.split(content, "\n")
-
-      case Enum.at(lines, cursor_line) do
-        nil -> nil
-        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
-      end
-    else
-      nil
-    end
-  end
+  @spec completion_prefix(CursorContext.t(), {non_neg_integer(), non_neg_integer()}) ::
+          String.t() | nil
+  defp completion_prefix(%CursorContext{} = context, trigger_position),
+    do: CursorContext.text_since(context, trigger_position)
 
   @spec handle_completion_result(
           EditorState.t(),
@@ -589,9 +572,10 @@ defmodule MingaEditor.CompletionHandling do
           term()
         ) :: EditorState.t()
   def handle_completion_result(state, role, client, buffer, version, gen, trigger_pos, result) do
-    with true <- completion_result_current?(state, client, buffer, version, gen),
-         {:ok, prefix} <- completion_prefix_from_trigger(buffer, trigger_pos),
-         true <- buffer_value(buffer, &Buffer.version/1) == version do
+    with %CursorContext{version: ^version} = context <-
+           buffer_value(buffer, &Buffer.cursor_context/1),
+         true <- completion_result_current?(state, client, buffer, gen),
+         {:ok, prefix} <- completion_prefix_from_trigger(context, trigger_pos) do
       mode = if role == :primary, do: :primary, else: :merge
       start_completion_task(self(), mode, result, trigger_pos, prefix, gen, buffer, version)
     end
@@ -603,26 +587,21 @@ defmodule MingaEditor.CompletionHandling do
          %{shell_runtime: %{state: %ShellState{}}} = state,
          client,
          buffer,
-         version,
          gen
        ) do
     trigger = ModalWorkflow.completion_trigger(state)
 
     ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
       CompletionTrigger.generation(trigger) == gen and state.workspace.buffers.active == buffer and
-      buffer_value(buffer, &Buffer.version/1) == version and
       client in SyncServer.clients_for_buffer(buffer)
   end
 
-  defp completion_result_current?(_state, _client, _buffer, _version, _gen), do: false
+  defp completion_result_current?(_state, _client, _buffer, _gen), do: false
 
-  @spec completion_prefix_from_trigger(pid(), CompletionTrigger.position()) ::
+  @spec completion_prefix_from_trigger(CursorContext.t(), CompletionTrigger.position()) ::
           {:ok, String.t()} | :stale
-  defp completion_prefix_from_trigger(buffer, trigger_pos) do
-    {:ok, CompletionTrigger.get_typed_since_trigger(buffer, trigger_pos)}
-  catch
-    :exit, _ -> :stale
-  end
+  defp completion_prefix_from_trigger(context, trigger_pos),
+    do: {:ok, CompletionTrigger.get_typed_since_trigger(context, trigger_pos)}
 
   @spec start_completion_task(
           pid(),
@@ -778,12 +757,13 @@ defmodule MingaEditor.CompletionHandling do
   defp merge_completion_items(state, [], _trigger_pos), do: state
 
   defp merge_completion_items(state, new_items, trigger_pos) do
+    context = buffer_value(state.workspace.buffers.active, &Buffer.cursor_context/1)
+
     case ModalWorkflow.completion(state) do
       nil ->
         completion = Completion.new(new_items, trigger_pos)
 
-        prefix =
-          CompletionTrigger.get_typed_since_trigger(state.workspace.buffers.active, trigger_pos)
+        prefix = typed_since_trigger(context, trigger_pos)
 
         completion = Completion.filter(completion, prefix)
         open_completion(state, completion)
@@ -792,11 +772,7 @@ defmodule MingaEditor.CompletionHandling do
         merged_items = existing.items ++ new_items
         completion = Completion.new(merged_items, existing.trigger_position)
 
-        prefix =
-          CompletionTrigger.get_typed_since_trigger(
-            state.workspace.buffers.active,
-            existing.trigger_position
-          )
+        prefix = typed_since_trigger(context, existing.trigger_position)
 
         completion = Completion.filter(completion, prefix)
 
@@ -805,6 +781,13 @@ defmodule MingaEditor.CompletionHandling do
         end)
     end
   end
+
+  @spec typed_since_trigger(CursorContext.t() | :stale, CompletionTrigger.position()) ::
+          String.t()
+  defp typed_since_trigger(%CursorContext{} = context, trigger_position),
+    do: CompletionTrigger.get_typed_since_trigger(context, trigger_position)
+
+  defp typed_since_trigger(:stale, _trigger_position), do: ""
 
   @spec codepoint_to_char(non_neg_integer()) :: String.t() | nil
   defp codepoint_to_char(cp) when cp >= 32 and cp <= 0x10FFFF do
@@ -840,9 +823,9 @@ defmodule MingaEditor.CompletionHandling do
 
   def handle_signature_help_response(state, _), do: state
 
-  @spec maybe_trigger_signature_help(EditorState.t(), pid(), non_neg_integer()) ::
+  @spec maybe_trigger_signature_help(EditorState.t(), pid(), CursorContext.t(), non_neg_integer()) ::
           EditorState.t()
-  defp maybe_trigger_signature_help(state, buf, codepoint) do
+  defp maybe_trigger_signature_help(state, buf, context, codepoint) do
     char = codepoint_to_char(codepoint)
 
     cond do
@@ -851,10 +834,10 @@ defmodule MingaEditor.CompletionHandling do
         SignatureHelpWorkflow.dismiss(state)
 
       char != nil and signature_trigger_char?(state, buf, char) ->
-        send_signature_help_request(state, buf)
+        send_signature_help_request(state, buf, context)
 
       codepoint in [?(, ?,] ->
-        send_signature_help_request(state, buf)
+        send_signature_help_request(state, buf, context)
 
       true ->
         state
@@ -876,13 +859,16 @@ defmodule MingaEditor.CompletionHandling do
     :exit, _ -> false
   end
 
-  @spec send_signature_help_request(EditorState.t(), pid()) :: EditorState.t()
-  defp send_signature_help_request(state, buf) do
-    case {lsp_client_for(state, buf), signature_help_origin(buf)} do
+  @spec send_signature_help_request(EditorState.t(), pid(), CursorContext.t()) :: EditorState.t()
+  defp send_signature_help_request(state, buf, context) do
+    case {lsp_client_for(state, buf), signature_help_origin(context)} do
       {client, {:ok, uri, {line, col}, version}} when is_pid(client) ->
+        position =
+          PositionEncoding.to_lsp({line, col}, context.line_text, client_encoding(client))
+
         params = %{
           "textDocument" => %{"uri" => uri},
-          "position" => %{"line" => line, "character" => col}
+          "position" => position
         }
 
         ref = Client.request(client, "textDocument/signatureHelp", params)
@@ -893,21 +879,19 @@ defmodule MingaEditor.CompletionHandling do
     end
   end
 
-  @spec signature_help_origin(pid()) ::
+  @spec signature_help_origin(CursorContext.t()) ::
           {:ok, String.t(), {non_neg_integer(), non_neg_integer()}, non_neg_integer()} | :stale
-  defp signature_help_origin(buf) do
-    case {
-      buffer_value(buf, &Buffer.file_path/1),
-      buffer_value(buf, &Buffer.cursor/1),
-      buffer_value(buf, &Buffer.version/1)
-    } do
-      {path, {line, col}, version}
-      when is_binary(path) and is_integer(version) and version >= 0 ->
-        {:ok, SyncServer.path_to_uri(path), {line, col}, version}
+  defp signature_help_origin(%CursorContext{file_path: path} = context) when is_binary(path) do
+    {:ok, SyncServer.path_to_uri(path), CursorContext.position(context), context.version}
+  end
 
-      _ ->
-        :stale
-    end
+  defp signature_help_origin(%CursorContext{}), do: :stale
+
+  @spec client_encoding(pid()) :: PositionEncoding.encoding()
+  defp client_encoding(client) do
+    Client.encoding(client)
+  catch
+    :exit, _ -> :utf16
   end
 
   @spec approximate_cursor_screen_pos(EditorState.t()) ::

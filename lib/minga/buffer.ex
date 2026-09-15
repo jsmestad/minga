@@ -12,6 +12,7 @@ defmodule Minga.Buffer do
   """
 
   alias Minga.Buffer.ChangeLog
+  alias Minga.Buffer.CursorContext
   alias Minga.Buffer.Document
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Buffer.SaveIntent
@@ -175,8 +176,8 @@ defmodule Minga.Buffer do
   @spec cursor(t()) :: position()
   defdelegate cursor(server), to: BufferProcess
 
-  @doc "Cursor position and text of the cursor's line: `{line, col, line_text}`."
-  @spec cursor_context(t()) :: {non_neg_integer(), non_neg_integer(), String.t()}
+  @doc "Coherent cursor-local text and buffer metadata."
+  @spec cursor_context(t()) :: CursorContext.t()
   defdelegate cursor_context(server), to: BufferProcess
 
   @doc "Move the cursor to an exact position."
