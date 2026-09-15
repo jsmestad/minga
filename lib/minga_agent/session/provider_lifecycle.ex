@@ -30,20 +30,11 @@ defmodule MingaAgent.Session.ProviderLifecycle do
   @typedoc "Retry timer identity installed by the Session process."
   @type retry_timer :: {timer_ref :: reference(), token :: reference()}
 
-  @typedoc "External effect for the Session process to execute after a transition."
-  @type effect ::
-          {:cancel_timer, reference()}
-          | {:release_lease, CodeLease.t()}
-          | {:stop_provider, pid()}
-
-  @typedoc "Ordered external effects returned by a pure lifecycle transition."
-  @type effects :: [effect()]
-
   @typedoc "Current provider lifecycle phase with phase-specific state."
   @type phase ::
           {:stopped, CodeLease.t() | nil, retry_state()}
           | {:starting, CodeLease.t() | nil, retry_state()}
-          | {:running, pid(), CodeLease.t() | nil, retry_state()}
+          | {:running, pid(), reference(), CodeLease.t() | nil, retry_state()}
           | {:retrying, retry_state(), retry_timer() | nil}
           | {:terminal_failure, retry_state()}
 
@@ -101,12 +92,19 @@ defmodule MingaAgent.Session.ProviderLifecycle do
 
   @doc "Returns the active provider process, or nil when no provider is attached."
   @spec pid(t()) :: pid() | nil
-  def pid(%__MODULE__{phase: {:running, pid, _lease, _retry}}), do: pid
+  def pid(%__MODULE__{phase: {:running, pid, _monitor_ref, _lease, _retry}}), do: pid
   def pid(%__MODULE__{}), do: nil
+
+  @doc "Returns the active provider monitor reference, or nil when no provider is attached."
+  @spec monitor_ref(t()) :: reference() | nil
+  def monitor_ref(%__MODULE__{phase: {:running, _pid, monitor_ref, _lease, _retry}}),
+    do: monitor_ref
+
+  def monitor_ref(%__MODULE__{}), do: nil
 
   @doc "Returns the active provider code lease, or nil when no provider is attached."
   @spec lease(t()) :: CodeLease.t() | nil
-  def lease(%__MODULE__{phase: {:running, _pid, lease, _retry}}), do: lease
+  def lease(%__MODULE__{phase: {:running, _pid, _monitor_ref, lease, _retry}}), do: lease
   def lease(%__MODULE__{phase: {:stopped, lease, _retry}}), do: lease
   def lease(%__MODULE__{phase: {:starting, lease, _retry}}), do: lease
   def lease(%__MODULE__{}), do: nil
@@ -129,20 +127,20 @@ defmodule MingaAgent.Session.ProviderLifecycle do
   @spec phase(t()) :: :stopped | :starting | :running | :retrying | :terminal_failure
   def phase(%__MODULE__{phase: {phase, _retry}}), do: phase
   def phase(%__MODULE__{phase: {phase, _retry, _timer}}), do: phase
-  def phase(%__MODULE__{phase: {phase, _pid, _lease, _retry}}), do: phase
+  def phase(%__MODULE__{phase: {phase, _pid, _monitor_ref, _lease, _retry}}), do: phase
 
   @doc "Returns the most recent provider failure reason."
   @spec failure_reason(t()) :: term()
   def failure_reason(%__MODULE__{} = lifecycle), do: retry_state(lifecycle).failure_reason
 
   @doc "Begins provider startup unless a provider is already attached."
-  @spec start(t()) :: {:start, t(), effects()} | {:active, t(), effects()}
-  def start(%__MODULE__{phase: {:running, _pid, _lease, _retry}} = lifecycle),
-    do: {:active, lifecycle, []}
+  @spec start(t()) :: {:start, t(), retry_timer() | nil} | {:active, t()}
+  def start(%__MODULE__{phase: {:running, _pid, _monitor_ref, _lease, _retry}} = lifecycle),
+    do: {:active, lifecycle}
 
   def start(%__MODULE__{} = lifecycle) do
     next = %{lifecycle | phase: {:starting, lease(lifecycle), retry_state(lifecycle)}}
-    {:start, next, cancel_timer_effects(lifecycle)}
+    {:start, next, retry_timer(lifecycle)}
   end
 
   @doc "Installs a source-code lease acquired while provider startup is in progress."
@@ -156,32 +154,51 @@ defmodule MingaAgent.Session.ProviderLifecycle do
 
   def install_lease(%__MODULE__{} = lifecycle, %CodeLease{}), do: {:invalid_phase, lifecycle}
 
-  @doc "Attaches a started provider process."
-  @spec attach(t(), pid()) :: {t(), effects()}
-  def attach(%__MODULE__{} = lifecycle, pid) when is_pid(pid) do
-    retry = %{retry_state(lifecycle) | failure_reason: nil}
-    next = %{lifecycle | phase: {:running, pid, lease(lifecycle), retry}}
-    {next, cancel_timer_effects(lifecycle)}
+  @doc "Attaches a started provider process and its Session-owned monitor."
+  @spec attach(t(), pid(), reference()) :: {:ok, t()} | {:invalid_phase, t()}
+  def attach(
+        %__MODULE__{phase: {:starting, lease, current_retry}} = lifecycle,
+        pid,
+        monitor_ref
+      )
+      when is_pid(pid) and is_reference(monitor_ref) do
+    retry = %{current_retry | failure_reason: nil}
+    {:ok, %{lifecycle | phase: {:running, pid, monitor_ref, lease, retry}}}
   end
 
-  @doc "Records provider failure and detaches the failed process and lease."
-  @spec failure(t(), term()) :: {t(), effects()}
-  def failure(%__MODULE__{} = lifecycle, reason) do
-    retry = %{retry_state(lifecycle) | failure_reason: reason}
+  def attach(%__MODULE__{} = lifecycle, pid, monitor_ref)
+      when is_pid(pid) and is_reference(monitor_ref),
+      do: {:invalid_phase, lifecycle}
+
+  @doc "Records startup or attached-provider failure and returns its lease for ordered release."
+  @spec failure(t(), term()) :: {:failed, t(), CodeLease.t() | nil} | {:invalid_phase, t()}
+  def failure(%__MODULE__{phase: {:starting, lease, current_retry}} = lifecycle, reason) do
+    retry = %{current_retry | failure_reason: reason}
     next = %{lifecycle | phase: {:stopped, nil, retry}}
-    {next, release_lease_effects(lifecycle) ++ cancel_timer_effects(lifecycle)}
+    {:failed, next, lease}
   end
+
+  def failure(
+        %__MODULE__{phase: {:running, _pid, _monitor_ref, lease, current_retry}} = lifecycle,
+        reason
+      ) do
+    retry = %{current_retry | failure_reason: reason}
+    next = %{lifecycle | phase: {:stopped, nil, retry}}
+    {:failed, next, lease}
+  end
+
+  def failure(%__MODULE__{} = lifecycle, _reason), do: {:invalid_phase, lifecycle}
 
   @doc "Calculates the next retry or records terminal retry exhaustion."
   @spec retry(t(), term(), integer()) ::
-          {:retry, t(), pos_integer(), effects()} | {:terminal_failure, t(), effects()}
-  def retry(%__MODULE__{} = lifecycle, reason, now_ms) when is_integer(now_ms) do
-    retry = %{retry_state(lifecycle) | failure_reason: reason}
+          {:retry, t(), pos_integer()} | {:terminal_failure, t()} | {:invalid_phase, t()}
+  def retry(%__MODULE__{phase: {:stopped, _lease, current_retry}} = lifecycle, reason, now_ms)
+      when is_integer(now_ms) do
+    retry = %{current_retry | failure_reason: reason}
     {attempts, window_started_at_ms} = next_retry_window(retry, lifecycle.restart_policy, now_ms)
-    effects = cancel_timer_effects(lifecycle)
 
     if attempts > lifecycle.restart_policy.max_attempts do
-      {:terminal_failure, %{lifecycle | phase: {:terminal_failure, retry}}, effects}
+      {:terminal_failure, %{lifecycle | phase: {:terminal_failure, retry}}}
     else
       next_retry = %{
         retry
@@ -190,9 +207,12 @@ defmodule MingaAgent.Session.ProviderLifecycle do
       }
 
       next = %{lifecycle | phase: {:retrying, next_retry, nil}}
-      {:retry, next, retry_delay_ms(lifecycle.restart_policy, attempts), effects}
+      {:retry, next, retry_delay_ms(lifecycle.restart_policy, attempts)}
     end
   end
+
+  def retry(%__MODULE__{} = lifecycle, _reason, now_ms) when is_integer(now_ms),
+    do: {:invalid_phase, lifecycle}
 
   @doc "Installs the timer identity created by the Session process for a scheduled retry."
   @spec install_retry_timer(t(), reference(), reference()) :: {:ok, t()} | {:invalid_phase, t()}
@@ -220,15 +240,15 @@ defmodule MingaAgent.Session.ProviderLifecycle do
   def retry_due(%__MODULE__{} = lifecycle, _token), do: {:stale, lifecycle}
 
   @doc "Clears retry history for an explicit provider restart."
-  @spec reset_retry(t()) :: {t(), effects()}
-  def reset_retry(%__MODULE__{phase: {:running, pid, lease, _retry}} = lifecycle) do
-    next = %{lifecycle | phase: {:running, pid, lease, initial_retry_state()}}
-    {next, cancel_timer_effects(lifecycle)}
+  @spec reset_retry(t()) :: {:reset, t(), retry_timer() | nil}
+  def reset_retry(%__MODULE__{phase: {:running, pid, monitor_ref, lease, _retry}} = lifecycle) do
+    next = %{lifecycle | phase: {:running, pid, monitor_ref, lease, initial_retry_state()}}
+    {:reset, next, nil}
   end
 
   def reset_retry(%__MODULE__{} = lifecycle) do
     next = %{lifecycle | phase: {:stopped, lease(lifecycle), initial_retry_state()}}
-    {next, cancel_timer_effects(lifecycle)}
+    {:reset, next, retry_timer(lifecycle)}
   end
 
   @doc "Replaces the model configuration while preserving process and retry identity."
@@ -244,45 +264,23 @@ defmodule MingaAgent.Session.ProviderLifecycle do
   end
 
   @doc "Stops the lifecycle and clears attached process, lease, retry, and failure state."
-  @spec stop(t()) :: {t(), effects()}
+  @spec stop(t()) ::
+          {:stop_provider, t(), pid(), reference(), CodeLease.t() | nil}
+          | {:stop_detached, t(), CodeLease.t() | nil, retry_timer() | nil}
+  def stop(%__MODULE__{phase: {:running, pid, monitor_ref, lease, _retry}} = lifecycle) do
+    next = %{lifecycle | phase: {:stopped, nil, initial_retry_state()}}
+    {:stop_provider, next, pid, monitor_ref, lease}
+  end
+
   def stop(%__MODULE__{} = lifecycle) do
     next = %{lifecycle | phase: {:stopped, nil, initial_retry_state()}}
-
-    effects =
-      stop_provider_effects(lifecycle) ++
-        release_lease_effects(lifecycle) ++ cancel_timer_effects(lifecycle)
-
-    {next, effects}
+    {:stop_detached, next, lease(lifecycle), retry_timer(lifecycle)}
   end
 
   @doc "Returns true when automatic retries are exhausted."
   @spec terminal_failure?(t()) :: boolean()
   def terminal_failure?(%__MODULE__{phase: {:terminal_failure, _retry}}), do: true
   def terminal_failure?(%__MODULE__{}), do: false
-
-  @spec stop_provider_effects(t()) :: effects()
-  defp stop_provider_effects(%__MODULE__{} = lifecycle) do
-    case pid(lifecycle) do
-      pid when is_pid(pid) -> [{:stop_provider, pid}]
-      nil -> []
-    end
-  end
-
-  @spec cancel_timer_effects(t()) :: effects()
-  defp cancel_timer_effects(%__MODULE__{} = lifecycle) do
-    case retry_timer(lifecycle) do
-      {timer_ref, _token} -> [{:cancel_timer, timer_ref}]
-      nil -> []
-    end
-  end
-
-  @spec release_lease_effects(t()) :: effects()
-  defp release_lease_effects(%__MODULE__{} = lifecycle) do
-    case lease(lifecycle) do
-      %CodeLease{} = lease -> [{:release_lease, lease}]
-      nil -> []
-    end
-  end
 
   @spec initial_retry_state() :: retry_state()
   defp initial_retry_state do
@@ -292,7 +290,7 @@ defmodule MingaAgent.Session.ProviderLifecycle do
   @spec retry_state(t()) :: retry_state()
   defp retry_state(%__MODULE__{phase: {:stopped, _lease, retry}}), do: retry
   defp retry_state(%__MODULE__{phase: {:starting, _lease, retry}}), do: retry
-  defp retry_state(%__MODULE__{phase: {:running, _pid, _lease, retry}}), do: retry
+  defp retry_state(%__MODULE__{phase: {:running, _pid, _monitor_ref, _lease, retry}}), do: retry
   defp retry_state(%__MODULE__{phase: {:retrying, retry, _timer}}), do: retry
   defp retry_state(%__MODULE__{phase: {:terminal_failure, retry}}), do: retry
 

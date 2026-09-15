@@ -980,8 +980,9 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:restart_provider, _from, state) do
-    {lifecycle, effects} = ProviderLifecycle.reset_retry(state.provider)
-    state = install_provider_transition(state, lifecycle, effects)
+    {:reset, lifecycle, retry_timer} = ProviderLifecycle.reset_retry(state.provider)
+    cancel_provider_retry_timer(retry_timer)
+    state = %{state | provider: lifecycle}
 
     {state, result} = refresh_credentials_state_result(state)
 
@@ -1302,7 +1303,7 @@ defmodule MingaAgent.Session do
   def handle_info({:start_provider, token}, state) do
     case ProviderLifecycle.retry_due(state.provider, token) do
       {:start, lifecycle} ->
-        state = install_provider_transition(state, lifecycle, [])
+        state = %{state | provider: lifecycle}
         {:noreply, refresh_credentials_state(state)}
 
       {:stale, _lifecycle} ->
@@ -1347,16 +1348,25 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info(
-        {:DOWN, _ref, :process, pid, reason},
-        %{provider: %ProviderLifecycle{phase: {:running, pid, _lease, _retry}}} = state
+        {:DOWN, monitor_ref, :process, pid, reason},
+        %{
+          provider: %ProviderLifecycle{
+            phase: {:running, pid, monitor_ref, _lease, _retry}
+          }
+        } = state
       ) do
     {:noreply, handle_provider_death(state, reason)}
   end
 
   def handle_info(
         {:EXIT, pid, reason},
-        %{provider: %ProviderLifecycle{phase: {:running, pid, _lease, _retry}}} = state
+        %{
+          provider: %ProviderLifecycle{
+            phase: {:running, pid, monitor_ref, _lease, _retry}
+          }
+        } = state
       ) do
+    Process.demonitor(monitor_ref, [:flush])
     {:noreply, handle_provider_death(state, reason)}
   end
 
@@ -2689,7 +2699,7 @@ defmodule MingaAgent.Session do
          %{
            provider: %ProviderLifecycle{
              module: module,
-             phase: {:running, provider, _lease, _retry}
+             phase: {:running, provider, _monitor_ref, _lease, _retry}
            }
          } = state,
          messages
@@ -3105,8 +3115,9 @@ defmodule MingaAgent.Session do
     lifecycle = state.provider
 
     if provider_startable?(lifecycle.module, lifecycle.opts, lifecycle.model_name) do
-      {:start, lifecycle, effects} = ProviderLifecycle.start(lifecycle)
-      state = install_provider_transition(state, lifecycle, effects)
+      {:start, lifecycle, retry_timer} = ProviderLifecycle.start(lifecycle)
+      cancel_provider_retry_timer(retry_timer)
+      state = %{state | provider: lifecycle}
 
       case start_provider(state) do
         {:ok, pid, state} ->
@@ -3128,10 +3139,10 @@ defmodule MingaAgent.Session do
   @spec attach_provider(state(), pid()) :: state()
   defp attach_provider(state, pid) do
     Process.unlink(pid)
-    Process.monitor(pid)
-    {lifecycle, effects} = ProviderLifecycle.attach(state.provider, pid)
+    monitor_ref = Process.monitor(pid)
+    {:ok, lifecycle} = ProviderLifecycle.attach(state.provider, pid, monitor_ref)
 
-    state = install_provider_transition(state, lifecycle, effects)
+    state = %{state | provider: lifecycle}
     state = clear_provider_start_error(state)
 
     state = seed_provider_messages(state, Transcript.messages(state.transcript))
@@ -3152,8 +3163,9 @@ defmodule MingaAgent.Session do
   @spec report_provider_start_error(state(), term()) :: state()
   defp report_provider_start_error(state, reason) do
     Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
-    {lifecycle, effects} = ProviderLifecycle.failure(state.provider, reason)
-    state = install_provider_transition(state, lifecycle, effects)
+    {:failed, lifecycle, lease} = ProviderLifecycle.failure(state.provider, reason)
+    release_provider_lease(lease)
+    state = %{state | provider: lifecycle}
 
     mark_provider_failed(state, format_error(reason))
   end
@@ -3161,8 +3173,9 @@ defmodule MingaAgent.Session do
   @spec handle_provider_death(state(), term()) :: state()
   defp handle_provider_death(state, reason) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    {lifecycle, effects} = ProviderLifecycle.failure(state.provider, reason)
-    state = install_provider_transition(state, lifecycle, effects)
+    {:failed, lifecycle, lease} = ProviderLifecycle.failure(state.provider, reason)
+    release_provider_lease(lease)
+    state = %{state | provider: lifecycle}
 
     state = mark_provider_failed(state, "Agent provider crashed")
     state = maybe_schedule_provider_restart(state, reason)
@@ -3177,8 +3190,8 @@ defmodule MingaAgent.Session do
            reason,
            System.monotonic_time(:millisecond)
          ) do
-      {:retry, lifecycle, delay_ms, effects} ->
-        state = install_provider_transition(state, lifecycle, effects)
+      {:retry, lifecycle, delay_ms} ->
+        state = %{state | provider: lifecycle}
         token = make_ref()
         timer_ref = Process.send_after(self(), {:start_provider, token}, delay_ms)
         {:ok, lifecycle} = ProviderLifecycle.install_retry_timer(state.provider, timer_ref, token)
@@ -3186,26 +3199,15 @@ defmodule MingaAgent.Session do
         %{state | provider: lifecycle}
         |> put_provider_retrying_error(delay_ms)
 
-      {:terminal_failure, lifecycle, effects} ->
+      {:terminal_failure, lifecycle} ->
         state
-        |> install_provider_transition(lifecycle, effects)
+        |> Map.put(:provider, lifecycle)
         |> put_provider_restart_exhausted_error()
     end
   end
 
-  @spec install_provider_transition(
-          state(),
-          ProviderLifecycle.t(),
-          ProviderLifecycle.effects()
-        ) :: state()
-  defp install_provider_transition(state, lifecycle, effects) do
-    Enum.each(effects, &perform_provider_effect/1)
-    %{state | provider: lifecycle}
-  end
-
-  @spec perform_provider_effect(ProviderLifecycle.effect()) :: :ok
-  defp perform_provider_effect({:stop_provider, pid}) do
-    monitor_ref = Process.monitor(pid)
+  @spec await_provider_stop(pid(), reference()) :: :ok
+  defp await_provider_stop(pid, monitor_ref) do
     Process.exit(pid, :shutdown)
 
     receive do
@@ -3221,17 +3223,27 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp perform_provider_effect({:cancel_timer, timer_ref}) do
+  @spec cancel_provider_retry_timer(ProviderLifecycle.retry_timer() | nil) :: :ok
+  defp cancel_provider_retry_timer(nil), do: :ok
+
+  defp cancel_provider_retry_timer({timer_ref, _token}) do
     _cancelled? = Process.cancel_timer(timer_ref)
     :ok
   end
 
-  defp perform_provider_effect({:release_lease, lease}), do: release_provider_lease(lease)
-
   @spec stop_provider_lifecycle(state()) :: state()
   defp stop_provider_lifecycle(state) do
-    {lifecycle, effects} = ProviderLifecycle.stop(state.provider)
-    install_provider_transition(state, lifecycle, effects)
+    case ProviderLifecycle.stop(state.provider) do
+      {:stop_provider, lifecycle, pid, monitor_ref, lease} ->
+        await_provider_stop(pid, monitor_ref)
+        release_provider_lease(lease)
+        %{state | provider: lifecycle}
+
+      {:stop_detached, lifecycle, lease, retry_timer} ->
+        cancel_provider_retry_timer(retry_timer)
+        release_provider_lease(lease)
+        %{state | provider: lifecycle}
+    end
   end
 
   @spec put_provider_retrying_error(state(), pos_integer()) :: state()
