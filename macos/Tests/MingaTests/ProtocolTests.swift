@@ -995,6 +995,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     struct Paste: Sendable { let text: String }
     struct KeyPress: Sendable { let codepoint: UInt32; let modifiers: UInt8 }
     struct PickerQuery: Sendable, Equatable { let generation: UInt32; let editSeq: UInt32; let text: String }
+    struct SearchQuery: Sendable, Equatable { let sessionID: UInt32; let editSeq: UInt32; let query: String; let flags: UInt8 }
     struct MouseEvent: Sendable { let row: Int16; let col: Int16; let button: UInt8; let modifiers: UInt8; let eventType: UInt8; let clickCount: UInt8 }
 
     /// Recorded GUI action events. Each sendFoo() call appends one entry.
@@ -1070,6 +1071,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         var pasteCalls: [Paste] = []
         var keyPressCalls: [KeyPress] = []
         var pickerQueryCalls: [PickerQuery] = []
+        var searchQueryCalls: [SearchQuery] = []
         var mouseEventCalls: [MouseEvent] = []
         var guiActions: [GUIAction] = []
     }
@@ -1080,6 +1082,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     var pasteCalls: [Paste] { state.withLock { $0.pasteCalls } }
     var keyPressCalls: [KeyPress] { state.withLock { $0.keyPressCalls } }
     var pickerQueryCalls: [PickerQuery] { state.withLock { $0.pickerQueryCalls } }
+    var searchQueryCalls: [SearchQuery] { state.withLock { $0.searchQueryCalls } }
     var mouseEventCalls: [MouseEvent] { state.withLock { $0.mouseEventCalls } }
     var guiActions: [GUIAction] { state.withLock { $0.guiActions } }
 
@@ -1091,6 +1094,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     }
     func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {
         state.withLock { $0.pickerQueryCalls.append(PickerQuery(generation: generation, editSeq: editSeq, text: text)) }
+    }
+    func sendSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {
+        state.withLock { $0.searchQueryCalls.append(SearchQuery(sessionID: sessionID, editSeq: editSeq, query: query, flags: flags)) }
     }
     func sendResize(cols: UInt16, rows: UInt16) {
         state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }

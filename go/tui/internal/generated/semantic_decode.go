@@ -2497,11 +2497,28 @@ func DecodeGuiSearchStateFields(data []byte, offset int, windowEnd int) (GuiSear
 	}
 	flags := data[pos]
 	pos++
+	query, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+4, "session_id"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	sessionID := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "acknowledged_edit_seq"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	acknowledgedEditSeq := decodeU32(data, pos)
+	pos += 4
 	return GuiSearchStateFields{
-		Active:       active,
-		MatchCount:   matchCount,
-		CurrentIndex: currentIndex,
-		Flags:        flags,
+		Active:              active,
+		MatchCount:          matchCount,
+		CurrentIndex:        currentIndex,
+		Flags:               flags,
+		Query:               query,
+		SessionID:           sessionID,
+		AcknowledgedEditSeq: acknowledgedEditSeq,
 	}, pos, nil
 }
 

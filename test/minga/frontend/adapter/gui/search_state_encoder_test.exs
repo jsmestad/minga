@@ -21,7 +21,7 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
 
       {cmd, _caches} = SearchStateEncoder.encode(model, caches)
 
-      assert <<@op_gui_search_state, 6::16, 0::8, 0::16, 0::16, 0::8>> = cmd
+      assert <<@op_gui_search_state, 16::16, 0::8, 0::16, 0::16, 0::8, 0::16, 0::32, 0::32>> = cmd
     end
 
     test "encodes active search state with matches" do
@@ -29,6 +29,9 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
         active: true,
         match_count: 5,
         current_index: 2,
+        query: "café",
+        session_id: 3,
+        acknowledged_edit_seq: 2,
         case_sensitive: true,
         whole_word: false,
         regex: false,
@@ -38,7 +41,8 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
       caches = Caches.new()
       {cmd, _caches} = SearchStateEncoder.encode(model, caches)
 
-      assert <<@op_gui_search_state, 6::16, 1::8, 5::16, 2::16, 0x02::8>> = cmd
+      assert <<@op_gui_search_state, 21::16, 1::8, 5::16, 2::16, 0x02::8, 5::16, "café"::binary,
+               3::32, 2::32>> = cmd
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do
@@ -57,6 +61,9 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
         active: true,
         match_count: 10,
         current_index: 3,
+        query: "foo",
+        session_id: 10,
+        acknowledged_edit_seq: 8,
         case_sensitive: true,
         whole_word: true,
         regex: true,
@@ -65,7 +72,8 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
 
       {cmd, _caches} = SearchStateEncoder.encode(model, Caches.new())
 
-      assert <<@op_gui_search_state, 6::16, 1::8, 10::16, 3::16, 0x0F::8>> = cmd
+      assert <<@op_gui_search_state, 19::16, 1::8, 10::16, 3::16, 0x0F::8, 3::16, "foo"::binary,
+               10::32, 8::32>> = cmd
     end
 
     test "rejects out-of-range match_count before narrowing it to u16" do

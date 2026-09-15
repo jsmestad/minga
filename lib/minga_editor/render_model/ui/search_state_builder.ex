@@ -17,23 +17,36 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilder do
     }
   end
 
-  def build(%EditorSearch{gui_search: %{} = gs, last_pattern: pattern}, active_buffer) do
+  def build(%EditorSearch{gui_search: %{active: false} = gui_search}, _active_buffer),
+    do: build_model(gui_search, 0, 0)
+
+  def build(%EditorSearch{gui_search: %{active: true} = gui_search}, active_buffer) do
     search_opts = [
-      case_sensitive: Map.get(gs, :case_sensitive, true),
-      whole_word: Map.get(gs, :whole_word, false),
-      regex: Map.get(gs, :regex, false)
+      case_sensitive: gui_search.case_sensitive,
+      whole_word: gui_search.whole_word,
+      regex: gui_search.regex
     ]
 
-    {match_count, current_index} = compute_search_stats(active_buffer, pattern, search_opts)
+    {match_count, current_index} =
+      compute_search_stats(active_buffer, gui_search.query, search_opts)
 
+    build_model(gui_search, match_count, current_index)
+  end
+
+  @spec build_model(EditorSearch.gui_search(), non_neg_integer(), non_neg_integer()) ::
+          SearchStateModel.t()
+  defp build_model(gui_search, match_count, current_index) do
     %SearchStateModel{
-      active: true,
+      active: gui_search.active,
+      query: gui_search.query,
+      session_id: gui_search.session_id,
+      acknowledged_edit_seq: gui_search.acknowledged_edit_seq,
       match_count: match_count,
       current_index: current_index,
-      case_sensitive: Map.get(gs, :case_sensitive, true),
-      whole_word: Map.get(gs, :whole_word, false),
-      regex: Map.get(gs, :regex, false),
-      replace_mode: Map.get(gs, :replace_mode, false)
+      case_sensitive: gui_search.case_sensitive,
+      whole_word: gui_search.whole_word,
+      regex: gui_search.regex,
+      replace_mode: gui_search.replace_mode
     }
   end
 

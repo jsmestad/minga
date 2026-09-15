@@ -1209,18 +1209,31 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     // MARK: - Search Toolbar Actions
 
-    /// Send a gui_action: search_query. Layout: opcode(1) + action_type(1) + query_len(2) + query + flags(1).
-    func sendSearchQuery(query: String, flags: UInt8) {
+    /// Send a gui_action: search_focus. Layout: opcode(1) + action_type(1) + replace_mode(1).
+    func sendSearchFocus(replaceMode: Bool) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_FOCUS
+        buf[2] = replaceMode ? 1 : 0
+        writeFrame(buf)
+    }
+
+    /// Send a correlated gui_action: search_query.
+    /// Layout: opcode(1) + action_type(1) + session_id(4) + edit_seq(4) + query_len(2) + query + flags(1).
+    func sendSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {
         let utf8 = Array(query.utf8)
-        let queryLen = min(utf8.count, Int(UInt16.max))
-        var buf = Data(count: 4 + queryLen + 1)
+        guard utf8.count <= Int(UInt16.max) else { return }
+        let queryLen = utf8.count
+        var buf = Data(count: 12 + queryLen + 1)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_QUERY
-        writeU16(&buf, 2, UInt16(queryLen))
+        writeU32(&buf, 2, sessionID)
+        writeU32(&buf, 6, editSeq)
+        writeU16(&buf, 10, UInt16(queryLen))
         if queryLen > 0 {
-            buf.replaceSubrange(4..<(4 + queryLen), with: utf8[0..<queryLen])
+            buf.replaceSubrange(12..<(12 + queryLen), with: utf8)
         }
-        buf[4 + queryLen] = flags
+        buf[12 + queryLen] = flags
         writeFrame(buf)
     }
 

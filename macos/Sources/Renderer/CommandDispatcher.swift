@@ -1352,12 +1352,8 @@ final class CommandDispatcher {
         case .guiExtensionRuntime(let message):
             effects.append(.extensionRuntime(message))
 
-        case .guiSearchState(let active, let matchCount, let currentIndex, let flags):
-            if active {
-                guiState.searchState.update(active: true, matchCount: matchCount, currentIndex: currentIndex, flags: flags)
-            } else {
-                guiState.searchState.hide()
-            }
+        case .guiSearchState(let active, let matchCount, let currentIndex, let flags, let query, let sessionID, let acknowledgedEditSeq):
+            guiState.searchState.update(active: active, matchCount: matchCount, currentIndex: currentIndex, flags: flags, query: query, sessionID: sessionID, acknowledgedEditSeq: acknowledgedEditSeq)
 
         case .guiSidebars(_, let activeId, let sidebars):
             guiState.sidebarHostState.update(activeId: activeId, sidebars: sidebars)

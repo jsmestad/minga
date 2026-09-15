@@ -214,4 +214,5 @@ const (
 	GUIActionPickerQueryChanged         byte = 0x5F
 	GUIActionPickerItemActivate         byte = 0x60
 	GUIActionPickerActionActivate       byte = 0x61
+	GUIActionSearchFocus                byte = 0x62
 )

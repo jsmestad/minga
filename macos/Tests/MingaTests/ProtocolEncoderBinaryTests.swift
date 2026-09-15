@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import MingaUI
 
 /// Helper to create a pipe-backed encoder and read the framed output.
 private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
@@ -22,6 +23,34 @@ private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
     let len = Int(raw[0]) << 24 | Int(raw[1]) << 16 | Int(raw[2]) << 8 | Int(raw[3])
     guard raw.count >= 4 + len else { return Data() }
     return raw.subdata(in: 4..<(4 + len))
+}
+
+// MARK: - Search session
+
+@Suite("Encoder Binary: Search Session")
+struct EncoderSearchSessionTests {
+    @Test("search focus carries only the requested mode")
+    func focusLayout() {
+        let payload = captureFrame { $0.sendSearchFocus(replaceMode: true) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_SEARCH_FOCUS, 1]))
+    }
+
+    @Test("search query carries session, sequence, Unicode query, and complete options")
+    func queryLayout() {
+        let payload = captureFrame {
+            $0.sendSearchQuery(sessionID: 7, editSeq: 3, query: "café λ", flags: SearchFlags.caseSensitive | SearchFlags.regex)
+        }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_SEARCH_QUERY)
+        #expect(readU32(payload, 2) == 7)
+        #expect(readU32(payload, 6) == 3)
+        let (query, nextOffset) = readString16(payload, 10)
+        #expect(query == "café λ")
+        #expect(payload[nextOffset] == SearchFlags.caseSensitive | SearchFlags.regex)
+        #expect(nextOffset + 1 == payload.count)
+    }
 }
 
 /// Read a big-endian UInt16 from data at offset.

@@ -5,9 +5,7 @@
 /// search field, match count, navigation buttons, toggle buttons for
 /// search options (case, whole word, regex), and an optional replace row.
 ///
-/// The search text field is locally managed (user types natively). On
-/// text change, the query and flags are sent to the BEAM. Match count
-/// and current index are BEAM-driven via SearchState.
+/// Committed native edits are reconciled with the complete BEAM-owned search session.
 
 import SwiftUI
 
@@ -22,24 +20,12 @@ public struct SearchToolbar: View {
 
     public let encoder: (any InputEncoder)?
 
-    @State private var searchText: String = ""
     @State private var replaceText: String = ""
-    @FocusState private var searchFieldFocused: Bool
-
-    /// Packs the current search option toggles into a flags byte.
-    private var flagsByte: UInt8 {
-        var flags: UInt8 = 0
-        if searchState.replaceMode { flags |= SearchFlags.replaceMode }
-        if searchState.caseSensitive { flags |= SearchFlags.caseSensitive }
-        if searchState.wholeWord { flags |= SearchFlags.wholeWord }
-        if searchState.regex { flags |= SearchFlags.regex }
-        return flags
-    }
 
     /// Formatted match count string, e.g. "3 of 12" or "No results".
     private var matchCountText: String {
         guard searchState.matchCount > 0 else {
-            return searchText.isEmpty ? "" : "No results"
+            return searchState.query.isEmpty ? "" : "No results"
         }
         return "\(searchState.currentIndex) of \(searchState.matchCount)"
     }
@@ -66,9 +52,6 @@ public struct SearchToolbar: View {
                 .fill(theme.popupBorder.opacity(0.3))
                 .frame(height: 1)
         }
-        .onAppear {
-            searchFieldFocused = true
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Find and Replace")
     }
@@ -80,8 +63,7 @@ public struct SearchToolbar: View {
         HStack(spacing: 4) {
             // Replace mode toggle (chevron)
             Button {
-                searchState.replaceMode.toggle()
-                sendQuery()
+                encoder?.sendSearchFocus(replaceMode: !searchState.replaceMode)
             } label: {
                 Image(systemName: searchState.replaceMode ? "chevron.down" : "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
@@ -94,25 +76,17 @@ public struct SearchToolbar: View {
 
             // Search text field with match count badge
             HStack(spacing: 0) {
-                TextField("Find", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.editorFg)
-                    .focused($searchFieldFocused)
-                    .onSubmit {
-                        if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                            encoder?.sendSearchPrev()
-                        } else {
-                            encoder?.sendSearchNext()
-                        }
-                    }
-                    .onChange(of: searchText) { _, _ in
-                        sendQuery()
-                    }
-                    .onKeyPress(.escape) {
-                        encoder?.sendSearchDismiss()
-                        return .handled
-                    }
+                SearchQueryField(
+                    searchState: searchState,
+                    style: InlineEditFieldStyle(
+                        textColor: theme.editorFg,
+                        selectionBackgroundColor: theme.accent.opacity(0.35),
+                        selectionForegroundColor: theme.editorFg,
+                        insertionPointColor: theme.accent
+                    ),
+                    encoder: encoder
+                )
+                .frame(maxWidth: .infinity, minHeight: 18, alignment: .leading)
 
                 if !matchCountText.isEmpty {
                     Text(matchCountText)
@@ -150,20 +124,17 @@ public struct SearchToolbar: View {
 
             // Case sensitive toggle
             toggleButton(label: "Aa", accessibilityLabel: "Match Case", isActive: searchState.caseSensitive) {
-                searchState.caseSensitive.toggle()
-                sendQuery()
+                sendEdit(searchState.toggle(.caseSensitive))
             }
 
             // Whole word toggle
             toggleButton(label: "ab", accessibilityLabel: "Match Whole Word", isActive: searchState.wholeWord, bordered: true) {
-                searchState.wholeWord.toggle()
-                sendQuery()
+                sendEdit(searchState.toggle(.wholeWord))
             }
 
             // Regex toggle
             toggleButton(label: ".*", accessibilityLabel: "Use Regular Expression", isActive: searchState.regex) {
-                searchState.regex.toggle()
-                sendQuery()
+                sendEdit(searchState.toggle(.regex))
             }
 
             Spacer(minLength: 0)
@@ -260,8 +231,8 @@ public struct SearchToolbar: View {
 
     // MARK: - Helpers
 
-    /// Sends the current search query and flags to the BEAM.
-    private func sendQuery() {
-        encoder?.sendSearchQuery(query: searchText, flags: flagsByte)
+    private func sendEdit(_ edit: SearchEdit?) {
+        guard let edit else { return }
+        encoder?.sendSearchQuery(sessionID: edit.sessionID, editSeq: edit.sequence, query: edit.query, flags: edit.flags)
     }
 }

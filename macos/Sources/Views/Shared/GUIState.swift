@@ -107,7 +107,7 @@ public final class GUIState {
         editTimelineState.update(visible: false, viewingIndex: 0xFFFF, wireEntries: [], wireFiles: [])
         extensionOverlayState.update([])
         extensionPanelState.update([])
-        searchState.hide()
+        searchState.reset()
         protocolErrorState.resetConnection()
         resyncState.clear()
     }

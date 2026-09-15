@@ -17,37 +17,38 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   @gui_action_search_replace Opcodes.gui_action_search_replace()
   @gui_action_search_replace_all Opcodes.gui_action_search_replace_all()
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
+  @gui_action_search_focus Opcodes.gui_action_search_focus()
 
   # ── decode_gui_action ──
 
   describe "decode_gui_action for search_query" do
     test "decodes query with flags" do
-      payload = <<5::16, "hello"::binary, 0x03::8>>
+      payload = <<7::32, 3::32, 5::16, "hello"::binary, 0x02::8>>
 
-      assert {:ok, {:search_query, "hello", 3}} ==
+      assert {:ok, {:search_query, 7, 3, "hello", 2}} ==
                ProtocolGUI.decode_gui_action(@gui_action_search_query, payload)
     end
 
     test "decodes empty query" do
-      payload = <<0::16, 0x00::8>>
+      payload = <<1::32, 1::32, 0::16, 0x00::8>>
 
-      assert {:ok, {:search_query, "", 0}} ==
+      assert {:ok, {:search_query, 1, 1, "", 0}} ==
                ProtocolGUI.decode_gui_action(@gui_action_search_query, payload)
     end
 
     test "decodes query with all flags set" do
-      payload = <<3::16, "foo"::binary, 0x0F::8>>
+      payload = <<2::32, 9::32, 3::16, "foo"::binary, 0x0E::8>>
 
-      assert {:ok, {:search_query, "foo", 0x0F}} ==
+      assert {:ok, {:search_query, 2, 9, "foo", 0x0E}} ==
                ProtocolGUI.decode_gui_action(@gui_action_search_query, payload)
     end
 
     test "decodes non-ASCII query" do
       query = "café"
       len = byte_size(query)
-      payload = <<len::16, query::binary, 0x00::8>>
+      payload = <<11::32, 4::32, len::16, query::binary, 0x00::8>>
 
-      assert {:ok, {:search_query, ^query, 0}} =
+      assert {:ok, {:search_query, 11, 4, ^query, 0}} =
                ProtocolGUI.decode_gui_action(@gui_action_search_query, payload)
     end
 
@@ -57,6 +58,22 @@ defmodule MingaEditor.Frontend.GUISearchTest do
 
     test "returns error for empty payload" do
       assert :error == ProtocolGUI.decode_gui_action(@gui_action_search_query, <<>>)
+    end
+  end
+
+  describe "decode_gui_action for search_focus" do
+    test "decodes Find and Replace focus modes" do
+      assert {:ok, {:search_focus, false}} ==
+               ProtocolGUI.decode_gui_action(@gui_action_search_focus, <<0>>)
+
+      assert {:ok, {:search_focus, true}} ==
+               ProtocolGUI.decode_gui_action(@gui_action_search_focus, <<1>>)
+    end
+
+    test "rejects invalid booleans and payload lengths" do
+      assert :error == ProtocolGUI.decode_gui_action(@gui_action_search_focus, <<2>>)
+      assert :error == ProtocolGUI.decode_gui_action(@gui_action_search_focus, <<>>)
+      assert :error == ProtocolGUI.decode_gui_action(@gui_action_search_focus, <<0, 0>>)
     end
   end
 
@@ -161,9 +178,17 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     @op_gui_action Opcodes.gui_action()
 
     test "decodes a complete search_query event" do
-      binary = <<@op_gui_action, @gui_action_search_query, 3::16, "foo"::binary, 0x02>>
+      binary =
+        <<@op_gui_action, @gui_action_search_query, 4::32, 2::32, 3::16, "foo"::binary, 0x02>>
 
-      assert {:ok, {:gui_action, {:search_query, "foo", 2}}} ==
+      assert {:ok, {:gui_action, {:search_query, 4, 2, "foo", 2}}} ==
+               MingaEditor.Frontend.Protocol.decode_event(binary)
+    end
+
+    test "decodes a complete search_focus event" do
+      binary = <<@op_gui_action, @gui_action_search_focus, 1>>
+
+      assert {:ok, {:gui_action, {:search_focus, true}}} ==
                MingaEditor.Frontend.Protocol.decode_event(binary)
     end
 
@@ -178,69 +203,72 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   # ── Search state mutations ──
 
   describe "SearchData state mutations" do
-    test "activate_gui_search sets all flags" do
-      s = %SearchData{}
-      result = SearchData.activate_gui_search(s, true, false, true)
+    test "focus starts a complete search session from the last pattern" do
+      result = SearchData.focus_gui_search(%SearchData{last_pattern: "foo"}, true)
 
       assert result.gui_search == %{
-               replace_mode: false,
-               case_sensitive: true,
+               active: true,
+               session_id: 1,
+               acknowledged_edit_seq: 0,
+               query: "foo",
+               replace_mode: true,
+               case_sensitive: false,
                whole_word: false,
-               regex: true
+               regex: false
              }
     end
 
-    test "gui_search_active? returns true when active" do
-      s = SearchData.activate_gui_search(%SearchData{}, false, false, false)
-      assert SearchData.gui_search_active?(s)
+    test "repeated focus preserves query and options while changing mode and session" do
+      s = SearchData.focus_gui_search(%SearchData{}, false)
+      {:accepted, s} = SearchData.apply_gui_search_edit(s, 1, 1, "foo", true, true, false)
+      result = SearchData.focus_gui_search(s, true)
+
+      assert result.gui_search == %{
+               active: true,
+               session_id: 2,
+               acknowledged_edit_seq: 0,
+               query: "foo",
+               replace_mode: true,
+               case_sensitive: true,
+               whole_word: true,
+               regex: false
+             }
     end
 
-    test "gui_search_active? returns false when nil" do
+    test "accepts only newer edits for the active session" do
+      s = SearchData.focus_gui_search(%SearchData{}, false)
+      {:accepted, newer} = SearchData.apply_gui_search_edit(s, 1, 2, "B", true, false, false)
+      assert newer.last_pattern == "B"
+      assert newer.gui_search.acknowledged_edit_seq == 2
+      assert newer.gui_search.case_sensitive
+
+      assert {:stale, ^newer} =
+               SearchData.apply_gui_search_edit(newer, 1, 1, "A", false, true, true)
+
+      assert {:stale, ^newer} =
+               SearchData.apply_gui_search_edit(newer, 7, 3, "old session", false, false, false)
+    end
+
+    test "gui_search_active? returns true only for an active retained session" do
+      s = SearchData.focus_gui_search(%SearchData{}, false)
+      assert SearchData.gui_search_active?(s)
+      refute s |> SearchData.dismiss_gui_search() |> SearchData.gui_search_active?()
       refute SearchData.gui_search_active?(%SearchData{})
     end
 
-    test "dismiss_gui_search sets gui_search to nil" do
-      s = SearchData.activate_gui_search(%SearchData{}, false, false, false)
+    test "dismiss retains query and options for a fresh reopen session" do
+      s = SearchData.focus_gui_search(%SearchData{}, false)
+      {:accepted, s} = SearchData.apply_gui_search_edit(s, 1, 1, "hello", true, false, true)
       result = SearchData.dismiss_gui_search(s)
-      assert result.gui_search == nil
-    end
+      refute result.gui_search.active
+      assert result.gui_search.query == "hello"
 
-    test "dismiss_gui_search preserves last_pattern" do
-      s =
-        %SearchData{}
-        |> SearchData.record("hello", :forward)
-        |> SearchData.activate_gui_search(false, false, false)
-        |> SearchData.dismiss_gui_search()
-
-      assert s.last_pattern == "hello"
-    end
-
-    test "update_gui_search_flags updates existing flags" do
-      s = SearchData.activate_gui_search(%SearchData{}, false, false, false)
-      result = SearchData.update_gui_search_flags(s, true, true, false)
-
-      assert result.gui_search.case_sensitive == true
-      assert result.gui_search.whole_word == true
-      assert result.gui_search.replace_mode == false
-    end
-
-    test "update_gui_search_flags activates when nil" do
-      result = SearchData.update_gui_search_flags(%SearchData{}, true, false, false)
-      assert SearchData.gui_search_active?(result)
-      assert result.gui_search.case_sensitive == true
-      assert result.gui_search.replace_mode == false
-    end
-
-    test "set_gui_replace_mode updates when active" do
-      s = SearchData.activate_gui_search(%SearchData{}, false, false, false)
-      result = SearchData.set_gui_replace_mode(s, true)
-      assert result.gui_search.replace_mode == true
-    end
-
-    test "set_gui_replace_mode is no-op when nil" do
-      s = %SearchData{}
-      result = SearchData.set_gui_replace_mode(s, true)
-      assert result.gui_search == nil
+      reopened = SearchData.focus_gui_search(result, true)
+      assert reopened.gui_search.session_id == 2
+      assert reopened.gui_search.acknowledged_edit_seq == 0
+      assert reopened.gui_search.query == "hello"
+      assert reopened.gui_search.case_sensitive
+      assert reopened.gui_search.regex
     end
   end
 
@@ -331,6 +359,85 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   end
 
   describe "production toolbar Replace route" do
+    test "uses the exact committed Unicode query and options for actions" do
+      ctx = start_editor("CAFÉ café")
+      send_search_focus(ctx, true)
+      send_search_query(ctx, "café", 0x02)
+
+      send_search_action(ctx, {:replace_all, "résumé"})
+
+      assert Buffer.content(ctx.buffer) == "CAFÉ résumé"
+    end
+
+    test "Find to Replace preserves the visible query and options used by replacement" do
+      ctx = start_editor("FOO foo")
+      Buffer.move_to(ctx.buffer, {0, 6})
+      send_search_focus(ctx, false)
+      send_search_query(ctx, "foo", 0x02)
+      find_session = editor_state(ctx).workspace.search.gui_search.session_id
+
+      send_search_focus(ctx, true)
+      search = editor_state(ctx).workspace.search.gui_search
+      assert search.session_id == find_session + 1
+      assert search.query == "foo"
+      assert search.case_sensitive
+      assert search.replace_mode
+
+      send_search_action(ctx, {:replace, "bar"})
+      assert Buffer.content(ctx.buffer) == "FOO bar"
+    end
+
+    test "delayed query and option echoes cannot overwrite a newer edit" do
+      ctx = start_editor("A B")
+      send_search_focus(ctx, false)
+      session_id = editor_state(ctx).workspace.search.gui_search.session_id
+
+      send_search_edit(ctx, session_id, 1, "A", 0x02)
+      send_search_edit(ctx, session_id, 2, "B", 0x04)
+      send_search_edit(ctx, session_id, 1, "A", 0x08)
+
+      search = editor_state(ctx).workspace.search.gui_search
+      assert search.query == "B"
+      refute search.case_sensitive
+      assert search.whole_word
+      refute search.regex
+      assert search.acknowledged_edit_seq == 2
+    end
+
+    test "acknowledges the visible query even when no buffer is active" do
+      ctx = start_editor("content")
+      send_search_focus(ctx, false)
+      session_id = editor_state(ctx).workspace.search.gui_search.session_id
+      replace_active_buffer(ctx, nil)
+
+      send_search_edit(ctx, session_id, 1, "café", 0x08)
+
+      search = editor_state(ctx).workspace.search.gui_search
+      assert search.query == "café"
+      assert search.regex
+      assert search.acknowledged_edit_seq == 1
+    end
+
+    test "a closed and reopened session rejects an old session edit" do
+      ctx = start_editor("old new")
+      send_search_focus(ctx, false)
+      old_session_id = editor_state(ctx).workspace.search.gui_search.session_id
+      send_search_edit(ctx, old_session_id, 1, "old", 0)
+      send_decoded_gui_action(ctx, <<Opcodes.gui_action(), @gui_action_search_dismiss>>)
+      send_search_focus(ctx, false)
+
+      new_session_id = editor_state(ctx).workspace.search.gui_search.session_id
+      assert new_session_id != old_session_id
+      send_search_edit(ctx, old_session_id, 2, "stale", 0x0E)
+
+      search = editor_state(ctx).workspace.search.gui_search
+      assert search.session_id == new_session_id
+      assert search.query == "old"
+      refute search.case_sensitive
+      refute search.whole_word
+      refute search.regex
+    end
+
     test "replaces the highlighted middle match before advancing" do
       ctx = start_editor("foo foo foo")
       select_first_match(ctx, "foo")
@@ -527,11 +634,29 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   end
 
   defp send_search_query(ctx, query, flags \\ 0x03) do
+    unless SearchData.gui_search_active?(editor_state(ctx).workspace.search) do
+      send_search_focus(ctx, false)
+    end
+
+    search = editor_state(ctx).workspace.search.gui_search
+    send_search_edit(ctx, search.session_id, search.acknowledged_edit_seq + 1, query, flags)
+  end
+
+  defp send_search_edit(ctx, session_id, edit_seq, query, flags) do
     payload =
-      <<Opcodes.gui_action(), @gui_action_search_query, byte_size(query)::16, query::binary,
-        flags::8>>
+      <<Opcodes.gui_action(), @gui_action_search_query, session_id::32, edit_seq::32,
+        byte_size(query)::16, query::binary, flags::8>>
 
     send_decoded_gui_action(ctx, payload)
+  end
+
+  defp send_search_focus(ctx, replace_mode) do
+    replace_mode_byte = if replace_mode, do: 1, else: 0
+
+    send_decoded_gui_action(
+      ctx,
+      <<Opcodes.gui_action(), @gui_action_search_focus, replace_mode_byte>>
+    )
   end
 
   defp send_search_action(ctx, :next) do

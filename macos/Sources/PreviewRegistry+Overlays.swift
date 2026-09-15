@@ -161,7 +161,15 @@ extension PreviewRegistry {
     static func searchToolbarPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = SearchState()
-        state.update(active: true, matchCount: 12, currentIndex: 3, flags: 0)
+        state.update(
+            active: true,
+            matchCount: 12,
+            currentIndex: 3,
+            flags: 0,
+            query: "needle",
+            sessionID: 1,
+            acknowledgedEditSeq: 0
+        )
 
         return SearchToolbar(searchState: state, encoder: nil)
             .frame(width: 800, height: 40)
