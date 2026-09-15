@@ -24,16 +24,15 @@ struct CompletionStateLifecycleTests {
         state.update(visible: true, anchorRow: 5, anchorCol: 10,
                      selectedIndex: 1, rawItems: raw, documentation: "Defines a function.")
 
-        #expect(state.visible == true)
-        #expect(state.anchorRow == 5)
-        #expect(state.anchorCol == 10)
-        #expect(state.selectedIndex == 1)
-        #expect(state.items.count == 2)
-        #expect(state.items[0].label == "def")
-        #expect(state.items[0].kind == 1)
-        #expect(state.items[1].label == "my_var")
-        #expect(state.items[1].detail == "String.t()")
-        #expect(state.documentation == "Defines a function.")
+        #expect(state.content?.anchorRow == 5)
+        #expect(state.content?.anchorCol == 10)
+        #expect(state.content?.selectedIndex == 1)
+        #expect(state.content?.items.count == 2)
+        #expect(state.content?.items[0].label == "def")
+        #expect(state.content?.items[0].kind == 1)
+        #expect(state.content?.items[1].label == "my_var")
+        #expect(state.content?.items[1].detail == "String.t()")
+        #expect(state.content?.documentation == "Defines a function.")
     }
 
     @Test("hide() clears all state")
@@ -45,9 +44,116 @@ struct CompletionStateLifecycleTests {
                      documentation: "doc")
         state.hide()
 
-        #expect(state.visible == false)
-        #expect(state.items.isEmpty)
-        #expect(state.documentation.isEmpty)
+        #expect(state.content == nil)
+    }
+}
+
+// MARK: - HoverPopupState
+
+@Suite("HoverPopupState Lifecycle")
+struct HoverPopupStateLifecycleTests {
+    private func line(_ text: String) -> Wire.HoverLine {
+        Wire.HoverLine(lineType: .text, segments: [
+            Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: text),
+        ])
+    }
+
+    @Test("composed payload and action install one complete content value")
+    @MainActor func composedUpdate() {
+        let state = HoverPopupState()
+        state.update(
+            visible: true,
+            anchorRow: 2,
+            anchorCol: 3,
+            focused: false,
+            scrollOffset: 0,
+            rawLines: [line("composed")],
+            openAction: (visible: true, name: "Open docs")
+        )
+
+        #expect(state.content?.openActionName == "Open docs")
+        #expect(state.content?.lines.first?.segments.first?.text == "composed")
+    }
+
+    @Test("action without current content is discarded")
+    @MainActor func unmatchedAction() {
+        let state = HoverPopupState()
+        state.updateOpenAction(visible: true, name: "Stale action")
+        state.update(visible: true, anchorRow: 4, anchorCol: 5, focused: true, scrollOffset: 0, rawLines: [line("later payload")])
+
+        #expect(state.content?.openActionName == nil)
+        #expect(state.content?.lines.first?.segments.first?.text == "later payload")
+    }
+
+    @Test("replacement retains active action while hide resets all content")
+    @MainActor func replacementAndHide() {
+        let state = HoverPopupState()
+        state.update(visible: true, anchorRow: 1, anchorCol: 2, focused: false, scrollOffset: 0, rawLines: [line("old")])
+        state.updateOpenAction(visible: true, name: "Open")
+        state.update(visible: true, anchorRow: 6, anchorCol: 7, focused: true, scrollOffset: 1, rawLines: [line("skip"), line("replacement")])
+
+        #expect(state.content?.anchorRow == 6)
+        #expect(state.content?.visibleLines.first?.segments.first?.text == "replacement")
+        #expect(state.content?.openActionName == "Open")
+
+        state.update(visible: false, anchorRow: 0, anchorCol: 0, focused: false, scrollOffset: 0, rawLines: [])
+        #expect(state.content == nil)
+
+        state.update(visible: true, anchorRow: 8, anchorCol: 9, focused: false, scrollOffset: 0, rawLines: [line("fresh")])
+        #expect(state.content?.lines.first?.segments.first?.text == "fresh")
+        #expect(state.content?.openActionName == nil)
+    }
+}
+
+// MARK: - SignatureHelpState
+
+@Suite("SignatureHelpState Lifecycle")
+struct SignatureHelpStateLifecycleTests {
+    private func signature(_ label: String, parameter: String) -> Wire.Signature {
+        Wire.Signature(label: label, documentation: "docs \(label)", parameters: [
+            Wire.SignatureParameter(label: parameter, documentation: "docs \(parameter)"),
+        ])
+    }
+
+    @Test("replace, hide, and show install one complete presentation")
+    @MainActor func replacementLifecycle() {
+        let state = SignatureHelpState()
+        state.update(visible: true, anchorRow: 2, anchorCol: 3, activeSignature: 0, activeParameter: 0, rawSignatures: [signature("old(a)", parameter: "a")])
+        state.update(visible: true, anchorRow: 5, anchorCol: 6, activeSignature: 0, activeParameter: 0, rawSignatures: [signature("replacement(b)", parameter: "b")])
+
+        #expect(state.content?.anchorRow == 5)
+        #expect(state.content?.signatures.map(\.label) == ["replacement(b)"])
+        #expect(state.content?.signatures.first?.parameters.first?.documentation == "docs b")
+
+        state.update(visible: false, anchorRow: 0, anchorCol: 0, activeSignature: 0, activeParameter: 0, rawSignatures: [])
+        #expect(state.content == nil)
+
+        state.update(visible: true, anchorRow: 7, anchorCol: 8, activeSignature: 0, activeParameter: 0, rawSignatures: [signature("fresh(c)", parameter: "c")])
+        #expect(state.content?.signatures.map(\.label) == ["fresh(c)"])
+    }
+}
+
+// MARK: - FloatPopupState
+
+@Suite("FloatPopupState Lifecycle")
+struct FloatPopupStateLifecycleTests {
+    @Test("replace, hide, and show install one complete presentation")
+    @MainActor func replacementLifecycle() {
+        let state = FloatPopupState()
+        state.update(visible: true, width: 40, height: 10, title: "Old", lines: ["old"])
+        state.update(visible: true, width: 60, height: 20, title: "Replacement", lines: ["replacement"])
+
+        #expect(state.content?.title == "Replacement")
+        #expect(state.content?.width == 60)
+        #expect(state.content?.height == 20)
+        #expect(state.content?.lines == ["replacement"])
+
+        state.update(visible: false, width: 0, height: 0, title: "", lines: [])
+        #expect(state.content == nil)
+
+        state.update(visible: true, width: 30, height: 8, title: "Fresh", lines: ["fresh"])
+        #expect(state.content?.title == "Fresh")
+        #expect(state.content?.lines == ["fresh"])
     }
 }
 

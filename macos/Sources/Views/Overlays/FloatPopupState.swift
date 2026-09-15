@@ -7,34 +7,40 @@
 
 import SwiftUI
 
-@MainActor
-@Observable
-public final class FloatPopupState {
-    public init(visible: Bool = false, title: String = "", width: Int = 0, height: Int = 0, lines: [String] = []) {
-        self.visible = visible
+/// Complete presentation value for one visible float popup.
+public struct FloatPopupContent {
+    fileprivate init(title: String, width: Int, height: Int, lines: [String]) {
         self.title = title
         self.width = width
         self.height = height
         self.lines = lines
     }
-    public var visible: Bool = false
-    public var title: String = ""
+
+    public let title: String
     /// Preferred maximum width, in editor-cell units for protocol compatibility.
-    public var width: Int = 0
+    public let width: Int
     /// Preferred maximum height, in editor-cell units for protocol compatibility.
-    public var height: Int = 0
-    public var lines: [String] = []
+    public let height: Int
+    public let lines: [String]
+}
+
+@MainActor
+@Observable
+public final class FloatPopupState {
+    public init() {}
+
+    /// The complete visible presentation, or `nil` when hidden.
+    public private(set) var content: FloatPopupContent?
 
     public func update(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String]) {
-        self.visible = visible
-        self.width = Int(width)
-        self.height = Int(height)
-        self.title = title
-        self.lines = lines
+        guard visible else {
+            hide()
+            return
+        }
+        content = FloatPopupContent(title: title, width: Int(width), height: Int(height), lines: lines)
     }
 
     public func hide() {
-        visible = false
-        lines = []
+        content = nil
     }
 }

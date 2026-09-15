@@ -634,10 +634,9 @@ struct CommandDispatcherRoutingTests {
         dispatcher.applyForTesting(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
                                             selectedIndex: 0, items: items, documentation: "Defines a function."))
 
-        #expect(gui.completionState.visible == true)
-        #expect(gui.completionState.items.count == 1)
-        #expect(gui.completionState.anchorRow == 5)
-        #expect(gui.completionState.documentation == "Defines a function.")
+        #expect(gui.completionState.content?.items.count == 1)
+        #expect(gui.completionState.content?.anchorRow == 5)
+        #expect(gui.completionState.content?.documentation == "Defines a function.")
     }
 
     @Test("guiCompletion hidden clears completionState")
@@ -650,9 +649,34 @@ struct CommandDispatcherRoutingTests {
         dispatcher.applyForTesting(.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0,
                                             selectedIndex: 0, items: [], documentation: ""))
 
-        #expect(gui.completionState.visible == false)
-        #expect(gui.completionState.items.isEmpty)
-        #expect(gui.completionState.documentation.isEmpty)
+        #expect(gui.completionState.content == nil)
+    }
+
+    @Test("completion replacement and hide cannot leak preview or documentation")
+    @MainActor func guiCompletionReplacementLifecycle() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.applyForTesting(.guiCompletion(
+            visible: true, anchorRow: 2, anchorCol: 3, selectedIndex: 0,
+            items: [
+                Wire.CompletionItem(kind: 1, label: "old", detail: ""),
+                Wire.CompletionItem(kind: 1, label: "old second", detail: ""),
+            ],
+            documentation: "old docs"
+        ))
+        #expect(gui.completionState.previewNavigation(delta: 1))
+
+        dispatcher.applyForTesting(.guiCompletion(
+            visible: true, anchorRow: 7, anchorCol: 8, selectedIndex: 0,
+            items: [Wire.CompletionItem(kind: 2, label: "replacement", detail: "")],
+            documentation: "replacement docs"
+        ))
+
+        #expect(gui.completionState.content?.items.map(\.label) == ["replacement"])
+        #expect(gui.completionState.content?.previewSelectedIndex == nil)
+        #expect(gui.completionState.content?.documentation == "replacement docs")
+
+        dispatcher.applyForTesting(.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0, selectedIndex: 0, items: [], documentation: ""))
+        #expect(gui.completionState.content == nil)
     }
 
     @Test("guiWhichKey visible updates whichKeyState")
@@ -1448,9 +1472,132 @@ struct CommandDispatcherRoutingTests {
 
         dispatcher.applyForTesting(.guiHoverPopup(visible: true, anchorRow: 4, anchorCol: 8, focused: true, scrollOffset: 1, lines: lines))
 
-        #expect(gui.hoverPopupState.visible == true)
-        #expect(gui.hoverPopupState.scrollOffset == 1)
-        #expect(gui.hoverPopupState.visibleLines.map { $0.segments.first?.text } == ["two", "three"])
+        #expect(gui.hoverPopupState.content?.scrollOffset == 1)
+        #expect(gui.hoverPopupState.content?.visibleLines.map { $0.segments.first?.text } == ["two", "three"])
+    }
+
+    @Test("guiHoverAction preserves action-first and payload-first delivery")
+    @MainActor func guiHoverActionOrdering() throws {
+        let line = Wire.HoverLine(lineType: .text, segments: [
+            Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "hover"),
+        ])
+
+        let (actionFirstDispatcher, actionFirstGUI) = makeDispatcher()
+        actionFirstDispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        actionFirstDispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        actionFirstDispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Open docs"))
+        actionFirstDispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 1, anchorCol: 2, focused: false, scrollOffset: 0, lines: [line]))
+        actionFirstDispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(actionFirstGUI.hoverPopupState.content?.openActionName == "Open docs")
+
+        let (payloadFirstDispatcher, payloadFirstGUI) = makeDispatcher()
+        payloadFirstDispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        payloadFirstDispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        payloadFirstDispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 3, anchorCol: 4, focused: false, scrollOffset: 0, lines: [line]))
+        payloadFirstDispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Open source"))
+        payloadFirstDispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(payloadFirstGUI.hoverPopupState.content?.openActionName == "Open source")
+
+        payloadFirstDispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        payloadFirstDispatcher.dispatch(.guiHoverAction(visible: false, actionName: ""))
+        payloadFirstDispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(payloadFirstGUI.hoverPopupState.content?.openActionName == nil)
+        #expect(payloadFirstGUI.hoverPopupState.content?.lines.count == 1)
+    }
+
+    @Test("unmatched hover action cannot attach to a later popup lifecycle")
+    @MainActor func unmatchedHoverActionIsDiscarded() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        let line = Wire.HoverLine(lineType: .text, segments: [
+            Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "later hover"),
+        ])
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Stale action"))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(gui.hoverPopupState.content == nil)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 6, anchorCol: 7, focused: false, scrollOffset: 0, lines: [line]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.hoverPopupState.content?.lines.first?.segments.first?.text == "later hover")
+        #expect(gui.hoverPopupState.content?.openActionName == nil)
+    }
+
+    @Test("signature help and float popup route complete visible content")
+    @MainActor func completeOverlayRouting() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        let signature = Wire.Signature(label: "call(value)", documentation: "docs", parameters: [
+            Wire.SignatureParameter(label: "value", documentation: "parameter docs"),
+        ])
+
+        dispatcher.applyForTesting(.guiSignatureHelp(visible: true, anchorRow: 5, anchorCol: 6, activeSignature: 0, activeParameter: 0, signatures: [signature]))
+        dispatcher.applyForTesting(.guiFloatPopup(visible: true, width: 40, height: 12, title: "Help", lines: ["line"]))
+
+        #expect(gui.signatureHelpState.content?.anchorRow == 5)
+        #expect(gui.signatureHelpState.content?.signatures.first?.label == "call(value)")
+        #expect(gui.floatPopupState.content?.title == "Help")
+        #expect(gui.floatPopupState.content?.lines == ["line"])
+
+        dispatcher.applyForTesting(.guiSignatureHelp(visible: false, anchorRow: 0, anchorCol: 0, activeSignature: 0, activeParameter: 0, signatures: []))
+        dispatcher.applyForTesting(.guiFloatPopup(visible: false, width: 0, height: 0, title: "", lines: []))
+        #expect(gui.signatureHelpState.content == nil)
+        #expect(gui.floatPopupState.content == nil)
+    }
+
+    @Test("failed frame preparation preserves last-good overlay content")
+    @MainActor func failedFramePreservesOverlayContent() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiCompletion(
+            visible: true, anchorRow: 2, anchorCol: 3, selectedIndex: 0,
+            items: [Wire.CompletionItem(kind: 1, label: "last good", detail: "")],
+            documentation: "published"
+        ))
+        dispatcher.dispatch(.guiHoverPopup(
+            visible: true, anchorRow: 4, anchorCol: 5, focused: false,
+            scrollOffset: 0,
+            lines: [Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "last good hover"),
+            ])]
+        ))
+        dispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Open last good"))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(gui.completionState.content?.items.first?.label == "last good")
+        #expect(gui.hoverPopupState.content?.openActionName == "Open last good")
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiCompletion(
+            visible: true, anchorRow: 9, anchorCol: 10, selectedIndex: 0,
+            items: [Wire.CompletionItem(kind: 2, label: "rejected", detail: "")],
+            documentation: "must not publish"
+        ))
+        dispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Rejected action"))
+        dispatcher.dispatch(.guiHoverPopup(
+            visible: true, anchorRow: 9, anchorCol: 10, focused: true,
+            scrollOffset: 0,
+            lines: [Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "rejected hover"),
+            ])]
+        ))
+        dispatcher.dispatch(.guiWindowContent(data: try editorContentRequiringFont(fontId: 7)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .missingFontResource(fontId: 7)
+        ))
+        #expect(gui.completionState.content?.items.first?.label == "last good")
+        #expect(gui.completionState.content?.documentation == "published")
+        #expect(gui.completionState.content?.anchorRow == 2)
+        #expect(gui.hoverPopupState.content?.lines.first?.segments.first?.text == "last good hover")
+        #expect(gui.hoverPopupState.content?.openActionName == "Open last good")
     }
 
     // MARK: - Batch lifecycle
@@ -1639,6 +1786,24 @@ fileprivate func editorContent(windowId: UInt16 = 1, geometry: GUIPaneGeometry? 
         rows: [], selection: nil,
         searchMatches: [], diagnosticUnderlines: [],
         documentHighlights: [], paneGeometry: geometry
+    )
+}
+
+fileprivate func editorContentRequiringFont(fontId: UInt8) throws -> GUIWindowContent {
+    let span = GUIHighlightSpan(
+        startCol: 0, endCol: 3, fg: 0xFFFFFF, bg: 0,
+        attrs: 0, fontWeight: 0, fontId: fontId
+    )
+    let row = GUIVisualRow(
+        rowType: .normal, rowId: 1, bufLine: 0,
+        contentHash: 11, text: "old", spans: [span]
+    )
+    return try GUIWindowContent(
+        windowId: 1, fullRefresh: true,
+        cursorRow: 0, cursorCol: 0, cursorShape: .block,
+        rows: [row], selection: nil, searchMatches: [],
+        diagnosticUnderlines: [], documentHighlights: [],
+        paneGeometry: editorGeometry()
     )
 }
 
@@ -2639,7 +2804,7 @@ struct CommandDispatcherStagingTests {
                 gui.windowContents[7]?.rows.first?.text,
                 gui.statusBarState.modeName,
                 dispatcher.committedEditorSnapshot?.windowIds ?? [],
-                gui.completionState.visible
+                gui.completionState.content != nil
             )
         }
 

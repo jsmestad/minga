@@ -86,7 +86,6 @@ struct CompletionOverlayViewTests {
     @Test("Hidden completion renders nothing")
     @MainActor func hiddenCompletion() throws {
         let state = CompletionState()
-        state.visible = false
 
         let sut = CompletionOverlay(
             state: state,
@@ -160,6 +159,66 @@ struct CompletionOverlayViewTests {
         #expect(throws: (any Error).self) {
             _ = try sut.inspect().find(ViewType.Divider.self)
         }
+    }
+}
+
+// MARK: - Semantic Popups
+
+@Suite("Semantic popup view structure")
+struct SemanticPopupViewTests {
+    @Test("Hover popup renders current lines and action")
+    @MainActor func hoverContent() throws {
+        let state = HoverPopupState()
+        state.update(visible: true, anchorRow: 2, anchorCol: 3, focused: true, scrollOffset: 0, rawLines: [
+            Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "Current hover"),
+            ]),
+        ])
+        state.updateOpenAction(visible: true, name: "Open source")
+
+        let strings = try HoverPopupOverlay(state: state, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(strings.contains("Current hover"))
+        #expect(strings.contains("Open"))
+    }
+
+    @Test("Signature help renders current signature and parameter documentation")
+    @MainActor func signatureHelpContent() throws {
+        let state = SignatureHelpState()
+        state.update(visible: true, anchorRow: 2, anchorCol: 3, activeSignature: 0, activeParameter: 0, rawSignatures: [
+            Wire.Signature(label: "call(value)", documentation: "function docs", parameters: [
+                Wire.SignatureParameter(label: "value", documentation: "Current parameter docs"),
+            ]),
+        ])
+
+        let strings = try SignatureHelpOverlay(state: state)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(strings.contains("call(value)"))
+        #expect(strings.contains("Current parameter docs"))
+    }
+
+    @Test("Float popup renders current title and lines")
+    @MainActor func floatPopupContent() throws {
+        let state = FloatPopupState()
+        state.update(visible: true, width: 40, height: 12, title: "Current help", lines: ["first", "second"])
+
+        let strings = try FloatPopupOverlay(state: state, cellWidth: 8, cellHeight: 16)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(strings.contains("Current help"))
+        #expect(strings.contains("first"))
+        #expect(strings.contains("second"))
     }
 }
 

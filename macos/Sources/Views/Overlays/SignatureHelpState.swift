@@ -29,34 +29,41 @@ public struct SignatureInfo: Identifiable {
     public let parameters: [SignatureParameter]
 }
 
-@MainActor
-@Observable
-public final class SignatureHelpState {
-    public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, activeSignature: Int = 0, activeParameter: Int = 0, signatures: [SignatureInfo] = []) {
-        self.visible = visible
+/// Complete presentation value for one visible signature-help popup.
+public struct SignatureHelpContent {
+    fileprivate init(anchorRow: Int, anchorCol: Int, activeSignature: Int, activeParameter: Int, signatures: [SignatureInfo]) {
         self.anchorRow = anchorRow
         self.anchorCol = anchorCol
         self.activeSignature = activeSignature
         self.activeParameter = activeParameter
         self.signatures = signatures
     }
-    public var visible: Bool = false
-    public var anchorRow: Int = 0
-    public var anchorCol: Int = 0
-    public var activeSignature: Int = 0
-    public var activeParameter: Int = 0
-    public var signatures: [SignatureInfo] = []
+
+    public let anchorRow: Int
+    public let anchorCol: Int
+    public let activeSignature: Int
+    public let activeParameter: Int
+    public let signatures: [SignatureInfo]
+}
+
+@MainActor
+@Observable
+public final class SignatureHelpState {
+    public init() {}
+
+    /// The complete visible presentation, or `nil` when hidden.
+    public private(set) var content: SignatureHelpContent?
 
     public func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
                 activeSignature: UInt8, activeParameter: UInt8,
                 rawSignatures: [Wire.Signature]) {
-        self.visible = visible
-        self.anchorRow = Int(anchorRow)
-        self.anchorCol = Int(anchorCol)
-        self.activeSignature = Int(activeSignature)
-        self.activeParameter = Int(activeParameter)
+        guard visible else {
+            hide()
+            return
+        }
+
         var paramId = 0
-        self.signatures = rawSignatures.enumerated().map { i, sig in
+        let signatures = rawSignatures.enumerated().map { i, sig in
             let params = sig.parameters.map { p in
                 let param = SignatureParameter(id: paramId, label: p.label, documentation: p.documentation)
                 paramId += 1
@@ -64,10 +71,14 @@ public final class SignatureHelpState {
             }
             return SignatureInfo(id: i, label: sig.label, documentation: sig.documentation, parameters: params)
         }
+        content = SignatureHelpContent(
+            anchorRow: Int(anchorRow), anchorCol: Int(anchorCol),
+            activeSignature: Int(activeSignature), activeParameter: Int(activeParameter),
+            signatures: signatures
+        )
     }
 
     public func hide() {
-        visible = false
-        signatures = []
+        content = nil
     }
 }

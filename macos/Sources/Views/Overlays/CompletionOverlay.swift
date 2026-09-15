@@ -27,28 +27,28 @@ public struct CompletionOverlay: View {
     private let docPaneMaxHeight: CGFloat = 160
 
     public var body: some View {
-        if state.visible && !state.items.isEmpty {
+        if let content = state.content, !content.items.isEmpty {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: state.items.count > maxVisibleItems) {
+                    ScrollView(.vertical, showsIndicators: content.items.count > maxVisibleItems) {
                         LazyVStack(spacing: 0) {
-                            ForEach(state.items.prefix(maxVisibleItems)) { item in
-                                completionRow(item)
+                            ForEach(content.items.prefix(maxVisibleItems)) { item in
+                                completionRow(item, content: content)
                             }
                         }
                     }
-                    .onChange(of: state.effectiveSelectedIndex) { _, newIndex in
+                    .onChange(of: content.effectiveSelectedIndex) { _, newIndex in
                         withAnimation(nil) {
                             proxy.scrollTo(newIndex, anchor: .center)
                         }
                     }
                 }
-                .frame(maxHeight: CGFloat(min(state.items.count, maxVisibleItems)) * itemHeight + 8)
+                .frame(maxHeight: CGFloat(min(content.items.count, maxVisibleItems)) * itemHeight + 8)
 
                 // Documentation preview for the selected item. Renders only when the
                 // item carries docs, so items without docs show no pane (no layout
                 // shift). Markdown is shown as plain styled text for v1.
-                documentationPane
+                documentationPane(content)
             }
             .frame(width: popupWidth)
             .background(
@@ -65,8 +65,8 @@ public struct CompletionOverlay: View {
     }
 
     @ViewBuilder
-    private var documentationPane: some View {
-        let doc = state.documentation.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func documentationPane(_ content: CompletionContent) -> some View {
+        let doc = content.documentation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !doc.isEmpty {
             Divider()
                 .overlay(theme.popupBorder.opacity(0.4))
@@ -84,8 +84,8 @@ public struct CompletionOverlay: View {
     }
 
     @ViewBuilder
-    private func completionRow(_ item: CompletionItem) -> some View {
-        let isSelected = item.id == state.effectiveSelectedIndex
+    private func completionRow(_ item: CompletionItem, content: CompletionContent) -> some View {
+        let isSelected = item.id == content.effectiveSelectedIndex
 
         HStack(spacing: 6) {
             // Kind indicator
