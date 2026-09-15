@@ -7,7 +7,7 @@ import MingaProtocol
 public struct SidebarItem: Identifiable, Equatable {
     public let id: String
     public let displayName: String
-    public let semanticKind: String
+    public let semanticKind: NativeSidebarKind
     public let icon: String
     public let order: UInt16
     public let visible: Bool
@@ -18,7 +18,7 @@ public struct SidebarItem: Identifiable, Equatable {
     public init(_ wire: Wire.SidebarMetadata) {
         id = wire.id
         displayName = wire.displayName
-        semanticKind = wire.semanticKind
+        semanticKind = NativeSidebarKind(wire.semanticKind)
         icon = wire.icon
         order = wire.order
         visible = wire.visible
@@ -28,16 +28,23 @@ public struct SidebarItem: Identifiable, Equatable {
     }
 }
 
-/// Stores the BEAM-selected sidebar identities and validates semantic kinds against the native registry.
+/// Stores the BEAM-selected sidebar identities and validates semantic kinds against the compiled-in native set.
 @MainActor
 @Observable
 public final class SidebarHostState {
     public init(warnedUnknownKinds: Set<String> = []) {
         self.warnedUnknownKinds = warnedUnknownKinds
+        warningSink = PortLogger.warn
+    }
+
+    init(warnedUnknownKinds: Set<String> = [], warningSink: @escaping (String) -> Void) {
+        self.warnedUnknownKinds = warnedUnknownKinds
+        self.warningSink = warningSink
     }
     public private(set) var sidebars: [SidebarItem] = SidebarHostState.defaultSidebars
     public private(set) var activeId: String = "file_tree"
     @ObservationIgnored private var warnedUnknownKinds: Set<String> = []
+    private let warningSink: (String) -> Void
 
     public var visibleSidebars: [SidebarItem] {
         sidebars.sorted { lhs, rhs in lhs.order < rhs.order }
@@ -71,9 +78,10 @@ public final class SidebarHostState {
     }
 
     private func warnForUnknownVisibleSidebars(_ items: [SidebarItem]) {
-        for item in items where item.visible && NativeSidebarRegistry.adapter(for: item.semanticKind) == nil {
-            if warnedUnknownKinds.insert(item.semanticKind).inserted {
-                PortLogger.warn("Unknown sidebar kind '\(item.semanticKind)' for sidebar '\(item.id)'; using generic fallback")
+        for item in items where item.visible && !item.semanticKind.isSupported {
+            let semanticKind = item.semanticKind.wireValue
+            if warnedUnknownKinds.insert(semanticKind).inserted {
+                warningSink("Unknown sidebar kind '\(semanticKind)' for sidebar '\(item.id)'; using generic fallback")
             }
         }
     }

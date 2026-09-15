@@ -340,7 +340,7 @@ struct CommandDispatcherRoutingTests {
         #expect(displayedTabs.map(\.isPinned) == [true, false])
         #expect(displayedTabs.map(\.isEphemeral) == [false, true])
 
-        #expect(gui.sidebarHostState.activeSidebar?.semanticKind == "file_tree")
+        #expect(gui.sidebarHostState.activeSidebar?.semanticKind == .fileTree)
         #expect(gui.fileTreeState.visible)
         #expect(gui.statusBarState.gitBranch == "feature/publication")
         #expect(gui.gitStatusState.branchName == "feature/publication")

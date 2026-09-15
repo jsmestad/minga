@@ -62,13 +62,15 @@ public struct ActivityBar: View {
     }
 
     private func activityButtonBase(for item: SidebarItem, isActive: Bool) -> some View {
-        let adapter = NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind)
-
         return Button {
-            adapter.sendPrimaryAction(encoder, item, isActive)
+            encoder?.sendSidebarAction(
+                sidebarId: item.id,
+                kind: item.semanticKind.wireValue,
+                action: isActive ? "toggle" : "activate"
+            )
         } label: {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: item.icon.isEmpty ? adapter.fallbackIcon : item.icon)
+                Image(systemName: item.icon.isEmpty ? item.semanticKind.fallbackIcon : item.icon)
                     .font(.system(size: 15, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? theme.accent : theme.treeFg.opacity(0.45))
                     .frame(width: buttonSize, height: buttonSize)
@@ -106,19 +108,14 @@ public struct ActivityBar: View {
     }
 
     private func badgeText(for item: SidebarItem) -> String? {
-        let context = NativeSidebarContext(
-            input: input,
-            theme: theme,
-            encoder: encoder,
-            projectName: "",
-            gitBranch: "",
-            leadingPadding: 0
+        item.semanticKind.badgeText(
+            metadataCount: item.badgeCount,
+            gitStatusCount: input.gitStatusState.totalCount
         )
-        return NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind).badgeText(context, item)
     }
 
     private func accessibilityValue(for item: SidebarItem) -> String? {
-        guard item.semanticKind == "git_status", let count = item.badgeCount, count > 0 else { return nil }
+        guard item.semanticKind == .gitStatus, let count = item.badgeCount, count > 0 else { return nil }
         let countText = count > 99 ? "99+" : String(count)
         return count == 1 ? "1 changed file" : "\(countText) changed files"
     }
