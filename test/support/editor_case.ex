@@ -165,6 +165,14 @@ defmodule Minga.Test.EditorCase do
         else: editor_opts
 
     editor_opts =
+      if Keyword.has_key?(opts, :file_tree_new_file_backend),
+        do: [
+          {:file_tree_new_file_backend, Keyword.get(opts, :file_tree_new_file_backend)}
+          | editor_opts
+        ],
+        else: editor_opts
+
+    editor_opts =
       if Keyword.has_key?(opts, :agent_provider_module),
         do: [{:agent_provider_module, Keyword.get(opts, :agent_provider_module)} | editor_opts],
         else: editor_opts
@@ -249,6 +257,14 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if Keyword.has_key?(opts, :options_server),
         do: [{:options_server, Keyword.get(opts, :options_server)} | editor_opts],
+        else: editor_opts
+
+    editor_opts =
+      if Keyword.has_key?(opts, :file_tree_new_file_backend),
+        do: [
+          {:file_tree_new_file_backend, Keyword.get(opts, :file_tree_new_file_backend)}
+          | editor_opts
+        ],
         else: editor_opts
 
     project_root = Keyword.get(opts, :project_root)
