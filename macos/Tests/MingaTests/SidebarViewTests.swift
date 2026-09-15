@@ -121,7 +121,7 @@ struct SidebarContainerViewTests {
     @MainActor func supportedKindsComposeConcreteViews() throws {
         let guiState = GUIState()
         guiState.fileTreeState.projectRoot = "/tmp/minga"
-        guiState.gitStatusState.branchName = "main"
+        publishGitStatus(guiState.gitStatusState, branchName: "main")
 
         let fileTree = sidebarItem(id: "file_tree", displayName: "File Tree", kind: "file_tree")
         let gitStatus = sidebarItem(id: "git_status", displayName: "Git Status", kind: "git_status")

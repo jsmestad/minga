@@ -386,6 +386,70 @@ struct NativeRenderPerformanceGateTests {
         ).contains { $0.contains("unequal counts") })
     }
 
+    @Test("absolute comparison uses duration medians")
+    func absoluteComparisonUsesDurationMedians() {
+        let passing = measurement()
+        let timingOutlier = measurement(drawP95: 20, gpuP95: 20, completionWallP95: 20)
+
+        #expect(NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, passing, timingOutlier]
+        ).isEmpty)
+        #expect(NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, timingOutlier, timingOutlier]
+        ).contains { $0.contains("draw_cpu p95") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, timingOutlier, timingOutlier]
+        ).contains { $0.contains("gpu_active_time p95") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, timingOutlier, timingOutlier]
+        ).contains { $0.contains("handoff_to_copy_completion p95") })
+    }
+
+    @Test("absolute comparison keeps resource failures fail-closed")
+    func absoluteComparisonKeepsResourceFailuresFailClosed() {
+        let passing = measurement()
+        let resourceFailure = measurement(allocatedBytes: 1, allocations: 1, dropped: 1, generations: 4)
+        let failures = NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, passing, resourceFailure]
+        )
+
+        #expect(failures.contains { $0.contains("allocated up to 1 bytes") })
+        #expect(failures.contains { $0.contains("1 native allocations") })
+        #expect(failures.contains { $0.contains("failed or discarded 1 frames") })
+        #expect(failures.contains { $0.contains("retained 4 generations") })
+    }
+
+    @Test("absolute comparison rejects invalid samples and sample counts")
+    func absoluteComparisonRejectsInvalidInput() {
+        let passing = measurement()
+        let invalid = measurement(attempted: 999)
+
+        #expect(NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, passing]
+        ).contains { $0.contains("odd count") })
+        #expect(NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, passing, invalid]
+        ).contains { $0.contains("invalid native measurement") })
+    }
+
+    @Test("absolute comparison keeps transcript accounting fail-closed")
+    func absoluteComparisonKeepsTranscriptAccountingFailClosed() {
+        let passing = measurement()
+        let fixture = NativeTranscriptAccountingMeasurement(
+            fixture: "short-100", messageCount: 100, ownedUTF8Bytes: 20_000,
+            stageCPUP50Ms: 0.1, stageCPUP95Ms: 0.2, stageCPUP99Ms: 0.3,
+            changedEntriesMeasured: 1, unchangedEntriesVisited: 0, retainedEntriesCopied: 0,
+            retainedUTF8BytesCopied: 0, sequenceNodeAllocations: 0,
+            measuredFrameCount: 120, compilerFlags: ["-O"], revision: "test"
+        )
+        let accountingFailure = measurement(transcriptAccounting: [fixture])
+        let failures = NativeRenderPerformanceGate.absoluteFailures(
+            measurements: [passing, passing, accountingFailure]
+        )
+
+        #expect(failures.contains { $0.contains("short-100 measured changed transcript entries") })
+    }
+
     private func measurement(
         freezeP95: Double = 1.0,
         drawP95: Double = 2.5,
@@ -397,7 +461,8 @@ struct NativeRenderPerformanceGateTests {
         allocations: Int = 0,
         dropped: Int = 0,
         generations: Int = 3,
-        attempted: Int? = nil
+        attempted: Int? = nil,
+        transcriptAccounting: [NativeTranscriptAccountingMeasurement]? = nil
     ) -> NativeRenderPerformanceMeasurement {
         NativeRenderPerformanceMeasurement(
             freezePublicationP50Ms: 0.5,
@@ -414,7 +479,8 @@ struct NativeRenderPerformanceGateTests {
             attemptedFrameCount: attempted ?? 1_000 + dropped,
             copyCompletedFrameCount: 1_000,
             failedOrDiscardedFrameCount: dropped,
-            maximumInFlightGenerations: generations
+            maximumInFlightGenerations: generations,
+            transcriptAccounting: transcriptAccounting
         )
     }
 }

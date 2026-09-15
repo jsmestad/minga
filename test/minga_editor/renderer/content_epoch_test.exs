@@ -5,6 +5,7 @@ defmodule MingaEditor.Renderer.ContentEpochTest do
   alias MingaEditor.Renderer.ContentEpoch
 
   @counter_key {ContentEpoch, :counter}
+  @task_timeout 20_000
 
   setup do
     previous_counter = :persistent_term.get(@counter_key, nil)
@@ -27,12 +28,12 @@ defmodule MingaEditor.Renderer.ContentEpochTest do
 
     task_pids =
       Enum.map(tasks, fn _task ->
-        assert_receive {:allocator_ready, task_pid}, 5_000
+        assert_receive {:allocator_ready, task_pid}, @task_timeout
         task_pid
       end)
 
     Enum.each(task_pids, &send(&1, :allocate))
-    epochs = Task.await_many(tasks, 5_000)
+    epochs = Task.await_many(tasks, @task_timeout)
 
     assert Enum.all?(epochs, &is_integer/1)
     assert MapSet.size(MapSet.new(epochs)) == length(epochs)

@@ -348,7 +348,8 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
 
   @spec fixture_command(String.t(), String.t(), [String.t()]) :: String.t()
   defp fixture_command(order, "barrier-success" = outcome, fixture_args) do
-    System.find_executable("elixir") <>
+    "/usr/bin/env ERL_FLAGS='+S 1:1 +SDio 1 +SDcpu 1' " <>
+      System.find_executable("elixir") <>
       " " <>
       Enum.map_join([@elixir_fixture, order, outcome | fixture_args], " ", &shell_escape/1)
   end

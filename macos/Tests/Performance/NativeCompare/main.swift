@@ -1,7 +1,8 @@
 import Foundation
 
 private func usage() -> Never {
-    FileHandle.standardError.write(Data("usage: native-render-compare --base BASE.json... --head HEAD.json...\n".utf8))
+    let message = "usage: native-render-compare [--base BASE.json...] --head HEAD.json...\n"
+    FileHandle.standardError.write(Data(message.utf8))
     exit(2)
 }
 
@@ -27,10 +28,12 @@ private func decode(_ urls: [URL]) throws -> [NativeRenderPerformanceMeasurement
 
 let baseMeasurements = try decode(baseURLs)
 let headMeasurements = try decode(headURLs)
-let failures = NativeRenderPerformanceGate.pairedFailures(
-    baseMeasurements: baseMeasurements,
-    headMeasurements: headMeasurements
-)
+let failures = baseMeasurements.isEmpty
+    ? NativeRenderPerformanceGate.absoluteFailures(measurements: headMeasurements)
+    : NativeRenderPerformanceGate.pairedFailures(
+        baseMeasurements: baseMeasurements,
+        headMeasurements: headMeasurements
+    )
 let pairedRatios = zip(baseMeasurements, headMeasurements).map { base, head in
     head.completionWallP50Ms / base.completionWallP50Ms
 }.sorted()

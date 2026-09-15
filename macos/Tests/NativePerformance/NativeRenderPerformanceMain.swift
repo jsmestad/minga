@@ -573,26 +573,9 @@ private struct NativeRenderPerformanceMain {
         print("fixture=native-resident-cursor-local-scroll-v1 path=\(rendererPath) device=\(renderer.device.name) os=\(ProcessInfo.processInfo.operatingSystemVersionString) rows=\(residentRowCount) viewport=\(viewportCols)x\(viewportRows) warmup=\(warmupFrameCount) measured=\(measuredFrameCount)")
 
         let failures = NativeRenderPerformanceGate.absoluteFailures(measurement)
-        var transcriptFailures: [String] = []
-        #if MINGA_TRANSCRIPT_ACCOUNTING
-        for fixture in transcriptAccounting {
-            if fixture.changedEntriesMeasured != 0 {
-                transcriptFailures.append("\(fixture.fixture) measured changed transcript entries in unrelated frames")
-            }
-            if fixture.unchangedEntriesVisited != 0 {
-                transcriptFailures.append("\(fixture.fixture) visited unchanged transcript entries")
-            }
-            if fixture.retainedEntriesCopied != 0 || fixture.retainedUTF8BytesCopied != 0 {
-                transcriptFailures.append("\(fixture.fixture) copied retained transcript payload")
-            }
-            if fixture.sequenceNodeAllocations != 0 {
-                transcriptFailures.append("\(fixture.fixture) allocated transcript sequence nodes")
-            }
-        }
-        #endif
-        for failure in failures + transcriptFailures {
+        for failure in failures {
             FileHandle.standardError.write(Data("error: \(failure)\n".utf8))
         }
-        if !(failures + transcriptFailures).isEmpty { exit(1) }
+        if !failures.isEmpty { exit(1) }
     }
 }
