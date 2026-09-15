@@ -33,24 +33,18 @@ public enum SidebarSizing {
 }
 
 public struct SidebarContainer: View {
-    public init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, sidebarWidth: Binding<CGFloat>) {
+    public init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, sidebarWidth: Binding<CGFloat>) {
         self.input = input
         self.activeSidebar = activeSidebar
         self.encoder = encoder
-        self.projectName = projectName
-        self.gitBranch = gitBranch
-        self.leadingPadding = leadingPadding
         self._sidebarWidth = sidebarWidth
         frameProbe = nil
     }
 
-    init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, sidebarWidth: Binding<CGFloat>, frameProbe: ContentViewFrameProbe?) {
+    init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, sidebarWidth: Binding<CGFloat>, frameProbe: ContentViewFrameProbe?) {
         self.input = input
         self.activeSidebar = activeSidebar
         self.encoder = encoder
-        self.projectName = projectName
-        self.gitBranch = gitBranch
-        self.leadingPadding = leadingPadding
         self._sidebarWidth = sidebarWidth
         self.frameProbe = frameProbe
     }
@@ -60,9 +54,6 @@ public struct SidebarContainer: View {
     @Environment(\.themeColors) private var theme
 
     public let encoder: InputEncoder?
-    public let projectName: String
-    public let gitBranch: String
-    public let leadingPadding: CGFloat
     @Binding public var sidebarWidth: CGFloat
     let frameProbe: ContentViewFrameProbe?
 
@@ -72,27 +63,18 @@ public struct SidebarContainer: View {
     public var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                NativeSidebarRegistry
-                    .adapterOrFallback(for: activeSidebar.semanticKind)
-                    .makeBody(context, activeSidebar)
+                NativeSidebarBody(
+                    input: input,
+                    item: activeSidebar,
+                    encoder: encoder,
+                    frameProbe: frameProbe
+                )
             }
             .frame(width: sidebarWidth)
             .background(theme.treeBg)
 
             resizeHandle
         }
-    }
-
-    private var context: NativeSidebarContext {
-        NativeSidebarContext(
-            input: input,
-            theme: theme,
-            encoder: encoder,
-            projectName: projectName,
-            gitBranch: gitBranch,
-            leadingPadding: leadingPadding,
-            frameProbe: frameProbe
-        )
     }
 
     // MARK: - Resize handle

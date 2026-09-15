@@ -5,7 +5,7 @@
 /// shared resize handle) didn't break text rendering or button counts.
 /// Cosmetic details (opacity, padding, colors) are left to visual QA.
 
-import MingaUI
+@testable import MingaUI
 import Testing
 import SwiftUI
 import AppKit
@@ -104,6 +104,35 @@ struct ActivityBarViewTests {
 
 @Suite("SidebarContainer View Structure")
 struct SidebarContainerViewTests {
+    @Test("Each supported kind composes its concrete header and body")
+    @MainActor func supportedKindsComposeConcreteViews() throws {
+        let guiState = GUIState()
+        guiState.fileTreeState.projectRoot = "/tmp/minga"
+        guiState.gitStatusState.branchName = "main"
+
+        let fileTree = sidebarItem(id: "file_tree", displayName: "File Tree", kind: "file_tree")
+        let gitStatus = sidebarItem(id: "git_status", displayName: "Git Status", kind: "git_status")
+        let observatory = sidebarItem(id: "observatory", displayName: "BEAM Observatory", kind: "observatory")
+
+        let fileTreeHeader = NativeSidebarHeader(input: guiState.shellInput, item: fileTree, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
+        let gitStatusHeader = NativeSidebarHeader(input: guiState.shellInput, item: gitStatus, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
+        let observatoryHeader = NativeSidebarHeader(input: guiState.shellInput, item: observatory, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
+
+        #expect(try fileTreeHeader.inspect().findAll(FileTreeHeaderView.self).count == 1)
+        #expect(try gitStatusHeader.inspect().findAll(GitStatusHeaderView.self).count == 1)
+        let observatoryHeaderText = try observatoryHeader.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(observatoryHeaderText.contains("BEAM Observatory"))
+        #expect(observatoryHeaderText.contains("0 processes"))
+
+        let fileTreeBody = NativeSidebarBody(input: guiState.shellInput, item: fileTree, encoder: nil, frameProbe: nil)
+        let gitStatusBody = NativeSidebarBody(input: guiState.shellInput, item: gitStatus, encoder: nil, frameProbe: nil)
+        let observatoryBody = NativeSidebarBody(input: guiState.shellInput, item: observatory, encoder: nil, frameProbe: nil)
+
+        #expect(try fileTreeBody.inspect().findAll(FileTreeView.self).count == 1)
+        #expect(try gitStatusBody.inspect().findAll(GitStatusView.self).count == 1)
+        #expect(try observatoryBody.inspect().findAll(ObservatoryView.self).count == 1)
+    }
+
     @Test("Observatory preferred width expands initial and maximum sidebar width")
     @MainActor func observatoryPreferredWidthExpandsSidebarWidth() {
         let item = SidebarItem(Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: true, focused: true, preferredWidth: 52, badgeCount: nil))
@@ -128,12 +157,45 @@ struct SidebarContainerViewTests {
         let item = Wire.SidebarMetadata(id: "custom", displayName: "Custom Tools", semanticKind: "custom_sidebar", icon: "sparkles", order: 40, visible: true, focused: true, preferredWidth: 30, badgeCount: nil)
         guiState.sidebarHostState.update(activeId: "custom", sidebars: [item])
         let active = try #require(guiState.sidebarHostState.activeSidebar)
-        let sut = SidebarContainer(input: guiState.shellInput, activeSidebar: active, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10, sidebarWidth: .constant(240))
+        let sut = SidebarContainer(input: guiState.shellInput, activeSidebar: active, encoder: nil, sidebarWidth: .constant(240))
             .environment(\.themeColors, ThemeColors())
         let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("Unsupported sidebar"))
         #expect(strings.contains("The native frontend does not have an adapter for \"custom_sidebar\"."))
+    }
+
+    @Test("Switching to an unknown kind replaces the previous supported composition")
+    @MainActor func unknownSidebarReplacesSupportedBody() throws {
+        let guiState = GUIState()
+        let fileTree = sidebarItem(id: "file_tree", displayName: "File Tree", kind: "file_tree")
+        let custom = sidebarItem(id: "custom", displayName: "Custom Tools", kind: "custom_sidebar")
+
+        let supported = NativeSidebarBody(input: guiState.shellInput, item: fileTree, encoder: nil, frameProbe: nil)
+        #expect(try supported.inspect().findAll(FileTreeView.self).count == 1)
+
+        let fallback = NativeSidebarBody(input: guiState.shellInput, item: custom, encoder: nil, frameProbe: nil)
+            .environment(\.themeColors, ThemeColors())
+        let fallbackBody = try fallback.inspect()
+        let strings = fallbackBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(fallbackBody.findAll(FileTreeView.self).isEmpty)
+        #expect(strings.contains("Unsupported sidebar"))
+        #expect(strings.contains("The native frontend does not have an adapter for \"custom_sidebar\"."))
+    }
+
+    private func sidebarItem(id: String, displayName: String, kind: String) -> SidebarItem {
+        SidebarItem(Wire.SidebarMetadata(
+            id: id,
+            displayName: displayName,
+            semanticKind: kind,
+            icon: "",
+            order: 10,
+            visible: true,
+            focused: true,
+            preferredWidth: 30,
+            badgeCount: nil
+        ))
     }
 }
 

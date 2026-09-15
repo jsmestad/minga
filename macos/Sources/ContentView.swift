@@ -721,21 +721,15 @@ public struct ContentView<EditorSurface: View>: View {
     @ViewBuilder
     private func sidebarHeaderContent(_ input: ShellHostInput) -> some View {
         if let activeSidebar = input.sidebarHostState.activeSidebar {
-            NativeSidebarRegistry
-                .adapterOrFallback(for: activeSidebar.semanticKind)
-                .makeHeader(sidebarContext(input), activeSidebar)
+            NativeSidebarHeader(
+                input: input,
+                item: activeSidebar,
+                encoder: encoder,
+                projectName: projectName(input),
+                gitBranch: input.statusBarState.gitBranch,
+                leadingPadding: sidebarHeaderLeadingPadding
+            )
         }
-    }
-
-    private func sidebarContext(_ input: ShellHostInput) -> NativeSidebarContext {
-        NativeSidebarContext(
-            input: input,
-            theme: input.currentTheme,
-            encoder: encoder,
-            projectName: projectName(input),
-            gitBranch: input.statusBarState.gitBranch,
-            leadingPadding: sidebarHeaderLeadingPadding
-        )
     }
 
     private func compactProjectBranchHeader(_ input: ShellHostInput) -> some View {
@@ -784,9 +778,6 @@ public struct ContentView<EditorSurface: View>: View {
                     input: input,
                     activeSidebar: activeSidebar,
                     encoder: encoder,
-                    projectName: projectName(input),
-                    gitBranch: input.statusBarState.gitBranch,
-                    leadingPadding: titleBarLeadingPadding,
                     sidebarWidth: $sidebarWidth,
                     frameProbe: frameProbe
                 )
