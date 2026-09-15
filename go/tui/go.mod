@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/epilande/go-devicons v0.0.0-20250505162540-0661cab71a28
 	github.com/rivo/uniseg v0.4.7
+	golang.org/x/sys v0.45.0
 )
 
 require (
@@ -27,5 +28,4 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
 )
