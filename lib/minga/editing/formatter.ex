@@ -35,6 +35,8 @@ defmodule Minga.Editing.Formatter do
 
   @typep cleanup_owner :: {pid(), reference()}
 
+  @line_separator ~r/(\r\n|\n)/
+
   @doc "Returns the default formatter map (filetype atom to command string)."
   @spec default_formatters() :: %{atom() => formatter_spec()}
   def default_formatters do
@@ -148,7 +150,10 @@ defmodule Minga.Editing.Formatter do
   Applies whitespace transforms with explicit boolean flags.
 
   Used by buffer-local option callers that have already resolved the
-  option values from `Buffer.get_option/2`.
+  option values from `Buffer.get_option/2`. Trimming preserves every
+  existing LF or CRLF separator. A missing final newline uses the last
+  complete separator in the content, including for mixed-ending files,
+  and defaults to LF when the non-empty content has no separator.
   """
   @spec apply_save_transforms(String.t(), boolean(), boolean()) :: String.t()
   def apply_save_transforms(content, trim_trailing, insert_final_newline) do
@@ -161,19 +166,51 @@ defmodule Minga.Editing.Formatter do
 
   @spec maybe_trim_trailing_whitespace(String.t(), boolean()) :: String.t()
   defp maybe_trim_trailing_whitespace(content, true) do
-    content
-    |> String.split("\n")
-    |> Enum.map_join("\n", &String.trim_trailing/1)
+    @line_separator
+    |> Regex.split(content, include_captures: true, trim: false)
+    |> trim_line_parts()
+    |> IO.iodata_to_binary()
   end
 
   defp maybe_trim_trailing_whitespace(content, _), do: content
 
   @spec maybe_insert_final_newline(String.t(), boolean()) :: String.t()
-  defp maybe_insert_final_newline(content, true) do
-    if String.ends_with?(content, "\n"), do: content, else: content <> "\n"
-  end
+  defp maybe_insert_final_newline("", true), do: ""
+
+  defp maybe_insert_final_newline(content, true),
+    do: maybe_append_final_newline(content, String.ends_with?(content, "\n"))
 
   defp maybe_insert_final_newline(content, _), do: content
+
+  @spec trim_line_parts([String.t()]) :: iodata()
+  defp trim_line_parts([line, separator | rest]),
+    do: [String.trim_trailing(line), separator | trim_line_parts(rest)]
+
+  defp trim_line_parts([line]), do: [String.trim_trailing(line)]
+  defp trim_line_parts([]), do: []
+
+  @spec maybe_append_final_newline(String.t(), boolean()) :: String.t()
+  defp maybe_append_final_newline(content, true), do: content
+  defp maybe_append_final_newline(content, false), do: content <> last_line_separator(content)
+
+  @spec last_line_separator(String.t()) :: String.t()
+  defp last_line_separator(content) do
+    content
+    |> :binary.matches("\n")
+    |> List.last()
+    |> separator_at(content)
+  end
+
+  @spec separator_at({non_neg_integer(), 1} | nil, String.t()) :: String.t()
+  defp separator_at(nil, _content), do: "\n"
+  defp separator_at({0, 1}, _content), do: "\n"
+
+  defp separator_at({index, 1}, content) do
+    case :binary.at(content, index - 1) do
+      ?\r -> "\r\n"
+      _other -> "\n"
+    end
+  end
 
   @spec temp_path() :: String.t()
   defp temp_path do
