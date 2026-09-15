@@ -12,6 +12,7 @@ defmodule MingaAgent.RemoteAPI do
   alias MingaAgent.RemoteAPI.AttachResult
   alias MingaAgent.RemoteAPI.SessionInfo
   alias MingaAgent.Session
+  alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
 
@@ -49,7 +50,7 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
-  @doc "Lists live sessions through the broker."
+  @doc "Lists live registrations with session metadata or a safe unavailable reason."
   @spec list_sessions() :: [session_info()]
   def list_sessions do
     SessionManager.list_sessions()
@@ -281,10 +282,10 @@ defmodule MingaAgent.RemoteAPI do
   @spec normalize_workdir(String.t()) :: String.t()
   defp normalize_workdir(workdir) when is_binary(workdir), do: Path.expand(workdir)
 
-  @spec session_info_if_live({String.t(), pid(), term()}) :: [session_info()]
-  defp session_info_if_live({session_id, pid, _metadata}) do
+  @spec session_info_if_live(SessionListing.t()) :: [session_info()]
+  defp session_info_if_live(%SessionListing{id: session_id} = listing) do
     case SessionManager.session_token(session_id) do
-      {:ok, token} -> [session_info(session_id, pid, token)]
+      {:ok, token} -> [SessionInfo.from_listing(listing, token)]
       {:error, _reason} -> []
     end
   catch
@@ -294,7 +295,7 @@ defmodule MingaAgent.RemoteAPI do
   @spec refresh_all_session_credentials() :: :ok
   defp refresh_all_session_credentials do
     SessionManager.list_sessions()
-    |> Enum.each(fn {_session_id, pid, _metadata} -> Session.refresh_credentials(pid) end)
+    |> Enum.each(fn %SessionListing{pid: pid} -> Session.refresh_credentials(pid) end)
   end
 
   @spec session_info(String.t(), pid(), String.t()) :: session_info()

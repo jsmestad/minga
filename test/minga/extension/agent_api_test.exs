@@ -62,6 +62,29 @@ defmodule Minga.Extension.AgentAPITest do
       assert is_nil(summary.active_tool) or is_binary(summary.active_tool)
       assert %DateTime{} = summary.created_at
     end
+
+    test "returns an unavailable summary without querying fabricated detail fields" do
+      dead_pid = spawn(fn -> :ok end)
+      dead_ref = Process.monitor(dead_pid)
+      assert_receive {:DOWN, ^dead_ref, :process, ^dead_pid, _reason}
+
+      manager =
+        start_supervised!({Minga.Test.SessionListingManager, [{"registered-session", dead_pid}]})
+
+      assert [summary] = AgentAPI.list_sessions(session_manager: manager)
+
+      assert summary == %{
+               id: "registered-session",
+               pid: dead_pid,
+               availability: :unavailable,
+               reason: :unreachable
+             }
+
+      refute Map.has_key?(summary, :status)
+      refute Map.has_key?(summary, :model)
+      refute Map.has_key?(summary, :created_at)
+      refute Map.has_key?(summary, :active_tool)
+    end
   end
 
   describe "session_info/2" do

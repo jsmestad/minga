@@ -468,8 +468,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   defp discover_remote_sessions(remote_node, server_name) do
     case SessionClient.list_sessions(remote_node) do
       {:ok, sessions} ->
-        Enum.map(sessions, fn %{session_id: session_id, pid: pid, metadata: metadata} ->
-          {session_id, pid, metadata}
+        Enum.map(sessions, fn %{session_id: session_id, pid: pid, details: details} ->
+          {session_id, pid, details}
         end)
 
       {:error, reason} ->
