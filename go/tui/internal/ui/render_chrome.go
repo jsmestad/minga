@@ -235,9 +235,6 @@ func (m Model) footerLines() []string {
 			status = message
 		}
 	}
-	if m.lastError != "" {
-		status = m.lastError
-	}
 	if search, ok := m.searchState(); ok && search.Active {
 		status += fmt.Sprintf("  search %d/%d", search.CurrentIndex, search.Count)
 	}

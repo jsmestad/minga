@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -32,24 +34,84 @@ func run() error {
 		return err
 	}
 
+	done := make(chan struct{})
 	out := make(chan []byte, 128)
-	go writePackets(os.Stdout, out)
 
 	filter := ui.NewInputFilter()
-	model := ui.New(width, height, out, filter)
-	program := tea.NewProgram(model, tea.WithInput(tty), tea.WithOutput(tty), tea.WithFilter(filter.Filter))
-	port.StartReader(program, os.Stdin)
-
-	_, err = program.Run()
-	close(out)
-	return err
+	model := ui.NewWithTransport(width, height, out, done, filter)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(tty), tea.WithFilter(filter.Filter))
+	return runSession(program, os.Stdin, os.Stdout, out, done, stop)
 }
 
-func writePackets(writer io.Writer, packets <-chan []byte) {
+type programResult struct {
+	err error
+}
+
+type workerResult struct {
+	name string
+	err  error
+}
+
+func runSession(program *tea.Program, reader io.ReadCloser, writer io.Writer, out chan []byte, done chan struct{}, stop func()) error {
+	ended := make(chan workerResult, 3)
+	programDone := make(chan programResult, 1)
+	go func() {
+		_, err := program.Run()
+		programDone <- programResult{err: err}
+		ended <- workerResult{name: "ui", err: err}
+	}()
+
+	readerDone := port.StartReader(program, reader)
+	readerJoined := make(chan error, 1)
+	go func() {
+		err := <-readerDone
+		readerJoined <- err
+		ended <- workerResult{name: "input", err: err}
+	}()
+	writerDone := make(chan error, 1)
+	go func() {
+		err := writePackets(writer, out)
+		writerDone <- err
+		close(writerDone)
+		ended <- workerResult{name: "output", err: err}
+	}()
+
+	first := <-ended
+	close(done)
+
+	if first.name != "ui" {
+		stop()
+		<-programDone
+	}
+
+	close(out)
+	_ = reader.Close()
+	if closer, ok := writer.(io.Closer); ok {
+		_ = closer.Close()
+	}
+	if first.name != "input" {
+		<-readerJoined
+	}
+	if first.name != "output" {
+		<-writerDone
+	}
+
+	if first.err == nil {
+		return nil
+	}
+	if first.name == "ui" {
+		return first.err
+	}
+	return fmt.Errorf("%s transport failed: %w", first.name, first.err)
+}
+
+func writePackets(writer io.Writer, packets <-chan []byte) error {
 	for packet := range packets {
 		if err := protocol.WritePacket(writer, packet); err != nil {
-			log.Printf("[GO_TUI/warn] failed to write port packet: %v", err)
-			return
+			return err
 		}
 	}
+	return nil
 }
