@@ -1073,6 +1073,7 @@ struct GUIFrameSwiftUIInvalidationTests {
         #expect(firstResponderOwners == [
             "Views/Editor/EditorFocusPolicy.swift",
             "Views/Editor/InlineEditField.swift",
+            "Views/EditorChrome/SearchQueryField.swift",
             "Views/Overlays/PickerQueryField.swift",
         ])
         #expect(!FileManager.default.fileExists(atPath: macosRoot.appendingPathComponent("Sources/Views/Shared/MingaWindow.swift").path))

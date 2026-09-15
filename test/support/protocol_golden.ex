@@ -721,6 +721,9 @@ defmodule Minga.Test.ProtocolGolden do
       active: true,
       match_count: 12,
       current_index: 3,
+      query: "café λ",
+      session_id: 7,
+      acknowledged_edit_seq: 4,
       case_sensitive: true,
       whole_word: false,
       regex: true
@@ -747,8 +750,19 @@ defmodule Minga.Test.ProtocolGolden do
   # test still proves the Go decoder agrees with these bytes.
   @spec search_state_expected(SearchState.t()) :: map()
   defp search_state_expected(model) do
-    <<active::8, match_count::16, current_index::16, flags::8>> = search_state_payload(model)
-    %{active: active, match_count: match_count, current_index: current_index, flags: flags}
+    <<active::8, match_count::16, current_index::16, flags::8, query_len::16,
+      query::binary-size(query_len), session_id::32, acknowledged_edit_seq::32>> =
+      search_state_payload(model)
+
+    %{
+      active: active,
+      match_count: match_count,
+      current_index: current_index,
+      flags: flags,
+      query: query,
+      session_id: session_id,
+      acknowledged_edit_seq: acknowledged_edit_seq
+    }
   end
 
   # ── Fixtures: gui_surface_layout placements (GuiSurfaceLayoutPlacements) ───

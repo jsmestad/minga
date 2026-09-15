@@ -1240,6 +1240,13 @@ value = 0x60
 name = "picker_action_activate"
 value = 0x61
 
+# Opens or focuses the native search toolbar without synthesizing a query edit.
+# Every focus starts a fresh search session while preserving the authoritative
+# query and options. Payload: replace_mode(u8 bool).
+[[gui_actions]]
+name = "search_focus"
+value = 0x62
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -2296,6 +2303,9 @@ fields = [
   { name = "match_count", type = "u16" },
   { name = "current_index", type = "u16" },
   { name = "flags", type = "u8" },
+  { name = "query", type = "string16" },
+  { name = "session_id", type = "u32" },
+  { name = "acknowledged_edit_seq", type = "u32" },
 ]
 
 [[command_fields]]

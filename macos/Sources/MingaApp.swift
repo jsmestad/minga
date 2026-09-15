@@ -111,11 +111,11 @@ struct MingaMenuCommands: Commands {
 
             Divider()
 
-            Button("Find…") { encoder?.sendSearchQuery(query: "", flags: 0) }
+            Button("Find…") { encoder?.sendSearchFocus(replaceMode: false) }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(!connected)
 
-            Button("Find and Replace…") { encoder?.sendSearchQuery(query: "", flags: 0x01) }
+            Button("Find and Replace…") { encoder?.sendSearchFocus(replaceMode: true) }
                 .keyboardShortcut("h", modifiers: .command)
                 .disabled(!connected)
         }

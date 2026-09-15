@@ -116,7 +116,7 @@ enum RenderCommand: Sendable {
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
     case guiExtensionPanel([Wire.ExtensionPanelEntry])
     case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
-    case guiSearchState(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8)
+    case guiSearchState(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8, query: String, sessionID: UInt32, acknowledgedEditSeq: UInt32)
     case guiSidebars(version: UInt8, activeId: String, sidebars: [Wire.SidebarMetadata])
     /// gui_empty_state (0xA5): the launchpad shown when zero buffers are open.
     /// `visible` false means the launchpad is hidden (payload is a single byte);
@@ -2855,18 +2855,24 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiExtensionRuntime(FrontendExtensionRuntimeMessage(extensionID: extensionID, channel: channel, payload: Data(payload))), 1 + 4 + payloadLen)
 
     case OP_GUI_SEARCH_STATE:
-        // Forward-compatible format: opcode(1) + payload_len(2) + active(1) + match_count(2) + current_index(2) + flags(1)
+        // Forward-compatible format: opcode(1) + payload_len(2) + active(1) + match_count(2) + current_index(2) + flags(1) + query(string16) + session_id(4) + acknowledged_edit_seq(4)
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let ssPayloadLen = Int(try readU16(data, rest))
-        guard data.count >= rest + 2 + ssPayloadLen, ssPayloadLen >= 6 else {
+        guard data.count >= rest + 2 + ssPayloadLen, ssPayloadLen >= 16 else {
             throw ProtocolDecodeError.malformed
         }
         let ssStart = rest + 2
+        let ssEnd = ssStart + ssPayloadLen
         let ssActive = data[ssStart] != 0
         let ssMatchCount = try readU16(data, ssStart + 1)
         let ssCurrentIndex = try readU16(data, ssStart + 3)
         let ssFlags = data[ssStart + 5]
-        return (.guiSearchState(active: ssActive, matchCount: ssMatchCount, currentIndex: ssCurrentIndex, flags: ssFlags), 1 + 2 + ssPayloadLen)
+        var ssPos = ssStart + 6
+        let ssQuery = try readString16(data: data, pos: &ssPos, end: ssEnd)
+        guard ssPos + 8 <= ssEnd else { throw ProtocolDecodeError.malformed }
+        let ssSessionID = try readU32(data, ssPos)
+        let ssAcknowledgedEditSeq = try readU32(data, ssPos + 4)
+        return (.guiSearchState(active: ssActive, matchCount: ssMatchCount, currentIndex: ssCurrentIndex, flags: ssFlags, query: ssQuery, sessionID: ssSessionID, acknowledgedEditSeq: ssAcknowledgedEditSeq), 1 + 2 + ssPayloadLen)
 
     case OP_GUI_SIDEBARS:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }

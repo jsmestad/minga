@@ -742,53 +742,46 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   # ── GUI search toolbar actions ──────────────────────────────────────
 
+  defp dispatch_action(state, {:search_focus, replace_mode}) do
+    search = SearchData.focus_gui_search(state.workspace.search, replace_mode)
+    put_search_data(state, search)
+  end
+
   defp dispatch_action(
          %{workspace: %{buffers: %{active: buf}}} = state,
-         {:search_query, query, flags}
-       )
-       when is_pid(buf) do
+         {:search_query, session_id, edit_seq, query, flags}
+       ) do
     decoded = ProtocolGUI.decode_search_flags(flags)
-    replace_mode = decoded[:replace_mode]
     case_sensitive = decoded[:case_sensitive]
     whole_word = decoded[:whole_word]
     regex = decoded[:regex]
 
-    state =
-      %{
+    case SearchData.apply_gui_search_edit(
+           state.workspace.search,
+           session_id,
+           edit_seq,
+           query,
+           case_sensitive,
+           whole_word,
+           regex
+         ) do
+      {:accepted, search} ->
         state
-        | workspace:
-            State.set_search(
-              state.workspace,
-              (fn search ->
-                 search
-                 |> SearchData.update_gui_search_flags(case_sensitive, whole_word, regex)
-                 |> SearchData.set_gui_replace_mode(replace_mode)
-                 |> SearchData.record(query, :forward)
-               end).(state.workspace.search)
-            )
-      }
+        |> put_search_data(search)
+        |> maybe_select_gui_match(buf, query)
 
-    if query != "" do
-      content = Buffer.content(buf)
-      search_opts = gui_search_opts(state)
-
-      case Minga.Editing.search_next(content, query, Buffer.cursor(buf), :forward, search_opts) do
-        nil ->
-          state
-
-        {line, col} ->
-          Buffer.move_to(buf, {line, col})
-          state
-      end
-    else
-      state
+      {:stale, _search} ->
+        state
     end
   end
 
-  defp dispatch_action(state, {:search_query, _query, _flags}), do: state
-
   defp dispatch_action(
-         %{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern}}} = state,
+         %{
+           workspace: %{
+             buffers: %{active: buf},
+             search: %{gui_search: %{active: true, query: pattern}}
+           }
+         } = state,
          :search_next
        )
        when is_pid(buf) and is_binary(pattern) do
@@ -809,7 +802,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, :search_next), do: state
 
   defp dispatch_action(
-         %{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern}}} = state,
+         %{
+           workspace: %{
+             buffers: %{active: buf},
+             search: %{gui_search: %{active: true, query: pattern}}
+           }
+         } = state,
          :search_prev
        )
        when is_pid(buf) and is_binary(pattern) do
@@ -830,7 +828,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, :search_prev), do: state
 
   defp dispatch_action(
-         %{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern}}} = state,
+         %{
+           workspace: %{
+             buffers: %{active: buf},
+             search: %{gui_search: %{active: true, query: pattern}}
+           }
+         } = state,
          {:search_replace, replacement}
        )
        when is_pid(buf) and is_binary(pattern) and pattern != "" do
@@ -868,7 +871,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:search_replace, _}), do: state
 
   defp dispatch_action(
-         %{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern}}} = state,
+         %{
+           workspace: %{
+             buffers: %{active: buf},
+             search: %{gui_search: %{active: true, query: pattern}}
+           }
+         } = state,
          {:search_replace_all, replacement}
        )
        when is_pid(buf) and is_binary(pattern) and pattern != "" do
@@ -901,14 +909,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, :search_dismiss) do
-    %{
-      state
-      | workspace:
-          State.set_search(
-            state.workspace,
-            (&SearchData.dismiss_gui_search/1).(state.workspace.search)
-          )
-    }
+    search = SearchData.dismiss_gui_search(state.workspace.search)
+    put_search_data(state, search)
   end
 
   defp dispatch_action(state, {:extension_action, _extension_id, _action, _payload} = action) do
@@ -1983,13 +1985,36 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   @spec gui_search_opts(state()) :: Minga.Editing.Search.search_opts()
-  defp gui_search_opts(%{workspace: %{search: %{gui_search: %{} = gs}}}) do
+  defp gui_search_opts(%{workspace: %{search: %{gui_search: %{active: true} = gs}}}) do
     [
-      case_sensitive: Map.get(gs, :case_sensitive, true),
-      whole_word: Map.get(gs, :whole_word, false),
-      regex: Map.get(gs, :regex, false)
+      case_sensitive: gs.case_sensitive,
+      whole_word: gs.whole_word,
+      regex: gs.regex
     ]
   end
 
   defp gui_search_opts(_state), do: []
+
+  @spec put_search_data(state(), SearchData.t()) :: state()
+  defp put_search_data(state, search) do
+    %{state | workspace: State.set_search(state.workspace, search)}
+  end
+
+  @spec maybe_select_gui_match(state(), pid() | nil, String.t()) :: state()
+  defp maybe_select_gui_match(state, _buf, ""), do: state
+  defp maybe_select_gui_match(state, buf, _query) when not is_pid(buf), do: state
+
+  defp maybe_select_gui_match(state, buf, query) do
+    content = Buffer.content(buf)
+    search_opts = gui_search_opts(state)
+
+    case Minga.Editing.search_next(content, query, Buffer.cursor(buf), :forward, search_opts) do
+      nil ->
+        state
+
+      {line, col} ->
+        Buffer.move_to(buf, {line, col})
+        state
+    end
+  end
 end

@@ -212,6 +212,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_replace Opcodes.gui_action_search_replace()
   @gui_action_search_replace_all Opcodes.gui_action_search_replace_all()
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
+  @gui_action_search_focus Opcodes.gui_action_search_focus()
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
 
   @search_flag_replace_mode 0x01
@@ -330,7 +331,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              activation_id :: non_neg_integer()}
           | {:picker_action_activate, generation :: non_neg_integer(),
              activation_id :: non_neg_integer()}
-          | {:search_query, query :: String.t(), flags :: non_neg_integer()}
+          | {:search_query, session_id :: non_neg_integer(), edit_seq :: non_neg_integer(),
+             query :: String.t(), flags :: non_neg_integer()}
+          | {:search_focus, replace_mode :: boolean()}
           | :search_next
           | :search_prev
           | {:search_replace, replacement :: String.t()}
@@ -984,9 +987,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(
         @gui_action_search_query,
-        <<query_len::16, query::binary-size(query_len), flags::8>>
+        <<session_id::32, edit_seq::32, query_len::16, query::binary-size(query_len), flags::8>>
       ) do
-    {:ok, {:search_query, query, flags}}
+    {:ok, {:search_query, session_id, edit_seq, query, flags}}
+  end
+
+  def decode_gui_action(@gui_action_search_focus, <<replace_mode::8>>) do
+    with {:ok, replace_mode?} <- decode_bool_byte(replace_mode) do
+      {:ok, {:search_focus, replace_mode?}}
+    end
   end
 
   def decode_gui_action(@gui_action_search_next, <<>>), do: {:ok, :search_next}

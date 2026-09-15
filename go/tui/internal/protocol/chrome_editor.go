@@ -521,10 +521,22 @@ func decodeSearchState(payload []byte) (SearchState, string, int) {
 		return SearchState{}, "", len(payload)
 	}
 	size := 3 + int(u16(payload, 1))
-	if len(payload) < size || size < 9 {
+	if len(payload) < size || size < 19 {
 		return SearchState{}, "", len(payload)
 	}
-	search := SearchState{Active: payload[3] != 0, Count: u16(payload, 4), CurrentIndex: u16(payload, 6), Flags: payload[8]}
+	fields, _, err := generated.DecodeGuiSearchStateFields(payload, 3, size)
+	if err != nil {
+		return SearchState{}, "", len(payload)
+	}
+	search := SearchState{
+		Active:              fields.Active != 0,
+		Count:               fields.MatchCount,
+		CurrentIndex:        fields.CurrentIndex,
+		Flags:               fields.Flags,
+		Query:               fields.Query,
+		SessionID:           fields.SessionID,
+		AcknowledgedEditSeq: fields.AcknowledgedEditSeq,
+	}
 	summary := ""
 	if search.Active {
 		summary = fmt.Sprintf("%d/%d", search.CurrentIndex, search.Count)

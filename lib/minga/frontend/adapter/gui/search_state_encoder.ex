@@ -46,6 +46,9 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoder do
       |> Writer.uint16(:match_count, count)
       |> Writer.uint16(:current_index, idx)
       |> Writer.uint8(:flags, flag_byte)
+      |> Writer.string16(:query, model.query)
+      |> Writer.uint32(:session_id, model.session_id)
+      |> Writer.uint32(:acknowledged_edit_seq, model.acknowledged_edit_seq)
       |> Writer.finish()
 
     Writer.new(@command)

@@ -154,7 +154,8 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendTimelineNavigate(index: UInt16)
 
     // Search toolbar actions
-    func sendSearchQuery(query: String, flags: UInt8)
+    func sendSearchFocus(replaceMode: Bool)
+    func sendSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8)
     func sendSearchNext()
     func sendSearchPrev()
     func sendSearchReplace(replacement: String)
@@ -219,7 +220,8 @@ public extension InputEncoder {
     func sendTimelineNavigate(index: UInt16) {}
 
     /// Default no-op so existing test spies do not need to implement search actions.
-    func sendSearchQuery(query: String, flags: UInt8) {}
+    func sendSearchFocus(replaceMode: Bool) {}
+    func sendSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {}
     func sendSearchNext() {}
     func sendSearchPrev() {}
     func sendSearchReplace(replacement: String) {}

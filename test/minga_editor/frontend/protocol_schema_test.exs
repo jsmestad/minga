@@ -272,7 +272,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       chat_returned_to_bottom: 0x5D,
       picker_query_changed: 0x5F,
       picker_item_activate: 0x60,
-      picker_action_activate: 0x61
+      picker_action_activate: 0x61,
+      search_focus: 0x62
     )
   end
 

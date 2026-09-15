@@ -17,6 +17,10 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilderTest do
     test "returns active model when gui_search is present" do
       search = %Search{
         gui_search: %{
+          active: true,
+          query: "café",
+          session_id: 4,
+          acknowledged_edit_seq: 2,
           case_sensitive: true,
           whole_word: false,
           regex: false,
@@ -29,6 +33,9 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilderTest do
 
       assert %SearchState{} = model
       assert model.active == true
+      assert model.query == "café"
+      assert model.session_id == 4
+      assert model.acknowledged_edit_seq == 2
       assert model.match_count == 0
       assert model.current_index == 0
       assert model.case_sensitive == true
@@ -37,9 +44,13 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilderTest do
       assert model.replace_mode == false
     end
 
-    test "preserves search flags" do
+    test "preserves an inactive authoritative session and clears stale counters" do
       search = %Search{
         gui_search: %{
+          active: false,
+          query: "foo",
+          session_id: 9,
+          acknowledged_edit_seq: 7,
           case_sensitive: false,
           whole_word: true,
           regex: true,
@@ -50,6 +61,12 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilderTest do
 
       model = SearchStateBuilder.build(search, nil)
 
+      assert model.active == false
+      assert model.query == "foo"
+      assert model.session_id == 9
+      assert model.acknowledged_edit_seq == 7
+      assert model.match_count == 0
+      assert model.current_index == 0
       assert model.case_sensitive == false
       assert model.whole_word == true
       assert model.regex == true
