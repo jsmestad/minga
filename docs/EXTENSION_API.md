@@ -370,7 +370,40 @@ Four phases are available:
 | `:around` | 2 | Receives `(execute_fn, state)`. You decide if and how the command runs |
 | `:override` | 1 | Replaces the command entirely. The original never executes |
 
-All advice is wrapped in try/rescue. If your advice function crashes, it logs a warning and the command proceeds normally. Your bug won't take down the editor.
+Editor command advice uses a state-to-state contract. Tool advice uses the same registration API but has an explicit result contract for `:around` and `:override` callbacks:
+
+```elixir
+Minga.Config.Advice.register(:around, :read_file, fn execute, state ->
+  case execute.(state) do
+    {:returned, next_state, {:ok, content}} ->
+      {:returned, Map.put(next_state, :bytes_read, byte_size(content)), {:ok, content}}
+
+    {:returned, next_state, result} ->
+      {:returned, next_state, result}
+
+    {:skipped, _next_state} = skipped ->
+      skipped
+  end
+end)
+```
+
+The complete tool outcome is `{:returned, advice_state, result}` or `{:skipped, advice_state}`. A bare state map from tool `:around` or `:override` advice means skipped; it is never interpreted as a tool result. A skipped invocation returns `{:error, :no_result}` to the tool caller. The core always receives the arguments that passed approval and hook checks, even if before or around advice transforms its separate advice-state map.
+
+Existing tool `:before` and `:after` callbacks do not need a signature change. They still receive and return only the advice-state map:
+
+```elixir
+Minga.Config.Advice.register(:before, :read_file, fn state ->
+  Map.put(state, :started_at, System.monotonic_time())
+end)
+
+Minga.Config.Advice.register(:after, :read_file, fn state ->
+  Map.put(state, :finished_at, System.monotonic_time())
+end)
+```
+
+Tool-specific around callbacks that previously treated `execute.(state)` as a bare state map must pattern-match and return the tagged outcome as shown above. Editor command callbacks continue to use the original bare-map contract.
+
+Advice callbacks are crash-isolated. Failed editor advice retains its existing behavior. Failed or invalid tool before/after advice preserves the prior advice state and tool result; failed or invalid tool around/override advice skips the invocation without retrying an already executed core.
 
 ---
 

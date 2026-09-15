@@ -1,6 +1,7 @@
 defmodule MingaAgent.Tool.ExecutorTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias Minga.Config.Advice
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Hooks.Hook
   alias MingaAgent.Hooks.Result
@@ -11,6 +12,9 @@ defmodule MingaAgent.Tool.ExecutorTest do
   alias MingaAgent.Tool.Spec
 
   setup do
+    Advice.reset()
+    on_exit(&Advice.reset/0)
+
     table = :"executor_test_#{:erlang.unique_integer([:positive])}"
 
     :ets.new(table, [
@@ -336,6 +340,135 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
       assert message =~ "git_commit"
       refute_receive :called, 20
+    end
+  end
+
+  describe "advised execution" do
+    test "before and after advice preserve normalized results and authorized arguments", %{
+      table: table
+    } do
+      parent = self()
+
+      register_tool(table, "advised_arguments",
+        callback: fn args ->
+          send(parent, {:tool_arguments, args})
+          {:ok, args["message"]}
+        end
+      )
+
+      Advice.register(:before, :advised_arguments, fn state ->
+        Map.put(state, "message", "changed by advice")
+      end)
+
+      Advice.register(:after, :advised_arguments, fn state ->
+        Map.put(state, :after_ran, true)
+      end)
+
+      assert {:ok, "authorized"} =
+               Executor.execute("advised_arguments", %{"message" => "authorized"}, table)
+
+      assert_received {:tool_arguments, %{"message" => "authorized"}}
+
+      register_tool(table, "advised_error", callback: fn _args -> {:error, :tool_failure} end)
+      Advice.register(:after, :advised_error, fn state -> Map.put(state, :observed, true) end)
+
+      assert {:error, :tool_failure} = Executor.execute("advised_error", %{}, table)
+    end
+
+    test "nested advised execution from after advice cannot replace the outer result", %{
+      table: table
+    } do
+      parent = self()
+      register_tool(table, "nested_outer", callback: fn _args -> {:ok, "outer"} end)
+      register_tool(table, "nested_inner", callback: fn _args -> {:ok, "inner"} end)
+
+      Advice.register(:before, :nested_inner, fn state -> state end)
+
+      Advice.register(:after, :nested_outer, fn state ->
+        send(parent, {:nested_result, Executor.execute("nested_inner", %{}, table)})
+        state
+      end)
+
+      assert {:ok, "outer"} = Executor.execute("nested_outer", %{}, table)
+      assert_received {:nested_result, {:ok, "inner"}}
+    end
+
+    test "around advice can replace or skip a tool result without ambient state", %{table: table} do
+      parent = self()
+
+      register_tool(table, "replacement_tool",
+        callback: fn _args ->
+          send(parent, :replacement_core_ran)
+          {:ok, "core"}
+        end
+      )
+
+      Advice.register(:around, :replacement_tool, fn _inner, state ->
+        {:returned, state, {:ok, "replacement"}}
+      end)
+
+      assert {:ok, "replacement"} = Executor.execute("replacement_tool", %{}, table)
+      refute_received :replacement_core_ran
+
+      register_tool(table, "conditional_skip", callback: fn _args -> {:ok, "fresh"} end)
+
+      Advice.register(:around, :conditional_skip, fn inner, state ->
+        if state["skip"], do: state, else: inner.(state)
+      end)
+
+      assert {:error, :no_result} = Executor.execute("conditional_skip", %{"skip" => true}, table)
+      assert {:ok, "fresh"} = Executor.execute("conditional_skip", %{"skip" => false}, table)
+    end
+
+    test "after advice failure retains the tool result", %{table: table} do
+      register_tool(table, "failing_after", callback: fn _args -> {:error, :tool_failure} end)
+      Advice.register(:after, :failing_after, fn _state -> raise "advice failure" end)
+
+      assert {:error, :tool_failure} = Executor.execute("failing_after", %{}, table)
+    end
+
+    test "around failure after running the tool skips without retrying", %{table: table} do
+      parent = self()
+      calls = :counters.new(1, [:atomics])
+
+      register_tool(table, "failing_around",
+        callback: fn _args ->
+          :counters.add(calls, 1, 1)
+          {:ok, "core"}
+        end
+      )
+
+      Advice.register(:around, :failing_around, fn inner, state ->
+        send(parent, {:inner_outcome, inner.(state)})
+        raise "after core"
+      end)
+
+      assert {:error, :no_result} = Executor.execute("failing_around", %{}, table)
+      assert :counters.get(calls, 1) == 1
+      assert_received {:inner_outcome, {:returned, %{}, {:ok, "core"}}}
+    end
+
+    test "advised tool raises and exits remain tool failures and do not leak", %{table: table} do
+      calls = :counters.new(1, [:atomics])
+
+      register_tool(table, "advised_flaky",
+        callback: fn _args ->
+          :counters.add(calls, 1, 1)
+
+          case :counters.get(calls, 1) do
+            1 -> raise "boom"
+            _ -> {:ok, "recovered"}
+          end
+        end
+      )
+
+      register_tool(table, "advised_exit", callback: fn _args -> exit(:boom) end)
+      Advice.register(:before, :advised_flaky, fn state -> state end)
+      Advice.register(:before, :advised_exit, fn state -> state end)
+
+      assert {:error, {:raised, "boom"}} = Executor.execute("advised_flaky", %{}, table)
+      assert {:ok, "recovered"} = Executor.execute("advised_flaky", %{}, table)
+      assert {:error, {:crashed, {:exit, :boom}}} = Executor.execute("advised_exit", %{}, table)
     end
   end
 
