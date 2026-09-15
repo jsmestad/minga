@@ -188,6 +188,188 @@ defmodule Minga.Config.AdviceTest do
     end
   end
 
+  describe "invoke/4" do
+    test "keeps advice state and the core result separate in documented order", %{table: table} do
+      parent = self()
+
+      Advice.register(table, :before, :tool, fn state ->
+        send(parent, {:advice_event, :before})
+        Map.put(state, :before, true)
+      end)
+
+      Advice.register(table, :around, :tool, fn inner, state ->
+        send(parent, {:advice_event, :outer_before})
+        {:returned, inner_state, result} = inner.(Map.put(state, :outer, true))
+        send(parent, {:advice_event, :outer_after})
+        {:returned, Map.put(inner_state, :outer_after, true), result}
+      end)
+
+      Advice.register(table, :around, :tool, fn inner, state ->
+        send(parent, {:advice_event, :inner_before})
+        outcome = inner.(Map.put(state, :inner, true))
+        send(parent, {:advice_event, :inner_after})
+        outcome
+      end)
+
+      Advice.register(table, :after, :tool, fn state ->
+        send(parent, {:advice_event, :after})
+        Map.put(state, :after, true)
+      end)
+
+      outcome =
+        Advice.invoke(table, :tool, %{input: true}, fn ->
+          send(parent, {:advice_event, :core})
+          {:ok, "result"}
+        end)
+
+      assert outcome ==
+               {:returned,
+                %{
+                  input: true,
+                  before: true,
+                  outer: true,
+                  inner: true,
+                  outer_after: true,
+                  after: true
+                }, {:ok, "result"}}
+
+      events =
+        for _ <- 1..7 do
+          assert_receive {:advice_event, event}
+          event
+        end
+
+      assert events == [
+               :before,
+               :outer_before,
+               :inner_before,
+               :core,
+               :inner_after,
+               :outer_after,
+               :after
+             ]
+    end
+
+    test "last override replaces the core and remains wrapped by around advice", %{table: table} do
+      parent = self()
+
+      Advice.register(table, :override, :tool, fn state ->
+        {:returned, Map.put(state, :first, true), :first}
+      end)
+
+      Advice.register(table, :override, :tool, fn state ->
+        {:returned, Map.put(state, :second, true), :second}
+      end)
+
+      Advice.register(table, :around, :tool, fn inner, state ->
+        {:returned, inner_state, result} = inner.(state)
+        {:returned, Map.put(inner_state, :wrapped, true), result}
+      end)
+
+      assert {:returned, %{second: true, wrapped: true}, :second} =
+               Advice.invoke(table, :tool, %{}, fn ->
+                 send(parent, :core_ran)
+                 :core
+               end)
+
+      refute_received :core_ran
+    end
+
+    test "bare state and explicit skipped outcomes skip the core", %{table: table} do
+      parent = self()
+
+      Advice.register(table, :around, :bare_skip, fn _inner, state ->
+        Map.put(state, :bare_skip, true)
+      end)
+
+      Advice.register(table, :around, :explicit_skip, fn _inner, state ->
+        {:skipped, Map.put(state, :explicit_skip, true)}
+      end)
+
+      assert {:skipped, %{bare_skip: true}} =
+               Advice.invoke(table, :bare_skip, %{}, fn -> send(parent, :bare_core) end)
+
+      assert {:skipped, %{explicit_skip: true}} =
+               Advice.invoke(table, :explicit_skip, %{}, fn -> send(parent, :explicit_core) end)
+
+      refute_received :bare_core
+      refute_received :explicit_core
+    end
+
+    test "invalid before and after values retain state and the core outcome", %{table: table} do
+      Advice.register(table, :before, :tool, fn _state -> :invalid_before end)
+      Advice.register(table, :after, :tool, fn _state -> {:returned, %{}, :invalid_after} end)
+      Advice.register(table, :after, :tool, fn state -> Map.put(state, :valid_after, true) end)
+
+      assert {:returned, %{input: true, valid_after: true}, {:error, :tool_failure}} =
+               Advice.invoke(table, :tool, %{input: true}, fn -> {:error, :tool_failure} end)
+    end
+
+    test "invalid override skips without executing the core", %{table: table} do
+      parent = self()
+      Advice.register(table, :override, :tool, fn _state -> :invalid end)
+
+      assert {:skipped, %{input: true}} =
+               Advice.invoke(table, :tool, %{input: true}, fn -> send(parent, :core_ran) end)
+
+      refute_received :core_ran
+    end
+
+    test "around failure after the core does not retry or retain its result", %{table: table} do
+      parent = self()
+      core_calls = :counters.new(1, [:atomics])
+
+      Advice.register(table, :around, :tool, fn inner, state ->
+        send(parent, {:inner_outcome, inner.(state)})
+        raise "after core"
+      end)
+
+      assert {:skipped, %{input: true}} =
+               Advice.invoke(table, :tool, %{input: true}, fn ->
+                 :counters.add(core_calls, 1, 1)
+                 :core_result
+               end)
+
+      assert :counters.get(core_calls, 1) == 1
+      assert_received {:inner_outcome, {:returned, %{input: true}, :core_result}}
+    end
+
+    test "invocation failures trip and successful callbacks reset the circuit breaker", %{
+      table: table
+    } do
+      malformed_around = fn _inner, _state -> :invalid end
+      Advice.register(table, :around, :malformed, malformed_around)
+
+      for _ <- 1..5 do
+        assert {:skipped, %{}} = Advice.invoke(table, :malformed, %{}, fn -> :core end)
+      end
+
+      assert Advice.disabled?(table, :around, :malformed, malformed_around)
+      assert {:returned, %{}, :core} = Advice.invoke(table, :malformed, %{}, fn -> :core end)
+
+      flaky_around = fn inner, state ->
+        if state.fail, do: :invalid, else: inner.(state)
+      end
+
+      Advice.register(table, :around, :flaky, flaky_around)
+
+      for _ <- 1..4 do
+        assert {:skipped, %{fail: true}} =
+                 Advice.invoke(table, :flaky, %{fail: true}, fn -> :core end)
+      end
+
+      assert {:returned, %{fail: false}, :core} =
+               Advice.invoke(table, :flaky, %{fail: false}, fn -> :core end)
+
+      for _ <- 1..4 do
+        assert {:skipped, %{fail: true}} =
+                 Advice.invoke(table, :flaky, %{fail: true}, fn -> :core end)
+      end
+
+      refute Advice.disabled?(table, :around, :flaky, flaky_around)
+    end
+  end
+
   describe "crash isolation" do
     test "crashing before advice is skipped", %{table: table} do
       Advice.register(table, :before, :save, fn _s -> raise "boom" end)

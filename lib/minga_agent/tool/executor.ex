@@ -222,21 +222,26 @@ defmodule MingaAgent.Tool.Executor do
           {:ok, term()} | {:error, term()}
   defp execute_with_advice(spec, args, tool_atom, tool_context) do
     if advice_available?() and Minga.Config.Advice.advised?(tool_atom) do
-      wrapped =
-        Minga.Config.Advice.wrap(tool_atom, fn _state ->
-          callback = Spec.build_callback(spec, tool_context)
-          result = callback.(args)
-          Process.put(:__tool_result__, result)
-          args
-        end)
-
-      wrapped.(args)
-      result = Process.delete(:__tool_result__)
-      normalize_result(result)
+      execute_advised(spec, args, tool_atom, tool_context)
     else
       execute_raw(spec, args, tool_context)
     end
   end
+
+  @spec execute_advised(Spec.t(), map(), atom(), Context.t() | nil) ::
+          {:ok, term()} | {:error, term()}
+  defp execute_advised(spec, args, tool_atom, tool_context) do
+    tool_atom
+    |> Minga.Config.Advice.invoke(args, fn -> execute_raw(spec, args, tool_context) end)
+    |> normalize_invocation_result()
+  end
+
+  @spec normalize_invocation_result(Minga.Config.Advice.invocation_outcome()) ::
+          {:ok, term()} | {:error, term()}
+  defp normalize_invocation_result({:returned, _advice_state, result}),
+    do: normalize_result(result)
+
+  defp normalize_invocation_result({:skipped, _advice_state}), do: {:error, :no_result}
 
   @spec execute_raw(Spec.t(), map(), Context.t() | nil) :: {:ok, term()} | {:error, term()}
   defp execute_raw(%Spec{} = spec, args, tool_context) do

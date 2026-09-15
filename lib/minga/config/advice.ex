@@ -26,6 +26,11 @@ defmodule Minga.Config.Advice do
   Multiple overrides chain (last registered wins as the innermost).
   `:before` and `:after` still run around an overridden command.
 
+  Result-returning tool execution uses `invoke/3`. Its around and override
+  callbacks return `{:returned, state, result}` or `{:skipped, state}` instead
+  of treating an ordinary state map as a result. `wrap/2` retains the existing
+  state-to-state editor command contract.
+
   ## Examples
 
       # Transform state before save
@@ -63,6 +68,9 @@ defmodule Minga.Config.Advice do
 
   @typedoc "Around advice: receives the execute function and state."
   @type around_fun :: ((map() -> map()), map() -> map())
+
+  @typedoc "Explicit result of a result-returning advised invocation."
+  @type invocation_outcome :: {:returned, map(), term()} | {:skipped, map()}
 
   # ── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -163,6 +171,35 @@ defmodule Minga.Config.Advice do
   end
 
   @doc """
+  Invokes a zero-arity core through the advice registered for `command`.
+
+  Unlike `wrap/2`, this function keeps advice state separate from the core result.
+  Around and override advice must return an explicit `t:invocation_outcome/0` to
+  return a result. Returning a bare state map explicitly skips the core.
+  """
+  @spec invoke(atom(), map(), (-> term())) :: invocation_outcome()
+  def invoke(command, advice_state, core)
+      when is_atom(command) and is_map(advice_state) and is_function(core, 0) do
+    invoke(@table, command, advice_state, core)
+  end
+
+  @doc false
+  @spec invoke(atom(), atom(), map(), (-> term())) :: invocation_outcome()
+  def invoke(table, command, advice_state, core)
+      when is_atom(table) and is_atom(command) and is_map(advice_state) and
+             is_function(core, 0) do
+    befores = lookup_funs(table, :before, command)
+    afters = lookup_funs(table, :after, command)
+    arounds = lookup_funs(table, :around, command)
+    overrides = lookup_funs(table, :override, command)
+
+    advice_state
+    |> run_invocation_state_chain(table, befores, :before, command)
+    |> run_invocation_core(build_invocation_core(table, command, core, overrides, arounds))
+    |> run_invocation_after_chain(table, afters, command)
+  end
+
+  @doc """
   Returns true if any advice is registered for the given phase and command.
   """
   @spec has_advice?(phase(), atom()) :: boolean()
@@ -209,6 +246,173 @@ defmodule Minga.Config.Advice do
       [{_, funs}] -> Enum.reverse(funs)
       [] -> []
     end
+  end
+
+  @spec build_invocation_core(atom(), atom(), (-> term()), [state_fun()], [around_fun()]) ::
+          (map() -> invocation_outcome())
+  defp build_invocation_core(table, command, core, overrides, arounds) do
+    base = build_invocation_base(table, command, core, overrides)
+
+    arounds
+    |> Enum.reject(&cb_disabled?(table, {:cb_disabled, :around, command, &1}))
+    |> Enum.reverse()
+    |> Enum.reduce(base, &wrap_invocation_around(&1, &2, table, command))
+  end
+
+  @spec wrap_invocation_around(function(), (map() -> invocation_outcome()), atom(), atom()) ::
+          (map() -> invocation_outcome())
+  defp wrap_invocation_around(around_fun, inner, table, command) do
+    fn state -> invoke_around_callback(table, command, around_fun, inner, state) end
+  end
+
+  @spec invoke_around_callback(atom(), atom(), function(), function(), map()) ::
+          invocation_outcome()
+  defp invoke_around_callback(table, command, around_fun, inner, state) do
+    run_invocation_callback(table, :around, command, around_fun, state, fn ->
+      around_fun.(inner, state)
+    end)
+  end
+
+  @spec build_invocation_base(atom(), atom(), (-> term()), [state_fun()]) ::
+          (map() -> invocation_outcome())
+  defp build_invocation_base(table, command, core, overrides) do
+    case last_enabled_override(table, command, overrides) do
+      nil ->
+        fn state -> return_invocation_core(core, state) end
+
+      override_fun ->
+        fn state -> invoke_override_callback(table, command, override_fun, state) end
+    end
+  end
+
+  @spec last_enabled_override(atom(), atom(), [state_fun()]) :: state_fun() | nil
+  defp last_enabled_override(table, command, overrides) do
+    overrides
+    |> Enum.reverse()
+    |> Enum.find(&(not cb_disabled?(table, {:cb_disabled, :override, command, &1})))
+  end
+
+  @spec return_invocation_core((-> term()), map()) :: invocation_outcome()
+  defp return_invocation_core(core, state), do: {:returned, state, core.()}
+
+  @spec invoke_override_callback(atom(), atom(), function(), map()) :: invocation_outcome()
+  defp invoke_override_callback(table, command, override_fun, state) do
+    run_invocation_callback(table, :override, command, override_fun, state, fn ->
+      override_fun.(state)
+    end)
+  end
+
+  @spec run_invocation_core(map(), (map() -> invocation_outcome())) :: invocation_outcome()
+  defp run_invocation_core(state, core), do: core.(state)
+
+  @spec run_invocation_after_chain(invocation_outcome(), atom(), [state_fun()], atom()) ::
+          invocation_outcome()
+  defp run_invocation_after_chain({:returned, state, result}, table, afters, command) do
+    {:returned, run_invocation_state_chain(state, table, afters, :after, command), result}
+  end
+
+  defp run_invocation_after_chain({:skipped, state}, table, afters, command) do
+    {:skipped, run_invocation_state_chain(state, table, afters, :after, command)}
+  end
+
+  @spec run_invocation_state_chain(map(), atom(), [state_fun()], phase(), atom()) :: map()
+  defp run_invocation_state_chain(state, _table, [], _phase, _command), do: state
+
+  defp run_invocation_state_chain(state, table, funs, phase, command) do
+    Enum.reduce(funs, state, fn fun, current_state ->
+      run_invocation_state_callback(table, phase, command, fun, current_state)
+    end)
+  end
+
+  @spec run_invocation_state_callback(atom(), phase(), atom(), state_fun(), map()) :: map()
+  defp run_invocation_state_callback(table, phase, command, fun, state) do
+    cb_key = {:cb_disabled, phase, command, fun}
+
+    if cb_disabled?(table, cb_key) do
+      state
+    else
+      invoke_state_callback(table, phase, command, fun, state)
+    end
+  end
+
+  @spec invoke_state_callback(atom(), phase(), atom(), state_fun(), map()) :: map()
+  defp invoke_state_callback(table, phase, command, fun, state) do
+    case fun.(state) do
+      next_state when is_map(next_state) ->
+        reset_failures(table, phase, command, fun)
+        next_state
+
+      invalid ->
+        record_invalid_invocation_result(table, phase, command, fun, invalid)
+        state
+    end
+  rescue
+    e ->
+      record_invocation_failure(table, phase, command, fun, Exception.message(e))
+      state
+  catch
+    kind, reason ->
+      record_invocation_crash(table, phase, command, fun, kind, reason)
+      state
+  end
+
+  @spec run_invocation_callback(atom(), phase(), atom(), function(), map(), (-> term())) ::
+          invocation_outcome()
+  defp run_invocation_callback(table, phase, command, fun, state, callback) do
+    case normalize_invocation_outcome(callback.()) do
+      {:ok, outcome} ->
+        reset_failures(table, phase, command, fun)
+        outcome
+
+      {:error, invalid} ->
+        record_invalid_invocation_result(table, phase, command, fun, invalid)
+        {:skipped, state}
+    end
+  rescue
+    e ->
+      record_invocation_failure(table, phase, command, fun, Exception.message(e))
+      {:skipped, state}
+  catch
+    kind, reason ->
+      record_invocation_crash(table, phase, command, fun, kind, reason)
+      {:skipped, state}
+  end
+
+  @spec normalize_invocation_outcome(term()) ::
+          {:ok, invocation_outcome()} | {:error, term()}
+  defp normalize_invocation_outcome({:returned, state, result}) when is_map(state),
+    do: {:ok, {:returned, state, result}}
+
+  defp normalize_invocation_outcome({:skipped, state}) when is_map(state),
+    do: {:ok, {:skipped, state}}
+
+  defp normalize_invocation_outcome(state) when is_map(state), do: {:ok, {:skipped, state}}
+  defp normalize_invocation_outcome(invalid), do: {:error, invalid}
+
+  @spec record_invalid_invocation_result(atom(), phase(), atom(), function(), term()) :: :ok
+  defp record_invalid_invocation_result(table, phase, command, fun, invalid) do
+    record_failure(table, phase, command, fun)
+
+    Minga.Log.warning(
+      :config,
+      "Advice #{phase}:#{command} returned an invalid invocation value: #{inspect(invalid)}"
+    )
+  end
+
+  @spec record_invocation_failure(atom(), phase(), atom(), function(), String.t()) :: :ok
+  defp record_invocation_failure(table, phase, command, fun, message) do
+    record_failure(table, phase, command, fun)
+    Minga.Log.warning(:config, "Advice #{phase}:#{command} failed: #{message}")
+  end
+
+  @spec record_invocation_crash(atom(), phase(), atom(), function(), term(), term()) :: :ok
+  defp record_invocation_crash(table, phase, command, fun, kind, reason) do
+    record_failure(table, phase, command, fun)
+
+    Minga.Log.warning(
+      :config,
+      "Advice #{phase}:#{command} crashed: #{inspect(kind)} #{inspect(reason)}"
+    )
   end
 
   # Builds the core function: override replaces execute, around wraps it.

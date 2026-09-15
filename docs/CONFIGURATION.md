@@ -962,6 +962,30 @@ end
 
 Multiple advice functions for the same phase and command run in registration order. For `:around`, they nest outward (first registered is outermost). Crashes in any advice are logged and skipped; the editor keeps running.
 
+### Tool advice outcomes
+
+Editor commands keep the state-to-state callback contract shown above. Advised agent tools retain their result separately from advice state. Tool `:around` and `:override` callbacks return one of these tagged outcomes:
+
+```elixir
+{:returned, advice_state, tool_result}
+{:skipped, advice_state}
+```
+
+Returning a bare advice-state map from tool `:around` or `:override` advice means skipped and produces `{:error, :no_result}` for the tool caller. The tool core always uses the arguments that passed approval and hooks; transforming advice state cannot replace those authorized arguments.
+
+Existing tool `:before` and `:after` callbacks still receive and return a state map, so they need no signature migration. Tool-specific around callbacks must preserve the tagged outcome instead of treating `execute.(state)` as a bare map:
+
+```elixir
+advise :around, :read_file, fn execute, state ->
+  case execute.(state) do
+    {:returned, next_state, result} -> {:returned, next_state, result}
+    {:skipped, _next_state} = skipped -> skipped
+  end
+end
+```
+
+An around or override callback can replace the result with an explicit `{:returned, state, replacement}`. If it fails or returns an invalid value, Minga skips that invocation and does not retry a core that already ran. Before or after failure preserves the prior advice state and retained tool result. Editor command advice behavior is unchanged.
+
 ### When to use advice vs. hooks
 
 **Hooks** (`on/2`) are for fire-and-forget side effects: running an external tool after save, logging, sending notifications. They run asynchronously and can't change editor state.
