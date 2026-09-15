@@ -106,6 +106,7 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     refute_received {:shutdown, 0}
 
     send(ctx.editor, {:lsp_format_timeout, ref})
+    :sys.get_state(ctx.editor)
 
     assert_receive {:shutdown, 0}
     assert File.read!(path) == " editedfile"
