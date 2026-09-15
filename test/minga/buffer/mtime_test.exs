@@ -461,7 +461,9 @@ defmodule Minga.Buffer.MtimeTest do
   end
 
   defp start_buffer(opts) do
-    start_supervised!({BufferProcess, opts}, id: {:buffer, make_ref()})
+    buffer = start_supervised!({BufferProcess, opts}, id: {:buffer, make_ref()})
+    assert {:ok, 0} = BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
+    buffer
   end
 
   defp buffer_snapshot(buf) do
