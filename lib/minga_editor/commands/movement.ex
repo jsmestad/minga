@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.Movement do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias Minga.Buffer.CursorContext
   alias Minga.Buffer.Document
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
@@ -851,7 +852,7 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec compute_desired_col(state(), GenServer.server()) :: non_neg_integer()
   defp compute_desired_col(state, buf) do
-    {_line, col, line_text} = Buffer.cursor_context(buf)
+    %CursorContext{byte_column: col, line_text: line_text} = Buffer.cursor_context(buf)
 
     if effective_wrap_enabled?(state, buf) do
       content_w = content_width(state)

@@ -42,6 +42,23 @@ defmodule Minga.Buffer.LinesTest do
       buf = Document.new("hello\n\nworld")
       assert Lines.fetch(buf, 1) == ""
     end
+
+    test "reads the same target line with the gap before, inside, and after it" do
+      content = "before\nαe\u0301_target\nafter"
+
+      for gap_position <- [{0, 0}, {1, byte_size("αe\u0301_")}, {2, 5}] do
+        document = content |> Document.new() |> Document.move_to(gap_position)
+        assert Lines.fetch(document, 1) == "αe\u0301_target"
+      end
+    end
+
+    test "copies a fetched line out of a document-sized backing binary" do
+      document = Document.new(String.duplicate("large filler line\n", 10_000) <> "target")
+      line = Lines.fetch(document, 10_000)
+
+      assert line == "target"
+      assert :binary.referenced_byte_size(line) == byte_size(line)
+    end
   end
 
   describe "slice/3" do

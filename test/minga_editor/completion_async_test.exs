@@ -75,6 +75,47 @@ defmodule MingaEditor.CompletionAsyncTest do
     end
   end
 
+  describe "Unicode prefix acceptance" do
+    test "accept replaces the byte-indexed Unicode prefix with the selected text" do
+      text = "λe\u0301_va"
+      ctx = start_editor(text)
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      :ok = Minga.Buffer.move_to(buffer, {0, byte_size(text)})
+
+      completion =
+        [%{"label" => "λe\u0301_value", "insertText" => "λe\u0301_value"}]
+        |> items()
+        |> Completion.new({0, 0})
+
+      _state = CompletionHandling.accept(state, completion)
+
+      assert Minga.Buffer.content(buffer) == "λe\u0301_value"
+      assert Minga.Buffer.cursor(buffer) == {0, byte_size("λe\u0301_value")}
+    end
+
+    test "one post-insert event reads one coherent cursor context" do
+      ctx = start_editor("identifier")
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      :ok = Minga.Buffer.move_to(buffer, {0, byte_size("identifier")})
+
+      workspace = SessionState.transition_mode(state.workspace, :insert)
+      state = %{state | workspace: workspace}
+
+      :erlang.trace(buffer, true, [:receive])
+
+      try do
+        _state = CompletionHandling.maybe_handle(state, true, ?r, 0)
+
+        assert_receive {:trace, ^buffer, :receive, {:"$gen_call", _from, :cursor_context}}
+        refute_receive {:trace, ^buffer, :receive, {:"$gen_call", _from, _other_call}}
+      after
+        :erlang.trace(buffer, false, [:receive])
+      end
+    end
+  end
+
   describe "(b) stale processed result is discarded latest-wins" do
     test "a result tagged with an older generation never overwrites the live menu" do
       ctx = start_editor("hello")

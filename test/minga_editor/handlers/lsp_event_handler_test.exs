@@ -1000,10 +1000,10 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       refute_receive {:lsp_request, "textDocument/signatureHelp", _, _, _}, 50
     end
 
-    test "completion result that dies during prefix extraction is taken without processing" do
+    test "completion result that dies during cursor-context capture is taken without processing" do
       state = buffer_state("hello\n")
       client = start_fake_lsp_client()
-      buffer = buffer_that_dies_on_content_and_cursor(7)
+      buffer = buffer_that_dies_on_cursor_context()
       register_lsp_client(buffer, client)
       ref = make_ref()
       trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1}
@@ -1024,7 +1024,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
-      assert_receive {:buffer_content_and_cursor_requested, ^buffer}
+      assert_receive {:buffer_cursor_context_requested, ^buffer}
       refute_receive {:completion_processed, _, _, _, _, _, _}, 50
     end
 
@@ -1990,31 +1990,19 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
   end
 
-  defp buffer_that_dies_on_content_and_cursor(version) do
+  defp buffer_that_dies_on_cursor_context do
     test = self()
 
     spawn(fn ->
       receive do
-        {:"$gen_call", from, :version} ->
-          GenServer.reply(from, version)
-          content_death_buffer_loop(test)
+        {:"$gen_call", _from, :cursor_context} ->
+          send(test, {:buffer_cursor_context_requested, self()})
+          exit(:context_probe)
 
         other ->
-          send(test, {:unexpected_content_death_buffer_message, other})
+          send(test, {:unexpected_context_death_buffer_message, other})
       end
     end)
-  end
-
-  defp content_death_buffer_loop(test) do
-    receive do
-      {:"$gen_call", _from, :content_and_cursor} ->
-        send(test, {:buffer_content_and_cursor_requested, self()})
-        exit(:content_probe)
-
-      other ->
-        send(test, {:unexpected_content_death_buffer_message, other})
-        content_death_buffer_loop(test)
-    end
   end
 
   defp tmp_lsp_path(name) do

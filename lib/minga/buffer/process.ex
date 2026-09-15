@@ -21,6 +21,7 @@ defmodule Minga.Buffer.Process do
   alias Minga.Buffer.{
     ChangeLog,
     Cursor,
+    CursorContext,
     Document,
     InspectionSnapshot,
     Lines,
@@ -497,8 +498,8 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :cursor)
   end
 
-  @doc "Returns the cursor position and the text of the cursor's line."
-  @spec cursor_context(GenServer.server()) :: {non_neg_integer(), non_neg_integer(), String.t()}
+  @doc "Returns one coherent cursor-local snapshot for completion and movement work."
+  @spec cursor_context(GenServer.server()) :: CursorContext.t()
   def cursor_context(server) do
     GenServer.call(server, :cursor_context)
   end
@@ -1615,9 +1616,10 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:cursor_context, _from, state) do
-    {line, col} = Document.cursor(state.document)
-    line_text = Document.line_at(state.document, line)
-    {:reply, {line, col, line_text}, state}
+    context =
+      CursorContext.new(state.document, BufState.version(state), state.file_path, state.filetype)
+
+    {:reply, context, state}
   end
 
   def handle_call(
