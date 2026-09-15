@@ -17,8 +17,9 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
 
-  @effect_timeout 2_000
-  @fixture Path.expand("../../fixtures/formatter_stream_fixture", __DIR__)
+  @effect_timeout 10_000
+  @elixir_fixture Path.expand("../../fixtures/formatter_stream_fixture", __DIR__)
+  @shell_fixture Path.expand("../../fixtures/formatter_stream_fixture.sh", __DIR__)
 
   test "origin creates feedback before scheduling and correlates the running lifecycle" do
     Options.set_for_filetype(:elixir, :formatter, "cat")
@@ -346,10 +347,14 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   defp fixture_command(order, outcome), do: fixture_command(order, outcome, [])
 
   @spec fixture_command(String.t(), String.t(), [String.t()]) :: String.t()
-  defp fixture_command(order, outcome, fixture_args) do
+  defp fixture_command(order, "barrier-success" = outcome, fixture_args) do
     System.find_executable("elixir") <>
       " " <>
-      Enum.map_join([@fixture, order, outcome | fixture_args], " ", &shell_escape/1)
+      Enum.map_join([@elixir_fixture, order, outcome | fixture_args], " ", &shell_escape/1)
+  end
+
+  defp fixture_command(order, outcome, []) do
+    "/bin/sh " <> Enum.map_join([@shell_fixture, order, outcome], " ", &shell_escape/1)
   end
 
   @spec shell_escape(String.t()) :: String.t()

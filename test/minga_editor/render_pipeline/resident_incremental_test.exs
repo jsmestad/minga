@@ -300,7 +300,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         state = warm(resident_state(line_count))
         buffer = state.editor.workspace.buffers.active
         handler_id = {__MODULE__, line_count, make_ref()}
-        parent = self()
+        owner = self()
 
         events = [
           [:minga, :render, :line_fetch],
@@ -314,12 +314,25 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
             handler_id,
             events,
             fn event, measurements, metadata, _config ->
-              send(parent, {:render_measurement, event, measurements, metadata})
+              if self() == owner do
+                send(owner, {:render_measurement, event, measurements, metadata})
+              end
             end,
             nil
           )
 
         on_exit(fn -> :telemetry.detach(handler_id) end)
+
+        Task.async(fn ->
+          Minga.Telemetry.execute(
+            [:minga, :render, :buffer_deltas],
+            %{deltas_consumed: 1, changelog_consumes: 1},
+            %{buffer: buffer, version: 0, reset_required?: false}
+          )
+        end)
+        |> Task.await()
+
+        refute_received {:render_measurement, [:minga, :render, :buffer_deltas], _, _}
 
         edit_line = if line_count == 65_536, do: 32_768, else: div(line_count, 2)
         BufferProcess.move_to(buffer, {edit_line, 0})

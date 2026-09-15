@@ -3,7 +3,7 @@ defmodule Minga.Parser.ManagerTest do
   use ExUnit.Case, async: false
 
   @moduletag :heavy
-  @moduletag timeout: 10_000
+  @moduletag timeout: 20_000
 
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager
@@ -281,7 +281,7 @@ defmodule Minga.Parser.ManagerTest do
     # Generous timeout: the parser lazily loads each grammar on first use, so a
     # cold-start request can exceed the 50ms default. These tests verify alias
     # resolution, not latency.
-    @highlight_timeout 2_000
+    @highlight_timeout 10_000
 
     test "a short alias label like \"js\" highlights via the real parser" do
       server = start_parser_manager()

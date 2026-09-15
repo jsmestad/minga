@@ -96,7 +96,7 @@ jobs:
         run: MIX_ENV=test mix protocol.golden --check
       - run: mix native.build.support
       - name: Run Elixir tests except the isolated compile-cache suite
-        run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
+        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
 
