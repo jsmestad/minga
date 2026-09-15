@@ -16,6 +16,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   alias Minga.Log
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.FindFileSession
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectFileCandidate
   alias MingaEditor.UI.Picker.Source
@@ -39,39 +40,125 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @impl true
   @spec candidates(Context.t() | nil) :: [Item.t()]
   def candidates(ctx) do
-    workspace = active_workspace()
-    root = project_root(ctx, workspace)
+    case candidate_result(ctx) do
+      {:ok, items, _activation_id} -> items
+      {:error, _message} -> []
+    end
+  end
 
-    case resolve_paths(root, workspace) do
-      {:ok, paths} ->
-        frecency_map = build_frecency_map()
-        git_status_map = build_git_status_map(root.path)
-        score_map = build_score_map(frecency_map, git_status_map)
+  @impl true
+  @spec async_fetch(Context.t()) :: {:ok, [Item.t()], map()} | {:error, String.t()}
+  def async_fetch(%Context{picker_ui: %{context: %{project_error: message}}})
+      when is_binary(message),
+      do: {:error, message}
 
+  def async_fetch(ctx) do
+    case candidate_result(ctx) do
+      {:ok, items, activation_id} ->
+        {:ok, items, %{project_activation_id: activation_id}}
+
+      {:error, message} ->
+        {:error, message}
+    end
+  end
+
+  @doc "Returns the immutable activation identity for a project-backed finder request."
+  @spec fetch_identity(Context.t()) ::
+          {:project_activation, WorkspaceSnapshot.activation_id()} | nil
+  def fetch_identity(%Context{
+        picker_ui: %{
+          context: %{
+            find_file_session: %FindFileSession{project_activation_id: activation_id}
+          }
+        }
+      })
+      when is_integer(activation_id),
+      do: {:project_activation, activation_id}
+
+  def fetch_identity(%Context{}), do: nil
+
+  @doc "Returns whether a completed project fetch still belongs to the active activation."
+  @spec current_fetch?(
+          {:project_activation, WorkspaceSnapshot.activation_id()} | nil,
+          Source.fetch_meta() | nil
+        ) :: boolean()
+  def current_fetch?({:project_activation, activation_id}, nil),
+    do: current_activation?(activation_id)
+
+  def current_fetch?(identity, %{project_activation_id: activation_id}) do
+    identity_matches?(identity, activation_id) and current_activation?(activation_id)
+  end
+
+  def current_fetch?(nil, nil), do: true
+  def current_fetch?(_identity, _meta), do: false
+
+  @doc "Returns whether a project candidate belongs to the active workspace activation."
+  @spec current_candidate?(ProjectFileCandidate.t()) :: boolean()
+  def current_candidate?(%ProjectFileCandidate{activation_id: nil}), do: false
+
+  def current_candidate?(%ProjectFileCandidate{activation_id: activation_id}),
+    do: current_activation?(activation_id)
+
+  @spec candidate_result(Context.t() | nil) ::
+          {:ok, [Item.t()], WorkspaceSnapshot.activation_id()} | {:error, String.t()}
+  defp candidate_result(ctx) do
+    with {:ok, workspace} <- active_workspace(),
+         {:ok, root, activation_id} <- project_identity(ctx, workspace),
+         {:ok, paths} <- resolve_paths(root, activation_id, workspace) do
+      frecency_map = build_frecency_map()
+      git_status_map = build_git_status_map(root.path)
+      score_map = build_score_map(frecency_map, git_status_map)
+
+      items =
         paths
-        |> Enum.flat_map(&lean_candidate(&1, git_status_map, root))
+        |> Enum.flat_map(&lean_candidate(&1, git_status_map, root, activation_id))
         |> sort_by_score(score_map)
 
-      {:error, msg} ->
-        log_error(msg)
+      {:ok, items, activation_id}
     end
   end
 
   # The picker reads only the Project-owned cache.
   # A managed `:project_rebuilt` event refreshes an open picker after an empty cache fills.
   # Picker tasks never start recursive inventory.
-  @spec resolve_paths(Root.t() | nil, WorkspaceSnapshot.t() | nil) ::
+  @spec resolve_paths(
+          Root.t(),
+          WorkspaceSnapshot.activation_id(),
+          WorkspaceSnapshot.t() | nil
+        ) ::
           {:ok, [String.t()]} | {:error, String.t()}
-  defp resolve_paths(nil, _workspace),
-    do: {:error, "No directory workspace active. Open a folder or switch project."}
+  defp resolve_paths(%Root{}, _activation_id, nil),
+    do: {:error, "Directory workspace is no longer active"}
 
-  defp resolve_paths(%Root{}, nil), do: {:error, "Directory workspace is no longer active"}
+  defp resolve_paths(
+         %Root{},
+         _activation_id,
+         %WorkspaceSnapshot{rebuilding?: true, files: []}
+       ),
+       do: {:error, "Project file inventory is loading"}
+
+  defp resolve_paths(
+         %Root{},
+         _activation_id,
+         %WorkspaceSnapshot{inventory_error: message}
+       )
+       when is_binary(message),
+       do: {:error, "Project file inventory failed: #{message}"}
 
   defp resolve_paths(
          %Root{} = root,
-         %WorkspaceSnapshot{root: active_root, files: files}
+         activation_id,
+         %WorkspaceSnapshot{
+           root: active_root,
+           activation_id: active_activation_id,
+           files: files
+         }
        ) do
-    resolve_matching_paths(files, Path.expand(root.path) == Path.expand(active_root.path))
+    matching? =
+      Path.expand(root.path) == Path.expand(active_root.path) and
+        identity_matches?(activation_id, active_activation_id)
+
+    resolve_matching_paths(files, matching?)
   end
 
   @spec resolve_matching_paths([String.t()], boolean()) ::
@@ -85,9 +172,14 @@ defmodule MingaEditor.UI.Picker.FileSource do
   # and to enrich later (git status stashed in `meta`). Icon, color, two-line
   # description, and the status annotation are built in `enrich/1` for the
   # bounded winners only, so a 50k-file repo never materializes 50k rich items.
-  @spec lean_candidate(String.t(), %{String.t() => atom()}, Root.t()) :: [Item.t()]
-  defp lean_candidate(path, git_status_map, root) do
-    case ProjectFileCandidate.new(root, path) do
+  @spec lean_candidate(
+          String.t(),
+          %{String.t() => atom()},
+          Root.t(),
+          WorkspaceSnapshot.activation_id()
+        ) :: [Item.t()]
+  defp lean_candidate(path, git_status_map, root, activation_id) do
+    case ProjectFileCandidate.new(root, path, activation_id) do
       {:ok, candidate} ->
         [
           %Item{
@@ -132,18 +224,27 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   defp enrich_item(%Item{} = item), do: item
 
-  @spec log_error(String.t()) :: []
-  defp log_error(msg) do
-    Minga.Log.error(:editor, "find_file: #{msg}")
-    []
-  end
-
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: %ProjectFileCandidate{} = candidate}, state) do
-    Log.debug(:editor, "[file_picker] on_select path=#{candidate.path}")
-    open_selected_file(ProjectFileCandidate.resolve(candidate), candidate, state)
+    if current_candidate?(candidate) do
+      Log.debug(:editor, "[file_picker] on_select path=#{candidate.path}")
+      open_selected_file(ProjectFileCandidate.resolve(candidate), candidate, state)
+    else
+      publish_stale_candidate(state)
+    end
   end
+
+  @impl true
+  @spec selection_disposition(Item.t(), term()) :: Source.selection_disposition()
+  def selection_disposition(%Item{id: %ProjectFileCandidate{} = candidate}, _context) do
+    if current_candidate?(candidate),
+      do: :accept,
+      else: {:reject, stale_candidate_message()}
+  end
+
+  def selection_disposition(%Item{}, _context),
+    do: {:reject, "Project file result is unavailable"}
 
   @spec open_selected_file(
           {:ok, String.t()} | {:error, ProjectFileCandidate.error()},
@@ -187,6 +288,14 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp publish_open_error(state, %ProjectFileCandidate{path: path}) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Could not open #{path}")
   end
+
+  @spec publish_stale_candidate(term()) :: term()
+  defp publish_stale_candidate(state),
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, stale_candidate_message())
+
+  @spec stale_candidate_message() :: String.t()
+  defp stale_candidate_message,
+    do: "Project changed; refresh Find file before selecting this result"
 
   @spec existing_target(term()) :: :buffer | :tab
   defp existing_target(state) when state.buffer_lifecycle.buffer_add_context == :preview,
@@ -299,28 +408,73 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp git_status_annotation(:conflict), do: "!"
   defp git_status_annotation(_), do: nil
 
-  @spec project_root(Context.t() | EditorState.t() | nil, WorkspaceSnapshot.t() | nil) ::
-          Root.t() | nil
-  defp project_root(%Context{picker_ui: %{context: %{project_root: nil}}}, _workspace), do: nil
-
-  defp project_root(
-         %Context{picker_ui: %{context: %{project_root: %Root{} = root}}},
+  @spec project_identity(Context.t() | EditorState.t() | nil, WorkspaceSnapshot.t() | nil) ::
+          {:ok, Root.t(), WorkspaceSnapshot.activation_id()} | {:error, String.t()}
+  defp project_identity(
+         %Context{
+           picker_ui: %{
+             context: %{
+               find_file_session: %FindFileSession{
+                 project_root: %Root{} = root,
+                 project_activation_id: activation_id
+               }
+             }
+           }
+         },
          _workspace
+       )
+       when is_integer(activation_id),
+       do: {:ok, root, activation_id}
+
+  defp project_identity(%Context{picker_ui: %{context: %{project_root: nil}}}, _workspace),
+    do: {:error, "No directory workspace active. Open a folder or switch project."}
+
+  defp project_identity(
+         %Context{picker_ui: %{context: %{project_root: %Root{} = root}}},
+         %WorkspaceSnapshot{activation_id: activation_id}
        ),
-       do: root
+       do: {:ok, root, activation_id}
 
-  defp project_root(%Context{file_tree: %{project_root: %Root{} = root}}, _workspace), do: root
-  defp project_root(%EditorState{}, workspace), do: workspace_root(workspace)
-  defp project_root(_ctx, workspace), do: workspace_root(workspace)
+  defp project_identity(
+         %Context{file_tree: %{project_root: %Root{} = root}},
+         %WorkspaceSnapshot{activation_id: activation_id}
+       ),
+       do: {:ok, root, activation_id}
 
-  @spec active_workspace() :: WorkspaceSnapshot.t() | nil
+  defp project_identity(%EditorState{}, workspace), do: workspace_identity(workspace)
+  defp project_identity(_ctx, workspace), do: workspace_identity(workspace)
+
+  @spec active_workspace() :: {:ok, WorkspaceSnapshot.t() | nil} | {:error, String.t()}
   defp active_workspace do
-    Minga.Project.snapshot(Minga.Project)
+    {:ok, Minga.Project.snapshot(Minga.Project)}
   catch
-    :exit, _ -> nil
+    :exit, _ -> {:error, "Project service is unavailable"}
   end
 
-  @spec workspace_root(WorkspaceSnapshot.t() | nil) :: Root.t() | nil
-  defp workspace_root(nil), do: nil
-  defp workspace_root(%WorkspaceSnapshot{root: root}), do: root
+  @spec workspace_identity(WorkspaceSnapshot.t() | nil) ::
+          {:ok, Root.t(), WorkspaceSnapshot.activation_id()} | {:error, String.t()}
+  defp workspace_identity(nil),
+    do: {:error, "No directory workspace active. Open a folder or switch project."}
+
+  defp workspace_identity(%WorkspaceSnapshot{root: root, activation_id: activation_id}),
+    do: {:ok, root, activation_id}
+
+  @spec identity_matches?(
+          {:project_activation, WorkspaceSnapshot.activation_id()}
+          | WorkspaceSnapshot.activation_id()
+          | nil,
+          WorkspaceSnapshot.activation_id()
+        ) :: boolean()
+  defp identity_matches?(nil, _activation_id), do: true
+  defp identity_matches?({:project_activation, activation_id}, activation_id), do: true
+  defp identity_matches?(activation_id, activation_id), do: true
+  defp identity_matches?(_expected, _actual), do: false
+
+  @spec current_activation?(WorkspaceSnapshot.activation_id()) :: boolean()
+  defp current_activation?(activation_id) do
+    case active_workspace() do
+      {:ok, %WorkspaceSnapshot{activation_id: ^activation_id}} -> true
+      _inactive_or_changed -> false
+    end
+  end
 end

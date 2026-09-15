@@ -36,18 +36,19 @@ struct PickerQueryFieldTests {
         let field = PickerNSTextField()
         let editor = NSTextView()
         field.isEditable = true
+        let path = "/tmp/Folder Name/résumé.txt"
 
         coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 0, authoritativeText: "")
-        field.stringValue = "café"
-        editor.string = "café"
+        field.stringValue = path
+        editor.string = path
         coordinator.handleTextChange(field: field, editor: editor)
 
-        #expect(encoder.pickerQueryCalls == [SpyEncoder.PickerQuery(generation: 7, editSeq: 1, text: "café")])
+        #expect(encoder.pickerQueryCalls == [SpyEncoder.PickerQuery(generation: 7, editSeq: 1, text: path)])
 
         editor.setSelectedRange(NSRange(location: 1, length: 2))
         coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 0, authoritativeText: "")
-        #expect(field.stringValue == "café")
-        #expect(editor.string == "café")
+        #expect(field.stringValue == path)
+        #expect(editor.string == path)
         #expect(editor.selectedRange() == NSRange(location: 1, length: 2))
     }
 

@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.UI do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Frontend
+  alias MingaEditor.FindFileWorkflow
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -21,9 +22,9 @@ defmodule MingaEditor.Commands.UI do
     execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.CommandSource) end
   )
 
-  command(:find_file, "Find file in project",
+  command(:find_file, "Find file",
     requires_buffer: false,
-    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.FileSource) end
+    execute: &FindFileWorkflow.open/1
   )
 
   command(:find_file_other_window, "Find file in other window",
@@ -31,7 +32,7 @@ defmodule MingaEditor.Commands.UI do
     execute: fn state ->
       state
       |> MingaEditor.Commands.Movement.execute(:split_vertical)
-      |> PickerUI.open(MingaEditor.UI.Picker.FileSource)
+      |> FindFileWorkflow.open()
     end
   )
 

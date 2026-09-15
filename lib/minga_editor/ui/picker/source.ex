@@ -59,6 +59,12 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback on_select(Picker.item(), MingaEditor.State.t()) :: MingaEditor.State.t()
 
+  @typedoc "Decision made before PickerUI closes a confirmed selection."
+  @type selection_disposition :: :accept | {:stay_open, term()} | {:reject, String.t()}
+
+  @doc "Allows a source to navigate in the current picker or reject a stale selection before close."
+  @callback selection_disposition(Picker.item(), term()) :: selection_disposition()
+
   @doc """
   Called when the user confirms explicitly marked items. Returns the new editor state.
 
@@ -195,7 +201,8 @@ defmodule MingaEditor.UI.Picker.Source do
     keep_open_on_select?: 0,
     async?: 0,
     async_fetch: 1,
-    enrich: 1
+    enrich: 1,
+    selection_disposition: 2
   ]
 
   @doc """
@@ -246,6 +253,28 @@ defmodule MingaEditor.UI.Picker.Source do
           MingaEditor.State.t()
   def on_select(module, item, state, source \\ nil) do
     invoke_state(module, :on_select, [item, state], source, state)
+  end
+
+  @doc "Returns the validated pre-close disposition for a source selection."
+  @spec selection_disposition(
+          module(),
+          Picker.item(),
+          term(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: selection_disposition()
+  def selection_disposition(module, item, context, source \\ nil) do
+    if exported?(module, :selection_disposition, 2) do
+      invoke_value(
+        module,
+        :selection_disposition,
+        [item, context],
+        source,
+        &valid_selection_disposition?/1,
+        {:reject, "Picker selection is unavailable"}
+      )
+    else
+      :accept
+    end
   end
 
   @doc "Runs a validated picker cancellation callback."
@@ -604,6 +633,12 @@ defmodule MingaEditor.UI.Picker.Source do
 
   defp valid_fetch_result?({:error, message}), do: is_binary(message)
   defp valid_fetch_result?(_result), do: false
+
+  @spec valid_selection_disposition?(term()) :: boolean()
+  defp valid_selection_disposition?(:accept), do: true
+  defp valid_selection_disposition?({:stay_open, _context}), do: true
+  defp valid_selection_disposition?({:reject, message}), do: is_binary(message)
+  defp valid_selection_disposition?(_disposition), do: false
 
   @spec exported?(module(), atom(), non_neg_integer()) :: boolean()
   defp exported?(module, function, arity) do

@@ -43,6 +43,7 @@ defmodule MingaEditor.State.Picker do
   fetches.
   """
   @type fetch_revision :: reference() | nil
+  @type fetch_identity :: term() | nil
 
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
@@ -56,6 +57,7 @@ defmodule MingaEditor.State.Picker do
           source_switch: source_switch(),
           load_status: load_status(),
           fetch_revision: fetch_revision(),
+          fetch_identity: fetch_identity(),
           query_generation: query_generation(),
           acknowledged_query_edit_seq: query_edit_seq(),
           activation_offer: ActivationOffer.t()
@@ -72,6 +74,7 @@ defmodule MingaEditor.State.Picker do
             source_switch: :original,
             load_status: :ready,
             fetch_revision: nil,
+            fetch_identity: nil,
             query_generation: 0,
             acknowledged_query_edit_seq: 0,
             activation_offer: %ActivationOffer{generation: 1}
@@ -279,9 +282,18 @@ defmodule MingaEditor.State.Picker do
         layout: layout,
         source_switch: source_switch,
         load_status: :ready,
-        fetch_revision: nil
+        fetch_revision: nil,
+        fetch_identity: nil
     }
     |> refresh_activation_offer()
+  end
+
+  @doc "Retargets an open picker and replaces its immutable source context atomically."
+  @spec retarget_with_context(t(), MingaEditor.UI.Picker.t(), source_target(), term()) :: t()
+  def retarget_with_context(%__MODULE__{} = ps, picker, target, context) do
+    ps
+    |> put_source(picker, target, ps.source_switch)
+    |> put_context(context)
   end
 
   @doc """
@@ -291,12 +303,12 @@ defmodule MingaEditor.State.Picker do
   tuple lets the caller tag the off-path fetch with `revision` so a stale result
   (one whose revision no longer matches the live picker) can be dropped.
   """
-  @spec begin_fetch(t()) :: {t(), reference()}
-  def begin_fetch(%__MODULE__{} = ps) do
+  @spec begin_fetch(t(), fetch_identity()) :: {t(), reference()}
+  def begin_fetch(%__MODULE__{} = ps, identity \\ nil) do
     revision = make_ref()
 
     state =
-      %{ps | fetch_revision: revision, load_status: :loading}
+      %{ps | fetch_revision: revision, fetch_identity: identity, load_status: :loading}
       |> refresh_activation_offer()
 
     {state, revision}
@@ -315,11 +327,25 @@ defmodule MingaEditor.State.Picker do
     %{ps | load_status: {:error, reason}}
   end
 
+  @doc "Invalidates any prior asynchronous result after a ready-state context-only edit."
+  @spec invalidate_fetch(t()) :: t()
+  def invalidate_fetch(%__MODULE__{} = ps) do
+    %{ps | fetch_revision: nil, fetch_identity: nil}
+  end
+
   @doc "Returns whether `revision` is the picker's current (live) fetch revision."
-  @spec current_fetch?(t(), fetch_revision()) :: boolean()
-  def current_fetch?(%__MODULE__{fetch_revision: revision}, revision)
+  @spec current_fetch?(t(), fetch_revision(), fetch_identity()) :: boolean()
+  def current_fetch?(
+        %__MODULE__{fetch_revision: revision, fetch_identity: identity},
+        revision,
+        identity
+      )
       when is_reference(revision),
       do: true
 
-  def current_fetch?(%__MODULE__{}, _revision), do: false
+  def current_fetch?(%__MODULE__{}, _revision, _identity), do: false
+
+  @doc "Returns whether `revision` is current for a source without an additional identity."
+  @spec current_fetch?(t(), fetch_revision()) :: boolean()
+  def current_fetch?(%__MODULE__{} = ps, revision), do: current_fetch?(ps, revision, nil)
 end

@@ -296,13 +296,16 @@ defmodule MingaEditor.PickerUITest do
 
   @spec file_picker_state(String.t()) :: {EditorState.t(), String.t(), binary()}
   defp file_picker_state(tmp_dir) do
+    original_workspace = Project.snapshot()
+    on_exit(fn -> restore_project(original_workspace) end)
     project = Path.join(tmp_dir, "find-file-project")
     path = Path.join(project, "kept.bin")
     bytes = <<0, 1, 2, "keep me">>
     File.mkdir_p!(project)
     File.write!(path, bytes)
     {:ok, root} = Minga.Project.Root.directory(project)
-    {:ok, candidate} = ProjectFileCandidate.new(root, "kept.bin")
+    snapshot = activate_project!(root)
+    {:ok, candidate} = ProjectFileCandidate.new(root, "kept.bin", snapshot.activation_id)
 
     state = TestHelpers.base_state(content: "initial")
 
@@ -327,10 +330,13 @@ defmodule MingaEditor.PickerUITest do
     File.write!(preview_path, "preview A")
     write_confirmation_target!(target_path, target_kind)
     {:ok, root} = Root.directory(project)
-    activate_project!(root)
+    snapshot = activate_project!(root)
 
-    {:ok, preview_candidate} = ProjectFileCandidate.new(root, "preview-a.txt")
-    {:ok, target_candidate} = ProjectFileCandidate.new(root, "target-b.txt")
+    {:ok, preview_candidate} =
+      ProjectFileCandidate.new(root, "preview-a.txt", snapshot.activation_id)
+
+    {:ok, target_candidate} =
+      ProjectFileCandidate.new(root, "target-b.txt", snapshot.activation_id)
 
     {state, origin_buffer} = state_with_origin_file(origin_path, project)
 
@@ -443,7 +449,7 @@ defmodule MingaEditor.PickerUITest do
     Project.recent_files()
   end
 
-  @spec activate_project!(Root.t()) :: :ok
+  @spec activate_project!(Root.t()) :: Minga.Project.WorkspaceSnapshot.t()
   defp activate_project!(%Root{path: path} = root) do
     Minga.Events.subscribe(:project_rebuilt)
     assert {:ok, snapshot} = Project.activate(root)
@@ -455,7 +461,7 @@ defmodule MingaEditor.PickerUITest do
     end
 
     _ = :sys.get_state(Project)
-    :ok
+    Project.snapshot()
   end
 
   @spec restore_project(Minga.Project.WorkspaceSnapshot.t() | nil) :: :ok
@@ -759,13 +765,16 @@ defmodule MingaEditor.PickerUITest do
 
     @tag :tmp_dir
     test "file finder dispatch opens the exact nonselected file", %{tmp_dir: tmp_dir} do
+      original_workspace = Project.snapshot()
+      on_exit(fn -> restore_project(original_workspace) end)
       first_path = Path.join(tmp_dir, "first.txt")
       second_path = Path.join(tmp_dir, "second.txt")
       File.write!(first_path, "first")
       File.write!(second_path, "second")
       {:ok, root} = Root.directory(tmp_dir)
-      {:ok, first} = ProjectFileCandidate.new(root, "first.txt")
-      {:ok, second} = ProjectFileCandidate.new(root, "second.txt")
+      snapshot = activate_project!(root)
+      {:ok, first} = ProjectFileCandidate.new(root, "first.txt", snapshot.activation_id)
+      {:ok, second} = ProjectFileCandidate.new(root, "second.txt", snapshot.activation_id)
 
       picker =
         Picker.new(

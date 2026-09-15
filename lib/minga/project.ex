@@ -462,9 +462,8 @@ defmodule Minga.Project do
   @spec handle_info(term(), t()) :: {:noreply, t()}
   def handle_info({:file_find_done, pid, result}, %{rebuild_pid: pid} = state) do
     state = clear_rebuild(state)
-    files = discovery_files(result)
     root = workspace_path(state.workspace)
-    workspace = WorkspaceSnapshot.complete_rebuild(state.workspace, files)
+    workspace = complete_discovery(state.workspace, result)
 
     Minga.Events.broadcast(
       :project_rebuilt,
@@ -483,13 +482,17 @@ defmodule Minga.Project do
       Minga.Log.warning(:editor, "Project file cache rebuild failed: #{inspect(reason)}")
     end
 
-    {:noreply, clear_rebuild(state)}
+    state = clear_rebuild(state)
+    workspace = fail_workspace_rebuild(state.workspace, "Project file cache rebuild failed")
+    {:noreply, %{state | workspace: workspace}}
   end
 
   def handle_info({:rebuild_timeout, pid}, %{rebuild_pid: pid} = state) do
     cancel_discovery(state, pid)
     Minga.Log.warning(:editor, "Project file cache rebuild timed out")
-    {:noreply, clear_rebuild(state)}
+    state = clear_rebuild(state)
+    workspace = fail_workspace_rebuild(state.workspace, "Project file cache rebuild timed out")
+    {:noreply, %{state | workspace: workspace}}
   end
 
   def handle_info(
@@ -657,7 +660,7 @@ defmodule Minga.Project do
 
       {:error, reason} ->
         Minga.Log.warning(:editor, "Project file cache rebuild rejected: #{reason}")
-        state
+        %{state | workspace: fail_workspace_rebuild(state.workspace, to_string(reason))}
     end
   end
 
@@ -700,13 +703,22 @@ defmodule Minga.Project do
     }
   end
 
-  @spec discovery_files(Minga.Project.FileFind.result()) :: [String.t()]
-  defp discovery_files({:ok, files}), do: files
+  @spec complete_discovery(WorkspaceSnapshot.t(), Minga.Project.FileFind.result()) ::
+          WorkspaceSnapshot.t()
+  defp complete_discovery(workspace, {:ok, files}),
+    do: WorkspaceSnapshot.complete_rebuild(workspace, files)
 
-  defp discovery_files({:error, reason}) do
+  defp complete_discovery(workspace, {:error, reason}) do
     Minga.Log.warning(:editor, "Project file cache rebuild failed: #{reason}")
-    []
+    WorkspaceSnapshot.fail_rebuild(workspace, to_string(reason))
   end
+
+  @spec fail_workspace_rebuild(WorkspaceSnapshot.t() | nil, String.t()) ::
+          WorkspaceSnapshot.t() | nil
+  defp fail_workspace_rebuild(nil, _message), do: nil
+
+  defp fail_workspace_rebuild(%WorkspaceSnapshot{} = workspace, message),
+    do: WorkspaceSnapshot.fail_rebuild(workspace, message)
 
   # ── Persistence ─────────────────────────────────────────────────────────────
 
