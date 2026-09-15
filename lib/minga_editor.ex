@@ -320,6 +320,9 @@ defmodule MingaEditor do
     events_registry = state.extension_surfaces.events_registry
     EventBus.subscribe(:diagnostics_updated, events_registry)
     EventBus.subscribe(:lsp_status_changed, events_registry)
+    EventBus.subscribe(:file_watcher_ready, events_registry)
+    EventBus.subscribe(:buffer_opened, events_registry)
+    EventBus.subscribe(:buffer_closed, events_registry)
 
     # Refresh file tree state when buffers, project files, git, diagnostics, or project roots change.
     EventBus.subscribe(:buffer_saved, events_registry)
@@ -356,6 +359,7 @@ defmodule MingaEditor do
         )
 
     state = MingaEditor.Handlers.BufferRegistry.monitor_buffers(state, all_initial_pids)
+    state = FileWatcherHelpers.restore_authority(state, FileWatcherHelpers.watcher_pid())
 
     # Schedule periodic eviction of inactive tree-sitter parse trees.
     if state.frontend.backend != :headless do

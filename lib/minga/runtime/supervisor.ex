@@ -39,9 +39,9 @@ defmodule Minga.Runtime.Supervisor do
       # moment the Editor boots. It's an independent leaf: its crash
       # restarts only itself under one_for_one.
       MingaEditor.Watchdog,
-      # FileWatcher is a leaf: Editor receives messages from it but doesn't
-      # depend on it structurally. A filesystem watcher flake restarts only
-      # FileWatcher, not the renderer.
+      # FileWatcher is a leaf: its ready event asks Editor to replay the current
+      # watch authority after an independent restart. A filesystem watcher flake
+      # therefore restarts only FileWatcher, not the renderer.
       Minga.FileWatcher,
       # Target-aware completion survives an Editor generation restart.
       Minga.Frontend.WaitRequests,

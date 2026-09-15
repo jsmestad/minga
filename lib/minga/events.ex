@@ -32,6 +32,7 @@ defmodule Minga.Events do
   | `:buffer_opened`  | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
+  | `:file_watcher_ready` | `Minga.FileWatcher.ReadyEvent` | `watcher: pid()` |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `last_commit_message` |
   | `:diagnostics_updated` | `DiagnosticsUpdatedEvent` | `uri: String.t(), source: atom()` |
@@ -345,6 +346,7 @@ defmodule Minga.Events do
           | :power_thermal_state_changed
           | :buffer_fork_conflict
           | :file_written
+          | :file_watcher_ready
           | :extension_updates_available
           | :extension_restart_required
           | :extension_deferred_batch_complete
@@ -380,6 +382,7 @@ defmodule Minga.Events do
           | MingaAgent.Changeset.BudgetExhaustedEvent.t()
           | Minga.Extension.UpdatesAvailableEvent.t()
           | Minga.Extension.DeferredBatchCompleteEvent.t()
+          | Minga.FileWatcher.ReadyEvent.t()
           | map()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
@@ -508,6 +511,7 @@ defmodule Minga.Events do
   @spec broadcast(:agent_hook, AgentHookEvent.t()) :: :ok
   @spec broadcast(:buffer_fork_conflict, map()) :: :ok
   @spec broadcast(:file_written, FileWrittenEvent.t()) :: :ok
+  @spec broadcast(:file_watcher_ready, Minga.FileWatcher.ReadyEvent.t()) :: :ok
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   @spec broadcast(:extension_agent_contributions_started, map()) :: :ok
   @spec broadcast(

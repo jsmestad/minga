@@ -17,7 +17,6 @@ defmodule MingaEditor.Startup do
   alias Minga.Config
   alias MingaEditor.Commands
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
-  alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.Shell.Runtime, as: ShellRuntime
   alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
@@ -111,8 +110,6 @@ defmodule MingaEditor.Startup do
 
     subscribe_port(port_manager)
     subscribe_to_parser(parser_manager)
-    FileWatcherHelpers.maybe_watch_buffer(buffer)
-
     log_safe_mode_startup()
 
     # An empty launch (no file argument) boots into the zero-buffers

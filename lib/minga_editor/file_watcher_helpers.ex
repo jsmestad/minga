@@ -4,14 +4,19 @@ defmodule MingaEditor.FileWatcherHelpers do
 
   Processes file system change notifications and determines whether
   to silently reload a buffer, prompt the user about a conflict, or
-  ignore the event. Also provides helpers for watching new buffers.
+  ignore the event. It also restores the editor's declarative watch intent
+  after FileWatcher starts.
   """
 
   alias Minga.Buffer
   alias Minga.Buffer.State, as: BufState
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias Minga.FileWatcher
+  alias MingaEditor.BufferFileIdentity
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.FileTree.WatcherSync
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
 
   @type state :: EditorState.t()
 
@@ -39,18 +44,44 @@ defmodule MingaEditor.FileWatcherHelpers do
     end
   end
 
-  @doc """
-  Watches a buffer's file path with the file watcher, if both exist.
-  """
-  @spec maybe_watch_buffer(pid() | nil) :: :ok
-  def maybe_watch_buffer(nil), do: :ok
+  @doc "Restores the watcher subscriber and complete intent from the current editor snapshot."
+  @spec restore_authority(state(), pid() | nil) :: state()
+  def restore_authority(%EditorState{} = state, nil), do: state
 
-  def maybe_watch_buffer(buf) do
-    case {watcher_pid(), Buffer.file_path(buf)} do
-      {nil, _} -> :ok
-      {_, nil} -> :ok
-      {watcher, path} -> FileWatcher.watch_path(watcher, path)
+  def restore_authority(%EditorState{} = state, watcher) when is_pid(watcher) do
+    case cancel_stale_watcher_sync(state.effect_scheduler) do
+      :ok ->
+        files = open_file_paths(state)
+        project_dirs = project_watch_dirs(state)
+        :ok = FileWatcher.restore_authority(watcher, self(), files, project_dirs)
+        state
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "File watcher authority restore skipped: watcher sync cancellation failed: #{inspect(reason)}"
+        )
+
+        state
     end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(:editor, "File watcher authority restore failed: #{inspect(reason)}")
+      state
+  end
+
+  @doc "Registers one newly opened file path with the current watcher."
+  @spec watch_opened_path(state(), String.t()) :: state()
+  def watch_opened_path(%EditorState{} = state, path) when is_binary(path) do
+    call_current_watcher(state, &FileWatcher.watch_path(&1, path))
+  end
+
+  @doc "Unregisters one closed file path from the current watcher."
+  @spec unwatch_closed_path(state(), String.t() | :scratch) :: state()
+  def unwatch_closed_path(%EditorState{} = state, :scratch), do: state
+
+  def unwatch_closed_path(%EditorState{} = state, path) when is_binary(path) do
+    call_current_watcher(state, &FileWatcher.unwatch_path(&1, path))
   end
 
   @doc """
@@ -62,6 +93,59 @@ defmodule MingaEditor.FileWatcherHelpers do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec cancel_stale_watcher_sync(EffectScheduler.server() | nil) ::
+          :ok | {:error, :scheduler_unavailable}
+  defp cancel_stale_watcher_sync(nil), do: :ok
+
+  defp cancel_stale_watcher_sync(scheduler) do
+    EffectScheduler.cancel_resource(scheduler, WatcherSync.resource())
+  end
+
+  @spec open_file_paths(state()) :: [String.t()]
+  defp open_file_paths(%EditorState{} = state) do
+    state
+    |> BufferFileIdentity.known_open_pids()
+    |> Enum.flat_map(fn buffer ->
+      case safe_file_path(buffer) do
+        nil -> []
+        path -> [path]
+      end
+    end)
+  end
+
+  @spec project_watch_dirs(state()) :: [String.t()]
+  defp project_watch_dirs(%EditorState{workspace: %{file_tree: file_tree}}) do
+    file_tree
+    |> FileTreeState.watcher_intent()
+    |> Map.fetch!(:expanded_dirs)
+    |> MapSet.to_list()
+  end
+
+  @spec safe_file_path(pid()) :: String.t() | nil
+  defp safe_file_path(buffer) do
+    Buffer.file_path(buffer)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec call_current_watcher(state(), (pid() -> :ok)) :: state()
+  defp call_current_watcher(%EditorState{} = state, callback) do
+    case watcher_pid() do
+      nil -> state
+      watcher -> call_watcher(state, watcher, callback)
+    end
+  end
+
+  @spec call_watcher(state(), pid(), (pid() -> :ok)) :: state()
+  defp call_watcher(%EditorState{} = state, watcher, callback) do
+    :ok = callback.(watcher)
+    state
+  catch
+    :exit, reason ->
+      Minga.Log.warning(:editor, "File watcher registration failed: #{inspect(reason)}")
+      state
+  end
 
   @spec handle_change(
           state(),
