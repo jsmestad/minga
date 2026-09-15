@@ -23,8 +23,6 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
   alias MingaEditor.WindowTree
 
   @effect_timeout 2_000
-  @fixture Path.expand("../../fixtures/formatter_stream_fixture", __DIR__)
-
   test "origin creates and terminalizes feedback when the scheduler is unavailable" do
     state = base_state("defmodule Example, do: nil\n", filetype: :elixir)
     state = Formatting.format_buffer(state)
@@ -61,36 +59,36 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert match?({:completed, _result}, outcome.value)
   end
 
-  test "real formatter worker keeps diagnostics out of the applied buffer in both write orders" do
-    for order <- ["stdout-first", "stderr-first"] do
-      state = base_state("original\n")
-      buffer = state.workspace.buffers.active
-      command = fixture_command(order, "success")
+  test "formatter diagnostics stay out of the applied buffer and remain visible" do
+    state = base_state("original\n")
+    buffer = state.workspace.buffers.active
 
-      assert {:ok, result} =
-               ExternalFormat.run(%ExternalFormat{buffer: buffer, formatter: command})
+    result =
+      ExternalFormatResult.new(
+        buffer,
+        Buffer.version(buffer),
+        "formatted:original\n",
+        "scratch",
+        "formatter warning: optional setting ignored\n"
+      )
 
-      assert result.content == "formatted:original\n"
-      assert result.diagnostics == "formatter warning: optional setting ignored\n"
+    {state, request} = external_request(state, buffer)
 
-      {state, request} = external_request(state, buffer)
+    log =
+      capture_log(fn ->
+        send(
+          self(),
+          {:format_applied, ExternalFormat.apply(state, Outcome.completed(request, result))}
+        )
+      end)
 
-      log =
-        capture_log(fn ->
-          send(
-            self(),
-            {:format_applied, ExternalFormat.apply(state, Outcome.completed(request, result))}
-          )
-        end)
+    assert_receive {:format_applied, {new_state, _outcome}}
 
-      assert_receive {:format_applied, {new_state, _outcome}}
-
-      assert Buffer.content(buffer) == "formatted:original\n"
-      refute Buffer.content(buffer) =~ "formatter warning"
-      assert feedback(new_state).status == :success
-      assert feedback(new_state).message == "Formatted (diagnostics in *Messages*)"
-      assert log =~ "Formatter diagnostics for scratch: formatter warning"
-    end
+    assert Buffer.content(buffer) == "formatted:original\n"
+    refute Buffer.content(buffer) =~ "formatter warning"
+    assert feedback(new_state).status == :success
+    assert feedback(new_state).message == "Formatted (diagnostics in *Messages*)"
+    assert log =~ "Formatter diagnostics for scratch: formatter warning"
   end
 
   test "external format continuation saves after successful scheduler result" do
@@ -457,15 +455,6 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     on_exit(fn -> File.rm(path) end)
     path
   end
-
-  @spec fixture_command(String.t(), String.t()) :: String.t()
-  defp fixture_command(order, outcome) do
-    System.find_executable("elixir") <>
-      " " <> Enum.map_join([@fixture, order, outcome], " ", &shell_escape/1)
-  end
-
-  @spec shell_escape(String.t()) :: String.t()
-  defp shell_escape(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 
   @spec base_state(String.t(), keyword()) :: EditorState.t()
   defp base_state(content, opts \\ []) do

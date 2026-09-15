@@ -9,7 +9,7 @@ defmodule Minga.Editing.FormatterTest do
   alias Minga.Editing.Formatter.Failure
   alias Minga.Editing.Formatter.Result
 
-  @fixture Path.expand("../../fixtures/formatter_stream_fixture", __DIR__)
+  @fixture Path.expand("../../fixtures/formatter_stream_fixture.sh", __DIR__)
 
   setup do
     case Options.start_link() do
@@ -186,8 +186,7 @@ defmodule Minga.Editing.FormatterTest do
 
   @spec fixture_command(String.t(), String.t()) :: String.t()
   defp fixture_command(order, outcome) do
-    System.find_executable("elixir") <>
-      " " <> Enum.map_join([@fixture, order, outcome], " ", &shell_escape/1)
+    "/bin/sh " <> Enum.map_join([@fixture, order, outcome], " ", &shell_escape/1)
   end
 
   @spec shell_escape(String.t()) :: String.t()

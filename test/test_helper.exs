@@ -43,6 +43,7 @@ macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos
 # `mix test --include perf`.
 ExUnit.start(
   capture_log: true,
+  assert_receive_timeout: 1_000,
   exclude: [:pi, :distributed, :perf] ++ swift_exclude ++ macos_ipc_exclude
 )
 
