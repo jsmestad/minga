@@ -2,71 +2,78 @@ import Darwin
 import Foundation
 import Testing
 
-@Suite("BEAMProcessManager Launch Arguments")
-struct BEAMProcessManagerLaunchArgumentsTests {
-    @Test("forwards safe mode, editor, minimal, and positional targets")
-    @MainActor func forwardsBooleanFlagsAndPositionals() {
-        let forwarded = BEAMProcessManager.forwardedCLIArguments(
-            from: [
-                "/Applications/Minga.app/Contents/MacOS/Minga",
-                "--safe",
-                "-Q",
-                "--editor",
-                "--no-context",
-                "--minimal",
-                "--ignored",
-                "README.md",
-                "COMMIT_EDITMSG"
-            ]
+@Suite("BEAM launch configuration")
+struct BEAMLaunchConfigurationTests {
+    struct WorkingDirectoryCase: Sendable {
+        let currentDirectory: String
+        let validHomeDirectory: String
+        let expectedDirectory: String
+    }
+
+    @Test("builds one complete normal launch configuration")
+    func buildsNormalConfiguration() {
+        let configuration = makeConfiguration(
+            appArguments: ["Minga", "--editor", "/tmp/path with space", "--ignored"],
+            inheritedEnvironment: ["HOME": "/Users/alice", "LANG": "en_US.UTF-8"],
+            currentDirectoryURL: URL(fileURLWithPath: "/Users/alice/code/minga"),
+            validHomeDirectoryURL: URL(fileURLWithPath: "/Users/alice")
         )
 
-        #expect(forwarded == [
+        #expect(configuration == BEAMLaunchConfiguration(
+            executableURL: URL(
+                fileURLWithPath: "/Applications/Minga.app/Contents/Resources/release/bin/minga_macos"
+            ),
+            arguments: ["start"],
+            environment: [
+                "HOME": "/Users/alice",
+                "LANG": "en_US.UTF-8",
+                "MINGA_APP_EUID": "501",
+                "MINGA_APP_INSTANCE_ID": "instance-123",
+                "MINGA_APP_PID": "1234",
+                "MINGA_CLI_ARGS_B64": "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U",
+                "MINGA_EXPECT_DISTRIBUTION": "0",
+                "MINGA_IPC_RUNTIME_PARENT": "/private/tmp/user",
+                "MINGA_PORT_MODE": "connected",
+                "MINGA_RANDOM_RELEASE_COOKIE": "1",
+                "PWD": "/Users/alice/code/minga",
+                "RELEASE_COOKIE": "cookie-1",
+                "RELEASE_DISTRIBUTION": "none"
+            ],
+            workingDirectoryURL: URL(fileURLWithPath: "/Users/alice/code/minga")
+        ))
+    }
+
+    @Test("forwards safe mode, value flags, and positional targets while isolating the launch nonce")
+    func buildsSafeConfiguration() {
+        let arguments = [
+            "Minga",
             "--safe",
             "-Q",
             "--editor",
             "--no-context",
             "--minimal",
-            "README.md",
-            "COMMIT_EDITMSG"
-        ])
-    }
+            "--config", "/tmp/minga.exs", "one.ex",
+            "--debug-log", "/tmp/minga.log", "two.ex",
+            "-D", "/tmp/minga-short.log", "three.ex",
+            "--minga-launch-nonce", "nonce-123",
+            "--ignored"
+        ]
+        let configuration = makeConfiguration(appArguments: arguments, launchNonce: "nonce-123")
 
-    @Test("forwards config and both debug log value flags with their values")
-    @MainActor func forwardsValueFlags() {
-        let forwarded = BEAMProcessManager.forwardedCLIArguments(
-            from: [
-                "/Applications/Minga.app/Contents/MacOS/Minga",
-                "--config", "/tmp/minga.exs", "one.ex",
-                "--debug-log", "/tmp/minga.log", "two.ex",
-                "-D", "/tmp/minga-short.log", "three.ex"
-            ]
-        )
-
-        #expect(forwarded == [
+        #expect(BEAMLaunchConfiguration.launchNonce(from: arguments) == "nonce-123")
+        #expect(configuration.environment["MINGA_CLI_ARGS_B64"] == encoded([
+            "--safe", "-Q", "--editor", "--no-context", "--minimal",
             "--config", "/tmp/minga.exs", "one.ex",
             "--debug-log", "/tmp/minga.log", "two.ex",
             "-D", "/tmp/minga-short.log", "three.ex"
-        ])
+        ]))
+        #expect(configuration.environment["MINGA_SAFE_MODE"] == "1")
+        #expect(configuration.environment["MINGA_LAUNCH_NONCE"] == "nonce-123")
     }
 
-    @Test("encodes release CLI arguments without losing spaces")
-    @MainActor func encodesCLIArguments() {
-        #expect(
-            BEAMProcessManager.encodedCLIArguments(["--editor", "/tmp/path with space"])
-                == "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U"
-        )
-    }
-
-    @Test("extracts but does not forward the internal launch nonce")
-    @MainActor func isolatesLaunchNonce() {
-        let arguments = ["Minga", "--minimal", "--minga-launch-nonce", "nonce-123", "README.md"]
-        #expect(BEAMProcessManager.internalLaunchNonce(from: arguments) == "nonce-123")
-        #expect(BEAMProcessManager.forwardedCLIArguments(from: arguments) == ["--minimal", "README.md"])
-    }
-
-    @Test("clears every inherited pre-VM option and requires local preboot distribution")
-    @MainActor func sanitizesPreVMEnvironment() {
-        let environment = BEAMProcessManager.sanitizedPreVMEnvironment([
+    @Test("removes inherited distribution flags from the complete configuration")
+    func sanitizesPreVMEnvironment() {
+        let configuration = makeConfiguration(inheritedEnvironment: [
             "ERL_AFLAGS": "-sname inherited",
             "ERL_FLAGS": "-name inherited@example",
             "ERL_ZFLAGS": "-sname inherited_zflags",
@@ -74,6 +81,7 @@ struct BEAMProcessManagerLaunchArgumentsTests {
             "RELEASE_VM_ARGS": "/tmp/inherited.vm.args",
             "HOME": "/Users/alice"
         ])
+        let environment = configuration.environment
 
         #expect(environment["ERL_AFLAGS"] == nil)
         #expect(environment["ERL_FLAGS"] == nil)
@@ -86,120 +94,127 @@ struct BEAMProcessManagerLaunchArgumentsTests {
     }
 
     @Test("uses the confstr Darwin per-user temporary directory for native IPC")
-    @MainActor func usesDarwinTemporaryDirectoryForIPC() {
+    @MainActor func usesDarwinTemporaryDirectoryForIPC() throws {
         let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
         #expect(length > 1)
         var buffer = [CChar](repeating: 0, count: length)
         #expect(confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) == length)
 
-        let expected = URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+        let path = try #require(String(
+            bytes: buffer.dropLast().map { UInt8(bitPattern: $0) },
+            encoding: .utf8
+        ))
+        let expected = URL(fileURLWithPath: path, isDirectory: true)
             .standardizedFileURL
-        #expect(BEAMProcessManager.ipcRuntimeParentURL() == expected)
+        #expect(BEAMLaunchInputAcquirer.ipcRuntimeParentURL() == expected)
     }
 
-    @Test("uses HOME when launch services provides root as cwd")
-    @MainActor func usesHomeForRootWorkingDirectory() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/",
-            environment: ["HOME": "/Users/alice"],
+    @Test("selects the working directory from resolved launch inputs", arguments: [
+        WorkingDirectoryCase(
+            currentDirectory: "/",
+            validHomeDirectory: "/Users/alice",
+            expectedDirectory: "/Users/alice"
+        ),
+        WorkingDirectoryCase(
+            currentDirectory: "/Applications",
+            validHomeDirectory: "/Users/alice",
+            expectedDirectory: "/Users/alice"
+        ),
+        WorkingDirectoryCase(
+            currentDirectory: "/System/Applications",
+            validHomeDirectory: "/Users/alice",
+            expectedDirectory: "/Users/alice"
+        ),
+        WorkingDirectoryCase(
+            currentDirectory: "/Applications/Minga.app/Contents/MacOS",
+            validHomeDirectory: "/Users/alice",
+            expectedDirectory: "/Users/alice"
+        ),
+        WorkingDirectoryCase(
+            currentDirectory: "/Users/alice/code/minga",
+            validHomeDirectory: "/Users/alice",
+            expectedDirectory: "/Users/alice/code/minga"
+        )
+    ])
+    func selectsWorkingDirectory(testCase: WorkingDirectoryCase) {
+        let configuration = makeConfiguration(
+            currentDirectoryURL: URL(fileURLWithPath: testCase.currentDirectory),
+            validHomeDirectoryURL: URL(fileURLWithPath: testCase.validHomeDirectory)
+        )
+
+        #expect(configuration.workingDirectoryURL.path == testCase.expectedDirectory)
+        #expect(configuration.environment["PWD"] == testCase.expectedDirectory)
+    }
+
+    @Test("keeps a placeholder cwd when no valid HOME directory was acquired")
+    func keepsCurrentDirectoryWithoutValidHome() {
+        let configuration = makeConfiguration(
+            inheritedEnvironment: ["HOME": "/Users/alice"],
+            currentDirectoryURL: URL(fileURLWithPath: "/Applications"),
+            validHomeDirectoryURL: nil
+        )
+
+        #expect(configuration.workingDirectoryURL.path == "/Applications")
+        #expect(configuration.environment["PWD"] == "/Applications")
+    }
+
+    @Test("fresh launch inputs change runtime values while identity and nonce remain stable")
+    func rebuildsConfigurationForRestart() {
+        let first = makeConfiguration(
+            inheritedEnvironment: ["HOME": "/Users/alice", "CURRENT_INPUT": "first"],
+            currentDirectoryURL: URL(fileURLWithPath: "/Users/alice/first"),
+            launchNonce: "stable-nonce",
+            releaseCookie: "cookie-1"
+        )
+        let restarted = makeConfiguration(
+            inheritedEnvironment: ["HOME": "/Users/alice", "CURRENT_INPUT": "second"],
+            currentDirectoryURL: URL(fileURLWithPath: "/Users/alice/second"),
+            launchNonce: "stable-nonce",
+            releaseCookie: "cookie-2"
+        )
+
+        #expect(first.environment["CURRENT_INPUT"] == "first")
+        #expect(restarted.environment["CURRENT_INPUT"] == "second")
+        #expect(first.environment["RELEASE_COOKIE"] == "cookie-1")
+        #expect(restarted.environment["RELEASE_COOKIE"] == "cookie-2")
+        #expect(first.environment["RELEASE_COOKIE"] != restarted.environment["RELEASE_COOKIE"])
+        #expect(first.environment["MINGA_APP_INSTANCE_ID"] == restarted.environment["MINGA_APP_INSTANCE_ID"])
+        #expect(first.environment["MINGA_LAUNCH_NONCE"] == restarted.environment["MINGA_LAUNCH_NONCE"])
+        #expect(first.workingDirectoryURL != restarted.workingDirectoryURL)
+    }
+
+    private func makeConfiguration(
+        appArguments: [String] = ["Minga"],
+        inheritedEnvironment: [String: String] = ["HOME": "/Users/alice"],
+        currentDirectoryURL: URL = URL(fileURLWithPath: "/Users/alice/code/minga"),
+        validHomeDirectoryURL: URL? = URL(fileURLWithPath: "/Users/alice"),
+        launchNonce: String? = nil,
+        releaseCookie: String = "cookie-1"
+    ) -> BEAMLaunchConfiguration {
+        BEAMLaunchConfiguration.build(from: BEAMLaunchInputs(
+            executableURL: URL(fileURLWithPath: "/Applications/Minga.app/Contents/Resources/release/bin/minga_macos"),
+            appArguments: appArguments,
+            inheritedEnvironment: inheritedEnvironment,
+            currentDirectoryURL: currentDirectoryURL,
             bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
-            fileExists: { path in path == "/Users/alice" }
-        )
-
-        #expect(workingDirectory.path == "/Users/alice")
+            validHomeDirectoryURL: validHomeDirectoryURL,
+            ipcRuntimeParentURL: URL(fileURLWithPath: "/private/tmp/user"),
+            appPID: 1234,
+            appEUID: 501,
+            appInstanceID: "instance-123",
+            launchNonce: launchNonce,
+            releaseCookie: releaseCookie
+        ))
     }
 
-    @Test("uses HOME when cwd is the Applications folder")
-    @MainActor func usesHomeForApplicationsWorkingDirectory() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Applications",
-            environment: ["HOME": "/Users/alice"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
-            fileExists: { path in path == "/Users/alice" }
-        )
-
-        #expect(workingDirectory.path == "/Users/alice")
-    }
-
-    @Test("uses HOME when cwd is System Applications")
-    @MainActor func usesHomeForSystemApplicationsWorkingDirectory() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/System/Applications",
-            environment: ["HOME": "/Users/alice"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
-            fileExists: { path in path == "/Users/alice" }
-        )
-
-        #expect(workingDirectory.path == "/Users/alice")
-    }
-
-    @Test("uses HOME when cwd is inside the app bundle")
-    @MainActor func usesHomeForBundleWorkingDirectory() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Applications/Minga.app/Contents/MacOS",
-            environment: ["HOME": "/Users/alice"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
-            fileExists: { path in path == "/Users/alice" }
-        )
-
-        #expect(workingDirectory.path == "/Users/alice")
-    }
-
-    @Test("keeps a real terminal cwd")
-    @MainActor func keepsRealTerminalWorkingDirectory() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Users/alice/code/minga",
-            environment: ["HOME": "/Users/alice"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app")
-        )
-
-        #expect(workingDirectory.path == "/Users/alice/code/minga")
-    }
-
-    @Test("uses HOME for /Applications even with TERM set")
-    @MainActor func usesHomeForApplicationsEvenWithTerm() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Applications",
-            environment: ["HOME": "/Users/alice", "TERM": "xterm-256color"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
-            fileExists: { path in path == "/Users/alice" }
-        )
-
-        #expect(workingDirectory.path == "/Users/alice")
-    }
-
-    @Test("keeps cwd when HOME is missing")
-    @MainActor func keepsCurrentDirectoryWhenHomeIsMissing() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Applications",
-            environment: [:],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app")
-        )
-
-        #expect(workingDirectory.path == "/Applications")
-    }
-
-    @Test("keeps cwd when HOME is empty")
-    @MainActor func keepsCurrentDirectoryWhenHomeIsEmpty() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Applications",
-            environment: ["HOME": ""],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app")
-        )
-
-        #expect(workingDirectory.path == "/Applications")
-    }
-
-    @Test("keeps cwd when HOME is not an existing directory")
-    @MainActor func keepsCurrentDirectoryWhenHomeIsInvalid() {
-        let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
-            currentDirectoryPath: "/Applications",
-            environment: ["HOME": "/Users/alice"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
-            fileExists: { path in path == "/Applications" }
-        )
-
-        #expect(workingDirectory.path == "/Applications")
+    private func encoded(_ arguments: [String]) -> String {
+        arguments.map { argument in
+            Data(argument.utf8)
+                .base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }.joined(separator: ",")
     }
 }
 
@@ -299,7 +314,7 @@ struct BEAMProcessManagerTerminationTests {
             processIsRunning: true,
             exitIntent: .appShutdown,
             expected: .rejectDuringShutdown
-        ),
+        )
     ])
     func transportRecoveryDisposition(testCase: TransportRestartCase) {
         let disposition = BEAMProcessManager.transportRestartDisposition(
