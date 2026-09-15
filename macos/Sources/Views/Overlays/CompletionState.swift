@@ -16,11 +16,9 @@ public struct CompletionItem: Identifiable {
     public let detail: String
 }
 
-@MainActor
-@Observable
-public final class CompletionState {
-    public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, items: [CompletionItem] = [], documentation: String = "") {
-        self.visible = visible
+/// Complete presentation value for one visible completion popup.
+public struct CompletionContent {
+    fileprivate init(anchorRow: Int, anchorCol: Int, selectedIndex: Int, previewSelectedIndex: Int? = nil, items: [CompletionItem], documentation: String) {
         self.anchorRow = anchorRow
         self.anchorCol = anchorCol
         self.selectedIndex = selectedIndex
@@ -28,15 +26,14 @@ public final class CompletionState {
         self.items = items
         self.documentation = documentation
     }
-    public var visible: Bool = false
-    public var anchorRow: Int = 0
-    public var anchorCol: Int = 0
-    public var selectedIndex: Int = 0
-    public var previewSelectedIndex: Int?
-    public var items: [CompletionItem] = []
-    /// Documentation preview for the selected item (markdown or plaintext from the
-    /// LSP completion item). Empty when the selected item has no docs.
-    public var documentation: String = ""
+
+    public let anchorRow: Int
+    public let anchorCol: Int
+    public let selectedIndex: Int
+    public fileprivate(set) var previewSelectedIndex: Int?
+    public let items: [CompletionItem]
+    /// Documentation preview for the selected item.
+    public let documentation: String
 
     public var effectiveSelectedIndex: Int {
         if let preview = previewSelectedIndex, preview >= 0, preview < items.count {
@@ -44,32 +41,43 @@ public final class CompletionState {
         }
         return selectedIndex
     }
+}
+
+@MainActor
+@Observable
+public final class CompletionState {
+    public init() {}
+
+    /// The complete visible presentation, or `nil` when hidden.
+    public private(set) var content: CompletionContent?
 
     public func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem], documentation: String) {
-        self.visible = visible
-        self.anchorRow = Int(anchorRow)
-        self.anchorCol = Int(anchorCol)
-        self.selectedIndex = Int(selectedIndex)
-        self.previewSelectedIndex = nil
-        self.documentation = documentation
-        self.items = rawItems.enumerated().map { i, item in
+        guard visible else {
+            hide()
+            return
+        }
+
+        let items = rawItems.enumerated().map { i, item in
             CompletionItem(id: i, kind: item.kind, label: item.label, detail: item.detail)
         }
+        content = CompletionContent(
+            anchorRow: Int(anchorRow), anchorCol: Int(anchorCol),
+            selectedIndex: Int(selectedIndex), items: items,
+            documentation: documentation
+        )
     }
 
     public func previewNavigation(delta: Int) -> Bool {
-        guard visible, !items.isEmpty else { return false }
-        let current = previewSelectedIndex ?? selectedIndex
-        let next = min(max(current + delta, 0), items.count - 1)
+        guard var content, !content.items.isEmpty else { return false }
+        let current = content.previewSelectedIndex ?? content.selectedIndex
+        let next = min(max(current + delta, 0), content.items.count - 1)
         guard next != current else { return false }
-        previewSelectedIndex = next
+        content.previewSelectedIndex = next
+        self.content = content
         return true
     }
 
     public func hide() {
-        visible = false
-        items = []
-        previewSelectedIndex = nil
-        documentation = ""
+        content = nil
     }
 }

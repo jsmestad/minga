@@ -31,11 +31,9 @@ public struct HoverLine: Identifiable {
     public let segments: [HoverSegment]
 }
 
-@MainActor
-@Observable
-public final class HoverPopupState {
-    public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, focused: Bool = false, scrollOffset: Int = 0, lines: [HoverLine] = [], openActionName: String? = nil) {
-        self.visible = visible
+/// Complete presentation value for one visible hover popup.
+public struct HoverPopupContent {
+    fileprivate init(anchorRow: Int, anchorCol: Int, focused: Bool, scrollOffset: Int, lines: [HoverLine], openActionName: String?) {
         self.anchorRow = anchorRow
         self.anchorCol = anchorCol
         self.focused = focused
@@ -43,27 +41,37 @@ public final class HoverPopupState {
         self.lines = lines
         self.openActionName = openActionName
     }
-    public var visible: Bool = false
-    public var anchorRow: Int = 0
-    public var anchorCol: Int = 0
-    public var focused: Bool = false
-    public var scrollOffset: Int = 0
-    public var lines: [HoverLine] = []
-    public var openActionName: String? = nil
+
+    public let anchorRow: Int
+    public let anchorCol: Int
+    public let focused: Bool
+    public let scrollOffset: Int
+    public let lines: [HoverLine]
+    public fileprivate(set) var openActionName: String?
 
     public var visibleLines: [HoverLine] {
         Array(lines.dropFirst(min(scrollOffset, lines.count)))
     }
+}
+
+@MainActor
+@Observable
+public final class HoverPopupState {
+    public init() {}
+
+    /// The complete visible presentation, or `nil` when hidden.
+    public private(set) var content: HoverPopupContent?
 
     public func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
-                focused: Bool, scrollOffset: UInt16, rawLines: [Wire.HoverLine]) {
-        self.visible = visible
-        self.anchorRow = Int(anchorRow)
-        self.anchorCol = Int(anchorCol)
-        self.focused = focused
-        self.scrollOffset = Int(scrollOffset)
+                focused: Bool, scrollOffset: UInt16, rawLines: [Wire.HoverLine],
+                openAction: (visible: Bool, name: String)? = nil) {
+        guard visible else {
+            hide()
+            return
+        }
+
         var segId = 0
-        self.lines = rawLines.enumerated().map { i, line in
+        let lines = rawLines.enumerated().map { i, line in
             let segments = line.segments.map { seg in
                 let s = HoverSegment(id: segId, style: seg.style, fgColor: seg.fgColor, flags: seg.flags, text: seg.text)
                 segId += 1
@@ -71,19 +79,27 @@ public final class HoverPopupState {
             }
             return HoverLine(id: i, lineType: line.lineType, segments: segments)
         }
+        content = HoverPopupContent(
+            anchorRow: Int(anchorRow), anchorCol: Int(anchorCol), focused: focused,
+            scrollOffset: Int(scrollOffset), lines: lines,
+            openActionName: resolvedOpenActionName(openAction)
+        )
     }
 
-    public func setOpenAction(name: String) {
-        openActionName = name.isEmpty ? nil : name
-    }
-
-    public func clearOpenAction() {
-        openActionName = nil
+    /// Applies an independently delivered hover action without changing popup visibility.
+    public func updateOpenAction(visible: Bool, name: String) {
+        let actionName = visible && !name.isEmpty ? name : nil
+        guard var content else { return }
+        content.openActionName = actionName
+        self.content = content
     }
 
     public func hide() {
-        visible = false
-        lines = []
-        openActionName = nil
+        content = nil
+    }
+
+    private func resolvedOpenActionName(_ update: (visible: Bool, name: String)?) -> String? {
+        guard let update else { return content?.openActionName }
+        return update.visible && !update.name.isEmpty ? update.name : nil
     }
 }

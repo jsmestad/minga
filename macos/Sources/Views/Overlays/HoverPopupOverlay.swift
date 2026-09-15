@@ -21,13 +21,13 @@ public struct HoverPopupOverlay: View {
 
     private let maxWidth: CGFloat = 500
 
-    private var showsScrollIndicators: Bool {
-        state.focused || state.scrollOffset > 0 || state.lines.count > 12
+    private func showsScrollIndicators(_ content: HoverPopupContent) -> Bool {
+        content.focused || content.scrollOffset > 0 || content.lines.count > 12
     }
 
     public var body: some View {
-        if state.visible && !state.lines.isEmpty {
-            popupContent
+        if let content = state.content, !content.lines.isEmpty {
+            popupContent(content)
                 .frame(maxWidth: maxWidth)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -37,10 +37,10 @@ public struct HoverPopupOverlay: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(
-                            state.focused
+                            content.focused
                                 ? theme.accent.opacity(0.8)
                                 : theme.popupBorder.opacity(0.5),
-                            lineWidth: state.focused ? 2 : 1
+                            lineWidth: content.focused ? 2 : 1
                         )
                 )
                 // Always intercept mouse events inside the popup (#2629). SwiftUI
@@ -54,14 +54,14 @@ public struct HoverPopupOverlay: View {
     }
 
     @ViewBuilder
-    private var popupContent: some View {
-        ScrollView(.vertical, showsIndicators: showsScrollIndicators) {
+    private func popupContent(_ content: HoverPopupContent) -> some View {
+        ScrollView(.vertical, showsIndicators: showsScrollIndicators(content)) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(state.visibleLines) { line in
+                ForEach(content.visibleLines) { line in
                     lineView(line)
                 }
 
-                if state.openActionName != nil {
+                if content.openActionName != nil {
                     Divider()
                         .background(theme.popupBorder.opacity(0.3))
                         .padding(.vertical, 4)

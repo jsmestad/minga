@@ -260,7 +260,7 @@ private struct ObservationOwnerProbeMatrix: View {
             ObservationOwnerProbe(point: .shellChrome, owner: statusBar, materialize: { $0.message }, recorder: recorder)
             ObservationOwnerProbe(point: .bottomPanel, owner: bottomPanel, materialize: { "\($0.userHeight)" }, recorder: recorder)
             ObservationOwnerProbe(point: .sidebar, owner: sidebar, materialize: { $0.activeId }, recorder: recorder)
-            ObservationOwnerProbe(point: .editorOverlay, owner: completion, materialize: { $0.items.first?.label ?? "" }, recorder: recorder)
+            ObservationOwnerProbe(point: .editorOverlay, owner: completion, materialize: { $0.content?.items.first?.label ?? "" }, recorder: recorder)
             ObservationOwnerProbe(point: .windowOverlay, owner: picker, materialize: { $0.items.first?.label ?? "" }, recorder: recorder)
             ObservationOwnerProbe(point: .agent, owner: agentContext, materialize: { $0.task }, recorder: recorder)
             ObservationOwnerProbe(point: .extensionOverlay, owner: extensionOverlay, materialize: { $0.entries.first?.content ?? "" }, recorder: recorder)

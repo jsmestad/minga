@@ -19,11 +19,11 @@ public struct SignatureHelpOverlay: View {
     private let maxWidth: CGFloat = 600
 
     public var body: some View {
-        if state.visible && !state.signatures.isEmpty {
+        if let content = state.content, !content.signatures.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                signatureLabel
+                signatureLabel(content)
 
-                if let paramDoc = activeParameterDoc, !paramDoc.isEmpty {
+                if let paramDoc = activeParameterDoc(content), !paramDoc.isEmpty {
                     Divider()
                         .background(theme.popupBorder.opacity(0.3))
 
@@ -33,8 +33,8 @@ public struct SignatureHelpOverlay: View {
                         .lineLimit(4)
                 }
 
-                if state.signatures.count > 1 {
-                    Text("\(state.activeSignature + 1)/\(state.signatures.count)")
+                if content.signatures.count > 1 {
+                    Text("\(content.activeSignature + 1)/\(content.signatures.count)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(theme.popupFg.opacity(0.4))
                 }
@@ -57,33 +57,33 @@ public struct SignatureHelpOverlay: View {
     }
 
     /// The active signature, or nil if the index is out of bounds.
-    private var activeSignatureInfo: SignatureInfo? {
-        guard state.activeSignature < state.signatures.count else { return nil }
-        return state.signatures[state.activeSignature]
+    private func activeSignatureInfo(_ content: SignatureHelpContent) -> SignatureInfo? {
+        guard content.activeSignature < content.signatures.count else { return nil }
+        return content.signatures[content.activeSignature]
     }
 
     /// Documentation for the active parameter, if available.
-    private var activeParameterDoc: String? {
-        guard let sig = activeSignatureInfo,
-              state.activeParameter < sig.parameters.count else { return nil }
-        let doc = sig.parameters[state.activeParameter].documentation
+    private func activeParameterDoc(_ content: SignatureHelpContent) -> String? {
+        guard let sig = activeSignatureInfo(content),
+              content.activeParameter < sig.parameters.count else { return nil }
+        let doc = sig.parameters[content.activeParameter].documentation
         return doc.isEmpty ? nil : doc
     }
 
     @ViewBuilder
-    private var signatureLabel: some View {
-        if let sig = activeSignatureInfo {
-            highlightedSignature(sig)
+    private func signatureLabel(_ content: SignatureHelpContent) -> some View {
+        if let sig = activeSignatureInfo(content) {
+            highlightedSignature(sig, content: content)
                 .font(.system(size: 12, design: .monospaced))
         }
     }
 
     /// Renders the signature label with the active parameter highlighted.
     @ViewBuilder
-    private func highlightedSignature(_ sig: SignatureInfo) -> some View {
+    private func highlightedSignature(_ sig: SignatureInfo, content: SignatureHelpContent) -> some View {
         let label = sig.label
-        let activeParam = state.activeParameter < sig.parameters.count
-            ? sig.parameters[state.activeParameter]
+        let activeParam = content.activeParameter < sig.parameters.count
+            ? sig.parameters[content.activeParameter]
             : nil
 
         if let param = activeParam, let range = label.range(of: param.label) {

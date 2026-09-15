@@ -24,23 +24,13 @@ public struct FloatPopupOverlay: View {
         reduceMotion ? 0 : 0.15
     }
 
-    /// Preferred maximum panel width in points, derived from cell dimensions.
-    private var panelMaxWidth: CGFloat {
-        CGFloat(state.width) * cellWidth
-    }
-
-    /// Preferred maximum panel height in points, derived from cell dimensions.
-    private var panelMaxHeight: CGFloat {
-        CGFloat(state.height) * cellHeight
-    }
-
     public var body: some View {
-        if state.visible && !state.lines.isEmpty {
+        if let content = state.content, !content.lines.isEmpty {
             VStack(spacing: 0) {
                 // Title bar
-                if !state.title.isEmpty {
+                if !content.title.isEmpty {
                     HStack {
-                        Text(state.title)
+                        Text(content.title)
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundStyle(theme.popupFg)
                         Spacer()
@@ -56,7 +46,7 @@ public struct FloatPopupOverlay: View {
                 // Content area
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(state.lines.enumerated()), id: \.offset) { _, line in
+                        ForEach(Array(content.lines.enumerated()), id: \.offset) { _, line in
                             Text(line.isEmpty ? " " : line)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(theme.popupFg.opacity(0.9))
@@ -68,7 +58,7 @@ public struct FloatPopupOverlay: View {
                     .padding(.vertical, 8)
                 }
             }
-            .frame(maxWidth: panelMaxWidth, maxHeight: panelMaxHeight)
+            .frame(maxWidth: CGFloat(content.width) * cellWidth, maxHeight: CGFloat(content.height) * cellHeight)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.popupBg)

@@ -193,29 +193,29 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if input.signatureHelpState.visible {
-                anchoredOverlay(row: input.signatureHelpState.anchorRow, col: input.signatureHelpState.anchorCol, preferredSide: .above, maxHeight: 220) { _ in
+            if let content = input.signatureHelpState.content {
+                anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .above, maxHeight: 220) { _ in
                     SignatureHelpOverlay(state: input.signatureHelpState)
                         .allowsHitTesting(false)
                 }
                 .zIndex(10)
             }
 
-            if input.hoverPopupState.visible {
-                anchoredOverlay(row: input.hoverPopupState.anchorRow, col: input.hoverPopupState.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
+            if let content = input.hoverPopupState.content {
+                anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
                     HoverPopupOverlay(state: input.hoverPopupState, encoder: encoder)
                         .allowsHitTesting(true)
                 }
                 .zIndex(20)
             }
 
-            if input.completionState.visible {
-                anchoredOverlay(row: input.completionState.anchorRow, col: input.completionState.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
+            if let content = input.completionState.content {
+                anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
                     CompletionOverlay(state: input.completionState, encoder: encoder)
                         .background {
                             probe(
                                 .editorOverlay,
-                                value: input.completionState.items.map(\.label).joined(separator: ","),
+                                value: content.items.map(\.label).joined(separator: ","),
                                 stateObject: input.completionState
                             )
                         }
@@ -1191,7 +1191,7 @@ public struct ContentView<EditorSurface: View>: View {
         }
 
 
-        if input.floatPopupState.visible {
+        if input.floatPopupState.content != nil {
             let geo = editorGeometry()
             FloatPopupOverlay(
                 state: input.floatPopupState,

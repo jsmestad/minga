@@ -190,7 +190,60 @@ struct PreparedChromeUpdates {
     let commands: [RenderCommand]
     let transcript: AgentTranscriptSnapshot?
 }
-struct PreparedOverlayUpdates: Sendable { let commands: [RenderCommand] }
+struct PreparedHoverPopupPayload: Sendable {
+    let visible: Bool
+    let anchorRow: UInt16
+    let anchorCol: UInt16
+    let focused: Bool
+    let scrollOffset: UInt16
+    let lines: [Wire.HoverLine]
+}
+
+struct PreparedHoverActionUpdate: Sendable {
+    let visible: Bool
+    let name: String
+}
+
+/// One transaction-local hover presentation update. Popup and action commands
+/// are paired here so protocol arrival order cannot create owner state.
+struct PreparedHoverPopupUpdate: Sendable {
+    let payload: PreparedHoverPopupPayload?
+    let action: PreparedHoverActionUpdate?
+}
+
+struct PreparedOverlayUpdates: Sendable {
+    let commands: [RenderCommand]
+    let hoverPopup: PreparedHoverPopupUpdate?
+
+    init(commands: [RenderCommand]) {
+        var ordinaryCommands: [RenderCommand] = []
+        var hoverPayload: PreparedHoverPopupPayload?
+        var hoverAction: PreparedHoverActionUpdate?
+
+        for command in commands {
+            switch command {
+            case .guiHoverPopup(let visible, let anchorRow, let anchorCol, let focused, let scrollOffset, let lines):
+                hoverPayload = PreparedHoverPopupPayload(
+                    visible: visible,
+                    anchorRow: anchorRow,
+                    anchorCol: anchorCol,
+                    focused: focused,
+                    scrollOffset: scrollOffset,
+                    lines: lines
+                )
+            case .guiHoverAction(let visible, let name):
+                hoverAction = PreparedHoverActionUpdate(visible: visible, name: name)
+            default:
+                ordinaryCommands.append(command)
+            }
+        }
+
+        self.commands = ordinaryCommands
+        self.hoverPopup = hoverPayload == nil && hoverAction == nil
+            ? nil
+            : PreparedHoverPopupUpdate(payload: hoverPayload, action: hoverAction)
+    }
+}
 struct PreparedResourceUpdates: Sendable { let commands: [RenderCommand] }
 struct PreparedFocusUpdates: Sendable { let commands: [RenderCommand] }
 struct PreparedMetadataUpdates: Sendable { let commands: [RenderCommand] }

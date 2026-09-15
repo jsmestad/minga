@@ -698,6 +698,7 @@ final class CommandDispatcher {
         }
         if let overlays = transaction.overlays {
             for command in overlays.commands { apply(command, effects: &effects) }
+            if let hoverPopup = overlays.hoverPopup { apply(hoverPopup) }
         }
         if let focus = transaction.focus {
             for command in focus.commands { apply(command, effects: &effects) }
@@ -718,6 +719,23 @@ final class CommandDispatcher {
         var effects: [CommitEffect] = []
         apply(command, effects: &effects)
         replay(effects)
+    }
+
+    /// Applies the one hover update prepared from all hover commands in a frame.
+    private func apply(_ update: PreparedHoverPopupUpdate) {
+        if let payload = update.payload {
+            guiState.hoverPopupState.update(
+                visible: payload.visible,
+                anchorRow: payload.anchorRow,
+                anchorCol: payload.anchorCol,
+                focused: payload.focused,
+                scrollOffset: payload.scrollOffset,
+                rawLines: payload.lines,
+                openAction: update.action.map { (visible: $0.visible, name: $0.name) }
+            )
+        } else if let action = update.action {
+            guiState.hoverPopupState.updateOpenAction(visible: action.visible, name: action.name)
+        }
     }
 
     /// Projects the committed snapshot's window content into the resident-window
@@ -1109,11 +1127,7 @@ final class CommandDispatcher {
             guiState.fileTreeState.updateSelection(selectedId: selectedId, focused: focused)
 
         case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation):
-            if visible {
-                guiState.completionState.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items, documentation: documentation)
-            } else {
-                guiState.completionState.hide()
-            }
+            guiState.completionState.update(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items, documentation: documentation)
 
         case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
             if visible {
@@ -1246,33 +1260,21 @@ final class CommandDispatcher {
 
         case .guiHoverPopup(let visible, let anchorRow, let anchorCol,
                              let focused, let scrollOffset, let lines):
-            if visible {
-                guiState.hoverPopupState.update(
-                    visible: true, anchorRow: anchorRow, anchorCol: anchorCol,
-                    focused: focused, scrollOffset: scrollOffset, rawLines: lines
-                )
-            } else {
-                guiState.hoverPopupState.hide()
-            }
+            guiState.hoverPopupState.update(
+                visible: visible, anchorRow: anchorRow, anchorCol: anchorCol,
+                focused: focused, scrollOffset: scrollOffset, rawLines: lines
+            )
 
         case .guiHoverAction(let visible, let actionName):
-            if visible {
-                guiState.hoverPopupState.setOpenAction(name: actionName)
-            } else {
-                guiState.hoverPopupState.clearOpenAction()
-            }
+            guiState.hoverPopupState.updateOpenAction(visible: visible, name: actionName)
 
         case .guiSignatureHelp(let visible, let anchorRow, let anchorCol,
                                 let activeSignature, let activeParameter, let signatures):
-            if visible {
-                guiState.signatureHelpState.update(
-                    visible: true, anchorRow: anchorRow, anchorCol: anchorCol,
-                    activeSignature: activeSignature, activeParameter: activeParameter,
-                    rawSignatures: signatures
-                )
-            } else {
-                guiState.signatureHelpState.hide()
-            }
+            guiState.signatureHelpState.update(
+                visible: visible, anchorRow: anchorRow, anchorCol: anchorCol,
+                activeSignature: activeSignature, activeParameter: activeParameter,
+                rawSignatures: signatures
+            )
 
         case .guiSplitSeparators:
             // Split separator geometry is frozen into the committed snapshot's
@@ -1281,14 +1283,10 @@ final class CommandDispatcher {
             break
 
         case .guiFloatPopup(let visible, let width, let height, let title, let lines):
-            if visible {
-                guiState.floatPopupState.update(
-                    visible: true, width: width, height: height,
-                    title: title, lines: lines
-                )
-            } else {
-                guiState.floatPopupState.hide()
-            }
+            guiState.floatPopupState.update(
+                visible: visible, width: width, height: height,
+                title: title, lines: lines
+            )
 
         case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage, let stashCount):
             // When git_status_panel is nil, the BEAM sends notARepo + empty
