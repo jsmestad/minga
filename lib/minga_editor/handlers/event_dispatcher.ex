@@ -11,9 +11,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias Minga.Distribution.Events.NodeConnectedEvent
   alias Minga.Distribution.Events.NodeDisconnectedEvent
   alias Minga.Events
+  alias Minga.FileWatcher.ReadyEvent
   alias Minga.Mode.ExtensionConfirmState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
+  alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.Notifications
@@ -64,6 +66,15 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   def dispatch(state, event, _payload, msg) when event in @file_events,
     do: FileEventHandler.dispatch(state, msg)
+
+  def dispatch(state, :file_watcher_ready, %ReadyEvent{watcher: watcher}, _msg),
+    do: FileWatcherHelpers.restore_authority(state, watcher)
+
+  def dispatch(state, :buffer_opened, %Events.BufferEvent{path: path}, _msg),
+    do: FileWatcherHelpers.watch_opened_path(state, path)
+
+  def dispatch(state, :buffer_closed, %Events.BufferClosedEvent{path: path}, _msg),
+    do: FileWatcherHelpers.unwatch_closed_path(state, path)
 
   def dispatch(
         state,

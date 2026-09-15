@@ -30,6 +30,10 @@ defmodule MingaEditor.FileTree.WatcherSync do
           backend_context: term()
         }
 
+  @doc "Returns the stable scheduler resource owned by file-tree watcher synchronization."
+  @spec resource() :: atom()
+  def resource, do: @resource
+
   @doc "Builds one coalescing request on the stable watcher resource."
   @spec request(MapSet.t(String.t()), String.t() | nil, MapSet.t(String.t()), keyword()) ::
           Request.t()
