@@ -14,7 +14,7 @@ defmodule MingaAgent.SessionManager do
   use GenServer
 
   alias MingaAgent.Session
-  alias MingaAgent.SessionMetadata
+  alias MingaAgent.SessionListing
   alias MingaAgent.SessionStore
   alias MingaAgent.Subagent.Handle
 
@@ -77,6 +77,7 @@ defmodule MingaAgent.SessionManager do
   @restart_default_max_delay_ms 100
   @restart_default_max_attempts 3
   @restart_default_window_ms 60_000
+  @metadata_listing_timeout_ms 4_500
 
   # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -188,16 +189,18 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:abort, session_id})
   end
 
-  @doc "Lists all active sessions as `{id, pid, metadata}` tuples."
-  @spec list_sessions() :: [{String.t(), pid(), SessionMetadata.t()}]
+  @doc "Lists every active registration with available metadata or a safe unavailable reason."
+  @spec list_sessions() :: [SessionListing.t()]
   def list_sessions do
     list_sessions(__MODULE__)
   end
 
-  @doc "Lists all active sessions through the given manager."
-  @spec list_sessions(GenServer.server()) :: [{String.t(), pid(), SessionMetadata.t()}]
+  @doc "Lists every active registration through the given manager without treating metadata failure as session death."
+  @spec list_sessions(GenServer.server()) :: [SessionListing.t()]
   def list_sessions(manager) do
-    GenServer.call(manager, :list_sessions)
+    manager
+    |> GenServer.call(:list_session_registrations)
+    |> read_session_listings()
   end
 
   @doc "Looks up the PID for a session ID."
@@ -343,16 +346,13 @@ defmodule MingaAgent.SessionManager do
     end
   end
 
-  def handle_call(:list_sessions, _from, state) do
-    entries =
+  def handle_call(:list_session_registrations, _from, state) do
+    registrations =
       state.sessions
       |> Enum.filter(fn {_session_id, entry} -> active_session_entry?(entry) end)
-      |> Enum.map(fn {session_id, %{pid: pid}} ->
-        metadata = safe_metadata(pid)
-        {session_id, pid, metadata}
-      end)
+      |> Enum.map(fn {session_id, %{pid: pid}} -> {session_id, pid} end)
 
-    {:reply, entries, state}
+    {:reply, registrations, state}
   end
 
   def handle_call({:get_session, session_id}, _from, state) do
@@ -1027,18 +1027,29 @@ defmodule MingaAgent.SessionManager do
     )
   end
 
-  @spec safe_metadata(pid()) :: SessionMetadata.t()
-  defp safe_metadata(pid) do
-    Session.metadata(pid)
-  catch
-    :exit, _ ->
-      now = DateTime.utc_now()
+  @spec read_session_listings([{String.t(), pid()}]) :: [SessionListing.t()]
+  defp read_session_listings([]), do: []
 
-      %SessionMetadata{
-        id: "unknown",
-        model_name: "unknown",
-        created_at: now,
-        last_message_at: now
-      }
+  defp read_session_listings(registrations) do
+    registrations
+    |> Task.async_stream(
+      fn {session_id, pid} -> SessionListing.read(session_id, pid) end,
+      ordered: true,
+      timeout: @metadata_listing_timeout_ms,
+      max_concurrency: length(registrations),
+      on_timeout: :kill_task
+    )
+    |> Enum.zip(registrations)
+    |> Enum.map(&listing_result/1)
   end
+
+  @spec listing_result({{:ok, SessionListing.t()} | {:exit, term()}, {String.t(), pid()}}) ::
+          SessionListing.t()
+  defp listing_result({{:ok, listing}, _registration}), do: listing
+
+  defp listing_result({{:exit, :timeout}, {session_id, pid}}),
+    do: SessionListing.unavailable(session_id, pid, :timeout)
+
+  defp listing_result({{:exit, _reason}, {session_id, pid}}),
+    do: SessionListing.unavailable(session_id, pid, :unreachable)
 end

@@ -50,7 +50,13 @@ defmodule MingaAgent.RemoteAPI.AttachResult do
           Session.editor_snapshot(),
           keyword()
         ) :: t()
-  def new(%SessionInfo{} = info, role, messages, snapshot, opts \\ [])
+  def new(
+        %SessionInfo{details: {:available, metadata}} = info,
+        role,
+        messages,
+        snapshot,
+        opts \\ []
+      )
       when role in [:driver, :viewer] and is_list(messages) and is_map(snapshot) do
     %__MODULE__{
       session_id: info.session_id,
@@ -59,7 +65,7 @@ defmodule MingaAgent.RemoteAPI.AttachResult do
       role: role,
       messages: messages,
       snapshot: snapshot,
-      metadata: info.metadata,
+      metadata: metadata,
       events: Keyword.get(opts, :events, []),
       latest_event_id: Keyword.get(opts, :latest_event_id, 0)
     }

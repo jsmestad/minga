@@ -1,9 +1,9 @@
 defmodule MingaEditor.State.Remote do
   @moduledoc "State for remote agent sessions and remote file buffers."
 
-  @typedoc "Remote session metadata is normally `MingaAgent.SessionMetadata.t()`. The map fallback keeps compatibility with older remote nodes that may return decoded persisted metadata before both nodes share the exact struct module version."
-  @type session_metadata :: MingaAgent.SessionMetadata.t() | map()
-  @type remote_session_entry :: {String.t(), pid(), session_metadata()}
+  @typedoc "Explicit metadata availability for a discovered remote session."
+  @type session_details :: MingaAgent.RemoteAPI.SessionInfo.details()
+  @type remote_session_entry :: {String.t(), pid(), session_details()}
   @type remote_connection_status :: :connected | :disconnected | :ended | :unavailable
   @type remote_file_key :: {String.t(), String.t()}
 

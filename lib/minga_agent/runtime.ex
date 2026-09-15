@@ -29,8 +29,8 @@ defmodule MingaAgent.Runtime do
   @spec abort(String.t()) :: :ok | {:error, :not_found}
   defdelegate abort(session_id), to: MingaAgent.SessionManager
 
-  @doc "Lists all active sessions as `{id, pid, metadata}` tuples."
-  @spec list_sessions() :: [{String.t(), pid(), MingaAgent.SessionMetadata.t()}]
+  @doc "Lists active session registrations with explicit metadata availability."
+  @spec list_sessions() :: [MingaAgent.SessionListing.t()]
   defdelegate list_sessions(), to: MingaAgent.SessionManager
 
   @doc "Looks up the PID for a session ID."

@@ -120,28 +120,55 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     end
   end
 
+  @doc false
   @spec remote_session_item(String.t(), MingaAgent.RemoteAPI.session_info()) :: Item.t()
-  defp remote_session_item(server_name, %{
-         session_id: session_id,
-         pid: remote_pid,
-         token: token,
-         metadata: meta
-       }) do
+  def remote_session_item(server_name, %{
+        session_id: session_id,
+        pid: remote_pid,
+        token: token,
+        details: {:available, meta}
+      }) do
     %Item{
       id:
         {{:remote, server_name, session_id},
          {:remote, server_name, session_id, remote_pid, token}},
-      label: "[#{server_name}] #{truncate_prompt(meta.title || meta.first_prompt || session_id)}",
+      label:
+        "[#{server_name}] #{truncate_prompt(Map.get(meta, :title) || Map.get(meta, :first_prompt) || session_id)}",
       description: remote_description(meta),
-      annotation: Atom.to_string(meta.status)
+      annotation: meta |> Map.fetch!(:status) |> Atom.to_string()
     }
   end
 
-  @spec remote_description(Session.metadata()) :: String.t()
-  defp remote_description(meta) do
-    created = Calendar.strftime(meta.created_at, "%b %d %H:%M")
-    "#{meta.provider_name}/#{meta.model_name} · #{meta.message_count} msgs · #{created}"
+  def remote_session_item(server_name, %{
+        session_id: session_id,
+        pid: remote_pid,
+        token: token,
+        details: {:unavailable, reason}
+      }) do
+    %Item{
+      id:
+        {{:remote, server_name, session_id},
+         {:remote, server_name, session_id, remote_pid, token}},
+      label: "[#{server_name}] #{session_id}",
+      description: "Metadata unavailable (#{unavailable_reason_text(reason)})",
+      annotation: "unavailable",
+      search_text: session_id
+    }
   end
+
+  @spec remote_description(MingaAgent.RemoteAPI.SessionInfo.metadata()) :: String.t()
+  defp remote_description(meta) do
+    created = meta |> Map.fetch!(:created_at) |> Calendar.strftime("%b %d %H:%M")
+    provider = Map.fetch!(meta, :provider_name)
+    model = Map.fetch!(meta, :model_name)
+    message_count = Map.fetch!(meta, :message_count)
+    "#{provider}/#{model} · #{message_count} msgs · #{created}"
+  end
+
+  @spec unavailable_reason_text(MingaAgent.SessionListing.unavailable_reason()) :: String.t()
+  defp unavailable_reason_text(:timeout), do: "timed out"
+  defp unavailable_reason_text(:unreachable), do: "session unreachable"
+  defp unavailable_reason_text(:invalid_details), do: "invalid details"
 
   @spec disk_candidates(Context.t()) :: [Item.t()]
   defp disk_candidates(ctx) do

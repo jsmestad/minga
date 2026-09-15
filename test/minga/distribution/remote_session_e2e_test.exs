@@ -23,7 +23,9 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
 
   alias MingaAgent.RemoteAPI
   alias MingaAgent.Session
+  alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
+  alias MingaAgent.SessionMetadata
 
   @moduletag :distributed
 
@@ -118,11 +120,29 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
 
     # ...and is still enumerable for a reconnecting GUI to find.
     sessions = :erpc.call(server, SessionManager, :list_sessions, [])
-    assert Enum.any?(sessions, fn {id, pid, _meta} -> id == session_id and pid == remote_pid end)
+
+    assert Enum.any?(sessions, fn
+             %SessionListing{
+               id: ^session_id,
+               pid: ^remote_pid,
+               details: {:available, %SessionMetadata{id: ^session_id}}
+             } ->
+               true
+
+             _listing ->
+               false
+           end)
   end
 
   test "brokered attach enforces one driver while viewers still receive events", %{server: server} do
-    {:ok, %{session_id: session_id, pid: remote_pid, token: token}} =
+    {:ok,
+     %{
+       session_id: session_id,
+       pid: remote_pid,
+       token: token,
+       metadata: %SessionMetadata{id: session_id} = metadata,
+       details: {:available, metadata}
+     }} =
       :erpc.call(server, RemoteAPI, :start_session, [[provider: @stub]])
 
     assert {:ok, %{role: :driver}} =

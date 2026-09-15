@@ -2,6 +2,7 @@ defmodule MingaAgent.IntrospectionTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Introspection
+  alias MingaAgent.SessionMetadata
 
   describe "capabilities/0" do
     test "returns a capabilities manifest with required fields" do
@@ -74,6 +75,51 @@ defmodule MingaAgent.IntrospectionTest do
         assert Map.has_key?(session, :status)
         assert Map.has_key?(session, :created_at)
       end
+    end
+
+    test "keeps unavailable registrations explicit without inventing metadata" do
+      dead_pid = spawn(fn -> :ok end)
+      dead_ref = Process.monitor(dead_pid)
+      assert_receive {:DOWN, ^dead_ref, :process, ^dead_pid, _reason}
+
+      now = DateTime.utc_now()
+
+      metadata = %SessionMetadata{
+        id: "healthy",
+        model_name: "real-model",
+        created_at: now,
+        last_message_at: now,
+        status: :thinking
+      }
+
+      healthy = start_supervised!({Minga.Test.SessionListingSession, {metadata, self()}})
+
+      manager =
+        start_supervised!(
+          {Minga.Test.SessionListingManager, [{"unavailable", dead_pid}, {"healthy", healthy}]}
+        )
+
+      descriptions = Introspection.describe_sessions(manager)
+
+      assert %{
+               session_id: "unavailable",
+               availability: :unavailable,
+               reason: :unreachable
+             } = Enum.find(descriptions, &(&1.session_id == "unavailable"))
+
+      unavailable = Enum.find(descriptions, &(&1.session_id == "unavailable"))
+      refute Map.has_key?(unavailable, :model_name)
+      refute Map.has_key?(unavailable, :status)
+      refute Map.has_key?(unavailable, :created_at)
+
+      assert %{
+               session_id: "healthy",
+               model_name: "real-model",
+               status: :thinking,
+               created_at: created_at
+             } = Enum.find(descriptions, &(&1.session_id == "healthy"))
+
+      assert created_at == DateTime.to_iso8601(now)
     end
   end
 end

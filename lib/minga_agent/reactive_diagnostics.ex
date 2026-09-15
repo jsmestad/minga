@@ -13,6 +13,7 @@ defmodule MingaAgent.ReactiveDiagnostics do
   alias Minga.Events
   alias Minga.LSP.SyncServer
   alias MingaAgent.Session
+  alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
 
   @save_window_ms 5_000
@@ -237,28 +238,31 @@ defmodule MingaAgent.ReactiveDiagnostics do
     %{state | pending: pending}
   end
 
+  @doc false
   @spec post_to_latest_session(String.t(), GenServer.server()) :: :ok
-  defp post_to_latest_session(text, session_manager) do
-    case SessionManager.list_sessions(session_manager) do
-      [] ->
-        :ok
-
-      sessions ->
-        sessions
-        |> Enum.max_by(fn {_id, _pid, metadata} ->
-          DateTime.to_unix(metadata.last_message_at, :microsecond)
-        end)
-        |> post_to_session(text)
-    end
+  def post_to_latest_session(text, session_manager) do
+    session_manager
+    |> SessionManager.list_sessions()
+    |> Enum.filter(&available_listing?/1)
+    |> Enum.max_by(&last_message_time/1, fn -> nil end)
+    |> post_to_session(text)
   catch
     :exit, _ -> :ok
   end
 
-  @spec post_to_session({String.t(), pid(), MingaAgent.SessionMetadata.t()} | nil, String.t()) ::
-          :ok
+  @spec available_listing?(SessionListing.t()) :: boolean()
+  defp available_listing?(%SessionListing{details: {:available, _metadata}}), do: true
+  defp available_listing?(%SessionListing{details: {:unavailable, _reason}}), do: false
+
+  @spec last_message_time(SessionListing.t()) :: integer()
+  defp last_message_time(%SessionListing{details: {:available, metadata}}) do
+    DateTime.to_unix(metadata.last_message_at, :microsecond)
+  end
+
+  @spec post_to_session(SessionListing.t() | nil, String.t()) :: :ok
   defp post_to_session(nil, _text), do: :ok
 
-  defp post_to_session({_id, pid, _metadata}, text),
+  defp post_to_session(%SessionListing{pid: pid, details: {:available, _metadata}}, text),
     do: Session.add_system_message(pid, text, :info)
 
   @spec monotonic_now_ms() :: integer()

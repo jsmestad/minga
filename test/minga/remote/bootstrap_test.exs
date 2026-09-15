@@ -6,6 +6,7 @@ defmodule Minga.Remote.BootstrapTest do
   alias Minga.Remote.SessionURL
   alias MingaAgent.RemoteAPI
   alias MingaAgent.SessionManager
+  alias MingaAgent.SessionMetadata
 
   @moduletag :distributed
 
@@ -124,6 +125,35 @@ defmodule Minga.Remote.BootstrapTest do
              :erpc.call(peer.node, SessionManager, :get_session, [session_id])
   end
 
+  test "session rows normalize supported older metadata records" do
+    metadata = metadata("older-session")
+
+    assert {:ok,
+            [
+              %{
+                session_id: "older-session",
+                workdir: "/work/older",
+                status: :thinking,
+                recent: "Keep working"
+              }
+            ]} =
+             Bootstrap.session_rows([
+               %{
+                 session_id: "older-session",
+                 pid: self(),
+                 token: "token",
+                 metadata: Map.from_struct(metadata)
+               }
+             ])
+  end
+
+  test "session rows reject unsupported remote listing records" do
+    assert {:error, :unsupported_session_listing} =
+             Bootstrap.session_rows([
+               %{session_id: "broken", pid: self(), token: "token", metadata: %{}}
+             ])
+  end
+
   defp start_peer do
     name = :"minga_bootstrap_#{System.unique_integer([:positive])}@127.0.0.1"
     {:ok, peer} = start_peer_node(name)
@@ -144,5 +174,24 @@ defmodule Minga.Remote.BootstrapTest do
   defp url(path \\ "/work/app") do
     {:ok, url} = SessionURL.parse("ssh://devbox#{path}")
     url
+  end
+
+  defp metadata(session_id) do
+    now = DateTime.utc_now()
+
+    %SessionMetadata{
+      id: session_id,
+      title: nil,
+      model_name: "real-model",
+      provider_name: "provider",
+      created_at: now,
+      last_message_at: now,
+      message_count: 3,
+      turn_count: 2,
+      first_prompt: "Keep working",
+      cost: 0.1,
+      status: :thinking,
+      workdir: "/work/older"
+    }
   end
 end

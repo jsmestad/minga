@@ -3,6 +3,7 @@ defmodule MingaAgent.Tools.SubagentTest do
 
   alias Minga.Events
   alias MingaAgent.Session
+  alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
   alias MingaAgent.Tools.Subagent
@@ -123,8 +124,8 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     on_exit(fn ->
       manager
-      |> GenServer.call(:list_sessions)
-      |> Enum.each(fn {session_id, _pid, _meta} ->
+      |> SessionManager.list_sessions()
+      |> Enum.each(fn %SessionListing{id: session_id} ->
         GenServer.call(manager, {:stop_session, session_id})
       end)
 

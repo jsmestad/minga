@@ -11,11 +11,11 @@ defmodule MingaEditor.Remote.SessionClient do
   @type session_id :: String.t()
   @type token :: String.t()
 
-  @doc "Lists live sessions on a remote node."
+  @doc "Lists live registrations on a remote node with explicit metadata availability."
   @spec list_sessions(remote_node()) :: {:ok, [RemoteAPI.session_info()]} | {:error, term()}
   def list_sessions(remote_node) when is_atom(remote_node) do
     case erpc(remote_node, :list_sessions, [], 5_000) do
-      sessions when is_list(sessions) -> {:ok, sessions}
+      sessions when is_list(sessions) -> SessionInfo.normalize_all(sessions)
       {:error, _reason} = error -> error
       other -> {:error, other}
     end

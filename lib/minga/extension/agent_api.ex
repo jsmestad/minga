@@ -22,6 +22,7 @@ defmodule Minga.Extension.AgentAPI do
   """
   alias MingaAgent.EventLog
   alias MingaAgent.Session
+  alias MingaAgent.SessionListing
 
   @default_manager MingaAgent.SessionManager
   @default_event_log EventLog
@@ -30,15 +31,22 @@ defmodule Minga.Extension.AgentAPI do
   @type session_status :: :idle | :plan | :thinking | :tool_executing | :error
 
   @typedoc "Summary of an active agent session."
-  @type session_summary :: %{
-          id: String.t(),
-          pid: pid(),
-          status: session_status(),
-          label: String.t(),
-          model: String.t(),
-          active_tool: String.t() | nil,
-          created_at: DateTime.t()
-        }
+  @type session_summary ::
+          %{
+            id: String.t(),
+            pid: pid(),
+            status: session_status(),
+            label: String.t(),
+            model: String.t(),
+            active_tool: String.t() | nil,
+            created_at: DateTime.t()
+          }
+          | %{
+              id: String.t(),
+              pid: pid(),
+              availability: :unavailable,
+              reason: SessionListing.unavailable_reason()
+            }
 
   @typedoc "Detailed info for a specific agent session."
   @type session_info :: %{
@@ -59,8 +67,9 @@ defmodule Minga.Extension.AgentAPI do
   @doc """
   Lists all active agent sessions with a summary for each.
 
-  Returns an empty list if no sessions are running or the session
-  manager is unavailable.
+  A registered session whose metadata cannot be queried is returned with
+  `availability: :unavailable` and a safe reason. Returns an empty list only
+  if no sessions are running or the session manager itself is unavailable.
   """
   @spec list_sessions(keyword()) :: [session_summary()]
   def list_sessions(opts \\ []) do
@@ -188,9 +197,12 @@ defmodule Minga.Extension.AgentAPI do
 
   # ── Private ──────────────────────────────────────────────────────────
 
-  @spec session_entry_to_summary({String.t(), pid(), MingaAgent.SessionMetadata.t()}) ::
-          session_summary()
-  defp session_entry_to_summary({id, pid, metadata}) do
+  @spec session_entry_to_summary(SessionListing.t()) :: session_summary()
+  defp session_entry_to_summary(%SessionListing{
+         id: id,
+         pid: pid,
+         details: {:available, metadata}
+       }) do
     snapshot = safe_editor_snapshot(pid)
 
     %{
@@ -202,6 +214,14 @@ defmodule Minga.Extension.AgentAPI do
       active_tool: snapshot.active_tool_name,
       created_at: metadata.created_at
     }
+  end
+
+  defp session_entry_to_summary(%SessionListing{
+         id: id,
+         pid: pid,
+         details: {:unavailable, reason}
+       }) do
+    %{id: id, pid: pid, availability: :unavailable, reason: reason}
   end
 
   @spec safe_editor_snapshot(pid()) :: Session.editor_snapshot()

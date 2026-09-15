@@ -14,6 +14,7 @@ defmodule MingaAgent.Introspection do
 
   alias MingaAgent.Tool.{Registry, Spec}
   alias MingaAgent.SessionManager
+  alias MingaAgent.SessionListing
 
   @typedoc "Runtime capabilities manifest."
   @type capabilities_manifest :: %{
@@ -34,12 +35,18 @@ defmodule MingaAgent.Introspection do
         }
 
   @typedoc "Structured session description for external clients."
-  @type session_description :: %{
-          session_id: String.t(),
-          model_name: String.t(),
-          status: atom(),
-          created_at: String.t()
-        }
+  @type session_description ::
+          %{
+            session_id: String.t(),
+            model_name: String.t(),
+            status: atom(),
+            created_at: String.t()
+          }
+          | %{
+              session_id: String.t(),
+              availability: :unavailable,
+              reason: SessionListing.unavailable_reason()
+            }
 
   @doc "Returns a capabilities manifest describing the runtime."
   @spec capabilities() :: capabilities_manifest()
@@ -75,15 +82,28 @@ defmodule MingaAgent.Introspection do
   @doc "Returns structured descriptions of all active sessions."
   @spec describe_sessions() :: [session_description()]
   def describe_sessions do
-    SessionManager.list_sessions()
-    |> Enum.map(fn {id, _pid, metadata} ->
-      %{
-        session_id: id,
-        model_name: metadata.model_name,
-        status: metadata.status,
-        created_at: DateTime.to_iso8601(metadata.created_at)
-      }
-    end)
+    describe_sessions(SessionManager)
+  end
+
+  @doc "Returns structured descriptions of all active sessions through the given manager."
+  @spec describe_sessions(GenServer.server()) :: [session_description()]
+  def describe_sessions(manager) do
+    SessionManager.list_sessions(manager)
+    |> Enum.map(&session_description/1)
+  end
+
+  @spec session_description(SessionListing.t()) :: session_description()
+  defp session_description(%SessionListing{id: id, details: {:available, metadata}}) do
+    %{
+      session_id: id,
+      model_name: metadata.model_name,
+      status: metadata.status,
+      created_at: DateTime.to_iso8601(metadata.created_at)
+    }
+  end
+
+  defp session_description(%SessionListing{id: id, details: {:unavailable, reason}}) do
+    %{session_id: id, availability: :unavailable, reason: reason}
   end
 
   @spec app_version() :: String.t()

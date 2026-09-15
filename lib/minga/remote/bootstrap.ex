@@ -2,6 +2,7 @@ defmodule Minga.Remote.Bootstrap do
   @moduledoc "Bootstraps and controls remote agent sessions over SSH plus the existing RemoteAPI broker."
 
   alias Minga.Remote.SessionURL
+  alias MingaAgent.RemoteAPI.SessionInfo
 
   @enforce_keys [:server_name, :remote_node, :session_id, :pid, :token, :workdir]
   defstruct [:server_name, :remote_node, :session_id, :pid, :token, :workdir]
@@ -15,12 +16,18 @@ defmodule Minga.Remote.Bootstrap do
           workdir: String.t()
         }
 
-  @type session_row :: %{
-          session_id: String.t(),
-          workdir: String.t() | nil,
-          status: atom(),
-          recent: String.t() | nil
-        }
+  @type session_row ::
+          %{
+            session_id: String.t(),
+            workdir: String.t() | nil,
+            status: atom(),
+            recent: String.t() | nil
+          }
+          | %{
+              session_id: String.t(),
+              availability: :unavailable,
+              reason: MingaAgent.SessionListing.unavailable_reason()
+            }
 
   @doc "Creates or reuses the session for an SSH URL's server-side working directory."
   @spec attach(SessionURL.t()) :: {:ok, attach_result()} | {:error, term()}
@@ -47,7 +54,15 @@ defmodule Minga.Remote.Bootstrap do
     with :ok <- ensure_daemon(url),
          {:ok, remote_node} <- connect_remote_node(url),
          {:ok, sessions} <- erpc(remote_node, MingaAgent.RemoteAPI, :list_sessions, []) do
-      {:ok, Enum.map(sessions, &session_row/1)}
+      session_rows(sessions)
+    end
+  end
+
+  @doc false
+  @spec session_rows(term()) :: {:ok, [session_row()]} | {:error, :unsupported_session_listing}
+  def session_rows(sessions) do
+    with {:ok, normalized} <- SessionInfo.normalize_all(sessions) do
+      {:ok, Enum.map(normalized, &session_row/1)}
     end
   end
 
@@ -178,15 +193,17 @@ defmodule Minga.Remote.Bootstrap do
   defp ssh_destination_args(%SessionURL{user: user, host: host}), do: ["-l", user, "--", host]
 
   @spec session_row(MingaAgent.RemoteAPI.session_info()) :: session_row()
-  defp session_row(info) do
-    meta = info.metadata
-
+  defp session_row(%{session_id: session_id, details: {:available, meta}}) do
     %{
-      session_id: info.session_id,
-      workdir: Map.get(meta, :workdir),
-      status: Map.get(meta, :status, :unknown),
-      recent: Map.get(meta, :first_prompt)
+      session_id: session_id,
+      workdir: Map.fetch!(meta, :workdir),
+      status: Map.fetch!(meta, :status),
+      recent: Map.fetch!(meta, :first_prompt)
     }
+  end
+
+  defp session_row(%{session_id: session_id, details: {:unavailable, reason}}) do
+    %{session_id: session_id, availability: :unavailable, reason: reason}
   end
 
   @spec distribution_atom(String.t()) :: {:ok, node()} | {:error, :invalid_node_name}

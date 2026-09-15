@@ -7,6 +7,7 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
   alias Minga.Events
   alias Minga.LSP.SyncServer
   alias MingaAgent.ReactiveDiagnostics
+  alias MingaAgent.SessionMetadata
 
   setup do
     registry = :"reactive_diag_events_#{System.unique_integer([:positive])}"
@@ -138,6 +139,49 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
     refute_received {:suggestion, _text}
   end
 
+  test "posts only to the latest session with known metadata" do
+    now = DateTime.utc_now()
+
+    older_metadata = %SessionMetadata{
+      id: "older",
+      model_name: "model",
+      created_at: now,
+      last_message_at: DateTime.add(now, -10, :second)
+    }
+
+    latest_metadata = %{older_metadata | id: "latest", last_message_at: now}
+
+    older =
+      start_supervised!({Minga.Test.SessionListingSession, {older_metadata, self()}}, id: :older)
+
+    latest =
+      start_supervised!({Minga.Test.SessionListingSession, {latest_metadata, self()}},
+        id: :latest
+      )
+
+    dead = dead_pid()
+
+    manager =
+      start_supervised!(
+        {Minga.Test.SessionListingManager,
+         [{"unavailable", dead}, {"older", older}, {"latest", latest}]}
+      )
+
+    assert :ok = ReactiveDiagnostics.post_to_latest_session("fix this", manager)
+    assert_receive {:system_message, ^latest, "fix this", :info}
+    refute_receive {:system_message, ^older, "fix this", :info}
+  end
+
+  test "does not post when every registration has unavailable metadata" do
+    manager =
+      start_supervised!(
+        {Minga.Test.SessionListingManager, [{"first", dead_pid()}, {"second", dead_pid()}]}
+      )
+
+    assert :ok = ReactiveDiagnostics.post_to_latest_session("fix this", manager)
+    refute_receive {:system_message, _pid, "fix this", :info}
+  end
+
   defp enable(options), do: Options.set(options, :agent_react_to_lsp_errors_on_save, true)
 
   defp sync(watcher) do
@@ -166,5 +210,12 @@ defmodule MingaAgent.ReactiveDiagnosticsTest do
       source: "elixir_ls",
       range: %{start_line: line, start_col: col, end_line: line, end_col: col + 1}
     }
+  end
+
+  defp dead_pid do
+    pid = spawn(fn -> :ok end)
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    pid
   end
 end

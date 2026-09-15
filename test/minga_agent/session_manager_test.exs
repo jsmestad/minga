@@ -6,6 +6,7 @@ defmodule MingaAgent.SessionManagerTest do
   alias MingaAgent.Providers.RecordingProvider
   alias MingaAgent.Session
   alias MingaAgent.Session.SubscriberLifecycle
+  alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionManager.SessionRestartedEvent
   alias MingaAgent.SessionManager.SessionStoppedEvent
@@ -21,7 +22,7 @@ defmodule MingaAgent.SessionManagerTest do
 
     on_exit(fn ->
       if Process.alive?(manager) do
-        for {session_id, _pid, _metadata} <- SessionManager.list_sessions(manager) do
+        for %SessionListing{id: session_id} <- SessionManager.list_sessions(manager) do
           SessionManager.stop_session(manager, session_id)
         end
 
@@ -259,13 +260,78 @@ defmodule MingaAgent.SessionManagerTest do
       sessions = SessionManager.list_sessions(manager)
       assert Enum.count(sessions) == 2
 
-      ids = Enum.map(sessions, &elem(&1, 0))
-      pids = Enum.map(sessions, &elem(&1, 1))
+      ids = Enum.map(sessions, & &1.id)
+      pids = Enum.map(sessions, & &1.pid)
 
       assert id1 in ids
       assert id2 in ids
       assert pid1 in pids
       assert pid2 in pids
+    end
+
+    test "keeps a timed-out registration and restores its metadata on a later query", %{
+      manager: manager
+    } do
+      Minga.Events.subscribe(:agent_session_restarted)
+      {:ok, slow_id, slow_pid} = SessionManager.start_session(manager, [])
+      {:ok, healthy_id, healthy_pid} = SessionManager.start_session(manager, [])
+      :ok = :sys.suspend(slow_pid)
+
+      on_exit(fn ->
+        if Process.info(slow_pid, :status) == {:status, :suspended}, do: :sys.resume(slow_pid)
+      end)
+
+      listings = SessionManager.list_sessions(manager)
+
+      assert %SessionListing{
+               id: ^slow_id,
+               pid: ^slow_pid,
+               details: {:unavailable, :timeout}
+             } = Enum.find(listings, &(&1.id == slow_id))
+
+      assert %SessionListing{
+               id: ^healthy_id,
+               pid: ^healthy_pid,
+               details: {:available, healthy_metadata}
+             } = Enum.find(listings, &(&1.id == healthy_id))
+
+      assert healthy_metadata.id == healthy_id
+      assert {:ok, ^slow_pid} = SessionManager.get_session(manager, slow_id)
+      assert Process.alive?(slow_pid)
+      refute_receive {:minga_event, :agent_session_restarted, _event}
+
+      :ok = :sys.resume(slow_pid)
+
+      assert %SessionListing{
+               id: ^slow_id,
+               pid: ^slow_pid,
+               details: {:available, restored_metadata}
+             } =
+               manager
+               |> SessionManager.list_sessions()
+               |> Enum.find(&(&1.id == slow_id))
+
+      assert restored_metadata.id == slow_id
+    end
+
+    test "marks conflicting session-owned metadata as invalid without changing registration", %{
+      manager: manager
+    } do
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
+      metadata = Session.metadata(pid)
+
+      listing = SessionListing.available(session_id, pid, %{metadata | id: "different-id"})
+
+      assert %SessionListing{
+               id: ^session_id,
+               pid: ^pid,
+               details: {:unavailable, :invalid_details}
+             } = listing
+
+      assert %SessionListing{details: {:unavailable, :invalid_details}} =
+               SessionListing.available(session_id, pid, %{id: session_id})
+
+      assert {:ok, ^pid} = SessionManager.get_session(manager, session_id)
     end
   end
 
@@ -292,6 +358,56 @@ defmodule MingaAgent.SessionManagerTest do
   end
 
   describe "session DOWN monitoring" do
+    test "a session that dies during metadata lookup is listed under its old registration and restarted only by its matching monitor",
+         %{manager: manager} do
+      Minga.Events.subscribe(:agent_session_restarted)
+      session_id = "metadata-death-#{System.unique_integer([:positive])}"
+
+      assert {:ok, ^session_id, old_pid} =
+               SessionManager.start_session(manager,
+                 session_id: session_id,
+                 provider: Minga.Test.StubProvider,
+                 persist?: false,
+                 restart_backoff_base_ms: 1,
+                 restart_backoff_max_ms: 1
+               )
+
+      :ok = :sys.suspend(old_pid)
+      listing_task = Task.async(fn -> SessionManager.list_sessions(manager) end)
+      await_metadata_call(old_pid)
+
+      old_ref = Process.monitor(old_pid)
+      Process.exit(old_pid, :kill)
+      assert_receive {:DOWN, ^old_ref, :process, ^old_pid, :killed}, 1_000
+
+      assert %SessionListing{
+               id: ^session_id,
+               pid: ^old_pid,
+               details: {:unavailable, :unreachable}
+             } =
+               listing_task
+               |> Task.await(1_000)
+               |> Enum.find(&(&1.id == session_id))
+
+      assert_receive {
+                       :minga_event,
+                       :agent_session_restarted,
+                       %SessionRestartedEvent{
+                         session_id: ^session_id,
+                         old_pid: ^old_pid,
+                         new_pid: new_pid,
+                         reason: :killed
+                       }
+                     },
+                     1_000
+
+      assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
+
+      send(manager, {:DOWN, make_ref(), :process, new_pid, :killed})
+      :sys.get_state(manager)
+      assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
+    end
+
     test "restarts a crashed session, refreshes child handles, and keeps the registry consistent",
          %{manager: manager} do
       Minga.Events.subscribe(:agent_session_restarted)
@@ -335,11 +451,11 @@ defmodule MingaAgent.SessionManagerTest do
 
       sessions = SessionManager.list_sessions(manager)
 
-      assert Enum.any?(sessions, fn {listed_id, listed_pid, _metadata} ->
+      assert Enum.any?(sessions, fn %SessionListing{id: listed_id, pid: listed_pid} ->
                listed_id == session_id and listed_pid == new_pid
              end)
 
-      refute Enum.any?(sessions, fn {listed_id, listed_pid, _metadata} ->
+      refute Enum.any?(sessions, fn %SessionListing{id: listed_id, pid: listed_pid} ->
                listed_id == session_id and listed_pid == pid
              end)
 
@@ -702,6 +818,26 @@ defmodule MingaAgent.SessionManagerTest do
     Process.exit(pid, :kill)
     assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1000
     wait_until_restarted_session(manager, session_id, pid)
+  end
+
+  @spec await_metadata_call(pid(), non_neg_integer()) :: :ok
+  defp await_metadata_call(pid, attempts \\ 100)
+
+  defp await_metadata_call(pid, 0) do
+    flunk("metadata call was not queued for suspended session #{inspect(pid)}")
+  end
+
+  defp await_metadata_call(pid, attempts) do
+    {:messages, messages} = Process.info(pid, :messages)
+
+    if Enum.any?(messages, &match?({:"$gen_call", _from, :metadata}, &1)) do
+      :ok
+    else
+      receive do
+      after
+        10 -> await_metadata_call(pid, attempts - 1)
+      end
+    end
   end
 
   @spec wait_until_restarted_session(GenServer.server(), String.t(), pid(), non_neg_integer()) ::

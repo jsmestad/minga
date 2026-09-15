@@ -38,7 +38,7 @@ Slow picker, Git, and similar work must be represented as a typed `MingaEditor.E
 
 ## Listing sessions
 
-`list_sessions/0` returns a summary for every active agent session.
+`list_sessions/0` returns a summary for every registered agent session. Available sessions include their observed metadata:
 
 ```elixir
 sessions = Minga.Extension.AgentAPI.list_sessions()
@@ -46,7 +46,14 @@ sessions = Minga.Extension.AgentAPI.list_sessions()
 #       model: "claude-4", active_tool: "edit_file", created_at: ~U[2026-05-23 ...]}]
 ```
 
-Returns `[]` when no sessions are running or the session manager is unavailable.
+When a registered session cannot return metadata, its entry remains visible with a safe reason. Metadata-dependent fields are absent rather than invented:
+
+```elixir
+[%{id: "1", pid: #PID<0.1234.0>, availability: :unavailable,
+   reason: :timeout | :unreachable | :invalid_details}]
+```
+
+Returns `[]` when no sessions are registered or the session manager is unavailable.
 
 ## Getting session details
 

@@ -164,11 +164,18 @@ defmodule Minga.Remote.CLI do
   end
 
   defp print_sessions(rows) do
-    Enum.each(rows, fn row ->
-      IO.puts("#{row.session_id}\t#{row.status}\t#{row.workdir || "-"}\t#{row.recent || ""}")
-    end)
+    Enum.each(rows, &print_session/1)
 
     :ok
+  end
+
+  @spec print_session(Bootstrap.session_row()) :: :ok
+  defp print_session(%{availability: :unavailable} = row) do
+    IO.puts("#{row.session_id}\tunavailable (#{row.reason})\t-\t")
+  end
+
+  defp print_session(row) do
+    IO.puts("#{row.session_id}\t#{row.status}\t#{row.workdir || "-"}\t#{row.recent || ""}")
   end
 
   @spec format_error(term()) :: String.t()
