@@ -24,6 +24,29 @@ defmodule Minga.Editing.Search.IndexTest do
       assert Index.count(index) == 70_000
       assert Index.current_ordinal(index, {65_535, 0}) == 65_536
     end
+
+    test "indexes more than 65,535 matches on one line for rank and navigation" do
+      match_count = 70_000
+      middle_col = 65_535 * 2
+      previous_col = 65_534 * 2
+      last_col = (match_count - 1) * 2
+      index = Index.build([String.duplicate("x ", match_count)], "x")
+
+      assert Index.count(index) == match_count
+      assert Index.current_ordinal(index, {0, 0}) == 1
+      assert Index.current_ordinal(index, {0, middle_col}) == 65_536
+      assert Index.current_ordinal(index, {0, last_col}) == match_count
+      assert Index.current_ordinal(index, {0, last_col + 1}) == 1
+
+      assert %{line: 0, col: ^middle_col} =
+               Index.next(index, {0, previous_col}, :forward)
+
+      assert %{line: 0, col: ^previous_col} =
+               Index.next(index, {0, middle_col}, :backward)
+
+      assert %{line: 0, col: ^last_col, length: 1} = Index.match_at(index, {0, last_col})
+      assert Index.match_at(index, {0, last_col - 1}) == nil
+    end
   end
 
   describe "navigation" do

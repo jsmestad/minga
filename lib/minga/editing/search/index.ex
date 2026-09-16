@@ -13,10 +13,10 @@ defmodule Minga.Editing.Search.Index do
   alias Minga.Editing.Search.Match
 
   @type option :: {:case_sensitive, boolean()} | {:whole_word, boolean()} | {:regex, boolean()}
-  @type line_match :: {non_neg_integer(), non_neg_integer()}
+  @type line_matches :: tuple()
   @type tree_node ::
           nil
-          | {non_neg_integer(), [line_match()], non_neg_integer(), tree_node(), tree_node(),
+          | {non_neg_integer(), line_matches(), non_neg_integer(), tree_node(), tree_node(),
              integer(), non_neg_integer()}
 
   @type metrics :: %{
@@ -93,9 +93,9 @@ defmodule Minga.Editing.Search.Index do
   @doc "Returns the one-based ordinal at or after the cursor, wrapping to one."
   @spec current_ordinal(t(), Search.position()) :: non_neg_integer()
   def current_ordinal(%__MODULE__{} = index, cursor) do
-    case first_at_or_after(index.root, cursor) do
+    case first_at_or_after_with_rank(index.root, cursor, 0) do
       nil -> if count(index) == 0, do: 0, else: 1
-      %Match{} = match -> rank(index.root, {match.line, match.col}) + 1
+      {%Match{}, rank} -> rank + 1
     end
   end
 
@@ -151,7 +151,9 @@ defmodule Minga.Editing.Search.Index do
         [%Match{line: line_number} | _rest] = line_matches
 
         compact_matches =
-          Enum.map(line_matches, fn %Match{col: col, length: length} -> {col, length} end)
+          line_matches
+          |> Enum.map(fn %Match{col: col, length: length} -> {col, length} end)
+          |> List.to_tuple()
 
         tree = insert(tree, leaf(line_number, compact_matches, mixed_priority(next_priority)))
         {tree, next_priority + 1}
@@ -184,12 +186,13 @@ defmodule Minga.Editing.Search.Index do
   @spec mixed_priority(pos_integer()) :: non_neg_integer()
   defp mixed_priority(value), do: :erlang.phash2({:gui_search_index, value})
 
-  @spec leaf(non_neg_integer(), [line_match()], non_neg_integer()) :: tree_node()
-  defp leaf(line, matches, priority), do: {line, matches, priority, nil, nil, 0, length(matches)}
+  @spec leaf(non_neg_integer(), line_matches(), non_neg_integer()) :: tree_node()
+  defp leaf(line, matches, priority),
+    do: {line, matches, priority, nil, nil, 0, tuple_size(matches)}
 
   @spec make_node(
           non_neg_integer(),
-          [line_match()],
+          line_matches(),
           non_neg_integer(),
           tree_node(),
           tree_node(),
@@ -197,7 +200,7 @@ defmodule Minga.Editing.Search.Index do
         ) :: tree_node()
   defp make_node(line, matches, priority, left, right, lazy) do
     {line, matches, priority, left, right, lazy,
-     length(matches) + node_count(left) + node_count(right)}
+     tuple_size(matches) + node_count(left) + node_count(right)}
   end
 
   @spec node_count(tree_node()) :: non_neg_integer()
@@ -304,16 +307,35 @@ defmodule Minga.Editing.Search.Index do
     merge(before, add_shift(suffix, shift))
   end
 
-  @spec first_at_or_after(tree_node(), Search.position()) :: Match.t() | nil
-  defp first_at_or_after(nil, _position), do: nil
+  @spec first_at_or_after_with_rank(tree_node(), Search.position(), non_neg_integer()) ::
+          {Match.t(), non_neg_integer()} | nil
+  defp first_at_or_after_with_rank(nil, _position, _preceding_count), do: nil
 
-  defp first_at_or_after(root, {line, col} = position) do
+  defp first_at_or_after_with_rank(root, {line, col} = position, preceding_count) do
     {root_line, matches, _priority, left, right, _lazy, _count} = push(root)
+    left_count = node_count(left)
+    line_count = tuple_size(matches)
 
     case root_line do
-      n when n < line -> first_at_or_after(right, position)
-      ^line -> match_on_or_after(matches, root_line, col) || first_match(right)
-      _ -> first_at_or_after(left, position) || first_line_match(root_line, matches)
+      n when n < line ->
+        first_at_or_after_with_rank(
+          right,
+          position,
+          preceding_count + left_count + line_count
+        )
+
+      ^line ->
+        match_on_or_after_with_rank(
+          matches,
+          root_line,
+          col,
+          preceding_count + left_count
+        ) ||
+          first_match_with_rank(right, preceding_count + left_count + line_count)
+
+      _ ->
+        first_at_or_after_with_rank(left, position, preceding_count) ||
+          first_line_match_with_rank(root_line, matches, preceding_count + left_count)
     end
   end
 
@@ -357,23 +379,10 @@ defmodule Minga.Editing.Search.Index do
         exact_match(left, line, col)
 
       _ ->
-        case List.keyfind(matches, col, 0) do
-          {^col, length} -> Match.new(line, col, length)
-          nil -> nil
+        case tuple_match(matches, lower_bound(matches, col), line) do
+          %Match{col: ^col} = match -> match
+          _other -> nil
         end
-    end
-  end
-
-  @spec rank(tree_node(), Search.position()) :: non_neg_integer()
-  defp rank(nil, _position), do: 0
-
-  defp rank(root, {line, col} = position) do
-    {root_line, matches, _priority, left, right, _lazy, _count} = push(root)
-
-    case root_line do
-      n when n < line -> node_count(left) + length(matches) + rank(right, position)
-      n when n > line -> rank(left, position)
-      _ -> node_count(left) + Enum.count(matches, fn {match_col, _length} -> match_col < col end)
     end
   end
 
@@ -393,38 +402,95 @@ defmodule Minga.Editing.Search.Index do
     last_match(right) || last_line_match(line, matches)
   end
 
-  @spec first_line_match(non_neg_integer(), [line_match()]) :: Match.t()
-  defp first_line_match(line, [{col, length} | _]), do: Match.new(line, col, length)
+  @spec first_match_with_rank(tree_node(), non_neg_integer()) ::
+          {Match.t(), non_neg_integer()} | nil
+  defp first_match_with_rank(nil, _preceding_count), do: nil
 
-  @spec last_line_match(non_neg_integer(), [line_match()]) :: Match.t()
-  defp last_line_match(line, [{col, length}]), do: Match.new(line, col, length)
-  defp last_line_match(line, [_match | rest]), do: last_line_match(line, rest)
+  defp first_match_with_rank(root, preceding_count) do
+    {line, matches, _priority, left, _right, _lazy, _count} = push(root)
 
-  @spec match_on_or_after([line_match()], non_neg_integer(), non_neg_integer()) :: Match.t() | nil
-  defp match_on_or_after(matches, line, col) do
-    case Enum.find(matches, fn {match_col, _length} -> match_col >= col end) do
-      {match_col, length} -> Match.new(line, match_col, length)
+    first_match_with_rank(left, preceding_count) ||
+      first_line_match_with_rank(line, matches, preceding_count + node_count(left))
+  end
+
+  @spec first_line_match(non_neg_integer(), line_matches()) :: Match.t()
+  defp first_line_match(line, matches) do
+    {col, length} = elem(matches, 0)
+    Match.new(line, col, length)
+  end
+
+  @spec first_line_match_with_rank(non_neg_integer(), line_matches(), non_neg_integer()) ::
+          {Match.t(), non_neg_integer()}
+  defp first_line_match_with_rank(line, matches, rank),
+    do: {first_line_match(line, matches), rank}
+
+  @spec last_line_match(non_neg_integer(), line_matches()) :: Match.t()
+  defp last_line_match(line, matches) do
+    {col, length} = elem(matches, tuple_size(matches) - 1)
+    Match.new(line, col, length)
+  end
+
+  @spec match_on_or_after_with_rank(
+          line_matches(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {Match.t(), non_neg_integer()} | nil
+  defp match_on_or_after_with_rank(matches, line, col, preceding_count) do
+    index = lower_bound(matches, col)
+
+    case tuple_match(matches, index, line) do
       nil -> nil
+      match -> {match, preceding_count + index}
     end
   end
 
-  @spec match_after([line_match()], non_neg_integer(), non_neg_integer()) :: Match.t() | nil
-  defp match_after(matches, line, col) do
-    case Enum.find(matches, fn {match_col, _length} -> match_col > col end) do
-      {match_col, length} -> Match.new(line, match_col, length)
-      nil -> nil
-    end
+  @spec match_after(line_matches(), non_neg_integer(), non_neg_integer()) :: Match.t() | nil
+  defp match_after(matches, line, col),
+    do: tuple_match(matches, upper_bound(matches, col), line)
+
+  @spec match_before(line_matches(), non_neg_integer(), non_neg_integer()) :: Match.t() | nil
+  defp match_before(matches, line, col),
+    do: tuple_match(matches, lower_bound(matches, col) - 1, line)
+
+  @spec lower_bound(line_matches(), non_neg_integer()) :: non_neg_integer()
+  defp lower_bound(matches, col), do: lower_bound(matches, col, 0, tuple_size(matches))
+
+  @spec lower_bound(line_matches(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp lower_bound(_matches, _col, low, high) when low >= high, do: low
+
+  defp lower_bound(matches, col, low, high) do
+    middle = div(low + high, 2)
+    {match_col, _length} = elem(matches, middle)
+
+    if match_col < col,
+      do: lower_bound(matches, col, middle + 1, high),
+      else: lower_bound(matches, col, low, middle)
   end
 
-  @spec match_before([line_match()], non_neg_integer(), non_neg_integer()) :: Match.t() | nil
-  defp match_before(matches, line, col) do
-    matches
-    |> Enum.take_while(fn {match_col, _length} -> match_col < col end)
-    |> List.last()
-    |> case do
-      {match_col, length} -> Match.new(line, match_col, length)
-      nil -> nil
-    end
+  @spec upper_bound(line_matches(), non_neg_integer()) :: non_neg_integer()
+  defp upper_bound(matches, col), do: upper_bound(matches, col, 0, tuple_size(matches))
+
+  @spec upper_bound(line_matches(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp upper_bound(_matches, _col, low, high) when low >= high, do: low
+
+  defp upper_bound(matches, col, low, high) do
+    middle = div(low + high, 2)
+    {match_col, _length} = elem(matches, middle)
+
+    if match_col <= col,
+      do: upper_bound(matches, col, middle + 1, high),
+      else: upper_bound(matches, col, low, middle)
+  end
+
+  @spec tuple_match(line_matches(), integer(), non_neg_integer()) :: Match.t() | nil
+  defp tuple_match(matches, index, _line) when index < 0 or index >= tuple_size(matches), do: nil
+
+  defp tuple_match(matches, index, line) do
+    {col, length} = elem(matches, index)
+    Match.new(line, col, length)
   end
 
   @spec collect_matches(tree_node(), [Match.t()]) :: [Match.t()]
@@ -435,7 +501,7 @@ defmodule Minga.Editing.Search.Index do
     acc = collect_matches(right, acc)
 
     acc =
-      Enum.reduce(Enum.reverse(matches), acc, fn {col, length}, items ->
+      Enum.reduce(matches |> Tuple.to_list() |> Enum.reverse(), acc, fn {col, length}, items ->
         [Match.new(line, col, length) | items]
       end)
 

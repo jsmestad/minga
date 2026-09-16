@@ -13,6 +13,7 @@ defmodule Minga.Bench.GuiSearchIndex do
   @frame_rounds 9
   @frames_per_round 1_000
   @edit_samples 31
+  @dense_single_line_matches 70_000
 
   @spec run() :: :ok
   def run do
@@ -27,7 +28,7 @@ defmodule Minga.Bench.GuiSearchIndex do
           density <- [:sparse, :dense],
           matcher <- [:literal, :regex] do
         measure(size, density, matcher)
-      end
+      end ++ [measure_dense_single_line()]
 
     IO.puts(
       JSON.encode!(%{
@@ -138,6 +139,57 @@ defmodule Minga.Bench.GuiSearchIndex do
     }
   end
 
+  @spec measure_dense_single_line() :: map()
+  defp measure_dense_single_line do
+    IO.puts(:stderr, "measuring dense single-line matches=#{@dense_single_line_matches}")
+    line = String.duplicate("x ", @dense_single_line_matches)
+
+    initial_samples =
+      samples(@initial_samples, fn ->
+        Index.build([line], "x")
+      end)
+
+    index = Index.build([line], "x")
+    initial_metrics = Index.metrics(index)
+
+    {cursor_samples, cursor_output} =
+      samples_with_result(@frame_rounds, fn ->
+        dense_single_line_frames(index, @frames_per_round, @dense_single_line_matches)
+      end)
+
+    last_col = (@dense_single_line_matches - 1) * 2
+    projection = projection(index, {0, last_col})
+    model = SearchStateBuilder.build(projection)
+    {wire, _caches} = SearchStateEncoder.encode(model, Caches.new())
+
+    %{
+      lines: 1,
+      shape: :dense_single_line,
+      density: :dense,
+      matcher: :literal,
+      matches: Index.count(index),
+      correctness: %{
+        ordinal_65_536: Index.current_ordinal(index, {0, 65_535 * 2}),
+        last_ordinal: Index.current_ordinal(index, {0, last_col})
+      },
+      matching: %{
+        initial_build_us: percentiles(initial_samples),
+        initial_work: initial_metrics
+      },
+      render_encode: %{
+        cursor_1_000_frames_us: percentiles(cursor_samples),
+        cursor_wire_bytes: cursor_output,
+        matching_work_delta: metric_delta(Index.metrics(index), initial_metrics)
+      },
+      retained_size: %{
+        index_words: :erts_debug.flat_size(index),
+        projection_external_bytes: :erlang.external_size(projection),
+        model_external_bytes: :erlang.external_size(model),
+        wire_bytes: byte_size(wire)
+      }
+    }
+  end
+
   @spec stage(pos_integer(), atom(), atom(), String.t()) :: :ok
   defp stage(size, density, matcher, stage) do
     IO.puts(
@@ -173,6 +225,19 @@ defmodule Minga.Bench.GuiSearchIndex do
     {_caches, bytes} =
       Enum.reduce(0..(count - 1), {Caches.new(), 0}, fn frame, {caches, bytes} ->
         model = index |> projection({frame, 0}) |> SearchStateBuilder.build()
+        {wire, caches} = SearchStateEncoder.encode(model, caches)
+        {caches, bytes + if(wire == nil, do: 0, else: byte_size(wire))}
+      end)
+
+    bytes
+  end
+
+  @spec dense_single_line_frames(Index.t(), pos_integer(), pos_integer()) :: non_neg_integer()
+  defp dense_single_line_frames(index, count, match_count) do
+    {_caches, bytes} =
+      Enum.reduce(0..(count - 1), {Caches.new(), 0}, fn frame, {caches, bytes} ->
+        cursor = {0, rem(frame * 67, match_count) * 2}
+        model = index |> projection(cursor) |> SearchStateBuilder.build()
         {wire, caches} = SearchStateEncoder.encode(model, caches)
         {caches, bytes + if(wire == nil, do: 0, else: byte_size(wire))}
       end)
