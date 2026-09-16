@@ -544,6 +544,10 @@ defmodule Minga.Buffer do
   @spec changes_since(t(), ChangeLog.sequence()) :: ChangeLog.sequence_changes()
   defdelegate changes_since(server, sequence), to: BufferProcess
 
+  @doc "Returns the atomic content version and monotonic change sequence."
+  @spec sync_revision(t()) :: {non_neg_integer(), ChangeLog.sequence()}
+  defdelegate sync_revision(server), to: BufferProcess
+
   @doc "Requests an atomic asynchronous parser synchronization snapshot."
   @spec request_sync_snapshot(t(), :full | ChangeLog.sequence(), pid(), reference()) :: :ok
   defdelegate request_sync_snapshot(server, cursor, reply_to, token), to: BufferProcess

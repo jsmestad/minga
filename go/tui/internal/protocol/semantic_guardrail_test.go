@@ -78,7 +78,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiEditTimeline:        {generated.OPGuiEditTimeline, 0, 4, 0, 0, 0, 0},
 		generated.OPGuiExtensionOverlay:    {generated.OPGuiExtensionOverlay, 0, 2, 0, 0},
 		generated.OPGuiExtensionPanel:      {generated.OPGuiExtensionPanel, 0, 1, 0},
-		generated.OPGuiSearchState:         {generated.OPGuiSearchState, 0, 5, 0, 0, 0, 0, 0},
+		generated.OPGuiSearchState:         {generated.OPGuiSearchState, 0, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		generated.OPGuiSidebars:            {generated.OPGuiSidebars, 0, 0, 0, 0, 0},
 		generated.OPGuiWindowOverlayDelta:  {generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0},
 		generated.OPGuiWindowViewportDelta: append(append([]byte{generated.OPGuiWindowViewportDelta, 2}, section32Semantic(0x01, []byte{0, 8, 0x12, 0x34, 0x56, 0x78, 0x01, 0, 0, 0x02, 0, 2, 0, 0})...), section32Semantic(0x02, []byte{0, 0, 0, 0})...),

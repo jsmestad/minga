@@ -52,6 +52,7 @@ defmodule Minga.Parser.BufferLifecycleTest do
     late_snapshot = %SyncSnapshot{
       buffer: buffer,
       token: deferred_token,
+      version: 1,
       sequence: 1,
       changes: :unchanged
     }

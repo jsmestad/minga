@@ -11,7 +11,8 @@ defmodule Minga.RenderModel.UI.SearchState do
           case_sensitive: boolean(),
           whole_word: boolean(),
           regex: boolean(),
-          replace_mode: boolean()
+          replace_mode: boolean(),
+          status: :ready | :loading | :rebuilding | :failed
         }
 
   @enforce_keys [:active]
@@ -24,5 +25,6 @@ defmodule Minga.RenderModel.UI.SearchState do
             case_sensitive: true,
             whole_word: false,
             regex: false,
-            replace_mode: false
+            replace_mode: false,
+            status: :ready
 end

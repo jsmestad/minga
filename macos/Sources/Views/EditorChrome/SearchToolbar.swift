@@ -24,10 +24,20 @@ public struct SearchToolbar: View {
 
     /// Formatted match count string, e.g. "3 of 12" or "No results".
     private var matchCountText: String {
-        guard searchState.matchCount > 0 else {
-            return searchState.query.isEmpty ? "" : "No results"
+        guard !searchState.query.isEmpty else { return "" }
+
+        switch searchState.status {
+        case .loading:
+            return "Searching…"
+        case .rebuilding:
+            return "Updating…"
+        case .failed:
+            return "Search failed"
+        case .ready:
+            return searchState.matchCount > 0
+                ? "\(searchState.currentIndex) of \(searchState.matchCount)"
+                : "No results"
         }
-        return "\(searchState.currentIndex) of \(searchState.matchCount)"
     }
 
     public var body: some View {
@@ -92,7 +102,7 @@ public struct SearchToolbar: View {
                     Text(matchCountText)
                         .font(.system(size: 10))
                         .foregroundStyle(
-                            searchState.matchCount > 0
+                            searchState.status != .failed
                                 ? theme.editorFg.opacity(0.5)
                                 : theme.gutterErrorFg.opacity(0.8)
                         )

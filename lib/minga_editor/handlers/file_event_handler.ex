@@ -14,6 +14,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.LspActions
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Runtime
@@ -52,11 +53,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_buffer_saved(state, buf)
   end
 
-  def handle(
-        state,
-        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf}}
-      ) do
-    handle_buffer_changed(state, buf)
+  def handle(state, {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{} = event}) do
+    handle_buffer_changed(state, event)
   end
 
   def handle(
@@ -185,8 +183,10 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     EventWorkflow.dispatch(state, {:buffer_saved, saved_buf})
   end
 
-  @spec handle_buffer_changed(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}
-  defp handle_buffer_changed(state, buffer) do
+  @spec handle_buffer_changed(EditorState.t(), Minga.Events.BufferChangedEvent.t()) ::
+          {EditorState.t(), [file_effect()]}
+  defp handle_buffer_changed(state, %Minga.Events.BufferChangedEvent{buffer: buffer} = event) do
+    state = GuiSearchWorkflow.buffer_changed(state, event)
     state = %{state | lsp: LSPState.clear_semantic_tokens(state.lsp, buffer)}
 
     if FileTreeFreshness.buffer_under_tree?(state, buffer) do

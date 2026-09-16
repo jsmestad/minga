@@ -42,7 +42,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   def build_ui(%Context{} = ctx, status_bar_data \\ nil, minibuffer_data \\ nil) do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
-    active_buf = active_buffer_pid(ctx)
     sb_data = status_bar_data || ctx.intent.frame.status_bar_data
 
     # Bottom panel has a side effect: encoding may advance the message_store cursor.
@@ -55,7 +54,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
       which_key: build_which_key(ctx),
       notifications: NotificationsBuilder.build(ctx.intent.frame.notifications),
-      search_state: SearchStateBuilder.build(ctx.workspace.search, active_buf),
+      search_state: SearchStateBuilder.build(ctx.workspace.search),
       git_status: build_git_status(ctx),
       agent_context: AgentContextBuilder.build(ctx),
       status_bar: build_status_bar(sb_data, ctx),
@@ -109,12 +108,6 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   end
 
   defp build_which_key(_ctx), do: nil
-
-  @spec active_buffer_pid(Context.t()) :: pid() | nil
-  defp active_buffer_pid(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf),
-    do: buf
-
-  defp active_buffer_pid(_ctx), do: nil
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do

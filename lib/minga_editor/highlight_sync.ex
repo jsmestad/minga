@@ -8,6 +8,7 @@ defmodule MingaEditor.HighlightSync do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.State.Highlighting
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager, as: ParserManager
@@ -74,12 +75,22 @@ defmodule MingaEditor.HighlightSync do
         old_buffer
       )
       when is_pid(active_buffer) and active_buffer != old_buffer do
-    if active_buffer_process?(active_buffer) do
-      ensure_active_buffer_setup(state, active_buffer)
-    else
-      state
-    end
+    state =
+      if active_buffer_process?(active_buffer) do
+        ensure_active_buffer_setup(state, active_buffer)
+      else
+        state
+      end
+
+    GuiSearchWorkflow.active_buffer_changed(state)
   end
+
+  def ensure_active_buffer_presentation(
+        %EditorState{workspace: %{buffers: %{active: active_buffer}}} = state,
+        old_buffer
+      )
+      when active_buffer != old_buffer,
+      do: GuiSearchWorkflow.active_buffer_changed(state)
 
   def ensure_active_buffer_presentation(%EditorState{} = state, _old_buffer), do: state
 

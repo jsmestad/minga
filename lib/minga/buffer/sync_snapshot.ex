@@ -10,12 +10,13 @@ defmodule Minga.Buffer.SyncSnapshot do
 
   @type changes :: {:full, String.t()} | {:edits, [EditDelta.t()]} | :unchanged
 
-  @enforce_keys [:buffer, :token, :sequence, :changes]
-  defstruct [:buffer, :token, :sequence, :changes]
+  @enforce_keys [:buffer, :token, :version, :sequence, :changes]
+  defstruct [:buffer, :token, :version, :sequence, :changes]
 
   @type t :: %__MODULE__{
           buffer: pid(),
           token: reference(),
+          version: non_neg_integer(),
           sequence: ChangeLog.sequence(),
           changes: changes()
         }

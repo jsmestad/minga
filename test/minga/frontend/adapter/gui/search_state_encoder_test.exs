@@ -21,7 +21,8 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
 
       {cmd, _caches} = SearchStateEncoder.encode(model, caches)
 
-      assert <<@op_gui_search_state, 16::16, 0::8, 0::16, 0::16, 0::8, 0::16, 0::32, 0::32>> = cmd
+      assert <<@op_gui_search_state, 21::16, 0::8, 0::32, 0::32, 0::8, 0::16, 0::32, 0::32, 0::8>> =
+               cmd
     end
 
     test "encodes active search state with matches" do
@@ -41,8 +42,8 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
       caches = Caches.new()
       {cmd, _caches} = SearchStateEncoder.encode(model, caches)
 
-      assert <<@op_gui_search_state, 21::16, 1::8, 5::16, 2::16, 0x02::8, 5::16, "café"::binary,
-               3::32, 2::32>> = cmd
+      assert <<@op_gui_search_state, 26::16, 1::8, 5::32, 2::32, 0x02::8, 5::16, "café"::binary,
+               3::32, 2::32, 0::8>> = cmd
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do
@@ -72,34 +73,30 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
 
       {cmd, _caches} = SearchStateEncoder.encode(model, Caches.new())
 
-      assert <<@op_gui_search_state, 19::16, 1::8, 10::16, 3::16, 0x0F::8, 3::16, "foo"::binary,
-               10::32, 8::32>> = cmd
+      assert <<@op_gui_search_state, 24::16, 1::8, 10::32, 3::32, 0x0F::8, 3::16, "foo"::binary,
+               10::32, 8::32, 0::8>> = cmd
     end
 
-    test "rejects out-of-range match_count before narrowing it to u16" do
-      model = %SearchState{
-        active: true,
-        match_count: 70_000,
-        current_index: 1,
-        case_sensitive: false,
-        whole_word: false,
-        regex: false,
-        replace_mode: false
-      }
+    test "encodes counts at and beyond the former u16 limit" do
+      for count <- [65_535, 65_536, 70_000] do
+        model = %SearchState{
+          active: true,
+          match_count: count,
+          current_index: count,
+          case_sensitive: false,
+          whole_word: false,
+          regex: false,
+          replace_mode: false
+        }
 
-      assert %{
-               command: :gui_search_state,
-               field: :match_count,
-               actual: 70_000,
-               min: 0,
-               max: 65_535
-             } =
-               assert_raise(Minga.Frontend.Adapter.GUI.EncodingError, fn ->
-                 SearchStateEncoder.encode(model, Caches.new())
-               end)
+        {cmd, _caches} = SearchStateEncoder.encode(model, Caches.new())
+
+        assert <<@op_gui_search_state, _len::16, 1::8, ^count::32, ^count::32, _rest::binary>> =
+                 cmd
+      end
     end
 
-    test "rejects out-of-range current_index before narrowing it to u16" do
+    test "encodes a current ordinal beyond the former u16 limit" do
       model = %SearchState{
         active: true,
         match_count: 1,
@@ -110,16 +107,16 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
         replace_mode: false
       }
 
-      assert %{
-               command: :gui_search_state,
-               field: :current_index,
-               actual: 70_000,
-               min: 0,
-               max: 65_535
-             } =
-               assert_raise(Minga.Frontend.Adapter.GUI.EncodingError, fn ->
-                 SearchStateEncoder.encode(model, Caches.new())
-               end)
+      {cmd, _caches} = SearchStateEncoder.encode(model, Caches.new())
+      assert <<@op_gui_search_state, _len::16, 1::8, 1::32, 70_000::32, _rest::binary>> = cmd
+    end
+
+    test "encodes every typed pending and failure status" do
+      for {status, wire} <- [ready: 0, loading: 1, rebuilding: 2, failed: 3] do
+        model = %SearchState{active: true, status: status}
+        {cmd, _caches} = SearchStateEncoder.encode(model, Caches.new())
+        assert <<@op_gui_search_state, 21::16, _prefix::binary-size(20), ^wire::8>> = cmd
+      end
     end
   end
 end

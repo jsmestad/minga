@@ -240,12 +240,13 @@ type GitToast struct {
 
 type SearchState struct {
 	Active              bool
-	Count               uint16
-	CurrentIndex        uint16
+	Count               uint32
+	CurrentIndex        uint32
 	Flags               byte
 	Query               string
 	SessionID           uint32
 	AcknowledgedEditSeq uint32
+	Status              byte
 }
 
 type HoverPopup struct {

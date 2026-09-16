@@ -1052,15 +1052,15 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 		t.Fatalf("git decoded incorrectly: size=%d git=%+v", command.Size, command.Chrome.Git)
 	}
 
-	searchPayload := []byte{1, 0, 9, 0, 12, 0x03}
+	searchPayload := []byte{1, 0, 0, 0, 9, 0, 0, 0, 12, 0x03}
 	searchPayload = append(searchPayload, string16("λ")...)
-	searchPayload = append(searchPayload, 0, 0, 0, 7, 0, 0, 0, 2)
+	searchPayload = append(searchPayload, 0, 0, 0, 7, 0, 0, 0, 2, 2)
 	search := append([]byte{generated.OPGuiSearchState, 0, byte(len(searchPayload))}, searchPayload...)
 	command, err = DecodeCommand(search)
 	if err != nil {
 		t.Fatalf("DecodeCommand search returned error: %v", err)
 	}
-	if !command.Chrome.Search.Active || command.Chrome.Search.Count != 9 || command.Chrome.Search.CurrentIndex != 12 || command.Chrome.Search.Query != "λ" || command.Chrome.Search.SessionID != 7 || command.Chrome.Search.AcknowledgedEditSeq != 2 {
+	if !command.Chrome.Search.Active || command.Chrome.Search.Count != 9 || command.Chrome.Search.CurrentIndex != 12 || command.Chrome.Search.Query != "λ" || command.Chrome.Search.SessionID != 7 || command.Chrome.Search.AcknowledgedEditSeq != 2 || command.Chrome.Search.Status != 2 {
 		t.Fatalf("search decoded incorrectly: %+v", command.Chrome.Search)
 	}
 

@@ -21,12 +21,19 @@ enum SearchOption {
     case regex
 }
 
+public enum SearchStatus: UInt8, Sendable {
+    case ready = 0
+    case loading = 1
+    case rebuilding = 2
+    case failed = 3
+}
+
 /// Owns the native presentation of one authoritative BEAM search session.
 /// Local committed edits are provisional until the BEAM acknowledges their sequence.
 @MainActor
 @Observable
 public final class SearchState {
-    public init(visible: Bool = false, matchCount: UInt16 = 0, currentIndex: UInt16 = 0, query: String = "", sessionID: UInt32 = 0, acknowledgedEditSeq: UInt32 = 0, replaceMode: Bool = false, caseSensitive: Bool = false, wholeWord: Bool = false, regex: Bool = false) {
+    public init(visible: Bool = false, matchCount: UInt32 = 0, currentIndex: UInt32 = 0, query: String = "", sessionID: UInt32 = 0, acknowledgedEditSeq: UInt32 = 0, replaceMode: Bool = false, caseSensitive: Bool = false, wholeWord: Bool = false, regex: Bool = false, status: SearchStatus = .ready) {
         self.visible = visible
         self.matchCount = matchCount
         self.currentIndex = currentIndex
@@ -37,13 +44,14 @@ public final class SearchState {
         self.caseSensitive = caseSensitive
         self.wholeWord = wholeWord
         self.regex = regex
+        self.status = status
         self.latestSentSequence = acknowledgedEditSeq
         self.nextSequence = acknowledgedEditSeq
     }
 
     public private(set) var visible: Bool
-    public private(set) var matchCount: UInt16
-    public private(set) var currentIndex: UInt16
+    public private(set) var matchCount: UInt32
+    public private(set) var currentIndex: UInt32
     public private(set) var query: String
     public private(set) var sessionID: UInt32
     public private(set) var acknowledgedEditSeq: UInt32
@@ -51,12 +59,14 @@ public final class SearchState {
     public private(set) var caseSensitive: Bool
     public private(set) var wholeWord: Bool
     public private(set) var regex: Bool
+    public private(set) var status: SearchStatus
 
     private(set) var latestSentSequence: UInt32
     private var nextSequence: UInt32
 
     /// Reconciles a complete authoritative state without allowing an old session or echo to replace newer local input.
-    public func update(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8, query: String, sessionID: UInt32, acknowledgedEditSeq: UInt32) {
+    public func update(active: Bool, matchCount: UInt32, currentIndex: UInt32, flags: UInt8, query: String, sessionID: UInt32, acknowledgedEditSeq: UInt32, status: UInt8 = SearchStatus.ready.rawValue) {
+        guard let decodedStatus = SearchStatus(rawValue: status) else { return }
         guard sessionID == self.sessionID || Self.isNewerSession(sessionID, than: self.sessionID) else { return }
 
         let changedSession = sessionID != self.sessionID
@@ -67,14 +77,14 @@ public final class SearchState {
             self.sessionID = sessionID
             latestSentSequence = acknowledgedEditSeq
             nextSequence = acknowledgedEditSeq
-            applyAuthoritativeValues(matchCount: matchCount, currentIndex: currentIndex, flags: flags, query: query, acknowledgedEditSeq: acknowledgedEditSeq)
+            applyAuthoritativeValues(matchCount: matchCount, currentIndex: currentIndex, flags: flags, query: query, acknowledgedEditSeq: acknowledgedEditSeq, status: decodedStatus)
             return
         }
 
         nextSequence = max(nextSequence, acknowledgedEditSeq)
         guard acknowledgedEditSeq >= latestSentSequence else { return }
         latestSentSequence = acknowledgedEditSeq
-        applyAuthoritativeValues(matchCount: matchCount, currentIndex: currentIndex, flags: flags, query: query, acknowledgedEditSeq: acknowledgedEditSeq)
+        applyAuthoritativeValues(matchCount: matchCount, currentIndex: currentIndex, flags: flags, query: query, acknowledgedEditSeq: acknowledgedEditSeq, status: decodedStatus)
     }
 
     /// Clears connection-scoped identity so a replacement BEAM can start session numbering again.
@@ -89,6 +99,7 @@ public final class SearchState {
         caseSensitive = false
         wholeWord = false
         regex = false
+        status = .ready
         latestSentSequence = 0
         nextSequence = 0
     }
@@ -98,6 +109,7 @@ public final class SearchState {
         self.query = query
         matchCount = 0
         currentIndex = 0
+        status = .loading
         return makeEdit()
     }
 
@@ -111,6 +123,7 @@ public final class SearchState {
         case .regex:
             regex.toggle()
         }
+        status = .loading
         return makeEdit()
     }
 
@@ -139,11 +152,12 @@ public final class SearchState {
         return flags
     }
 
-    private func applyAuthoritativeValues(matchCount: UInt16, currentIndex: UInt16, flags: UInt8, query: String, acknowledgedEditSeq: UInt32) {
+    private func applyAuthoritativeValues(matchCount: UInt32, currentIndex: UInt32, flags: UInt8, query: String, acknowledgedEditSeq: UInt32, status: SearchStatus) {
         self.matchCount = matchCount
         self.currentIndex = currentIndex
         self.query = query
         self.acknowledgedEditSeq = acknowledgedEditSeq
+        self.status = status
         caseSensitive = flags & SearchFlags.caseSensitive != 0
         wholeWord = flags & SearchFlags.wholeWord != 0
         regex = flags & SearchFlags.regex != 0

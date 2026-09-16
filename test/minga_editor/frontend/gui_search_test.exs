@@ -3,9 +3,11 @@ defmodule MingaEditor.Frontend.GUISearchTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Editing.Search.Index
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Session.State
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search, as: SearchData
@@ -206,7 +208,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     test "focus starts a complete search session from the last pattern" do
       result = SearchData.focus_gui_search(%SearchData{last_pattern: "foo"}, true)
 
-      assert result.gui_search == %{
+      assert %MingaEditor.State.Search.Session{
                active: true,
                session_id: 1,
                acknowledged_edit_seq: 0,
@@ -214,8 +216,9 @@ defmodule MingaEditor.Frontend.GUISearchTest do
                replace_mode: true,
                case_sensitive: false,
                whole_word: false,
-               regex: false
-             }
+               regex: false,
+               result: :loading
+             } = result.gui_search
     end
 
     test "repeated focus preserves query and options while changing mode and session" do
@@ -223,7 +226,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       {:accepted, s} = SearchData.apply_gui_search_edit(s, 1, 1, "foo", true, true, false)
       result = SearchData.focus_gui_search(s, true)
 
-      assert result.gui_search == %{
+      assert %MingaEditor.State.Search.Session{
                active: true,
                session_id: 2,
                acknowledged_edit_seq: 0,
@@ -231,8 +234,9 @@ defmodule MingaEditor.Frontend.GUISearchTest do
                replace_mode: true,
                case_sensitive: true,
                whole_word: true,
-               regex: false
-             }
+               regex: false,
+               result: :loading
+             } = result.gui_search
     end
 
     test "accepts only newer edits for the active session" do
@@ -359,6 +363,61 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   end
 
   describe "production toolbar Replace route" do
+    test "cursor-only frame intents reuse the accepted index without matching work" do
+      ctx = start_editor(Enum.join(List.duplicate("foo and text", 2_000), "\n"))
+      send_search_query(ctx, "foo")
+
+      before = ready_index(ctx)
+      before_metrics = Index.metrics(before)
+
+      for col <- 0..20 do
+        Buffer.move_to(ctx.buffer, {0, col})
+        intent = Intent.from_editor_state(editor_state(ctx))
+        assert intent.workspace.search.match_count == 2_000
+        refute Map.has_key?(Map.from_struct(intent.workspace.search), :root)
+      end
+
+      assert Index.metrics(ready_index(ctx)) == before_metrics
+    end
+
+    test "line-local edits scan only affected current lines and undo rebuilds exactly" do
+      ctx = start_editor("foo\nnone\nfoo")
+      send_search_query(ctx, "foo")
+      initial_metrics = Index.metrics(ready_index(ctx))
+
+      Buffer.move_to(ctx.buffer, {1, 0})
+      :ok = Buffer.insert_text(ctx.buffer, "foo")
+      {_version, sequence} = Buffer.sync_revision(ctx.buffer)
+
+      wait_until(ctx, fn state ->
+        match?(
+          %{accepted_sequence: ^sequence, result: {:ready, _index}},
+          state.workspace.search.gui_search
+        )
+      end)
+
+      updated = ready_index(ctx)
+      assert Index.count(updated) == 3
+      assert Index.metrics(updated).scanned_lines == initial_metrics.scanned_lines + 1
+      assert Index.metrics(updated).updated_lines == 1
+
+      :ok = Buffer.undo(ctx.buffer)
+      {undo_version, undo_sequence} = Buffer.sync_revision(ctx.buffer)
+
+      wait_until(ctx, fn state ->
+        match?(
+          %{
+            accepted_version: ^undo_version,
+            accepted_sequence: ^undo_sequence,
+            result: {:ready, _index}
+          },
+          state.workspace.search.gui_search
+        )
+      end)
+
+      assert Index.count(ready_index(ctx)) == 2
+    end
+
     test "uses the exact committed Unicode query and options for actions" do
       ctx = start_editor("CAFÉ café")
       send_search_focus(ctx, true)
@@ -509,7 +568,9 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       send_search_query(query, "missing")
       send_search_action(query, {:replace, "bar"})
       assert Buffer.content(query.buffer) == "foo foo"
-      assert notice_message(query) == "Search match changed; select a match and try again"
+
+      assert notice_message(query) ==
+               "Search results changed; wait for Find to finish and try again"
 
       buffer = start_editor("foo foo")
       select_first_match(buffer, "foo")
@@ -517,14 +578,18 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       replace_active_buffer(buffer, other)
       send_search_action(buffer, {:replace, "bar"})
       assert Buffer.content(other) == "x foo"
-      assert notice_message(buffer) == "Search match changed; select a match and try again"
+
+      assert notice_message(buffer) ==
+               "Search results changed; wait for Find to finish and try again"
 
       content = start_editor("foo foo")
       select_first_match(content, "foo")
       :ok = Buffer.replace_content(content.buffer, "x foo")
       send_search_action(content, {:replace, "bar"})
       assert Buffer.content(content.buffer) == "x foo"
-      assert notice_message(content) == "Search match changed; select a match and try again"
+
+      assert notice_message(content) ==
+               "Search results changed; wait for Find to finish and try again"
     end
 
     test "preserves literal, case, whole-word, regex, Unicode, and zero-width semantics" do
@@ -648,6 +713,20 @@ defmodule MingaEditor.Frontend.GUISearchTest do
         byte_size(query)::16, query::binary, flags::8>>
 
     send_decoded_gui_action(ctx, payload)
+
+    state = editor_state(ctx)
+
+    if is_pid(state.workspace.buffers.active) and
+         state.workspace.search.gui_search.acknowledged_edit_seq == edit_seq do
+      wait_until(ctx, &search_edit_ready?(&1, edit_seq))
+    end
+  end
+
+  defp search_edit_ready?(state, edit_seq) do
+    match?(
+      %{acknowledged_edit_seq: ^edit_seq, result: {:ready, _index}},
+      state.workspace.search.gui_search
+    )
   end
 
   defp send_search_focus(ctx, replace_mode) do
@@ -686,9 +765,21 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   end
 
   defp assert_search_stats(ctx, count, index) do
-    model = SearchStateBuilder.build(editor_state(ctx).workspace.search, ctx.buffer)
+    state = editor_state(ctx)
+
+    projection =
+      SearchData.render_snapshot(state.workspace.search, ctx.buffer, Buffer.cursor(ctx.buffer))
+
+    model = SearchStateBuilder.build(projection)
     assert model.match_count == count
     assert model.current_index == index
+  end
+
+  defp ready_index(ctx) do
+    state = editor_state(ctx)
+    revision = Buffer.sync_revision(ctx.buffer)
+    assert {:ok, index} = SearchData.ready_gui_index(state.workspace.search, ctx.buffer, revision)
+    index
   end
 
   defp replace_active_buffer(ctx, buffer) do
