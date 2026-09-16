@@ -471,13 +471,9 @@ final class CommandDispatcher {
         // setTitle / setWindowBg / setLinkCursor / clipboardWrite: post-commit
         //   side-channels.
         // protocolError: handshake rejection, always pre-transaction.
-        // setFont / setFontFallback / registerFont / guiConfigState: startup
+        // setFont / setFontFallback / registerFont: startup
         //   config emitted before the first frame (equivalent to Go's CommandNoop
         //   for font commands, but Swift actually applies them).
-        case .guiConfigState:
-            // Settings is an independently interactive scene and has no frame consumer.
-            applyImmediately(command)
-
         case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont, .clipboardWrite:
             if openFrameSeq != nil {

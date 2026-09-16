@@ -10,10 +10,12 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias Minga.RenderModel.Cursor
+  alias Minga.RenderModel.UI.ConfigState
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Frontend.FrameTransaction
   alias Minga.Core.Face
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.Window, as: RenderWindow
@@ -25,6 +27,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
+  alias MingaEditor.State.Appearance
   alias MingaEditor.State.Windows
   alias MingaEditor.UI.FontRegistry
 
@@ -96,6 +99,25 @@ defmodule MingaEditor.Frontend.EmitTest do
       commands = assert_receive_frame_commands()
       assert is_list(commands)
       assert Enum.all?(commands, &is_binary/1)
+    end
+
+    test "GUI config state is emitted inside the frame transaction" do
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
+      config_state = %ConfigState{options: [{"cursor_blink", false}]}
+      state = gui_state(port_manager: Process.get(:emit_test_frontend))
+      appearance = Appearance.cache_gui_config(state.appearance, config_state)
+      state = %{state | appearance: appearance}
+      ctx = Context.from_editor_state(state)
+
+      Emit.emit(frame, ctx)
+
+      commands = assert_receive_frame_commands()
+      config_index = Enum.find_index(commands, &match?(<<0x97, _::binary>>, &1))
+
+      assert config_index != nil
+      assert config_index > 0
+      assert config_index < Enum.count(commands) - 1
+      assert FrameTransaction.validate(commands) == :ok
     end
 
     test "semantic TUI path emits semantic window commands instead of cell-grid clear" do

@@ -17,7 +17,6 @@ defmodule MingaEditor.Frontend.FrameTransaction do
     Opcodes.set_font(),
     Opcodes.set_font_fallback(),
     Opcodes.register_font(),
-    Opcodes.gui_config_state(),
     Opcodes.clipboard_write(),
     Opcodes.presentation_operation()
   ]

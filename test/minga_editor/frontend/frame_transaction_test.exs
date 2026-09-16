@@ -2,6 +2,8 @@ defmodule MingaEditor.Frontend.FrameTransactionTest do
   use ExUnit.Case, async: true
 
   alias Minga.Protocol.Opcodes
+  alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
+  alias Minga.RenderModel.UI.ConfigState
   alias MingaEditor.Frontend.FrameTransaction
   alias MingaEditor.Frontend.Protocol
 
@@ -27,6 +29,15 @@ defmodule MingaEditor.Frontend.FrameTransactionTest do
 
     assert FrameTransaction.format_error({:out_of_transaction_command, opcode}) ==
              "opcode 0x71 outside a frame"
+  end
+
+  test "rejects GUI config state outside a frame" do
+    command = ConfigStateEncoder.encode_command(%ConfigState{options: []})
+
+    assert {:error, {:out_of_transaction_command, opcode}} =
+             FrameTransaction.validate([command])
+
+    assert opcode == Opcodes.gui_config_state()
   end
 
   test "rejects retired cell-grid clear inside a frame" do
