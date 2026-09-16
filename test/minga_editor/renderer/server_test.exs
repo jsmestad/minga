@@ -697,6 +697,24 @@ defmodule MingaEditor.Renderer.ServerTest do
       refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
     end
 
+    test "correlated decode rejection starts recovery before its acknowledgement timeout" do
+      renderer = start_ack_renderer(self(), ack_timeout_ms: 60_000)
+
+      RendererServer.cast_snapshot(renderer, stub_intent(), 20)
+      assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_intent(), 21)
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 1, 20, 0, :decode_failure, :retryable_recovery}
+      )
+
+      assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
+      send(renderer, {:frame_ack_timeout, 1, 20})
+      refute_receive {:ack_pipeline, _, 3, _, _}, 50
+      refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
+    end
+
     test "terminal resource rejection cancels credit, preserves last good, and ignores stale duplicates" do
       renderer = start_ack_renderer(self())
 

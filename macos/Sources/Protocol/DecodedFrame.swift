@@ -75,8 +75,8 @@ struct FrameEnvelope: Sendable, Equatable {
     let baseFrameSeq: UInt32
 }
 
-/// A fully decoded failure. The optional envelope allows a resource rejection
-/// to use the same correlated terminal status as a staged-frame rejection.
+/// A fully decoded failure. A trustworthy leading frame envelope lets the dispatcher
+/// emit the matching typed rejection without publishing partially decoded commands.
 struct DecodedFrameFailure: Error, Sendable {
     let error: ProtocolDecodeError
     let envelope: FrameEnvelope?
