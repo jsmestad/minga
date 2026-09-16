@@ -2,7 +2,9 @@ defmodule MingaAgent.Tools.ProjectViewProcessRoutingTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.ProjectView.RecordingBackend
+  alias MingaAgent.ProjectView.UnavailableBackend
   alias MingaAgent.Test.RecordingProcessBackend
+  alias MingaAgent.Tool.Context
   alias MingaAgent.Tools
 
   @moduletag :tmp_dir
@@ -58,6 +60,51 @@ defmodule MingaAgent.Tools.ProjectViewProcessRoutingTest do
     assert shell_result =~ "cwd=#{working_dir}"
     assert shell_result =~ "PROJECT_VIEW_SENTINEL"
     assert shell_result =~ "ProjectView workspace 42"
+  end
+
+  test "routing failures prevent find, grep, and shell process execution", %{root: root} do
+    {:ok, view} = UnavailableBackend.create(root, workspace_id: 99)
+
+    context =
+      Context.new(
+        project_root: root,
+        project_view: view,
+        metadata: %{process_backend: RecordingProcessBackend}
+      )
+
+    for {name, args} <- [
+          {"find", %{"pattern" => "*.txt", "path" => "lib"}},
+          {"grep", %{"pattern" => "needle", "path" => "lib"}},
+          {"shell", %{"command" => "echo must-not-run"}}
+        ] do
+      assert {:error, message} = call_tool(context, name, args)
+      assert message =~ "project_view_unavailable"
+    end
+  end
+
+  test "a terminated changeset prevents find, grep, and shell process execution", %{root: root} do
+    {:ok, changeset} =
+      start_supervised({MingaAgent.Changeset.Server, project_root: root})
+
+    context =
+      Context.new(
+        project_root: root,
+        changeset: changeset,
+        metadata: %{process_backend: RecordingProcessBackend}
+      )
+
+    ref = Process.monitor(changeset)
+    Process.exit(changeset, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+    for {name, args} <- [
+          {"find", %{"pattern" => "*.txt", "path" => "lib"}},
+          {"grep", %{"pattern" => "needle", "path" => "lib"}},
+          {"shell", %{"command" => "echo must-not-run"}}
+        ] do
+      assert {:error, message} = call_tool(context, name, args)
+      assert message =~ "noproc"
+    end
   end
 
   @spec call_tool(MingaAgent.Tool.Context.t(), String.t(), map()) ::

@@ -41,6 +41,8 @@ defmodule MingaAgent.ToolRouter do
   @typedoc "Trusted execution and filtering context for search tools."
   @type search_context :: SearchContext.t()
 
+  @typep route_result(value) :: {:ok, value} | {:error, term()}
+
   @doc """
   Builds a routing context from the fork store and changeset pids.
   """
@@ -182,51 +184,62 @@ defmodule MingaAgent.ToolRouter do
 
   @doc "Returns the filesystem path corresponding to `path` in the routed view."
   @spec filesystem_path(context(), String.t()) :: String.t()
-  def filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
-    case ProjectView.prepare_working_dir(view) do
-      {:ok, cwd} -> Path.expand(project_view_relative_path(view, path), cwd)
+  def filesystem_path(%Context{} = ctx, path) do
+    case resolve_filesystem_path(ctx, path) do
+      {:ok, resolved_path} -> resolved_path
       {:error, _reason} -> path
     end
   end
 
-  def filesystem_path(%Context{}, path), do: path
-
   @doc "Returns the working directory for shell commands."
   @spec working_dir(context()) :: String.t() | nil
-  def working_dir(%Context{project_view: %ProjectView{} = view}) do
-    case ProjectView.prepare_working_dir(view) do
+  def working_dir(%Context{} = ctx) do
+    case resolve_working_dir(ctx) do
       {:ok, cwd} -> cwd
       {:error, _reason} -> nil
     end
   end
 
-  def working_dir(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
-    try do
-      case Changeset.prepare_working_dir(cs) do
-        {:ok, cwd} -> cwd
-        {:error, _reason} -> nil
-      end
-    catch
-      :exit, _ -> nil
-    end
-  end
-
-  def working_dir(_ctx), do: nil
-
   @doc "Returns environment variables for shell commands."
   @spec command_env(context()) :: [{String.t(), String.t()}]
-  def command_env(%Context{project_view: %ProjectView{} = view}) do
-    case ProjectView.command_env(view) do
+  def command_env(%Context{} = ctx) do
+    case resolve_command_env(ctx) do
+      {:ok, env} -> env
       {:error, _reason} -> []
-      env -> env
     end
   end
-
-  def command_env(%Context{}), do: []
 
   @doc "Returns the filesystem path for search tools, or a tagged error if ProjectView is unavailable."
   @spec filesystem_path_result(context(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def filesystem_path_result(%Context{project_view: %ProjectView{} = view}, path) do
+  def filesystem_path_result(%Context{} = ctx, path) do
+    with :ok <- prepare_execution_routing(ctx) do
+      resolve_filesystem_path(ctx, path)
+    end
+  end
+
+  @doc "Returns the trusted execution and logical filtering context for search tools."
+  @spec search_context(context(), String.t()) :: {:ok, search_context()} | {:error, term()}
+  def search_context(%Context{} = ctx, path) do
+    with :ok <- prepare_execution_routing(ctx),
+         {:ok, exec_path} <- resolve_filesystem_path(ctx, path) do
+      {:ok, %SearchContext{exec_path: exec_path, filter_root: path}}
+    end
+  end
+
+  @doc "Returns the working directory for shell commands, or a tagged error if ProjectView is unavailable."
+  @spec working_dir_result(context()) :: {:ok, String.t() | nil} | {:error, term()}
+  def working_dir_result(%Context{} = ctx) do
+    with :ok <- prepare_execution_routing(ctx) do
+      resolve_working_dir(ctx)
+    end
+  end
+
+  @doc "Returns environment variables for shell commands, or a tagged error if ProjectView is unavailable."
+  @spec command_env_result(context()) :: {:ok, [{String.t(), String.t()}]} | {:error, term()}
+  def command_env_result(%Context{} = ctx), do: resolve_command_env(ctx)
+
+  @spec resolve_filesystem_path(context(), String.t()) :: route_result(String.t())
+  defp resolve_filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
     case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
       {:ok, cwd} -> {:ok, Path.expand(project_view_relative_path(view, path), cwd)}
       {:error, {:project_view_unavailable, _}} = error -> error
@@ -234,10 +247,9 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def filesystem_path_result(%Context{changeset: cs} = ctx, path) when cs != nil and is_pid(cs) do
+  defp resolve_filesystem_path(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
     try do
-      with :ok <- materialize_forks_for_command(ctx),
-           {:ok, cwd} <- Changeset.prepare_working_dir(cs),
+      with {:ok, cwd} <- Changeset.prepare_working_dir(cs),
            {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
         {:ok, Path.expand(relative_path, cwd)}
       end
@@ -246,45 +258,10 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def filesystem_path_result(%Context{}, path), do: {:ok, path}
+  defp resolve_filesystem_path(%Context{}, path), do: {:ok, path}
 
-  @doc "Returns the trusted execution and logical filtering context for search tools."
-  @spec search_context(context(), String.t()) :: {:ok, search_context()} | {:error, term()}
-  def search_context(%Context{project_view: %ProjectView{} = view}, path) do
-    case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
-      {:ok, cwd} ->
-        {:ok,
-         %SearchContext{
-           exec_path: Path.expand(project_view_relative_path(view, path), cwd),
-           filter_root: path
-         }}
-
-      {:error, {:project_view_unavailable, _}} = error ->
-        error
-
-      {:error, reason} ->
-        {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
-    end
-  end
-
-  def search_context(%Context{changeset: cs} = ctx, path) when cs != nil and is_pid(cs) do
-    try do
-      with :ok <- materialize_forks_for_command(ctx),
-           {:ok, cwd} <- Changeset.prepare_working_dir(cs),
-           {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
-        {:ok, %SearchContext{exec_path: Path.expand(relative_path, cwd), filter_root: path}}
-      end
-    catch
-      :exit, reason -> {:error, {:changeset_unavailable, reason}}
-    end
-  end
-
-  def search_context(%Context{}, path),
-    do: {:ok, %SearchContext{exec_path: path, filter_root: path}}
-
-  @doc "Returns the working directory for shell commands, or a tagged error if ProjectView is unavailable."
-  @spec working_dir_result(context()) :: {:ok, String.t() | nil} | {:error, term()}
-  def working_dir_result(%Context{project_view: %ProjectView{} = view}) do
+  @spec resolve_working_dir(context()) :: route_result(String.t() | nil)
+  defp resolve_working_dir(%Context{project_view: %ProjectView{} = view}) do
     case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
       {:ok, cwd} -> {:ok, cwd}
       {:error, {:project_view_unavailable, _}} = error -> error
@@ -292,21 +269,18 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def working_dir_result(%Context{changeset: cs} = ctx) when cs != nil and is_pid(cs) do
+  defp resolve_working_dir(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
     try do
-      with :ok <- materialize_forks_for_command(ctx) do
-        Changeset.prepare_working_dir(cs)
-      end
+      Changeset.prepare_working_dir(cs)
     catch
       :exit, reason -> {:error, {:changeset_unavailable, reason}}
     end
   end
 
-  def working_dir_result(_ctx), do: {:ok, nil}
+  defp resolve_working_dir(%Context{}), do: {:ok, nil}
 
-  @doc "Returns environment variables for shell commands, or a tagged error if ProjectView is unavailable."
-  @spec command_env_result(context()) :: {:ok, [{String.t(), String.t()}]} | {:error, term()}
-  def command_env_result(%Context{project_view: %ProjectView{} = view}) do
+  @spec resolve_command_env(context()) :: route_result([{String.t(), String.t()}])
+  defp resolve_command_env(%Context{project_view: %ProjectView{} = view}) do
     case project_view_result(fn -> ProjectView.command_env(view) end) do
       {:ok, env} -> {:ok, env}
       env when is_list(env) -> {:ok, env}
@@ -315,7 +289,7 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def command_env_result(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
+  defp resolve_command_env(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
     try do
       {:ok, Changeset.command_env(cs)}
     catch
@@ -323,7 +297,20 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def command_env_result(_ctx), do: {:ok, []}
+  defp resolve_command_env(%Context{}), do: {:ok, []}
+
+  @spec prepare_execution_routing(context()) :: :ok | {:error, term()}
+  defp prepare_execution_routing(%Context{project_view: %ProjectView{}}), do: :ok
+
+  defp prepare_execution_routing(%Context{changeset: cs} = ctx) when cs != nil and is_pid(cs) do
+    try do
+      materialize_forks_for_command(ctx)
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
+
+  defp prepare_execution_routing(%Context{}), do: :ok
 
   @doc "Returns true when the context includes a ProjectView."
   @spec project_view?(context()) :: boolean()
