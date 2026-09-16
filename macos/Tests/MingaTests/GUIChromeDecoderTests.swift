@@ -2123,6 +2123,24 @@ struct GUIAgentChatDecoderTests {
         #expect(helpGroups.first?.bindings.first?.description == "accept")
     }
 
+    @Test("Decode gui_agent_chat preserves prompt cursor as a UTF-8 byte offset")
+    func decodePromptCursorByteOffset() throws {
+        let prompt = "café 👩‍💻"
+        let byteOffset = UInt16(prompt.utf8.count)
+        let data = buildChatData(prompt: prompt, promptCursorCol: byteOffset, promptVimMode: 1)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentChat(_, _, _, _, let decodedPrompt, _, _, let decodedCursorCol, _, _, _, _, _, _, _) = cmd else {
+            Issue.record("Expected .guiAgentChat")
+            return
+        }
+
+        #expect(size == data.count)
+        #expect(decodedPrompt == prompt)
+        #expect(decodedCursorCol == byteOffset)
+        #expect(decodedCursorCol != UInt16(prompt.count))
+    }
+
 
     @Test("Decode gui_agent_chat skips retired section 0x06")
     func decodeSkipsRetiredMessagesSection() throws {
