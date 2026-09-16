@@ -664,6 +664,18 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			m.protocolError = "missing gui_theme in keyframe"
 			return m.invalidateStaging(cmds, "missing gui_theme in keyframe")
 		}
+	}
+
+	transcriptCandidate, transcriptFailure := m.prepareTranscriptCandidate()
+	if transcriptFailure != transcriptApplied {
+		return m.rejectStaging(
+			cmds,
+			protocol.RejectTranscriptDesync,
+			fmt.Sprintf("transcript frame rejected: %s", transcriptFailure),
+		)
+	}
+
+	if m.staging.base == 0 {
 		m.lineCache.reset()
 		m.renderWork.fullResets++
 	}
@@ -691,6 +703,9 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	for _, staged := range m.staging.commands {
 		m.applyMutation(staged)
 	}
+	if transcriptCandidate != nil {
+		m.transcript = transcriptCandidate
+	}
 	m.lastCommittedSeq = seq
 	m.lastCommittedGeneration = generation
 	m.staging = nil
@@ -706,6 +721,25 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	m.latency.Resolve(command.InputSeq)
 	m.send(protocol.EncodeFrameApplied(generation, seq))
 	return cmds
+}
+
+// prepareTranscriptCandidate folds every transcript command in arrival order
+// into one detached candidate. It performs no live writes, so any failure can
+// reject the complete frame before keyframe cache reset or mutation replay.
+func (m *Model) prepareTranscriptCandidate() (*residentTranscript, transcriptDropReason) {
+	var candidate *residentTranscript
+	for _, command := range m.staging.commands {
+		if command.Kind != protocol.CommandChrome || command.Chrome.Opcode != generated.OPGuiAgentTranscript {
+			continue
+		}
+		if candidate == nil {
+			candidate = m.transcript.detachedCandidate()
+		}
+		if reason := candidate.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
+			return nil, reason
+		}
+	}
+	return candidate, transcriptApplied
 }
 
 // invalidateStaging discards any open transaction and emits one typed
@@ -869,20 +903,6 @@ func (m *Model) applyMutation(command protocol.Command) {
 		}
 		m.chrome[command.Chrome.Opcode] = command.Chrome
 		switch command.Chrome.Opcode {
-		case generated.OPGuiAgentTranscript:
-			// Fold the resident transcript delta (#2654). The 0x86 stream, not the
-			// chrome snapshot, is the transcript source; the chrome entry is kept
-			// only so opcode bookkeeping stays uniform.
-			if m.transcript != nil {
-				if reason := m.transcript.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
-					// A dropped delta freezes the transcript until the next
-					// full_replace; that must never be invisible.
-					frame := command.Chrome.AgentTranscript
-					m.send(protocol.EncodeLogMessage(protocol.LogLevelWarn,
-						fmt.Sprintf("transcript frame dropped: %s (epoch %d, trim %d, base %d, count %d)",
-							reason, frame.Epoch, frame.TrimFront, frame.BaseCount, len(frame.Messages))))
-				}
-			}
 		case generated.OPGuiTheme:
 			m.activePalette = paletteFromTheme(command.Chrome.Theme)
 			m.themeApplied = true

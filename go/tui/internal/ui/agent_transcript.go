@@ -48,11 +48,25 @@ func newResidentTranscript() *residentTranscript {
 	return &residentTranscript{pinned: true}
 }
 
+// detachedCandidate returns an independently mutable transcript candidate for
+// frame preparation. Message bodies are immutable after decoding, so copying
+// the outer slice is sufficient to keep rejected frames from mutating live
+// transcript state.
+func (t *residentTranscript) detachedCandidate() *residentTranscript {
+	if t == nil {
+		return newResidentTranscript()
+	}
+
+	candidate := *t
+	candidate.messages = append([]protocol.AgentChatMessage(nil), t.messages...)
+	return &candidate
+}
+
 // transcriptDropReason names why a transcript frame was not folded into the
 // store; empty means it applied. The drop cases are defense-in-depth (a fresh
 // connection's encoder state makes every epoch's first frame a full_replace),
-// but if one ever fires the transcript is frozen until the next full_replace,
-// so the caller must surface it rather than let the freeze be invisible.
+// but if one ever fires the frame coordinator must reject the complete frame so
+// the BEAM can recover from the last committed transcript.
 type transcriptDropReason string
 
 const (
@@ -65,7 +79,7 @@ const (
 
 // apply folds one decoded gui_agent_transcript frame into the store, following
 // the docs/GUI_PROTOCOL.md 0x86 apply rules. Returns transcriptApplied, or the
-// reason the frame was dropped so the caller can log it.
+// reason preparation failed so the frame coordinator can reject atomically.
 func (t *residentTranscript) apply(frame protocol.AgentTranscript) transcriptDropReason {
 	if !frame.Present {
 		return transcriptDroppedUndecodable

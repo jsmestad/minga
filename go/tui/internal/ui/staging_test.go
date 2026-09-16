@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"encoding/binary"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -28,6 +30,16 @@ func windowRowsCommand(id uint16, text string) protocol.Command {
 		CursorVisible: true,
 		Rows:          []protocol.WindowRow{{Text: text}},
 	}}
+}
+
+func transcriptCommand(frame protocol.AgentTranscript) protocol.Command {
+	return protocol.Command{
+		Kind: protocol.CommandChrome,
+		Chrome: protocol.ChromePayload{
+			Opcode:          generated.OPGuiAgentTranscript,
+			AgentTranscript: frame,
+		},
+	}
 }
 
 func renderedBody(model Model) string {
@@ -223,6 +235,176 @@ func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 	if got := model.lastCommittedSeq; got != 2 {
 		t.Fatalf("lastCommittedSeq = %d, want 2", got)
 	}
+}
+
+func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates(t *testing.T) {
+	out := make(chan []byte, 16)
+	model := New(40, 8, out, nil)
+	model = applyTo(t, model,
+		beginFrame(1, 0),
+		testThemeCommand(),
+		windowRowsCommand(1, "baseline"),
+		transcriptCommand(replaceFrame(1, msg(1, "first"))),
+		commitFrame(1),
+	)
+	drainOutboundPackets(out)
+
+	model.transcript.truncated = true
+	model.transcript.pinned = false
+	model.transcript.topOffset = 7
+	model.transcript.pendingScroll = -3
+	model.transcript.pinTransition = pinScrolledAway
+	beforeTheme := model.chrome[generated.OPGuiTheme].Theme.Colors[themeEditorBG]
+
+	nextTheme := testThemeCommand()
+	nextTheme.Chrome.Theme.Colors[themeEditorBG] = 0x010203
+	model.applyCommands([]protocol.Command{
+		beginFrame(2, 1),
+		nextTheme,
+		windowRowsCommand(1, "must not publish"),
+		transcriptCommand(replaceFrame(2, msg(9, "replacement"))),
+		transcriptCommand(appendFrame(2, 1, 1, msg(10, "invalid suffix"))),
+		commitFrame(2),
+	})
+
+	packets := drainOutboundPackets(out)
+	rejections := 0
+	applied := 0
+	for _, packet := range packets {
+		switch packet[0] {
+		case generated.OPFrameRejected:
+			rejections++
+			if len(packet) != 15 || binary.BigEndian.Uint32(packet[1:5]) != 1 || binary.BigEndian.Uint32(packet[5:9]) != 2 || binary.BigEndian.Uint32(packet[9:13]) != 1 || packet[13] != protocol.RejectTranscriptDesync || packet[14] != byte(protocol.DispositionRetryable) {
+				t.Fatalf("unexpected transcript rejection: %v", packet)
+			}
+		case generated.OPFrameApplied:
+			applied++
+		}
+	}
+	if rejections != 1 || applied != 0 {
+		t.Fatalf("invalid transcript emitted rejections=%d applied=%d packets=%v", rejections, applied, packets)
+	}
+	if model.lastCommittedSeq != 1 {
+		t.Fatalf("invalid transcript advanced commit sequence to %d", model.lastCommittedSeq)
+	}
+	if got := model.windows[1].Rows[0].Text; got != "baseline" {
+		t.Fatalf("invalid transcript published sibling window %q", got)
+	}
+	if got := model.chrome[generated.OPGuiTheme].Theme.Colors[themeEditorBG]; got != beforeTheme {
+		t.Fatalf("invalid transcript published sibling chrome %#x", got)
+	}
+	if model.transcript.epoch != 1 || len(model.transcript.messages) != 1 || model.transcript.messages[0].ID != 1 || !model.transcript.truncated || model.transcript.pinned || model.transcript.topOffset != 7 || model.transcript.pendingScroll != -3 || model.transcript.pinTransition != pinScrolledAway {
+		t.Fatalf("invalid transcript changed live transcript state: %+v", model.transcript)
+	}
+
+	model.applyCommands([]protocol.Command{
+		beginFrame(3, 0),
+		testThemeCommand(),
+		windowRowsCommand(1, "recovered"),
+		transcriptCommand(replaceFrame(2, msg(9, "replacement"))),
+		commitFrame(3),
+	})
+	if model.resyncPending {
+		t.Fatal("recovery keyframe did not clear pending resync")
+	}
+	if model.lastCommittedSeq != 3 || model.windows[1].Rows[0].Text != "recovered" || model.transcript.epoch != 2 || model.transcript.messages[0].ID != 9 || !model.transcript.pinned || model.transcript.topOffset != 0 {
+		t.Fatalf("recovery keyframe did not publish complete state: seq=%d window=%q transcript=%+v", model.lastCommittedSeq, model.windows[1].Rows[0].Text, model.transcript)
+	}
+}
+
+func TestMultipleTranscriptCommandsFoldInOrderAndPublishOnce(t *testing.T) {
+	model := New(40, 8, nil, nil)
+	model = applyTo(t, model,
+		beginFrame(1, 0),
+		testThemeCommand(),
+		transcriptCommand(replaceFrame(7, msg(1, "first"))),
+		transcriptCommand(appendFrame(7, 0, 1, msg(2, "second"))),
+		transcriptCommand(appendFrame(7, 0, 2, msg(3, "third"))),
+		commitFrame(1),
+	)
+
+	if got, want := ids(model.transcript.messages), []uint32{1, 2, 3}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("ordered transcript fold = %v, want %v", got, want)
+	}
+}
+
+func TestTranscriptPreparationRejectsEveryInvalidTransition(t *testing.T) {
+	tests := []struct {
+		name string
+		seed *protocol.AgentTranscript
+		bad  protocol.AgentTranscript
+	}{
+		{name: "append before seed", bad: appendFrame(1, 0, 0, msg(1, "early"))},
+		{name: "epoch mismatch", seed: transcriptFrame(replaceFrame(1, msg(1, "seed"))), bad: appendFrame(2, 0, 1, msg(2, "wrong epoch"))},
+		{name: "short retained prefix", seed: transcriptFrame(replaceFrame(1, msg(1, "seed"))), bad: appendFrame(1, 1, 1, msg(2, "orphan"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := make(chan []byte, 16)
+			model := New(40, 8, out, nil)
+			seedCommands := []protocol.Command{beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline")}
+			if tt.seed != nil {
+				seedCommands = append(seedCommands, transcriptCommand(*tt.seed))
+			}
+			seedCommands = append(seedCommands, commitFrame(1))
+			model.applyCommands(seedCommands)
+			drainOutboundPackets(out)
+
+			before := model.transcript.detachedCandidate()
+			model.applyCommands([]protocol.Command{beginFrame(2, 1), transcriptCommand(tt.bad), commitFrame(2)})
+
+			if model.lastCommittedSeq != 1 || !reflect.DeepEqual(model.transcript, before) {
+				t.Fatalf("invalid transition changed committed state: seq=%d before=%+v after=%+v", model.lastCommittedSeq, before, model.transcript)
+			}
+			packets := drainOutboundPackets(out)
+			rejections := 0
+			for _, packet := range packets {
+				if packet[0] == generated.OPFrameApplied {
+					t.Fatalf("invalid transition emitted frame_applied: %v", packets)
+				}
+				if packet[0] == generated.OPFrameRejected {
+					rejections++
+					if packet[13] != protocol.RejectTranscriptDesync || packet[14] != byte(protocol.DispositionRetryable) {
+						t.Fatalf("wrong rejection packet: %v", packet)
+					}
+				}
+			}
+			if rejections != 1 {
+				t.Fatalf("rejections = %d, want 1; packets=%v", rejections, packets)
+			}
+		})
+	}
+}
+
+func TestSameEpochFullReplacementPreservesReadingPosition(t *testing.T) {
+	model := New(40, 8, nil, nil)
+	model.applyCommands([]protocol.Command{
+		beginFrame(1, 0),
+		testThemeCommand(),
+		transcriptCommand(replaceFrame(4, msg(1, "first"), msg(2, "second"))),
+		commitFrame(1),
+	})
+	model.transcript.pinned = false
+	model.transcript.topOffset = 5
+	model.transcript.pendingScroll = -2
+
+	model.applyCommands([]protocol.Command{
+		beginFrame(2, 1),
+		transcriptCommand(replaceFrame(4, msg(3, "compacted"))),
+		commitFrame(2),
+	})
+
+	if model.transcript.pinned || model.transcript.topOffset != 5 || model.transcript.pendingScroll != -2 {
+		t.Fatalf("same-epoch replacement reset reading position: %+v", model.transcript)
+	}
+	if got := ids(model.transcript.messages); len(got) != 1 || got[0] != 3 {
+		t.Fatalf("same-epoch replacement messages = %v, want [3]", got)
+	}
+}
+
+func transcriptFrame(frame protocol.AgentTranscript) *protocol.AgentTranscript {
+	return &frame
 }
 
 // AC-3: a truncated transaction does not partially paint or automatically ask
