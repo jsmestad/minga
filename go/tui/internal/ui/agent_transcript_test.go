@@ -53,19 +53,19 @@ func TestResidentTranscriptDetachedCandidateDoesNotShareMutableSlice(t *testing.
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 	tr.pinned = false
-	tr.topOffset = 4
+	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
 	tr.pendingScroll = -2
 	tr.pinTransition = pinScrolledAway
 
 	candidate := tr.detachedCandidate()
 	candidate.messages[0] = msg(9, "changed")
-	candidate.topOffset = 1
+	candidate.anchor.row = 0
 
 	if tr.messages[0].ID != 1 || tr.messages[0].Text != "a" {
 		t.Fatalf("candidate mutated live messages: %+v", tr.messages)
 	}
-	if tr.topOffset != 4 {
-		t.Fatalf("candidate mutated live scroll offset: %d", tr.topOffset)
+	if tr.anchor.row != 1 {
+		t.Fatalf("candidate mutated live anchor: %+v", tr.anchor)
 	}
 	if candidate.epoch != tr.epoch || candidate.pinned != tr.pinned || candidate.pendingScroll != tr.pendingScroll || candidate.pinTransition != tr.pinTransition {
 		t.Fatalf("candidate did not preserve transcript-owned state: live=%+v candidate=%+v", tr, candidate)
@@ -143,7 +143,7 @@ func TestResidentTranscriptEpochFlipReplaces(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 	tr.pinned = false
-	tr.topOffset = 3
+	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
 	tr.apply(replaceFrame(2, msg(9, "fresh")))
 
 	if got, want := ids(tr.messages), []uint32{9}; fmt.Sprint(got) != fmt.Sprint(want) {
@@ -152,7 +152,7 @@ func TestResidentTranscriptEpochFlipReplaces(t *testing.T) {
 	if tr.epoch != 2 {
 		t.Fatalf("epoch = %d, want 2", tr.epoch)
 	}
-	if !tr.pinned || tr.topOffset != 0 {
+	if !tr.pinned || tr.anchor != (transcriptAnchor{}) {
 		t.Fatalf("epoch flip (session switch) should re-pin to bottom: %+v", tr)
 	}
 }
@@ -201,93 +201,127 @@ func TestResidentTranscriptAppendBeforeSeedDropped(t *testing.T) {
 	}
 }
 
-func TestResolveScrollUnpinsFromBottom(t *testing.T) {
+func TestResidentTranscriptAssignsDistinctSlotsForDuplicateAndZeroIDs(t *testing.T) {
 	tr := newResidentTranscript()
-	tr.scrollBy(-3) // scroll up off the bottom
-	transition := tr.resolveScroll(15)
+	frame := replaceFrame(1, msg(0, "zero"), msg(0, "zero"), msg(7, "first"), msg(7, "duplicate"))
+	tr.apply(frame)
+	before := make([]uint64, len(tr.entries))
+	seen := map[uint64]bool{}
+	for index, entry := range tr.entries {
+		before[index] = entry.slot
+		if seen[entry.slot] {
+			t.Fatalf("slot %d reused for distinct messages", entry.slot)
+		}
+		seen[entry.slot] = true
+	}
 
-	if tr.pinned {
-		t.Fatalf("scrolling up should unpin")
+	tr.apply(frame)
+	for index, entry := range tr.entries {
+		if entry.slot != before[index] {
+			t.Fatalf("unchanged duplicate/zero message %d changed slot from %d to %d", index, before[index], entry.slot)
+		}
 	}
-	if tr.topOffset != 12 {
-		t.Fatalf("topOffset = %d, want 12 (maxTop 15 - 3)", tr.topOffset)
+
+	tr.apply(appendFrame(1, 0, 4, msg(7, "patched first")))
+	if tr.entries[2].slot != before[2] || tr.entries[3].slot != before[3] {
+		t.Fatalf("duplicate ID patch collapsed local identities: %+v", tr.entries)
 	}
-	if transition != pinScrolledAway {
-		t.Fatalf("transition = %d, want pinScrolledAway", transition)
+	if tr.messages[2].Text != "patched first" || tr.messages[3].Text != "duplicate" {
+		t.Fatalf("duplicate ID patch changed wrong messages: %+v", tr.messages)
 	}
 }
 
-func TestResolveScrollDownWhilePinnedIsNoop(t *testing.T) {
+func TestResidentTranscriptReplacementReservesExactDuplicateIDOccurrences(t *testing.T) {
 	tr := newResidentTranscript()
-	tr.scrollBy(4)
-	transition := tr.resolveScroll(15)
-
-	if !tr.pinned || transition != pinNone {
-		t.Fatalf("scroll down while pinned should stay pinned with no transition: %+v t=%d", tr, transition)
-	}
-}
-
-func TestResolveScrollReturnsToBottom(t *testing.T) {
-	tr := newResidentTranscript()
+	tr.apply(replaceFrame(1, msg(7, "A"), msg(7, "B"), msg(7, "C")))
+	anchorSlot := tr.entries[1].slot
+	cSlot := tr.entries[2].slot
 	tr.pinned = false
-	tr.topOffset = 12
-	tr.scrollBy(5) // past the bottom
-	transition := tr.resolveScroll(15)
+	tr.anchor = transcriptAnchor{slot: anchorSlot, row: 1}
 
-	if !tr.pinned {
-		t.Fatalf("scrolling down to the bottom should re-pin")
+	tr.apply(replaceFrame(1, msg(7, "B"), msg(7, "C")))
+
+	if tr.anchor != (transcriptAnchor{slot: anchorSlot, row: 1}) {
+		t.Fatalf("duplicate compaction moved anchor from B: %+v", tr.anchor)
 	}
-	if transition != pinReturned {
-		t.Fatalf("transition = %d, want pinReturned", transition)
+	if tr.entries[0].slot != anchorSlot || tr.entries[1].slot != cSlot {
+		t.Fatalf("duplicate compaction reassigned exact occurrences: %+v", tr.entries)
 	}
 }
 
-func TestResolveScrollClampsToTop(t *testing.T) {
+func TestResidentTranscriptLargeZeroIDReplacementUsesLinearExactIndex(t *testing.T) {
+	const count = 10_000
 	tr := newResidentTranscript()
+	original := make([]protocol.AgentChatMessage, count)
+	for index := range original {
+		original[index] = msg(0, fmt.Sprintf("original-%05d", index))
+	}
+	tr.apply(replaceFrame(1, original...))
+	lastOriginalSlot := tr.nextSlot
+
+	replacement := make([]protocol.AgentChatMessage, count)
+	for index := range replacement {
+		replacement[index] = msg(0, fmt.Sprintf("replacement-%05d", count-index))
+	}
+	tr.apply(replaceFrame(1, replacement...))
+
+	if len(tr.entries) != count {
+		t.Fatalf("replacement entry count = %d, want %d", len(tr.entries), count)
+	}
+	for index, entry := range tr.entries {
+		if entry.slot <= lastOriginalSlot {
+			t.Fatalf("unmatched zero-ID entry %d reused old slot %d", index, entry.slot)
+		}
+	}
+}
+
+func TestResidentTranscriptReconcilesMissingAnchorToSuccessorThenPredecessor(t *testing.T) {
+	t.Run("successor", func(t *testing.T) {
+		tr := newResidentTranscript()
+		tr.apply(replaceFrame(1, msg(1, "one"), msg(2, "two"), msg(3, "three")))
+		tr.pinned = false
+		tr.anchor = transcriptAnchor{slot: tr.entries[1].slot, row: 1}
+		successor := tr.entries[2].slot
+		tr.apply(replaceFrame(1, msg(1, "one"), msg(3, "three")))
+		if tr.pinned || tr.anchor != (transcriptAnchor{slot: successor}) {
+			t.Fatalf("missing anchor did not select retained successor: %+v", tr)
+		}
+	})
+
+	t.Run("predecessor", func(t *testing.T) {
+		tr := newResidentTranscript()
+		tr.apply(replaceFrame(1, msg(1, "one"), msg(2, "two"), msg(3, "three")))
+		tr.pinned = false
+		tr.anchor = transcriptAnchor{slot: tr.entries[2].slot, row: 7}
+		predecessor := tr.entries[0].slot
+		tr.apply(replaceFrame(1, msg(1, "one")))
+		if tr.pinned || tr.anchor.slot != predecessor || tr.anchor.row != 7 {
+			t.Fatalf("missing anchor did not select retained predecessor and preserve row for later clamp: %+v", tr)
+		}
+	})
+}
+
+func TestResidentTranscriptTrimAndSuffixReplacementPreserveAnchor(t *testing.T) {
+	tr := newResidentTranscript()
+	tr.apply(replaceFrame(1, msg(1, "one"), msg(2, "two"), msg(3, "three"), msg(4, "four")))
 	tr.pinned = false
-	tr.topOffset = 2
-	tr.scrollBy(-10) // way past the top
-	tr.resolveScroll(15)
+	tr.anchor = transcriptAnchor{slot: tr.entries[2].slot, row: 1}
+	anchor := tr.anchor
 
-	if tr.topOffset != 0 {
-		t.Fatalf("topOffset = %d, want 0 (clamped to top)", tr.topOffset)
-	}
-	if tr.pinned {
-		t.Fatalf("scrolled to top should remain unpinned")
+	tr.apply(appendFrame(1, 1, 2, msg(4, "four streaming"), msg(5, "five")))
+	if tr.anchor != anchor || tr.pinned {
+		t.Fatalf("trim/suffix replacement moved retained anchor: before=%+v after=%+v", anchor, tr.anchor)
 	}
 }
 
-func TestResolveScrollAppendWhileScrolledUpPreservesPosition(t *testing.T) {
-	// Scroll up in a 20-line transcript (budget 5, maxTop 15), then a streaming
-	// append grows it to 25 lines (maxTop 20). Because the offset is top-anchored,
-	// the reading position (topOffset) must not move.
+func TestResidentTranscriptEmptyReplacementPins(t *testing.T) {
 	tr := newResidentTranscript()
-	tr.scrollBy(-3)
-	tr.resolveScroll(15)
-	if tr.topOffset != 12 {
-		t.Fatalf("precondition topOffset = %d, want 12", tr.topOffset)
-	}
-
-	// Next frame after an append: no new scroll input, larger transcript.
-	tr.resolveScroll(20)
-
-	if tr.pinned {
-		t.Fatalf("append while scrolled up must not re-pin")
-	}
-	if tr.topOffset != 12 {
-		t.Fatalf("append moved the reading position: topOffset = %d, want 12", tr.topOffset)
-	}
-}
-
-func TestResolveScrollContentShrinkRepinsWhenAllFits(t *testing.T) {
-	tr := newResidentTranscript()
+	tr.apply(replaceFrame(1, msg(1, "one")))
 	tr.pinned = false
-	tr.topOffset = 8
-	// Content now fits entirely in the viewport (maxTop 0): nothing to scroll.
-	tr.resolveScroll(0)
-
-	if !tr.pinned || tr.topOffset != 0 {
-		t.Fatalf("all-fits should re-pin to bottom: %+v", tr)
+	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
+	tr.apply(replaceFrame(1))
+	if !tr.pinned || tr.anchor != (transcriptAnchor{}) {
+		t.Fatalf("empty transcript did not pin: %+v", tr)
 	}
 }
 

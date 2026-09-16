@@ -113,10 +113,10 @@ type conformanceTranscriptExpect struct {
 	MessageIDs []uint32 `json:"message_ids"`
 }
 
-// conformanceGoSelector carries the Go-specific position assertions. Go owns a
-// top-anchored scroll offset in the store, so its runner drives the pure
-// scrollBy/resolveScroll functions with an explicit max_top and asserts the
-// resulting offset and pin state (the Swift SwiftUI-native runner ignores this).
+// conformanceGoSelector carries the Go-specific position assertions. The corpus
+// retains max_top/top_offset as rendered-row observations; the runner derives a
+// viewport budget and checks those observations through the production local
+// anchor operation (the Swift SwiftUI-native runner ignores this selector).
 type conformanceGoSelector struct {
 	MaxTop              int     `json:"max_top"`
 	ExpectTopOffset     *int    `json:"expect_top_offset"`
@@ -537,35 +537,56 @@ func applyConformanceTranscriptFrame(t *testing.T, model *Model, i int, step con
 	}
 }
 
-// applyConformanceTranscriptScroll drives the real local-scroll path
-// (scrollBy + resolveScroll) and asserts the resulting top-anchored offset, pin
-// state, and pin transition. This is the Go offset model; the Swift runner treats
-// the scroll input as a view-only concern with no store effect.
+// applyConformanceTranscriptScroll drives the production anchor/index viewport
+// operation. The corpus max_top remains a rendered-row contract; the helper
+// derives a viewport budget from the exact oracle height without putting a
+// global rendered-line offset back into residentTranscript.
 func applyConformanceTranscriptScroll(t *testing.T, model *Model, i int, step conformanceStep) {
 	t.Helper()
 	store := model.transcript
 	store.scrollBy(step.Rows)
 
-	maxTop := 0
-	if step.Go != nil {
-		maxTop = step.Go.MaxTop
-	}
-	transition := store.resolveScroll(maxTop)
+	model.transcriptRenderer.render(*model, store, conformanceTranscriptBudget(*model, step), max(model.width-2, 1))
+	transition := store.takePinTransition()
 	assertConformanceGoSelector(t, i, step, store, transition)
 }
 
-// assertConformanceTranscriptPosition drives resolveScroll once more (no queued
-// scroll) at the post-frame max_top and asserts the reading offset is stable and
-// the pin state is correct. It is the Go leg of the per-frontend position
-// assertion; the Swift runner asserts an anchor id instead.
+// assertConformanceTranscriptPosition resolves the production viewport once
+// more with no queued scroll and checks that the local anchor remains stable.
 func assertConformanceTranscriptPosition(t *testing.T, model *Model, i int, step conformanceStep) {
 	t.Helper()
 	if step.Go == nil {
 		return
 	}
 	store := model.transcript
-	transition := store.resolveScroll(step.Go.MaxTop)
+	model.transcriptRenderer.render(*model, store, conformanceTranscriptBudget(*model, step), max(model.width-2, 1))
+	transition := store.takePinTransition()
 	assertConformanceGoSelector(t, i, step, store, transition)
+}
+
+func conformanceTranscriptBudget(model Model, step conformanceStep) int {
+	width := max(model.width-2, 1)
+	total := len(model.agentTranscriptAllLines(model.transcript.messages, width))
+	maxTop := 0
+	if step.Go != nil {
+		maxTop = step.Go.MaxTop
+	}
+	return max(total-maxTop, 1)
+}
+
+func conformanceTranscriptTopOffset(store *residentTranscript) int {
+	if store.pinned || store.anchor.slot == 0 {
+		return 0
+	}
+	index, found := store.bySlot[store.anchor.slot]
+	if !found {
+		return 0
+	}
+	offset := store.anchor.row
+	for entry := 0; entry < index; entry++ {
+		offset += agentMessageRowCount(store.entries[entry].message) + 1
+	}
+	return offset
 }
 
 func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, store *residentTranscript, transition int) {
@@ -574,8 +595,10 @@ func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, stor
 	if sel == nil {
 		return
 	}
-	if sel.ExpectTopOffset != nil && store.topOffset != *sel.ExpectTopOffset {
-		t.Fatalf("step %d (%s): top_offset = %d, want %d", i, step.Note, store.topOffset, *sel.ExpectTopOffset)
+	if sel.ExpectTopOffset != nil && !store.pinned {
+		if got := conformanceTranscriptTopOffset(store); got != *sel.ExpectTopOffset {
+			t.Fatalf("step %d (%s): anchor-derived top offset = %d, want %d", i, step.Note, got, *sel.ExpectTopOffset)
+		}
 	}
 	if sel.ExpectPinned != nil && store.pinned != *sel.ExpectPinned {
 		t.Fatalf("step %d (%s): pinned = %v, want %v", i, step.Note, store.pinned, *sel.ExpectPinned)

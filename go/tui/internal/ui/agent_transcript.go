@@ -1,41 +1,46 @@
 package ui
 
-import "github.com/jsmestad/minga/go/tui/internal/protocol"
+import (
+	"encoding/binary"
+	"reflect"
 
-// residentTranscript is the Go TUI's resident agent-chat transcript store
-// (#2654). It folds gui_agent_transcript (0x86) frames so the whole session can
-// be scrolled from local data without a BEAM round-trip: a full_replace swaps
-// the entire slice at a new epoch; an append keeps the strict-equal prefix and
-// replaces the suffix (new messages plus the in-place patch of the streaming
-// last message).
-//
-// It is a pointer on Model so it survives the value-copied Update loop, and it
-// owns the local scroll offset + pin flag so j/k/wheel repaint same-frame
-// without waiting for the BEAM. While pinned the view follows the bottom; while
-// unpinned it holds a top-anchored line offset so a streaming append at the
-// bottom never disturbs the reading position.
+	"github.com/jsmestad/minga/go/tui/internal/protocol"
+)
+
+// residentTranscript owns the semantic transcript, stable local message slots,
+// and the reading anchor. Styled rows are disposable renderer state and live in
+// agentTranscriptRenderer instead.
 type residentTranscript struct {
-	epoch    uint32
-	hasEpoch bool
-	messages []protocol.AgentChatMessage
-	// truncated mirrors the frame flag: older messages sit outside the resident
-	// window (cap eviction), so the top of the local scroll is not the true start
-	// of the conversation.
+	epoch     uint32
+	hasEpoch  bool
+	messages  []protocol.AgentChatMessage
+	entries   []transcriptEntry
+	bySlot    map[uint64]int
+	nextSlot  uint64
 	truncated bool
 
-	// pinned true = follow the bottom (default). Unpinned holds topOffset.
-	pinned bool
-	// topOffset is the rendered line at the top of the viewport, counted from the
-	// top of the full transcript. Only meaningful while unpinned. Top-anchored so
-	// bottom appends leave it (and the reading position) untouched.
-	topOffset int
-	// pendingScroll accumulates unresolved scroll rows for this frame (+down /
-	// -up). It is resolved during render, where the full transcript height (and
-	// thus the clamp bounds) is known.
+	pinned        bool
+	anchor        transcriptAnchor
 	pendingScroll int
-	// pinTransition records a pin edge produced by the last resolve so Update can
-	// report it to the BEAM (pinNone once reported).
 	pinTransition int
+	animatedCount int
+}
+
+type transcriptEntry struct {
+	slot     uint64
+	revision uint64
+	message  protocol.AgentChatMessage
+
+	// Height is presentation metadata, not styled output. It is populated only
+	// when traversal encounters the message at the active width.
+	height         int
+	heightWidth    int
+	heightRevision uint64
+}
+
+type transcriptAnchor struct {
+	slot uint64
+	row  int
 }
 
 const (
@@ -45,13 +50,12 @@ const (
 )
 
 func newResidentTranscript() *residentTranscript {
-	return &residentTranscript{pinned: true}
+	return &residentTranscript{pinned: true, bySlot: map[uint64]int{}}
 }
 
-// detachedCandidate returns an independently mutable transcript candidate for
+// detachedCandidate returns independently mutable transcript state for atomic
 // frame preparation. Message bodies are immutable after decoding, so copying
-// the outer slice is sufficient to keep rejected frames from mutating live
-// transcript state.
+// the outer semantic and entry slices is sufficient.
 func (t *residentTranscript) detachedCandidate() *residentTranscript {
 	if t == nil {
 		return newResidentTranscript()
@@ -59,14 +63,11 @@ func (t *residentTranscript) detachedCandidate() *residentTranscript {
 
 	candidate := *t
 	candidate.messages = append([]protocol.AgentChatMessage(nil), t.messages...)
+	candidate.entries = append([]transcriptEntry(nil), t.entries...)
+	candidate.rebuildSlotIndex()
 	return &candidate
 }
 
-// transcriptDropReason names why a transcript frame was not folded into the
-// store; empty means it applied. The drop cases are defense-in-depth (a fresh
-// connection's encoder state makes every epoch's first frame a full_replace),
-// but if one ever fires the frame coordinator must reject the complete frame so
-// the BEAM can recover from the last committed transcript.
 type transcriptDropReason string
 
 const (
@@ -77,38 +78,37 @@ const (
 	transcriptDroppedUndecodable transcriptDropReason = "undecodable frame"
 )
 
-// apply folds one decoded gui_agent_transcript frame into the store, following
-// the docs/GUI_PROTOCOL.md 0x86 apply rules. Returns transcriptApplied, or the
-// reason preparation failed so the frame coordinator can reject atomically.
+// apply folds one decoded gui_agent_transcript frame into the semantic store.
+// It preserves local slots for retained messages and reconciles the anchor
+// before the candidate is published by the frame transaction.
 func (t *residentTranscript) apply(frame protocol.AgentTranscript) transcriptDropReason {
 	if !frame.Present {
 		return transcriptDroppedUndecodable
 	}
 
 	if frame.FullReplace() {
-		t.truncated = frame.Truncated
 		epochChanged := !t.hasEpoch || frame.Epoch != t.epoch
-		next := make([]protocol.AgentChatMessage, len(frame.Messages))
-		copy(next, frame.Messages)
-		t.messages = next
+		oldEntries := t.entries
+		if epochChanged {
+			t.entries = make([]transcriptEntry, 0, len(frame.Messages))
+			for _, message := range frame.Messages {
+				t.entries = append(t.entries, t.newTranscriptEntry(message))
+			}
+		} else {
+			t.entries = t.reconcileReplacement(frame.Messages)
+		}
+		t.installEntries()
+		t.truncated = frame.Truncated
 		t.epoch = frame.Epoch
 		t.hasEpoch = true
-		// A new epoch is a session switch / structural reset: re-pin to the bottom
-		// so the fresh transcript shows its newest content. A same-epoch
-		// full_replace (compaction, resident-cap drop from the front) keeps the pin
-		// state; the render clamps any now-out-of-range offset.
 		if epochChanged {
-			t.pinned = true
-			t.topOffset = 0
+			t.pinToBottom()
+		} else {
+			t.reconcileAnchor(oldEntries)
 		}
 		return transcriptApplied
 	}
 
-	// append drop conditions per GUI_PROTOCOL.md 0x86 (await the next
-	// full_replace). An unseeded store drops appends too: every epoch's first
-	// frame is a full_replace, so an early append means a missed seed, and folding
-	// it against an empty store would fabricate a partial transcript. The Swift
-	// consumer drops this case as well; the two frontends must agree.
 	if !t.hasEpoch {
 		return transcriptDroppedBeforeSeed
 	}
@@ -117,106 +117,295 @@ func (t *residentTranscript) apply(frame protocol.AgentTranscript) transcriptDro
 	}
 	trim := int(frame.TrimFront)
 	base := int(frame.BaseCount)
-	// Desync when the store cannot cover the delta's front assumptions: it holds
-	// fewer than trim_front + base_count messages. Drop and await full_replace.
-	if len(t.messages) < trim+base {
+	if len(t.entries) < trim+base {
 		return transcriptDroppedDesync
 	}
 
-	// Apply order (GUI_PROTOCOL.md 0x86): drop trim_front from the front; keep the
-	// first base_count of the remainder unchanged; upsert each frame message by id
-	// (new id appends, matching id patches the streaming last message in place).
-	kept := t.messages[trim : trim+base]
-	next := make([]protocol.AgentChatMessage, len(kept), base+len(frame.Messages))
+	oldEntries := t.entries
+	kept := t.entries[trim : trim+base]
+	next := make([]transcriptEntry, len(kept), base+len(frame.Messages))
 	copy(next, kept)
-	for _, msg := range frame.Messages {
-		if idx := indexByID(next, msg.ID); idx >= 0 {
-			next[idx] = msg
+	for _, message := range frame.Messages {
+		if index := indexEntryByID(next, message.ID); index >= 0 {
+			next[index] = reviseTranscriptEntry(next[index], message)
 		} else {
-			next = append(next, msg)
+			next = append(next, t.newTranscriptEntry(message))
 		}
 	}
-	t.messages = next
+	t.entries = next
+	t.installEntries()
 	t.truncated = frame.Truncated
+	t.reconcileAnchor(oldEntries)
 	return transcriptApplied
 }
 
-// indexByID returns the position of the message with id, or -1. A message id of 0
-// is the "no stable identity" sentinel (bare bodies encode with id 0), so those
-// never match and always append.
-func indexByID(messages []protocol.AgentChatMessage, id uint32) int {
+func (t *residentTranscript) reconcileReplacement(messages []protocol.AgentChatMessage) []transcriptEntry {
+	old := t.entries
+	used := make([]bool, len(old))
+	matches := make([]int, len(messages))
+	for position, message := range messages {
+		matches[position] = -1
+		if position < len(old) && reflect.DeepEqual(old[position].message, message) {
+			matches[position] = position
+			used[position] = true
+		}
+	}
+
+	// Reserve every unchanged occurrence before assigning same-ID revisions.
+	// Without this pass, a removed duplicate can consume the slot of a later
+	// exact match and silently move the reading anchor to another message.
+	exact := make(map[string][]int, len(old))
+	for index := range old {
+		if !used[index] {
+			key := transcriptMessageKey(old[index].message)
+			exact[key] = append(exact[key], index)
+		}
+	}
+	exactCursor := make(map[string]int, len(exact))
+	for position, message := range messages {
+		if matches[position] >= 0 {
+			continue
+		}
+		key := transcriptMessageKey(message)
+		indexes := exact[key]
+		cursor := exactCursor[key]
+		if cursor < len(indexes) {
+			matches[position] = indexes[cursor]
+			used[indexes[cursor]] = true
+			exactCursor[key] = cursor + 1
+		}
+	}
+
+	byID := make(map[uint32][]int, len(old))
+	for index := range old {
+		if id := old[index].message.ID; !used[index] && id != 0 {
+			byID[id] = append(byID[id], index)
+		}
+	}
+	idCursor := make(map[uint32]int, len(byID))
+	for position, message := range messages {
+		if matches[position] >= 0 || message.ID == 0 {
+			continue
+		}
+		indexes := byID[message.ID]
+		cursor := idCursor[message.ID]
+		if cursor < len(indexes) {
+			matches[position] = indexes[cursor]
+			used[indexes[cursor]] = true
+			idCursor[message.ID] = cursor + 1
+		}
+	}
+
+	next := make([]transcriptEntry, 0, len(messages))
+	for position, message := range messages {
+		match := matches[position]
+		if match < 0 {
+			next = append(next, t.newTranscriptEntry(message))
+			continue
+		}
+		next = append(next, reviseTranscriptEntry(old[match], message))
+	}
+	return next
+}
+
+// transcriptMessageKey is an exact, length-prefixed encoding used only while
+// reconciling a same-epoch full replacement. It makes occurrence matching
+// linear in the number and encoded size of messages, including ID-zero input.
+func transcriptMessageKey(message protocol.AgentChatMessage) string {
+	key := make([]byte, 0, len(message.Text)+len(message.Result)+len(message.Summary)+64)
+	key = binary.LittleEndian.AppendUint32(key, message.ID)
+	key = append(key, message.Kind)
+	key = appendTranscriptString(key, message.Text)
+	key = appendTranscriptString(key, message.Name)
+	key = appendTranscriptString(key, message.Summary)
+	key = appendTranscriptString(key, message.Result)
+	key = append(key, message.Status, boolByte(message.IsError), boolByte(message.Collapsed))
+	key = binary.LittleEndian.AppendUint32(key, message.DurationMS)
+	key = append(key, message.AutoApprovedScope)
+	key = appendTranscriptStyledLines(key, message.StyledLines)
+	key = appendTranscriptMarkdownBlocks(key, message.MarkdownBlocks)
+	key = binary.LittleEndian.AppendUint32(key, message.Usage.Input)
+	key = binary.LittleEndian.AppendUint32(key, message.Usage.Output)
+	key = binary.LittleEndian.AppendUint32(key, message.Usage.CacheRead)
+	key = binary.LittleEndian.AppendUint32(key, message.Usage.CacheWrite)
+	key = binary.LittleEndian.AppendUint32(key, message.Usage.CostMicros)
+	key = append(key, message.PreviewKind)
+	key = appendTranscriptStrings(key, message.PreviewLines)
+	return string(key)
+}
+
+func appendTranscriptStyledLines(key []byte, lines []protocol.AgentStyledLine) []byte {
+	key = appendTranscriptSliceHeader(key, lines == nil, len(lines))
+	for _, line := range lines {
+		key = appendTranscriptSliceHeader(key, line == nil, len(line))
+		for _, run := range line {
+			key = appendTranscriptString(key, run.Text)
+			key = binary.LittleEndian.AppendUint32(key, run.FG)
+			key = binary.LittleEndian.AppendUint32(key, run.BG)
+			key = append(key, run.Flags)
+			key = appendTranscriptString(key, run.URL)
+		}
+	}
+	return key
+}
+
+func appendTranscriptMarkdownBlocks(key []byte, blocks []protocol.AgentMarkdownBlock) []byte {
+	key = appendTranscriptSliceHeader(key, blocks == nil, len(blocks))
+	for _, block := range blocks {
+		key = binary.LittleEndian.AppendUint32(key, block.ID)
+		key = append(key, block.Kind, block.Flags)
+		key = appendTranscriptStyledLines(key, block.Lines)
+		key = append(key, block.Level, block.Indent, boolByte(block.Ordered))
+		key = binary.LittleEndian.AppendUint32(key, block.Ordinal)
+		key = append(key, block.Height)
+		key = appendTranscriptString(key, block.Language)
+		key = appendTranscriptString(key, block.Label)
+		key = appendTranscriptString(key, block.TargetPath)
+		key = append(key, block.CapabilityFlags)
+	}
+	return key
+}
+
+func appendTranscriptStrings(key []byte, values []string) []byte {
+	key = appendTranscriptSliceHeader(key, values == nil, len(values))
+	for _, value := range values {
+		key = appendTranscriptString(key, value)
+	}
+	return key
+}
+
+func appendTranscriptSliceHeader(key []byte, nilSlice bool, length int) []byte {
+	key = append(key, boolByte(nilSlice))
+	return binary.LittleEndian.AppendUint64(key, uint64(length))
+}
+
+func appendTranscriptString(key []byte, value string) []byte {
+	key = binary.LittleEndian.AppendUint64(key, uint64(len(value)))
+	return append(key, value...)
+}
+
+func boolByte(value bool) byte {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func (t *residentTranscript) newTranscriptEntry(message protocol.AgentChatMessage) transcriptEntry {
+	t.nextSlot++
+	return transcriptEntry{slot: t.nextSlot, revision: 1, message: message}
+}
+
+func reviseTranscriptEntry(entry transcriptEntry, message protocol.AgentChatMessage) transcriptEntry {
+	if reflect.DeepEqual(entry.message, message) {
+		return entry
+	}
+	entry.message = message
+	entry.revision++
+	entry.height = 0
+	entry.heightWidth = 0
+	entry.heightRevision = 0
+	return entry
+}
+
+func (t *residentTranscript) installEntries() {
+	t.messages = make([]protocol.AgentChatMessage, len(t.entries))
+	t.animatedCount = 0
+	for index := range t.entries {
+		t.messages[index] = t.entries[index].message
+		if agentMessageAnimated(t.entries[index].message) {
+			t.animatedCount++
+		}
+	}
+	t.rebuildSlotIndex()
+}
+
+func (t *residentTranscript) rebuildSlotIndex() {
+	t.bySlot = make(map[uint64]int, len(t.entries))
+	for index := range t.entries {
+		t.bySlot[t.entries[index].slot] = index
+	}
+}
+
+func (t *residentTranscript) reconcileAnchor(oldEntries []transcriptEntry) {
+	if len(t.entries) == 0 {
+		t.pinToBottom()
+		return
+	}
+	if t.pinned || t.anchor.slot == 0 {
+		return
+	}
+	if _, found := t.bySlot[t.anchor.slot]; found {
+		return
+	}
+
+	oldIndex := -1
+	for index := range oldEntries {
+		if oldEntries[index].slot == t.anchor.slot {
+			oldIndex = index
+			break
+		}
+	}
+	if oldIndex < 0 {
+		t.pinToBottom()
+		return
+	}
+	for index := oldIndex + 1; index < len(oldEntries); index++ {
+		if _, found := t.bySlot[oldEntries[index].slot]; found {
+			t.anchor = transcriptAnchor{slot: oldEntries[index].slot}
+			return
+		}
+	}
+	for index := oldIndex - 1; index >= 0; index-- {
+		if _, found := t.bySlot[oldEntries[index].slot]; found {
+			t.anchor.slot = oldEntries[index].slot
+			return
+		}
+	}
+	// A same-epoch replacement can revise every message at once. With no old
+	// slot left to select, preserve the reader's approximate message position in
+	// the replacement rather than jumping to the bottom.
+	t.anchor.slot = t.entries[min(oldIndex, len(t.entries)-1)].slot
+}
+
+func (t *residentTranscript) pinToBottom() {
+	t.pinned = true
+	t.anchor = transcriptAnchor{}
+	t.pendingScroll = 0
+}
+
+func indexEntryByID(entries []transcriptEntry, id uint32) int {
 	if id == 0 {
 		return -1
 	}
-	for i := range messages {
-		if messages[i].ID == id {
-			return i
+	for index := range entries {
+		if entries[index].message.ID == id {
+			return index
 		}
 	}
 	return -1
 }
 
-// scrollBy queues a scroll intent of `rows` lines (+down / -up). It is applied
-// and clamped at render time via resolveScroll.
 func (t *residentTranscript) scrollBy(rows int) {
 	t.pendingScroll += rows
 }
 
-// resolveScroll applies the queued scroll against a transcript whose full
-// rendered height allows a maximum top-anchored offset of maxTop, then clamps
-// and updates the pin flag. It records any pin edge in pinTransition and returns
-// it. maxTop is max(totalLines-budget, 0).
-func (t *residentTranscript) resolveScroll(maxTop int) int {
-	transition := pinNone
-	rows := t.pendingScroll
-	t.pendingScroll = 0
-
-	if rows != 0 {
-		if t.pinned {
-			// A downward scroll while pinned is already at the bottom: ignore it.
-			// An upward scroll leaves the bottom: baseline at maxTop, then move up.
-			if rows < 0 {
-				t.pinned = false
-				t.topOffset = clampInt(maxTop+rows, 0, maxTop)
-				transition = pinScrolledAway
-			}
-		} else {
-			t.topOffset = clampInt(t.topOffset+rows, 0, maxTop)
-			if t.topOffset >= maxTop {
-				t.pinned = true
-				transition = pinReturned
-			}
-		}
-	}
-
-	// Content may have changed height since the last frame; keep an unpinned
-	// offset in range. If the whole transcript now fits (maxTop == 0), there is
-	// nothing to scroll, so fall back to pinned without reporting a user return.
-	if !t.pinned {
-		if maxTop == 0 {
-			t.pinned = true
-			t.topOffset = 0
-		} else {
-			t.topOffset = clampInt(t.topOffset, 0, maxTop)
-		}
-	}
-
-	if transition != pinNone {
-		t.pinTransition = transition
-	}
-	return transition
-}
-
-// takePinTransition returns and clears the pending pin transition so Update
-// reports it to the BEAM exactly once.
 func (t *residentTranscript) takePinTransition() int {
 	transition := t.pinTransition
 	t.pinTransition = pinNone
 	return transition
 }
 
-// windowTopAnchored returns the visible slice of `lines` for a top-anchored
-// viewport of height `budget` whose first visible line is `topOffset`.
+func (t *residentTranscript) hasAnimatedMessages() bool {
+	return t != nil && t.animatedCount > 0
+}
+
+func (t *residentTranscript) recordPinTransition(transition int) {
+	if transition != pinNone {
+		t.pinTransition = transition
+	}
+}
+
 func windowTopAnchored(lines []string, budget, topOffset int) []string {
 	if budget <= 0 || len(lines) == 0 {
 		return nil
@@ -227,7 +416,6 @@ func windowTopAnchored(lines []string, budget, topOffset int) []string {
 	return lines[top:end]
 }
 
-// windowBottom returns the last `budget` lines (the follow-bottom view).
 func windowBottom(lines []string, budget int) []string {
 	if budget <= 0 || len(lines) == 0 {
 		return nil
