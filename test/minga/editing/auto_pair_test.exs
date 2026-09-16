@@ -33,6 +33,25 @@ defmodule Minga.Editing.AutoPairTest do
     end
   end
 
+  describe "on_insert/3 delimiter decisions" do
+    test "maps each delimiter class and cursor context to the existing action" do
+      cases = [
+        {"opening delimiter", "text", {0, 2}, "(", {:pair, "(", ")"}},
+        {"matching closing delimiter", "()", {0, 1}, ")", {:skip, ")"}},
+        {"non-matching closing delimiter", "(x", {0, 1}, ")", {:passthrough, ")"}},
+        {"matching quote", ~s(""), {0, 1}, "\"", {:skip, "\""}},
+        {"matching quote after word character", ~s(word"), {0, 4}, "\"", {:skip, "\""}},
+        {"quote after a word character", "word", {0, 4}, "\"", {:passthrough, "\""}},
+        {"quote after ordinary text", "word ", {0, 5}, "\"", {:pair, "\"", "\""}},
+        {"plain character", "text", {0, 2}, "x", {:passthrough, "x"}}
+      ]
+
+      Enum.each(cases, fn {label, text, position, char, expected} ->
+        assert AutoPair.on_insert(Document.new(text), position, char) == expected, label
+      end)
+    end
+  end
+
   # ── on_insert/3 — skip-over ─────────────────────────────────────────────────
 
   describe "on_insert/3 skip-over" do
@@ -108,6 +127,54 @@ defmodule Minga.Editing.AutoPairTest do
     test "typing \" at col 0 does auto-pair" do
       buf = Document.new("")
       assert {:pair, "\"", "\""} = AutoPair.on_insert(buf, {0, 0}, "\"")
+    end
+
+    test "only ASCII letters, digits, and underscore count as word characters" do
+      cases = [
+        {"A", {:passthrough, "\""}},
+        {"z", {:passthrough, "\""}},
+        {"0", {:passthrough, "\""}},
+        {"9", {:passthrough, "\""}},
+        {"_", {:passthrough, "\""}},
+        {"é", {:pair, "\"", "\""}}
+      ]
+
+      Enum.each(cases, fn {text, expected} ->
+        position = {0, byte_size(text)}
+        assert AutoPair.on_insert(Document.new(text), position, "\"") == expected
+      end)
+    end
+  end
+
+  describe "on_insert/3 byte-offset boundaries" do
+    test "preserves empty, missing, zero, end, and beyond-end behavior" do
+      cases = [
+        {"empty line", "", {0, 0}, "\"", {:pair, "\"", "\""}},
+        {"missing line", "text", {1, 0}, "\"", {:pair, "\"", "\""}},
+        {"column zero", "text", {0, 0}, "\"", {:pair, "\"", "\""}},
+        {"end of line", "text ", {0, 5}, "\"", {:pair, "\"", "\""}},
+        {"beyond end after a word", "text", {0, 99}, "\"", {:passthrough, "\""}},
+        {"beyond end closing", ")", {0, 99}, ")", {:passthrough, ")"}}
+      ]
+
+      Enum.each(cases, fn {label, text, position, char, expected} ->
+        assert AutoPair.on_insert(Document.new(text), position, char) == expected, label
+      end)
+    end
+
+    test "preserves behavior at and inside multibyte and combining graphemes" do
+      cases = [
+        {"inside multibyte grapheme", "🥨)", {0, 1}, ")", {:passthrough, ")"}},
+        {"after multibyte grapheme", "🥨)", {0, 4}, ")", {:skip, ")"}},
+        {"inside multibyte grapheme for previous lookup", "é", {0, 1}, "\"", {:pair, "\"", "\""}},
+        {"inside combining grapheme", "e\u0301", {0, 1}, "\"", {:pair, "\"", "\""}},
+        {"inside combining codepoint", "e\u0301)", {0, 2}, ")", {:passthrough, ")"}},
+        {"after multibyte grapheme and ASCII word", "éa", {0, 3}, "\"", {:passthrough, "\""}}
+      ]
+
+      Enum.each(cases, fn {label, text, position, char, expected} ->
+        assert AutoPair.on_insert(Document.new(text), position, char) == expected, label
+      end)
     end
   end
 
@@ -200,6 +267,12 @@ defmodule Minga.Editing.AutoPairTest do
     test "backspace at end of line (no char at cursor) passes through" do
       buf = Document.new("(")
       assert :passthrough = AutoPair.on_backspace(buf, {0, 1})
+    end
+
+    test "backspace on a missing line or beyond the line passes through" do
+      buf = Document.new("()")
+      assert :passthrough = AutoPair.on_backspace(buf, {1, 1})
+      assert :passthrough = AutoPair.on_backspace(buf, {0, 99})
     end
   end
 

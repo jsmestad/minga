@@ -28,6 +28,7 @@ defmodule Minga.Editing.AutoPair do
   """
 
   alias Minga.Buffer.Document
+  alias Minga.Core.Unicode
 
   @typedoc "A zero-indexed `{line, col}` position."
   @type position :: Document.position()
@@ -40,6 +41,12 @@ defmodule Minga.Editing.AutoPair do
 
   @typedoc "Result of auto-pair analysis on backspace."
   @type backspace_action :: :delete_pair | :passthrough
+
+  @typep delimiter ::
+           {:opening, String.t()}
+           | {:quote, String.t()}
+           | {:closing, String.t()}
+           | :plain
 
   # Maps opening delimiters to their closing counterpart.
   @pair_map %{
@@ -81,17 +88,7 @@ defmodule Minga.Editing.AutoPair do
   """
   @spec on_insert(Document.t(), position(), String.t()) :: insert_action()
   def on_insert(%Document{} = buffer, {line, col}, char) do
-    char_at_cursor = char_at(buffer, line, col)
-
-    on_insert_action(
-      buffer,
-      {line, col},
-      char,
-      MapSet.member?(@closing_chars, char) and char_at_cursor == char,
-      Map.has_key?(@quote_pairs, char) and char_at_cursor == char,
-      Map.has_key?(@pair_map, char),
-      Map.has_key?(@quote_pairs, char)
-    )
+    on_insert_action(classify_delimiter(char), buffer, {line, col}, char)
   end
 
   @doc """
@@ -141,42 +138,53 @@ defmodule Minga.Editing.AutoPair do
   @spec closing_for(String.t()) :: String.t() | nil
   def closing_for(char), do: Map.get(@all_pairs, char)
 
-  @spec on_insert_action(
-          Document.t(),
-          position(),
-          String.t(),
-          boolean(),
-          boolean(),
-          boolean(),
-          boolean()
-        ) ::
+  @spec classify_delimiter(String.t()) :: delimiter()
+  defp classify_delimiter(char), do: classify_opening(char, Map.fetch(@pair_map, char))
+
+  @spec classify_opening(String.t(), {:ok, String.t()} | :error) :: delimiter()
+  defp classify_opening(_char, {:ok, close}), do: {:opening, close}
+  defp classify_opening(char, :error), do: classify_quote(char, Map.fetch(@quote_pairs, char))
+
+  @spec classify_quote(String.t(), {:ok, String.t()} | :error) :: delimiter()
+  defp classify_quote(_char, {:ok, close}), do: {:quote, close}
+
+  defp classify_quote(char, :error),
+    do: classify_closing(char, MapSet.member?(@closing_chars, char))
+
+  @spec classify_closing(String.t(), boolean()) :: delimiter()
+  defp classify_closing(char, true), do: {:closing, char}
+  defp classify_closing(_char, false), do: :plain
+
+  @spec on_insert_action(delimiter(), Document.t(), position(), String.t()) ::
           insert_action()
-  defp on_insert_action(_buffer, _position, char, true, _quote_match?, _opening?, _quote?),
-    do: {:skip, char}
+  defp on_insert_action({:opening, close}, _buffer, _position, char),
+    do: {:pair, char, close}
 
-  defp on_insert_action(_buffer, _position, char, false, true, _opening?, _quote?),
-    do: {:skip, char}
-
-  defp on_insert_action(_buffer, _position, char, false, false, true, _quote?),
-    do: {:pair, char, Map.fetch!(@pair_map, char)}
-
-  defp on_insert_action(buffer, {line, col}, char, false, false, false, true) do
-    quote_insert_action(char, char_before(buffer, line, col))
+  defp on_insert_action({:closing, _close}, buffer, {line, col}, char) do
+    closing_insert_action(char, char_at(buffer, line, col))
   end
 
-  defp on_insert_action(_buffer, _position, char, false, false, false, false),
-    do: {:passthrough, char}
-
-  @spec quote_insert_action(String.t(), String.t() | nil) :: insert_action()
-  defp quote_insert_action(char, char_before) do
-    quote_insert_action_for_word_char(char, word_char?(char_before))
+  defp on_insert_action({:quote, close}, buffer, {line, col}, char) do
+    quote_insert_action(buffer, {line, col}, char, close, char_at(buffer, line, col))
   end
 
-  @spec quote_insert_action_for_word_char(String.t(), boolean()) :: insert_action()
-  defp quote_insert_action_for_word_char(char, true), do: {:passthrough, char}
+  defp on_insert_action(:plain, _buffer, _position, char), do: {:passthrough, char}
 
-  defp quote_insert_action_for_word_char(char, false),
-    do: {:pair, char, Map.fetch!(@quote_pairs, char)}
+  @spec closing_insert_action(String.t(), String.t() | nil) :: insert_action()
+  defp closing_insert_action(char, char), do: {:skip, char}
+  defp closing_insert_action(char, _at_cursor), do: {:passthrough, char}
+
+  @spec quote_insert_action(Document.t(), position(), String.t(), String.t(), String.t() | nil) ::
+          insert_action()
+  defp quote_insert_action(_buffer, _position, char, _close, char), do: {:skip, char}
+
+  defp quote_insert_action(buffer, {line, col}, char, close, _at_cursor) do
+    quote_insert_action_for_word_char(char, close, word_char?(char_before(buffer, line, col)))
+  end
+
+  @spec quote_insert_action_for_word_char(String.t(), String.t(), boolean()) :: insert_action()
+  defp quote_insert_action_for_word_char(char, _close, true), do: {:passthrough, char}
+  defp quote_insert_action_for_word_char(char, close, false), do: {:pair, char, close}
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
@@ -184,19 +192,8 @@ defmodule Minga.Editing.AutoPair do
   @spec char_at(Document.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
   defp char_at(buffer, line, byte_col) do
     case Document.line_at(buffer, line) do
-      nil ->
-        nil
-
-      text when byte_col >= byte_size(text) ->
-        nil
-
-      text ->
-        rest = binary_part(text, byte_col, byte_size(text) - byte_col)
-
-        case String.next_grapheme(rest) do
-          {g, _} -> g
-          nil -> nil
-        end
+      nil -> nil
+      text -> Unicode.grapheme_at(text, byte_col)
     end
   end
 
@@ -210,35 +207,8 @@ defmodule Minga.Editing.AutoPair do
         nil
 
       text ->
-        # Find grapheme whose byte offset is just before byte_col
-        find_grapheme_before(text, byte_col)
-    end
-  end
-
-  @spec find_grapheme_before(String.t(), non_neg_integer()) :: String.t() | nil
-  defp find_grapheme_before(text, target_byte) do
-    do_find_grapheme_before(text, target_byte, 0, nil)
-  end
-
-  @spec do_find_grapheme_before(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t() | nil
-        ) ::
-          String.t() | nil
-  defp do_find_grapheme_before(text, target, current_byte, prev_g) do
-    if current_byte >= target do
-      prev_g
-    else
-      case String.next_grapheme(text) do
-        {g, rest} ->
-          g_size = byte_size(text) - byte_size(rest)
-          do_find_grapheme_before(rest, target, current_byte + g_size, g)
-
-        nil ->
-          prev_g
-      end
+        previous_byte_col = Unicode.prev_grapheme_byte_offset(text, byte_col)
+        Unicode.grapheme_at(text, previous_byte_col)
     end
   end
 
