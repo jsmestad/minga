@@ -77,6 +77,7 @@ defmodule MingaEditor do
           | {:options_server, GenServer.server() | nil}
           | {:events_registry, EventBus.registry()}
           | {:effect_scheduler, GenServer.server()}
+          | {:file_tree_duplicate_backend, MingaEditor.Commands.FileTree.DuplicateBackend.t()}
           | {:file_tree_new_file_backend, MingaEditor.Commands.FileTree.NewFileBackend.t()}
           | {:buffer, pid()}
           | {:width, pos_integer()}

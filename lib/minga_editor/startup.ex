@@ -203,6 +203,12 @@ defmodule MingaEditor.Startup do
           editing_model: editing_model,
           keymap_server: keymap_server,
           options_server: options_server,
+          file_tree_duplicate_backend:
+            Keyword.get(
+              opts,
+              :file_tree_duplicate_backend,
+              MingaEditor.Commands.FileTree.SystemDuplicateBackend
+            ),
           file_tree_new_file_backend:
             Keyword.get(
               opts,
