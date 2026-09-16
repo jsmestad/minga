@@ -135,6 +135,24 @@ func TestEncodeGUIFloatPopupDismiss(t *testing.T) {
 	}
 }
 
+func TestEncodeGUIChatPinTransitions(t *testing.T) {
+	tests := []struct {
+		name string
+		got  []byte
+		want []byte
+	}{
+		{"scrolled away", EncodeGUIChatScrolledAwayFromBottom(), []byte{generated.OPGuiAction, generated.GUIActionChatScrolledAwayFromBottom}},
+		{"returned", EncodeGUIChatReturnedToBottom(), []byte{generated.OPGuiAction, generated.GUIActionChatReturnedToBottom}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !bytes.Equal(test.got, test.want) {
+				t.Fatalf("packet = %v, want %v", test.got, test.want)
+			}
+		})
+	}
+}
+
 func TestEncodeScrollBatchDown(t *testing.T) {
 	got := EncodeScrollBatch(42, 3, 0)
 	want := []byte{generated.OPScrollBatch, 0, 42, 0, 3, 0}

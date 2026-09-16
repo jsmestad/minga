@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -89,6 +90,373 @@ func TestProductionKeyAndWheelScrollUpdateAnchorSameFrame(t *testing.T) {
 	}
 	if work := model.transcriptRenderer.work; work.MessagesVisited > model.layout.body.Height*2 {
 		t.Fatalf("local wheel scroll exceeded viewport work bound: %s", work)
+	}
+}
+
+func TestAgentTranscriptPinEdgesEmitExactlyOnceFromUpdate(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		away tea.Msg
+		back tea.Msg
+	}{
+		{
+			name: "keys",
+			away: tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}),
+			back: tea.KeyPressMsg(tea.Key{Code: 'G', Text: "G"}),
+		},
+		{
+			name: "wheel",
+			away: tea.MouseWheelMsg(tea.Mouse{X: 10, Y: 1, Button: tea.MouseWheelUp}),
+			back: tea.MouseWheelMsg(tea.Mouse{X: 10, Y: 1, Button: tea.MouseWheelDown}),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			out := make(chan []byte, 32)
+			model := residentModel(t, 100)
+			model.out = out
+			if mouse, ok := test.away.(tea.MouseMsg); ok {
+				value := mouse.Mouse()
+				value.Y = model.layout.body.Y
+				test.away = tea.MouseWheelMsg(value)
+				value = test.back.(tea.MouseMsg).Mouse()
+				value.Y = model.layout.body.Y
+				test.back = tea.MouseWheelMsg(value)
+			}
+
+			updated, _ := model.Update(test.away)
+			model = updated.(Model)
+			updated, _ = model.Update(test.away)
+			model = updated.(Model)
+			updated, _ = model.Update(test.back)
+			model = updated.(Model)
+			updated, _ = model.Update(test.back)
+			_ = updated.(Model)
+
+			packets := drainOutboundPackets(out)
+			assertPacketCount(t, packets, protocol.EncodeGUIChatScrolledAwayFromBottom(), 1)
+			assertPacketCount(t, packets, protocol.EncodeGUIChatReturnedToBottom(), 1)
+		})
+	}
+}
+
+func assertPacketCount(t *testing.T, packets [][]byte, want []byte, count int) {
+	t.Helper()
+	got := 0
+	for _, packet := range packets {
+		if bytes.Equal(packet, want) {
+			got++
+		}
+	}
+	if got != count {
+		t.Fatalf("packet %v count = %d, want %d; outbound=%v", want, got, count, packets)
+	}
+}
+
+func TestAgentTranscriptNavigationMapping(t *testing.T) {
+	page := 17
+	tests := []struct {
+		name    string
+		key     tea.Key
+		want    int
+		handled bool
+	}{
+		{"j", tea.Key{Code: 'j'}, 1, true},
+		{"k", tea.Key{Code: 'k'}, -1, true},
+		{"ctrl-d", tea.Key{Code: 'd', Mod: tea.ModCtrl}, 8, true},
+		{"ctrl-u", tea.Key{Code: 'u', Mod: tea.ModCtrl}, -8, true},
+		{"G", tea.Key{Code: 'G'}, 1 << 20, true},
+		{"shift-G", tea.Key{Code: 'G', Mod: tea.ModShift}, 1 << 20, true},
+		{"page down", tea.Key{Code: tea.KeyPgDown}, page, true},
+		{"page up", tea.Key{Code: tea.KeyPgUp}, -page, true},
+		{"ctrl-j", tea.Key{Code: 'j', Mod: tea.ModCtrl}, 0, false},
+		{"alt-k", tea.Key{Code: 'k', Mod: tea.ModAlt}, 0, false},
+		{"shift-j", tea.Key{Code: 'j', Mod: tea.ModShift}, 0, false},
+		{"ctrl-shift-d", tea.Key{Code: 'd', Mod: tea.ModCtrl | tea.ModShift}, 0, false},
+		{"ctrl-alt-u", tea.Key{Code: 'u', Mod: tea.ModCtrl | tea.ModAlt}, 0, false},
+		{"ctrl-G", tea.Key{Code: 'G', Mod: tea.ModCtrl}, 0, false},
+		{"ctrl-page-up", tea.Key{Code: tea.KeyPgUp, Mod: tea.ModCtrl}, 0, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, handled := agentTranscriptScrollRows(tea.KeyPressMsg(test.key), page)
+			if got != test.want || handled != test.handled {
+				t.Fatalf("mapping = (%d, %v), want (%d, %v)", got, handled, test.want, test.handled)
+			}
+		})
+	}
+}
+
+func TestAgentTranscriptComposerFocusGatesLocalNavigation(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		inputFocused bool
+		wantPinned   bool
+		wantEdge     int
+	}{
+		{"composer focused", true, true, 0},
+		{"transcript focused", false, false, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			out := make(chan []byte, 8)
+			model := residentModel(t, 100)
+			chat := visibleAgentChat()
+			chat.InputFocused = test.inputFocused
+			model.chrome[generated.OPGuiAgentChat] = protocol.ChromePayload{AgentChat: chat}
+			model.out = out
+
+			updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+			model = updated.(Model)
+			if model.transcript.pinned != test.wantPinned {
+				t.Fatalf("pinned = %v, want %v", model.transcript.pinned, test.wantPinned)
+			}
+			packets := drainOutboundPackets(out)
+			keyPackets := 0
+			for _, packet := range packets {
+				if len(packet) > 0 && packet[0] == generated.OPKeyPress {
+					keyPackets++
+				}
+			}
+			if keyPackets != 1 {
+				t.Fatalf("key packet count = %d, want 1; outbound=%v", keyPackets, packets)
+			}
+			assertPacketCount(t, packets, protocol.EncodeGUIChatScrolledAwayFromBottom(), test.wantEdge)
+		})
+	}
+}
+
+func TestFocusedComposerReceivesEveryTranscriptNavigationKey(t *testing.T) {
+	keys := []tea.Key{
+		{Code: 'j', Text: "j"},
+		{Code: 'k', Text: "k"},
+		{Code: 'd', Mod: tea.ModCtrl},
+		{Code: 'u', Mod: tea.ModCtrl},
+		{Code: 'G', Text: "G"},
+		{Code: tea.KeyPgUp},
+		{Code: tea.KeyPgDown},
+	}
+	for _, key := range keys {
+		t.Run(key.String(), func(t *testing.T) {
+			out := make(chan []byte, 8)
+			model := residentModel(t, 100)
+			chat := visibleAgentChat()
+			chat.InputFocused = true
+			model.chrome[generated.OPGuiAgentChat] = protocol.ChromePayload{AgentChat: chat}
+			model.out = out
+
+			updated, _ := model.Update(tea.KeyPressMsg(key))
+			model = updated.(Model)
+			if !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
+				t.Fatalf("focused composer navigation changed transcript: %+v", model.transcript)
+			}
+			packets := drainOutboundPackets(out)
+			keyPackets := 0
+			for _, packet := range packets {
+				if len(packet) > 0 && packet[0] == generated.OPKeyPress {
+					keyPackets++
+				}
+			}
+			if keyPackets != 1 {
+				t.Fatalf("key packet count = %d, want 1; outbound=%v", keyPackets, packets)
+			}
+			assertPacketCount(t, packets, protocol.EncodeGUIChatScrolledAwayFromBottom(), 0)
+			assertPacketCount(t, packets, protocol.EncodeGUIChatReturnedToBottom(), 0)
+		})
+	}
+}
+
+func TestAgentTranscriptPageKeysUseContentBudget(t *testing.T) {
+	model := residentModel(t, 100)
+	chat, _ := model.agentChat()
+	panelWidth := max(model.width-2, 1)
+	mainBudget := model.bodyHeight() - 1
+	composerRows := len(model.renderAgentComposer(chat, panelWidth))
+	expected := mainBudget - composerRows - 1 - 1
+	page := model.agentTranscriptPageSize()
+	if page != expected {
+		t.Fatalf("page size = %d, want transcript content budget %d", page, expected)
+	}
+	if page >= model.layout.body.Height {
+		t.Fatalf("page size %d should exclude body chrome from height %d", page, model.layout.body.Height)
+	}
+	if got, handled := agentTranscriptScrollRows(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}), page); !handled || got != expected {
+		t.Fatalf("page-down mapping = (%d, %v), want (%d, true)", got, handled, expected)
+	}
+}
+
+func TestAgentTranscriptTruncationAffordanceOnlyAtResidentTop(t *testing.T) {
+	model := residentModel(t, 20)
+	model.transcript.truncated = true
+	model.transcript.pinned = false
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	width := 50
+	budget := 8
+
+	rows := model.transcriptRenderer.render(model, model.transcript, budget, width)
+	if got := ansi.Strip(strings.Join(rows, "\n")); !strings.Contains(got, "earlier messages hidden") {
+		t.Fatalf("top of truncated transcript lacks affordance: %q", got)
+	}
+	if len(rows) != budget {
+		t.Fatalf("affordance should stay inside content budget: got %d rows, want %d", len(rows), budget)
+	}
+
+	model.transcript.scrollBy(1)
+	rows = model.transcriptRenderer.render(model, model.transcript, budget, width)
+	if got := ansi.Strip(strings.Join(rows, "\n")); strings.Contains(got, "earlier messages hidden") {
+		t.Fatalf("affordance should disappear below resident top: %q", got)
+	}
+
+	model.transcript.truncated = false
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	rows = model.transcriptRenderer.render(model, model.transcript, budget, width)
+	if got := ansi.Strip(strings.Join(rows, "\n")); strings.Contains(got, "earlier messages hidden") {
+		t.Fatalf("complete transcript should not show truncation affordance: %q", got)
+	}
+}
+
+func TestTruncationAffordanceIsReachableWhenResidentRowsExactlyFillBudget(t *testing.T) {
+	model := residentModel(t, 0)
+	model.transcript.apply(protocol.AgentTranscript{
+		Present:   true,
+		Mode:      0,
+		Epoch:     1,
+		Truncated: true,
+		Messages:  []protocol.AgentChatMessage{{ID: 1, Kind: agentKindSystem, Text: "retained"}},
+	})
+	width := 50
+	budget := 1
+
+	rows := model.transcriptRenderer.render(model, model.transcript, budget, width)
+	if got := ansi.Strip(strings.Join(rows, "\n")); !strings.Contains(got, "retained") {
+		t.Fatalf("pinned view should keep the retained bottom row: %q", got)
+	}
+
+	model.transcript.scrollBy(-1)
+	rows = model.transcriptRenderer.render(model, model.transcript, budget, width)
+	if got := ansi.Strip(strings.Join(rows, "\n")); !strings.Contains(got, "earlier messages hidden") {
+		t.Fatalf("scrolling to resident top should reveal truncation affordance: %q", got)
+	}
+	if model.transcript.pinned {
+		t.Fatal("truncation affordance should act as a scrollable row above an exact-fit transcript")
+	}
+}
+
+func TestReplacementPinIntentReportingThroughUpdate(t *testing.T) {
+	tests := []struct {
+		name             string
+		prepare          func(*Model)
+		frame            func(Model) protocol.AgentTranscript
+		wantReturned     int
+		wantPinned       bool
+		wantAnchorStable bool
+	}{
+		{
+			name: "all resident rows fit after shrink",
+			prepare: func(model *Model) {
+				model.transcript.pinned = false
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+			},
+			frame: func(Model) protocol.AgentTranscript {
+				return replaceFrame(1, msg(100, "only"))
+			},
+			wantReturned: 1,
+			wantPinned:   true,
+		},
+		{
+			name: "resident rows exactly fill viewport after shrink",
+			prepare: func(model *Model) {
+				model.transcript.pinned = false
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+			},
+			frame: func(model Model) protocol.AgentTranscript {
+				budget := model.agentTranscriptPageSize()
+				if budget < 3 {
+					t.Fatalf("transcript budget = %d, need at least 3 rows for exact-fit fixture", budget)
+				}
+				lines := make([]protocol.AgentStyledLine, budget-3)
+				for index := range lines {
+					lines[index] = protocol.AgentStyledLine{{Text: fmt.Sprintf("row %d", index)}}
+				}
+				return replaceFrame(1, protocol.AgentChatMessage{
+					ID:   100,
+					Kind: agentKindAssistantMarkdown,
+					MarkdownBlocks: []protocol.AgentMarkdownBlock{{
+						Kind:  0x07,
+						Label: "Exact fit",
+						Flags: 1,
+						Lines: lines,
+					}},
+				})
+			},
+			wantReturned: 1,
+			wantPinned:   true,
+		},
+		{
+			name: "removed near-tail anchor clamps to bottom",
+			prepare: func(model *Model) {
+				model.transcript.pinned = false
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[90].slot}
+			},
+			frame: func(model Model) protocol.AgentTranscript {
+				messages := append([]protocol.AgentChatMessage(nil), model.transcript.messages[:80]...)
+				return replaceFrame(1, messages...)
+			},
+			wantReturned: 1,
+			wantPinned:   true,
+		},
+		{
+			name: "same-epoch replacement retains stable anchor",
+			prepare: func(model *Model) {
+				model.transcript.pinned = false
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[40].slot, row: 1}
+			},
+			frame: func(model Model) protocol.AgentTranscript {
+				messages := append([]protocol.AgentChatMessage(nil), model.transcript.messages...)
+				messages[len(messages)-1].Text = "streamed tail revision"
+				return replaceFrame(1, messages...)
+			},
+			wantPinned:       false,
+			wantAnchorStable: true,
+		},
+		{
+			name: "epoch flip re-pins without local intent",
+			prepare: func(model *Model) {
+				model.transcript.pinned = false
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[40].slot, row: 1}
+				model.transcript.pinTransition = pinScrolledAway
+			},
+			frame: func(Model) protocol.AgentTranscript {
+				return replaceFrame(2, msg(1, "fresh session"))
+			},
+			wantPinned: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out := make(chan []byte, 16)
+			model := residentModel(t, 100)
+			model.out = out
+			model.lastCommittedSeq = 1
+			test.prepare(&model)
+			anchor := model.transcript.anchor
+			frame := test.frame(model)
+
+			updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+				beginFrame(2, 1),
+				transcriptCommand(frame),
+				commitFrame(2),
+			}})
+			model = updated.(Model)
+			if model.transcript.pinned != test.wantPinned {
+				t.Fatalf("pinned = %v, want %v", model.transcript.pinned, test.wantPinned)
+			}
+			if test.wantAnchorStable && model.transcript.anchor != anchor {
+				t.Fatalf("stable replacement moved anchor: before=%+v after=%+v", anchor, model.transcript.anchor)
+			}
+			packets := drainOutboundPackets(out)
+			assertPacketCount(t, packets, []byte{generated.OPGuiAction, 0x5D}, test.wantReturned)
+			assertPacketCount(t, packets, protocol.EncodeGUIChatScrolledAwayFromBottom(), 0)
+		})
 	}
 }
 
@@ -323,22 +691,37 @@ func TestTranscriptCacheEvictsAsViewportMoves(t *testing.T) {
 	}
 }
 
-func TestContentShrinkClampsAnchorAndPinsOnlyWhenEverythingFits(t *testing.T) {
-	model := residentModel(t, 10)
-	width := 50
-	budget := 5
-	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[9].slot}
+func TestContentShrinkClampsAnchorAndReportsReturn(t *testing.T) {
+	t.Run("clamp to bottom", func(t *testing.T) {
+		model := residentModel(t, 10)
+		width := 50
+		budget := 5
+		model.transcript.pinned = false
+		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[9].slot}
 
-	got := model.transcriptRenderer.render(model, model.transcript, budget, width)
-	want := windowBottom(model.agentTranscriptAllLines(model.transcript.messages, width), budget)
-	if model.transcript.pinned || strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("underfilled anchor did not clamp to unpinned tail: pinned=%v", model.transcript.pinned)
-	}
+		got := model.transcriptRenderer.render(model, model.transcript, budget, width)
+		want := windowBottom(model.agentTranscriptAllLines(model.transcript.messages, width), budget)
+		if !model.transcript.pinned || strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("underfilled anchor did not clamp and re-pin: pinned=%v", model.transcript.pinned)
+		}
+		if model.transcript.takePinTransition() != pinReturned {
+			t.Fatal("clamp-to-bottom did not report pinReturned")
+		}
+	})
 
-	model.transcript.apply(replaceFrame(1, msg(10, "only")))
-	model.transcriptRenderer.render(model, model.transcript, budget, width)
-	if !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
-		t.Fatalf("all-fitting replacement did not pin: %+v", model.transcript)
-	}
+	t.Run("everything fits", func(t *testing.T) {
+		model := residentModel(t, 10)
+		width := 50
+		budget := 5
+		model.transcript.pinned = false
+		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+		model.transcript.apply(replaceFrame(1, msg(10, "only")))
+		model.transcriptRenderer.render(model, model.transcript, budget, width)
+		if !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
+			t.Fatalf("all-fitting replacement did not pin: %+v", model.transcript)
+		}
+		if model.transcript.takePinTransition() != pinReturned {
+			t.Fatal("all-fitting replacement did not report pinReturned")
+		}
+	})
 }

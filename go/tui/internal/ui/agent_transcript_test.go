@@ -144,6 +144,7 @@ func TestResidentTranscriptEpochFlipReplaces(t *testing.T) {
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 	tr.pinned = false
 	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
+	tr.pinTransition = pinScrolledAway
 	tr.apply(replaceFrame(2, msg(9, "fresh")))
 
 	if got, want := ids(tr.messages), []uint32{9}; fmt.Sprint(got) != fmt.Sprint(want) {
@@ -154,6 +155,9 @@ func TestResidentTranscriptEpochFlipReplaces(t *testing.T) {
 	}
 	if !tr.pinned || tr.anchor != (transcriptAnchor{}) {
 		t.Fatalf("epoch flip (session switch) should re-pin to bottom: %+v", tr)
+	}
+	if tr.pinTransition != pinNone {
+		t.Fatalf("epoch flip should clear the local pin latch without reporting intent: %d", tr.pinTransition)
 	}
 }
 
@@ -322,6 +326,9 @@ func TestResidentTranscriptEmptyReplacementPins(t *testing.T) {
 	tr.apply(replaceFrame(1))
 	if !tr.pinned || tr.anchor != (transcriptAnchor{}) {
 		t.Fatalf("empty transcript did not pin: %+v", tr)
+	}
+	if tr.takePinTransition() != pinReturned {
+		t.Fatal("same-epoch empty replacement did not report its automatic return to bottom")
 	}
 }
 

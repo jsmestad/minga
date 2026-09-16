@@ -22,6 +22,8 @@ const (
 	arrowRight rune = 57351
 	arrowUp    rune = 57352
 	arrowDown  rune = 57353
+	pageUp     rune = 57362
+	pageDown   rune = 57363
 )
 
 type Model struct {
@@ -388,9 +390,19 @@ func (m *Model) queueAgentTranscriptScroll(msg tea.KeyPressMsg) {
 	if !m.agentTranscriptScrollTarget() {
 		return
 	}
-	if rows, ok := agentTranscriptScrollRows(msg, m.layout.body.Height); ok {
+	page := 1
+	if agentTranscriptUsesPageSize(msg) {
+		page = m.agentTranscriptPageSize()
+	}
+	if rows, ok := agentTranscriptScrollRows(msg, page); ok {
 		m.transcript.scrollBy(rows)
 	}
+}
+
+func agentTranscriptUsesPageSize(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+	return (key.Mod == tea.ModCtrl && (key.Code == 'd' || key.Code == 'u')) ||
+		(key.Mod == 0 && (key.Code == tea.KeyPgDown || key.Code == tea.KeyPgUp))
 }
 
 // queueAgentWheelScroll queues a local transcript scroll for a wheel event over
@@ -419,34 +431,36 @@ func agentTranscriptScrollRows(msg tea.KeyPressMsg, page int) (int, bool) {
 	page = max(page, 1)
 	half := max(page/2, 1)
 	key := msg.Key()
-	ctrl := key.Mod.Contains(tea.ModCtrl)
-	alt := key.Mod.Contains(tea.ModAlt)
 	switch key.Code {
 	case 'j':
-		if !ctrl && !alt {
+		if key.Mod == 0 {
 			return 1, true
 		}
 	case 'k':
-		if !ctrl && !alt {
+		if key.Mod == 0 {
 			return -1, true
 		}
 	case 'd':
-		if ctrl && !alt {
+		if key.Mod == tea.ModCtrl {
 			return half, true
 		}
 	case 'u':
-		if ctrl && !alt {
+		if key.Mod == tea.ModCtrl {
 			return -half, true
 		}
 	case 'G':
-		if !ctrl && !alt {
+		if key.Mod == 0 || key.Mod == tea.ModShift {
 			// Jump to bottom: a large downward amount the render clamps and re-pins.
 			return 1 << 20, true
 		}
 	case tea.KeyPgDown:
-		return page, true
+		if key.Mod == 0 {
+			return page, true
+		}
 	case tea.KeyPgUp:
-		return -page, true
+		if key.Mod == 0 {
+			return -page, true
+		}
 	}
 	return 0, false
 }
