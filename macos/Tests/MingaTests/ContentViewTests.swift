@@ -932,7 +932,7 @@ struct ContentViewTests {
         #expect(replacementEncoder.guiActions == [.executeCommand(name: "select_all")])
     }
 
-    @Test("production reconnect workflow accepts a lower keyframe from controlled pipes", .timeLimit(.minutes(1)))
+    @Test("replacement protocol connection accepts a lower keyframe from controlled pipes", .timeLimit(.minutes(1)))
     func productionReconnectAcceptsControlledPipeKeyframe() async throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
@@ -947,49 +947,38 @@ struct ContentViewTests {
         let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldEncoder)
         let replacementInput = Pipe()
         let replacementOutput = Pipe()
-        let delivery = ProtocolEventDelivery()
         var currentConnectionID: UInt64 = 1
         let results = AsyncStream.makeStream(of: FrameTransactionResult.self, bufferingPolicy: .bufferingNewest(1))
         dispatcher.onTransactionResult = { results.continuation.yield($0) }
         let rejections = AsyncStream.makeStream(of: OutboundInputRejection.self, bufferingPolicy: .bufferingNewest(1))
         defer { rejections.continuation.finish() }
 
-        let connection = try ProtocolReconnectWorkflow.replace(
+        oldEncoder.disconnect(reason: .expectedTeardown)
+        currentConnectionID = 2
+        dispatcher.replaceConnection(with: 2)
+        editorView.invalidateConnection()
+        let connection = try ProtocolConnection(
             connectionID: 2,
             readHandle: replacementInput.fileHandleForReading,
             writeHandle: replacementOutput.fileHandleForWriting,
-            oldEncoder: oldEncoder,
-            oldReader: nil,
             resourcePolicy: .default,
-            invalidate: {
-                delivery.cancel()
-                currentConnectionID = 2
-                dispatcher.replaceConnection(with: 2)
-                editorView.invalidateConnection()
+            isCurrent: { $0 == currentConnectionID },
+            consume: { event, deliveredConnectionID in
+                switch event {
+                case .frame(let frame):
+                    dispatcher.dispatch(frame, connectionID: deliveredConnectionID)
+                case .failure(let failure):
+                    dispatcher.decodedFrameFailed(failure, connectionID: deliveredConnectionID)
+                }
             },
             onTransportFailure: { _ in },
             onInputRejection: { rejections.continuation.yield($0) },
-            installEncoder: { encoder in
-                editorView.installConnectionEncoder(encoder)
-            },
-            installDelivery: { connectionID in
-                delivery.replace(
-                    connectionID: connectionID,
-                    isCurrent: { $0 == currentConnectionID },
-                    consume: { event, deliveredConnectionID in
-                        switch event {
-                        case .frame(let frame):
-                            dispatcher.dispatch(frame, connectionID: deliveredConnectionID)
-                        case .failure(let failure):
-                            dispatcher.decodedFrameFailed(failure, connectionID: deliveredConnectionID)
-                        }
-                    }
-                )
-            },
             onReaderDisconnect: { encoder, _ in
                 encoder.disconnect(reason: .unexpectedPeerClosure)
             }
         )
+        editorView.installConnectionEncoder(connection.encoder)
+        connection.start()
         #expect(editorView.interactionSnapshot.inputEnabled)
 
         connection.encoder.sendPasteEvent(text: String(repeating: "x", count: 65_536))
@@ -1014,13 +1003,13 @@ struct ContentViewTests {
         )
         #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
 
-        connection.reader.stop()
+        connection.stop()
         replacementInput.fileHandleForWriting.closeFile()
         replacementOutput.fileHandleForReading.closeFile()
     }
 
-    @Test("failed reconnect construction leaves old connection nonsemantic and disconnected")
-    func failedReconnectConstructionInvalidatesOldConnection() throws {
+    @Test("failed replacement construction leaves retired delivery and application input disabled", .timeLimit(.minutes(1)))
+    func failedReplacementConstructionStaysRetired() async throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
         dispatcher.replaceConnection(with: 1)
@@ -1029,76 +1018,73 @@ struct ContentViewTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 90, seq: 0))
         let oldSnapshot = try #require(dispatcher.committedEditorSnapshot)
 
+        let oldInput = Pipe()
         let oldOutput = Pipe()
-        let oldEncoder = try ProtocolEncoder(output: oldOutput.fileHandleForWriting)
-        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldEncoder)
-        let delivery = ProtocolEventDelivery()
+        let replacementInput = Pipe()
+        let replacementOutput = Pipe()
         var currentConnectionID: UInt64 = 1
-        let oldHandoff = delivery.replace(
+        var oldDeliveries = 0
+        let oldConnection = try ProtocolConnection(
             connectionID: 1,
+            readHandle: oldInput.fileHandleForReading,
+            writeHandle: oldOutput.fileHandleForWriting,
+            resourcePolicy: .default,
             isCurrent: { $0 == currentConnectionID },
-            consume: { event, connectionID in
-                switch event {
-                case .frame(let frame):
-                    dispatcher.dispatch(frame, connectionID: connectionID)
-                case .failure(let failure):
-                    dispatcher.decodedFrameFailed(failure, connectionID: connectionID)
-                }
+            consume: { _, _ in oldDeliveries += 1 },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in }
+        )
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldConnection.encoder)
+        var activeEncoder: InputEncoder? = oldConnection.encoder
+        var replacementDeliveries = 0
+        var recoveryFailure: OutboundTransportInitializationError?
+        oldConnection.start()
+        try oldInput.fileHandleForWriting.write(contentsOf: framedKeyframe(generation: 40, frameSeq: 91))
+        oldConnection.waitForBlockedReaderAdmissionForTesting()
+
+        let replacement = ProtocolConnection.replacing(
+            oldConnection,
+            connectionID: 2,
+            readHandle: replacementInput.fileHandleForReading,
+            writeHandle: replacementOutput.fileHandleForWriting,
+            resourcePolicy: .default,
+            invalidate: {
+                currentConnectionID = 2
+                dispatcher.replaceConnection(with: 2)
+                editorView.invalidateConnection()
+                activeEncoder = nil
+            },
+            isCurrent: { $0 == currentConnectionID },
+            consume: { _, _ in replacementDeliveries += 1 },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in },
+            onInitializationFailure: { recoveryFailure = $0 },
+            encoderFactory: { _ in
+                throw OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: EIO)
             }
         )
-        #expect(oldHandoff.acquireAdmission())
-        var activeEncoder: InputEncoder? = oldEncoder
-        var installedReplacement = false
 
-        do {
-            _ = try ProtocolReconnectWorkflow.replace(
-                connectionID: 2,
-                readHandle: Pipe().fileHandleForReading,
-                writeHandle: Pipe().fileHandleForWriting,
-                oldEncoder: oldEncoder,
-                oldReader: nil,
-                resourcePolicy: .default,
-                invalidate: {
-                    delivery.cancel()
-                    currentConnectionID = 2
-                    dispatcher.replaceConnection(with: 2)
-                    editorView.invalidateConnection()
-                    activeEncoder = nil
-                },
-                encoderFactory: { _ in
-                    #expect(currentConnectionID == 2)
-                    #expect(dispatcher.committedEditorSnapshot == nil)
-                    #expect(editorView.interactionSnapshot.inputEnabled == false)
-                    throw OutboundTransportInitializationError.nonBlockingSetupFailed(errorCode: EIO)
-                },
-                onTransportFailure: { _ in },
-                onInputRejection: { _ in },
-                installEncoder: { encoder in
-                    installedReplacement = true
-                    activeEncoder = encoder
-                    editorView.installConnectionEncoder(encoder)
-                },
-                installDelivery: { _ in
-                    Issue.record("failed construction must not install replacement delivery")
-                    return ProtocolEventHandoff(connectionID: 2)
-                },
-                onReaderDisconnect: { _, _ in }
-            )
-            Issue.record("expected encoder construction failure")
-        } catch let error as OutboundTransportInitializationError {
-            #expect(error == .nonBlockingSetupFailed(errorCode: EIO))
-        }
-
-        #expect(currentConnectionID == 2)
+        #expect(replacement == nil)
+        #expect(recoveryFailure == .nonBlockingSetupFailed(errorCode: EIO))
+        #expect(oldConnection.isStoppedForTesting)
+        #expect(oldConnection.acquireReaderAdmissionForTesting() == false)
         #expect(activeEncoder == nil)
-        #expect(installedReplacement == false)
-        #expect(oldHandoff.acquireAdmission() == false)
+        #expect(editorView.interactionSnapshot.inputEnabled == false)
         #expect(dispatcher.connectionID == 2)
         #expect(dispatcher.committedEditorSnapshot == nil)
         #expect(dispatcher.visibleEditorSnapshot == nil)
-        #expect(editorView.interactionSnapshot.inputEnabled == false)
         dispatcher.promoteVisibleEditorPresentation(snapshot: oldSnapshot, localTransform: nil, connectionID: 1)
         #expect(dispatcher.visibleEditorSnapshot == nil)
+        await Task.yield()
+        #expect(oldDeliveries == 0)
+        #expect(replacementDeliveries == 0)
+
+        oldInput.fileHandleForWriting.closeFile()
+        replacementInput.fileHandleForWriting.closeFile()
+        oldOutput.fileHandleForReading.closeFile()
+        replacementOutput.fileHandleForReading.closeFile()
     }
 
     @Test("SwiftUI editor updates preserve sidebar field-editor selection and IME composition")

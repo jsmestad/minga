@@ -204,8 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
 
     private var beamManager: BEAMProcessManager?
-    private var protocolReader: ProtocolReader?
-    private var encoder: ProtocolEncoder?
+    private var protocolConnection: ProtocolConnection?
+    private var encoder: ProtocolEncoder? { protocolConnection?.encoder }
     private var dispatcher: CommandDispatcher?
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
@@ -215,7 +215,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
-    private let protocolEventDelivery = ProtocolEventDelivery()
     private var outboundConnectionState = OutboundConnectionState()
     private var pendingFileURLs: [URL] = []
     private var acceptsOpenRequests = false
@@ -312,34 +311,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.recoveryManager = recovery
 
         let connectionID = outboundConnectionState.issueID()
-        let enc: ProtocolEncoder
-        do {
-            enc = try ProtocolEncoder(
-                output: protocolOutput,
-                onTransportFailure: { [weak self] report in
-                    self?.handleOutboundTransportFailure(report, connectionID: connectionID)
-                },
-                onInputRejection: { [weak self] rejection in
-                    self?.handleOutboundInputRejection(rejection, connectionID: connectionID)
-                }
-            )
-        } catch let error as OutboundTransportInitializationError {
-            presentOutboundTransportInitializationFailure(error, canRestart: false)
-            return
-        } catch {
-            presentOutboundTransportInitializationFailure(
-                .nonBlockingSetupFailed(errorCode: EIO),
-                canRestart: false
-            )
-            return
-        }
-        self.encoder = enc
-        appState.encoder = enc
-        appState.gui.settingsState.encoder = enc
-        outboundConnectionState.install(id: connectionID)
+        guard let connection = replaceProtocolConnection(
+            connectionID: connectionID,
+            readHandle: protocolInput,
+            writeHandle: protocolOutput,
+            canRestart: false
+        ) else { return }
+        let enc = connection.encoder
 
         // Enable port-based logging so messages appear in *Messages*.
-        PortLogger.setup(encoder: enc)
         PortLogger.info("macOS GUI frontend starting (\(beamManager != nil ? "bundle" : "dev") mode)")
         PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(fm.cellWidth)x\(fm.cellHeight), scale: \(scale)x")
         PortLogger.info("Initial grid: \(cols)x\(rows) cells")
@@ -513,40 +493,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.
 
-        // Capture the encoder for the disconnect callback. The closure
-        // runs on the reader's background thread; ProtocolEncoder is
-        // @unchecked Sendable and disconnect() is lock-protected.
-        let disconnectEncoder = enc
-
-        // Start reading protocol commands. One stream consumer preserves the
-        // reader's wire order across successful packets and decode failures.
-        let protocolHandoff = installProtocolEventHandoff(connectionID: connectionID)
-        let resourcePolicy = frameResourcePolicy
-        let reader = ProtocolReader(
-            input: protocolInput,
-            maxPayloadLength: resourcePolicy.wire.payloadBytes,
-            decoder: { [resourcePolicy] data in
-                try decodeFrame(from: data, policy: resourcePolicy)
-            },
-            handler: { frame in
-                protocolHandoff.deliver(frame)
-            },
-            onDecodeFailure: { error in
-                protocolHandoff.deliver(error)
-            },
-            onDisconnect: { [weak self] in
-                Task { @MainActor in
-                    self?.handleOutboundReaderDisconnect(
-                        encoder: disconnectEncoder,
-                        connectionID: connectionID
-                    )
-                }
-            },
-            acquireAdmission: { protocolHandoff.acquireAdmission() },
-            cancelAdmission: { protocolHandoff.cancel() }
-        )
-        reader.start()
-        self.protocolReader = reader
+        // Start the already-installed connection only after every application consumer is ready to receive its ordered events.
+        connection.start()
+        coreConnectionIsLive = true
 
         // First frame callback: dismiss the startup overlay and flush Finder,
         // `open -a`, and CLI wait requests buffered until the BEAM can accept
@@ -651,10 +600,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         cancelWorkspaceLifecycleNotifications()
-        protocolEventDelivery.cancel()
+        protocolConnection?.stop()
+        protocolConnection = nil
         beamManager?.beginAppShutdown()
-        encoder?.disconnect(reason: .expectedTeardown)
-        protocolReader?.stop()
     }
 
     /// Handles Finder/Open With and `open -a Minga file.ex` file URLs.
@@ -793,67 +741,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Called by BEAMProcessManager.onBEAMReady after a crash restart.
     private func reconnectProtocol(readHandle: FileHandle, writeHandle: FileHandle) {
         let connectionID = outboundConnectionState.issueID()
-        let oldEncoder = encoder
-        let oldReader = protocolReader
-        let replacement: ProtocolReconnectWorkflow.Connection
-        do {
-            replacement = try ProtocolReconnectWorkflow.replace(
-                connectionID: connectionID,
-                readHandle: readHandle,
-                writeHandle: writeHandle,
-                oldEncoder: oldEncoder,
-                oldReader: oldReader,
-                resourcePolicy: frameResourcePolicy,
-                invalidate: {
-                    self.dismissInputRejection()
-                    self.protocolEventDelivery.cancel()
-                    self.outboundConnectionState.install(id: connectionID)
-                    self.dispatcher?.replaceConnection(with: connectionID)
-                    self.editorNSView?.invalidateConnection()
-                    self.encoder = nil
-                    self.protocolReader = nil
-                    self.appState.encoder = nil
-                    self.appState.gui.settingsState.encoder = nil
-                    self.applicationQuitCoordinator?.replaceConnection()
-                    self.coreConnectionIsLive = false
-                    PortLogger.clearEncoder()
-                },
-                onTransportFailure: { [weak self] report in
-                    self?.handleOutboundTransportFailure(report, connectionID: connectionID)
-                },
-                onInputRejection: { [weak self] rejection in
-                    self?.handleOutboundInputRejection(rejection, connectionID: connectionID)
-                },
-                installEncoder: { encoder in
-                    self.encoder = encoder
-                    self.appState.encoder = encoder
-                    self.appState.gui.settingsState.encoder = encoder
-                    self.editorNSView?.installConnectionEncoder(encoder)
-                    PortLogger.setup(encoder: encoder)
-                },
-                installDelivery: { installedConnectionID in
-                    return self.installProtocolEventHandoff(connectionID: installedConnectionID)
-                },
-                onReaderDisconnect: { [weak self] disconnectedEncoder, disconnectedConnectionID in
-                    Task { @MainActor in
-                        self?.handleOutboundReaderDisconnect(
-                            encoder: disconnectedEncoder,
-                            connectionID: disconnectedConnectionID
-                        )
-                    }
-                }
-            )
-        } catch let error as OutboundTransportInitializationError {
-            presentOutboundTransportInitializationFailure(error, canRestart: true)
-            return
-        } catch {
-            presentOutboundTransportInitializationFailure(
-                .nonBlockingSetupFailed(errorCode: EIO),
-                canRestart: true
-            )
-            return
-        }
-        self.protocolReader = replacement.reader
+        guard let replacement = replaceProtocolConnection(
+            connectionID: connectionID,
+            readHandle: readHandle,
+            writeHandle: writeHandle,
+            canRestart: true
+        ) else { return }
+        replacement.start()
 
         recoveryManager?.transportDidReconnect()
         coreConnectionIsLive = true
@@ -959,9 +853,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Protocol handling
 
-    private func installProtocolEventHandoff(connectionID: UInt64) -> ProtocolEventHandoff {
-        protocolEventDelivery.replace(
+    private func replaceProtocolConnection(
+        connectionID: UInt64,
+        readHandle: FileHandle,
+        writeHandle: FileHandle,
+        canRestart: Bool
+    ) -> ProtocolConnection? {
+        let connection = ProtocolConnection.replacing(
+            protocolConnection,
             connectionID: connectionID,
+            readHandle: readHandle,
+            writeHandle: writeHandle,
+            resourcePolicy: frameResourcePolicy,
+            invalidate: {
+                self.dismissInputRejection()
+                self.protocolConnection = nil
+                self.outboundConnectionState.install(id: connectionID)
+                self.dispatcher?.replaceConnection(with: connectionID)
+                self.editorNSView?.invalidateConnection()
+                self.appState.encoder = nil
+                self.appState.gui.settingsState.encoder = nil
+                self.applicationQuitCoordinator?.replaceConnection()
+                self.coreConnectionIsLive = false
+                PortLogger.clearEncoder()
+            },
             isCurrent: { [weak self] candidate in
                 self?.outboundConnectionState.isCurrent(candidate) == true
             },
@@ -973,8 +888,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .failure(let failure):
                     self.handleProtocolDecodeFailure(failure, connectionID: eventConnectionID)
                 }
+            },
+            onTransportFailure: { [weak self] report in
+                self?.handleOutboundTransportFailure(report, connectionID: connectionID)
+            },
+            onInputRejection: { [weak self] rejection in
+                self?.handleOutboundInputRejection(rejection, connectionID: connectionID)
+            },
+            onReaderDisconnect: { [weak self] disconnectedEncoder, disconnectedConnectionID in
+                self?.handleOutboundReaderDisconnect(
+                    encoder: disconnectedEncoder,
+                    connectionID: disconnectedConnectionID
+                )
+            },
+            onInitializationFailure: { [weak self] error in
+                self?.presentOutboundTransportInitializationFailure(error, canRestart: canRestart)
             }
         )
+        guard let connection else { return nil }
+        protocolConnection = connection
+        appState.encoder = connection.encoder
+        appState.gui.settingsState.encoder = connection.encoder
+        editorNSView?.installConnectionEncoder(connection.encoder)
+        PortLogger.setup(encoder: connection.encoder)
+        return connection
     }
 
     private func handleDecodedFrame(_ frame: DecodedFrame, connectionID: UInt64) {
@@ -1026,7 +963,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dismissInputRejection()
         coreConnectionIsLive = false
         applicationQuitCoordinator?.transportDidDisconnect()
-        encoder = nil
+        if protocolConnection?.connectionID == connectionID {
+            protocolConnection?.stop()
+            protocolConnection = nil
+        }
         appState.encoder = nil
         appState.gui.settingsState.encoder = nil
         editorNSView?.encoder = NullInputEncoder()

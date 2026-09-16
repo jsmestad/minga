@@ -14,6 +14,7 @@ final class ProtocolEventHandoff: @unchecked Sendable {
     private let continuation: AsyncStream<DecodedFrameEvent>.Continuation
     private let condition = NSCondition()
     private var slotOccupied = false
+    private var blockedAdmissionCount = 0
     private var cancelled = false
 
     init(connectionID: UInt64 = 0) {
@@ -29,12 +30,18 @@ final class ProtocolEventHandoff: @unchecked Sendable {
     /// Blocks only for the one FIFO permit. Returns false after shutdown.
     func acquireAdmission() -> Bool {
         condition.lock()
-        while slotOccupied && !cancelled { condition.wait() }
+        while slotOccupied && !cancelled {
+            blockedAdmissionCount += 1
+            condition.broadcast()
+            condition.wait()
+            blockedAdmissionCount -= 1
+        }
         guard !cancelled else {
             condition.unlock()
             return false
         }
         slotOccupied = true
+        condition.broadcast()
         condition.unlock()
         return true
     }
@@ -69,44 +76,18 @@ final class ProtocolEventHandoff: @unchecked Sendable {
     }
 
     func finish() { cancel() }
-}
 
-/// Owns the single main-actor consumer for the current protocol connection.
-@MainActor
-final class ProtocolEventDelivery {
-    typealias CurrentConnection = @MainActor (UInt64) -> Bool
-    typealias Consumer = @MainActor (DecodedFrameEvent, UInt64) -> Void
-
-    private var handoff: ProtocolEventHandoff?
-    private var task: Task<Void, Never>?
-    private(set) var activeConnectionID: UInt64?
-
-    /// Replaces any earlier consumer and returns the capacity-one handoff for the new reader.
-    func replace(
-        connectionID: UInt64,
-        isCurrent: @escaping CurrentConnection,
-        consume: @escaping Consumer
-    ) -> ProtocolEventHandoff {
-        cancel()
-        let handoff = ProtocolEventHandoff(connectionID: connectionID)
-        self.handoff = handoff
-        activeConnectionID = connectionID
-        task = Task { @MainActor in
-            for await event in handoff.events {
-                handoff.releaseAdmission()
-                guard !Task.isCancelled, isCurrent(handoff.connectionID) else { continue }
-                consume(event, handoff.connectionID)
-            }
-        }
-        return handoff
+    /// Waits until the reader owns the sole slot. Tests use this to prove teardown while the pipe read is blocked.
+    func waitForAdmissionOwnershipForTesting() {
+        condition.lock()
+        while !slotOccupied && !cancelled { condition.wait() }
+        condition.unlock()
     }
 
-    /// Cancels queued delivery and wakes any reader waiting for admission. Idempotent.
-    func cancel() {
-        handoff?.cancel()
-        task?.cancel()
-        handoff = nil
-        task = nil
-        activeConnectionID = nil
+    /// Waits until a producer is blocked behind the occupied slot. Tests use this to synchronize without sleeps.
+    func waitForBlockedAdmissionForTesting() {
+        condition.lock()
+        while blockedAdmissionCount == 0 && !cancelled { condition.wait() }
+        condition.unlock()
     }
 }
