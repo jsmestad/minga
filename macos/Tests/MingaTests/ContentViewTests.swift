@@ -141,7 +141,7 @@ struct ContentViewTests {
         return view
     }
 
-    private func nativeInteractionContent(anchorTop: UInt32 = 10, fullRefresh: Bool = true, scrollSeq: UInt32 = 0, resident: Bool = true, extraRows: Int = 0) throws -> GUIWindowContent {
+    private func nativeInteractionContent(anchorTop: UInt32 = 10, contentEpoch: UInt32 = 1, fullRefresh: Bool = true, scrollSeq: UInt32 = 0, resident: Bool = true, extraRows: Int = 0) throws -> GUIWindowContent {
         var rows: [GUIVisualRow] = []
         rows.reserveCapacity(100)
         let range = resident ? 0..<100 : Int(anchorTop)..<(Int(anchorTop) + 24 + extraRows)
@@ -188,14 +188,14 @@ struct ContentViewTests {
             visibleEndLine: anchorTop + 23,
             overscanStartLine: UInt32(range.lowerBound),
             overscanEndLine: UInt32(range.upperBound),
-            contentEpoch: 1,
+            contentEpoch: contentEpoch,
             layoutGeneration: 1,
             scrollSeq: scrollSeq
         )
         return try GUIWindowContent(
             windowId: 1,
             fullRefresh: fullRefresh,
-            contentEpoch: 1,
+            contentEpoch: contentEpoch,
             cursorRow: 0,
             cursorCol: 0,
             cursorShape: .block,
@@ -533,6 +533,101 @@ struct ContentViewTests {
             phase: phase,
             momentumPhase: momentumPhase
         )
+    }
+
+    private func commitScrollFrame(_ dispatcher: CommandDispatcher, frameSeq: UInt32, anchorTop: UInt32) throws -> CommittedEditorSnapshot {
+        dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: frameSeq - 1, generation: 1))
+        if frameSeq == 1 {
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        }
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(anchorTop: anchorTop)))
+        dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+        return try #require(dispatcher.committedEditorSnapshot)
+    }
+
+    @Test("draw reconciles a live trackpad prediction against its captured committed snapshot exactly once")
+    @MainActor func liveTrackpadDrawUsesCapturedCommit() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
+        dispatcher.promoteVisibleEditorSnapshot(visible)
+        editorView.seedTrackpadReconciliationForTesting(windowId: 1, unconfirmedLines: 2, confirmedAnchorTop: 10, settling: false)
+
+        let firstCommitted = try commitScrollFrame(dispatcher, frameSeq: 2, anchorTop: 11)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        let firstDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: firstCommitted)
+        #expect(firstDraw.unconfirmedLines == 1)
+        #expect(firstDraw.lastConfirmedAnchorTop == 11)
+        #expect(firstDraw.presentation?.offset.y == firstDraw.cellHeight)
+
+        let repeatedDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: firstCommitted)
+        #expect(repeatedDraw.unconfirmedLines == 1)
+        #expect(repeatedDraw.presentation?.offset.y == repeatedDraw.cellHeight)
+
+        let secondCommitted = try commitScrollFrame(dispatcher, frameSeq: 3, anchorTop: 12)
+        let secondDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: secondCommitted)
+        #expect(secondDraw.unconfirmedLines == 0)
+        #expect(secondDraw.presentation?.offset.y == 0)
+    }
+
+    @Test("draw reconciles gesture settle against the captured commit before deriving its offset")
+    @MainActor func settleDrawUsesCapturedCommit() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
+        dispatcher.promoteVisibleEditorSnapshot(visible)
+        editorView.seedTrackpadReconciliationForTesting(windowId: 1, unconfirmedLines: 2, confirmedAnchorTop: 10, settling: true)
+
+        let committed = try commitScrollFrame(dispatcher, frameSeq: 2, anchorTop: 11)
+        let draw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: committed)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(draw.unconfirmedLines == 1)
+        #expect(draw.presentation?.offset.y == draw.cellHeight)
+    }
+
+    @Test("draw reconciles upward batched commits against the latest captured snapshot exactly once")
+    @MainActor func upwardBatchedCommitsUseLatestCapturedCommit() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
+        dispatcher.promoteVisibleEditorSnapshot(visible)
+        editorView.seedTrackpadReconciliationForTesting(windowId: 1, unconfirmedLines: -3, confirmedAnchorTop: 10, settling: false)
+
+        _ = try commitScrollFrame(dispatcher, frameSeq: 2, anchorTop: 9)
+        let latestCommitted = try commitScrollFrame(dispatcher, frameSeq: 3, anchorTop: 8)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        let firstDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: latestCommitted)
+        #expect(firstDraw.unconfirmedLines == -1)
+        #expect(firstDraw.lastConfirmedAnchorTop == 8)
+        #expect(firstDraw.presentation?.offset.y == -firstDraw.cellHeight)
+
+        let repeatedDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: latestCommitted)
+        #expect(repeatedDraw.unconfirmedLines == -1)
+        #expect(repeatedDraw.presentation?.offset.y == -repeatedDraw.cellHeight)
+    }
+
+    @Test("draw advances thumb-drag reconciliation from its captured commit")
+    @MainActor func thumbDragDrawUsesCapturedCommit() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
+        dispatcher.promoteVisibleEditorSnapshot(visible)
+        editorView.seedThumbDragReconciliationForTesting(windowId: 1, targetLine: 12, committedAnchorTop: 10)
+
+        let firstCommitted = try commitScrollFrame(dispatcher, frameSeq: 2, anchorTop: 11)
+        let firstDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: firstCommitted)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(firstDraw.presentation?.offset.y == firstDraw.cellHeight)
+        let repeatedDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: firstCommitted)
+        #expect(repeatedDraw.presentation?.offset.y == repeatedDraw.cellHeight)
+
+        let secondCommitted = try commitScrollFrame(dispatcher, frameSeq: 3, anchorTop: 12)
+        let secondDraw = editorView.prepareLocalScrollPresentationForTesting(committedSnapshot: secondCommitted)
+        #expect(secondDraw.presentation == nil)
     }
 
     @Test("resolves the current encoder instead of retaining the startup value")

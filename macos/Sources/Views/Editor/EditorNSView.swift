@@ -629,9 +629,7 @@ final class EditorNSView: MTKView {
             flashScrollIndicator()
         }
 
-        clearSmoothScrollStateIfTargetWindowMissing()
-        advancePresentationScrollAnimation(snapshot: committedSnapshot)
-        advanceThumbDragPresentation()
+        let localScrollPresentation = prepareLocalScrollPresentationForDraw(committedSnapshot: committedSnapshot)
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             committedSnapshot.windowIds.contains(windowId) ? windowId : nil
         }
@@ -639,7 +637,6 @@ final class EditorNSView: MTKView {
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.takePresentationInputSeq()
-        let localScrollPresentation = localScrollPresentation
         let connectionID = dispatcher.connectionID
         coreTextRenderer.render(snapshot: committedSnapshot, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
@@ -710,6 +707,16 @@ final class EditorNSView: MTKView {
             NSAccessibility.post(element: self, notification: .selectedTextChanged)
             resetCursorBlink()
         }
+    }
+
+    /// Reconciles every local scroll transform against the exact committed snapshot rendered by
+    /// this draw. Interaction remains bound to the last presented snapshot; only render-local
+    /// prediction consumes committed-but-unpresented scroll acknowledgements.
+    private func prepareLocalScrollPresentationForDraw(committedSnapshot: CommittedEditorSnapshot) -> LocalScrollPresentation? {
+        clearSmoothScrollStateIfTargetWindowMissing(in: committedSnapshot)
+        advancePresentationScrollAnimation(snapshot: committedSnapshot)
+        advanceThumbDragPresentation(committedSnapshot: committedSnapshot)
+        return localScrollPresentation
     }
 
     private func currentGridDimensions() -> GridDimensions {
@@ -1322,7 +1329,11 @@ final class EditorNSView: MTKView {
 
     /// The committed scroll presentation of the thumb-drag pane, or nil when it is gone.
     private func committedThumbDrag(for windowId: UInt16) -> ThumbDragSession.Committed? {
-        guard let sp = dispatcher.committedEditorSnapshot?.content(for: windowId)?.scrollPresentation else { return nil }
+        committedThumbDrag(for: windowId, in: editorPresentationSnapshot)
+    }
+
+    private func committedThumbDrag(for windowId: UInt16, in snapshot: CommittedEditorSnapshot?) -> ThumbDragSession.Committed? {
+        guard let sp = snapshot?.content(for: windowId)?.scrollPresentation else { return nil }
         return ThumbDragSession.Committed(anchorTop: sp.anchorTop, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration)
     }
 
@@ -1330,9 +1341,9 @@ final class EditorNSView: MTKView {
     /// throttled intent (AC4), tracks the offset against the committed anchor, and finishes the
     /// session when the reconcile lands, an authoritative event interrupts it, the presentation
     /// vanishes, the button is released without a mouseUp, or the reconcile watchdog expires.
-    private func advanceThumbDragPresentation() {
+    private func advanceThumbDragPresentation(committedSnapshot: CommittedEditorSnapshot) {
         guard var session = thumbDragSession else { return }
-        let committed = committedThumbDrag(for: session.windowId)
+        let committed = committedThumbDrag(for: session.windowId, in: committedSnapshot)
         // The button check catches a lost mouseUp (system modal / Mission Control / Cmd-Tab mid-drag)
         // so a gesture cannot stay stuck in the dragging phase with the gate held open.
         let buttonHeld = NSEvent.pressedMouseButtons & 0x1 != 0
@@ -2096,6 +2107,48 @@ final class EditorNSView: MTKView {
     func scrollTrackLineForTesting(y: CGFloat) -> UInt32 {
         scrollTrackYToLine(y)
     }
+
+    struct ScrollDrawSnapshot {
+        let presentation: LocalScrollPresentation?
+        let unconfirmedLines: Int
+        let lastConfirmedAnchorTop: UInt32?
+        let cellHeight: CGFloat
+    }
+
+    func seedTrackpadReconciliationForTesting(windowId: UInt16, unconfirmedLines: Int, confirmedAnchorTop: UInt32, settling: Bool) {
+        scrollTargetWindowId = settling ? nil : windowId
+        scrollSettleWindowId = settling ? windowId : nil
+        scrollUnconfirmedLines = unconfirmedLines
+        scrollLastConfirmedAnchorTop = confirmedAnchorTop
+        scrollPixelOffset = CGPoint(x: 0, y: CGFloat(unconfirmedLines) * effectiveCellHeight)
+        if settling {
+            scrollSettleAnimator.start(offset: 0, duration: 60)
+        }
+    }
+
+    func seedThumbDragReconciliationForTesting(windowId: UInt16, targetLine: UInt32, committedAnchorTop: UInt32) {
+        var session = ThumbDragSession(windowId: windowId, targetLine: targetLine)
+        _ = session.takeIntent()
+        _ = session.release(
+            committed: ThumbDragSession.Committed(anchorTop: committedAnchorTop, scrollSeq: 0, contentEpoch: 1, layoutGeneration: 1),
+            now: CACurrentMediaTime()
+        )
+        thumbDragSession = session
+        scrollPixelOffset = CGPoint(
+            x: 0,
+            y: Self.thumbDragPresentationOffsetY(targetLine: targetLine, committedAnchorTop: committedAnchorTop, cellHeight: effectiveCellHeight)
+        )
+    }
+
+    func prepareLocalScrollPresentationForTesting(committedSnapshot: CommittedEditorSnapshot) -> ScrollDrawSnapshot {
+        let presentation = prepareLocalScrollPresentationForDraw(committedSnapshot: committedSnapshot)
+        return ScrollDrawSnapshot(
+            presentation: presentation,
+            unconfirmedLines: scrollUnconfirmedLines,
+            lastConfirmedAnchorTop: scrollLastConfirmedAnchorTop,
+            cellHeight: effectiveCellHeight
+        )
+    }
 #endif
 
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
@@ -2300,6 +2353,23 @@ final class EditorNSView: MTKView {
         scrollLastConfirmedAnchorTop = sp.anchorTop
     }
 
+    /// Applies trackpad and discrete-wheel acknowledgements from this draw's committed snapshot.
+    /// A live gesture adjusts its already-derived pixel offset by only the newly acknowledged
+    /// lines. A settle derives its complete offset in `advancePresentationScrollAnimation()`.
+    private func reconcileTrackpadPresentation(against committedSnapshot: CommittedEditorSnapshot) {
+        guard let windowId = scrollTargetWindowId ?? scrollSettleWindowId,
+              let sp = committedSnapshot.content(for: windowId)?.scrollPresentation else { return }
+        let previousUnconfirmedLines = scrollUnconfirmedLines
+        reconcileUnconfirmedLines(against: sp)
+        guard scrollTargetWindowId != nil else { return }
+        let acknowledgedLines = previousUnconfirmedLines - scrollUnconfirmedLines
+        guard acknowledgedLines != 0 else { return }
+        scrollPixelOffset = CGPoint(
+            x: scrollPixelOffset.x,
+            y: scrollPixelOffset.y - CGFloat(acknowledgedLines) * effectiveCellHeight
+        )
+    }
+
     /// Advances the settle and rubber-band spring-back animations one frame.
     ///
     /// The MTKView is paused, so this self-retriggers `needsDisplay` while an animation runs,
@@ -2454,14 +2524,22 @@ final class EditorNSView: MTKView {
     }
 
     private func clearSmoothScrollStateIfTargetWindowMissing() {
+        guard let availableWindowIds = dispatcher.visibleEditorSnapshot?.windowIds else { return }
+        clearSmoothScrollStateIfTargetWindowMissing(availableWindowIds: availableWindowIds)
+    }
+
+    private func clearSmoothScrollStateIfTargetWindowMissing(in snapshot: CommittedEditorSnapshot) {
+        clearSmoothScrollStateIfTargetWindowMissing(availableWindowIds: snapshot.windowIds)
+    }
+
+    private func clearSmoothScrollStateIfTargetWindowMissing(availableWindowIds: Set<UInt16>) {
         // Covers the live gesture target, the thumb-drag pane, and the settle / elastic windows that
         // outlive it: if any pane owning presentation state has closed, drop the offset and cancel
         // its animation so a stale whole-cell offset can't linger after the animator finishes on a
         // vanished pane.
-        guard let available = dispatcher.committedEditorSnapshot?.windowIds else { return }
         if Self.missingPresentationWindow(
             candidateWindowIds: [scrollTargetWindowId, thumbDragSession?.windowId, scrollSettleWindowId, scrollElasticWindowId],
-            availableWindowIds: available
+            availableWindowIds: availableWindowIds
         ) {
             // The thumb-drag pane vanished: drop the session (no flush; the window is gone).
             thumbDragSession = nil
