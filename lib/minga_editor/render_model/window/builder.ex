@@ -82,6 +82,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          }
 
   @typep folded_source_ctx :: %{
+           lines: [String.t()],
+           first_line: non_neg_integer(),
            line_byte_offsets: %{non_neg_integer() => non_neg_integer()},
            highlight_segments_by_line: %{non_neg_integer() => [Highlight.styled_segment()]},
            line_identity: LineIdentity.t() | nil,
@@ -94,10 +96,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   Called from the Content stage with the same `WindowScroll` and
   `Context` that drive the draw-based rendering.
   """
-  @spec build(state(), WindowScroll.t(), Context.t(), keyword()) :: RenderWindow.t()
-  def build(state, scroll, ctx, opts \\ []) do
-    {window, _stats} = build_with_stats(state, scroll, ctx, opts)
-    window
+  @spec build(state(), WindowScroll.t(), Context.t(), FontRegistry.t(), keyword()) ::
+          {RenderWindow.t(), FontRegistry.t()}
+  def build(state, scroll, ctx, font_registry, opts \\ []) do
+    {window, _stats, font_registry} = build_with_stats(state, scroll, ctx, font_registry, opts)
+    {window, font_registry}
   end
 
   @doc """
@@ -108,9 +111,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   previous frame's retained rows via the `:retained_rows` option so unchanged
   rows are reused verbatim instead of being recomposed.
   """
-  @spec build_with_stats(state(), WindowScroll.t(), Context.t(), keyword()) ::
-          {RenderWindow.t(), build_stats()}
-  def build_with_stats(state, scroll, ctx, opts \\ []) do
+  @spec build_with_stats(state(), WindowScroll.t(), Context.t(), FontRegistry.t(), keyword()) ::
+          {RenderWindow.t(), build_stats(), FontRegistry.t()}
+  def build_with_stats(state, scroll, ctx, %FontRegistry{} = font_registry, opts \\ []) do
     %WindowScroll{
       is_active: is_active,
       viewport: viewport,
@@ -161,7 +164,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # case (in-place text edit) avoids the O(document) compose. Off residence this
     # is the unchanged windowed build and `resident_result` is nil, so behaviour
     # is byte identical.
-    {all_visual_entries, resident_result} =
+    {all_visual_entries, resident_result, font_registry} =
       if scroll.full_residence do
         materialize_full? =
           state.intent.frame.force_keyframe? or adapter_full_snapshot_pending?(state, win_id)
@@ -175,18 +178,23 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           ctx,
           snapshot,
           retain_ctx,
-          resident_opts
+          resident_opts,
+          font_registry
         )
       else
-        {build_visual_entries(
-           lines,
-           first_line,
-           visible_line_map,
-           wrap_on,
-           ctx,
-           snapshot,
-           retain_ctx
-         ), nil}
+        {visual_entries, font_registry} =
+          build_visual_entries(
+            lines,
+            first_line,
+            visible_line_map,
+            wrap_on,
+            ctx,
+            snapshot,
+            retain_ctx,
+            font_registry
+          )
+
+        {visual_entries, nil, font_registry}
       end
 
     visible_row_start_index = scroll.visible_row_start_index + viewport.visual_row_offset
@@ -394,7 +402,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        resident_build: resident_build_state,
        resident_rows_spliced: resident_rows_spliced,
        row_slot_allocator: row_slot_allocator
-     }}
+     }, font_registry}
   end
 
   @spec adapter_full_snapshot_pending?(map(), non_neg_integer()) :: boolean()
@@ -435,9 +443,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           Context.t(),
           map(),
           retain_ctx(),
-          keyword()
-        ) :: {[visual_row_entry()], map()}
-  defp build_resident_entries(scroll, lines, first_line, ctx, snapshot, retain_ctx, opts) do
+          keyword(),
+          FontRegistry.t()
+        ) :: {[visual_row_entry()], map(), FontRegistry.t()}
+  defp build_resident_entries(
+         scroll,
+         lines,
+         first_line,
+         ctx,
+         snapshot,
+         retain_ctx,
+         opts,
+         font_registry
+       ) do
     inputs = %{
       line_texts: lines,
       line_count: snapshot.line_count,
@@ -448,20 +466,30 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       keyframe?: Keyword.get(opts, :keyframe?, false),
       retained_rows: retain_ctx.prev,
       edit_deltas: Keyword.get(opts, :edit_deltas, []),
-      build_all: fn ->
+      font_registry: font_registry,
+      build_all: fn registry ->
         # Hydration is the one path where BufferPrefetch explicitly supplied the
         # whole bounded line range. No retained Document is sliced here.
-        build_visual_entries(lines, first_line, nil, false, ctx, snapshot, retain_ctx)
+        build_visual_entries(lines, first_line, nil, false, ctx, snapshot, retain_ctx, registry)
       end,
-      build_dirty: fn dirty ->
-        build_dirty_sequential_entries(dirty, lines, first_line, ctx, snapshot, retain_ctx)
+      build_dirty: fn dirty, registry ->
+        build_dirty_sequential_entries(
+          dirty,
+          lines,
+          first_line,
+          ctx,
+          snapshot,
+          retain_ctx,
+          registry
+        )
       end
     }
 
-    {state, result} = ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
+    {state, result, font_registry} =
+      ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
 
     if result.row_delta == nil do
-      {result.payloads, Map.put(result, :state, state)}
+      {result.payloads, Map.put(result, :state, state), font_registry}
     else
       context_before = 8
       context_start = max(scroll.visible_row_start_index - context_before, 0)
@@ -471,7 +499,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       {context_payloads,
        result
        |> Map.put(:state, state)
-       |> Map.put(:context_start, context_start)}
+       |> Map.put(:context_start, context_start), font_registry}
     end
   end
 
@@ -483,29 +511,39 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           Context.t(),
           map(),
-          retain_ctx()
-        ) :: %{non_neg_integer() => visual_row_entry()}
-  defp build_dirty_sequential_entries(dirty, lines, first_line, ctx, snapshot, retain_ctx) do
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {%{non_neg_integer() => visual_row_entry()}, FontRegistry.t()}
+  defp build_dirty_sequential_entries(
+         dirty,
+         lines,
+         first_line,
+         ctx,
+         snapshot,
+         retain_ctx,
+         font_registry
+       ) do
     first_byte_off = snapshot.first_line_byte_offset
     local_dirty = MapSet.new(dirty, &(&1 - first_line))
     offsets = dirty_line_offsets(lines, first_byte_off, local_dirty)
     masked = masked_highlight_by_index(ctx.highlight, lines, first_byte_off, local_dirty)
 
-    Enum.reduce(dirty, %{}, fn absolute_index, acc ->
+    Enum.reduce(dirty, {%{}, font_registry}, fn absolute_index, {acc, registry} ->
       local_index = absolute_index - first_line
       {line_text, line_byte_offset} = Map.fetch!(offsets, local_index)
 
-      entry =
+      {entry, registry} =
         compose_sequential_entry(
           absolute_index,
           line_text,
           Map.get(masked, local_index),
           line_byte_offset,
           ctx,
-          retain_ctx
+          retain_ctx,
+          registry
         )
 
-      Map.put(acc, absolute_index, entry)
+      {Map.put(acc, absolute_index, entry), registry}
     end)
   end
 
@@ -703,14 +741,29 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # Returns the composed Row for a visual row, reusing the retained Row when the
   # input fingerprint is unchanged. The returned entry carries `:input_hash` and
   # `:reused?` so the build can report rasterized counts and refresh the cache.
-  @spec compose_or_reuse(retain_ctx(), non_neg_integer(), term(), (-> Row.t())) ::
-          {Row.t(), non_neg_integer(), boolean()}
-  defp compose_or_reuse(%{prev: prev} = retain_ctx, row_id, key, compose_fun) do
+  @spec compose_or_reuse(
+          retain_ctx(),
+          non_neg_integer(),
+          term(),
+          FontRegistry.t(),
+          (FontRegistry.t() -> {Row.t(), FontRegistry.t()})
+        ) :: {Row.t(), non_neg_integer(), boolean(), FontRegistry.t()}
+  defp compose_or_reuse(
+         %{prev: prev} = retain_ctx,
+         row_id,
+         key,
+         font_registry,
+         compose_fun
+       ) do
     input_hash = row_input_hash(retain_ctx, key)
 
     case Map.get(prev, row_id) do
-      {^input_hash, %Row{} = cached} -> {cached, input_hash, true}
-      _ -> {compose_fun.(), input_hash, false}
+      {^input_hash, %Row{} = cached} ->
+        {cached, input_hash, true, font_registry}
+
+      _ ->
+        {row, font_registry} = compose_fun.(font_registry)
+        {row, input_hash, false, font_registry}
     end
   end
 
@@ -803,8 +856,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       first_line,
       ctx,
       %{first_line_byte_offset: 0, options: options},
-      no_retain(LineIdentity.new(first_line + length(lines)))
+      no_retain(LineIdentity.new(first_line + length(lines))),
+      FontRegistry.new()
     )
+    |> elem(0)
     |> Enum.at(visual_row)
     |> source_position_from_visual_entry(display_col, ctx.decorations)
   end
@@ -832,8 +887,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           boolean(),
           Context.t(),
           map(),
-          retain_ctx()
-        ) :: [visual_row_entry()]
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {[visual_row_entry()], FontRegistry.t()}
   defp build_visual_entries(
          lines,
          first_line,
@@ -841,7 +897,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          wrap_on,
          ctx,
          snapshot,
-         retain_ctx
+         retain_ctx,
+         font_registry
        ) do
     build_visual_entries_for_mode(
       lines,
@@ -850,7 +907,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       wrap_on,
       ctx,
       snapshot,
-      retain_ctx
+      retain_ctx,
+      font_registry
     )
   end
 
@@ -872,8 +930,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           boolean(),
           Context.t(),
           map(),
-          retain_ctx()
-        ) :: [visual_row_entry()]
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {[visual_row_entry()], FontRegistry.t()}
   defp build_visual_entries_for_mode(
          lines,
          first_line,
@@ -881,18 +940,45 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _wrap_on,
          ctx,
          snapshot,
-         retain_ctx
+         retain_ctx,
+         font_registry
        )
        when is_list(visible_line_map) do
-    build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot, retain_ctx)
+    build_visual_entries_folded(
+      lines,
+      first_line,
+      visible_line_map,
+      ctx,
+      snapshot,
+      retain_ctx,
+      font_registry
+    )
   end
 
-  defp build_visual_entries_for_mode(lines, first_line, nil, true, ctx, snapshot, retain_ctx) do
-    build_visual_entries_wrapped(lines, first_line, ctx, snapshot, retain_ctx)
+  defp build_visual_entries_for_mode(
+         lines,
+         first_line,
+         nil,
+         true,
+         ctx,
+         snapshot,
+         retain_ctx,
+         font_registry
+       ) do
+    build_visual_entries_wrapped(lines, first_line, ctx, snapshot, retain_ctx, font_registry)
   end
 
-  defp build_visual_entries_for_mode(lines, first_line, nil, false, ctx, snapshot, retain_ctx) do
-    build_visual_entries_sequential(lines, first_line, ctx, snapshot, retain_ctx)
+  defp build_visual_entries_for_mode(
+         lines,
+         first_line,
+         nil,
+         false,
+         ctx,
+         snapshot,
+         retain_ctx,
+         font_registry
+       ) do
+    build_visual_entries_sequential(lines, first_line, ctx, snapshot, retain_ctx, font_registry)
   end
 
   # Sequential path (no folds): one visual row per line.
@@ -901,9 +987,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           Context.t(),
           map(),
-          retain_ctx()
-        ) :: [visual_row_entry()]
-  defp build_visual_entries_sequential(lines, first_line, ctx, snapshot, retain_ctx) do
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {[visual_row_entry()], FontRegistry.t()}
+  defp build_visual_entries_sequential(
+         lines,
+         first_line,
+         ctx,
+         snapshot,
+         retain_ctx,
+         font_registry
+       ) do
     first_byte_off = snapshot.first_line_byte_offset
 
     lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
@@ -918,15 +1012,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     lines_with_offsets
     |> Enum.zip(highlight_segments_list)
     |> Enum.with_index()
-    |> Enum.map(fn {{{line_text, line_byte_offset}, hl_segments}, idx} ->
-      compose_sequential_entry(
-        first_line + idx,
-        line_text,
-        hl_segments,
-        line_byte_offset,
-        ctx,
-        retain_ctx
-      )
+    |> Enum.map_reduce(font_registry, fn
+      {{{line_text, line_byte_offset}, hl_segments}, idx}, registry ->
+        compose_sequential_entry(
+          first_line + idx,
+          line_text,
+          hl_segments,
+          line_byte_offset,
+          ctx,
+          retain_ctx,
+          registry
+        )
     end)
   end
 
@@ -939,37 +1035,48 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [Highlight.styled_segment()] | nil,
           non_neg_integer(),
           Context.t(),
-          retain_ctx()
-        ) :: visual_row_entry()
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {visual_row_entry(), FontRegistry.t()}
   defp compose_sequential_entry(
          buf_line,
          line_text,
          hl_segments,
          line_byte_offset,
          ctx,
-         retain_ctx
+         retain_ctx,
+         font_registry
        ) do
     row_id = Row.stable_id(:normal, durable_source_id(retain_ctx, buf_line))
 
-    {row, input_hash, reused?} =
-      compose_or_reuse(retain_ctx, row_id, {:seq, line_text, hl_segments}, fn ->
-        {composed_text, spans} =
-          compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+    {row, input_hash, reused?, font_registry} =
+      compose_or_reuse(
+        retain_ctx,
+        row_id,
+        {:seq, line_text, hl_segments},
+        font_registry,
+        fn registry ->
+          {composed_text, spans, registry} =
+            compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, registry)
 
-        %Row{
-          row_id: row_id,
-          row_type: :normal,
-          buf_line: buf_line,
-          text: composed_text,
-          spans: spans,
-          content_hash: Row.compute_hash(composed_text, spans)
-        }
-      end)
+          {%Row{
+             row_id: row_id,
+             row_type: :normal,
+             buf_line: buf_line,
+             text: composed_text,
+             spans: spans,
+             content_hash: Row.compute_hash(composed_text, spans)
+           }, registry}
+        end
+      )
 
-    row
-    |> Row.reposition(buf_line)
-    |> visual_entry(0, Unicode.display_width(row.text), 0)
-    |> VisualRow.with_retention(input_hash, reused?)
+    entry =
+      row
+      |> Row.reposition(buf_line)
+      |> visual_entry(0, Unicode.display_width(row.text), 0)
+      |> VisualRow.with_retention(input_hash, reused?)
+
+    {entry, font_registry}
   end
 
   @spec build_visual_entries_wrapped(
@@ -977,9 +1084,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           Context.t(),
           map(),
-          retain_ctx()
-        ) :: [visual_row_entry()]
-  defp build_visual_entries_wrapped(lines, first_line, ctx, snapshot, retain_ctx) do
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {[visual_row_entry()], FontRegistry.t()}
+  defp build_visual_entries_wrapped(
+         lines,
+         first_line,
+         ctx,
+         snapshot,
+         retain_ctx,
+         font_registry
+       ) do
     first_byte_off = snapshot.first_line_byte_offset
     lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
 
@@ -996,17 +1111,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     lines_with_offsets
     |> Enum.zip(highlight_segments_list)
     |> Enum.with_index()
-    |> Enum.flat_map(fn {{{line_text, line_byte_offset}, hl_segments}, idx} ->
-      build_wrapped_logical_line(%{
-        line_text: line_text,
-        line_byte_offset: line_byte_offset,
-        hl_segments: hl_segments,
-        buf_line: first_line + idx,
-        content_width: content_width,
-        wrap_opts: wrap_opts,
-        ctx: ctx,
-        retain_ctx: retain_ctx
-      })
+    |> Enum.flat_map_reduce(font_registry, fn
+      {{{line_text, line_byte_offset}, hl_segments}, idx}, registry ->
+        build_wrapped_logical_line(
+          %{
+            line_text: line_text,
+            line_byte_offset: line_byte_offset,
+            hl_segments: hl_segments,
+            buf_line: first_line + idx,
+            content_width: content_width,
+            wrap_opts: wrap_opts,
+            ctx: ctx,
+            retain_ctx: retain_ctx
+          },
+          registry
+        )
     end)
   end
 
@@ -1017,8 +1136,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # points depend on width) matches the cached logical line, the entire
   # visual-row set is replayed verbatim, skipping both compose_line and the wrap
   # computation. Otherwise the line is composed and re-wrapped from scratch (#2287).
-  @spec build_wrapped_logical_line(map()) :: [visual_row_entry()]
-  defp build_wrapped_logical_line(params) do
+  @spec build_wrapped_logical_line(map(), FontRegistry.t()) ::
+          {[visual_row_entry()], FontRegistry.t()}
+  defp build_wrapped_logical_line(params, font_registry) do
     %{
       line_text: line_text,
       hl_segments: hl_segments,
@@ -1033,13 +1153,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     source_id = durable_source_id(retain_ctx, buf_line)
 
     case reuse_wrapped_line(retain_ctx, source_id, buf_line, wrap_line_hash) do
-      {:reuse, entries} -> entries
-      :miss -> compose_wrapped_logical_line(params, wrap_line_hash)
+      {:reuse, entries} -> {entries, font_registry}
+      :miss -> compose_wrapped_logical_line(params, wrap_line_hash, font_registry)
     end
   end
 
-  @spec compose_wrapped_logical_line(map(), non_neg_integer()) :: [visual_row_entry()]
-  defp compose_wrapped_logical_line(params, wrap_line_hash) do
+  @spec compose_wrapped_logical_line(map(), non_neg_integer(), FontRegistry.t()) ::
+          {[visual_row_entry()], FontRegistry.t()}
+  defp compose_wrapped_logical_line(params, wrap_line_hash, font_registry) do
     %{
       line_text: line_text,
       line_byte_offset: line_byte_offset,
@@ -1049,17 +1170,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       ctx: ctx
     } = params
 
-    {composed_text, spans} =
-      compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+    {composed_text, spans, font_registry} =
+      compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, font_registry)
 
-    composed_text
-    |> wrap_composed_entries(
-      spans,
-      buf_line,
-      durable_source_id(params.retain_ctx, buf_line),
-      wrap_opts
-    )
-    |> Enum.map(&stamp_wrapped_entry(&1, wrap_line_hash))
+    entries =
+      composed_text
+      |> wrap_composed_entries(
+        spans,
+        buf_line,
+        durable_source_id(params.retain_ctx, buf_line),
+        wrap_opts
+      )
+      |> Enum.map(&stamp_wrapped_entry(&1, wrap_line_hash))
+
+    {entries, font_registry}
   end
 
   @spec stamp_wrapped_entry(visual_row_entry(), non_neg_integer()) :: visual_row_entry()
@@ -1221,9 +1345,18 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [DisplayMap.entry()],
           Context.t(),
           map(),
-          retain_ctx()
-        ) :: [visual_row_entry()]
-  defp build_visual_entries_folded(lines, first_line, visible_line_map, ctx, snapshot, retain_ctx) do
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {[visual_row_entry()], FontRegistry.t()}
+  defp build_visual_entries_folded(
+         lines,
+         first_line,
+         visible_line_map,
+         ctx,
+         snapshot,
+         retain_ctx,
+         font_registry
+       ) do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
 
@@ -1237,37 +1370,39 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       )
 
     source_ctx = %{
+      lines: lines,
+      first_line: first_line,
       line_byte_offsets: line_byte_offsets,
       highlight_segments_by_line: highlight_segments_by_line,
       line_identity: retain_ctx.line_identity,
       decoration_slots: retain_ctx.decoration_slots
     }
 
-    {entries, _counters} =
-      Enum.map_reduce(visible_line_map, %{}, fn {buf_line, entry_type}, counters ->
-        {visual_identity_index, counters} = next_visual_identity(buf_line, entry_type, counters)
+    {entries, {_counters, font_registry}} =
+      Enum.map_reduce(visible_line_map, {%{}, font_registry}, fn
+        {buf_line, entry_type}, {counters, registry} ->
+          {visual_identity_index, counters} = next_visual_identity(buf_line, entry_type, counters)
 
-        {row, input_hash, reused?} =
-          build_visual_row_entry_retained(
-            buf_line,
-            entry_type,
-            lines,
-            first_line,
-            ctx,
-            source_ctx,
-            visual_identity_index,
-            retain_ctx
-          )
+          {row, input_hash, reused?, registry} =
+            build_visual_row_entry_retained(
+              buf_line,
+              entry_type,
+              ctx,
+              source_ctx,
+              visual_identity_index,
+              retain_ctx,
+              registry
+            )
 
-        entry =
-          row
-          |> visual_entry(0, Unicode.display_width(row.text), 0)
-          |> VisualRow.with_retention(input_hash, reused?)
+          entry =
+            row
+            |> visual_entry(0, Unicode.display_width(row.text), 0)
+            |> VisualRow.with_retention(input_hash, reused?)
 
-        {entry, counters}
+          {entry, {counters, registry}}
       end)
 
-    entries
+    {entries, font_registry}
   end
 
   @spec build_highlight_segments_by_line(
@@ -1315,48 +1450,71 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec build_visual_row_entry_retained(
           non_neg_integer(),
           term(),
-          [String.t()],
-          non_neg_integer(),
           Context.t(),
           folded_source_ctx(),
           non_neg_integer(),
-          retain_ctx()
-        ) :: {Row.t(), non_neg_integer(), boolean()}
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {Row.t(), non_neg_integer(), boolean(), FontRegistry.t()}
   defp build_visual_row_entry_retained(
          buf_line,
          :normal,
-         lines,
-         first_line,
          ctx,
          source_ctx,
          index,
-         retain_ctx
+         retain_ctx,
+         font_registry
        ) do
-    line_text = line_at(lines, buf_line, first_line)
+    line_text = line_at(source_ctx.lines, buf_line, source_ctx.first_line)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
     row_id = Row.stable_id(:normal, durable_source_id(retain_ctx, buf_line))
 
-    {row, input_hash, reused?} =
-      compose_or_reuse(retain_ctx, row_id, {:fold_normal, line_text, hl_segments}, fn ->
-        build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, source_ctx, index)
-      end)
+    {row, input_hash, reused?, font_registry} =
+      compose_or_reuse(
+        retain_ctx,
+        row_id,
+        {:fold_normal, line_text, hl_segments},
+        font_registry,
+        fn registry ->
+          build_visual_row_entry(
+            buf_line,
+            :normal,
+            source_ctx.lines,
+            source_ctx.first_line,
+            ctx,
+            source_ctx,
+            index,
+            registry
+          )
+        end
+      )
 
-    {Row.reposition(row, buf_line), input_hash, reused?}
+    {Row.reposition(row, buf_line), input_hash, reused?, font_registry}
   end
 
   defp build_visual_row_entry_retained(
          buf_line,
          entry_type,
-         lines,
-         first_line,
          ctx,
          source_ctx,
          index,
-         retain_ctx
+         retain_ctx,
+         font_registry
        ) do
-    row = build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx, source_ctx, index)
+    {row, font_registry} =
+      build_visual_row_entry(
+        buf_line,
+        entry_type,
+        source_ctx.lines,
+        source_ctx.first_line,
+        ctx,
+        source_ctx,
+        index,
+        font_registry
+      )
 
-    {row, row_input_hash(retain_ctx, {:fold_other, row.row_id, row.content_hash}), false}
+    {row, row_input_hash(retain_ctx, {:fold_other, row.row_id, row.content_hash}), false,
+     font_registry}
   end
 
   @spec next_visual_identity(non_neg_integer(), term(), map()) :: {non_neg_integer(), map()}
@@ -1383,8 +1541,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           Context.t(),
           folded_source_ctx(),
-          non_neg_integer()
-        ) :: Row.t()
+          non_neg_integer(),
+          FontRegistry.t()
+        ) :: {Row.t(), FontRegistry.t()}
   defp build_visual_row_entry(
          buf_line,
          :normal,
@@ -1392,21 +1551,24 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          first_line,
          ctx,
          source_ctx,
-         _index
+         _index,
+         font_registry
        ) do
     line_text = line_at(lines, buf_line, first_line)
     line_byte_offset = Map.get(source_ctx.line_byte_offsets, buf_line, 0)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
-    {composed, spans} = compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
-    %Row{
-      row_id: Row.stable_id(:normal, durable_source_id(source_ctx, buf_line)),
-      row_type: :normal,
-      buf_line: buf_line,
-      text: composed,
-      spans: spans,
-      content_hash: Row.compute_hash(composed, spans)
-    }
+    {composed, spans, font_registry} =
+      compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, font_registry)
+
+    {%Row{
+       row_id: Row.stable_id(:normal, durable_source_id(source_ctx, buf_line)),
+       row_type: :normal,
+       buf_line: buf_line,
+       text: composed,
+       spans: spans,
+       content_hash: Row.compute_hash(composed, spans)
+     }, font_registry}
   end
 
   defp build_visual_row_entry(
@@ -1416,22 +1578,26 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          first_line,
          ctx,
          source_ctx,
-         _index
+         _index,
+         font_registry
        ) do
     line_text = line_at(lines, buf_line, first_line)
     line_byte_offset = Map.get(source_ctx.line_byte_offsets, buf_line, 0)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
-    {composed, spans} = compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+
+    {composed, spans, font_registry} =
+      compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, font_registry)
+
     {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
-    %Row{
-      row_id: Row.stable_id(:fold_start, durable_source_id(source_ctx, buf_line)),
-      row_type: :fold_start,
-      buf_line: buf_line,
-      text: composed,
-      spans: spans,
-      content_hash: Row.compute_hash(composed, spans)
-    }
+    {%Row{
+       row_id: Row.stable_id(:fold_start, durable_source_id(source_ctx, buf_line)),
+       row_type: :fold_start,
+       buf_line: buf_line,
+       text: composed,
+       spans: spans,
+       content_hash: Row.compute_hash(composed, spans)
+     }, font_registry}
   end
 
   defp build_visual_row_entry(
@@ -1441,26 +1607,27 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _first_line,
          _ctx,
          source_ctx,
-         visual_identity_index
+         visual_identity_index,
+         font_registry
        ) do
     text = virtual_text_to_string(vt)
 
-    spans = virtual_text_spans(vt)
+    {spans, font_registry} = virtual_text_spans(vt, font_registry)
 
-    %Row{
-      row_id:
-        Row.stable_decoration_id(
-          :virtual_line,
-          durable_source_id(source_ctx, buf_line),
-          decoration_slot(source_ctx, buf_line, :virtual_line, vt.id)
-        ),
-      row_type: :virtual_line,
-      buf_line: buf_line,
-      visual_index: visual_identity_index,
-      text: text,
-      spans: spans,
-      content_hash: Row.compute_hash(text, spans)
-    }
+    {%Row{
+       row_id:
+         Row.stable_decoration_id(
+           :virtual_line,
+           durable_source_id(source_ctx, buf_line),
+           decoration_slot(source_ctx, buf_line, :virtual_line, vt.id)
+         ),
+       row_type: :virtual_line,
+       buf_line: buf_line,
+       visual_index: visual_identity_index,
+       text: text,
+       spans: spans,
+       content_hash: Row.compute_hash(text, spans)
+     }, font_registry}
   end
 
   defp build_visual_row_entry(
@@ -1470,29 +1637,30 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _first_line,
          ctx,
          source_ctx,
-         visual_identity_index
+         visual_identity_index,
+         font_registry
        ) do
     # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
     rendered_lines = block.render.(ctx.content_w)
     normalized = BlockDecoration.normalize_render_result(rendered_lines)
     segments = Enum.at(normalized, line_idx, [])
     text = Enum.map_join(segments, fn {t, _style} -> t end)
-    spans = segments_to_spans(segments)
+    {spans, font_registry} = segments_to_spans(segments, font_registry)
 
-    %Row{
-      row_id:
-        Row.stable_decoration_id(
-          :block,
-          durable_source_id(source_ctx, buf_line),
-          decoration_slot(source_ctx, buf_line, :block, {block.id, line_idx})
-        ),
-      row_type: :block,
-      buf_line: buf_line,
-      visual_index: visual_identity_index,
-      text: text,
-      spans: spans,
-      content_hash: Row.compute_hash(text, spans)
-    }
+    {%Row{
+       row_id:
+         Row.stable_decoration_id(
+           :block,
+           durable_source_id(source_ctx, buf_line),
+           decoration_slot(source_ctx, buf_line, :block, {block.id, line_idx})
+         ),
+       row_type: :block,
+       buf_line: buf_line,
+       visual_index: visual_identity_index,
+       text: text,
+       spans: spans,
+       content_hash: Row.compute_hash(text, spans)
+     }, font_registry}
   end
 
   defp build_visual_row_entry(
@@ -1502,24 +1670,25 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _first_line,
          _ctx,
          source_ctx,
-         _index
+         _index,
+         font_registry
        ) do
     hidden = FoldRegion.hidden_count(fold)
     text = " ··· #{hidden} lines"
 
-    %Row{
-      row_id:
-        Row.stable_decoration_id(
-          :fold_start,
-          durable_source_id(source_ctx, buf_line),
-          decoration_slot(source_ctx, buf_line, :decoration_fold, fold.id)
-        ),
-      row_type: :fold_start,
-      buf_line: buf_line,
-      text: text,
-      spans: [],
-      content_hash: Row.compute_hash(text, [])
-    }
+    {%Row{
+       row_id:
+         Row.stable_decoration_id(
+           :fold_start,
+           durable_source_id(source_ctx, buf_line),
+           decoration_slot(source_ctx, buf_line, :decoration_fold, fold.id)
+         ),
+       row_type: :fold_start,
+       buf_line: buf_line,
+       text: text,
+       spans: [],
+       content_hash: Row.compute_hash(text, [])
+     }, font_registry}
   end
 
   # ── Line composition ───────────────────────────────────────────────────
@@ -1539,9 +1708,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [Highlight.styled_segment()] | nil,
           Context.t(),
           non_neg_integer(),
-          non_neg_integer()
-        ) :: {String.t(), [Span.t()]}
-  defp compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset) do
+          non_neg_integer(),
+          FontRegistry.t()
+        ) :: {String.t(), [Span.t()], FontRegistry.t()}
+  defp compose_line(
+         line_text,
+         hl_segments,
+         ctx,
+         buf_line,
+         line_byte_offset,
+         font_registry
+       ) do
     ctx = maybe_reveal_conceals(ctx, buf_line)
 
     # Start with highlight segments or plain text
@@ -1568,7 +1745,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         else: segments
 
     # Convert to composed text + spans
-    Composition.segments_to_text_and_spans(segments)
+    Composition.segments_to_text_and_spans(segments, font_registry)
   end
 
   @spec maybe_reveal_conceals(Context.t(), non_neg_integer()) :: Context.t()
@@ -2833,42 +3010,43 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     Enum.map_join(segments, fn {text, _style} -> text end)
   end
 
-  @spec virtual_text_spans(Decorations.VirtualText.t()) :: [Span.t()]
-  defp virtual_text_spans(%{segments: segments}) do
-    segments_to_spans(segments)
+  @spec virtual_text_spans(Decorations.VirtualText.t(), FontRegistry.t()) ::
+          {[Span.t()], FontRegistry.t()}
+  defp virtual_text_spans(%{segments: segments}, %FontRegistry{} = font_registry) do
+    segments_to_spans(segments, font_registry)
   end
 
-  @spec segments_to_spans([{String.t(), Minga.Core.Face.t()}]) :: [Span.t()]
-  defp segments_to_spans(segments) do
-    {spans, _col} =
-      Enum.reduce(segments, {[], 0}, fn {text, style}, {acc, col} ->
-        width = Unicode.display_width(text)
+  @spec segments_to_spans([{String.t(), Minga.Core.Face.t()}], FontRegistry.t()) ::
+          {[Span.t()], FontRegistry.t()}
+  defp segments_to_spans(segments, %FontRegistry{} = font_registry) do
+    {spans, _col, font_registry} =
+      Enum.reduce(segments, {[], 0, font_registry}, fn
+        {text, style}, {acc, col, registry} ->
+          width = Unicode.display_width(text)
 
-        if width > 0 do
-          span = Span.from_face(style, col, col + width, font_id_for_face(style))
-          {[span | acc], col + width}
-        else
-          {acc, col}
-        end
+          if width > 0 do
+            {font_id, registry} = font_id_for_face(style, registry)
+            span = Span.from_face(style, col, col + width, font_id)
+            {[span | acc], col + width, registry}
+          else
+            {acc, col, registry}
+          end
       end)
 
-    Enum.reverse(spans)
+    {Enum.reverse(spans), font_registry}
   end
 
-  @spec font_id_for_face(Minga.Core.Face.t()) :: non_neg_integer()
-  defp font_id_for_face(%Minga.Core.Face{font_family: nil}), do: 0
+  @spec font_id_for_face(Minga.Core.Face.t(), FontRegistry.t()) ::
+          {non_neg_integer(), FontRegistry.t()}
+  defp font_id_for_face(%Minga.Core.Face{font_family: nil}, %FontRegistry{} = registry),
+    do: {0, registry}
 
-  defp font_id_for_face(%Minga.Core.Face{font_family: family}) when is_binary(family) do
-    case FontRegistry.process_registry() do
-      nil ->
-        0
-
-      registry ->
-        {font_id, updated_registry, _new?} =
-          FontRegistry.get_or_register(registry, family)
-
-        FontRegistry.put_process_registry(updated_registry)
-        font_id
-    end
+  defp font_id_for_face(
+         %Minga.Core.Face{font_family: family},
+         %FontRegistry{} = registry
+       )
+       when is_binary(family) do
+    {font_id, updated_registry, _new?} = FontRegistry.get_or_register(registry, family)
+    {font_id, updated_registry}
   end
 end

@@ -314,25 +314,72 @@ defmodule MingaEditor.Frontend.EmitTest do
                <<0x52, 1, _len::16, "Fira Code">> -> true
                _ -> false
              end)
-
-      refute Process.get(:emit_font_registry)
     end
 
-    test "flushes font registrations allocated before emit" do
-      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
+    test "flushes font registrations before references and does not repeat them" do
+      frame = window_frame_with_content() |> put_first_span_font_id(1)
 
       {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
-      ctx = %{Context.from_editor_state(emit_state()) | font_registry: registry}
+      ctx = %{Context.from_editor_state(emit_state()) | font_registry: registry, frame_seq: 41}
 
-      {_caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      {caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
       commands = assert_receive_frame_commands()
 
       assert FontRegistry.pending_registrations(font_registry) == []
 
-      assert Enum.any?(commands, fn
-               <<0x52, 1, _::binary>> -> true
-               _ -> false
-             end)
+      registration_index = Enum.find_index(commands, &match?(<<0x52, 1, _::binary>>, &1))
+      window_index = Enum.find_index(commands, &match?(<<0x80, _::binary>>, &1))
+      assert registration_index < window_index
+
+      ctx = %{ctx | font_registry: font_registry, frame_seq: 42}
+      {_caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
+      commands = assert_receive_frame_commands()
+
+      refute Enum.any?(commands, &match?(<<0x52, _::binary>>, &1))
+      assert FontRegistry.lookup(font_registry, "Fira Code") == 1
+    end
+
+    test "identical explicit registries produce identical registration and frame bytes" do
+      frame = window_frame_with_content()
+
+      {_first_id, registry, true} =
+        FontRegistry.get_or_register(FontRegistry.new(), "First Fallback")
+
+      {_second_id, registry, true} = FontRegistry.get_or_register(registry, "Second Fallback")
+
+      ctx = %{
+        Context.from_editor_state(semantic_state())
+        | font_registry: registry,
+          frame_seq: 77
+      }
+
+      {_caches, first_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      first_commands = assert_receive_frame_commands()
+      {_caches, second_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      second_commands = assert_receive_frame_commands()
+
+      assert first_commands == second_commands
+      assert first_registry == second_registry
+
+      assert Enum.filter(first_commands, &match?(<<0x52, _::binary>>, &1)) == [
+               <<0x52, 1, 0, 14, "First Fallback">>,
+               <<0x52, 2, 0, 15, "Second Fallback">>
+             ]
+    end
+
+    test "an invalid frame preserves pending registrations for retry" do
+      invalid_frame = window_frame_with_content() |> frame_with_invalid_indent_level()
+
+      {_font_id, registry, true} =
+        FontRegistry.get_or_register(FontRegistry.new(), "Retry Fallback")
+
+      ctx = %{Context.from_editor_state(semantic_state()) | font_registry: registry, frame_seq: 9}
+
+      {_caches, returned_registry, _message_store} =
+        Emit.emit(invalid_frame, ctx, nil, %Caches{})
+
+      refute_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
+      assert returned_registry == registry
     end
   end
 
@@ -420,6 +467,15 @@ defmodule MingaEditor.Frontend.EmitTest do
     }
 
     %{frame | windows: [%{window | indent_guides: indent_guides}]}
+  end
+
+  defp put_first_span_font_id(frame, font_id) do
+    [window] = frame.windows
+    [row] = window.rows
+    [span] = row.spans
+    spans = [%{span | font_id: font_id}]
+    row = %{row | spans: spans, content_hash: RenderRow.compute_hash(row.text, spans)}
+    %{frame | windows: [%{window | rows: [row]}]}
   end
 
   # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,

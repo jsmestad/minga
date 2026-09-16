@@ -27,10 +27,8 @@ defmodule MingaEditor.Frontend.Emit do
   @spec emit(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
           {Caches.t(), FontRegistry.t(), MingaEditor.UI.Panel.MessageStore.t()}
   def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
-    FontRegistry.with_process_registry(ctx.font_registry, fn ->
-      {caches, ctx} = emit_semantic(frame, ctx, chrome, caches)
-      {caches, FontRegistry.current_process_registry(ctx.font_registry), ctx.message_store}
-    end)
+    {caches, ctx} = emit_semantic(frame, ctx, chrome, caches)
+    {caches, ctx.font_registry, ctx.message_store}
   end
 
   @spec emit_semantic(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
@@ -131,10 +129,15 @@ defmodule MingaEditor.Frontend.Emit do
     surface_layout_command =
       Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder.encode_command(ctx.surface_placements)
 
+    {font_registration_commands, font_registry} =
+      flush_font_registration_commands(ctx.font_registry)
+
+    ctx = Context.with_font_registry(ctx, font_registry)
+
     commands =
       [Protocol.encode_begin_frame(frame_seq, base_frame_seq, caches.recovery_generation)] ++
         presentation_target_commands(ctx) ++
-        flush_font_registration_commands() ++
+        font_registration_commands ++
         encoded_frame.metal_commands ++
         encoded_frame.chrome_commands ++
         [surface_layout_command, Protocol.encode_commit_frame(frame_seq, input_seq)]
@@ -207,20 +210,14 @@ defmodule MingaEditor.Frontend.Emit do
 
   # ── Font registry context (shared) ───────────────────────────────────────
 
-  @spec flush_font_registration_commands() :: [binary()]
-  defp flush_font_registration_commands do
-    registry = FontRegistry.current_process_registry(FontRegistry.new())
-
+  @spec flush_font_registration_commands(FontRegistry.t()) :: {[binary()], FontRegistry.t()}
+  defp flush_font_registration_commands(%FontRegistry{} = registry) do
     commands =
       registry
       |> FontRegistry.pending_registrations()
       |> Enum.map(fn {font_id, family} -> Protocol.encode_register_font(font_id, family) end)
 
-    registry
-    |> FontRegistry.mark_registered()
-    |> FontRegistry.put_process_registry()
-
-    commands
+    {commands, FontRegistry.mark_registered(registry)}
   end
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────

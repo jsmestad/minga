@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
   alias Minga.RenderModel.Window.RowSplice
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderModel.Window.VisualRow
+  alias MingaEditor.UI.FontRegistry
 
   @type payload :: VisualRow.t()
   @type retained_rows :: %{optional(Row.row_id()) => {non_neg_integer(), Row.t()}}
@@ -28,20 +29,21 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           required(:keyframe?) => boolean(),
           required(:retained_rows) => retained_rows(),
           required(:edit_deltas) => [EditDelta.t()],
-          required(:build_all) => (-> [payload()]),
-          required(:build_dirty) => (MapSet.t(non_neg_integer()) ->
-                                       %{non_neg_integer() => payload()})
+          required(:font_registry) => FontRegistry.t(),
+          required(:build_all) => (FontRegistry.t() -> {[payload()], FontRegistry.t()}),
+          required(:build_dirty) => (MapSet.t(non_neg_integer()), FontRegistry.t() ->
+                                       {%{non_neg_integer() => payload()}, FontRegistry.t()})
         }
 
-  @spec run(t() | nil, inputs()) :: {t(), map()}
+  @spec run(t() | nil, inputs()) :: {t(), map(), FontRegistry.t()}
   def run(prev, inputs) do
-    {state, result} =
+    {state, result, font_registry} =
       case transition(prev, inputs) do
         :hydrate ->
           hydrate(inputs, hydration_reason(prev, inputs))
 
         :reuse ->
-          reuse(prev)
+          reuse(prev, inputs.font_registry)
 
         {:splice, start, delete_count, insert_count} ->
           splice(prev, inputs, start, delete_count, insert_count)
@@ -50,7 +52,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           splice_lines(prev, inputs, lines)
       end
 
-    if inputs.keyframe?, do: materialize_keyframe(state, result), else: {state, result}
+    {state, result} =
+      if inputs.keyframe?, do: materialize_keyframe(state, result), else: {state, result}
+
+    {state, result, font_registry}
   end
 
   defp transition(nil, _), do: :hydrate
@@ -108,7 +113,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
 
   defp hydrate(inputs, reason) do
     Minga.Telemetry.execute([:minga, :render, :full_hydration], %{count: 1}, %{reason: reason})
-    payloads = inputs.build_all.()
+    {payloads, font_registry} = inputs.build_all.(inputs.font_registry)
     store = ResidentStore.from_entries(Enum.map(payloads, &to_store_entry/1))
 
     state = %__MODULE__{
@@ -128,10 +133,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
        rasterized: rasterized_of(payloads),
        spliced: 0,
        work: ResidentStore.work(store)
-     }}
+     }, font_registry}
   end
 
-  defp reuse(prev) do
+  defp reuse(prev, font_registry) do
     {prev,
      %{
        payloads: [],
@@ -142,7 +147,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
        rasterized: 0,
        spliced: 0,
        work: %{rows_visited: 0, rows_copied: 0, rows_emitted: 0, chunks_touched: 0}
-     }}
+     }, font_registry}
   end
 
   # A frontend keyframe cannot reference or patch its now-empty adapter cache.
@@ -169,7 +174,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
     dirty =
       if insert_count == 0, do: MapSet.new(), else: MapSet.new(start..(start + insert_count - 1))
 
-    dirty_payloads = if insert_count == 0, do: %{}, else: inputs.build_dirty.(dirty)
+    {dirty_payloads, font_registry} =
+      if insert_count == 0,
+        do: {%{}, inputs.font_registry},
+        else: inputs.build_dirty.(dirty, inputs.font_registry)
 
     inserted_payloads =
       if insert_count == 0,
@@ -199,12 +207,14 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
        rasterized: length(inserted_payloads),
        spliced: max(delete_count, insert_count),
        work: work
-     }}
+     }, font_registry}
   end
 
-  @spec splice_lines(t(), inputs(), [non_neg_integer()]) :: {t(), map()}
+  @spec splice_lines(t(), inputs(), [non_neg_integer()]) ::
+          {t(), map(), FontRegistry.t()}
   defp splice_lines(prev, inputs, lines) do
-    dirty_payloads = inputs.build_dirty.(MapSet.new(lines))
+    {dirty_payloads, font_registry} =
+      inputs.build_dirty.(MapSet.new(lines), inputs.font_registry)
 
     {store, inserted_payloads, splices} =
       Enum.reduce(lines, {prev.store, [], []}, fn line, {store, payloads, splices} ->
@@ -231,7 +241,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
        rasterized: rasterized_of(inserted_payloads),
        spliced: length(lines),
        work: work
-     }}
+     }, font_registry}
   end
 
   defp empty_delta(count) do

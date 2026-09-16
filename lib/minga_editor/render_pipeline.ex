@@ -38,7 +38,6 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.WindowTree
   alias MingaEditor.Frontend.Emit
-  alias MingaEditor.UI.FontRegistry
   alias Minga.Telemetry
 
   # ── Orchestrator ───────────────────────────────────────────────────────────
@@ -52,11 +51,7 @@ defmodule MingaEditor.RenderPipeline do
   Returns updated Input with per-window render caches populated. `Renderer.Server` retains renderer-private state and returns a focused receipt for atomic Editor integration.
   """
   @spec run(input()) :: input()
-  def run(input) do
-    FontRegistry.with_process_registry(input.font_registry, fn ->
-      run_stages(input)
-    end)
-  end
+  def run(input), do: run_stages(input)
 
   @spec run_stages(input()) :: input()
   defp run_stages(input) do
@@ -162,12 +157,6 @@ defmodule MingaEditor.RenderPipeline do
 
     # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
-      input =
-        Input.with_font_registry(
-          input,
-          FontRegistry.current_process_registry(input.font_registry)
-        )
-
       ctx = MingaEditor.Frontend.Emit.Context.from_input(input)
 
       {updated_caches, updated_font_registry, updated_message_store} =

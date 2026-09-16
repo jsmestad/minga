@@ -12,7 +12,67 @@ defmodule MingaEditor.Renderer.CompositionTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.Face
+  alias Minga.RenderModel.Window.Span
   alias MingaEditor.Renderer.Composition
+  alias MingaEditor.UI.FontRegistry
+
+  describe "segments_to_text_and_spans/2" do
+    test "allocates fallback families in encounter order and reuses repeated families" do
+      first = Face.new(font_family: "First Fallback")
+      second = Face.new(font_family: "Second Fallback")
+
+      {text, spans, registry} =
+        Composition.segments_to_text_and_spans(
+          [{"one", first}, {" two", first}, {" three", second}],
+          FontRegistry.new()
+        )
+
+      assert text == "one two three"
+      assert Enum.map(spans, & &1.font_id) == [1, 1, 2]
+
+      assert FontRegistry.pending_registrations(registry) == [
+               {1, "First Fallback"},
+               {2, "Second Fallback"}
+             ]
+    end
+
+    test "the same input and initial registry produce identical spans and registry values" do
+      segments = [
+        {"ordinary", Face.new(font_family: "Ordinary Fallback")},
+        {" virtual", Face.new(font_family: "Virtual Fallback")}
+      ]
+
+      initial = FontRegistry.new()
+      first = Composition.segments_to_text_and_spans(segments, initial)
+      second = Composition.segments_to_text_and_spans(segments, initial)
+
+      assert first == second
+      assert initial == FontRegistry.new()
+    end
+
+    test "successive and concurrent computations cannot influence one another" do
+      build = fn family ->
+        Composition.segments_to_text_and_spans(
+          [{family, Face.new(font_family: family)}],
+          FontRegistry.new()
+        )
+      end
+
+      {_, [%Span{font_id: 1}], first_registry} = build.("First")
+      {_, [%Span{font_id: 1}], second_registry} = build.("Second")
+
+      first_task = Task.async(fn -> build.("Task First") end)
+      second_task = Task.async(fn -> build.("Task Second") end)
+
+      {_, [%Span{font_id: 1}], task_first_registry} = Task.await(first_task)
+      {_, [%Span{font_id: 1}], task_second_registry} = Task.await(second_task)
+
+      assert FontRegistry.pending_registrations(first_registry) == [{1, "First"}]
+      assert FontRegistry.pending_registrations(second_registry) == [{1, "Second"}]
+      assert FontRegistry.pending_registrations(task_first_registry) == [{1, "Task First"}]
+      assert FontRegistry.pending_registrations(task_second_registry) == [{1, "Task Second"}]
+    end
+  end
 
   describe "apply_invisible_chars/3" do
     # A distinct text face and whitespace face keep content runs and marker
