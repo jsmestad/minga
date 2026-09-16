@@ -412,11 +412,12 @@ struct ContentViewTests {
                 label: "legacy.ex"
             )
         ])
-        gui.tabBarState.updateWorkspaces(
+        gui.tabBarState.install(WorkspacePresentationSnapshot(
+            version: 1,
             activeWorkspaceId: 7,
             mode: 1,
             flags: 0,
-            entries: [Wire.WorkspaceEntry(
+            workspaces: [Wire.WorkspaceEntry(
                 id: 7,
                 kind: 1,
                 status: 0,
@@ -442,7 +443,7 @@ struct ContentViewTests {
                 label: "canonical.ex",
                 path: "/tmp/canonical.ex"
             )]
-        )
+        ))
         let root = ContentView(
             gui: gui,
             encoder: { nil },
@@ -459,13 +460,14 @@ struct ContentViewTests {
         #expect(!strings.contains("legacy.ex"))
         #expect((try? root.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) != nil)
 
-        gui.tabBarState.updateWorkspaces(
+        gui.tabBarState.install(WorkspacePresentationSnapshot(
+            version: 1,
             activeWorkspaceId: 7,
             mode: 1,
             flags: 0,
-            entries: [],
+            workspaces: [],
             visibleTabs: []
-        )
+        ))
         let canonicalEmptyRoot = ContentView(
             gui: gui,
             encoder: { nil },

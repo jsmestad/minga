@@ -1,12 +1,12 @@
 import SwiftUI
 
 public struct WorkspaceIndicatorView: View {
-    public init(workspace: WorkspaceEntry, encoder: InputEncoder? = nil, barHeight: CGFloat) {
+    public init(workspace: WorkspacePresentationEntry, encoder: InputEncoder? = nil, barHeight: CGFloat) {
         self.workspace = workspace
         self.encoder = encoder
         self.barHeight = barHeight
     }
-    public let workspace: WorkspaceEntry
+    public let workspace: WorkspacePresentationEntry
     @Environment(\.themeColors) private var theme
     public let encoder: InputEncoder?
     public let barHeight: CGFloat

@@ -178,6 +178,25 @@ struct GUIObservationGuardrailTests {
         #expect(occurrenceCounts(ignoredDeclarations(in: duplicateIgnored)).values.first == 2)
     }
 
+    @Test("workspace wire conversion feeds two independent presentation owners")
+    func workspaceSnapshotPreservesObservationBoundaries() throws {
+        let dispatcher = try source(at: "Sources/Renderer/CommandDispatcher.swift")
+        let snapshot = try source(at: "Sources/Views/EditorChrome/WorkspacePresentationSnapshot.swift")
+        let workspaceState = try source(at: "Sources/Views/EditorChrome/WorkspaceState.swift")
+        let tabBarState = try source(at: "Sources/Views/EditorChrome/TabBarState.swift")
+
+        #expect(dispatcher.sanitized.components(separatedBy: "WorkspacePresentationSnapshot(").count - 1 == 1)
+        #expect(dispatcher.sanitized.components(separatedBy: "workspaceState.install(snapshot)").count - 1 == 1)
+        #expect(dispatcher.sanitized.components(separatedBy: "tabBarState.install(snapshot)").count - 1 == 1)
+        #expect(snapshot.sanitized.contains("[Wire.WorkspaceEntry]"))
+        #expect(snapshot.sanitized.contains("[Wire.WorkspaceTabEntry]"))
+        #expect(!snapshot.sanitized.contains("@Observable"))
+        #expect(!workspaceState.sanitized.contains("Wire.Workspace"))
+        #expect(!tabBarState.sanitized.contains("Wire.Workspace"))
+        #expect(workspaceState.sanitized.contains("@Observable"))
+        #expect(tabBarState.sanitized.contains("@Observable"))
+    }
+
     @Test("committed correlation types and accessors stay inside owned boundaries")
     func committedCorrelationBoundaries() throws {
         let allowedPaths: [String: Set<String>] = [

@@ -346,6 +346,92 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.gitStatusState.snapshot.branchName == "feature/publication")
     }
 
+    @Test("guiWorkspaces replaces both independent owners from one presentation snapshot")
+    @MainActor func guiWorkspacesReplacesBothOwners() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        let workspaces = [
+            Wire.WorkspaceEntry(id: 0, kind: 0, status: 1, flags: 0x0001, colorR: 0x11, colorG: 0x22, colorB: 0x33, tabCount: 2, draftCount: 3, conflictCount: 4, runningBackgroundCount: 5, label: "Manual", icon: "folder"),
+            Wire.WorkspaceEntry(id: 9, kind: 1, status: 2, flags: 0x0002, colorR: 0x44, colorG: 0x55, colorB: 0x66, tabCount: 6, draftCount: 7, conflictCount: 8, runningBackgroundCount: 9, label: "Review", icon: "cpu"),
+        ]
+        let tabs = [
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 9, kind: 0, flags: 0x003F, pathHash: 0x12345678, tintColorRGB: 0x7AA2F7, icon: "file-code", label: "first.ex", path: "/tmp/first.ex"),
+            Wire.WorkspaceTabEntry(id: 43, workspaceId: 9, kind: 0, flags: 0x0040, pathHash: 0x87654321, tintColorRGB: 0, icon: "file", label: "untitled", path: ""),
+        ]
+
+        dispatcher.applyForTesting(.guiWorkspaces(version: 3, activeWorkspaceId: 9, mode: 2, flags: 0x05, workspaces: workspaces, visibleTabs: tabs))
+
+        #expect(gui.workspaceState.activeWorkspaceId == 9)
+        #expect(gui.tabBarState.activeWorkspaceId == 9)
+        #expect(gui.workspaceState.viewMode == 2)
+        #expect(gui.tabBarState.workspaceMode == 2)
+        #expect(gui.workspaceState.flags == 0x05)
+        #expect(gui.tabBarState.workspaceFlags == 0x05)
+        #expect(gui.workspaceState.hasCanonicalPayload)
+        #expect(gui.tabBarState.hasCanonicalWorkspaceTabs)
+        #expect(gui.workspaceState.workspaces.map(\.id) == [0, 9])
+        #expect(gui.tabBarState.workspaces.map(\.id) == [0, 9])
+        #expect(gui.workspaceState.workspaces.map(\.agentStatus) == [1, 2])
+        #expect(gui.tabBarState.workspaces.map(\.agentStatus) == [1, 2])
+        #expect(gui.workspaceState.workspaces.map(\.flags) == [0x0001, 0x0002])
+        #expect(gui.tabBarState.workspaces.map(\.flags) == [0x0001, 0x0002])
+        #expect(gui.workspaceState.workspaces.map(\.tabCount) == [2, 6])
+        #expect(gui.tabBarState.workspaces.map(\.tabCount) == [2, 6])
+        #expect(gui.workspaceState.workspaces.map(\.draftCount) == [3, 7])
+        #expect(gui.tabBarState.workspaces.map(\.draftCount) == [3, 7])
+        #expect(gui.workspaceState.workspaces.map(\.conflictCount) == [4, 8])
+        #expect(gui.tabBarState.workspaces.map(\.conflictCount) == [4, 8])
+        #expect(gui.workspaceState.workspaces.map(\.runningBackgroundCount) == [5, 9])
+        #expect(gui.tabBarState.workspaces.map(\.runningBackgroundCount) == [5, 9])
+        #expect(gui.workspaceState.workspaces.map(\.label) == ["Manual", "Review"])
+        #expect(gui.tabBarState.workspaces.map(\.label) == ["Manual", "Review"])
+        #expect(gui.workspaceState.workspaces.map(\.icon) == ["folder", "cpu"])
+        #expect(gui.tabBarState.workspaces.map(\.icon) == ["folder", "cpu"])
+        #expect(gui.workspaceState.visibleTabs.map(\.id) == [42, 43])
+        #expect(gui.tabBarState.workspaceTabs.map(\.id) == [42, 43])
+        #expect(gui.workspaceState.visibleTabs.map(\.pathHash) == [0x12345678, 0x87654321])
+        #expect(gui.tabBarState.workspaceTabs.map(\.pathHash) == [0x12345678, 0x87654321])
+        #expect(gui.workspaceState.visibleTabs[0].tintColor != nil)
+        #expect(gui.tabBarState.workspaceTabs[0].tintColor != nil)
+        #expect(gui.workspaceState.visibleTabs[1].tintColor == nil)
+        #expect(gui.tabBarState.workspaceTabs[1].tintColor == nil)
+
+        dispatcher.applyForTesting(.guiWorkspaces(version: 0, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [], visibleTabs: []))
+
+        #expect(gui.workspaceState.activeWorkspaceId == 0)
+        #expect(gui.tabBarState.activeWorkspaceId == 0)
+        #expect(gui.workspaceState.workspaces.isEmpty)
+        #expect(gui.tabBarState.workspaces.isEmpty)
+        #expect(gui.workspaceState.visibleTabs.isEmpty)
+        #expect(gui.tabBarState.workspaceTabs.isEmpty)
+        #expect(!gui.workspaceState.hasCanonicalPayload)
+        #expect(gui.tabBarState.hasCanonicalWorkspaceTabs)
+    }
+
+    @Test("rejected workspace replacement retains both owners' last-good snapshot")
+    @MainActor func rejectedWorkspaceReplacementRetainsLastGoodSnapshot() {
+        let (dispatcher, gui) = makeDispatcher()
+        let originalWorkspace = Wire.WorkspaceEntry(id: 1, kind: 1, status: 1, flags: 0x0001, colorR: 0x11, colorG: 0x22, colorB: 0x33, tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Original", icon: "cpu")
+        let replacementWorkspace = Wire.WorkspaceEntry(id: 2, kind: 1, status: 2, flags: 0x0002, colorR: 0x44, colorG: 0x55, colorB: 0x66, tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Replacement", icon: "cpu")
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWorkspaces(version: 1, activeWorkspaceId: 1, mode: 1, flags: 1, workspaces: [originalWorkspace], visibleTabs: []))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 1))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWorkspaces(version: 2, activeWorkspaceId: 2, mode: 2, flags: 2, workspaces: [replacementWorkspace], visibleTabs: []))
+        dispatcher.dispatch(.commitFrame(frameSeq: 99, seq: 1))
+
+        #expect(gui.workspaceState.activeWorkspaceId == 1)
+        #expect(gui.tabBarState.activeWorkspaceId == 1)
+        #expect(gui.workspaceState.workspaces.map(\.label) == ["Original"])
+        #expect(gui.tabBarState.workspaces.map(\.label) == ["Original"])
+        #expect(gui.workspaceState.viewMode == 1)
+        #expect(gui.tabBarState.workspaceMode == 1)
+        #expect(gui.workspaceState.flags == 1)
+        #expect(gui.tabBarState.workspaceFlags == 1)
+    }
+
     @Test("guiObservatory updates observatoryState")
     @MainActor func guiObservatoryRouting() throws {
         let (dispatcher, gui) = makeDispatcher()

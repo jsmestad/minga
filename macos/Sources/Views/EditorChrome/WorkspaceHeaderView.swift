@@ -57,7 +57,7 @@ public struct WorkspaceHeaderView: View {
         .accessibilityIdentifier("workspace-header")
     }
 
-    private func activeWorkspacePill(_ workspace: WorkspaceSummaryEntry) -> some View {
+    private func activeWorkspacePill(_ workspace: WorkspacePresentationEntry) -> some View {
         HStack(spacing: 6) {
             workspaceIcon(workspace)
             workspaceTitle(workspace)
@@ -82,7 +82,7 @@ public struct WorkspaceHeaderView: View {
     }
 
     @ViewBuilder
-    private func workspaceTitle(_ workspace: WorkspaceSummaryEntry) -> some View {
+    private func workspaceTitle(_ workspace: WorkspacePresentationEntry) -> some View {
         if isRenaming {
             TextField("Workspace name", text: $renameText)
                 .textFieldStyle(.plain)
@@ -128,7 +128,7 @@ public struct WorkspaceHeaderView: View {
         .help("Switch to next workspace")
     }
 
-    private func agentStatusButton(_ workspace: WorkspaceSummaryEntry) -> some View {
+    private func agentStatusButton(_ workspace: WorkspacePresentationEntry) -> some View {
         Button {
             encoder?.sendExecuteCommand(name: "toggle_agentic_view")
         } label: {
@@ -149,7 +149,7 @@ public struct WorkspaceHeaderView: View {
     }
 
     @ViewBuilder
-    private func badges(for workspace: WorkspaceSummaryEntry) -> some View {
+    private func badges(for workspace: WorkspacePresentationEntry) -> some View {
         HStack(spacing: 5) {
             if workspace.runningBackgroundCount > 0 {
                 badge("⚡\(workspace.runningBackgroundCount)", help: "Agent running in this workspace")
@@ -189,7 +189,7 @@ public struct WorkspaceHeaderView: View {
         .accessibilityLabel("Background workspace badges")
     }
 
-    private func closeButton(_ workspace: WorkspaceSummaryEntry) -> some View {
+    private func closeButton(_ workspace: WorkspacePresentationEntry) -> some View {
         Button {
             encoder?.sendWorkspaceClose(id: workspace.id)
         } label: {
@@ -214,7 +214,7 @@ public struct WorkspaceHeaderView: View {
     }
 
     @ViewBuilder
-    private func workspaceIcon(_ workspace: WorkspaceSummaryEntry) -> some View {
+    private func workspaceIcon(_ workspace: WorkspacePresentationEntry) -> some View {
         if workspace.isManual {
             Image(systemName: "folder")
                 .font(.system(size: 12))
@@ -226,17 +226,17 @@ public struct WorkspaceHeaderView: View {
         }
     }
 
-    private func workspaceSystemImage(_ workspace: WorkspaceSummaryEntry) -> String {
+    private func workspaceSystemImage(_ workspace: WorkspacePresentationEntry) -> String {
         workspace.isManual ? "folder" : (workspace.icon.isEmpty ? "cpu" : workspace.icon)
     }
 
-    private func beginRename(_ workspace: WorkspaceSummaryEntry) {
+    private func beginRename(_ workspace: WorkspacePresentationEntry) {
         renameText = workspace.label
         isRenaming = true
         Task { @MainActor in renameFieldFocused = true }
     }
 
-    private func commitRename(_ workspace: WorkspaceSummaryEntry) {
+    private func commitRename(_ workspace: WorkspacePresentationEntry) {
         guard isRenaming else { return }
         isRenaming = false
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -244,7 +244,7 @@ public struct WorkspaceHeaderView: View {
         encoder?.sendWorkspaceRename(id: workspace.id, name: trimmed)
     }
 
-    private func workspaceValue(_ workspace: WorkspaceSummaryEntry) -> String {
+    private func workspaceValue(_ workspace: WorkspacePresentationEntry) -> String {
         [workspace.isManual ? "manual" : "agent", agentStatusLabel(workspace.agentStatus)]
             .joined(separator: ", ")
     }
