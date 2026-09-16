@@ -5,10 +5,10 @@ defmodule MingaAgent.SessionManager do
   Maps stable session IDs to session PIDs. Local scratch sessions still use
   human-readable generated IDs (e.g., `"session-1"`), while remote attach sessions
   pass a deterministic `:session_id` derived from their server-side working directory.
-  Sessions are started via `MingaAgent.Supervisor` (DynamicSupervisor) and
-  monitored here. When a session dies or restarts, the manager broadcasts
-  lifecycle events so the Editor (or any subscriber) can react without
-  monitoring PIDs directly.
+  Sessions are started via a configurable `DynamicSupervisor`, which defaults
+  to `MingaAgent.Supervisor`, and monitored here. When a session dies or
+  restarts, the manager broadcasts lifecycle events so the Editor (or any
+  subscriber) can react without monitoring PIDs directly.
   """
 
   use GenServer
@@ -24,7 +24,8 @@ defmodule MingaAgent.SessionManager do
   @type state :: %{
           sessions: %{String.t() => session_entry()},
           background_subagents: %{String.t() => Handle.t()},
-          next_id: pos_integer()
+          next_id: pos_integer(),
+          session_supervisor: GenServer.server()
         }
 
   @typedoc "Restart bookkeeping for a managed session that is being recovered."
@@ -255,8 +256,14 @@ defmodule MingaAgent.SessionManager do
 
   @impl GenServer
   @spec init(keyword()) :: {:ok, state()}
-  def init(_opts) do
-    {:ok, %{sessions: %{}, background_subagents: %{}, next_id: 1}}
+  def init(opts) do
+    {:ok,
+     %{
+       sessions: %{},
+       background_subagents: %{},
+       next_id: 1,
+       session_supervisor: Keyword.get(opts, :session_supervisor, MingaAgent.Supervisor)
+     }}
   end
 
   @impl GenServer
@@ -312,7 +319,7 @@ defmodule MingaAgent.SessionManager do
     case Map.fetch(state.sessions, session_id) do
       {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) ->
         Process.demonitor(ref, [:flush])
-        MingaAgent.Supervisor.stop_session(pid)
+        MingaAgent.Supervisor.stop_session(state.session_supervisor, pid)
         {:reply, :ok, remove_session(state, session_id)}
 
       {:ok, %{monitor_ref: nil, restart_state: %{timer_ref: timer_ref}}} ->
@@ -376,7 +383,7 @@ defmodule MingaAgent.SessionManager do
     case find_session_by_pid(state.sessions, pid) do
       {session_id, %{monitor_ref: ref}} ->
         Process.demonitor(ref, [:flush])
-        MingaAgent.Supervisor.stop_session(pid)
+        MingaAgent.Supervisor.stop_session(state.session_supervisor, pid)
         {:reply, :ok, remove_session(state, session_id)}
 
       nil ->
@@ -503,7 +510,8 @@ defmodule MingaAgent.SessionManager do
 
     with {:ok, token} <-
            session_token_for_start(session_id, supplied_token, session_opts),
-         {:ok, pid} <- MingaAgent.Supervisor.start_session(session_opts) do
+         {:ok, pid} <-
+           MingaAgent.Supervisor.start_session(state.session_supervisor, session_opts) do
       ref = Process.monitor(pid)
 
       entry = %{
@@ -951,7 +959,7 @@ defmodule MingaAgent.SessionManager do
   @spec restart_managed_session(state(), String.t(), session_entry()) ::
           {:ok, state(), pid()} | {:error, term(), state()}
   defp restart_managed_session(state, _session_id, %{restart_opts: restart_opts}) do
-    case MingaAgent.Supervisor.start_session(restart_opts) do
+    case MingaAgent.Supervisor.start_session(state.session_supervisor, restart_opts) do
       {:ok, pid} ->
         {:ok, state, pid}
 
