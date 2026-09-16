@@ -14,10 +14,14 @@ defmodule MingaAgent.SessionManagerTest do
   alias MingaAgent.Subagent.Handle
 
   setup do
-    # Start an isolated SessionManager with a unique name per test.
+    session_supervisor = start_supervised!({DynamicSupervisor, strategy: :one_for_one})
+
+    # Start an isolated SessionManager and session supervisor per test.
     name = :"session_manager_#{System.unique_integer([:positive])}"
 
-    {:ok, manager} = SessionManager.start_link(name: name)
+    {:ok, manager} =
+      SessionManager.start_link(name: name, session_supervisor: session_supervisor)
+
     Process.unlink(manager)
 
     on_exit(fn ->
@@ -30,10 +34,25 @@ defmodule MingaAgent.SessionManagerTest do
       end
     end)
 
-    %{manager: manager}
+    %{manager: manager, session_supervisor: session_supervisor}
   end
 
   describe "start_session/2" do
+    test "starts and stops sessions under the configured supervisor", %{
+      manager: manager,
+      session_supervisor: session_supervisor
+    } do
+      assert {:ok, session_id, pid} = SessionManager.start_session(manager, [])
+
+      assert [{:undefined, ^pid, :worker, [Session]}] =
+               DynamicSupervisor.which_children(session_supervisor)
+
+      assert :ok = SessionManager.stop_session(manager, session_id)
+      refute Process.alive?(pid)
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+      assert [] = DynamicSupervisor.which_children(session_supervisor)
+    end
+
     test "starts a session and returns a human-readable unique ID", %{manager: manager} do
       assert {:ok, session_id, pid} = SessionManager.start_session(manager, [])
       assert String.match?(session_id, ~r/^session-1-[0-9a-f]{8}$/)
@@ -409,7 +428,7 @@ defmodule MingaAgent.SessionManagerTest do
     end
 
     test "restarts a crashed session, refreshes child handles, and keeps the registry consistent",
-         %{manager: manager} do
+         %{manager: manager, session_supervisor: session_supervisor} do
       Minga.Events.subscribe(:agent_session_restarted)
       Minga.Events.subscribe(:agent_session_stopped)
 
@@ -448,6 +467,11 @@ defmodule MingaAgent.SessionManagerTest do
       assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
       assert {:ok, ^session_id} = SessionManager.session_id_for_pid(manager, new_pid)
       assert {:ok, ^token} = SessionManager.session_token(manager, session_id)
+
+      assert Enum.any?(DynamicSupervisor.which_children(session_supervisor), fn
+               {:undefined, ^new_pid, :worker, [Session]} -> true
+               _ -> false
+             end)
 
       sessions = SessionManager.list_sessions(manager)
 

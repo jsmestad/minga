@@ -18,13 +18,25 @@ defmodule MingaAgent.Supervisor do
   @doc "Starts a new agent session under this supervisor."
   @spec start_session(keyword()) :: DynamicSupervisor.on_start_child()
   def start_session(opts \\ []) do
-    DynamicSupervisor.start_child(__MODULE__, {MingaAgent.Session, opts})
+    start_session(__MODULE__, opts)
+  end
+
+  @doc "Starts a new agent session under the given supervisor."
+  @spec start_session(GenServer.server(), keyword()) :: DynamicSupervisor.on_start_child()
+  def start_session(supervisor, opts) do
+    DynamicSupervisor.start_child(supervisor, {MingaAgent.Session, opts})
   end
 
   @doc "Stops a running agent session."
   @spec stop_session(pid()) :: :ok | {:error, :not_found}
   def stop_session(pid) do
-    DynamicSupervisor.terminate_child(__MODULE__, pid)
+    stop_session(__MODULE__, pid)
+  end
+
+  @doc "Stops a running agent session under the given supervisor."
+  @spec stop_session(GenServer.server(), pid()) :: :ok | {:error, :not_found}
+  def stop_session(supervisor, pid) do
+    DynamicSupervisor.terminate_child(supervisor, pid)
   end
 
   @doc "Lists all running agent session pids."
