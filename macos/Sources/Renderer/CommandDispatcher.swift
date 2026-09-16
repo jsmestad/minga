@@ -1079,8 +1079,9 @@ final class CommandDispatcher {
             }
 
         case .guiWorkspaces(let version, let activeWorkspaceId, let mode, let flags, let workspaces, let visibleTabs):
-            guiState.workspaceState.update(version: version, activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, workspaces: workspaces, visibleTabs: visibleTabs)
-            guiState.tabBarState.updateWorkspaces(activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, entries: workspaces, visibleTabs: visibleTabs)
+            let snapshot = WorkspacePresentationSnapshot(version: version, activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, workspaces: workspaces, visibleTabs: visibleTabs)
+            guiState.workspaceState.install(snapshot)
+            guiState.tabBarState.install(snapshot)
 
 
         case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove, let progress, let todos):

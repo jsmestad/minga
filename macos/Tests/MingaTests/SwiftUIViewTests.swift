@@ -1041,14 +1041,14 @@ struct TabBarViewViewTests {
             Wire.TabEntry(id: 2, groupId: 2, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "background.ex")
         ])
-        state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu"),
             Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                                 tabCount: 3, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Research", icon: "cpu")
         ], visibleTabs: [
             Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
-        ])
+        ]))
 
         let sut = TabBarView(tabBarState: state, encoder: nil)
         let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -1062,20 +1062,20 @@ struct TabBarViewViewTests {
     @Test("Canonical workspace tabs render agent entries with the agent icon")
     @MainActor func canonicalWorkspaceTabsRenderAgentEntriesWithAgentIcon() throws {
         let fileState = TabBarState()
-        fileState.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+        fileState.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu")
         ], visibleTabs: [
             Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "󰈙", label: "active.ex", path: "/tmp/active.ex")
-        ])
+        ]))
 
         let agentState = TabBarState()
-        agentState.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+        agentState.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu")
         ], visibleTabs: [
             Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 1, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "cpu", label: "Agent", path: "")
-        ])
+        ]))
 
         let fileImages = try TabBarView(tabBarState: fileState, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1101,7 +1101,7 @@ struct WorkspaceHeaderViewTests {
 
     @MainActor private func populatedState() -> WorkspaceState {
         let state = WorkspaceState()
-        state.update(version: 1, activeWorkspaceId: 2, mode: 1, flags: 1, workspaces: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 2, mode: 1, flags: 1, workspaces: [
             Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
@@ -1110,7 +1110,7 @@ struct WorkspaceHeaderViewTests {
                                 tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Review", icon: "cpu")
         ], visibleTabs: [
             Wire.WorkspaceTabEntry(id: 42, workspaceId: 2, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
-        ])
+        ]))
         return state
     }
 
@@ -1130,12 +1130,12 @@ struct WorkspaceHeaderViewTests {
     @Test("Header exposes background workspace badges without activating them")
     @MainActor func showsBackgroundWorkspaceBadges() throws {
         let state = WorkspaceState()
-        state.update(version: 1, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [
             Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 3, flags: 0x0001, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                                 tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Background", icon: "cpu")
-        ], visibleTabs: [])
+        ], visibleTabs: []))
 
         let sut = WorkspaceHeaderView(workspaceState: state, encoder: nil)
         let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }

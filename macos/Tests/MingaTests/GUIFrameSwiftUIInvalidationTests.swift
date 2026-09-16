@@ -571,13 +571,14 @@ struct GUIFrameSwiftUIInvalidationTests {
 
         for iteration in 0..<100 {
             let label = "tab-\(iteration).ex"
-            gui.tabBarState.updateWorkspaces(
+            gui.tabBarState.install(WorkspacePresentationSnapshot(
+                version: 1,
                 activeWorkspaceId: 0,
                 mode: 0,
                 flags: 0,
-                entries: [],
+                workspaces: [],
                 visibleTabs: [Self.workspaceTab(id: UInt32(iteration + 10), label: label, path: "/tmp/\(label)")]
-            )
+            ))
             await recorder.waitForValue(label, point: .shell)
         }
 

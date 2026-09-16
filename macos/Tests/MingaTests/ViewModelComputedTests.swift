@@ -11,6 +11,86 @@ import Foundation
 import SwiftUI
 import MingaProtocol
 
+// MARK: - WorkspacePresentationSnapshot
+
+@Suite("Workspace Presentation Snapshot")
+struct WorkspacePresentationSnapshotTests {
+    @Test("converts every shared workspace and tab field once")
+    func convertsSharedWorkspaceFields() throws {
+        let snapshot = WorkspacePresentationSnapshot(
+            version: 3,
+            activeWorkspaceId: 9,
+            mode: 2,
+            flags: 0x05,
+            workspaces: [
+                Wire.WorkspaceEntry(id: 0, kind: 0, status: 1, flags: 0x0001, colorR: 0x11, colorG: 0x22, colorB: 0x33, tabCount: 2, draftCount: 3, conflictCount: 4, runningBackgroundCount: 5, label: "Manual", icon: "folder"),
+                Wire.WorkspaceEntry(id: 9, kind: 1, status: 2, flags: 0x0002, colorR: 0x44, colorG: 0x55, colorB: 0x66, tabCount: 6, draftCount: 7, conflictCount: 8, runningBackgroundCount: 9, label: "Review", icon: "cpu"),
+            ],
+            visibleTabs: [
+                Wire.WorkspaceTabEntry(id: 42, workspaceId: 9, kind: 0, flags: 0x003F, pathHash: 0x12345678, tintColorRGB: 0x7AA2F7, icon: "file-code", label: "first.ex", path: "/tmp/first.ex"),
+                Wire.WorkspaceTabEntry(id: 43, workspaceId: 9, kind: 0, flags: 0x0040, pathHash: 0x87654321, tintColorRGB: 0, icon: "file", label: "untitled", path: ""),
+            ]
+        )
+
+        #expect(snapshot.version == 3)
+        #expect(snapshot.activeWorkspaceId == 9)
+        #expect(snapshot.mode == 2)
+        #expect(snapshot.flags == 0x05)
+        #expect(snapshot.workspaces.map(\.id) == [0, 9])
+
+        let workspace = try #require(snapshot.workspaces.last)
+        #expect(workspace.kind == 1)
+        #expect(workspace.agentStatus == 2)
+        #expect(workspace.flags == 0x0002)
+        #expect(workspace.color == Color(.sRGB, red: 0x44 / 255.0, green: 0x55 / 255.0, blue: 0x66 / 255.0))
+        #expect(workspace.tabCount == 6)
+        #expect(workspace.draftCount == 7)
+        #expect(workspace.conflictCount == 8)
+        #expect(workspace.runningBackgroundCount == 9)
+        #expect(workspace.label == "Review")
+        #expect(workspace.icon == "cpu")
+
+        #expect(snapshot.visibleTabs.map(\.id) == [42, 43])
+        let colored = snapshot.visibleTabs[0]
+        #expect(colored.workspaceId == 9)
+        #expect(colored.kind == 0)
+        #expect(colored.flags == 0x003F)
+        #expect(colored.pathHash == 0x12345678)
+        #expect(colored.tintColor == Color(.sRGB, red: 0x7A / 255.0, green: 0xA2 / 255.0, blue: 0xF7 / 255.0))
+        #expect(colored.icon == "file-code")
+        #expect(colored.label == "first.ex")
+        #expect(colored.path == "/tmp/first.ex")
+        #expect(colored.isDirty)
+        #expect(colored.hasAttention)
+        #expect(colored.isDraft)
+        #expect(colored.isDraftElsewhere)
+        #expect(colored.hasConflict)
+        #expect(colored.isPinned)
+        #expect(snapshot.visibleTabs[1].tintColor == nil)
+        #expect(snapshot.visibleTabs[1].isEphemeral)
+    }
+
+    @Test("owners install shared values but retain canonical-payload semantics")
+    @MainActor func ownersRetainPresentationBehavior() {
+        let snapshot = WorkspacePresentationSnapshot(version: 0, activeWorkspaceId: 0, mode: 2, flags: 3, workspaces: [], visibleTabs: [])
+        let workspaceState = WorkspaceState()
+        let tabBarState = TabBarState()
+
+        workspaceState.install(snapshot)
+        tabBarState.install(snapshot)
+
+        #expect(workspaceState.activeWorkspaceId == tabBarState.activeWorkspaceId)
+        #expect(workspaceState.viewMode == tabBarState.workspaceMode)
+        #expect(workspaceState.flags == tabBarState.workspaceFlags)
+        #expect(workspaceState.workspaces.isEmpty)
+        #expect(tabBarState.workspaces.isEmpty)
+        #expect(workspaceState.visibleTabs.isEmpty)
+        #expect(tabBarState.workspaceTabs.isEmpty)
+        #expect(!workspaceState.hasCanonicalPayload)
+        #expect(tabBarState.hasCanonicalWorkspaceTabs)
+    }
+}
+
 // MARK: - PickerItem
 
 @Suite("PickerItem Computed Properties")

@@ -259,7 +259,7 @@ public struct TabBarView: View {
     // MARK: - Collapsed workspace capsule
 
     @ViewBuilder
-    private func collapsedWorkspaceCapsule(_ workspace: WorkspaceEntry) -> some View {
+    private func collapsedWorkspaceCapsule(_ workspace: WorkspacePresentationEntry) -> some View {
         let color = workspace.color
 
         Button(action: {
@@ -302,7 +302,7 @@ public struct TabBarView: View {
     }
 
     @MainActor
-    private func workspaceGotoCommand(for workspace: WorkspaceEntry) -> String {
+    private func workspaceGotoCommand(for workspace: WorkspacePresentationEntry) -> String {
         "workspace_goto_id:\(workspace.id)"
     }
 

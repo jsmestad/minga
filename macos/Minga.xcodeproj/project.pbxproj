@@ -360,6 +360,7 @@
 		DF3B2A645C089F616B9DBD1B /* ProtocolEncoderDisconnectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19D226D16EF96375868F716D /* ProtocolEncoderDisconnectTests.swift */; };
 		DF3C7F2962B4563C54D82C8C /* PreviewSnapshotPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100F1DE1D6A8C5A2065AC582 /* PreviewSnapshotPolicyTests.swift */; };
 		DF498FA4A0E14A495D35773F /* FrameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D59D9EEB390C8DF351D595 /* FrameState.swift */; };
+		DFD75ED2D5B509E45D538AA2 /* WorkspacePresentationSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6116DF8895FE551CD46040E /* WorkspacePresentationSnapshot.swift */; };
 		E0F2C0021D714788A404E845 /* PresentationScrollAnimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29556A488CB8DABE4F7DBC51 /* PresentationScrollAnimator.swift */; };
 		E139B8F9FCA100EBDDC042AB /* ExtensionOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD9302C5E00767815DD10A7 /* ExtensionOverlayView.swift */; };
 		E1601C8BE90E7A7CB8F7F5DA /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953A62EE436C9B1F73B97D07 /* ResyncState.swift */; };
@@ -694,6 +695,7 @@
 		B4867C8EE01AF6ACFB27DB7C /* MessagesContentStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentStateTests.swift; sourceTree = "<group>"; };
 		B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerThermalPolicy.swift; sourceTree = "<group>"; };
 		B59BD32DD25D2C6C5A90D898 /* WorkspaceIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceIndicatorView.swift; sourceTree = "<group>"; };
+		B6116DF8895FE551CD46040E /* WorkspacePresentationSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePresentationSnapshot.swift; sourceTree = "<group>"; };
 		B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolSemanticDecode.generated.swift; sourceTree = "<group>"; };
 		B6F41F2EB3E50F072FC68B88 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		B7DCE12924B5A58CA615BA58 /* MinibufferState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinibufferState.swift; sourceTree = "<group>"; };
@@ -1167,6 +1169,7 @@
 				D0D4C9BE8CA9DC30BCE6ED49 /* WorkspaceHeaderView.swift */,
 				671A222860B90E08D7975099 /* WorkspaceIconPicker.swift */,
 				B59BD32DD25D2C6C5A90D898 /* WorkspaceIndicatorView.swift */,
+				B6116DF8895FE551CD46040E /* WorkspacePresentationSnapshot.swift */,
 				D1EC68F918782FE2FCDB2413 /* WorkspaceState.swift */,
 			);
 			path = EditorChrome;
@@ -1915,6 +1918,7 @@
 				172D7B7EC516CC0CA76797AC /* WorkspaceHeaderView.swift in Sources */,
 				4A3BE630EECDBD2A557A4027 /* WorkspaceIconPicker.swift in Sources */,
 				A23A42248D022DE42E122D0B /* WorkspaceIndicatorView.swift in Sources */,
+				DFD75ED2D5B509E45D538AA2 /* WorkspacePresentationSnapshot.swift in Sources */,
 				DB4EE4C9D35A3CCEA80442D6 /* WorkspaceState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
