@@ -490,6 +490,12 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert_received {:minga_input, {:request_keyframe, 0, 1}}
       assert Agent.get(attempts, & &1) == 1
 
+      send(pid, {:retry_frontend_output, retry_token})
+      _state = :sys.get_state(pid)
+
+      refute_received {:minga_input, {:request_keyframe, _, _}}
+      assert Agent.get(attempts, & &1) == 1
+
       pressure = Manager.output_pressure(name)
       assert pressure.minimum_ack_generation == 2
       assert pressure.total_retained_bytes == 0

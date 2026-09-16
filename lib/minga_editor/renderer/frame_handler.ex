@@ -55,8 +55,6 @@ defmodule MingaEditor.Renderer.FrameHandler do
   def dispatch({:frame_ack_timeout, generation, seq}, state),
     do: MingaEditor.Renderer.AckHandler.timeout(state, generation, seq)
 
-  def dispatch(:request_recovery, state), do: MingaEditor.Renderer.RecoveryHandler.request(state)
-
   def dispatch({:DOWN, ref, :process, buffer, _reason}, state) do
     {state, _matched?} = State.drop_buffer_down(state, ref, buffer)
     {:noreply, state}

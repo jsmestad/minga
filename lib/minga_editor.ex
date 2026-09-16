@@ -934,7 +934,12 @@ defmodule MingaEditor do
       "Frontend requested recovery from frame #{last_good_frame_seq} generation #{failed_generation}"
     )
 
-    MingaEditor.Renderer.Server.request_recovery(renderer)
+    MingaEditor.Renderer.Server.request_recovery(
+      renderer,
+      failed_generation,
+      last_good_frame_seq
+    )
+
     {:noreply, state}
   end
 
