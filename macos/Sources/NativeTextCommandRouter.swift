@@ -33,34 +33,41 @@ enum NativeTextCommandRouter {
     static func handles(_ responder: NSResponder?) -> Bool {
         responder is NSTextView
     }
+
+    static func isAvailable(
+        _ command: Command,
+        to responder: NSResponder?,
+        target: (Selector, NSResponder) -> Any?
+    ) -> Bool {
+        guard let textView = responder as? NSTextView else { return false }
+        switch command {
+        case .undo:
+            return textView.undoManager?.canUndo ?? false
+        case .redo:
+            return textView.undoManager?.canRedo ?? false
+        case .cut, .copy, .paste, .selectAll:
+            break
+        }
+        guard let target = target(command.selector, textView) else { return false }
+        let menuItem = NSMenuItem(title: "", action: command.selector, keyEquivalent: "")
+        if let validator = target as? NSMenuItemValidation {
+            return validator.validateMenuItem(menuItem)
+        }
+        if let validator = target as? NSUserInterfaceValidations {
+            return validator.validateUserInterfaceItem(menuItem)
+        }
+        return true
+    }
 }
 
-/// Routes native Undo and Redo menu actions to the focused field editor or the BEAM-owned editor history.
+/// Routes standard Edit menu actions to the focused native field editor or one BEAM-owned editor fallback.
 @MainActor
-enum NativeMenuHistoryRouter {
-    enum Command {
-        case undo
-        case redo
-
-        var nativeCommand: NativeTextCommandRouter.Command {
-            switch self {
-            case .undo: .undo
-            case .redo: .redo
-            }
-        }
-
-        var semanticCommandName: String {
-            switch self {
-            case .undo: "undo"
-            case .redo: "redo"
-            }
-        }
-    }
-
+enum NativeMenuTextRouter {
     static func perform(
-        _ command: Command,
+        _ command: NativeTextCommandRouter.Command,
         encoder: InputEncoder?,
-        application: NSApplication = NSApp
+        application: NSApplication = NSApp,
+        fallback: (InputEncoder) -> Void
     ) {
         route(
             command,
@@ -68,19 +75,49 @@ enum NativeMenuHistoryRouter {
             responder: application.keyWindow?.firstResponder
         ) { selector, target in
             application.sendAction(selector, to: target, from: nil)
+        } fallback: {
+            fallback($0)
+        }
+    }
+
+    static func isAvailable(
+        _ command: NativeTextCommandRouter.Command,
+        encoder: InputEncoder?,
+        application: NSApplication = NSApp
+    ) -> Bool {
+        isAvailable(
+            command,
+            encoder: encoder,
+            responder: application.keyWindow?.firstResponder
+        ) { selector, responder in
+            application.target(forAction: selector, to: responder, from: nil)
         }
     }
 
     static func route(
-        _ command: Command,
+        _ command: NativeTextCommandRouter.Command,
         encoder: InputEncoder?,
         responder: NSResponder?,
-        sendNative: (Selector, NSResponder) -> Bool
+        sendNative: (Selector, NSResponder) -> Bool,
+        fallback: (InputEncoder) -> Void
     ) {
         if NativeTextCommandRouter.handles(responder) {
-            _ = NativeTextCommandRouter.route(command.nativeCommand, to: responder, send: sendNative)
+            _ = NativeTextCommandRouter.route(command, to: responder, send: sendNative)
             return
         }
-        encoder?.sendExecuteCommand(name: command.semanticCommandName)
+        guard let encoder else { return }
+        fallback(encoder)
+    }
+
+    static func isAvailable(
+        _ command: NativeTextCommandRouter.Command,
+        encoder: InputEncoder?,
+        responder: NSResponder?,
+        target: (Selector, NSResponder) -> Any?
+    ) -> Bool {
+        if NativeTextCommandRouter.handles(responder) {
+            return NativeTextCommandRouter.isAvailable(command, to: responder, target: target)
+        }
+        return encoder != nil
     }
 }
