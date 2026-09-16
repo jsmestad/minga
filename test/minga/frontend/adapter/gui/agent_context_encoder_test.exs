@@ -11,14 +11,13 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
   @op_gui_agent_context Minga.Protocol.Opcodes.gui_agent_context()
 
   describe "encode/2" do
-    test "encodes hidden agent context" do
+    test "encodes hidden agent context with a canonical zero timestamp" do
       model = %AgentContext{visible: false}
       caches = Caches.new()
 
       {cmd, _caches} = AgentContextEncoder.encode(model, caches)
 
-      assert <<@op_gui_agent_context, payload_len::16, payload::binary-size(payload_len)>> = cmd
-      assert <<0::8, 0::16, _ts::64, 0::8, 0::8>> = payload
+      assert cmd == <<@op_gui_agent_context, 13::16, 0::8, 0::16, 0::64, 0::8, 0::8>>
     end
 
     test "encodes visible agent context" do

@@ -28,7 +28,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoder do
       Writer.new(@command)
       |> Writer.uint8(:visible, 0)
       |> Writer.string16(:task, "")
-      |> Writer.uint64(:dispatch_timestamp, DateTime.to_unix(DateTime.utc_now()))
+      |> Writer.uint64(:dispatch_timestamp, 0)
       |> Writer.uint8(:status, 0)
       |> Writer.uint8(:can_approve, 0)
       |> Writer.finish()
