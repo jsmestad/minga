@@ -317,6 +317,135 @@ defmodule MingaAgent.SessionRecoveryTest do
     refute_receive {:crashable_provider_started, _provider4}, 50
   end
 
+  test "the running lifecycle owns the provider's only Session monitor" do
+    {:ok, session} =
+      Session.start_link(
+        provider: CrashableProvider,
+        provider_opts: [test_pid: self()],
+        provider_restart_backoff_base_ms: 30_000,
+        provider_restart_backoff_max_ms: 30_000
+      )
+
+    on_exit(fn -> Process.exit(session, :kill) end)
+
+    assert_receive {:crashable_provider_started, provider}, 1_000
+    state = await_provider_startup(session)
+    monitor_ref = ProviderLifecycle.monitor_ref(state.provider)
+
+    assert is_reference(monitor_ref)
+    assert ProviderLifecycle.pid(state.provider) == provider
+    assert {:monitors, monitors} = Process.info(session, :monitors)
+    assert Enum.count(monitors, &(&1 == {:process, provider})) == 1
+  end
+
+  test "a provider PID with the wrong monitor reference cannot change provider or subscriber ownership" do
+    {:ok, session} =
+      Session.start_link(
+        provider: CrashableProvider,
+        provider_opts: [test_pid: self()],
+        provider_restart_backoff_base_ms: 30_000,
+        provider_restart_backoff_max_ms: 30_000
+      )
+
+    on_exit(fn -> Process.exit(session, :kill) end)
+
+    assert :ok = Session.subscribe(session)
+    assert_receive {:crashable_provider_started, provider}, 1_000
+    original = await_provider_startup(session).provider
+    original_ref = ProviderLifecycle.monitor_ref(original)
+
+    send(session, {:DOWN, make_ref(), :process, provider, :forged})
+    assert Session.get_provider(session) == provider
+
+    settled = await_provider_startup(session).provider
+    assert ProviderLifecycle.monitor_ref(settled) == original_ref
+    assert ProviderLifecycle.retry_attempts(settled) == 0
+    assert Session.subscriber_role(session, self()) == :driver
+  end
+
+  test "a stale provider notification cannot stop its replacement or spend another retry" do
+    {:ok, session} =
+      Session.start_link(
+        provider: CrashableProvider,
+        provider_opts: [test_pid: self()],
+        provider_restart_backoff_base_ms: 1,
+        provider_restart_backoff_max_ms: 1
+      )
+
+    on_exit(fn -> Process.exit(session, :kill) end)
+
+    assert :ok = Session.subscribe(session)
+    assert_receive {:crashable_provider_started, old_provider}, 1_000
+    old_lifecycle = await_provider_startup(session).provider
+    old_ref = ProviderLifecycle.monitor_ref(old_lifecycle)
+
+    Process.exit(old_provider, :kill)
+    assert_receive {:crashable_provider_started, replacement}, 1_000
+    replacement_lifecycle = await_provider_startup(session).provider
+    replacement_ref = ProviderLifecycle.monitor_ref(replacement_lifecycle)
+
+    send(session, {:DOWN, old_ref, :process, old_provider, :late})
+    assert Session.get_provider(session) == replacement
+
+    settled = await_provider_startup(session).provider
+    assert ProviderLifecycle.monitor_ref(settled) == replacement_ref
+    assert ProviderLifecycle.retry_attempts(settled) == 1
+    assert Session.subscriber_role(session, self()) == :driver
+  end
+
+  for notification_order <- [:exit_first, :down_first] do
+    test "linked startup notifications are handled once when #{notification_order}", %{} do
+      order = unquote(notification_order)
+
+      {:ok, session} =
+        Session.start_link(
+          provider: CrashableProvider,
+          provider_opts: [test_pid: self()],
+          provider_restart_backoff_base_ms: 30_000,
+          provider_restart_backoff_max_ms: 30_000
+        )
+
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      assert_receive {:crashable_provider_started, provider}, 1_000
+      lifecycle = await_provider_startup(session).provider
+      provider_ref = ProviderLifecycle.monitor_ref(lifecycle)
+      test_ref = Process.monitor(provider)
+
+      :ok = :sys.suspend(session)
+      queue_provider_death_notifications(order, session, provider, test_ref)
+
+      :ok = :sys.resume(session)
+      assert Session.get_provider(session) == nil
+
+      state = await_provider_startup(session)
+      assert ProviderLifecycle.phase(state.provider) == :retrying
+      assert ProviderLifecycle.retry_attempts(state.provider) == 1
+
+      assert {:messages, messages} = Process.info(session, :messages)
+
+      refute Enum.any?(messages, fn
+               {:DOWN, ^provider_ref, :process, ^provider, _reason} -> true
+               {:EXIT, ^provider, _reason} -> true
+               _message -> false
+             end)
+    end
+  end
+
+  defp queue_provider_death_notifications(:exit_first, session, provider, test_ref) do
+    send(session, {:EXIT, provider, :startup_crash})
+    Process.exit(provider, :kill)
+    assert_receive {:DOWN, ^test_ref, :process, ^provider, :killed}
+    :ok
+  end
+
+  defp queue_provider_death_notifications(:down_first, session, provider, test_ref) do
+    Process.exit(provider, :kill)
+    assert_receive {:DOWN, ^test_ref, :process, ^provider, :killed}
+    send(session, {:EXIT, provider, :startup_crash})
+    :ok
+  end
+
   test "restart_provider/1 recovers manually after automatic start retries are exhausted" do
     {:ok, tracker} = Agent.start_link(fn -> %{attempts: 0, failures_remaining: :always} end)
 

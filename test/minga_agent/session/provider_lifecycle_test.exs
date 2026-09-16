@@ -4,18 +4,17 @@ defmodule MingaAgent.Session.ProviderLifecycleTest do
   alias Minga.Extension.CodeLease
   alias MingaAgent.Session.ProviderLifecycle
 
-  test "normal lifecycle starts, attaches, replaces configuration, and stops" do
+  test "normal lifecycle keeps provider identity, monitor, lease, and retry state together" do
     lease = lease()
+    monitor_ref = make_ref()
     lifecycle = lifecycle(lease: lease)
 
-    assert {:start, starting, []} = ProviderLifecycle.start(lifecycle)
-    assert ProviderLifecycle.phase(starting) == :starting
-    assert ProviderLifecycle.pid(starting) == nil
-
-    {running, []} = ProviderLifecycle.attach(starting, self())
+    assert {:start, starting, nil} = ProviderLifecycle.start(lifecycle)
+    assert {:ok, running} = ProviderLifecycle.attach(starting, self(), monitor_ref)
 
     assert ProviderLifecycle.phase(running) == :running
     assert ProviderLifecycle.pid(running) == self()
+    assert ProviderLifecycle.monitor_ref(running) == monitor_ref
     assert ProviderLifecycle.lease(running) == lease
 
     replaced =
@@ -27,126 +26,163 @@ defmodule MingaAgent.Session.ProviderLifecycleTest do
         provider: "openai"
       )
 
-    assert ProviderLifecycle.phase(replaced) == :running
     assert ProviderLifecycle.pid(replaced) == self()
+    assert ProviderLifecycle.monitor_ref(replaced) == monitor_ref
     assert ProviderLifecycle.lease(replaced) == lease
     assert replaced.model_name == "openai:gpt-5"
     assert replaced.provider_name == "openai"
     assert replaced.opts[:model] == "openai:gpt-5"
 
-    {stopped, effects} = ProviderLifecycle.stop(replaced)
-    assert effects == [{:stop_provider, self()}, {:release_lease, lease}]
+    assert {:stop_provider, stopped, pid, ^monitor_ref, ^lease} =
+             ProviderLifecycle.stop(replaced)
 
-    assert ProviderLifecycle.phase(stopped) == :stopped
-    assert ProviderLifecycle.pid(stopped) == nil
-    assert ProviderLifecycle.lease(stopped) == nil
-    assert ProviderLifecycle.retry_attempts(stopped) == 0
-    assert ProviderLifecycle.retry_timer(stopped) == nil
-    assert ProviderLifecycle.failure_reason(stopped) == nil
+    assert pid == self()
+    assert_stopped(stopped)
   end
 
-  test "start returns the active lifecycle when a provider is already attached" do
-    {running, []} = ProviderLifecycle.attach(lifecycle(), self())
+  test "start is exhaustive and returns only a retry timer that must be cancelled" do
+    phases = lifecycle_phases()
+    running = phases.running
+    retrying = phases.retrying
 
-    assert {:active, ^running, []} = ProviderLifecycle.start(running)
+    assert {:active, ^running} = ProviderLifecycle.start(running)
+    assert {:start, _starting, {timer_ref, token}} = ProviderLifecycle.start(retrying)
+    assert {timer_ref, token} == ProviderLifecycle.retry_timer(retrying)
+
+    for {_name, lifecycle} <- Map.drop(phases, [:running, :retrying]) do
+      assert {:start, starting, nil} = ProviderLifecycle.start(lifecycle)
+      assert ProviderLifecycle.phase(starting) == :starting
+    end
   end
 
-  test "a lease acquired during startup becomes lifecycle-owned before attachment" do
-    assert {:start, starting, []} = ProviderLifecycle.start(lifecycle())
+  test "lease installation and provider attachment accept only the starting phase" do
+    phases = lifecycle_phases()
     lease = lease()
 
-    assert {:ok, leased} = ProviderLifecycle.install_lease(starting, lease)
+    assert {:ok, leased} = ProviderLifecycle.install_lease(phases.starting, lease)
     assert ProviderLifecycle.lease(leased) == lease
 
-    assert {running, []} = ProviderLifecycle.attach(leased, self())
-    assert ProviderLifecycle.lease(running) == lease
+    monitor_ref = make_ref()
+    assert {:ok, running} = ProviderLifecycle.attach(leased, self(), monitor_ref)
+    assert ProviderLifecycle.monitor_ref(running) == monitor_ref
+
+    for {_name, lifecycle} <- Map.drop(phases, [:starting]) do
+      assert {:invalid_phase, ^lifecycle} = ProviderLifecycle.install_lease(lifecycle, lease)
+
+      assert {:invalid_phase, ^lifecycle} =
+               ProviderLifecycle.attach(lifecycle, self(), make_ref())
+    end
   end
 
-  test "failure and retry transitions back off until terminal exhaustion" do
-    {failed, []} = ProviderLifecycle.failure(lifecycle(), :crashed)
+  test "failure accepts startup and running phases and rejects every detached phase" do
+    phases = lifecycle_phases()
 
-    assert ProviderLifecycle.phase(failed) == :stopped
-    assert ProviderLifecycle.pid(failed) == nil
-    assert ProviderLifecycle.lease(failed) == nil
-    assert ProviderLifecycle.failure_reason(failed) == :crashed
+    for name <- [:starting, :running] do
+      lifecycle = Map.fetch!(phases, name)
+      expected_lease = ProviderLifecycle.lease(lifecycle)
 
-    assert {:retry, first_retry, 10, []} = ProviderLifecycle.retry(failed, :crashed, 1_000)
-    assert ProviderLifecycle.phase(first_retry) == :retrying
+      assert {:failed, failed, ^expected_lease} = ProviderLifecycle.failure(lifecycle, :crashed)
+      assert ProviderLifecycle.phase(failed) == :stopped
+      assert ProviderLifecycle.failure_reason(failed) == :crashed
+      assert ProviderLifecycle.lease(failed) == nil
+    end
+
+    for name <- [:stopped, :retrying, :terminal_failure] do
+      lifecycle = Map.fetch!(phases, name)
+      assert {:invalid_phase, ^lifecycle} = ProviderLifecycle.failure(lifecycle, :crashed)
+    end
+  end
+
+  test "retry backoff advances only from stopped and exhausts at the configured cap" do
+    phases = lifecycle_phases()
+    stopped = failed_starting(phases.starting, :first)
+
+    assert {:retry, first_retry, 10} = ProviderLifecycle.retry(stopped, :first, 1_000)
     assert ProviderLifecycle.retry_attempts(first_retry) == 1
     assert ProviderLifecycle.retry_window_started_at_ms(first_retry) == 1_000
 
-    timer_ref = make_ref()
-    token = make_ref()
-    {:ok, waiting} = ProviderLifecycle.install_retry_timer(first_retry, timer_ref, token)
-
-    assert {:start, _early_start, [{:cancel_timer, ^timer_ref}]} =
-             ProviderLifecycle.start(waiting)
-
-    assert {:stale, ^waiting} = ProviderLifecycle.retry_due(waiting, make_ref())
-    assert {:start, retrying_start} = ProviderLifecycle.retry_due(waiting, token)
-    assert ProviderLifecycle.phase(retrying_start) == :starting
-    assert ProviderLifecycle.retry_timer(retrying_start) == nil
-
-    {failed_again, []} = ProviderLifecycle.failure(retrying_start, :still_crashed)
-
-    assert {:retry, second_retry, 20, []} =
-             ProviderLifecycle.retry(failed_again, :still_crashed, 1_050)
-
+    starting_again = retry_due(first_retry)
+    stopped_again = failed_starting(starting_again, :second)
+    assert {:retry, second_retry, 20} = ProviderLifecycle.retry(stopped_again, :second, 1_050)
     assert ProviderLifecycle.retry_attempts(second_retry) == 2
 
-    {failed_last, []} = ProviderLifecycle.failure(second_retry, :permanent)
+    starting_last = retry_due(second_retry)
+    stopped_last = failed_starting(starting_last, :permanent)
 
-    assert {:terminal_failure, terminal, []} =
-             ProviderLifecycle.retry(failed_last, :permanent, 1_075)
+    assert {:terminal_failure, terminal} =
+             ProviderLifecycle.retry(stopped_last, :permanent, 1_075)
 
     assert ProviderLifecycle.terminal_failure?(terminal)
     assert ProviderLifecycle.failure_reason(terminal) == :permanent
-    assert ProviderLifecycle.retry_timer(terminal) == nil
 
-    {reset, []} = ProviderLifecycle.reset_retry(terminal)
-
-    refute ProviderLifecycle.terminal_failure?(reset)
-    assert ProviderLifecycle.phase(reset) == :stopped
-    assert ProviderLifecycle.retry_attempts(reset) == 0
-    assert ProviderLifecycle.retry_window_started_at_ms(reset) == nil
-    assert ProviderLifecycle.failure_reason(reset) == nil
-  end
-
-  test "retry reset preserves a lease acquired before provider startup" do
-    lease = lease()
-    lifecycle = lifecycle(lease: lease)
-
-    {reset, []} = ProviderLifecycle.reset_retry(lifecycle)
-
-    assert ProviderLifecycle.phase(reset) == :stopped
-    assert ProviderLifecycle.pid(reset) == nil
-    assert ProviderLifecycle.lease(reset) == lease
-
-    assert {:start, starting, []} = ProviderLifecycle.start(reset)
-    assert ProviderLifecycle.lease(starting) == lease
+    for name <- [:starting, :running, :retrying, :terminal_failure] do
+      lifecycle = Map.fetch!(phases, name)
+      assert {:invalid_phase, ^lifecycle} = ProviderLifecycle.retry(lifecycle, :failure, 1_000)
+    end
   end
 
   test "retry count restarts when the backoff window expires" do
-    {failed, []} = ProviderLifecycle.failure(lifecycle(), :first)
-    assert {:retry, first_retry, 10, []} = ProviderLifecycle.retry(failed, :first, 1_000)
+    {:start, starting, nil} = ProviderLifecycle.start(lifecycle())
+    stopped = failed_starting(starting, :first)
+    assert {:retry, first_retry, 10} = ProviderLifecycle.retry(stopped, :first, 1_000)
 
-    {failed_after_window, []} = ProviderLifecycle.failure(first_retry, :later)
+    stopped_later = first_retry |> retry_due() |> failed_starting(:later)
 
-    assert {:retry, reset_retry, 10, []} =
-             ProviderLifecycle.retry(failed_after_window, :later, 2_001)
+    assert {:retry, reset_retry, 10} =
+             ProviderLifecycle.retry(stopped_later, :later, 2_001)
 
     assert ProviderLifecycle.retry_attempts(reset_retry) == 1
     assert ProviderLifecycle.retry_window_started_at_ms(reset_retry) == 2_001
   end
 
-  test "failure, replacement, and stop are exhaustive across lifecycle phases" do
+  test "retry timer installation and token consumption reject invalid and stale inputs" do
     phases = lifecycle_phases()
+    timer_ref = make_ref()
+    token = make_ref()
 
-    Enum.each(phases, fn lifecycle ->
-      {failed, _effects} = ProviderLifecycle.failure(lifecycle, :failure)
-      assert ProviderLifecycle.phase(failed) == :stopped
-      assert ProviderLifecycle.failure_reason(failed) == :failure
+    assert {:ok, waiting} =
+             ProviderLifecycle.install_retry_timer(phases.retrying, timer_ref, token)
 
+    assert {:stale, ^waiting} = ProviderLifecycle.retry_due(waiting, make_ref())
+    assert {:start, starting} = ProviderLifecycle.retry_due(waiting, token)
+    assert ProviderLifecycle.phase(starting) == :starting
+    assert ProviderLifecycle.retry_timer(starting) == nil
+
+    for {_name, lifecycle} <- Map.drop(phases, [:retrying]) do
+      assert {:invalid_phase, ^lifecycle} =
+               ProviderLifecycle.install_retry_timer(lifecycle, make_ref(), make_ref())
+
+      assert {:stale, ^lifecycle} = ProviderLifecycle.retry_due(lifecycle, make_ref())
+    end
+  end
+
+  test "retry reset is exhaustive, preserves a running attachment, and exposes timer cancellation" do
+    phases = lifecycle_phases()
+    running = phases.running
+
+    assert {:reset, reset_running, nil} = ProviderLifecycle.reset_retry(running)
+    assert ProviderLifecycle.pid(reset_running) == ProviderLifecycle.pid(running)
+    assert ProviderLifecycle.monitor_ref(reset_running) == ProviderLifecycle.monitor_ref(running)
+    assert ProviderLifecycle.lease(reset_running) == ProviderLifecycle.lease(running)
+
+    assert {:reset, reset_retrying, retry_timer} = ProviderLifecycle.reset_retry(phases.retrying)
+    assert retry_timer == ProviderLifecycle.retry_timer(phases.retrying)
+    assert_stopped(reset_retrying)
+
+    for name <- [:stopped, :starting, :terminal_failure] do
+      lifecycle = Map.fetch!(phases, name)
+      expected_lease = ProviderLifecycle.lease(lifecycle)
+
+      assert {:reset, reset, nil} = ProviderLifecycle.reset_retry(lifecycle)
+      assert ProviderLifecycle.phase(reset) == :stopped
+      assert ProviderLifecycle.lease(reset) == expected_lease
+      assert ProviderLifecycle.retry_attempts(reset) == 0
+      assert ProviderLifecycle.failure_reason(reset) == nil
+    end
+  end
+
+  test "replace and stop are exhaustive across every phase" do
+    for {name, lifecycle} <- lifecycle_phases() do
       replaced =
         ProviderLifecycle.replace(lifecycle, "new-model", "new-provider", model: "new-model")
 
@@ -154,13 +190,39 @@ defmodule MingaAgent.Session.ProviderLifecycleTest do
       assert replaced.model_name == "new-model"
       assert replaced.provider_name == "new-provider"
 
-      {stopped, _effects} = ProviderLifecycle.stop(lifecycle)
-      assert ProviderLifecycle.phase(stopped) == :stopped
-      assert ProviderLifecycle.pid(stopped) == nil
-      assert ProviderLifecycle.lease(stopped) == nil
-      assert ProviderLifecycle.retry_timer(stopped) == nil
-      assert ProviderLifecycle.failure_reason(stopped) == nil
-    end)
+      case {name, ProviderLifecycle.stop(lifecycle)} do
+        {:running, {:stop_provider, stopped, pid, monitor_ref, lease}} ->
+          assert pid == ProviderLifecycle.pid(lifecycle)
+          assert monitor_ref == ProviderLifecycle.monitor_ref(lifecycle)
+          assert lease == ProviderLifecycle.lease(lifecycle)
+          assert_stopped(stopped)
+
+        {_detached, {:stop_detached, stopped, lease, retry_timer}} ->
+          assert lease == ProviderLifecycle.lease(lifecycle)
+          assert retry_timer == ProviderLifecycle.retry_timer(lifecycle)
+          assert_stopped(stopped)
+      end
+    end
+  end
+
+  test "Session has one provider monitor path and no generic lifecycle effect interpreter" do
+    session_source = File.read!("lib/minga_agent/session.ex")
+    lifecycle_source = File.read!("lib/minga_agent/session/provider_lifecycle.ex")
+
+    monitor_paths =
+      Regex.scan(
+        ~r/defp attach_provider\(state, pid\).*?Process\.monitor\(pid\)/s,
+        session_source
+      )
+
+    assert [_provider_monitor_path] = monitor_paths
+
+    assert session_source =~ "ProviderLifecycle.attach(state.provider, pid, monitor_ref)"
+    refute session_source =~ ~r/defp await_provider_stop.*?Process\.monitor/s
+    refute session_source =~ "perform_provider_effect"
+    refute session_source =~ "install_provider_transition"
+    refute lifecycle_source =~ "@type effect"
+    refute lifecycle_source =~ "@type effects"
   end
 
   defp lifecycle(overrides \\ []) do
@@ -184,25 +246,49 @@ defmodule MingaAgent.Session.ProviderLifecycleTest do
 
   defp lifecycle_phases do
     initial = lifecycle(lease: lease())
-    {:start, starting, []} = ProviderLifecycle.start(initial)
-    {running, []} = ProviderLifecycle.attach(starting, self())
-    {failed, _effects} = ProviderLifecycle.failure(running, :failure)
-    {:retry, retrying, _delay_ms, []} = ProviderLifecycle.retry(failed, :failure, 1_000)
+    {:start, starting, nil} = ProviderLifecycle.start(initial)
+    {:ok, running} = ProviderLifecycle.attach(starting, self(), make_ref())
+    stopped = failed_starting(starting, :failure)
+    {:retry, retrying, _delay_ms} = ProviderLifecycle.retry(stopped, :failure, 1_000)
+    {:ok, retrying} = ProviderLifecycle.install_retry_timer(retrying, make_ref(), make_ref())
+
+    starting_again = retry_due(retrying)
+    stopped_again = failed_starting(starting_again, :failure)
+    {:retry, retrying_again, _delay_ms} = ProviderLifecycle.retry(stopped_again, :failure, 1_001)
+    starting_last = retry_due(retrying_again)
+    stopped_last = failed_starting(starting_last, :failure)
+    {:terminal_failure, terminal} = ProviderLifecycle.retry(stopped_last, :failure, 1_002)
+
+    %{
+      stopped: initial,
+      starting: starting,
+      running: running,
+      retrying: retrying,
+      terminal_failure: terminal
+    }
+  end
+
+  defp retry_due(retrying) do
     timer_ref = make_ref()
-    {:ok, retrying} = ProviderLifecycle.install_retry_timer(retrying, timer_ref, make_ref())
+    token = make_ref()
+    {:ok, waiting} = ProviderLifecycle.install_retry_timer(retrying, timer_ref, token)
+    {:start, starting} = ProviderLifecycle.retry_due(waiting, token)
+    starting
+  end
 
-    {failed_again, [{:cancel_timer, ^timer_ref}]} =
-      ProviderLifecycle.failure(retrying, :failure)
+  defp failed_starting(starting, reason) do
+    {:failed, stopped, _lease} = ProviderLifecycle.failure(starting, reason)
+    stopped
+  end
 
-    {:retry, retrying_again, _delay_ms, []} =
-      ProviderLifecycle.retry(failed_again, :failure, 1_001)
-
-    {failed_last, []} = ProviderLifecycle.failure(retrying_again, :failure)
-
-    {:terminal_failure, terminal, []} =
-      ProviderLifecycle.retry(failed_last, :failure, 1_002)
-
-    [initial, starting, running, retrying, terminal]
+  defp assert_stopped(lifecycle) do
+    assert ProviderLifecycle.phase(lifecycle) == :stopped
+    assert ProviderLifecycle.pid(lifecycle) == nil
+    assert ProviderLifecycle.monitor_ref(lifecycle) == nil
+    assert ProviderLifecycle.lease(lifecycle) == nil
+    assert ProviderLifecycle.retry_attempts(lifecycle) == 0
+    assert ProviderLifecycle.retry_timer(lifecycle) == nil
+    assert ProviderLifecycle.failure_reason(lifecycle) == nil
   end
 
   defp lease do
