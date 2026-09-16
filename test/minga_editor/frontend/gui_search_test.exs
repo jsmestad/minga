@@ -441,6 +441,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       assert search.query == "foo"
       assert search.case_sensitive
       assert search.replace_mode
+      assert match?({:ready, %Index{}}, search.result)
 
       send_search_action(ctx, {:replace, "bar"})
       assert Buffer.content(ctx.buffer) == "FOO bar"

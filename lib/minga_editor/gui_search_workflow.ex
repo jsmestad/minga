@@ -19,9 +19,11 @@ defmodule MingaEditor.GuiSearchWorkflow do
   @doc "Focuses Find or Replace and admits matching for the active buffer."
   @spec focus(state(), boolean()) :: state()
   def focus(%EditorState{} = state, replace_mode) do
-    state
-    |> put_search(Search.focus_gui_search(state.workspace.search, replace_mode))
-    |> build_for_active_buffer(true)
+    active? = Search.gui_search_active?(state.workspace.search)
+
+    state = put_search(state, Search.focus_gui_search(state.workspace.search, replace_mode))
+
+    if active?, do: state, else: build_for_active_buffer(state, true)
   end
 
   @doc "Accepts one correlated native query/options edit and admits its replacement build."

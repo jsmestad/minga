@@ -64,7 +64,16 @@ defmodule MingaEditor.State.Search.Session do
   end
 
   @spec focus(t(), boolean()) :: t()
-  def focus(%__MODULE__{} = session, replace_mode) do
+  def focus(%__MODULE__{active: true} = session, replace_mode) do
+    %{
+      session
+      | session_id: next_session_id(session.session_id),
+        acknowledged_edit_seq: 0,
+        replace_mode: replace_mode
+    }
+  end
+
+  def focus(%__MODULE__{active: false} = session, replace_mode) do
     %{
       session
       | active: true,

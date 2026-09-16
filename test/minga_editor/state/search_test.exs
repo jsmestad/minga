@@ -35,6 +35,26 @@ defmodule MingaEditor.State.SearchTest do
     assert :stale = Search.ready_gui_index(ready, buffer, {7, 11})
   end
 
+  test "changing an active Find session to Replace preserves its accepted index" do
+    buffer = self()
+    index = Index.build(["foo"], "foo")
+
+    search =
+      %Search{}
+      |> Search.focus_gui_search(false)
+      |> Search.begin_gui_build(buffer)
+
+    revision = search.gui_search.revision
+    assert {:accepted, ready} = Search.accept_gui_index(search, revision, buffer, 7, 10, index)
+
+    replace = Search.focus_gui_search(ready, true)
+
+    assert replace.gui_search.session_id == ready.gui_search.session_id + 1
+    assert replace.gui_search.replace_mode
+    assert replace.gui_search.revision == revision
+    assert {:ok, ^index} = Search.ready_gui_index(replace, buffer, {7, 10})
+  end
+
   test "ready, rebuilding, failed, dismissed, and target-switch projections are distinct" do
     buffer = self()
     other = spawn(fn -> :ok end)
