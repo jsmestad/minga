@@ -529,7 +529,23 @@ public enum NativeRenderPerformanceGate {
         if measurement.maximumInFlightGenerations > maximumInFlightGenerations {
             failures.append("native presentation retained \(measurement.maximumInFlightGenerations) generations; limit is \(maximumInFlightGenerations)")
         }
+        failures.append(contentsOf: transcriptAccountingFailures(measurement))
         return failures
+    }
+
+    /// Returns absolute failures for an odd set of at least three independent measurements.
+    public static func absoluteFailures(
+        measurements: [NativeRenderPerformanceMeasurement]
+    ) -> [String] {
+        guard measurements.count >= 3, measurements.count.isMultiple(of: 2) == false else {
+            return ["native absolute comparison requires an odd count of at least three"]
+        }
+        for measurement in measurements where !validationFailures(measurement).isEmpty {
+            return ["invalid native measurement"]
+        }
+        let transcriptFailures = measurements.flatMap(transcriptAccountingFailures)
+        guard transcriptFailures.isEmpty else { return transcriptFailures }
+        return absoluteFailures(aggregate(measurements))
     }
 
     /// Returns absolute HEAD failures plus the paired end-to-end p50 regression failure.
@@ -561,7 +577,7 @@ public enum NativeRenderPerformanceGate {
             return ["invalid native HEAD measurement"]
         }
 
-        var failures = absoluteFailures(aggregate(headMeasurements))
+        var failures = absoluteFailures(measurements: headMeasurements)
         let ratios = zip(baseMeasurements, headMeasurements).map { base, head in
             head.completionWallP50Ms / base.completionWallP50Ms
         }
@@ -599,10 +615,33 @@ public enum NativeRenderPerformanceGate {
         return failures
     }
 
+    private static func transcriptAccountingFailures(
+        _ measurement: NativeRenderPerformanceMeasurement
+    ) -> [String] {
+        var failures: [String] = []
+        for fixture in measurement.transcriptAccounting ?? [] {
+            if let count = fixture.changedEntriesMeasured, count != 0 {
+                failures.append("\(fixture.fixture) measured changed transcript entries in unrelated frames")
+            }
+            if let count = fixture.unchangedEntriesVisited, count != 0 {
+                failures.append("\(fixture.fixture) visited unchanged transcript entries")
+            }
+            if (fixture.retainedEntriesCopied ?? 0) != 0 || (fixture.retainedUTF8BytesCopied ?? 0) != 0 {
+                failures.append("\(fixture.fixture) copied retained transcript payload")
+            }
+            if let count = fixture.sequenceNodeAllocations, count != 0 {
+                failures.append("\(fixture.fixture) allocated transcript sequence nodes")
+            }
+        }
+        return failures
+    }
+
     private static func aggregate(
         _ measurements: [NativeRenderPerformanceMeasurement]
     ) -> NativeRenderPerformanceMeasurement {
-        NativeRenderPerformanceMeasurement(
+        let copyCompletedFrameCount = Int(median(measurements.map { Double($0.copyCompletedFrameCount) }))
+        let failedOrDiscardedFrameCount = measurements.map(\.failedOrDiscardedFrameCount).max() ?? 0
+        return NativeRenderPerformanceMeasurement(
             freezePublicationP50Ms: median(measurements.map(\.freezePublicationP50Ms)),
             freezePublicationP95Ms: median(measurements.map(\.freezePublicationP95Ms)),
             drawCPUP50Ms: median(measurements.map(\.drawCPUP50Ms)),
@@ -614,9 +653,9 @@ public enum NativeRenderPerformanceGate {
             completionWallP95Ms: median(measurements.map(\.completionWallP95Ms)),
             maximumAllocatedBytesPerFrame: measurements.map(\.maximumAllocatedBytesPerFrame).max() ?? 0,
             allocationCountAfterWarmup: measurements.map(\.allocationCountAfterWarmup).max() ?? 0,
-            attemptedFrameCount: Int(median(measurements.map { Double($0.attemptedFrameCount) })),
-            copyCompletedFrameCount: Int(median(measurements.map { Double($0.copyCompletedFrameCount) })),
-            failedOrDiscardedFrameCount: measurements.map(\.failedOrDiscardedFrameCount).max() ?? 0,
+            attemptedFrameCount: copyCompletedFrameCount + failedOrDiscardedFrameCount,
+            copyCompletedFrameCount: copyCompletedFrameCount,
+            failedOrDiscardedFrameCount: failedOrDiscardedFrameCount,
             maximumInFlightGenerations: measurements.map(\.maximumInFlightGenerations).max() ?? 0
         )
     }

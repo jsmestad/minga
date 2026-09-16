@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -u
+
+status=${1:?measurement status is required}
+output=${2:?measurement output path is required}
+
+if (( status == 0 )); then
+  exit 0
+fi
+
+if (( status == 1 )) && [[ -s "$output" ]]; then
+  exit 0
+fi
+
+exit "$status"

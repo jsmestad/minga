@@ -64,7 +64,7 @@ build_revision() {
 
 measure_revision() {
   local side=$1 pair=$2 source_root=$3 build_dir=$4
-  local output="$work_dir/$side-$pair.json" status=0 revision
+  local output="$work_dir/$side-$pair.json" status=0 result_status=0 revision
   if [[ "$side" == base ]]; then
     revision=$base_sha
   else
@@ -72,12 +72,18 @@ measure_revision() {
   fi
   echo "::group::Measure native Metal benchmark $side pair $pair"
   MINGA_NATIVE_RENDER_ROOT="$source_root" MINGA_BENCHMARK_REVISION="$revision" "$runner" --measure "$build_dir" "$output" 2>&1 | tee -a "$metrics_file" || status=$?
-  if (( status != 0 )); then
+  bash "$repo_root/scripts/check_native_render_measurement_result" "$status" "$output" || result_status=$?
+  if (( result_status != 0 )); then
     find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -name 'minga-native-render-performance*.ips' -mmin -10 -print -exec cp {} "$artifact_dir/" \; -exec cat {} \; 2>/dev/null || true
-    if command -v lldb >/dev/null; then
-      echo "Native benchmark trapped; rerunning once under LLDB for a symbolic backtrace" | tee -a "$metrics_file"
+    if [[ ! -s "$output" ]] && command -v lldb >/dev/null; then
+      echo "Native benchmark produced no measurement; rerunning under LLDB for a symbolic backtrace" | tee -a "$metrics_file"
       lldb --batch -o run -k "thread backtrace all" -- "$build_dir/Build/Products/Release/minga-native-render-performance" --measurement-output "$work_dir/$side-$pair-lldb.json" 2>&1 | tee -a "$metrics_file" || true
     fi
+    echo "::endgroup::"
+    return "$result_status"
+  fi
+  if (( status != 0 )); then
+    echo "Native measurement recorded a budget breach; deferring the decision to the fixed-sample aggregate" | tee -a "$metrics_file"
   fi
   echo "::endgroup::"
   [[ -s "$output" ]] || return 1
@@ -87,10 +93,19 @@ measure_revision() {
     head_runs+=("$output")
     cp "$output" "$head_output"
   fi
-  if [[ "$side" == head && $status -ne 0 ]]; then
-    echo "HEAD native measurement breached an absolute budget" >&2
-    return "$status"
-  fi
+}
+
+run_head_measurements() {
+  local sample
+  for sample in 1 2 3; do
+    measure_revision head "$sample" "$head_source" "$head_build" || return 1
+  done
+}
+
+compare_head_measurements() {
+  local args=() path
+  for path in "${head_runs[@]}"; do args+=(--head "$path"); done
+  MINGA_NATIVE_RENDER_ROOT="$head_source" "$runner" --compare "$head_build" "${args[@]}" 2>&1 | tee -a "$metrics_file"
 }
 
 run_pairs() {
@@ -119,8 +134,9 @@ if ! build_revision "$head_sha" head "$head_source" "$head_build" "MINGA_SNAPSHO
 fi
 
 if (( head_only )); then
-  measure_revision head 1 "$head_source" "$head_build" || exit 1
-  exit 0
+  run_head_measurements || exit 1
+  compare_head_measurements
+  exit $?
 fi
 
 git cat-file -e "$base_sha^{commit}" 2>/dev/null || {
