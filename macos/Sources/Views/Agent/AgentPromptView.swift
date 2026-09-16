@@ -1,5 +1,6 @@
 import SwiftUI
 import MingaProtocol
+import CoreText
 
 public struct AgentPromptView: View {
     public init(state: AgentChatState, isInsertMode: Bool, encoder: InputEncoder? = nil) {
@@ -138,53 +139,32 @@ public struct AgentPromptView: View {
         .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
     }
 
-    /// Monospace character width at the prompt font size, computed from actual font metrics.
-    private var promptCharWidth: CGFloat {
-        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        let size = ("M" as NSString).size(withAttributes: [.font: font])
-        return size.width
-    }
-
     /// Line height for the prompt font, derived from actual font metrics.
     private var promptLineHeight: CGFloat {
-        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let font = AgentPromptLineLayout.font
         return ceil(font.ascender - font.descender + font.leading)
     }
 
-    /// Renders the prompt text with a cursor at the BEAM-reported position.
-    /// Uses monospaced font so cursor positioning aligns with character columns.
+    /// Renders each prompt line and its cursor through one native text layout.
+    /// The BEAM column remains a UTF-8 byte offset until the line resolves it to a glyph boundary.
     @ViewBuilder
     private var promptTextWithCursor: some View {
         let lines = state.prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let cursorLine = Int(state.promptCursorLine)
         let cursorCol = Int(state.promptCursorCol)
         let isBlock = state.promptVimMode == 0 || state.promptVimMode >= 2
-        let charW = promptCharWidth
         let lineH = promptLineHeight
 
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(lines.prefix(8).enumerated()), id: \.offset) { lineIdx, line in
-                ZStack(alignment: .leading) {
-                    Text(line.isEmpty ? " " : line)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(theme.agentTextFg.opacity(isStreaming ? 0.4 : 1.0))
-
-                    if lineIdx == cursorLine && !isStreaming {
-                        let cursorX = CGFloat(cursorCol) * charW
-
-                        if isBlock {
-                            Rectangle()
-                                .fill(theme.agentInputBorder.opacity(0.7))
-                                .frame(width: charW, height: lineH)
-                                .offset(x: cursorX)
-                        } else {
-                            Rectangle()
-                                .fill(theme.agentInputBorder)
-                                .frame(width: 1.5, height: lineH)
-                                .offset(x: cursorX)
-                        }
-                    }
-                }
+                AgentPromptLineView(
+                    text: line,
+                    cursorByteOffset: lineIdx == cursorLine && !isStreaming ? cursorCol : nil,
+                    cursorShape: isBlock ? .block : .beam,
+                    textColor: theme.agentTextFg.opacity(isStreaming ? 0.4 : 1.0),
+                    cursorColor: theme.agentInputBorder.opacity(isBlock ? 0.7 : 1.0)
+                )
+                .frame(height: lineH)
             }
         }
     }
@@ -261,5 +241,163 @@ public struct AgentPromptView: View {
         .padding(.horizontal, 16)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isSlash ? "Slash command completion" : "File mention completion")
+    }
+}
+
+enum AgentPromptCursorShape {
+    case block
+    case beam
+}
+
+struct AgentPromptCaretMetrics {
+    let x: CGFloat
+    let blockWidth: CGFloat
+}
+
+@MainActor struct AgentPromptLineLayout {
+    static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+    let line: CTLine
+    let size: CGSize
+    let baseline: CGFloat
+    let caret: AgentPromptCaretMetrics?
+
+    static func make(text: String, cursorByteOffset: Int?, textColor: NSColor) -> AgentPromptLineLayout {
+        let displayText = text + " "
+        let attributedText = NSAttributedString(string: displayText, attributes: [
+            .font: font,
+            .foregroundColor: textColor
+        ])
+        let line = CTLineCreateWithAttributedString(attributedText)
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        let height = ceil(ascent + descent + leading)
+        let baseline = descent + leading / 2
+        let caret = cursorByteOffset.flatMap { caretMetrics(text: text, displayLine: line, utf8ByteOffset: $0) }
+
+        return AgentPromptLineLayout(
+            line: line,
+            size: CGSize(width: ceil(width), height: height),
+            baseline: baseline,
+            caret: caret
+        )
+    }
+
+    static func caretMetrics(text: String, utf8ByteOffset: Int) -> AgentPromptCaretMetrics? {
+        let displayText = text + " "
+        let attributedText = NSAttributedString(string: displayText, attributes: [.font: font])
+        let line = CTLineCreateWithAttributedString(attributedText)
+        return caretMetrics(text: text, displayLine: line, utf8ByteOffset: utf8ByteOffset)
+    }
+
+    private static func caretMetrics(text: String, displayLine: CTLine, utf8ByteOffset: Int) -> AgentPromptCaretMetrics? {
+        guard let stringIndex = stringIndex(in: text, utf8ByteOffset: utf8ByteOffset) else { return nil }
+        let utf16Offset = stringIndex.utf16Offset(in: text)
+        let nextUTF16Offset: Int
+
+        if stringIndex == text.endIndex {
+            nextUTF16Offset = utf16Offset + 1
+        } else {
+            nextUTF16Offset = text.index(after: stringIndex).utf16Offset(in: text)
+        }
+
+        let x = CTLineGetOffsetForStringIndex(displayLine, utf16Offset, nil)
+        let nextX = CTLineGetOffsetForStringIndex(displayLine, nextUTF16Offset, nil)
+        return AgentPromptCaretMetrics(x: x, blockWidth: max(nextX - x, 1))
+    }
+
+    private static func stringIndex(in text: String, utf8ByteOffset: Int) -> String.Index? {
+        guard utf8ByteOffset >= 0 && utf8ByteOffset <= text.utf8.count else { return nil }
+        let utf8Index = text.utf8.index(text.utf8.startIndex, offsetBy: utf8ByteOffset)
+        return String.Index(utf8Index, within: text)
+    }
+}
+
+private struct AgentPromptLineView: NSViewRepresentable {
+    let text: String
+    let cursorByteOffset: Int?
+    let cursorShape: AgentPromptCursorShape
+    let textColor: Color
+    let cursorColor: Color
+
+    func makeNSView(context: Context) -> AgentPromptLineNSView {
+        let view = AgentPromptLineNSView()
+        update(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: AgentPromptLineNSView, context: Context) {
+        update(nsView)
+    }
+
+    private func update(_ view: AgentPromptLineNSView) {
+        view.update(
+            text: text,
+            cursorByteOffset: cursorByteOffset,
+            cursorShape: cursorShape,
+            textColor: Self.nsColor(textColor),
+            cursorColor: Self.nsColor(cursorColor)
+        )
+    }
+
+    private static func nsColor(_ color: Color) -> NSColor {
+        NSColor(color).usingColorSpace(.sRGB) ?? NSColor(color)
+    }
+}
+
+final class AgentPromptLineNSView: NSView {
+    private(set) var promptLayout = AgentPromptLineLayout.make(text: "", cursorByteOffset: nil, textColor: .textColor)
+    private(set) var cursorShape = AgentPromptCursorShape.beam
+    private(set) var cursorColor = NSColor.controlAccentColor
+
+    override var acceptsFirstResponder: Bool { false }
+    override var intrinsicContentSize: NSSize { promptLayout.size }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(false)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setAccessibilityElement(false)
+    }
+
+    func update(text: String, cursorByteOffset: Int?, cursorShape: AgentPromptCursorShape, textColor: NSColor, cursorColor: NSColor) {
+        promptLayout = AgentPromptLineLayout.make(text: text, cursorByteOffset: cursorByteOffset, textColor: textColor)
+        self.cursorShape = cursorShape
+        self.cursorColor = cursorColor
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    func cursorRect() -> CGRect? {
+        guard let caret = promptLayout.caret else { return nil }
+        let width = cursorShape == .block ? caret.blockWidth : 1.5
+        return CGRect(x: caret.x, y: 0, width: width, height: promptLayout.size.height)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        context.saveGState()
+        if let cursorRect = cursorRect(), cursorShape == .block {
+            context.setFillColor(cursorColor.cgColor)
+            context.fill(cursorRect)
+        }
+        context.textPosition = CGPoint(x: 0, y: promptLayout.baseline)
+        CTLineDraw(promptLayout.line, context)
+        if let cursorRect = cursorRect(), cursorShape == .beam {
+            context.setFillColor(cursorColor.cgColor)
+            context.fill(cursorRect)
+        }
+        context.restoreGState()
     }
 }

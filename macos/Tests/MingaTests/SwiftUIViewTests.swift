@@ -9,7 +9,7 @@
 /// tests verify structure (what views exist, how many items render,
 /// which text appears) without needing Metal, a window, or pixel output.
 
-import MingaUI
+@testable import MingaUI
 import Testing
 import SwiftUI
 import UniformTypeIdentifiers
@@ -1174,6 +1174,76 @@ struct WorkspaceHeaderViewTests {
 }
 
 // MARK: - AgentChatView
+
+@Suite("Agent prompt native caret layout")
+struct AgentPromptCaretLayoutTests {
+    private let accuracy: CGFloat = 0.01
+
+    @Test("UTF-8 byte offsets resolve to native glyph boundaries")
+    @MainActor func unicodeGlyphBoundaries() throws {
+        let samples = [
+            "hello",
+            "café",
+            "é",
+            "👩‍💻",
+            "漢字",
+            "a\tb"
+        ]
+
+        for text in samples {
+            let caret = try #require(AgentPromptLineLayout.caretMetrics(text: text, utf8ByteOffset: text.utf8.count))
+            #expect(caret.x > 0)
+            #expect(caret.blockWidth > 0)
+        }
+
+        let ascii = try #require(AgentPromptLineLayout.caretMetrics(text: "M", utf8ByteOffset: 1))
+        let accented = try #require(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 2))
+        let decomposed = try #require(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 3))
+        #expect(abs(accented.x - ascii.x) < accuracy)
+        #expect(abs(decomposed.x - ascii.x) < accuracy)
+
+        let tab = try #require(AgentPromptLineLayout.caretMetrics(text: "\t", utf8ByteOffset: 1))
+        #expect(tab.x > ascii.x)
+    }
+
+    @Test("empty and end-of-line positions retain a measurable block cell")
+    @MainActor func endOfLineMetrics() throws {
+        let empty = try #require(AgentPromptLineLayout.caretMetrics(text: "", utf8ByteOffset: 0))
+        let end = try #require(AgentPromptLineLayout.caretMetrics(text: "abc", utf8ByteOffset: 3))
+
+        #expect(empty.x == 0)
+        #expect(empty.blockWidth > 0)
+        #expect(end.x > 0)
+        #expect(abs(end.blockWidth - empty.blockWidth) < accuracy)
+    }
+
+    @Test("malformed and out-of-range byte positions do not produce a cursor")
+    @MainActor func invalidOffsets() {
+        #expect(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 1) == nil)
+        #expect(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 1) == nil)
+        #expect(AgentPromptLineLayout.caretMetrics(text: "abc", utf8ByteOffset: -1) == nil)
+        #expect(AgentPromptLineLayout.caretMetrics(text: "abc", utf8ByteOffset: 4) == nil)
+    }
+
+    @Test("native prompt renderer uses measured block and beam shapes")
+    @MainActor func cursorShapesAndInvalidUpdate() throws {
+        let view = AgentPromptLineNSView()
+        view.update(text: "👩‍💻x", cursorByteOffset: "👩‍💻".utf8.count, cursorShape: .block, textColor: .white, cursorColor: .red)
+        let measuredBlockWidth = try #require(view.promptLayout.caret?.blockWidth)
+        let blockRect = try #require(view.cursorRect())
+        #expect(abs(blockRect.width - measuredBlockWidth) < accuracy)
+
+        view.update(text: "👩‍💻x", cursorByteOffset: "👩‍💻".utf8.count, cursorShape: .beam, textColor: .white, cursorColor: .red)
+        let beamRect = try #require(view.cursorRect())
+        #expect(abs(beamRect.minX - blockRect.minX) < accuracy)
+        #expect(beamRect.width == 1.5)
+
+        view.update(text: "é", cursorByteOffset: 1, cursorShape: .beam, textColor: .white, cursorColor: .red)
+        #expect(view.cursorRect() == nil)
+        #expect(view.acceptsFirstResponder == false)
+        #expect(view.hitTest(.zero) == nil)
+    }
+}
 
 @Suite("AgentChatView View Structure")
 struct AgentChatViewTests {
