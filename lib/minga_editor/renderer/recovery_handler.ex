@@ -8,6 +8,8 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
   alias MingaEditor.Renderer.FrameHandler
   alias MingaEditor.Renderer.State
 
+  @type request_result :: :recovery_started | :stale
+
   @spec reset(State.t(), Intent.t(), non_neg_integer(), integer()) :: {:reply, :ok, State.t()}
   def reset(state, intent, seq, pushed_at) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
@@ -38,18 +40,39 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
     |> FrameHandler.render_sync(Intent.force_keyframe(intent), seq, pushed_at)
   end
 
-  @spec request(State.t()) :: {:noreply, State.t()}
+  @spec request(State.t(), non_neg_integer(), non_neg_integer()) ::
+          {:reply, request_result(), State.t()}
   def request(
-        %State{frame_credit: {:awaiting_ack, %AckLease{attempt: attempt}, _successor}} = state
-      ),
-      do: transaction(state, attempt)
+        %State{
+          frame_credit: {
+            :awaiting_ack,
+            %AckLease{generation: generation, attempt: attempt},
+            _successor
+          },
+          caches: %{last_acknowledged_frame_seq: committed_base}
+        } = state,
+        failed_generation,
+        last_applied_frame_seq
+      )
+      when generation == failed_generation and committed_base == last_applied_frame_seq,
+      do: recover_request(state, attempt)
 
   def request(
-        %State{frame_credit: {:scheduled, _token, %FrameAttempt{} = attempt, _, _}} = state
-      ),
-      do: transaction(state, attempt)
+        %State{
+          frame_credit: {:scheduled, _token, %FrameAttempt{} = attempt, _, _successor},
+          caches: %{
+            recovery_generation: generation,
+            last_acknowledged_frame_seq: committed_base
+          }
+        } = state,
+        failed_generation,
+        last_applied_frame_seq
+      )
+      when generation == failed_generation and committed_base == last_applied_frame_seq,
+      do: recover_request(state, attempt)
 
-  def request(state), do: {:noreply, state}
+  def request(state, _failed_generation, _last_applied_frame_seq),
+    do: {:reply, :stale, state}
 
   @doc "Starts one fresh-generation retry only after consuming explicit adaptation evidence."
   @spec adapted(State.t(), non_neg_integer(), atom()) :: {:noreply, State.t()}
@@ -85,7 +108,16 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
   @doc "Starts transaction recovery from the latest semantic intent."
   @spec transaction(State.t(), FrameAttempt.t()) :: {:noreply, State.t()}
-  def transaction(state, %FrameAttempt{} = rejected_attempt) do
+  def transaction(state, %FrameAttempt{} = rejected_attempt),
+    do: {:noreply, transaction_state(state, rejected_attempt)}
+
+  @spec recover_request(State.t(), FrameAttempt.t()) ::
+          {:reply, :recovery_started, State.t()}
+  defp recover_request(state, %FrameAttempt{} = rejected_attempt),
+    do: {:reply, :recovery_started, transaction_state(state, rejected_attempt)}
+
+  @spec transaction_state(State.t(), FrameAttempt.t()) :: State.t()
+  defp transaction_state(state, %FrameAttempt{} = rejected_attempt) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
     generation = State.reserve_recovery_generation(state)
 
@@ -96,12 +128,9 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
     token = schedule_render()
 
-    state =
-      state
-      |> State.reset_frontend(generation)
-      |> State.schedule_frame(retry, token)
-
-    {:noreply, state}
+    state
+    |> State.reset_frontend(generation)
+    |> State.schedule_frame(retry, token)
   end
 
   @doc "Recovers one missed retained window without resetting unrelated frontend state."

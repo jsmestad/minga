@@ -98,11 +98,16 @@ defmodule MingaEditor.Renderer.Server do
     :ok
   end
 
-  @doc "Requests recovery of the outstanding renderer transaction."
-  @spec request_recovery(GenServer.server()) :: :ok
-  def request_recovery(server \\ __MODULE__) do
-    send(server, :request_recovery)
-    :ok
+  @doc "Requests recovery only when the failed generation and committed base still match."
+  @spec request_recovery(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: RecoveryHandler.request_result()
+  def request_recovery(server \\ __MODULE__, failed_generation, last_applied_frame_seq)
+      when is_integer(failed_generation) and failed_generation >= 0 and
+             is_integer(last_applied_frame_seq) and last_applied_frame_seq >= 0 do
+    GenServer.call(server, {:request_recovery, failed_generation, last_applied_frame_seq})
   end
 
   @doc "Abandons the old frontend connection and renders a fresh keyframe."
@@ -138,6 +143,9 @@ defmodule MingaEditor.Renderer.Server do
 
   def handle_call(:terminal_failure, _from, state),
     do: {:reply, State.terminal_failure(state), state}
+
+  def handle_call({:request_recovery, failed_generation, last_applied_frame_seq}, _from, state),
+    do: RecoveryHandler.request(state, failed_generation, last_applied_frame_seq)
 
   def handle_call(
         {:record_adaptation, generation, frame_seq, dimension, rejected_value, adapted_value,
