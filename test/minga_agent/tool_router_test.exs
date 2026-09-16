@@ -3,6 +3,8 @@ defmodule MingaAgent.ToolRouterTest do
 
   alias MingaAgent.BufferForkStore
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.RecordingBackend
+  alias MingaAgent.ProjectView.UnavailableBackend
   alias MingaAgent.ToolRouter
   alias Minga.Buffer.Fork
 
@@ -320,6 +322,192 @@ defmodule MingaAgent.ToolRouterTest do
 
       assert {:ok, cwd} = ToolRouter.working_dir_result(ctx)
       assert File.read!(Path.join(cwd, "lib/foo.ex")) == "fork draft needle\n"
+    end
+  end
+
+  describe "directory and environment projections" do
+    test "ProjectView APIs project one successful resolution per call", %{path: path} do
+      project_root = Path.dirname(Path.dirname(path))
+      working_dir = Path.join(project_root, "project-view")
+      env = [{"ROUTED", "true"}]
+
+      {:ok, view} =
+        RecordingBackend.create(project_root,
+          parent: self(),
+          working_dir: working_dir,
+          env: env
+        )
+
+      ctx = ToolRouter.context(view, nil, nil)
+
+      assert ToolRouter.filesystem_path(ctx, path) == Path.join(working_dir, "lib/foo.ex")
+      assert_received {:project_view_call, :prepare_working_dir}
+      refute_received {:project_view_call, :prepare_working_dir}
+
+      assert {:ok, resolved_path} = ToolRouter.filesystem_path_result(ctx, path)
+      assert resolved_path == Path.join(working_dir, "lib/foo.ex")
+      assert_received {:project_view_call, :prepare_working_dir}
+      refute_received {:project_view_call, :prepare_working_dir}
+
+      assert ToolRouter.working_dir(ctx) == working_dir
+      assert_received {:project_view_call, :prepare_working_dir}
+      refute_received {:project_view_call, :prepare_working_dir}
+
+      assert ToolRouter.working_dir_result(ctx) == {:ok, working_dir}
+      assert_received {:project_view_call, :prepare_working_dir}
+      refute_received {:project_view_call, :prepare_working_dir}
+
+      assert ToolRouter.command_env(ctx) == env
+      assert_received {:project_view_call, :command_env}
+      refute_received {:project_view_call, :command_env}
+
+      assert ToolRouter.command_env_result(ctx) == {:ok, env}
+      assert_received {:project_view_call, :command_env}
+      refute_received {:project_view_call, :command_env}
+    end
+
+    test "compatibility APIs collapse routing failure without changing tagged results", %{
+      path: path
+    } do
+      project_root = Path.dirname(Path.dirname(path))
+      {:ok, view} = UnavailableBackend.create(project_root, workspace_id: 7)
+      ctx = ToolRouter.context(view, nil, nil)
+
+      assert ToolRouter.filesystem_path(ctx, path) == path
+
+      assert ToolRouter.filesystem_path_result(ctx, path) ==
+               {:error, {:project_view_unavailable, {:working_dir_failed, :working_dir_failed}}}
+
+      assert ToolRouter.working_dir(ctx) == nil
+
+      assert ToolRouter.working_dir_result(ctx) ==
+               {:error, {:project_view_unavailable, {:working_dir_failed, :working_dir_failed}}}
+
+      assert ToolRouter.command_env(ctx) == []
+
+      assert ToolRouter.command_env_result(ctx) ==
+               {:error, {:project_view_unavailable, {:command_env_failed, :command_env_failed}}}
+    end
+
+    test "passthrough keeps absent directory and empty environment distinct from failure", %{
+      path: path
+    } do
+      ctx = ToolRouter.context(nil, nil)
+
+      assert ToolRouter.filesystem_path(ctx, path) == path
+      assert ToolRouter.filesystem_path_result(ctx, path) == {:ok, path}
+      assert ToolRouter.working_dir(ctx) == nil
+      assert ToolRouter.working_dir_result(ctx) == {:ok, nil}
+      assert ToolRouter.command_env(ctx) == []
+      assert ToolRouter.command_env_result(ctx) == {:ok, []}
+    end
+
+    test "changeset projections resolve the same paths and environment", %{path: path} do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(nil, nil, changeset)
+      expected_path = Path.join(MingaAgent.Changeset.overlay_path(changeset), "lib/foo.ex")
+
+      assert ToolRouter.filesystem_path(ctx, path) == expected_path
+      assert ToolRouter.filesystem_path_result(ctx, path) == {:ok, expected_path}
+
+      working_dir = ToolRouter.working_dir(ctx)
+      assert ToolRouter.working_dir_result(ctx) == {:ok, working_dir}
+
+      env = ToolRouter.command_env(ctx)
+      assert ToolRouter.command_env_result(ctx) == {:ok, env}
+    end
+
+    test "compatibility lookups do not materialize live buffer forks", %{
+      store: store,
+      path: path
+    } do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(store, changeset)
+      original = File.read!(path)
+      assert :ok = ToolRouter.write_file(ctx, path, "uncommitted fork draft\n")
+
+      resolved_path = ToolRouter.filesystem_path(ctx, path)
+      assert ToolRouter.working_dir(ctx) == Path.dirname(Path.dirname(resolved_path))
+      assert File.read!(resolved_path) == original
+
+      assert {:ok, ^resolved_path} = ToolRouter.filesystem_path_result(ctx, path)
+      assert File.read!(resolved_path) == "uncommitted fork draft\n"
+    end
+
+    test "dead routing dependencies remain tagged for execution and collapsed for compatibility",
+         %{
+           path: path
+         } do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(nil, nil, changeset)
+      :ok = :sys.suspend(changeset)
+
+      task =
+        Task.async(fn ->
+          receive do
+            :resolve -> ToolRouter.filesystem_path_result(ctx, path)
+          end
+        end)
+
+      :erlang.trace(task.pid, true, [:send])
+      send(task.pid, :resolve)
+
+      assert_receive {:trace, task_pid, :send, {:"$gen_call", _from, :materialize_for_command},
+                      ^changeset}
+
+      assert task_pid == task.pid
+
+      ref = Process.monitor(changeset)
+      Process.exit(changeset, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+      assert {:error, filesystem_reason} = Task.await(task)
+      assert filesystem_reason != nil
+      assert ToolRouter.filesystem_path(ctx, path) == path
+
+      assert ToolRouter.working_dir(ctx) == nil
+      assert {:error, working_dir_reason} = ToolRouter.working_dir_result(ctx)
+      assert working_dir_reason != nil
+      assert ToolRouter.command_env(ctx) == []
+      assert {:error, {:changeset_unavailable, _reason}} = ToolRouter.command_env_result(ctx)
+    end
+
+    test "a dead fork store blocks execution preparation without blocking compatibility lookups",
+         %{
+           store: store,
+           path: path
+         } do
+      project_root = Path.dirname(Path.dirname(path))
+
+      {:ok, changeset} =
+        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
+
+      ctx = ToolRouter.context(store, changeset)
+      ref = Process.monitor(store)
+      Process.exit(store, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^store, _reason}
+
+      assert is_binary(ToolRouter.filesystem_path(ctx, path))
+      assert is_binary(ToolRouter.working_dir(ctx))
+      assert is_list(ToolRouter.command_env(ctx))
+
+      assert {:error, {:fork_unavailable, _reason}} =
+               ToolRouter.filesystem_path_result(ctx, path)
+
+      assert {:error, {:fork_unavailable, _reason}} = ToolRouter.working_dir_result(ctx)
+      assert {:error, {:fork_unavailable, _reason}} = ToolRouter.search_context(ctx, path)
     end
   end
 
