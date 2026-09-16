@@ -14,10 +14,6 @@ type PacketMsg struct {
 	Commands []protocol.Command
 }
 
-type ErrorMsg struct {
-	Err error
-}
-
 // LogMsg carries a renderer diagnostic. The model forwards it to the BEAM as a
 // log_message event so it lands in Minga's *Messages* buffer (matching Zig),
 // instead of being lost on the renderer's stderr.
@@ -26,24 +22,29 @@ type LogMsg struct {
 	Text  string
 }
 
-func StartReader(program *tea.Program, reader io.Reader) {
-	warn := func(level byte, text string) { program.Send(LogMsg{Level: level, Text: text}) }
+func StartReader(program *tea.Program, reader io.Reader) <-chan error {
+	result := make(chan error, 1)
 	go func() {
-		for {
-			packet, err := protocol.ReadPacket(reader)
-			if err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-					program.Send(tea.Quit())
-					return
-				}
-				program.Send(ErrorMsg{Err: err})
-				return
-			}
-
-			commands := decodePacket(packet, warn)
-			program.Send(PacketMsg{Commands: commands})
-		}
+		result <- readPackets(reader, program.Send)
+		close(result)
 	}()
+	return result
+}
+
+func readPackets(reader io.Reader, send func(tea.Msg)) error {
+	warn := func(level byte, text string) { send(LogMsg{Level: level, Text: text}) }
+	for {
+		packet, err := protocol.ReadPacket(reader)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		commands := decodePacket(packet, warn)
+		send(PacketMsg{Commands: commands})
+	}
 }
 
 // decodePacket walks a batch of concatenated commands. The schema-generated

@@ -28,6 +28,7 @@ type Model struct {
 	width    int
 	height   int
 	out      chan<- []byte
+	done     <-chan struct{}
 	viewport viewport.Model
 	zones    *zoneManager
 	windows  map[uint16]protocol.WindowContent
@@ -47,7 +48,6 @@ type Model struct {
 	bg               uint32
 	cursorlineChrome protocol.CursorlineChrome
 	pendingClipboard string
-	lastError        string
 	// protocolError holds the reason from a protocol_error (0x18) command. The
 	// BEAM emits it when this frontend's handshake protocol_version does not
 	// match the BEAM's, so the frontend never reaches ready. While set, the UI
@@ -158,11 +158,16 @@ type frameStaging struct {
 }
 
 func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
+	return NewWithTransport(width, height, out, nil, filter)
+}
+
+func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}, filter *InputFilter) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
 		width:             int(width),
 		height:            int(height),
 		out:               out,
+		done:              done,
 		viewport:          vp,
 		zones:             newZoneManager(),
 		windows:           map[uint16]protocol.WindowContent{},
@@ -312,9 +317,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout = m.computeLayout()
 	case port.LogMsg:
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
-	case port.ErrorMsg:
-		m.lastError = msg.Err.Error()
-		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
 	}
 
 	if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages()) && !m.agent.animationRunning {
@@ -1135,9 +1137,22 @@ func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	return true
 }
 
-func (m Model) send(payload []byte) {
-	if m.out != nil {
-		m.out <- payload
+func (m Model) send(payload []byte) bool {
+	if m.out == nil {
+		return false
+	}
+	if m.done != nil {
+		select {
+		case <-m.done:
+			return false
+		default:
+		}
+	}
+	select {
+	case <-m.done:
+		return false
+	case m.out <- payload:
+		return true
 	}
 }
 
