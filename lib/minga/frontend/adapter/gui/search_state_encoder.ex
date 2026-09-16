@@ -16,6 +16,11 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoder do
   @search_flag_whole_word 0x04
   @search_flag_regex 0x08
 
+  @search_status_ready 0
+  @search_status_loading 1
+  @search_status_rebuilding 2
+  @search_status_failed 3
+
   @spec encode(SearchState.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%SearchState{} = model, %Caches{} = caches) do
     fp = :erlang.phash2(model)
@@ -43,12 +48,13 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoder do
     payload =
       Writer.new(@command)
       |> Writer.uint8(:active, active_byte)
-      |> Writer.uint16(:match_count, count)
-      |> Writer.uint16(:current_index, idx)
+      |> Writer.uint32(:match_count, count)
+      |> Writer.uint32(:current_index, idx)
       |> Writer.uint8(:flags, flag_byte)
       |> Writer.string16(:query, model.query)
       |> Writer.uint32(:session_id, model.session_id)
       |> Writer.uint32(:acknowledged_edit_seq, model.acknowledged_edit_seq)
+      |> Writer.uint8(:status, encode_status(model.status))
       |> Writer.finish()
 
     Writer.new(@command)
@@ -56,4 +62,10 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoder do
     |> Writer.payload16(:payload, payload)
     |> Writer.finish()
   end
+
+  @spec encode_status(:ready | :loading | :rebuilding | :failed) :: 0..3
+  defp encode_status(:ready), do: @search_status_ready
+  defp encode_status(:loading), do: @search_status_loading
+  defp encode_status(:rebuilding), do: @search_status_rebuilding
+  defp encode_status(:failed), do: @search_status_failed
 end

@@ -2482,16 +2482,16 @@ func DecodeGuiSearchStateFields(data []byte, offset int, windowEnd int) (GuiSear
 	}
 	active := data[pos]
 	pos++
-	if err := decodeRequireWindow(windowEnd, pos+2, "match_count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "match_count"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
-	matchCount := decodeU16(data, pos)
-	pos += 2
-	if err := decodeRequireWindow(windowEnd, pos+2, "current_index"); err != nil {
+	matchCount := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "current_index"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
-	currentIndex := decodeU16(data, pos)
-	pos += 2
+	currentIndex := decodeU32(data, pos)
+	pos += 4
 	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
 		return GuiSearchStateFields{}, offset, err
 	}
@@ -2511,6 +2511,11 @@ func DecodeGuiSearchStateFields(data []byte, offset int, windowEnd int) (GuiSear
 	}
 	acknowledgedEditSeq := decodeU32(data, pos)
 	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
+		return GuiSearchStateFields{}, offset, err
+	}
+	status := data[pos]
+	pos++
 	return GuiSearchStateFields{
 		Active:              active,
 		MatchCount:          matchCount,
@@ -2519,6 +2524,7 @@ func DecodeGuiSearchStateFields(data []byte, offset int, windowEnd int) (GuiSear
 		Query:               query,
 		SessionID:           sessionID,
 		AcknowledgedEditSeq: acknowledgedEditSeq,
+		Status:              status,
 	}, pos, nil
 }
 

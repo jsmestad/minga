@@ -88,27 +88,93 @@ struct SearchSessionReconciliationTests {
 
     @Test("decoder carries the complete authoritative search state")
     func decoderCarriesCompleteState() throws {
-        let query = Data("café".utf8)
-        var payload = Data([1, 0, 4, 0, 2, SearchFlags.caseSensitive])
-        payload.append(UInt8(query.count >> 8))
-        payload.append(UInt8(query.count & 0xFF))
-        payload.append(query)
-        payload.append(contentsOf: [0, 0, 0, 7, 0, 0, 0, 3])
-        var data = Data([OP_GUI_SEARCH_STATE, UInt8(payload.count >> 8), UInt8(payload.count & 0xFF)])
-        data.append(payload)
+        let data = searchStateCommand(matchCount: 70_000, currentIndex: 65_536, status: .ready)
 
         let (command, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        guard case .guiSearchState(let active, let count, let index, let flags, let decodedQuery, let sessionID, let acknowledgedEditSeq) = command else {
+        guard case .guiSearchState(let active, let count, let index, let flags, let decodedQuery, let sessionID, let acknowledgedEditSeq, let status) = command else {
             Issue.record("Expected guiSearchState")
             return
         }
         #expect(active)
-        #expect(count == 4)
-        #expect(index == 2)
+        #expect(count == 70_000)
+        #expect(index == 65_536)
         #expect(flags == SearchFlags.caseSensitive)
         #expect(decodedQuery == "café")
         #expect(sessionID == 7)
         #expect(acknowledgedEditSeq == 3)
+        #expect(status == SearchStatus.ready.rawValue)
+    }
+
+    @Test("decoder preserves exact counts across the former u16 boundary", arguments: [UInt32(65_535), UInt32(65_536), UInt32(70_000)])
+    func decoderPreservesWideCounts(count: UInt32) throws {
+        let data = searchStateCommand(matchCount: count, currentIndex: count, status: .ready)
+        let (command, _) = try decodeCommand(data: data, offset: 0)
+
+        guard case .guiSearchState(_, let decodedCount, let decodedIndex, _, _, _, _, _) = command else {
+            Issue.record("Expected guiSearchState")
+            return
+        }
+
+        #expect(decodedCount == count)
+        #expect(decodedIndex == count)
+    }
+
+    @Test("every search status survives decode and native reconciliation", arguments: [SearchStatus.ready, .loading, .rebuilding, .failed])
+    func preservesStatuses(status: SearchStatus) throws {
+        let data = searchStateCommand(matchCount: 4, currentIndex: 2, status: status)
+        let (command, _) = try decodeCommand(data: data, offset: 0)
+
+        guard case .guiSearchState(let active, let count, let index, let flags, let query, let sessionID, let acknowledgedEditSeq, let wireStatus) = command else {
+            Issue.record("Expected guiSearchState")
+            return
+        }
+
+        let state = SearchState()
+        state.update(active: active, matchCount: count, currentIndex: index, flags: flags, query: query, sessionID: sessionID, acknowledgedEditSeq: acknowledgedEditSeq, status: wireStatus)
+        #expect(state.status == status)
+    }
+
+    @Test("malformed status and legacy u16 payloads are rejected")
+    func rejectsIncompatiblePayloads() {
+        var malformedStatus = searchStateCommand(matchCount: 4, currentIndex: 2, status: .ready)
+        malformedStatus[malformedStatus.count - 1] = 4
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: malformedStatus, offset: 0)
+        }
+
+        let legacyPayload = Data([1, 0, 4, 0, 2, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3])
+        var legacy = Data([OP_GUI_SEARCH_STATE, 0, UInt8(legacyPayload.count)])
+        legacy.append(legacyPayload)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: legacy, offset: 0)
+        }
+    }
+
+    private func searchStateCommand(matchCount: UInt32, currentIndex: UInt32, status: SearchStatus) -> Data {
+        let query = Data("café".utf8)
+        var payload = Data([1])
+        appendUInt32(matchCount, to: &payload)
+        appendUInt32(currentIndex, to: &payload)
+        payload.append(SearchFlags.caseSensitive)
+        payload.append(UInt8(query.count >> 8))
+        payload.append(UInt8(query.count & 0xFF))
+        payload.append(query)
+        appendUInt32(7, to: &payload)
+        appendUInt32(3, to: &payload)
+        payload.append(status.rawValue)
+
+        var command = Data([OP_GUI_SEARCH_STATE, UInt8(payload.count >> 8), UInt8(payload.count & 0xFF)])
+        command.append(payload)
+        return command
+    }
+
+    private func appendUInt32(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8((value >> 24) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
     }
 }

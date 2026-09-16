@@ -544,6 +544,11 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:changes_since, sequence})
   end
 
+  @doc "Returns the atomic content version and monotonic change sequence."
+  @spec sync_revision(GenServer.server()) ::
+          {non_neg_integer(), Minga.Buffer.ChangeLog.sequence()}
+  def sync_revision(server), do: GenServer.call(server, :sync_revision)
+
   @doc "Requests an atomic synchronization snapshot and replies asynchronously to `reply_to`."
   @spec request_sync_snapshot(
           GenServer.server(),
@@ -1814,6 +1819,10 @@ defmodule Minga.Buffer.Process do
     end
   end
 
+  def handle_call(:sync_revision, _from, state) do
+    {:reply, {BufState.version(state), ChangeLog.sequence(state.change_log)}, state}
+  end
+
   def handle_call({:delete_range, _from_pos, _to_pos}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
@@ -2351,13 +2360,20 @@ defmodule Minga.Buffer.Process do
 
   @impl true
   def handle_info({:request_sync_snapshot, cursor, reply_to, token}, state) do
+    version = BufState.version(state)
     sequence = ChangeLog.sequence(state.change_log)
     changes = sync_snapshot_changes(state, cursor)
 
     send(
       reply_to,
       {:buffer_sync_snapshot,
-       %SyncSnapshot{buffer: self(), token: token, sequence: sequence, changes: changes}}
+       %SyncSnapshot{
+         buffer: self(),
+         token: token,
+         version: version,
+         sequence: sequence,
+         changes: changes
+       }}
     )
 
     {:noreply, state}

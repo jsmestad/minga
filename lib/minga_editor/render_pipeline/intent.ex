@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderPipeline.Intent do
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.RenderPipeline.WorkspaceIntent
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Search
   alias MingaEditor.Window
   alias MingaEditor.Window.RenderCache
 
@@ -27,10 +28,14 @@ defmodule MingaEditor.RenderPipeline.Intent do
   @spec from_editor_state(EditorState.t(), non_neg_integer()) :: t()
   def from_editor_state(%EditorState{} = state, revision \\ 0) do
     windows = state.workspace.windows
+    active_buffer = state.workspace.buffers.active
+
+    search =
+      Search.render_snapshot(state.workspace.search, active_buffer, active_cursor(active_buffer))
 
     %__MODULE__{
       frame: FrameIntent.from_editor_state(state),
-      workspace: WorkspaceIntent.from_workspace(state.workspace),
+      workspace: WorkspaceIntent.from_workspace(state.workspace, search),
       windows:
         Map.new(windows.map, fn {id, window} -> {id, WindowIntent.from_window(window)} end),
       window_layout: %{tree: windows.tree, active: windows.active, next_id: windows.next_id},
@@ -38,6 +43,15 @@ defmodule MingaEditor.RenderPipeline.Intent do
       revision: revision
     }
   end
+
+  @spec active_cursor(pid() | nil) :: Minga.Editing.Search.position()
+  defp active_cursor(buffer) when is_pid(buffer) do
+    Minga.Buffer.cursor(buffer)
+  catch
+    :exit, _reason -> {0, 0}
+  end
+
+  defp active_cursor(_buffer), do: {0, 0}
 
   @doc "Marks semantic frame state for a recovery keyframe without adding cache state."
   @spec force_keyframe(t()) :: t()

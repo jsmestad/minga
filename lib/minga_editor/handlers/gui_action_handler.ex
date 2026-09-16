@@ -30,6 +30,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.GitRepositoryResolver
+  alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
@@ -743,159 +744,34 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # ── GUI search toolbar actions ──────────────────────────────────────
 
   defp dispatch_action(state, {:search_focus, replace_mode}) do
-    search = SearchData.focus_gui_search(state.workspace.search, replace_mode)
-    put_search_data(state, search)
+    GuiSearchWorkflow.focus(state, replace_mode)
   end
 
-  defp dispatch_action(
-         %{workspace: %{buffers: %{active: buf}}} = state,
-         {:search_query, session_id, edit_seq, query, flags}
-       ) do
+  defp dispatch_action(state, {:search_query, session_id, edit_seq, query, flags}) do
     decoded = ProtocolGUI.decode_search_flags(flags)
     case_sensitive = decoded[:case_sensitive]
     whole_word = decoded[:whole_word]
     regex = decoded[:regex]
 
-    case SearchData.apply_gui_search_edit(
-           state.workspace.search,
-           session_id,
-           edit_seq,
-           query,
-           case_sensitive,
-           whole_word,
-           regex
-         ) do
-      {:accepted, search} ->
-        state
-        |> put_search_data(search)
-        |> maybe_select_gui_match(buf, query)
-
-      {:stale, _search} ->
-        state
-    end
+    GuiSearchWorkflow.replace_query(
+      state,
+      session_id,
+      edit_seq,
+      query,
+      case_sensitive,
+      whole_word,
+      regex
+    )
   end
 
-  defp dispatch_action(
-         %{
-           workspace: %{
-             buffers: %{active: buf},
-             search: %{gui_search: %{active: true, query: pattern}}
-           }
-         } = state,
-         :search_next
-       )
-       when is_pid(buf) and is_binary(pattern) do
-    search_opts = gui_search_opts(state)
-    content = Buffer.content(buf)
-    cursor = Buffer.cursor(buf)
+  defp dispatch_action(state, :search_next), do: GuiSearchWorkflow.navigate(state, :forward)
+  defp dispatch_action(state, :search_prev), do: GuiSearchWorkflow.navigate(state, :backward)
 
-    case Minga.Editing.search_next(content, pattern, cursor, :forward, search_opts) do
-      nil ->
-        state
+  defp dispatch_action(state, {:search_replace, replacement}),
+    do: GuiSearchWorkflow.replace(state, replacement)
 
-      {line, col} ->
-        Buffer.move_to(buf, {line, col})
-        state
-    end
-  end
-
-  defp dispatch_action(state, :search_next), do: state
-
-  defp dispatch_action(
-         %{
-           workspace: %{
-             buffers: %{active: buf},
-             search: %{gui_search: %{active: true, query: pattern}}
-           }
-         } = state,
-         :search_prev
-       )
-       when is_pid(buf) and is_binary(pattern) do
-    search_opts = gui_search_opts(state)
-    content = Buffer.content(buf)
-    cursor = Buffer.cursor(buf)
-
-    case Minga.Editing.search_next(content, pattern, cursor, :backward, search_opts) do
-      nil ->
-        state
-
-      {line, col} ->
-        Buffer.move_to(buf, {line, col})
-        state
-    end
-  end
-
-  defp dispatch_action(state, :search_prev), do: state
-
-  defp dispatch_action(
-         %{
-           workspace: %{
-             buffers: %{active: buf},
-             search: %{gui_search: %{active: true, query: pattern}}
-           }
-         } = state,
-         {:search_replace, replacement}
-       )
-       when is_pid(buf) and is_binary(pattern) and pattern != "" do
-    {content, version} = Buffer.content_with_version(buf)
-    cursor = Buffer.cursor(buf)
-    search_opts = gui_search_opts(state)
-
-    case Minga.Editing.search_match_at(content, pattern, cursor, search_opts) do
-      nil ->
-        stale_search_match(state)
-
-      %{line: line, col: col, length: length} ->
-        case Buffer.replace_byte_range_if_version(
-               buf,
-               version,
-               {line, col},
-               length,
-               replacement
-             ) do
-          {:ok, _new_version} ->
-            advance_after_search_replace(state, buf, pattern, search_opts, length)
-
-          {:error, :read_only} ->
-            NoticeWorkflow.publish(state, "Buffer is read-only")
-
-          {:error, :stale} ->
-            stale_search_match(state)
-
-          {:error, :invalid_range} ->
-            stale_search_match(state)
-        end
-    end
-  end
-
-  defp dispatch_action(state, {:search_replace, _}), do: state
-
-  defp dispatch_action(
-         %{
-           workspace: %{
-             buffers: %{active: buf},
-             search: %{gui_search: %{active: true, query: pattern}}
-           }
-         } = state,
-         {:search_replace_all, replacement}
-       )
-       when is_pid(buf) and is_binary(pattern) and pattern != "" do
-    content = Buffer.content(buf)
-    search_opts = gui_search_opts(state)
-
-    {new_content, count} =
-      Minga.Editing.substitute(content, pattern, replacement, true, search_opts)
-
-    if count > 0 do
-      Buffer.replace_content(buf, new_content)
-      msg = if count == 1, do: "1 replacement", else: "#{count} replacements"
-      NoticeWorkflow.publish(state, msg)
-    else
-      NoticeWorkflow.publish(state, "No matches to replace")
-    end
-  end
-
-  defp dispatch_action(state, {:search_replace_all, _}), do: state
+  defp dispatch_action(state, {:search_replace_all, replacement}),
+    do: GuiSearchWorkflow.replace_all(state, replacement)
 
   defp dispatch_action(state, {:picker_item_activate, generation, activation_id}) do
     case PickerUI.activate_item(state, generation, activation_id) do
@@ -909,8 +785,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, :search_dismiss) do
-    search = SearchData.dismiss_gui_search(state.workspace.search)
-    put_search_data(state, search)
+    GuiSearchWorkflow.dismiss(state)
   end
 
   defp dispatch_action(state, {:extension_action, _extension_id, _action, _payload} = action) do
@@ -1937,84 +1812,5 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       state,
       "Extension panel action unavailable"
     )
-  end
-
-  @spec advance_after_search_replace(
-          state(),
-          pid(),
-          String.t(),
-          Minga.Editing.Search.search_opts(),
-          non_neg_integer()
-        ) :: state()
-  defp advance_after_search_replace(state, buf, pattern, search_opts, 0) do
-    {content, cursor} = Buffer.content_and_cursor(buf)
-    move_to_next_search_match(state, buf, content, pattern, cursor, search_opts)
-  end
-
-  defp advance_after_search_replace(state, buf, pattern, search_opts, _consumed_length) do
-    {content, cursor} = Buffer.content_and_cursor(buf)
-
-    case Minga.Editing.search_match_at(content, pattern, cursor, search_opts) do
-      nil -> move_to_next_search_match(state, buf, content, pattern, cursor, search_opts)
-      _adjacent_match -> state
-    end
-  end
-
-  @spec move_to_next_search_match(
-          state(),
-          pid(),
-          String.t(),
-          String.t(),
-          Minga.Editing.Search.position(),
-          Minga.Editing.Search.search_opts()
-        ) :: state()
-  defp move_to_next_search_match(state, buf, content, pattern, cursor, search_opts) do
-    case Minga.Editing.search_next(content, pattern, cursor, :forward, search_opts) do
-      nil ->
-        state
-
-      {line, col} ->
-        Buffer.move_to(buf, {line, col})
-        state
-    end
-  end
-
-  @spec stale_search_match(state()) :: state()
-  defp stale_search_match(state) do
-    NoticeWorkflow.publish(state, "Search match changed; select a match and try again")
-  end
-
-  @spec gui_search_opts(state()) :: Minga.Editing.Search.search_opts()
-  defp gui_search_opts(%{workspace: %{search: %{gui_search: %{active: true} = gs}}}) do
-    [
-      case_sensitive: gs.case_sensitive,
-      whole_word: gs.whole_word,
-      regex: gs.regex
-    ]
-  end
-
-  defp gui_search_opts(_state), do: []
-
-  @spec put_search_data(state(), SearchData.t()) :: state()
-  defp put_search_data(state, search) do
-    %{state | workspace: State.set_search(state.workspace, search)}
-  end
-
-  @spec maybe_select_gui_match(state(), pid() | nil, String.t()) :: state()
-  defp maybe_select_gui_match(state, _buf, ""), do: state
-  defp maybe_select_gui_match(state, buf, _query) when not is_pid(buf), do: state
-
-  defp maybe_select_gui_match(state, buf, query) do
-    content = Buffer.content(buf)
-    search_opts = gui_search_opts(state)
-
-    case Minga.Editing.search_next(content, query, Buffer.cursor(buf), :forward, search_opts) do
-      nil ->
-        state
-
-      {line, col} ->
-        Buffer.move_to(buf, {line, col})
-        state
-    end
   end
 end

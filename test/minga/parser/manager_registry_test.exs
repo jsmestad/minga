@@ -79,6 +79,7 @@ defmodule Minga.Parser.ManagerRegistryTest do
        %SyncSnapshot{
          buffer: unknown,
          token: make_ref(),
+         version: 1,
          sequence: 1,
          changes: {:full, "ignored"}
        }}

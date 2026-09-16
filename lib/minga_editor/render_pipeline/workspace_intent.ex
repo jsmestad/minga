@@ -28,13 +28,13 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
           document_highlights: term(),
           cmd_hover_link: term(),
           mouse: term(),
-          search: term(),
+          search: MingaEditor.State.Search.Projection.t(),
           keymap_scope: atom(),
           launchpad: term()
         }
 
-  @spec from_workspace(SessionState.t()) :: t()
-  def from_workspace(%SessionState{} = workspace) do
+  @spec from_workspace(SessionState.t(), MingaEditor.State.Search.Projection.t()) :: t()
+  def from_workspace(%SessionState{} = workspace, %MingaEditor.State.Search.Projection{} = search) do
     %__MODULE__{
       buffers: workspace.buffers,
       file_tree: SessionState.file_tree_state(workspace),
@@ -43,7 +43,7 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
       document_highlights: workspace.document_highlights,
       cmd_hover_link: workspace.hover_observation.link,
       mouse: workspace.mouse,
-      search: workspace.search,
+      search: search,
       keymap_scope: workspace.keymap_scope,
       launchpad: workspace.launchpad
     }

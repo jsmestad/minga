@@ -637,12 +637,13 @@ type GuiCursorlineFields struct {
 
 type GuiSearchStateFields struct {
 	Active              uint8
-	MatchCount          uint16
-	CurrentIndex        uint16
+	MatchCount          uint32
+	CurrentIndex        uint32
 	Flags               uint8
 	Query               string
 	SessionID           uint32
 	AcknowledgedEditSeq uint32
+	Status              uint8
 }
 
 type GuiEditTimelineFields struct {

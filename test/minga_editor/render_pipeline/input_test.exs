@@ -89,14 +89,19 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert intent.workspace.cmd_hover_link == state.workspace.hover_observation.link
       assert intent.workspace.document_highlights == state.workspace.document_highlights
       assert intent.workspace.mouse == state.workspace.mouse
-      assert intent.workspace.search == state.workspace.search
+      assert intent.workspace.search.active == false
+      assert intent.workspace.search.match_count == 0
+      refute Map.has_key?(Map.from_struct(intent.workspace.search), :gui_search)
       assert intent.workspace.keymap_scope == state.workspace.keymap_scope
       refute Map.has_key?(Map.from_struct(intent.workspace), :windows)
 
       invalid_workspace = :erlang.binary_to_term(:erlang.term_to_binary(%{}))
 
       assert_raise FunctionClauseError, fn ->
-        MingaEditor.RenderPipeline.WorkspaceIntent.from_workspace(invalid_workspace)
+        MingaEditor.RenderPipeline.WorkspaceIntent.from_workspace(
+          invalid_workspace,
+          intent.workspace.search
+        )
       end
     end
 

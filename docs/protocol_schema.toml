@@ -43,7 +43,10 @@ version = "2.0.0"
 # expectations, and native readiness outcomes (#3324).
 # protocol_version 20 adds continuous native presentation observations for
 # semantic inspection without inferring visibility from committed BEAM state.
-protocol_version = 20
+# protocol_version 21 widens GUI Find counts to u32 and appends its typed
+# ready/loading/rebuilding/failed status. Older frontends are rejected before
+# they can interpret the incompatible count fields.
+protocol_version = 21
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -2300,12 +2303,13 @@ fields = [{ name = "col", type = "u16" }, { name = "bg", type = "rgb" }]
 opcode = "gui_search_state"
 fields = [
   { name = "active", type = "u8" },
-  { name = "match_count", type = "u16" },
-  { name = "current_index", type = "u16" },
+  { name = "match_count", type = "u32" },
+  { name = "current_index", type = "u32" },
   { name = "flags", type = "u8" },
   { name = "query", type = "string16" },
   { name = "session_id", type = "u32" },
   { name = "acknowledged_edit_seq", type = "u32" },
+  { name = "status", type = "u8" },
 ]
 
 [[command_fields]]

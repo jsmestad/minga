@@ -750,8 +750,8 @@ defmodule Minga.Test.ProtocolGolden do
   # test still proves the Go decoder agrees with these bytes.
   @spec search_state_expected(SearchState.t()) :: map()
   defp search_state_expected(model) do
-    <<active::8, match_count::16, current_index::16, flags::8, query_len::16,
-      query::binary-size(query_len), session_id::32, acknowledged_edit_seq::32>> =
+    <<active::8, match_count::32, current_index::32, flags::8, query_len::16,
+      query::binary-size(query_len), session_id::32, acknowledged_edit_seq::32, status::8>> =
       search_state_payload(model)
 
     %{
@@ -761,7 +761,8 @@ defmodule Minga.Test.ProtocolGolden do
       flags: flags,
       query: query,
       session_id: session_id,
-      acknowledged_edit_seq: acknowledged_edit_seq
+      acknowledged_edit_seq: acknowledged_edit_seq,
+      status: status
     }
   end
 

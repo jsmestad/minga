@@ -7,17 +7,12 @@ defmodule MingaEditor.State.Search do
   project search picker source), and the complete GUI search session.
   """
 
+  alias Minga.Editing.Search.Index
+  alias MingaEditor.State.Search.Projection
+  alias MingaEditor.State.Search.Session
+
   @typedoc "Retained authoritative GUI search session, including inactive sessions."
-  @type gui_search :: %{
-          active: boolean(),
-          session_id: pos_integer(),
-          acknowledged_edit_seq: non_neg_integer(),
-          query: String.t(),
-          replace_mode: boolean(),
-          case_sensitive: boolean(),
-          whole_word: boolean(),
-          regex: boolean()
-        }
+  @type gui_search :: Session.t()
 
   @type t :: %__MODULE__{
           last_pattern: String.t() | nil,
@@ -58,31 +53,11 @@ defmodule MingaEditor.State.Search do
   @doc "Starts a fresh GUI search session while preserving its query and options."
   @spec focus_gui_search(t(), boolean()) :: t()
   def focus_gui_search(%__MODULE__{gui_search: nil} = s, replace_mode) do
-    %{
-      s
-      | gui_search: %{
-          active: true,
-          session_id: 1,
-          acknowledged_edit_seq: 0,
-          query: initial_gui_query(s.last_pattern),
-          replace_mode: replace_mode,
-          case_sensitive: false,
-          whole_word: false,
-          regex: false
-        }
-    }
+    %{s | gui_search: Session.new(initial_gui_query(s.last_pattern), replace_mode)}
   end
 
-  def focus_gui_search(%__MODULE__{gui_search: gui_search} = s, replace_mode) do
-    gui_search = %{
-      gui_search
-      | active: true,
-        session_id: next_session_id(gui_search.session_id),
-        acknowledged_edit_seq: 0,
-        replace_mode: replace_mode
-    }
-
-    %{s | gui_search: gui_search}
+  def focus_gui_search(%__MODULE__{gui_search: %Session{} = session} = s, replace_mode) do
+    %{s | gui_search: Session.focus(session, replace_mode)}
   end
 
   @doc "Accepts a complete native query edit only for the active session and a newer sequence."
@@ -96,32 +71,29 @@ defmodule MingaEditor.State.Search do
           boolean()
         ) :: {:accepted, t()} | {:stale, t()}
   def apply_gui_search_edit(
-        %__MODULE__{
-          gui_search:
-            %{
-              active: true,
-              session_id: session_id,
-              acknowledged_edit_seq: acknowledged_edit_seq
-            } = gui_search
-        } = s,
+        %__MODULE__{gui_search: %Session{} = session} = s,
         session_id,
         edit_seq,
         query,
         case_sensitive,
         whole_word,
         regex
-      )
-      when is_binary(query) and edit_seq > acknowledged_edit_seq do
-    gui_search = %{
-      gui_search
-      | acknowledged_edit_seq: edit_seq,
-        query: query,
-        case_sensitive: case_sensitive,
-        whole_word: whole_word,
-        regex: regex
-    }
+      ) do
+    case Session.accept_edit(
+           session,
+           session_id,
+           edit_seq,
+           query,
+           case_sensitive,
+           whole_word,
+           regex
+         ) do
+      {:accepted, session} ->
+        {:accepted, %{s | gui_search: session, last_pattern: query, last_direction: :forward}}
 
-    {:accepted, %{s | gui_search: gui_search, last_pattern: query, last_direction: :forward}}
+      :stale ->
+        {:stale, s}
+    end
   end
 
   def apply_gui_search_edit(
@@ -137,19 +109,109 @@ defmodule MingaEditor.State.Search do
 
   @doc "Dismisses the GUI search toolbar."
   @spec dismiss_gui_search(t()) :: t()
-  def dismiss_gui_search(%__MODULE__{gui_search: %{} = gui_search} = s),
-    do: %{s | gui_search: %{gui_search | active: false}}
+  def dismiss_gui_search(%__MODULE__{gui_search: %Session{} = session} = s),
+    do: %{s | gui_search: Session.dismiss(session)}
 
   def dismiss_gui_search(%__MODULE__{} = s), do: s
 
   @doc "Returns whether the GUI search toolbar is active."
   @spec gui_search_active?(t()) :: boolean()
-  def gui_search_active?(%__MODULE__{gui_search: %{active: true}}), do: true
+  def gui_search_active?(%__MODULE__{gui_search: %Session{active: true}}), do: true
   def gui_search_active?(%__MODULE__{}), do: false
+
+  @doc "Targets the active GUI session at a buffer and marks its build pending."
+  @spec begin_gui_build(t(), pid()) :: t()
+  def begin_gui_build(%__MODULE__{gui_search: %Session{} = session} = search, buffer),
+    do: %{search | gui_search: Session.begin_build(session, buffer)}
+
+  @doc "Accepts a fully built index only for the exact live search revision."
+  @spec accept_gui_index(
+          t(),
+          non_neg_integer(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Index.t()
+        ) :: {:accepted, t()} | {:stale, t()}
+  def accept_gui_index(
+        %__MODULE__{gui_search: %Session{} = session} = search,
+        revision,
+        buffer,
+        version,
+        sequence,
+        index
+      ) do
+    case Session.accept_index(session, revision, buffer, version, sequence, index) do
+      {:accepted, session} -> {:accepted, %{search | gui_search: session}}
+      :stale -> {:stale, search}
+    end
+  end
+
+  @doc "Installs an exact line-local incremental index update."
+  @spec accept_gui_incremental(t(), non_neg_integer(), non_neg_integer(), Index.t()) :: t()
+  def accept_gui_incremental(
+        %__MODULE__{gui_search: %Session{} = session} = search,
+        version,
+        sequence,
+        index
+      ),
+      do: %{search | gui_search: Session.accept_incremental(session, version, sequence, index)}
+
+  @doc "Invalidates the accepted revision and retains prior results only for pending display."
+  @spec rebuild_gui_search(t(), Minga.Buffer.EditDelta.t() | nil) :: t()
+  def rebuild_gui_search(%__MODULE__{gui_search: %Session{} = session} = search, delta),
+    do: %{search | gui_search: Session.rebuild(session, delta)}
+
+  @doc "Records an explicit asynchronous search failure for the exact live request."
+  @spec fail_gui_search(t(), non_neg_integer(), pid(), String.t()) ::
+          {:accepted, t()} | {:stale, t()}
+  def fail_gui_search(
+        %__MODULE__{
+          gui_search: %Session{active: true, revision: revision, target_buffer: buffer} = session
+        } = search,
+        revision,
+        buffer,
+        reason
+      ),
+      do: {:accepted, %{search | gui_search: Session.fail(session, reason)}}
+
+  def fail_gui_search(%__MODULE__{} = search, _revision, _buffer, _reason),
+    do: {:stale, search}
+
+  @doc "Returns the bounded renderer projection without copying the index."
+  @spec render_snapshot(t(), pid() | nil, Minga.Editing.Search.position()) :: Projection.t()
+  def render_snapshot(%__MODULE__{gui_search: nil}, _buffer, _cursor) do
+    %Projection{
+      active: false,
+      query: "",
+      session_id: 0,
+      acknowledged_edit_seq: 0,
+      match_count: 0,
+      current_index: 0,
+      case_sensitive: false,
+      whole_word: false,
+      regex: false,
+      replace_mode: false,
+      status: :ready
+    }
+  end
+
+  def render_snapshot(%__MODULE__{gui_search: session}, buffer, cursor),
+    do: Session.projection(session, buffer, cursor)
+
+  @doc "Returns a ready index only at the exact active buffer revision."
+  @spec ready_gui_index(t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
+          {:ok, Index.t()} | :stale
+  def ready_gui_index(%__MODULE__{gui_search: %Session{} = session}, buffer, revision),
+    do: Session.ready_index(session, buffer, revision)
+
+  def ready_gui_index(%__MODULE__{}, _buffer, _revision), do: :stale
+
+  @doc "Returns the active GUI query options."
+  @spec gui_options(t()) :: Minga.Editing.Search.search_opts()
+  def gui_options(%__MODULE__{gui_search: %Session{} = session}), do: Session.options(session)
+  def gui_options(%__MODULE__{}), do: []
 
   defp initial_gui_query(nil), do: ""
   defp initial_gui_query(pattern), do: pattern
-
-  defp next_session_id(0xFFFFFFFF), do: 1
-  defp next_session_id(session_id), do: session_id + 1
 end

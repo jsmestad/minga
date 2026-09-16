@@ -26,6 +26,7 @@ defmodule Minga.Buffer.ProcessTest do
                       %Buffer.SyncSnapshot{
                         buffer: ^buffer,
                         token: ^full_token,
+                        version: 0,
                         sequence: 0,
                         changes: {:full, "one"}
                       }}
@@ -37,6 +38,7 @@ defmodule Minga.Buffer.ProcessTest do
       assert_receive {:buffer_sync_snapshot,
                       %Buffer.SyncSnapshot{
                         token: ^edits_token,
+                        version: 1,
                         sequence: 1,
                         changes: {:edits, [_delta]}
                       }}
@@ -47,6 +49,7 @@ defmodule Minga.Buffer.ProcessTest do
       assert_receive {:buffer_sync_snapshot,
                       %Buffer.SyncSnapshot{
                         token: ^unchanged_token,
+                        version: 1,
                         sequence: 1,
                         changes: :unchanged
                       }}
@@ -58,9 +61,12 @@ defmodule Minga.Buffer.ProcessTest do
       assert_receive {:buffer_sync_snapshot,
                       %Buffer.SyncSnapshot{
                         token: ^reset_token,
+                        version: 2,
                         sequence: 2,
                         changes: {:full, "replacement"}
                       }}
+
+      assert Buffer.sync_revision(buffer) == {2, 2}
     end
   end
 
