@@ -342,57 +342,6 @@ struct ProtocolEventHandoffTests {
         replacement.cancel()
     }
 
-    @Test("production delivery replacement admits only current connection events")
-    @MainActor func replacementDeliveryRejectsOldEvents() async throws {
-        let delivery = ProtocolEventDelivery()
-        var currentConnectionID: UInt64 = 1
-        var receivedConnectionIDs: [UInt64] = []
-        let frame = try decodeFrame(from: Data([OP_SET_WINDOW_BG, 1, 2, 3]))
-        let old = delivery.replace(
-            connectionID: 1,
-            isCurrent: { $0 == currentConnectionID },
-            consume: { _, connectionID in receivedConnectionIDs.append(connectionID) }
-        )
-        #expect(old.acquireAdmission())
-
-        currentConnectionID = 2
-        await withCheckedContinuation { continuation in
-            let replacement = delivery.replace(
-                connectionID: 2,
-                isCurrent: { $0 == currentConnectionID },
-                consume: { _, connectionID in
-                    receivedConnectionIDs.append(connectionID)
-                    continuation.resume()
-                }
-            )
-            old.deliver(frame)
-            #expect(old.acquireAdmission() == false)
-            #expect(replacement.acquireAdmission())
-            replacement.deliver(frame)
-        }
-
-        #expect(receivedConnectionIDs == [2])
-        delivery.cancel()
-    }
-
-    @Test("repeated replacement and shutdown cancel the exact active delivery")
-    @MainActor func repeatedReplacementAndShutdownAreIdempotent() {
-        let delivery = ProtocolEventDelivery()
-        let first = delivery.replace(connectionID: 1, isCurrent: { _ in true }, consume: { _, _ in })
-        let second = delivery.replace(connectionID: 2, isCurrent: { _ in true }, consume: { _, _ in })
-        let third = delivery.replace(connectionID: 3, isCurrent: { _ in true }, consume: { _, _ in })
-
-        #expect(first.acquireAdmission() == false)
-        #expect(second.acquireAdmission() == false)
-        #expect(third.acquireAdmission())
-        #expect(delivery.activeConnectionID == 3)
-
-        delivery.cancel()
-        delivery.cancel()
-        #expect(delivery.activeConnectionID == nil)
-        #expect(third.acquireAdmission() == false)
-    }
-
     @Test("multiple decoded packets reach one main-actor consumer in wire order")
     func preservesPacketOrder() async throws {
         let packets = [
@@ -450,5 +399,249 @@ struct ProtocolEventHandoffTests {
 
         #expect(await blocked.value == false)
         #expect(handoff.acquireAdmission() == false)
+    }
+}
+
+@Suite("Protocol connection lifecycle")
+struct ProtocolConnectionTests {
+    private enum ReceivedEvent: Equatable {
+        case frame(UInt8)
+        case failure
+    }
+
+    private func framed(_ payload: Data) -> Data {
+        let length = UInt32(payload.count)
+        var packet = Data([
+            UInt8((length >> 24) & 0xFF),
+            UInt8((length >> 16) & 0xFF),
+            UInt8((length >> 8) & 0xFF),
+            UInt8(length & 0xFF)
+        ])
+        packet.append(payload)
+        return packet
+    }
+
+    @Test("startup delivers frames and decode failures in FIFO order")
+    @MainActor func startupPreservesEventOrder() async throws {
+        let input = Pipe()
+        let output = Pipe()
+        let received = AsyncStream.makeStream(of: ReceivedEvent.self, bufferingPolicy: .unbounded)
+        let connection = try ProtocolConnection(
+            connectionID: 1,
+            readHandle: input.fileHandleForReading,
+            writeHandle: output.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { $0 == 1 },
+            consume: { event, _ in
+                switch event {
+                case .frame(let frame):
+                    received.continuation.yield(.frame(frame.commands[0].opcode))
+                case .failure:
+                    received.continuation.yield(.failure)
+                }
+            },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in }
+        )
+        connection.start()
+
+        var packets = framed(Data([OP_SET_WINDOW_BG, 1, 2, 3]))
+        packets.append(framed(Data([OP_SET_TITLE, 0, 2, 0x61])))
+        packets.append(framed(Data([OP_SET_TITLE, 0, 1, 0x78])))
+        try input.fileHandleForWriting.write(contentsOf: packets)
+
+        var iterator = received.stream.makeAsyncIterator()
+        let first = await iterator.next()
+        let second = await iterator.next()
+        let third = await iterator.next()
+
+        #expect(first == .frame(OP_SET_WINDOW_BG))
+        #expect(second == .failure)
+        #expect(third == .frame(OP_SET_TITLE))
+
+        connection.stop()
+        input.fileHandleForWriting.closeFile()
+        output.fileHandleForReading.closeFile()
+        received.continuation.finish()
+    }
+
+    @Test("stop wakes a reader blocked behind capacity-one admission and is idempotent", .timeLimit(.minutes(1)))
+    @MainActor func stopWakesBlockedAdmission() throws {
+        let input = Pipe()
+        let output = Pipe()
+        let connection = try ProtocolConnection(
+            connectionID: 1,
+            readHandle: input.fileHandleForReading,
+            writeHandle: output.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { _ in true },
+            consume: { _, _ in },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in }
+        )
+        connection.start()
+
+        var packets = framed(Data([OP_SET_WINDOW_BG, 1, 2, 3]))
+        packets.append(framed(Data([OP_SET_TITLE, 0, 1, 0x78])))
+        try input.fileHandleForWriting.write(contentsOf: packets)
+        connection.waitForBlockedReaderAdmissionForTesting()
+
+        connection.stop()
+        connection.stop()
+        #expect(connection.isStoppedForTesting)
+
+        input.fileHandleForWriting.closeFile()
+        output.fileHandleForReading.closeFile()
+    }
+
+    @Test("stop returns while the reader is blocked and pipe closure releases the retired callback", .timeLimit(.minutes(1)))
+    @MainActor func blockedReadTeardownIsNonblocking() async throws {
+        let input = Pipe()
+        let output = Pipe()
+        let disconnects = AsyncStream.makeStream(of: UInt64.self, bufferingPolicy: .unbounded)
+        let connection = try ProtocolConnection(
+            connectionID: 7,
+            readHandle: input.fileHandleForReading,
+            writeHandle: output.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { _ in true },
+            consume: { _, _ in },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, connectionID in disconnects.continuation.yield(connectionID) }
+        )
+        connection.start()
+        connection.waitForReaderAdmissionForTesting()
+
+        connection.stop()
+        #expect(connection.isStoppedForTesting)
+        input.fileHandleForWriting.closeFile()
+
+        var iterator = disconnects.stream.makeAsyncIterator()
+        #expect(await iterator.next() == 7)
+        output.fileHandleForReading.closeFile()
+        disconnects.continuation.finish()
+    }
+
+    @Test("replacement cancels queued retired delivery before new delivery starts", .timeLimit(.minutes(1)))
+    @MainActor func replacementCancelsRetiredConsumer() async throws {
+        let oldInput = Pipe()
+        let oldOutput = Pipe()
+        let replacementInput = Pipe()
+        let replacementOutput = Pipe()
+        let delivered = AsyncStream.makeStream(of: UInt64.self, bufferingPolicy: .unbounded)
+        var receivedConnectionIDs: [UInt64] = []
+        var currentConnectionID: UInt64 = 1
+
+        let consume: ProtocolConnection.Consumer = { _, connectionID in
+            receivedConnectionIDs.append(connectionID)
+            delivered.continuation.yield(connectionID)
+        }
+        let oldConnection = try ProtocolConnection(
+            connectionID: 1,
+            readHandle: oldInput.fileHandleForReading,
+            writeHandle: oldOutput.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { $0 == currentConnectionID },
+            consume: consume,
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in }
+        )
+        oldConnection.start()
+        try oldInput.fileHandleForWriting.write(contentsOf: framed(Data([OP_SET_WINDOW_BG, 1, 2, 3])))
+        oldConnection.waitForBlockedReaderAdmissionForTesting()
+
+        let replacementCandidate = ProtocolConnection.replacing(
+            oldConnection,
+            connectionID: 2,
+            readHandle: replacementInput.fileHandleForReading,
+            writeHandle: replacementOutput.fileHandleForWriting,
+            resourcePolicy: .default,
+            invalidate: { currentConnectionID = 2 },
+            isCurrent: { $0 == currentConnectionID },
+            consume: consume,
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in },
+            onInitializationFailure: { _ in Issue.record("replacement construction unexpectedly failed") }
+        )
+        let replacement = try #require(replacementCandidate)
+        replacement.start()
+        try replacementInput.fileHandleForWriting.write(contentsOf: framed(Data([OP_SET_TITLE, 0, 1, 0x78])))
+
+        var iterator = delivered.stream.makeAsyncIterator()
+        #expect(await iterator.next() == 2)
+        await Task.yield()
+        #expect(receivedConnectionIDs == [2])
+
+        replacement.stop()
+        oldInput.fileHandleForWriting.closeFile()
+        replacementInput.fileHandleForWriting.closeFile()
+        oldOutput.fileHandleForReading.closeFile()
+        replacementOutput.fileHandleForReading.closeFile()
+        delivered.continuation.finish()
+    }
+
+    @Test("a delayed retired disconnect cannot retire the replacement encoder", .timeLimit(.minutes(1)))
+    @MainActor func replacementCapturesRetiredEncoder() async throws {
+        let oldInput = Pipe()
+        let oldOutput = Pipe()
+        let replacementInput = Pipe()
+        let replacementOutput = Pipe()
+        let disconnects = AsyncStream.makeStream(of: UInt64.self, bufferingPolicy: .unbounded)
+        var currentConnectionID: UInt64 = 1
+
+        let oldConnection = try ProtocolConnection(
+            connectionID: 1,
+            readHandle: oldInput.fileHandleForReading,
+            writeHandle: oldOutput.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { $0 == currentConnectionID },
+            consume: { _, _ in },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { encoder, connectionID in
+                encoder.disconnect(reason: .unexpectedPeerClosure)
+                disconnects.continuation.yield(connectionID)
+            }
+        )
+        oldConnection.start()
+        oldConnection.waitForReaderAdmissionForTesting()
+        oldConnection.stop()
+
+        currentConnectionID = 2
+        let replacement = try ProtocolConnection(
+            connectionID: 2,
+            readHandle: replacementInput.fileHandleForReading,
+            writeHandle: replacementOutput.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { $0 == currentConnectionID },
+            consume: { _, _ in },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { encoder, connectionID in
+                encoder.disconnect(reason: .unexpectedPeerClosure)
+                disconnects.continuation.yield(connectionID)
+            }
+        )
+        replacement.start()
+        replacement.waitForReaderAdmissionForTesting()
+
+        oldInput.fileHandleForWriting.closeFile()
+        var iterator = disconnects.stream.makeAsyncIterator()
+        #expect(await iterator.next() == 1)
+
+        replacement.encoder.sendReady(cols: 80, rows: 24)
+        #expect(replacement.encoder.waitForPendingWritesForTesting())
+        replacementOutput.fileHandleForWriting.closeFile()
+        #expect(replacementOutput.fileHandleForReading.readDataToEndOfFile().isEmpty == false)
+
+        replacement.stop()
+        replacementInput.fileHandleForWriting.closeFile()
+        oldOutput.fileHandleForReading.closeFile()
+        disconnects.continuation.finish()
     }
 }
