@@ -120,6 +120,11 @@ defmodule MingaEditor.Frontend.Emit.Context do
   def accept_message_store(%__MODULE__{} = ctx, %MessageStore{} = message_store),
     do: %{ctx | message_store: message_store}
 
+  @doc "Returns the context with the renderer-owned font registry produced by emission."
+  @spec with_font_registry(t(), FontRegistry.t()) :: t()
+  def with_font_registry(%__MODULE__{} = ctx, %FontRegistry{} = font_registry),
+    do: %{ctx | font_registry: font_registry}
+
   @spec tab_bar(term()) :: TabBar.t() | nil
   defp tab_bar(%TraditionalState{} = shell_state), do: TraditionalState.tab_bar(shell_state)
   defp tab_bar(_shell_state), do: nil

@@ -73,40 +73,4 @@ defmodule Minga.FontRegistryTest do
       assert FontRegistry.lookup(reg, "Fira Code") == 1
     end
   end
-
-  describe "process registry" do
-    test "with_process_registry restores the caller process dictionary" do
-      reg = FontRegistry.new()
-
-      result =
-        FontRegistry.with_process_registry(reg, fn ->
-          {_id, updated, _} =
-            FontRegistry.get_or_register(FontRegistry.process_registry(), "Fira Code")
-
-          FontRegistry.put_process_registry(updated)
-          FontRegistry.process_registry()
-        end)
-
-      assert FontRegistry.lookup(result, "Fira Code") == 1
-      assert FontRegistry.process_registry() == nil
-    end
-
-    test "nested with_process_registry restores the outer registry" do
-      outer = FontRegistry.new()
-      {_id, inner, _} = FontRegistry.get_or_register(FontRegistry.new(), "Inner Font")
-
-      result =
-        FontRegistry.with_process_registry(outer, fn ->
-          FontRegistry.with_process_registry(inner, fn ->
-            FontRegistry.mark_registered(FontRegistry.process_registry())
-            |> FontRegistry.put_process_registry()
-          end)
-
-          FontRegistry.process_registry()
-        end)
-
-      assert result == outer
-      assert FontRegistry.process_registry() == nil
-    end
-  end
 end

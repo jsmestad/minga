@@ -32,6 +32,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.Renderer.RenderWindow, as: Window
   alias MingaEditor.State.Windows
+  alias MingaEditor.UI.FontRegistry
 
   @async_render_timeout 5_000
 
@@ -127,6 +128,65 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     refute renderer_busy?(renderer)
     assert Process.alive?(renderer)
+  end
+
+  test "pipeline failure cannot commit its locally allocated font registry" do
+    parent = self()
+
+    pipeline = fn input ->
+      {_id, allocated, true} =
+        FontRegistry.get_or_register(input.font_registry, "Failed Fallback")
+
+      send(parent, {:failed_font_registry, allocated})
+      raise "boom after font allocation"
+    end
+
+    renderer = start_renderer(self(), pipeline: pipeline)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 43)
+
+    assert_receive {:failed_font_registry, failed_registry}, @async_render_timeout
+    assert FontRegistry.lookup(failed_registry, "Failed Fallback") == 1
+
+    refute renderer_busy?(renderer)
+    assert :sys.get_state(renderer).font_registry == FontRegistry.new()
+  end
+
+  test "retryable rejection reuses font ids and restores registration order" do
+    parent = self()
+
+    pipeline = fn input ->
+      send(
+        parent,
+        {:font_registry_probe, input.frame_seq,
+         FontRegistry.pending_registrations(input.font_registry)}
+      )
+
+      case input.frame_seq do
+        20 ->
+          {_id, registry, true} =
+            FontRegistry.get_or_register(input.font_registry, "First Fallback")
+
+          {_id, registry, true} = FontRegistry.get_or_register(registry, "Second Fallback")
+          Input.with_font_registry(input, FontRegistry.mark_registered(registry))
+
+        _ ->
+          input
+      end
+    end
+
+    renderer = start_ack_renderer(self(), pipeline: pipeline)
+    RendererServer.cast_snapshot(renderer, stub_intent(), 20)
+    assert_receive {:font_registry_probe, 20, []}, @async_render_timeout
+
+    RendererServer.cast_snapshot(renderer, stub_intent(), 21)
+    reject_base_sequence_mismatch(renderer, 1, 20, 0)
+
+    assert_receive {:font_registry_probe, 21, [{1, "First Fallback"}, {2, "Second Fallback"}]},
+                   @async_render_timeout
+
+    registry = :sys.get_state(renderer).font_registry
+    assert FontRegistry.lookup(registry, "First Fallback") == 1
+    assert FontRegistry.lookup(registry, "Second Fallback") == 2
   end
 
   test "synchronous stale-buffer retries stop at the configured bound" do

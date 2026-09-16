@@ -7,13 +7,10 @@ defmodule MingaEditor.UI.FontRegistry do
   is first rendered. The Emit stage sends `register_font` protocol commands
   for pending registrations so the GUI frontend can load the corresponding FontFace instances.
 
-  The registry is process-local state owned by `MingaEditor.Renderer.Server`.
-  Render snapshots receive the current registry just before the pipeline runs,
-  and the renderer stores the updated registry after emit. It resets when the
-  renderer restarts or the font config changes.
+  `MingaEditor.Renderer.Server` owns the long-lived registry. Each render passes
+  the immutable value through composition and emission, then the renderer stores
+  the completed result. It resets when the renderer restarts or the font config changes.
   """
-
-  @process_key :emit_font_registry
 
   @enforce_keys [:families, :next_id]
   defstruct families: %{},
@@ -85,44 +82,5 @@ defmodule MingaEditor.UI.FontRegistry do
   def require_reregistration(%__MODULE__{} = registry) do
     pending = Map.new(registry.families, fn {family, id} -> {id, family} end)
     %{registry | pending: pending}
-  end
-
-  @doc "Runs a function with this registry installed for render-local font resolution."
-  @spec with_process_registry(t(), (-> result)) :: result when result: term()
-  def with_process_registry(%__MODULE__{} = font_registry, fun) when is_function(fun, 0) do
-    previous = Process.get(@process_key, :__minga_unset__)
-    Process.put(@process_key, font_registry)
-
-    try do
-      fun.()
-    after
-      if previous == :__minga_unset__ do
-        Process.delete(@process_key)
-      else
-        Process.put(@process_key, previous)
-      end
-    end
-  end
-
-  @doc "Returns the active render-local font registry, if one is installed."
-  @spec process_registry() :: t() | nil
-  def process_registry do
-    case Process.get(@process_key) do
-      %__MODULE__{} = registry -> registry
-      _ -> nil
-    end
-  end
-
-  @doc "Returns the render-local font registry, or the supplied fallback."
-  @spec current_process_registry(t()) :: t()
-  def current_process_registry(%__MODULE__{} = fallback) do
-    process_registry() || fallback
-  end
-
-  @doc "Stores the render-local font registry."
-  @spec put_process_registry(t()) :: t()
-  def put_process_registry(%__MODULE__{} = registry) do
-    Process.put(@process_key, registry)
-    registry
   end
 end

@@ -130,41 +130,36 @@ defmodule MingaEditor.Renderer.Composition do
   The text is the concatenation of all segment texts. Spans are built
   from each segment's Face, with display column coordinates.
   """
-  @spec segments_to_text_and_spans([styled_segment()]) ::
-          {String.t(), [Minga.RenderModel.Window.Span.t()]}
-  def segments_to_text_and_spans(segments) do
+  @spec segments_to_text_and_spans([styled_segment()], FontRegistry.t()) ::
+          {String.t(), [Minga.RenderModel.Window.Span.t()], FontRegistry.t()}
+  def segments_to_text_and_spans(segments, %FontRegistry{} = font_registry) do
     alias Minga.RenderModel.Window.Span
 
-    {spans_rev, text_parts, _col} =
-      Enum.reduce(segments, {[], [], 0}, fn {text, face}, {spans, parts, col} ->
-        width = Unicode.display_width(text)
+    {spans_rev, text_parts, _col, font_registry} =
+      Enum.reduce(segments, {[], [], 0, font_registry}, fn
+        {text, face}, {spans, parts, col, registry} ->
+          width = Unicode.display_width(text)
 
-        if width > 0 do
-          span = Span.from_face(face, col, col + width, font_id_for_face(face))
-          {[span | spans], [text | parts], col + width}
-        else
-          {spans, parts, col}
-        end
+          if width > 0 do
+            {font_id, registry} = font_id_for_face(face, registry)
+            span = Span.from_face(face, col, col + width, font_id)
+            {[span | spans], [text | parts], col + width, registry}
+          else
+            {spans, parts, col, registry}
+          end
       end)
 
-    {text_parts |> Enum.reverse() |> Enum.join(), Enum.reverse(spans_rev)}
+    {text_parts |> Enum.reverse() |> Enum.join(), Enum.reverse(spans_rev), font_registry}
   end
 
-  @spec font_id_for_face(Face.t()) :: non_neg_integer()
-  defp font_id_for_face(%Face{font_family: nil}), do: 0
+  @spec font_id_for_face(Face.t(), FontRegistry.t()) ::
+          {non_neg_integer(), FontRegistry.t()}
+  defp font_id_for_face(%Face{font_family: nil}, %FontRegistry{} = registry), do: {0, registry}
 
-  defp font_id_for_face(%Face{font_family: family}) when is_binary(family) do
-    case FontRegistry.process_registry() do
-      nil ->
-        0
-
-      registry ->
-        {font_id, updated_registry, _new?} =
-          FontRegistry.get_or_register(registry, family)
-
-        FontRegistry.put_process_registry(updated_registry)
-        font_id
-    end
+  defp font_id_for_face(%Face{font_family: family}, %FontRegistry{} = registry)
+       when is_binary(family) do
+    {font_id, updated_registry, _new?} = FontRegistry.get_or_register(registry, family)
+    {font_id, updated_registry}
   end
 
   # ── Invisible character substitution (private) ─────────────────────────

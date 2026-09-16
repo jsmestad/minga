@@ -27,6 +27,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Window, as: EditorWindow
   alias MingaEditor.WindowTree
+  alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Highlight
   alias Minga.RenderModel.Window
   alias Minga.RenderModel.Window.Row
@@ -187,7 +188,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         )
       )
 
-    Builder.build(input, scroll, ctx)
+    {window, _font_registry} = Builder.build(input, scroll, ctx, input.font_registry)
+    window
   end
 
   defp build_window_with_stats(%EditorState{} = state, ctx_overrides, opts) do
@@ -213,10 +215,43 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         )
       )
 
-    Builder.build_with_stats(input, scroll, ctx, opts)
+    {window, build_result, _font_registry} =
+      Builder.build_with_stats(input, scroll, ctx, input.font_registry, opts)
+
+    {window, build_result}
   end
 
   describe "GUI content stage" do
+    test "ordinary and virtual rows share one explicit font registry in encounter order" do
+      state = gui_state(content: "hello")
+      buffer = state.workspace.buffers.active
+
+      BufferProcess.add_virtual_text(buffer, {0, 0},
+        segments: [{"above", Face.new(font_family: "Virtual Fallback")}],
+        placement: :above,
+        priority: 0
+      )
+
+      BufferProcess.add_virtual_text(buffer, {0, 1},
+        segments: [{"inline", Face.new(font_family: "Inline Fallback")}],
+        placement: :inline,
+        priority: 0
+      )
+
+      {[view], _cursor, input} = build_content(state)
+      [virtual_row, ordinary_row] = view.window_model.rows
+
+      assert virtual_row.row_type == :virtual_line
+      assert Enum.map(virtual_row.spans, & &1.font_id) == [1]
+      assert ordinary_row.row_type == :normal
+      assert Enum.map(ordinary_row.spans, & &1.font_id) == [0, 2, 0]
+
+      assert FontRegistry.pending_registrations(input.font_registry) == [
+               {1, "Virtual Fallback"},
+               {2, "Inline Fallback"}
+             ]
+    end
+
     test "builds a canonical window model" do
       state = gui_state(content: "hello\nworld")
       {[wf], _cursor, _state} = build_content(state)
