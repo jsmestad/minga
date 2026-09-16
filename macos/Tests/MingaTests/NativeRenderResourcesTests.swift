@@ -342,6 +342,38 @@ struct NativeRenderResourcesTests {
         #expect(completed.allocator.pixelWidth(forSlot: 0) == 64)
     }
 
+    @Test("window invalidation clears every warmed atlas generation")
+    @MainActor func windowInvalidationClearsEveryAtlasGeneration() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let atlas = LineTextureAtlas(device: device, slotHeight: 16, policy: policy)
+        let key = AtlasKey.bufferRow(windowId: 7, rowId: 9)
+        let bytes = UnsafeMutableRawPointer.allocate(byteCount: 64 * 16 * 4, alignment: 16)
+        defer { bytes.deallocate() }
+        memset(bytes, 0x7f, 64 * 16 * 4)
+
+        var completed = atlas
+        for slot in 0..<LineTextureAtlas.textureGenerationCount {
+            let candidate = completed.makeCandidate(texturePoolSlot: slot)
+            guard case .success = candidate.ensureCapacity(maxSlots: 4, width: 64) else { return }
+            candidate.beginFrame()
+            guard case .reserved(let reservation)? = candidate.lookupOrReserve(key: key, contentHash: 1) else { return }
+            #expect(candidate.commitUpload(reservation: reservation, pointer: bytes,
+                                           pixelWidth: 64, bytesPerRow: 256) != nil)
+            completed = candidate
+        }
+
+        completed.invalidateWindow(7)
+
+        for slot in 0..<LineTextureAtlas.textureGenerationCount {
+            let candidate = completed.makeCandidate(texturePoolSlot: slot)
+            candidate.beginFrame()
+            guard case .reserved = candidate.lookupOrReserve(key: key, contentHash: 1) else {
+                Issue.record("atlas generation \(slot) retained an invalidated window")
+                return
+            }
+        }
+    }
+
     @Test("growth staging refusal rolls back texture and allocator")
     @MainActor func growthStagingRefusalIsAtomic() {
         guard let device = MTLCreateSystemDefaultDevice() else { return }

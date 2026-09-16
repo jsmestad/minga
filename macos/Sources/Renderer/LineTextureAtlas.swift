@@ -61,6 +61,18 @@ private final class AtlasTexturePool {
     func store(_ generation: AtlasTextureGeneration, at index: Int) {
         generations[index] = generation
     }
+
+    func invalidateAll() {
+        for index in generations.indices {
+            generations[index].allocator.invalidateAll()
+        }
+    }
+
+    func invalidateWindow(_ windowId: UInt16) {
+        for index in generations.indices {
+            generations[index].allocator.invalidateWindow(windowId)
+        }
+    }
 }
 
 @MainActor
@@ -364,11 +376,13 @@ final class LineTextureAtlas {
     }
 
     func invalidateAll() {
+        texturePool.invalidateAll()
         allocator.invalidateAll()
         persistTextureGeneration()
     }
 
     func invalidateWindow(_ windowId: UInt16) {
+        texturePool.invalidateWindow(windowId)
         allocator.invalidateWindow(windowId)
         persistTextureGeneration()
     }
