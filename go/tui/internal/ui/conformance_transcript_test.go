@@ -589,7 +589,7 @@ func conformanceTranscriptTopOffset(store *residentTranscript) int {
 	return offset
 }
 
-func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, store *residentTranscript, transition int) {
+func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, store *residentTranscript, transition pinEdge) {
 	t.Helper()
 	sel := step.Go
 	if sel == nil {
@@ -611,7 +611,7 @@ func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, stor
 	}
 }
 
-func pinTransitionFromName(name string) int {
+func pinTransitionFromName(name string) pinEdge {
 	switch name {
 	case "scrolled_away":
 		return pinScrolledAway

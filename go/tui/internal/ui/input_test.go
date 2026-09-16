@@ -45,6 +45,24 @@ func TestKeyPacketEncodesSpace(t *testing.T) {
 	}
 }
 
+func TestKeyPacketPageNavigation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code rune
+		want rune
+	}{
+		{"page up", tea.KeyPgUp, pageUp},
+		{"page down", tea.KeyPgDown, pageDown},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: test.code}), 0)
+			if !ok || codepoint(packet) != test.want {
+				t.Fatalf("key packet = %v, want codepoint %d", packet, test.want)
+			}
+		})
+	}
+}
+
 func TestKeyPacketEncodesPrintableUppercaseWithoutShiftModifier(t *testing.T) {
 	for _, key := range []tea.Key{
 		{Code: 'T', Text: "T"},

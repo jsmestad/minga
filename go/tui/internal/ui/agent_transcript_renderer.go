@@ -109,16 +109,16 @@ func (r *agentTranscriptRenderer) render(m Model, transcript *residentTranscript
 	defer r.finish()
 	if transcript == nil || budget <= 0 || len(transcript.entries) == 0 {
 		if transcript != nil {
-			transcript.pendingScroll = 0
+			transcript.discardPendingScroll()
 		}
 		return nil
 	}
 
-	rows := transcript.pendingScroll
-	transcript.pendingScroll = 0
+	rows := transcript.discardPendingScroll()
 
 	if transcript.pinned {
-		tail, allFits := r.tailStart(m, transcript, budget, width)
+		tail, _ := r.tailStart(m, transcript, budget, width)
+		allFits := r.allFits(m, transcript, budget, width)
 		if rows >= 0 || allFits {
 			return r.renderPinned(m, transcript, budget, width)
 		}
@@ -156,6 +156,11 @@ func (r *agentTranscriptRenderer) render(m Model, transcript *residentTranscript
 		}
 	}
 
+	if r.allFits(m, transcript, budget, width) {
+		transcript.returnToBottom()
+		return r.renderPinned(m, transcript, budget, width)
+	}
+
 	transcript.anchor = r.anchorFor(transcript, position)
 	lines := r.renderFrom(m, transcript, position, budget, width)
 	if len(lines) == budget {
@@ -163,34 +168,54 @@ func (r *agentTranscriptRenderer) render(m Model, transcript *residentTranscript
 	}
 
 	// A trim or replacement can leave a retained anchor too close to the end to
-	// fill the viewport. Resolve the bounded tail and clamp there without
-	// scanning from the transcript start. Only an all-fitting transcript silently
-	// returns to pinned; otherwise the reader remains explicitly scrolled away.
-	tail, allFits := r.tailStart(m, transcript, budget, width)
-	if allFits {
-		transcript.pinToBottom()
-		return r.renderPinned(m, transcript, budget, width)
-	}
-	transcript.anchor = r.anchorFor(transcript, tail)
-	return r.renderFrom(m, transcript, tail, budget, width)
+	// fill the viewport. Reaching the bounded tail means the reader is at the
+	// bottom again, so re-pin and report the edge instead of leaving BEAM follow
+	// state disengaged after a content shrink.
+	transcript.returnToBottom()
+	return r.renderPinned(m, transcript, budget, width)
 }
 
 func (r *agentTranscriptRenderer) renderPinned(m Model, transcript *residentTranscript, budget int, width int) []string {
 	overscan := min(budget, transcriptOverscanLimit)
 	start := r.moveBackward(m, transcript, r.endPosition(m, transcript, width), budget+overscan, width)
 	lines := r.renderForward(m, transcript, start, budget+overscan, width)
-	return windowBottom(lines, budget)
+	lines = windowBottom(lines, budget)
+	if transcript.truncated && len(lines) < budget && start.index == 0 && start.row == 0 {
+		return append([]string{m.renderAgentEarlierMessagesHidden(width)}, lines...)
+	}
+	return lines
 }
 
 func (r *agentTranscriptRenderer) renderFrom(m Model, transcript *residentTranscript, position transcriptPosition, budget int, width int) []string {
-	overscan := min(budget, transcriptOverscanLimit)
-	lines := r.renderForward(m, transcript, position, budget+overscan, width)
-	return takeLines(lines, budget)
+	showTruncated := transcript.truncated && position.index == 0 && position.row == 0
+	rowBudget := budget
+	if showTruncated {
+		rowBudget--
+	}
+	overscan := min(max(rowBudget, 0), transcriptOverscanLimit)
+	lines := r.renderForward(m, transcript, position, max(rowBudget, 0)+overscan, width)
+	lines = takeLines(lines, max(rowBudget, 0))
+	if showTruncated {
+		return append([]string{m.renderAgentEarlierMessagesHidden(width)}, lines...)
+	}
+	return lines
 }
 
 func (r *agentTranscriptRenderer) tailStart(m Model, transcript *residentTranscript, budget int, width int) (transcriptPosition, bool) {
 	start := r.moveBackward(m, transcript, r.endPosition(m, transcript, width), budget, width)
 	return start, start.index == 0 && start.row == 0
+}
+
+func (r *agentTranscriptRenderer) allFits(m Model, transcript *residentTranscript, budget int, width int) bool {
+	effectiveBudget := budget
+	if transcript.truncated {
+		effectiveBudget--
+	}
+	if effectiveBudget <= 0 || len(transcript.entries)*2-1 > effectiveBudget {
+		return false
+	}
+	_, allFits := r.tailStart(m, transcript, effectiveBudget, width)
+	return allFits
 }
 
 func (r *agentTranscriptRenderer) endPosition(m Model, transcript *residentTranscript, width int) transcriptPosition {

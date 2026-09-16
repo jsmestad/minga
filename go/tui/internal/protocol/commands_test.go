@@ -1257,6 +1257,35 @@ func TestDecodeAgentChatSkipsRetiredMessagesSection(t *testing.T) {
 	}
 }
 
+func TestDecodeAgentChatInputFocusedSectionRoundTripAndDefault(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		sections [][]byte
+		want     bool
+	}{
+		{name: "focused", sections: [][]byte{section(0x01, []byte{1, 0}), section(0x09, []byte{1})}, want: true},
+		{name: "not focused", sections: [][]byte{section(0x01, []byte{1, 0}), section(0x09, []byte{0})}, want: false},
+		{name: "absent defaults false", sections: [][]byte{section(0x01, []byte{1, 0})}, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload := []byte{generated.OPGuiAgentChat, byte(len(test.sections))}
+			for _, encoded := range test.sections {
+				payload = append(payload, encoded...)
+			}
+			command, err := DecodeCommand(payload)
+			if err != nil {
+				t.Fatalf("DecodeCommand returned error: %v", err)
+			}
+			if command.Size != len(payload) {
+				t.Fatalf("consumed = %d, want %d", command.Size, len(payload))
+			}
+			if got := command.Chrome.AgentChat.InputFocused; got != test.want {
+				t.Fatalf("InputFocused = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestDecodeAgentTimelineChrome(t *testing.T) {
 	timelinePayload := []byte{1, 0xFF, 0xFF, 1, 3}
 	timelinePayload = append(timelinePayload, string8("apply_patch")...)

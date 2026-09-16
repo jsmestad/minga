@@ -154,13 +154,7 @@ func agentColumnGap() int {
 func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget int, empty bool) []string {
 	lines := make([]string, 0, budget)
 	composer := m.renderAgentComposer(chat, width)
-	composerHeight := min(len(composer), max(budget, 0))
-	transcriptBudget := max(budget-composerHeight, 0)
-	statusHeight := 0
-	if transcriptBudget >= 4 {
-		statusHeight = 1
-	}
-	contentBudget := max(transcriptBudget-statusHeight, 0)
+	composerHeight, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget)
 	messageCount := len(m.agentTranscriptMessages())
 	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
 	if chat.Pending != "" && len(lines) < contentBudget {
@@ -171,7 +165,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 		lines = append(lines, m.renderAgentTranscriptHeader(width))
 	}
 
-	messageLines := m.renderAgentResidentTranscript(max(contentBudget-len(lines), 0), width)
+	messageLines := m.renderAgentResidentTranscript(messageBudget, width)
 	lines = append(lines, messageLines...)
 
 	if empty && len(lines) < contentBudget {
@@ -188,6 +182,39 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	}
 	lines = append(lines, composer[:composerHeight]...)
 	return takeLines(lines, budget)
+}
+
+func agentMainColumnBudgets(chat protocol.AgentChat, composerRows int, budget int) (composerHeight int, statusHeight int, contentBudget int, messageBudget int) {
+	composerHeight = min(composerRows, max(budget, 0))
+	transcriptBudget := max(budget-composerHeight, 0)
+	if transcriptBudget >= 4 {
+		statusHeight = 1
+	}
+	contentBudget = max(transcriptBudget-statusHeight, 0)
+	chromeRows := 1
+	if chat.Pending != "" {
+		chromeRows++
+	}
+	messageBudget = max(contentBudget-chromeRows, 0)
+	return composerHeight, statusHeight, contentBudget, messageBudget
+}
+
+func (m Model) agentTranscriptPageSize() int {
+	chat, ok := m.agentChat()
+	if !ok {
+		return 1
+	}
+	limit := m.bodyHeight()
+	panelWidth := max(m.width-2, 1)
+	mainWidth := panelWidth
+	if agentDetailsVisible(panelWidth) && limit > 5 {
+		detailWidth := agentDetailsWidth(panelWidth)
+		mainWidth = max(panelWidth-detailWidth-agentColumnGap(), 40)
+	}
+	mainBudget := max(limit-1, 0)
+	composerRows := len(m.renderAgentComposer(chat, mainWidth))
+	_, _, _, messageBudget := agentMainColumnBudgets(chat, composerRows, mainBudget)
+	return max(messageBudget, 1)
 }
 
 func (m Model) renderAgentBlankLine(width int) string {
@@ -208,6 +235,12 @@ func (m Model) renderAgentTranscriptHeader(width int) string {
 	label := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(p.AgentPanel()).Render(" Transcript ")
 	rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Render(strings.Repeat("─", max(width-lipgloss.Width(label), 0)))
 	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(label+rule, width))
+}
+
+func (m Model) renderAgentEarlierMessagesHidden(width int) string {
+	p := m.palette()
+	label := " earlier messages hidden "
+	return lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width).Align(lipgloss.Center).Render(fit(label, width))
 }
 
 func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
@@ -518,7 +551,7 @@ func (m Model) renderAgentNotice(label string, text string, width int) string {
 // agentTranscriptMessages is the transcript rendering source: the resident 0x86
 // store (#2654).
 func (m Model) agentTranscriptMessages() []protocol.AgentChatMessage {
-	if m.transcript != nil && len(m.transcript.messages) > 0 {
+	if m.transcript != nil && m.transcript.hasEpoch {
 		return m.transcript.messages
 	}
 	return nil

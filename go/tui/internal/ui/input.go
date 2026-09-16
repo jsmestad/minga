@@ -41,6 +41,10 @@ func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
 		return protocol.EncodeKeyPress(arrowLeft, keyModifiers(key), seq), true
 	case tea.KeyRight:
 		return protocol.EncodeKeyPress(arrowRight, keyModifiers(key), seq), true
+	case tea.KeyPgUp:
+		return protocol.EncodeKeyPress(pageUp, keyModifiers(key), seq), true
+	case tea.KeyPgDown:
+		return protocol.EncodeKeyPress(pageDown, keyModifiers(key), seq), true
 	case tea.KeySpace:
 		return protocol.EncodeKeyPress(' ', keyModifiers(key), seq), true
 	}

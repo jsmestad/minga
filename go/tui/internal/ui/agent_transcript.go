@@ -11,7 +11,10 @@ import (
 // and the reading anchor. Styled rows are disposable renderer state and live in
 // agentTranscriptRenderer instead.
 type residentTranscript struct {
-	epoch     uint32
+	epoch uint32
+	// hasEpoch is the received-a-frame flag. It stays true for a legitimate
+	// empty 0x86 transcript, so callers never confuse empty resident data with
+	// the pre-seed state that existed before this epoch's full replacement.
 	hasEpoch  bool
 	messages  []protocol.AgentChatMessage
 	entries   []transcriptEntry
@@ -22,7 +25,7 @@ type residentTranscript struct {
 	pinned        bool
 	anchor        transcriptAnchor
 	pendingScroll int
-	pinTransition int
+	pinTransition pinEdge
 	animatedCount int
 }
 
@@ -43,8 +46,10 @@ type transcriptAnchor struct {
 	row  int
 }
 
+type pinEdge uint8
+
 const (
-	pinNone = iota
+	pinNone pinEdge = iota
 	pinScrolledAway
 	pinReturned
 )
@@ -102,6 +107,10 @@ func (t *residentTranscript) apply(frame protocol.AgentTranscript) transcriptDro
 		t.epoch = frame.Epoch
 		t.hasEpoch = true
 		if epochChanged {
+			// An epoch flip is an authoritative session/reset transition. Both
+			// BEAM epoch sources independently reset follow-bottom, so discard a
+			// stale local edge and re-pin without reporting a new intent.
+			t.pinTransition = pinNone
 			t.pinToBottom()
 		} else {
 			t.reconcileAnchor(oldEntries)
@@ -329,7 +338,7 @@ func (t *residentTranscript) rebuildSlotIndex() {
 
 func (t *residentTranscript) reconcileAnchor(oldEntries []transcriptEntry) {
 	if len(t.entries) == 0 {
-		t.pinToBottom()
+		t.returnToBottom()
 		return
 	}
 	if t.pinned || t.anchor.slot == 0 {
@@ -374,6 +383,14 @@ func (t *residentTranscript) pinToBottom() {
 	t.pendingScroll = 0
 }
 
+func (t *residentTranscript) returnToBottom() {
+	wasPinned := t.pinned
+	t.pinToBottom()
+	if !wasPinned {
+		t.recordPinTransition(pinReturned)
+	}
+}
+
 func indexEntryByID(entries []transcriptEntry, id uint32) int {
 	if id == 0 {
 		return -1
@@ -390,7 +407,13 @@ func (t *residentTranscript) scrollBy(rows int) {
 	t.pendingScroll += rows
 }
 
-func (t *residentTranscript) takePinTransition() int {
+func (t *residentTranscript) discardPendingScroll() int {
+	rows := t.pendingScroll
+	t.pendingScroll = 0
+	return rows
+}
+
+func (t *residentTranscript) takePinTransition() pinEdge {
 	transition := t.pinTransition
 	t.pinTransition = pinNone
 	return transition
@@ -400,7 +423,7 @@ func (t *residentTranscript) hasAnimatedMessages() bool {
 	return t != nil && t.animatedCount > 0
 }
 
-func (t *residentTranscript) recordPinTransition(transition int) {
+func (t *residentTranscript) recordPinTransition(transition pinEdge) {
 	if transition != pinNone {
 		t.pinTransition = transition
 	}
