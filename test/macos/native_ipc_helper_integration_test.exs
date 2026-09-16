@@ -113,25 +113,24 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     {:os_pid, app_pid} = Port.info(sleeper, :os_pid)
     euid = File.stat!(File.cwd!()).uid
 
-    supervisor =
-      start_supervised!(
-        {IPCSupervisor,
-         name: nil,
-         server_name: nil,
-         task_supervisor_name: tasks,
-         runtime_parent: runtime_parent,
-         runtime_dir: runtime_dir,
-         app_instance_id: "app-instance-integration",
-         app_pid: app_pid,
-         euid: euid,
-         launch_nonce: "integration-launch-nonce",
-         wait_tracker: tracker,
-         open_wait: open_wait,
-         open_receipt: open_receipt,
-         inspect_request: inspect_request,
-         navigation_request: navigation_request,
-         kill_checker: fn ^app_pid -> true end}
-      )
+    start_supervised!(
+      {IPCSupervisor,
+       name: nil,
+       server_name: nil,
+       task_supervisor_name: tasks,
+       runtime_parent: runtime_parent,
+       runtime_dir: runtime_dir,
+       app_instance_id: "app-instance-integration",
+       app_pid: app_pid,
+       euid: euid,
+       launch_nonce: "integration-launch-nonce",
+       wait_tracker: tracker,
+       open_wait: open_wait,
+       open_receipt: open_receipt,
+       inspect_request: inspect_request,
+       navigation_request: navigation_request,
+       kill_checker: fn ^app_pid -> true end}
+    )
 
     on_exit(fn ->
       send(buffer, :stop)
@@ -153,7 +152,6 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
       descriptor: descriptor,
       helper: helper,
       runtime_parent: runtime_parent,
-      supervisor: supervisor,
       tracker: tracker
     }
   end
@@ -243,7 +241,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
-    assert :ok = Supervisor.stop(ctx.supervisor)
+    assert :ok = stop_supervised(IPCSupervisor)
     assert {output, 1} = Task.await(task, @helper_timeout)
     assert output =~ "disconnected"
   end
@@ -254,7 +252,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
-    assert :ok = Supervisor.stop(ctx.supervisor)
+    assert :ok = stop_supervised(IPCSupervisor)
     assert {output, 5} = Task.await(task, @helper_timeout)
     assert output =~ "before accepting"
   end
@@ -316,7 +314,9 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
     assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
     assert {:ok, _applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
-    assert :ok = Supervisor.stop(ctx.supervisor)
+    assert :ok = stop_supervised(IPCSupervisor)
+
+    refute File.exists?(Path.join(ctx.runtime_parent, "com.minga.editor/current.json"))
 
     assert {output, 3} = Task.await(task, @helper_timeout)
     result = JSON.decode!(output)
