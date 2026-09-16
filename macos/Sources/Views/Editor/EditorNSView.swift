@@ -78,6 +78,16 @@ final class EditorNSView: MTKView {
 
     /// IME composition state (marked text tracking).
     private var imeComposition = IMEComposition()
+    private struct IMECommitTarget: Equatable {
+        let connectionGeneration: UInt64
+        let windowID: UInt16?
+        let contentEpoch: UInt32?
+    }
+    private var imeCommitTarget: IMECommitTarget?
+    private var textInputCallbacksSuppressed = false
+
+    /// Controlled NSTextInputContext seam for native input-routing tests.
+    var inputMethodEventHandlerForTesting: ((NSEvent) -> Bool)?
 
     /// Cell dimensions in points (used for mouse → cell coordinate mapping).
     var cellWidth: CGFloat { fontManager.cellWidth }
@@ -562,7 +572,7 @@ final class EditorNSView: MTKView {
         activeContextMenu?.cancelTracking()
         activeContextMenu = nil
         contextMenuShownForRightClick = false
-        imeComposition.clear()
+        cancelIMEComposition()
         lastMoveRow = -1
         lastMoveCol = -1
         isMouseInGutter = false
@@ -691,6 +701,7 @@ final class EditorNSView: MTKView {
             localTransform: localScrollPresentation,
             connectionID: connectionID
         )
+        cancelIMECompositionIfTargetChanged()
         Task { @MainActor [weak self] in
             await Task.yield()
             guard let self else { return }
@@ -1003,6 +1014,7 @@ final class EditorNSView: MTKView {
     }
 
     override func resignFirstResponder() -> Bool {
+        cancelIMEComposition()
         let result = super.resignFirstResponder()
         if result { stopCursorBlink() }
         return result
@@ -1446,6 +1458,12 @@ final class EditorNSView: MTKView {
         resetCursorBlink()
         let mods = modifierBits(from: event.modifierFlags)
 
+        if imeComposition.hasMarkedText && !imeCommitTargetIsCurrent {
+            cancelIMEComposition()
+            return
+        }
+        textInputCallbacksSuppressed = false
+
         if event.modifierFlags.contains(.control),
            event.charactersIgnoringModifiers == "g",
            recoveryManager?.handleCtrlG() == true
@@ -1526,23 +1544,15 @@ final class EditorNSView: MTKView {
             return
         }
 
-        // Special keys (arrows, Enter, Escape, etc.) bypass IME.
+        if imeComposition.hasMarkedText,
+           Self.routesToInputMethodDuringComposition(event)
+        {
+            handleInputMethodEvent(event)
+            return
+        }
+
+        // Special keys outside composition bypass IME.
         if let codepoint = mapKeyCode(event) {
-            // If IME is composing, Escape/Enter may need special handling.
-            if imeComposition.hasMarkedText {
-                if codepoint == 27 { // Escape: cancel composition
-                    imeComposition.clear()
-                    needsDisplay = true
-                    return
-                }
-                if codepoint == 13 { // Enter: commit composition
-                    if let text = imeComposition.unmark() {
-                        commitIMEText(text)
-                    }
-                    needsDisplay = true
-                    return
-                }
-            }
             sendKeyPress(codepoint: codepoint, modifiers: mods)
             return
         }
@@ -1573,11 +1583,7 @@ final class EditorNSView: MTKView {
         // NSTextInputClient methods (insertText, setMarkedText, etc.)
         // for IME-aware input. For non-IME input, it calls insertText
         // directly with the typed character.
-        if let ctx = inputContext {
-            _ = ctx.handleEvent(event)
-        } else {
-            interpretKeyEvents([event])
-        }
+        handleInputMethodEvent(event)
     }
 
     override func keyUp(with event: NSEvent) {
@@ -2824,6 +2830,57 @@ final class EditorNSView: MTKView {
         }
     }
 
+    private var currentIMECommitTarget: IMECommitTarget {
+        let surface = dispatcher.committedEditorSnapshot?.activeSurface
+        return IMECommitTarget(
+            connectionGeneration: inputConnectionGeneration,
+            windowID: surface?.windowId,
+            contentEpoch: surface?.content.contentEpoch
+        )
+    }
+
+    private var imeCommitTargetIsCurrent: Bool {
+        imeCommitTarget == currentIMECommitTarget
+    }
+
+    private func cancelIMECompositionIfTargetChanged() {
+        guard imeComposition.hasMarkedText, !imeCommitTargetIsCurrent else { return }
+        cancelIMEComposition()
+    }
+
+    private func cancelIMEComposition() {
+        let hadMarkedText = imeComposition.hasMarkedText
+        imeComposition.clear()
+        imeCommitTarget = nil
+        textInputCallbacksSuppressed = true
+        if hadMarkedText { inputContext?.discardMarkedText() }
+        needsDisplay = true
+    }
+
+    @discardableResult
+    private func handleInputMethodEvent(_ event: NSEvent) -> Bool {
+        if let inputMethodEventHandlerForTesting {
+            return inputMethodEventHandlerForTesting(event)
+        }
+        if let inputContext {
+            return inputContext.handleEvent(event)
+        }
+        interpretKeyEvents([event])
+        return true
+    }
+
+    private static func routesToInputMethodDuringComposition(_ event: NSEvent) -> Bool {
+        guard !event.modifierFlags.contains(.control),
+              !event.modifierFlags.contains(.command) else { return false }
+
+        switch event.keyCode {
+        case 36, 48, 51, 53, 76, 115, 116, 117, 119, 121, 123, 124, 125, 126:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Sends a key press and updates recovery tracking in one place.
     ///
     /// Stamps a latency correlation sequence (ticket #2215) so the resulting
@@ -3372,11 +3429,14 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
             return
         }
 
-        // Clear any active composition.
+        let wasComposing = imeComposition.hasMarkedText
+        let targetIsCurrent = !wasComposing || imeCommitTargetIsCurrent
         imeComposition.clear()
+        imeCommitTarget = nil
+        if wasComposing && !targetIsCurrent { textInputCallbacksSuppressed = true }
 
         // Send committed text to the BEAM.
-        guard !text.isEmpty else { return }
+        guard !textInputCallbacksSuppressed, targetIsCurrent, !text.isEmpty else { return }
         commitIMEText(text)
         needsDisplay = true
     }
@@ -3392,16 +3452,32 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
             return
         }
 
+        guard !textInputCallbacksSuppressed else { return }
+        if !imeComposition.hasMarkedText {
+            imeCommitTarget = currentIMECommitTarget
+        }
+        guard imeCommitTargetIsCurrent else {
+            cancelIMEComposition()
+            return
+        }
         imeComposition.setMarked(text: text, selectedRange: selectedRange,
-                                  replacementRange: replacementRange)
+                                 replacementRange: replacementRange)
+        if !imeComposition.hasMarkedText { imeCommitTarget = nil }
         needsDisplay = true
     }
 
     /// Called to finalize/clear the composition.
     func unmarkText() {
-        if let text = imeComposition.unmark() {
+        let targetIsCurrent = imeCommitTargetIsCurrent
+        if !textInputCallbacksSuppressed, targetIsCurrent,
+           let text = imeComposition.unmark()
+        {
             commitIMEText(text)
+        } else {
+            imeComposition.clear()
+            if !targetIsCurrent { textInputCallbacksSuppressed = true }
         }
+        imeCommitTarget = nil
         needsDisplay = true
     }
 

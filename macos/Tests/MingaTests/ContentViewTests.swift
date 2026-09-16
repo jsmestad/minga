@@ -702,6 +702,43 @@ struct ContentViewTests {
         #expect(promotedClick.row != visibleClick.row || promotedClick.col != visibleClick.col)
     }
 
+    @Test("composition commit is rejected after the active editor target changes")
+    func compositionCommitCannotCrossEditorTargets() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(
+            prefix: "original", foldLine: 10, contentEpoch: 1, windowId: 1
+        )))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 10, windowId: 1)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        editorView.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(
+            prefix: "replacement", foldLine: 20, contentEpoch: 2, windowId: 2
+        )))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 20, windowId: 2)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        editorView.insertText(
+            "仮名",
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(editorView.hasMarkedText() == false)
+    }
+
     @Test(
         "shell-only commit preserves mounted EditorNSView interaction ownership",
         .timeLimit(.minutes(1))
