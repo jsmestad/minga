@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
+  alias MingaEditor.Commands.FileTree.DuplicateBackend
   alias MingaEditor.Commands.FileTree.NewFileBackend
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
@@ -567,42 +568,92 @@ defmodule MingaEditor.Commands.FileTree do
     with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{} = entry <- FileTree.selected_entry(tree) do
       dest = unique_copy_path(entry.path)
+      backend = state.interaction.file_tree_duplicate_backend
+      entry_type = if entry.dir?, do: :directory, else: :file
 
-      result =
-        if entry.dir?,
-          do: File.cp_r(entry.path, dest),
-          else: File.cp(entry.path, dest)
-
-      handle_duplicate_result(state, entry, dest, result)
+      duplicate_claimed_destination(state, backend, entry, dest, entry_type)
     else
       _ -> state
     end
   end
 
-  @spec handle_duplicate_result(state(), map(), String.t(), term()) :: state()
-  defp handle_duplicate_result(state, entry, dest, result) do
-    case result do
-      :ok ->
-        log_duplicate_success(entry, dest)
-        refresh(state)
-
-      {:ok, _} ->
-        log_duplicate_success(entry, dest)
-        refresh(state)
-
-      {:error, reason, _} ->
-        Log.warning(:editor, "[file-tree] Duplicate failed: #{inspect(reason)}")
-        state
-
-      {:error, reason} ->
-        Log.warning(:editor, "[file-tree] Duplicate failed: #{inspect(reason)}")
-        state
+  @spec duplicate_claimed_destination(
+          state(),
+          DuplicateBackend.t(),
+          map(),
+          String.t(),
+          DuplicateBackend.entry_type()
+        ) :: state()
+  defp duplicate_claimed_destination(state, backend, entry, dest, entry_type) do
+    case backend.claim_destination(dest, entry_type) do
+      :ok -> duplicate_owned_destination(state, backend, entry, dest, entry_type)
+      {:error, reason} -> duplicate_claim_failed(state, dest, reason)
     end
   end
 
-  @spec log_duplicate_success(map(), String.t()) :: :ok
-  defp log_duplicate_success(entry, dest) do
-    Log.info(:editor, "[file-tree] Duplicated: #{entry.name} → #{Path.basename(dest)}")
+  @spec duplicate_owned_destination(
+          state(),
+          DuplicateBackend.t(),
+          map(),
+          String.t(),
+          DuplicateBackend.entry_type()
+        ) :: state()
+  defp duplicate_owned_destination(state, backend, entry, dest, entry_type) do
+    case backend.copy(entry.path, dest, entry_type) do
+      :ok -> duplicate_succeeded(state, entry, dest)
+      {:ok, _paths} -> duplicate_succeeded(state, entry, dest)
+      {:error, reason, path} -> duplicate_copy_failed(state, backend, dest, reason, path)
+      {:error, reason} -> duplicate_copy_failed(state, backend, dest, reason, entry.path)
+    end
+  end
+
+  @spec duplicate_succeeded(state(), map(), String.t()) :: state()
+  defp duplicate_succeeded(state, entry, dest) do
+    message = "Duplicated #{entry.name} to #{Path.basename(dest)}"
+    Log.info(:editor, "[file-tree] #{message}")
+
+    state
+    |> refresh()
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(message)
+  end
+
+  @spec duplicate_claim_failed(state(), String.t(), term()) :: state()
+  defp duplicate_claim_failed(state, dest, :eexist) do
+    duplicate_failed_notice(state, "Duplicate destination already exists: #{dest}")
+  end
+
+  defp duplicate_claim_failed(state, dest, reason) do
+    duplicate_failed_notice(
+      state,
+      "Duplicate failed to create destination #{dest}: #{format_file_error(reason)}"
+    )
+  end
+
+  @spec duplicate_copy_failed(state(), DuplicateBackend.t(), String.t(), term(), String.t()) ::
+          state()
+  defp duplicate_copy_failed(state, backend, dest, copy_reason, failed_path) do
+    copy_message =
+      "Duplicate failed while copying #{failed_path} to #{dest}: #{format_file_error(copy_reason)}"
+
+    case backend.cleanup(dest) do
+      {:ok, _removed_paths} ->
+        duplicate_failed_notice(state, "#{copy_message}. Partial output was removed")
+
+      {:error, cleanup_reason, cleanup_path} ->
+        duplicate_failed_notice(
+          state,
+          "#{copy_message}. Cleanup failed at #{cleanup_path}: #{format_file_error(cleanup_reason)}; partial destination remains at #{dest}"
+        )
+    end
+  end
+
+  @spec duplicate_failed_notice(state(), String.t()) :: state()
+  defp duplicate_failed_notice(state, message) do
+    Log.warning(:editor, "[file-tree] #{message}")
+
+    state
+    |> refresh()
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(message)
   end
 
   @doc """

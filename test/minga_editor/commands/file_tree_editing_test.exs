@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
   alias MingaEditor.Commands
+  alias MingaEditor.Commands.FileTree.SystemDuplicateBackend
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Shell.Runtime
@@ -19,12 +20,83 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Interaction
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Session.State, as: SessionState
 
   @backspace 127
+
+  defmodule ControlledDuplicateBackend do
+    @moduledoc false
+
+    @behaviour MingaEditor.Commands.FileTree.DuplicateBackend
+
+    alias MingaEditor.Commands.FileTree.SystemDuplicateBackend
+
+    @type option ::
+            {:claim, :normal | :collision}
+            | {:copy, :success | :fail_before_entry | :fail_after_child}
+            | {:cleanup, :success | :failure}
+
+    @spec configure([option()]) :: :ok
+    def configure(opts) when is_list(opts) do
+      Process.put({__MODULE__, :claim}, Keyword.get(opts, :claim, :normal))
+      Process.put({__MODULE__, :copy}, Keyword.get(opts, :copy, :success))
+      Process.put({__MODULE__, :cleanup}, Keyword.get(opts, :cleanup, :success))
+      :ok
+    end
+
+    @impl true
+    def claim_destination(path, entry_type) do
+      case Process.get({__MODULE__, :claim}, :normal) do
+        :normal -> SystemDuplicateBackend.claim_destination(path, entry_type)
+        :collision -> create_collision(path, entry_type)
+      end
+    end
+
+    @impl true
+    def copy(source, destination, entry_type) do
+      case Process.get({__MODULE__, :copy}, :success) do
+        :success -> SystemDuplicateBackend.copy(source, destination, entry_type)
+        :fail_before_entry -> {:error, :eacces, source}
+        :fail_after_child -> copy_one_child_then_fail(source, destination)
+      end
+    end
+
+    @impl true
+    def cleanup(path) do
+      case Process.get({__MODULE__, :cleanup}, :success) do
+        :success -> SystemDuplicateBackend.cleanup(path)
+        :failure -> {:error, :eacces, path}
+      end
+    end
+
+    @spec create_collision(
+            String.t(),
+            MingaEditor.Commands.FileTree.DuplicateBackend.entry_type()
+          ) ::
+            {:error, :eexist}
+    defp create_collision(path, :directory) do
+      File.mkdir!(path)
+      File.write!(Path.join(path, "existing.txt"), "collision bytes")
+      {:error, :eexist}
+    end
+
+    defp create_collision(path, :file) do
+      File.write!(path, "collision bytes")
+      {:error, :eexist}
+    end
+
+    @spec copy_one_child_then_fail(String.t(), String.t()) ::
+            {:error, :eacces, String.t()}
+    defp copy_one_child_then_fail(source, destination) do
+      copied_source = Path.join(source, "alpha.txt")
+      File.cp!(copied_source, Path.join(destination, "alpha.txt"))
+      {:error, :eacces, Path.join(source, "blocked.txt")}
+    end
+  end
 
   @moduletag :tmp_dir
 
@@ -327,6 +399,135 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert File.read!(second) == "second"
       refute File.exists?(Path.join(dir, "wrong.txt"))
       assert result.shell_runtime.state.notice.message == "File tree edit is stale; try again"
+    end
+  end
+
+  describe "[command-state] duplicate" do
+    test "removes owned partial directory output and a retry creates one complete duplicate", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      source = duplicate_source_directory(dir)
+      destination = Path.join(dir, "original copy")
+      ControlledDuplicateBackend.configure(copy: :fail_after_child)
+
+      failed =
+        dir
+        |> make_state(events_registry)
+        |> use_duplicate_backend(ControlledDuplicateBackend)
+        |> select_entry("original")
+        |> Commands.FileTree.duplicate()
+
+      assert File.read!(Path.join(source, "alpha.txt")) == "alpha bytes"
+      assert File.read!(Path.join(source, "blocked.txt")) == "blocked bytes"
+      refute File.exists?(destination)
+      assert failed.shell_runtime.state.notice.message =~ "Duplicate failed while copying"
+      assert failed.shell_runtime.state.notice.message =~ "Partial output was removed"
+      assert_refresh_requested(failed)
+
+      ControlledDuplicateBackend.configure(copy: :success)
+      succeeded = Commands.FileTree.duplicate(failed)
+
+      assert File.read!(Path.join(destination, "alpha.txt")) == "alpha bytes"
+      assert File.read!(Path.join(destination, "blocked.txt")) == "blocked bytes"
+      refute File.exists?(Path.join(dir, "original copy 2"))
+
+      assert succeeded.shell_runtime.state.notice.message ==
+               "Duplicated original to original copy"
+    end
+
+    test "reports both failures and refreshes when owned partial cleanup fails", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      source = duplicate_source_directory(dir)
+      destination = Path.join(dir, "original copy")
+      ControlledDuplicateBackend.configure(copy: :fail_after_child, cleanup: :failure)
+
+      result =
+        dir
+        |> make_state(events_registry)
+        |> use_duplicate_backend(ControlledDuplicateBackend)
+        |> select_entry("original")
+        |> Commands.FileTree.duplicate()
+
+      assert File.read!(Path.join(source, "alpha.txt")) == "alpha bytes"
+      assert File.read!(Path.join(source, "blocked.txt")) == "blocked bytes"
+      assert File.read!(Path.join(destination, "alpha.txt")) == "alpha bytes"
+      refute File.exists?(Path.join(destination, "blocked.txt"))
+      assert result.shell_runtime.state.notice.message =~ "Duplicate failed while copying"
+      assert result.shell_runtime.state.notice.message =~ "Cleanup failed"
+      assert result.shell_runtime.state.notice.message =~ destination
+      assert result.shell_runtime.state.notice.message =~ "partial destination remains"
+      assert_refresh_requested(result)
+    end
+
+    test "cleans an owned destination when copying fails before the first child", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      _source = duplicate_source_directory(dir)
+      destination = Path.join(dir, "original copy")
+      ControlledDuplicateBackend.configure(copy: :fail_before_entry)
+
+      result =
+        dir
+        |> make_state(events_registry)
+        |> use_duplicate_backend(ControlledDuplicateBackend)
+        |> select_entry("original")
+        |> Commands.FileTree.duplicate()
+
+      refute File.exists?(destination)
+      assert result.shell_runtime.state.notice.message =~ "Partial output was removed"
+      assert_refresh_requested(result)
+    end
+
+    test "does not overwrite or clean a destination won by a collision", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      source = duplicate_source_directory(dir)
+      destination = Path.join(dir, "original copy")
+      ControlledDuplicateBackend.configure(claim: :collision)
+
+      result =
+        dir
+        |> make_state(events_registry)
+        |> use_duplicate_backend(ControlledDuplicateBackend)
+        |> select_entry("original")
+        |> Commands.FileTree.duplicate()
+
+      assert File.read!(Path.join(source, "alpha.txt")) == "alpha bytes"
+      assert File.read!(Path.join(source, "blocked.txt")) == "blocked bytes"
+      assert File.read!(Path.join(destination, "existing.txt")) == "collision bytes"
+
+      assert result.shell_runtime.state.notice.message ==
+               "Duplicate destination already exists: #{destination}"
+
+      assert_refresh_requested(result)
+    end
+
+    test "normal file duplication preserves exact bytes", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      source = Path.join(dir, "data.bin")
+      destination = Path.join(dir, "data copy.bin")
+      bytes = <<0, 1, 2, 255, 10, 0>>
+      File.write!(source, bytes)
+      ControlledDuplicateBackend.configure([])
+
+      result =
+        dir
+        |> make_state(events_registry)
+        |> use_duplicate_backend(ControlledDuplicateBackend)
+        |> select_entry("data.bin")
+        |> Commands.FileTree.duplicate()
+
+      assert File.read!(source) == bytes
+      assert File.read!(destination) == bytes
+      assert result.shell_runtime.state.notice.message == "Duplicated data.bin to data copy.bin"
+      assert_refresh_requested(result)
     end
   end
 
@@ -670,6 +871,23 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state),
       interaction: %MingaEditor.State.Interaction{}
     }
+  end
+
+  defp duplicate_source_directory(dir) do
+    source = Path.join(dir, "original")
+    File.mkdir!(source)
+    File.write!(Path.join(source, "alpha.txt"), "alpha bytes")
+    File.write!(Path.join(source, "blocked.txt"), "blocked bytes")
+    source
+  end
+
+  defp use_duplicate_backend(%EditorState{} = state, backend) when is_atom(backend) do
+    %{state | interaction: Interaction.new(file_tree_duplicate_backend: backend)}
+  end
+
+  defp assert_refresh_requested(%EditorState{} = state) do
+    assert {:debounced, token, 0} = state.workspace.file_tree.refresh.phase
+    assert is_reference(token)
   end
 
   defp file_ref_for_buffer(root, buffer) when is_pid(buffer) do
