@@ -2164,7 +2164,10 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
 
         dispatcher.decodedFrameFailed(
-            DecodedFrameFailure(error: .unknownOpcode(0xFF), envelope: nil),
+            DecodedFrameFailure(
+                error: .unknownOpcode(0xFF),
+                envelope: FrameEnvelope(generation: 30, frameSeq: 81, baseFrameSeq: 80)
+            ),
             connectionID: 1
         )
         #expect(dispatcher.openFrameSeq == 1)
@@ -2805,6 +2808,101 @@ struct CommandDispatcherStagingTests {
         requested.removeAll()
         dispatcher.decodeFailed()
         #expect(requested.isEmpty)
+    }
+
+    @Test("correlated decode failure rejects once, preserves snapshots, and recovers through keyframe and delta")
+    @MainActor func correlatedDecodeFailureRecoversImmediately() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.replaceConnection(with: 1)
+        var results: [FrameTransactionResult] = []
+        var requested: [UInt32] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 4))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("last-good.ex")]))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let baseline = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: baseline,
+            localTransform: nil,
+            connectionID: 1
+        )
+
+        let failure = DecodedFrameFailure(
+            error: .unknownOpcode(0xFF),
+            envelope: FrameEnvelope(generation: 4, frameSeq: 2, baseFrameSeq: 1)
+        )
+        dispatcher.decodedFrameFailed(failure, connectionID: 1)
+
+        #expect(results.last == .rejected(
+            generation: 4,
+            frameSeq: 2,
+            lastAppliedFrameSeq: 1,
+            reason: .decodeFailure(frameSeq: 2)
+        ))
+        #expect(results.count == 2)
+        #expect(requested == [1])
+        #expect(dispatcher.publicationCount == 1)
+        #expect(dispatcher.committedEditorSnapshot?.frameSeq == baseline.frameSeq)
+        #expect(dispatcher.committedEditorSnapshot?.generation == baseline.generation)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == baseline.frameSeq)
+        #expect(dispatcher.visibleEditorSnapshot?.generation == baseline.generation)
+        #expect(gui.tabBarState.tabs.first?.label == "last-good.ex")
+        #expect(gui.resyncState.pending)
+
+        dispatcher.decodedFrameFailed(failure, connectionID: 1)
+        dispatcher.decodedFrameFailed(DecodedFrameFailure(
+            error: .malformed,
+            envelope: FrameEnvelope(generation: 3, frameSeq: 99, baseFrameSeq: 1)
+        ), connectionID: 1)
+        dispatcher.decodedFrameFailed(
+            DecodedFrameFailure(error: .insufficientData, envelope: nil),
+            connectionID: 1
+        )
+        #expect(results.count == 2)
+        #expect(requested == [1])
+        #expect(dispatcher.publicationCount == 1)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 5))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("recovered.ex")]))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(epoch: 43)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(gui.resyncState.pending == false)
+        #expect(gui.tabBarState.tabs.first?.label == "recovered.ex")
+        #expect(results.last == .applied(generation: 5, frameSeq: 3))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3, generation: 5))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("next-delta.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+        #expect(gui.tabBarState.tabs.first?.label == "next-delta.ex")
+        #expect(results.last == .applied(generation: 5, frameSeq: 4))
+        #expect(dispatcher.publicationCount == 3)
+    }
+
+    @Test("stale correlated resource failure preserves the newer generation")
+    @MainActor func staleCorrelatedResourceFailureIsIgnored() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 10, baseFrameSeq: 0, generation: 5))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 10, seq: 0))
+        dispatcher.decodedFrameFailed(DecodedFrameFailure(
+            error: .resource(.limitExceeded(
+                dimension: .commands, used: 1, requested: 1, limit: 1
+            )),
+            envelope: FrameEnvelope(generation: 4, frameSeq: 99, baseFrameSeq: 0)
+        ))
+
+        #expect(results == [.applied(generation: 5, frameSeq: 10)])
+        #expect(dispatcher.lastCommittedGeneration == 5)
+        #expect(dispatcher.lastCommittedFrameSeq == 10)
+        #expect(gui.resyncState.pending == false)
     }
 
     @Test("a clean commit after a resync clears the pending hint")

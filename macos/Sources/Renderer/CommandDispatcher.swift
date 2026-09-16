@@ -46,6 +46,11 @@ private struct TerminalRejectionSignature: Equatable {
     let reason: UInt8
 }
 
+private struct CorrelatedFailureIdentity: Equatable {
+    let generation: UInt32
+    let frameSeq: UInt32
+}
+
 private enum CompletionNavigationCodepoints {
     static let ctrlN: UInt32 = 110
     static let ctrlP: UInt32 = 112
@@ -331,6 +336,7 @@ final class CommandDispatcher {
     private(set) var lastCommittedFrameSeq: UInt32 = 0
     private(set) var lastCommittedGeneration: UInt32 = 0
     private var lastTerminalRejection: TerminalRejectionSignature?
+    private var lastCorrelatedFailure: CorrelatedFailureIdentity?
 
     /// True once at least one frame has committed, so `lastCommittedFrameSeq == 0`
     /// can still be told apart from "never committed" when validating a base.
@@ -400,6 +406,7 @@ final class CommandDispatcher {
         lastCommittedFrameSeq = 0
         lastCommittedGeneration = 0
         lastTerminalRejection = nil
+        lastCorrelatedFailure = nil
         hasCommitted = false
         resyncRecoveryState = .clean
 
@@ -762,9 +769,11 @@ final class CommandDispatcher {
         _ rejection: PreparedFrameRejection,
         frameSeq: UInt32?,
         logReason: String,
+        generation: UInt32? = nil,
         sourceOpcode: UInt8? = nil
     ) {
         let opcodeContext = sourceOpcode.map { String(format: ", opcode=0x%02X", $0) } ?? ""
+        let rejectedGeneration = generation ?? openGeneration
         let rejectedFrameSeq = frameSeq ?? 0
         let rejectedPresentationTarget = openPresentationTarget
         openFrameSeq = nil
@@ -790,7 +799,7 @@ final class CommandDispatcher {
 
         let terminal = rejection.disposition == .terminalFrontendFailure
         let terminalSignature = TerminalRejectionSignature(
-            generation: openGeneration,
+            generation: rejectedGeneration,
             frameSeq: rejectedFrameSeq,
             lastGoodFrameSeq: lastCommittedFrameSeq,
             reason: rejection.wireCode
@@ -810,7 +819,7 @@ final class CommandDispatcher {
             PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); awaiting BEAM recovery from \(lastCommittedFrameSeq)")
             guiState.resyncState.markPending(
                 lastGoodFrameSeq: lastCommittedFrameSeq,
-                generation: openGeneration,
+                generation: rejectedGeneration,
                 rejection: rejection.logDescription
             )
             if shouldRequestKeyframe {
@@ -820,14 +829,16 @@ final class CommandDispatcher {
             }
         }
         onTransactionResult?(.rejected(
-            generation: openGeneration,
+            generation: rejectedGeneration,
             frameSeq: rejectedFrameSeq,
             lastAppliedFrameSeq: lastCommittedFrameSeq,
             reason: rejection
         ))
     }
 
-    /// Classifies one packet failure against the currently open transaction.
+    /// Classifies one packet failure. A trustworthy leading frame envelope is
+    /// sufficient to reject the decoded packet without partially dispatching its
+    /// begin-frame command or requiring a main-actor transaction to be open.
     func decodedFrameFailed(_ failure: DecodedFrameFailure) {
         if failure.error.isResourceFailure {
             if let envelope = failure.envelope {
@@ -838,7 +849,11 @@ final class CommandDispatcher {
             return
         }
         PortLogger.error("Protocol decode error: \(failure.error)")
-        decodeFailed()
+        if let envelope = failure.envelope {
+            decodeFailed(envelope: envelope)
+        } else {
+            decodeFailed()
+        }
     }
 
     /// Applies one queued decode failure only when it belongs to the live connection.
@@ -862,6 +877,19 @@ final class CommandDispatcher {
         )
     }
 
+    /// Publishes a correlated retryable result when whole-packet decoding fails
+    /// after a valid leading begin-frame command. The packet never mutates staged,
+    /// committed, or visible state.
+    private func decodeFailed(envelope: FrameEnvelope) {
+        guard admitCorrelatedFailure(envelope) else { return }
+        reject(
+            .decodeFailure(frameSeq: envelope.frameSeq),
+            frameSeq: envelope.frameSeq,
+            logReason: "correlated packet decode failure",
+            generation: envelope.generation
+        )
+    }
+
     /// Rejects the open frame under the deterministic hard resource policy.
     /// The last-good semantic publication remains active and no keyframe is requested.
     @discardableResult
@@ -878,14 +906,31 @@ final class CommandDispatcher {
     /// Publishes a correlated terminal result when decode failed before the
     /// transaction crossed actor isolation. Last-good semantic state is untouched.
     func resourcePolicyRejected(envelope: FrameEnvelope) {
-        openGeneration = envelope.generation
-        openFrameSeq = envelope.frameSeq
-        openBaseFrameSeq = envelope.baseFrameSeq
+        guard admitCorrelatedFailure(envelope) else { return }
         reject(
             .resourcePolicy,
             frameSeq: envelope.frameSeq,
-            logReason: "frontend decode resource policy exceeded"
+            logReason: "frontend decode resource policy exceeded",
+            generation: envelope.generation
         )
+    }
+
+    private func admitCorrelatedFailure(_ envelope: FrameEnvelope) -> Bool {
+        if hasCommitted {
+            if envelope.generation < lastCommittedGeneration { return false }
+            if envelope.generation == lastCommittedGeneration,
+               envelope.frameSeq <= lastCommittedFrameSeq { return false }
+        }
+        if let lastCorrelatedFailure {
+            if envelope.generation < lastCorrelatedFailure.generation { return false }
+            if envelope.generation == lastCorrelatedFailure.generation,
+               envelope.frameSeq <= lastCorrelatedFailure.frameSeq { return false }
+        }
+        lastCorrelatedFailure = CorrelatedFailureIdentity(
+            generation: envelope.generation,
+            frameSeq: envelope.frameSeq
+        )
+        return true
     }
 
     /// Test seam: apply a single command directly to the presented state,

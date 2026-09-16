@@ -1,5 +1,6 @@
 import Foundation
 import MingaProtocol
+import MingaUI
 import Testing
 
 @Suite("Transactional frame decoding")
@@ -180,6 +181,33 @@ struct DecodedFrameTests {
         }
     }
 
+    @Test("valid begin followed by an unknown opcode retains its envelope")
+    func unknownOpcodeRetainsEnvelope() {
+        let envelope = FrameEnvelope(generation: 9, frameSeq: 7, baseFrameSeq: 3)
+        var packet = beginFramePacket(envelope)
+        packet.append(0xFF)
+
+        assertFailureEnvelope(packet, equals: envelope)
+    }
+
+    @Test("truncated payload after a valid begin retains its envelope")
+    func truncatedPayloadRetainsEnvelope() {
+        let envelope = FrameEnvelope(generation: 9, frameSeq: 7, baseFrameSeq: 3)
+        var packet = beginFramePacket(envelope)
+        packet.append(contentsOf: [OP_SET_TITLE, 0, 2, 0x61])
+
+        assertFailureEnvelope(packet, equals: envelope)
+    }
+
+    @Test("malformed commit after a valid begin retains its envelope")
+    func malformedCommitRetainsEnvelope() {
+        let envelope = FrameEnvelope(generation: 9, frameSeq: 7, baseFrameSeq: 3)
+        var packet = beginFramePacket(envelope)
+        packet.append(contentsOf: [OP_COMMIT_FRAME, 0, 0, 0, 7])
+
+        assertFailureEnvelope(packet, equals: envelope)
+    }
+
     @Test("production decode skips deep owned-value accounting")
     func productionMetricsStayLightweight() throws {
         let packet = makeRenderingPacket(size: 64 * 1024)
@@ -225,6 +253,35 @@ struct DecodedFrameTests {
             packet.append(Data(repeating: 0x61, count: textSize))
         }
         return packet
+    }
+
+    private func beginFramePacket(_ envelope: FrameEnvelope) -> Data {
+        Data([
+            OP_BEGIN_FRAME,
+            UInt8((envelope.frameSeq >> 24) & 0xFF),
+            UInt8((envelope.frameSeq >> 16) & 0xFF),
+            UInt8((envelope.frameSeq >> 8) & 0xFF),
+            UInt8(envelope.frameSeq & 0xFF),
+            UInt8((envelope.baseFrameSeq >> 24) & 0xFF),
+            UInt8((envelope.baseFrameSeq >> 16) & 0xFF),
+            UInt8((envelope.baseFrameSeq >> 8) & 0xFF),
+            UInt8(envelope.baseFrameSeq & 0xFF),
+            UInt8((envelope.generation >> 24) & 0xFF),
+            UInt8((envelope.generation >> 16) & 0xFF),
+            UInt8((envelope.generation >> 8) & 0xFF),
+            UInt8(envelope.generation & 0xFF),
+        ])
+    }
+
+    private func assertFailureEnvelope(_ packet: Data, equals envelope: FrameEnvelope) {
+        do {
+            _ = try decodeFrame(from: packet)
+            Issue.record("expected packet decode failure")
+        } catch let error as ProtocolDecodeError {
+            #expect(error.frameEnvelope == envelope)
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
     }
 }
 
@@ -464,6 +521,63 @@ struct ProtocolConnectionTests {
         input.fileHandleForWriting.closeFile()
         output.fileHandleForReading.closeFile()
         received.continuation.finish()
+    }
+
+    @Test("controlled pipe carries a correlated decode failure through the production dispatcher path", .timeLimit(.minutes(1)))
+    @MainActor func controlledPipeRejectsMalformedFrameImmediately() async throws {
+        let input = Pipe()
+        let output = Pipe()
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        dispatcher.replaceConnection(with: 41)
+        let results = AsyncStream.makeStream(
+            of: FrameTransactionResult.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        dispatcher.onTransactionResult = { results.continuation.yield($0) }
+        let connection = try ProtocolConnection(
+            connectionID: 41,
+            readHandle: input.fileHandleForReading,
+            writeHandle: output.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { $0 == 41 },
+            consume: { event, connectionID in
+                switch event {
+                case .frame(let frame):
+                    dispatcher.dispatch(frame, connectionID: connectionID)
+                case .failure(let failure):
+                    dispatcher.decodedFrameFailed(failure, connectionID: connectionID)
+                }
+            },
+            onTransportFailure: { _ in },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { _, _ in }
+        )
+        connection.start()
+
+        var payload = Data([
+            OP_BEGIN_FRAME,
+            0, 0, 0, 7,
+            0, 0, 0, 3,
+            0, 0, 0, 9,
+        ])
+        payload.append(0xFF)
+        try input.fileHandleForWriting.write(contentsOf: framed(payload))
+
+        var iterator = results.stream.makeAsyncIterator()
+        #expect(await iterator.next() == .rejected(
+            generation: 9,
+            frameSeq: 7,
+            lastAppliedFrameSeq: 0,
+            reason: .decodeFailure(frameSeq: 7)
+        ))
+        #expect(dispatcher.openFrameSeq == nil)
+        #expect(gui.resyncState.pending)
+
+        connection.stop()
+        input.fileHandleForWriting.closeFile()
+        output.fileHandleForReading.closeFile()
+        results.continuation.finish()
     }
 
     @Test("stop wakes a reader blocked behind capacity-one admission and is idempotent", .timeLimit(.minutes(1)))
