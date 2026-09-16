@@ -623,6 +623,16 @@ final class CoreTextMetalRenderer {
                     scale: scale,
                     viewportWidth: Float(viewportSize.width)
                 )
+                let textBounds = CoreTextMetalRenderer.textHorizontalBounds(
+                    geometry: paneGeometry,
+                    gutter: gutter,
+                    frameCols: frameState.cols,
+                    cellW: cellW,
+                    scale: scale,
+                    gutterLeftMarginPx: gutterLeftMarginPx,
+                    gutterPaddingPx: gutterPaddingPx,
+                    viewportWidth: Float(viewportSize.width)
+                )
                 let contentRightPx = windowBounds.x + windowBounds.width
                 let contentTopPx = Float(paneGeometry.textRect.row) * displayCellH * scale
                 let visibleSlice = preparedSurface.slice
@@ -672,8 +682,8 @@ final class CoreTextMetalRenderer {
                     )
                     if let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) {
                         var clQuad = QuadGPU()
-                        clQuad.position = SIMD2<Float>(windowBounds.x, clipped.y)
-                        clQuad.size = SIMD2<Float>(windowBounds.width, clipped.height)
+                        clQuad.position = SIMD2<Float>(textBounds.x, clipped.y)
+                        clQuad.size = SIMD2<Float>(textBounds.width, clipped.height)
                         clQuad.color = colorFromU24(cursorline.bg, default: defaultBg)
                         clQuad.alpha = 1.0
                         bgQuads.append(clQuad)
@@ -1253,7 +1263,7 @@ final class CoreTextMetalRenderer {
             let cursorWidth = CoreTextMetalRenderer.snapToPixel(cellW * scale)
             let cursorHeight = CoreTextMetalRenderer.snapToPixel(displayCellH * scale)
             let cursorWindowBounds = cursorSurface.map { surface in
-                CoreTextMetalRenderer.cursorHorizontalBounds(
+                CoreTextMetalRenderer.textHorizontalBounds(
                     geometry: surface.paneGeometry,
                     gutter: surface.renderGutter,
                     frameCols: frameState.cols,
@@ -1430,7 +1440,7 @@ final class CoreTextMetalRenderer {
             let cursorX = renderCursor.x - cursorScrollOffsetPx.x
             let cursorY = renderCursor.y - cursorScrollOffsetPx.y
             let cursorWindowBounds = cursorSurface.map { surface in
-                CoreTextMetalRenderer.cursorHorizontalBounds(
+                CoreTextMetalRenderer.textHorizontalBounds(
                     geometry: surface.paneGeometry,
                     gutter: surface.renderGutter,
                     frameCols: frameState.cols,
@@ -2853,7 +2863,7 @@ final class CoreTextMetalRenderer {
         return (x: left, width: max(right - left, 0))
     }
 
-    nonisolated static func cursorHorizontalBounds(
+    nonisolated static func textHorizontalBounds(
         geometry: GUIPaneGeometry?,
         gutter: Wire.WindowGutter,
         frameCols: UInt16,
@@ -2912,39 +2922,6 @@ final class CoreTextMetalRenderer {
         lineGPU.uvOrigin = SIMD2<Float>(uvOrigin.x + uvSize.x * leftRatio, uvOrigin.y)
         lineGPU.uvSize = SIMD2<Float>(uvSize.x * visibleRatio, uvSize.y)
         return lineGPU
-    }
-
-    nonisolated static func cursorlineHorizontalBounds(
-        row: UInt16,
-        gutters: [UInt16: Wire.WindowGutter],
-        frameCols: UInt16,
-        cellW: Float,
-        scale: Float,
-        viewportWidth: Float
-    ) -> (x: Float, width: Float) {
-        let rowIndex = Int(row)
-        let matchingGutter = gutters.values.first { gutter in
-            let start = Int(gutter.contentRow)
-            let end = start + Int(gutter.contentHeight)
-            return gutter.isActive && rowIndex >= start && rowIndex < end
-        } ?? gutters.values.first { gutter in
-            let start = Int(gutter.contentRow)
-            let end = start + Int(gutter.contentHeight)
-            return rowIndex >= start && rowIndex < end
-        }
-
-        guard let matchingGutter else {
-            return (x: 0, width: viewportWidth)
-        }
-
-        return windowHorizontalBounds(
-            geometry: nil,
-            gutter: matchingGutter,
-            frameCols: frameCols,
-            cellW: cellW,
-            scale: scale,
-            viewportWidth: viewportWidth
-        )
     }
 
     nonisolated static func interpolateCursor(start: RenderCursor, target: RenderCursor, progress: Float) -> RenderCursor {

@@ -296,32 +296,50 @@ struct CoreTextMetalRendererCursorTests {
         ) == 35)
     }
 
-    @Test("cursorline is clipped to the active split pane")
-    func cursorlineIsClippedToActiveSplitPane() {
-        let gutters: [UInt16: Wire.WindowGutter] = [
-            1: Wire.WindowGutter(
-                windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
-                isActive: true, contentWidth: 40, cursorLine: 3, lineNumberStyle: .hybrid,
-                lineNumberWidth: 4, signColWidth: 1, entries: []
-            ),
-            2: Wire.WindowGutter(
-                windowId: 2, contentRow: 0, contentCol: 41, contentHeight: 20,
-                isActive: false, contentWidth: 39, cursorLine: 3, lineNumberStyle: .hybrid,
-                lineNumberWidth: 4, signColWidth: 1, entries: []
-            )
+    @Test("text bounds follow semantic geometry across line-number styles and display scales")
+    func textBoundsFollowSemanticGeometry() {
+        let cases: [(style: Wire.LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, textCol: UInt16, cellW: Float, scale: Float, leftMargin: Float, padding: Float)] = [
+            (.absolute, 4, 1, 9, 8, 1, 6, 14),
+            (.relative, 4, 1, 9, 7.5, 2, 12, 28),
+            (.hybrid, 5, 1, 10, 9, 1.5, 9, 21),
+            (.none, 0, 0, 4, 8, 1, 0, 0)
         ]
 
-        let bounds = CoreTextMetalRenderer.cursorlineHorizontalBounds(
-            row: 5,
-            gutters: gutters,
-            frameCols: 80,
-            cellW: 8,
-            scale: 2,
-            viewportWidth: 1_600
-        )
+        for testCase in cases {
+            let geometry = GUIPaneGeometry(
+                windowId: 1,
+                totalRect: GUICellRect(row: 0, col: 4, width: 20, height: 10),
+                contentRect: GUICellRect(row: 0, col: 4, width: 20, height: 10),
+                textRect: GUICellRect(row: 0, col: testCase.textCol, width: 24 - testCase.textCol, height: 10),
+                gutterRect: GUICellRect(row: 0, col: 4, width: testCase.textCol - 4, height: 10),
+                clipRect: GUICellRect(row: 0, col: 4, width: 20, height: 10),
+                viewport: GUIViewportSummary(top: 0, left: 0, rows: 10, cols: 20, totalLines: 100, visualRowOffset: 0, totalVisualRows: 100),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: UInt16(testCase.lineNumberWidth), signColWidth: UInt16(testCase.signColWidth)),
+                hitRegions: []
+            )
+            let gutter = Wire.WindowGutter(
+                windowId: 1, contentRow: 0, contentCol: 4, contentHeight: 10,
+                isActive: true, contentWidth: 20, cursorLine: 0,
+                lineNumberStyle: testCase.style, lineNumberWidth: testCase.lineNumberWidth,
+                signColWidth: testCase.signColWidth, entries: []
+            )
 
-        #expect(bounds.x == 0)
-        #expect(bounds.width == 640)
+            let bounds = CoreTextMetalRenderer.textHorizontalBounds(
+                geometry: geometry,
+                gutter: gutter,
+                frameCols: 80,
+                cellW: testCase.cellW,
+                scale: testCase.scale,
+                gutterLeftMarginPx: testCase.leftMargin,
+                gutterPaddingPx: testCase.padding,
+                viewportWidth: 1_600
+            )
+            let paneRight = Float(24) * testCase.cellW * testCase.scale
+            let expectedLeft = Float(testCase.textCol) * testCase.cellW * testCase.scale + testCase.leftMargin + testCase.padding
+
+            #expect(bounds.x == expectedLeft)
+            #expect(bounds.width == paneRight - expectedLeft)
+        }
     }
 
     @Test("committed visible rows prefer the pane geometry height")
@@ -512,8 +530,8 @@ struct CoreTextMetalRendererCursorTests {
         #expect(CoreTextMetalRenderer.clipHorizontalRect(x: 0, width: 10, left: 20, right: 30) == nil)
     }
 
-    @Test("cursor horizontal bounds start at semantic text rect")
-    func cursorHorizontalBoundsStartAtSemanticTextRect() {
+    @Test("text horizontal bounds start at semantic text rect")
+    func textHorizontalBoundsStartAtSemanticTextRect() {
         let geometry = GUIPaneGeometry(
             windowId: 1,
             totalRect: GUICellRect(row: 0, col: 4, width: 20, height: 10),
@@ -531,7 +549,7 @@ struct CoreTextMetalRendererCursorTests {
             lineNumberWidth: 3, signColWidth: 1, entries: []
         )
 
-        let bounds = CoreTextMetalRenderer.cursorHorizontalBounds(
+        let bounds = CoreTextMetalRenderer.textHorizontalBounds(
             geometry: geometry,
             gutter: gutter,
             frameCols: 80,
