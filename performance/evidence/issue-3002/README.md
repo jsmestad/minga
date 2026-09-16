@@ -43,7 +43,7 @@ Median of the three focused whole-atlas GPU-copy batches:
 
 The whole-atlas GPU-copy result is an intermediate working-tree experiment based on `2a0df44a34849081d4230ed6c884fa71637c665d`. It is retained as raw evidence but is not a separately addressable commit.
 
-Median of the three accepted atlas-ring batches at implementation revision `b8082153b34541923ef455b88e500835fb50dee6`:
+Median of the three accepted atlas-ring batches at pre-rebase implementation revision `b8082153b34541923ef455b88e500835fb50dee6`. The identical implementation commit after rebasing onto current `main` is `a197f94c5725b1da8702fdd538125d6777842f04`:
 
 | Workload | CPU p95 | CPU p99 | GPU p95 | Wall p95 | Atlas copy bytes | Raster upload bytes | Warm allocations | Retained native bytes | Result |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
