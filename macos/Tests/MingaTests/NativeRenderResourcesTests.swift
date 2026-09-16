@@ -1131,18 +1131,20 @@ struct NativeRenderResourcesTests {
         factories.observeCompletion = { _, completion in completions.append(completion) }
         factories.present = { _ in presentCalls += 1 }
         guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
-        let oldFontManager = FontManager(name: "Menlo", size: 13, scale: 1)
-        renderer.setupRenderers(fontManager: oldFontManager)
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        renderer.setupRenderers(fontManager: fontManager)
         renderer.render(
-            frameState: FrameState(cols: 4, rows: 4), fontManager: oldFontManager,
+            frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
             drawableProvider: { NativeTestDrawable(texture: texture) },
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
             presentationInputSeq: 303
         )
         #expect(completions.count == 1)
 
-        let newFontManager = FontManager(name: "Menlo", size: 15, scale: 2)
-        renderer.setupRenderers(fontManager: newFontManager)
+        fontManager.setPrimaryFont(FontManager.Configuration(
+            family: "Menlo", size: 15, scale: 2, ligatures: true, weight: 2
+        ))
+        renderer.setupRenderers(fontManager: fontManager)
         let configured = renderer.activeResourceSnapshot()
         completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
 

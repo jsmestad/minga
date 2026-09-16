@@ -989,6 +989,11 @@ struct PasteEventEncoderTests {
 /// GUI action calls are recorded as GUIAction enum values, allowing tests
 /// to verify that view interactions send the correct protocol events.
 final class SpyEncoder: InputEncoder, Sendable {
+    enum LifecycleCall: Equatable, Sendable {
+        case ready
+        case resize
+    }
+
     struct Resize: Sendable { let cols: UInt16; let rows: UInt16 }
     struct Ready: Sendable { let cols: UInt16; let rows: UInt16 }
     struct Log: Sendable { let level: UInt8; let message: String }
@@ -1067,6 +1072,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     struct State: Sendable {
         var resizeCalls: [Resize] = []
         var readyCalls: [Ready] = []
+        var lifecycleCalls: [LifecycleCall] = []
         var logCalls: [Log] = []
         var pasteCalls: [Paste] = []
         var keyPressCalls: [KeyPress] = []
@@ -1078,6 +1084,7 @@ final class SpyEncoder: InputEncoder, Sendable {
 
     var resizeCalls: [Resize] { state.withLock { $0.resizeCalls } }
     var readyCalls: [Ready] { state.withLock { $0.readyCalls } }
+    var lifecycleCalls: [LifecycleCall] { state.withLock { $0.lifecycleCalls } }
     var logCalls: [Log] { state.withLock { $0.logCalls } }
     var pasteCalls: [Paste] { state.withLock { $0.pasteCalls } }
     var keyPressCalls: [KeyPress] { state.withLock { $0.keyPressCalls } }
@@ -1087,7 +1094,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     var guiActions: [GUIAction] { state.withLock { $0.guiActions } }
 
     func sendReady(cols: UInt16, rows: UInt16) {
-        state.withLock { $0.readyCalls.append(Ready(cols: cols, rows: rows)) }
+        state.withLock {
+            $0.readyCalls.append(Ready(cols: cols, rows: rows))
+            $0.lifecycleCalls.append(.ready)
+        }
     }
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
         state.withLock { $0.keyPressCalls.append(KeyPress(codepoint: codepoint, modifiers: modifiers)) }
@@ -1099,7 +1109,10 @@ final class SpyEncoder: InputEncoder, Sendable {
         state.withLock { $0.searchQueryCalls.append(SearchQuery(sessionID: sessionID, editSeq: editSeq, query: query, flags: flags)) }
     }
     func sendResize(cols: UInt16, rows: UInt16) {
-        state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }
+        state.withLock {
+            $0.resizeCalls.append(Resize(cols: cols, rows: rows))
+            $0.lifecycleCalls.append(.resize)
+        }
     }
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8 = 1) {
         state.withLock { $0.mouseEventCalls.append(MouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount)) }
@@ -1192,13 +1205,12 @@ final class SpyEncoder: InputEncoder, Sendable {
 struct EditorNSViewResizeTests {
     /// Helper to create an EditorNSView with CoreText renderer.
     @MainActor private func makeView(spy: SpyEncoder, cols: UInt16 = 80, rows: UInt16 = 24, scale: CGFloat = 1.0) -> EditorNSView? {
-        let face = FontFace(name: "Menlo", size: 13.0, scale: scale)
         let fm = FontManager(name: "Menlo", size: 13.0, scale: scale)
         let guiState = GUIState()
         let disp = CommandDispatcher(cols: cols, rows: rows, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
         ctRenderer.setupRenderers(fontManager: fm)
-        return EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
+        return EditorNSView(encoder: spy, dispatcher: disp,
                             coreTextRenderer: ctRenderer, fontManager: fm)
     }
 
@@ -1206,7 +1218,7 @@ struct EditorNSViewResizeTests {
     @MainActor func setFrameSizeSendsResize() throws {
         let spy = SpyEncoder()
         guard let view = makeView(spy: spy) else { return }
-        let face = view.fontFace
+        let face = view.fontManager.primary
 
         let newWidth = CGFloat(face.cellWidth) * 100
         let newHeight = CGFloat(face.cellHeight) * 40
@@ -1245,6 +1257,64 @@ struct EditorNSViewResizeTests {
         #expect(spy.resizeCalls[0].rows >= 1)
         #expect(view.dispatcher.frameState.cols >= 1)
         #expect(view.dispatcher.frameState.rows >= 1)
+    }
+
+    @Test("font transition reads manager metrics for resizing and IME geometry")
+    @MainActor func fontTransitionUsesManagerMetrics() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let manager = view.fontManager
+        let initialPrimary = manager.primary
+        let initialCellWidth = view.cellWidth
+        view.setFrameSize(NSSize(width: initialCellWidth * 80, height: view.cellHeight * 24))
+        let initialIMERect = view.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+
+        let update = manager.setPrimaryFont(FontManager.Configuration(
+            family: "Menlo",
+            size: 20,
+            scale: manager.scale,
+            ligatures: false,
+            weight: 5
+        ))
+        view.coreTextRenderer.setupRenderers(fontManager: manager)
+        view.fontConfigurationChanged(metricsChanged: update.metricsChanged)
+
+        let updatedIMERect = view.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+        #expect(manager.primary !== initialPrimary)
+        #expect(view.cellWidth == manager.primary.cellWidth)
+        #expect(view.cellHeight == CGFloat(manager.primary.cellHeight))
+        #expect(updatedIMERect.width == view.cellWidth)
+        #expect(updatedIMERect.height == view.cellHeight)
+        #expect(updatedIMERect.width > initialIMERect.width)
+        #expect(spy.readyCalls.count == 1)
+        #expect(spy.resizeCalls.count == 1)
+        #expect(spy.lifecycleCalls == [.ready, .resize])
+        #expect(spy.resizeCalls[0].cols < spy.readyCalls[0].cols)
+        #expect(spy.resizeCalls[0].rows < spy.readyCalls[0].rows)
+    }
+
+    @Test("scale transition preserves ready then resize emission and manager identity")
+    @MainActor func scaleTransitionPreservesEmissionPath() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy, scale: 1.0) else { return }
+        let manager = view.fontManager
+        view.setFrameSize(NSSize(width: view.cellWidth * 80, height: view.cellHeight * 24))
+
+        view.onScaleFactorChanged = { newScale in
+            let update = manager.setPrimaryFont(manager.configuration.withScale(newScale))
+            view.coreTextRenderer.setupRenderers(fontManager: manager)
+            view.fontConfigurationChanged(metricsChanged: update.metricsChanged)
+        }
+        view.displayConfigurationChanged(newScale: 2.0)
+
+        #expect(manager.scale == 2.0)
+        #expect(view.fontManager === manager)
+        #expect(manager.primaryConstructionCount == 2)
+        #expect(spy.readyCalls.count == 1)
+        #expect(spy.resizeCalls.count == 1)
+        #expect(spy.lifecycleCalls == [.ready, .resize])
+        #expect(spy.resizeCalls[0].cols == spy.readyCalls[0].cols)
+        #expect(spy.resizeCalls[0].rows == spy.readyCalls[0].rows)
     }
 
     @Test("viewDidMoveToWindow corrects initial scale mismatch without sending ready early")

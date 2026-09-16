@@ -282,7 +282,6 @@ enum PreviewRegistry {
 
     private static func previewEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-        let fontFace = FontFace(name: "Menlo", size: 13, scale: scale)
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }
         renderer.setupRenderers(fontManager: fontManager)
@@ -291,7 +290,7 @@ enum PreviewRegistry {
         dispatcher.fontManager = fontManager
         populateEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 
-        let nsView = EditorNSView(encoder: encoder, fontFace: fontFace, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
+        let nsView = EditorNSView(encoder: encoder, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
         nsView.editorInput = appState.gui.editorInput
         nsView.statusBarState = appState.gui.statusBarState
         nsView.renderFrame()
@@ -509,7 +508,6 @@ enum PreviewRegistry {
 
     private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-        let fontFace = FontFace(name: "Menlo", size: 13, scale: scale)
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }
         renderer.setupRenderers(fontManager: fontManager)
@@ -518,7 +516,7 @@ enum PreviewRegistry {
         dispatcher.fontManager = fontManager
         populateDiagnosticsEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 
-        let nsView = EditorNSView(encoder: encoder, fontFace: fontFace, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
+        let nsView = EditorNSView(encoder: encoder, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
         nsView.editorInput = appState.gui.editorInput
         nsView.statusBarState = appState.gui.statusBarState
         nsView.renderFrame()

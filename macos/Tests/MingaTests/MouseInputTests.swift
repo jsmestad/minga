@@ -27,21 +27,20 @@ struct MouseInputTests {
     /// of the coordinate math; cellWidth/cellHeight are in points).
     @MainActor
     private func makeView(spy: SpyEncoder) -> EditorNSView? {
-        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
         let guiState = GUIState()
         let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
         ctRenderer.setupRenderers(fontManager: fm)
-        let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
+        let view = EditorNSView(encoder: spy, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
         view.editorInput = guiState.editorInput
         // Give the view a real frame so cellPosition math works.
         // Without a window, convert(_:from:) returns the point unchanged,
         // so locationInWindow IS the local point.
         view.frame = NSRect(x: 0, y: 0,
-                           width: CGFloat(face.cellWidth) * 80,
-                           height: CGFloat(face.cellHeight) * 24)
+                           width: CGFloat(fm.cellWidth) * 80,
+                           height: CGFloat(fm.cellHeight) * 24)
         return view
     }
 
@@ -1072,6 +1071,29 @@ struct MouseInputTests {
         #expect(spy.mouseEventCalls.count == 1)
         #expect(spy.mouseEventCalls[0].button == MOUSE_BUTTON_NONE)
         #expect(spy.mouseEventCalls[0].eventType == MOUSE_MOTION)
+    }
+
+    @Test("font transition updates hit testing to manager metrics")
+    @MainActor func fontTransitionUpdatesHitTesting() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let manager = view.fontManager
+
+        let update = manager.setPrimaryFont(FontManager.Configuration(
+            family: "Menlo", size: 20, scale: manager.scale, ligatures: false, weight: 5
+        ))
+        view.coreTextRenderer.setupRenderers(fontManager: manager)
+        view.fontConfigurationChanged(metricsChanged: update.metricsChanged)
+
+        guard let event = mouseEvent(
+            type: .mouseMoved,
+            location: NSPoint(x: view.cellWidth * 5.25, y: view.cellHeight * 2.25)
+        ) else { return }
+        view.mouseMoved(with: event)
+
+        #expect(spy.mouseEventCalls.count == 1)
+        #expect(spy.mouseEventCalls[0].col == 5)
+        #expect(spy.mouseEventCalls[0].row == 2)
     }
 
     @Test("mouseMoved deduplicates same cell position")

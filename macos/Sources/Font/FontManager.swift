@@ -19,8 +19,41 @@ import AppKit
 /// Swift 6 strict concurrency.
 @MainActor
 final class FontManager {
+    /// Immutable inputs used to resolve the primary font face.
+    struct Configuration: Equatable {
+        let family: String
+        let size: CGFloat
+        let scale: CGFloat
+        let ligatures: Bool
+        let weight: UInt8
+
+        func withScale(_ scale: CGFloat) -> Configuration {
+            Configuration(
+                family: family,
+                size: size,
+                scale: scale,
+                ligatures: ligatures,
+                weight: weight
+            )
+        }
+    }
+
+    /// Result of applying a primary-font configuration.
+    struct PrimaryUpdate {
+        let previous: FontFace
+        let current: FontFace
+        let configurationChanged: Bool
+        let metricsChanged: Bool
+    }
+
+    /// Inputs that produced `primary`.
+    private(set) var configuration: Configuration
+
     /// The primary font (ID 0). Always set after init.
     private(set) var primary: FontFace
+
+    /// Number of primary faces resolved during this manager's lifetime.
+    private(set) var primaryConstructionCount = 1
 
     /// Secondary fonts keyed by font_id (1-255).
     private var secondaryFonts: [UInt8: FontFace] = [:]
@@ -37,19 +70,58 @@ final class FontManager {
     var ascent: CGFloat { primary.ascent }
     var descent: CGFloat { primary.descent }
     var scale: CGFloat { primary.scale }
+    var configuredFallbackFamilies: [String] { fallbackFamilies }
 
     init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2) {
-        self.primary = FontFace(name: name, size: size, scale: scale,
-                                 ligatures: ligatures, weight: weight)
+        let configuration = Configuration(
+            family: name,
+            size: size,
+            scale: scale,
+            ligatures: ligatures,
+            weight: weight
+        )
+        self.configuration = configuration
+        self.primary = FontFace(
+            name: configuration.family,
+            size: configuration.size,
+            scale: configuration.scale,
+            ligatures: configuration.ligatures,
+            weight: configuration.weight
+        )
     }
 
-    /// Replace the primary font after a set_font command or display scale change.
-    func setPrimaryFont(name: String, size: CGFloat, scale: CGFloat,
-                        ligatures: Bool, weight: UInt8) {
-        self.primary = FontFace(name: name, size: size, scale: scale,
-                                 ligatures: ligatures, weight: weight)
+    /// Applies one complete primary-font configuration.
+    @discardableResult
+    func setPrimaryFont(_ configuration: Configuration) -> PrimaryUpdate {
+        let previous = primary
+        guard configuration != self.configuration else {
+            return PrimaryUpdate(
+                previous: previous,
+                current: previous,
+                configurationChanged: false,
+                metricsChanged: false
+            )
+        }
+
+        let current = FontFace(
+            name: configuration.family,
+            size: configuration.size,
+            scale: configuration.scale,
+            ligatures: configuration.ligatures,
+            weight: configuration.weight
+        )
+        self.configuration = configuration
+        self.primary = current
+        primaryConstructionCount += 1
         primary.setFallbackFonts(fallbackFamilies)
         rebuildSecondaryFonts()
+
+        return PrimaryUpdate(
+            previous: previous,
+            current: current,
+            configurationChanged: true,
+            metricsChanged: abs(previous.cellWidth - current.cellWidth) > 0.001 || previous.cellHeight != current.cellHeight
+        )
     }
 
     /// Configure the primary font fallback chain and preserve it across primary font rebuilds.

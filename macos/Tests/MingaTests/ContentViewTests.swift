@@ -123,7 +123,6 @@ struct ContentViewTests {
         dispatcher: CommandDispatcher,
         encoder: InputEncoder
     ) throws -> EditorNSView {
-        let face = FontFace(name: "Menlo", size: 13, scale: 1)
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         var factories = NativeRenderFactories.production
         factories.makeLibrary = { device in
@@ -133,7 +132,6 @@ struct ContentViewTests {
         renderer.setupRenderers(fontManager: fontManager)
         let view = EditorNSView(
             encoder: encoder,
-            fontFace: face,
             dispatcher: dispatcher,
             coreTextRenderer: renderer,
             fontManager: fontManager

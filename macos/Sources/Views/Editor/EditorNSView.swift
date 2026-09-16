@@ -31,7 +31,6 @@ private enum EditorStatusMode {
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
     var encoder: InputEncoder
-    public private(set) var fontFace: FontFace
 
     /// Command dispatcher owning frame metadata.
     let dispatcher: CommandDispatcher
@@ -43,7 +42,7 @@ final class EditorNSView: MTKView {
     /// MTKView.currentDrawable; tests may inject nil without retaining a drawable.
     var drawableProvider: (() -> CAMetalDrawable?)?
 
-    /// Font manager for per-span font family support.
+    /// Sole owner of the primary font and per-span font families.
     let fontManager: FontManager
 
     /// Editor-scoped backing references for semantic content and theme.
@@ -81,8 +80,8 @@ final class EditorNSView: MTKView {
     private var imeComposition = IMEComposition()
 
     /// Cell dimensions in points (used for mouse → cell coordinate mapping).
-    var cellWidth: CGFloat { fontFace.cellWidth }
-    var cellHeight: CGFloat { CGFloat(fontFace.cellHeight) }
+    var cellWidth: CGFloat { fontManager.cellWidth }
+    var cellHeight: CGFloat { CGFloat(fontManager.cellHeight) }
 
     /// Track last reported cell position to avoid flooding the Port with
     /// redundant mouse move events.
@@ -225,10 +224,9 @@ final class EditorNSView: MTKView {
     /// Task observing system scroller style changes.
     private var scrollerStyleTask: Task<Void, Never>?
 
-    init(encoder: InputEncoder, fontFace: FontFace, dispatcher: CommandDispatcher,
+    init(encoder: InputEncoder, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
         self.encoder = encoder
-        self.fontFace = fontFace
         self.dispatcher = dispatcher
         self.coreTextRenderer = coreTextRenderer
         self.fontManager = fontManager
@@ -738,15 +736,16 @@ final class EditorNSView: MTKView {
 
     // MARK: - Font update
 
-    /// Called when the BEAM sends a set_font command or the display scale changes.
-    /// Replaces the font face, resizes the grid to match new cell dimensions,
-    /// and sends a resize event to the BEAM so it re-renders with the new grid size.
-    func updateFont(_ newFace: FontFace) {
-        self.fontFace = newFace
+    /// Called after FontManager applies a set_font command or display scale change.
+    /// Resizes the grid from the manager-owned metrics and requests a fresh frame.
+    func fontConfigurationChanged(metricsChanged: Bool) {
+        guard metricsChanged else {
+            renderFrame()
+            return
+        }
 
-        // Recompute grid dimensions with the new cell size.
-        let newCellW = newFace.cellWidth
-        let newCellH = CGFloat(newFace.cellHeight)
+        let newCellW = fontManager.cellWidth
+        let newCellH = CGFloat(fontManager.cellHeight)
         guard newCellW > 0, newCellH > 0 else { return }
 
         let grid = gridDimensions(width: frame.width, height: frame.height, cellWidth: newCellW, cellHeight: newCellH)
@@ -813,7 +812,7 @@ final class EditorNSView: MTKView {
     /// Applies a live display configuration update to the Metal surface.
     func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false, sendDimensions: Bool = true) {
         updateMetalBackingScale(newScale)
-        let scaleChanged = abs(fontFace.scale - newScale) > 0.001
+        let scaleChanged = abs(fontManager.scale - newScale) > 0.001
 
         if sendDimensions && (scaleChanged || forceResizeEvent) {
             sendCurrentGridSize(reason: "Display configuration changed")
