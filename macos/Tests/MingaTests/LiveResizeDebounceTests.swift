@@ -226,18 +226,17 @@ struct LiveResizeDebounceTests {
 struct LiveResizeWiringTests {
     @MainActor
     private func makeView(spy: SpyEncoder) -> EditorNSView? {
-        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
         let guiState = GUIState()
         let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
         ctRenderer.setupRenderers(fontManager: fm)
-        let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
+        let view = EditorNSView(encoder: spy, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
         view.editorInput = guiState.editorInput
         view.frame = NSRect(x: 0, y: 0,
-                            width: CGFloat(face.cellWidth) * 80,
-                            height: CGFloat(face.cellHeight) * 24)
+                            width: CGFloat(fm.cellWidth) * 80,
+                            height: CGFloat(fm.cellHeight) * 24)
         return view
     }
 

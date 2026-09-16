@@ -212,7 +212,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var inputRejectionAlert: NSAlert?
     private var coreConnectionIsLive = true
     private var recoveryManager: RecoveryManager?
-    private var fontFace: FontFace?
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
@@ -240,18 +239,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Initial backing scale for Retina rendering. The window does not exist yet, so NSScreen.main is the only safe source here. EditorNSView.viewDidMoveToWindow/viewDidChangeBackingProperties corrects this if the window lands on another display.
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
 
-        // Initialize font.
-        let face = FontFace(name: defaultFontName, size: defaultFontSize, scale: scale)
-        self.fontFace = face
-
-        // Font manager for CoreText rendering.
+        // Font manager owns the primary and all registered font faces.
         let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
         self.fontManager = fm
 
         // Initial grid dimensions (no gutter padding subtraction yet; the first
         // setFrameSize call will send corrected cols once the gutter is established).
-        let cols = UInt16(max(defaultWindowWidth / CGFloat(face.cellWidth), 1))
-        let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
+        let cols = UInt16(max(defaultWindowWidth / CGFloat(fm.cellWidth), 1))
+        let rows = UInt16(defaultWindowHeight / CGFloat(fm.cellHeight))
 
         // CoreText renderer.
         guard let ctRenderer = CoreTextMetalRenderer(
@@ -346,7 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Enable port-based logging so messages appear in *Messages*.
         PortLogger.setup(encoder: enc)
         PortLogger.info("macOS GUI frontend starting (\(beamManager != nil ? "bundle" : "dev") mode)")
-        PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(face.cellWidth)x\(face.cellHeight), scale: \(scale)x")
+        PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(fm.cellWidth)x\(fm.cellHeight), scale: \(scale)x")
         PortLogger.info("Initial grid: \(cols)x\(rows) cells")
 
         // Command dispatcher.
@@ -409,7 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Create the editor view.
-        let nsView = EditorNSView(encoder: enc, fontFace: face, dispatcher: disp,
+        let nsView = EditorNSView(encoder: enc, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         disp.onScrollPresentationReset = { [weak nsView] in
             guard let nsView else { return }
@@ -886,40 +881,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleFontChange(family: String, size: CGFloat, ligatures: Bool, weight: UInt8) {
-        rebuildFont(family: family, size: size, scale: currentBackingScaleFactor(), ligatures: ligatures, weight: weight, reason: "Font changed")
+        applyFontConfiguration(
+            FontManager.Configuration(
+                family: family,
+                size: size,
+                scale: currentBackingScaleFactor(),
+                ligatures: ligatures,
+                weight: weight
+            ),
+            reason: "Font changed"
+        )
     }
 
     private func handleScaleChange(newScale: CGFloat) {
-        guard let currentFace = fontFace else { return }
-        guard abs(currentFace.scale - newScale) > 0.001 else { return }
-
-        rebuildFont(
-            family: currentFace.requestedName,
-            size: CTFontGetSize(currentFace.ctFont),
-            scale: newScale,
-            ligatures: currentFace.ligaturesEnabled,
-            weight: currentFace.protocolWeight,
+        guard let fontManager else { return }
+        applyFontConfiguration(
+            fontManager.configuration.withScale(newScale),
             reason: "Display scale changed"
         )
     }
 
-    private func rebuildFont(family: String, size: CGFloat, scale: CGFloat, ligatures: Bool, weight: UInt8, reason: String) {
-        guard let nsView = editorNSView else { return }
+    private func applyFontConfiguration(_ configuration: FontManager.Configuration, reason: String) {
+        guard let nsView = editorNSView, let fontManager else { return }
+        let update = fontManager.setPrimaryFont(configuration)
+        guard update.configurationChanged else { return }
 
-        let newFace = FontFace(name: family, size: size, scale: scale, ligatures: ligatures, weight: weight)
-        let fontName = CTFontCopyPostScriptName(newFace.ctFont) as String
-        PortLogger.info("\(reason): \(fontName) \(Int(size))pt, scale: \(scale)x, ligatures: \(ligatures), cell: \(newFace.cellWidth)x\(newFace.cellHeight)")
+        let fontName = CTFontCopyPostScriptName(update.current.ctFont) as String
+        PortLogger.info("\(reason): \(fontName) \(Int(configuration.size))pt, scale: \(configuration.scale)x, ligatures: \(configuration.ligatures), cell: \(update.current.cellWidth)x\(update.current.cellHeight)")
 
-        self.fontFace = newFace
-
-        // Update FontManager and CoreText renderer for the new font.
-        fontManager?.setPrimaryFont(name: family, size: size, scale: scale,
-                                     ligatures: ligatures, weight: weight)
-        if let fm = fontManager {
-            nsView.coreTextRenderer.setupRenderers(fontManager: fm)
-        }
-
-        nsView.updateFont(newFace)
+        // Rebuild renderer resources before the view requests drawing with new metrics.
+        nsView.coreTextRenderer.setupRenderers(fontManager: fontManager)
+        nsView.fontConfigurationChanged(metricsChanged: update.metricsChanged)
     }
 
     // MARK: - Font registration

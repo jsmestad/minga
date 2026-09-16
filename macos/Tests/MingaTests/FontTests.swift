@@ -171,7 +171,7 @@ struct FontManagerTests {
         let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
         #expect(abs(fm.cellWidth - fm.primary.cellWidth) < 0.001)
 
-        fm.setPrimaryFont(name: "Menlo", size: 17, scale: 2.0, ligatures: true, weight: 2)
+        fm.setPrimaryFont(FontManager.Configuration(family: "Menlo", size: 17, scale: 2.0, ligatures: true, weight: 2))
         #expect(abs(fm.cellWidth - fm.primary.cellWidth) < 0.001)
         #expect(abs(fm.cellWidth - ceil(fm.cellWidth)) > 0.01)
     }
@@ -199,28 +199,79 @@ struct FontManagerTests {
         #expect(face === fm.primary)
     }
 
-    @Test("setPrimaryFont replaces the font")
+    @Test("setPrimaryFont applies one immutable configuration and reports metric changes")
     func setPrimaryFont() {
         let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
+        let previous = fm.primary
         let oldWidth = fm.cellWidth
-        fm.setPrimaryFont(name: "Menlo", size: 20, scale: 2.0, ligatures: true, weight: 2)
+        let configuration = FontManager.Configuration(
+            family: "Menlo",
+            size: 20,
+            scale: 2.0,
+            ligatures: false,
+            weight: 5
+        )
+
+        let update = fm.setPrimaryFont(configuration)
+
         #expect(fm.cellWidth > oldWidth)
+        #expect(fm.configuration == configuration)
+        #expect(update.previous === previous)
+        #expect(update.current === fm.primary)
+        #expect(update.configurationChanged)
+        #expect(update.metricsChanged)
+        #expect(fm.primary.ligaturesEnabled == false)
+        #expect(fm.primary.protocolWeight == 5)
+        #expect(fm.primaryConstructionCount == 2)
+    }
+
+    @Test("unchanged primary configuration preserves identity and performs no construction")
+    func unchangedConfigurationPreservesIdentity() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 2.0, ligatures: false, weight: 4)
+        let primary = fm.primary
+
+        let update = fm.setPrimaryFont(fm.configuration)
+
+        #expect(update.current === primary)
+        #expect(update.previous === primary)
+        #expect(update.configurationChanged == false)
+        #expect(update.metricsChanged == false)
+        #expect(fm.primaryConstructionCount == 1)
+    }
+
+    @Test("scale-only configuration replaces the primary without changing point metrics")
+    func scaleOnlyConfiguration() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 1.0)
+        let previous = fm.primary
+
+        let update = fm.setPrimaryFont(fm.configuration.withScale(2.0))
+
+        #expect(update.previous === previous)
+        #expect(update.current === fm.primary)
+        #expect(update.current !== previous)
+        #expect(update.configurationChanged)
+        #expect(update.metricsChanged == false)
+        #expect(fm.scale == 2.0)
+        #expect(fm.primaryConstructionCount == 2)
     }
 
     @Test("setPrimaryFont preserves registered secondary fonts at the new scale")
     func setPrimaryFontPreservesSecondaryFonts() {
         let fm = FontManager(name: "Menlo", size: 13, scale: 1.0)
+        fm.setFallbackFonts(["Menlo"])
         fm.registerFont(id: 1, name: "Menlo")
 
         let secondaryBefore = fm.fontFace(for: 1)
         #expect(secondaryBefore !== fm.primary)
         #expect(secondaryBefore.scale == 1.0)
 
-        fm.setPrimaryFont(name: "Menlo", size: 14, scale: 2.0, ligatures: false, weight: 5)
+        fm.setPrimaryFont(FontManager.Configuration(family: "Menlo", size: 14, scale: 2.0, ligatures: false, weight: 5))
 
         let secondaryAfter = fm.fontFace(for: 1)
         #expect(secondaryAfter !== fm.primary)
+        #expect(secondaryAfter !== secondaryBefore)
         #expect(secondaryAfter.scale == 2.0)
         #expect(secondaryAfter.ligaturesEnabled == false)
+        #expect(fm.configuredFallbackFamilies == ["Menlo"])
     }
 }
