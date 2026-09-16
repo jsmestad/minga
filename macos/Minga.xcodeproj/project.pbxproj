@@ -138,6 +138,7 @@
 		5DDC0854DEF9C0F6DD82B694 /* FrontendExtensionRuntimeMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F330603D06228BB2A18F71F5 /* FrontendExtensionRuntimeMessage.swift */; };
 		5DE70D2369F1CB92DD8D5000 /* PreviewSnapshotPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E1D0E05FBEEC550591460C7 /* PreviewSnapshotPolicy.swift */; };
 		5EE07BDB6F4106780833146F /* OperationReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0584599FD3264B1C8F85A90 /* OperationReadiness.swift */; };
+		5F8BC72C8547CB32B13FD775 /* NativeResourceInvestigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5ACBDC580464626842B6C23 /* NativeResourceInvestigation.swift */; };
 		604EA0D182B756909D021DC6 /* PreviewRegistry+GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */; };
 		615049EC1AF720C119D63438 /* ExtensionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089C5163F2C513D3DC21E7C /* ExtensionPanelView.swift */; };
 		6184BD99497BC7DED163F04F /* ProtocolSemanticDecode.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */; };
@@ -747,6 +748,7 @@
 		E41827D81991F10BAE2D88FF /* OperationReceiptTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationReceiptTypes.swift; sourceTree = "<group>"; };
 		E4DCF10EBEB51624A4A1F428 /* InlineEditField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditField.swift; sourceTree = "<group>"; };
 		E557E349097FF119EFE0F827 /* FeedbackStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackStateTests.swift; sourceTree = "<group>"; };
+		E5ACBDC580464626842B6C23 /* NativeResourceInvestigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeResourceInvestigation.swift; sourceTree = "<group>"; };
 		E8D8E70B7413F570FBAC58C1 /* MessagesContentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentState.swift; sourceTree = "<group>"; };
 		E945E6E53217CEC4BAAECBDD /* NativeRenderResources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderResources.swift; sourceTree = "<group>"; };
 		EA5181B8CD0511FCA58DC662 /* minga-tui */ = {isa = PBXFileReference; path = "minga-tui"; sourceTree = "<group>"; };
@@ -1151,6 +1153,7 @@
 			isa = PBXGroup;
 			children = (
 				C96967ED4DCCC7465EC07D8B /* NativeRenderPerformanceMain.swift */,
+				E5ACBDC580464626842B6C23 /* NativeResourceInvestigation.swift */,
 			);
 			path = NativePerformance;
 			sourceTree = "<group>";
@@ -1709,6 +1712,7 @@
 				DAA7EF98BE173F84E9F3E48E /* LiveResizeDebounce.swift in Sources */,
 				B1744D1172F401BB1649EC96 /* NativeRenderPerformanceMain.swift in Sources */,
 				C0389E69F6B78917438E810C /* NativeRenderResources.swift in Sources */,
+				5F8BC72C8547CB32B13FD775 /* NativeResourceInvestigation.swift in Sources */,
 				B48BC4542B423D422705314A /* NativeTextCommandRouter.swift in Sources */,
 				5EE07BDB6F4106780833146F /* OperationReadiness.swift in Sources */,
 				4BC82E5D7B75A3365DFFC323 /* OperationReceiptTypes.swift in Sources */,
