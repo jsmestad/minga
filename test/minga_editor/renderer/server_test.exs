@@ -462,7 +462,9 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert {60, 0, duplicate_ready_generation} = frame_header(duplicate_ready_batch)
       assert duplicate_ready_generation > recovery_generation
 
-      RendererServer.request_recovery(renderer_name)
+      assert RendererServer.request_recovery(renderer_name, duplicate_ready_generation, 0) ==
+               :recovery_started
+
       assert_receive {:wire_batch, concurrent_recovery_batch}, @async_render_timeout
 
       assert {concurrent_frame_seq, 0, concurrent_recovery_generation} =
@@ -804,20 +806,99 @@ defmodule MingaEditor.Renderer.ServerTest do
       refute_receive {:adaptation_pipeline, _, 3, _, _, _}, 50
     end
 
-    test "manual retry returns the credit and advances recovery generation every time" do
+    test "matching recovery preserves the latest coalesced intent and rejects delayed duplicates" do
       renderer = start_ack_renderer(self())
 
       RendererServer.cast_snapshot(renderer, stub_intent(), 30)
       assert_receive {:ack_pipeline, 30, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_intent(), 31)
 
-      RendererServer.request_recovery(renderer)
-      assert_receive {:ack_pipeline, first_retry, 2, 0, true}, @async_render_timeout
+      assert RendererServer.request_recovery(renderer, 1, 99) == :stale
+      assert RendererServer.acknowledgement_state(renderer) == {1, 0}
+
+      assert RendererServer.request_recovery(renderer, 1, 0) == :recovery_started
+      assert_receive {:ack_pipeline, 31, 2, 0, true}, @async_render_timeout
       assert RendererServer.acknowledgement_state(renderer) == {2, 0}
 
-      RendererServer.request_recovery(renderer)
-      assert_receive {:ack_pipeline, second_retry, 3, 0, true}, @async_render_timeout
-      assert second_retry > first_retry
-      assert RendererServer.acknowledgement_state(renderer) == {3, 0}
+      assert RendererServer.request_recovery(renderer, 1, 0) == :stale
+      assert RendererServer.request_recovery(renderer, 1, 0) == :stale
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+      refute_received {:ack_pipeline, _, 3, _, _}
+    end
+
+    test "matching recovery can replace a scheduled attempt before rendering begins" do
+      renderer = start_ack_renderer(self())
+      park_in_flight(renderer)
+
+      assert RendererServer.request_recovery(renderer, 1, 0) == :recovery_started
+      assert_receive {:ack_pipeline, retry_seq, 2, 0, true}, @async_render_timeout
+      assert retry_seq > 0
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+    end
+
+    test "recovery request while idle is stale" do
+      renderer = start_ack_renderer(self())
+
+      assert RendererServer.request_recovery(renderer, 1, 0) == :stale
+      assert RendererServer.acknowledgement_state(renderer) == {1, 0}
+      refute_received {:ack_pipeline, _, _, _, _}
+    end
+
+    test "recovery request after acknowledgement is stale" do
+      renderer = start_ack_renderer(self())
+      RendererServer.cast_snapshot(renderer, stub_intent(), 40)
+      assert_receive {:ack_pipeline, 40, 1, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 40})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 40}}, @async_render_timeout
+
+      assert RendererServer.request_recovery(renderer, 1, 40) == :stale
+      assert RendererServer.acknowledgement_state(renderer) == {1, 40}
+      refute_received {:ack_pipeline, _, 2, _, _}
+    end
+
+    test "recovery request after terminal failure is stale" do
+      renderer = start_ack_renderer(self())
+      RendererServer.cast_snapshot(renderer, stub_intent(), 50)
+      assert_receive {:ack_pipeline, 50, 1, 0, true}, @async_render_timeout
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 1, 50, 0, :resource_policy, :terminal_frontend_failure}
+      )
+
+      assert %{frame_seq: 50} = RendererServer.terminal_failure(renderer)
+      assert RendererServer.request_recovery(renderer, 1, 0) == :stale
+      assert RendererServer.acknowledgement_state(renderer) == {1, 0}
+      refute_received {:ack_pipeline, _, 2, _, _}
+    end
+
+    test "recovery request from a replaced connection cannot reset its successor" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_intent(), 60)
+      assert_receive {:ack_pipeline, 60, 1, 0, true}, @async_render_timeout
+
+      assert :ok = RendererServer.reset_connection(renderer, stub_intent(), 61)
+      assert_receive {:ack_pipeline, 61, 2, 0, true}, @async_render_timeout
+
+      assert RendererServer.request_recovery(renderer, 1, 0) == :stale
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+      refute_received {:ack_pipeline, _, 3, _, _}
+    end
+
+    test "Editor forwards keyframe recovery correlation unchanged" do
+      renderer = start_ack_renderer(self())
+      state = build_editor_state(:tui, renderer)
+
+      RendererServer.cast_snapshot(renderer, stub_intent(), 70)
+      assert_receive {:ack_pipeline, 70, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_intent(), 71)
+
+      message = {:minga_input, {:request_keyframe, 0, 1}}
+      assert {:noreply, ^state} = MingaEditor.handle_info(message, state)
+
+      assert_receive {:ack_pipeline, 71, 2, 0, true}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
     end
 
     test "connection reset clears stale retry exhaustion before recovery" do
