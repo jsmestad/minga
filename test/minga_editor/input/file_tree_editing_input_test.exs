@@ -114,7 +114,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     text = Keyword.get(opts, :text, "")
     index = tree(state).cursor
 
-    file_tree = FileTreeState.start_editing(ft(state), index, type, 1, text)
+    file_tree = FileTreeState.start_editing(ft(state), index, type, tmp_dir, 1, text)
 
     then(state, fn state ->
       %{

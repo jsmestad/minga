@@ -21,7 +21,7 @@ defmodule MingaEditor.State.FileTree do
   query returns `nil` in every other interaction phase.
   The `index` is the visual position in the visible entry list where
   the editing row appears. For new file/folder, this is the insertion
-  point. For rename, this is the entry being renamed.
+  point and `parent_path` is the immutable admitted destination. For rename, this is the entry being renamed.
   """
   @type editing_type :: :new_file | :new_folder | :rename
   @type edit_token :: 1..4_294_967_295
@@ -31,6 +31,7 @@ defmodule MingaEditor.State.FileTree do
           text: String.t(),
           type: editing_type(),
           original_name: String.t() | nil,
+          parent_path: String.t() | nil,
           source_path: String.t() | nil,
           token: edit_token()
         }
@@ -425,13 +426,15 @@ defmodule MingaEditor.State.FileTree do
           t(),
           non_neg_integer(),
           :new_file | :new_folder,
+          String.t(),
           edit_token(),
           String.t()
         ) :: t()
-  def start_editing(%__MODULE__{} = ft, index, type, token, initial_text \\ "")
+  def start_editing(%__MODULE__{} = ft, index, type, parent_path, token, initial_text \\ "")
       when type in [:new_file, :new_folder] and is_integer(index) and index >= 0 and
+             is_binary(parent_path) and
              is_integer(token) and token > 0 and token <= 4_294_967_295 do
-    admit_edit(ft, index, type, initial_text, nil, token)
+    admit_edit(ft, index, type, initial_text, Path.expand(parent_path), nil, token)
   end
 
   @doc "Enters inline rename mode while retaining the admitted source path as authority."
@@ -439,7 +442,7 @@ defmodule MingaEditor.State.FileTree do
   def start_rename(%__MODULE__{} = ft, index, %{path: path, name: name}, token)
       when is_integer(index) and index >= 0 and is_binary(path) and is_binary(name) and
              is_integer(token) and token > 0 and token <= 4_294_967_295 do
-    admit_edit(ft, index, :rename, name, Path.expand(path), token)
+    admit_edit(ft, index, :rename, name, nil, Path.expand(path), token)
   end
 
   @doc "Accepts native confirmation text only for the currently admitted edit token."
@@ -473,9 +476,10 @@ defmodule MingaEditor.State.FileTree do
           editing_type(),
           String.t(),
           String.t() | nil,
+          String.t() | nil,
           edit_token()
         ) :: t()
-  defp admit_edit(%__MODULE__{} = ft, index, type, text, source_path, token) do
+  defp admit_edit(%__MODULE__{} = ft, index, type, text, parent_path, source_path, token) do
     original_name = if type == :rename, do: text, else: nil
 
     editing = %{
@@ -483,6 +487,7 @@ defmodule MingaEditor.State.FileTree do
       text: text,
       type: type,
       original_name: original_name,
+      parent_path: parent_path,
       source_path: source_path,
       token: token
     }

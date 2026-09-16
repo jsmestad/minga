@@ -64,6 +64,70 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       assert File.exists?(expected), "Expected newfile.txt to exist at #{expected}"
     end
+
+    test "invalid parent keeps the admitted name and preserves existing data", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      blocker = Path.join(dir, "regular-file.txt")
+      active_path = Path.join(dir, "active.txt")
+      attempted = Path.join(blocker, "child.txt")
+      File.write!(blocker, "original bytes")
+      File.write!(active_path, "saved bytes")
+
+      buffer =
+        start_supervised!({Buffer, file_path: active_path, events_registry: events_registry})
+
+      :ok = Buffer.insert_char(buffer, "!")
+
+      state =
+        dir
+        |> make_state(events_registry, buffer)
+        |> select_entry("regular-file.txt")
+        |> Commands.FileTree.new_file()
+        |> replace_editing_text("regular-file.txt/child.txt")
+
+      original_buffers = state.workspace.buffers.list
+      state = Commands.FileTree.confirm_editing(state)
+
+      assert editing(state).text == "regular-file.txt/child.txt"
+      assert editing(state).parent_path == Path.expand(dir)
+      assert state.workspace.buffers.list == original_buffers
+
+      assert state.shell_runtime.state.notice.message =~
+               "New file failed to create parent directory #{blocker}"
+
+      assert state.shell_runtime.state.notice.message =~ "not a directory"
+      assert File.read!(blocker) == "original bytes"
+      assert File.read!(active_path) == "saved bytes"
+      assert Buffer.dirty?(buffer)
+      refute File.exists?(attempted)
+    end
+
+    test "retry uses the parent admitted before tree selection changes", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      admitted_parent = Path.join(dir, "a-parent")
+      later_selection = Path.join(dir, "b-parent")
+      created = Path.join(admitted_parent, "kept-target.txt")
+      File.mkdir_p!(admitted_parent)
+      File.mkdir_p!(later_selection)
+      _buffer = start_supervised!({Buffer, file_path: created, events_registry: events_registry})
+
+      state =
+        dir
+        |> make_state(events_registry)
+        |> select_entry("a-parent")
+        |> Commands.FileTree.new_file()
+        |> replace_editing_text("kept-target.txt")
+        |> select_entry("b-parent")
+        |> Commands.FileTree.confirm_editing()
+
+      assert editing(state) == nil
+      assert File.exists?(created)
+      refute File.exists?(Path.join(later_selection, "kept-target.txt"))
+    end
   end
 
   describe "[command-state] new folder (A)" do

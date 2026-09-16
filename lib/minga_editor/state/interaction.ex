@@ -13,12 +13,14 @@ defmodule MingaEditor.State.Interaction do
           editing_model: editing_model(),
           keymap_server: Minga.Keymap.server(),
           options_server: Minga.Config.Options.server(),
+          file_tree_new_file_backend: MingaEditor.Commands.FileTree.NewFileBackend.t(),
           keystroke_history: KeystrokeHistory.t()
         }
 
   defstruct editing_model: :vim,
             keymap_server: Minga.Keymap.Active,
             options_server: Minga.Config.Options,
+            file_tree_new_file_backend: MingaEditor.Commands.FileTree.SystemNewFileBackend,
             keystroke_history: KeystrokeHistory.new()
 
   @doc "Creates interaction state from startup configuration."
@@ -27,7 +29,13 @@ defmodule MingaEditor.State.Interaction do
     %__MODULE__{
       editing_model: Keyword.get(opts, :editing_model, :vim),
       keymap_server: Keyword.get(opts, :keymap_server, Minga.Keymap.Active),
-      options_server: Keyword.get(opts, :options_server, Minga.Config.Options)
+      options_server: Keyword.get(opts, :options_server, Minga.Config.Options),
+      file_tree_new_file_backend:
+        Keyword.get(
+          opts,
+          :file_tree_new_file_backend,
+          MingaEditor.Commands.FileTree.SystemNewFileBackend
+        )
     }
   end
 

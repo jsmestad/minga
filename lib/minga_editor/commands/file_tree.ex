@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
+  alias MingaEditor.Commands.FileTree.NewFileBackend
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -348,11 +349,12 @@ defmodule MingaEditor.Commands.FileTree do
 
   defp install_new_entry_edit({:ok, tree}, state, index, type) do
     token = FileTreeFreshness.next_edit_token()
+    parent_path = new_entry_parent_path(tree)
 
     ft =
       state
       |> file_tree_state()
-      |> FileTreeState.start_editing(index, type, token)
+      |> FileTreeState.start_editing(index, type, parent_path, token)
       |> FileTreeState.replace_tree(tree)
 
     state = set_file_tree(state, ft)
@@ -424,14 +426,31 @@ defmodule MingaEditor.Commands.FileTree do
   defp confirm_new_file(state, editing) do
     parent_dir = editing_parent_dir(state)
     full_path = Path.join(parent_dir, editing.text)
+    backend = state.interaction.file_tree_new_file_backend
 
-    File.mkdir_p!(Path.dirname(full_path))
-    File.touch!(full_path)
+    case backend.mkdir_p(Path.dirname(full_path)) do
+      :ok ->
+        create_new_file(state, backend, full_path)
 
-    state = clear_editing_and_refresh(state)
+      {:error, reason} ->
+        new_file_creation_failed(state, :create_parent, Path.dirname(full_path), reason)
+    end
+  end
 
-    case Commands.start_buffer(full_path, state.interaction.options_server,
-           events_registry: state.extension_surfaces.events_registry
+  @spec create_new_file(state(), NewFileBackend.t(), String.t()) :: state()
+  defp create_new_file(state, backend, full_path) do
+    case backend.touch(full_path) do
+      :ok -> open_created_file(clear_editing_and_refresh(state), backend, full_path)
+      {:error, reason} -> new_file_creation_failed(state, :create_file, full_path, reason)
+    end
+  end
+
+  @spec open_created_file(state(), NewFileBackend.t(), String.t()) :: state()
+  defp open_created_file(state, backend, full_path) do
+    case backend.open_buffer(
+           full_path,
+           state.interaction.options_server,
+           state.extension_surfaces.events_registry
          ) do
       {:ok, pid} ->
         BufferRegistry.do_file_tree_open(
@@ -442,11 +461,54 @@ defmodule MingaEditor.Commands.FileTree do
         )
 
       {:error, reason} ->
-        Log.warning(:editor, "[file-tree] Failed to open #{full_path}: #{inspect(reason)}")
-
-        state
+        new_file_open_failed(state, full_path, reason)
     end
   end
+
+  @spec new_file_creation_failed(state(), :create_parent | :create_file, String.t(), term()) ::
+          state()
+  defp new_file_creation_failed(state, operation, path, reason) do
+    message = new_file_creation_failure_message(operation, path, reason)
+    Log.warning(:editor, "[file-tree] #{message}")
+
+    state
+    |> refresh()
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(message)
+  end
+
+  @spec new_file_open_failed(state(), String.t(), term()) :: state()
+  defp new_file_open_failed(state, path, reason) do
+    message = "Created #{path}, but opening its buffer failed: #{format_file_error(reason)}"
+    Log.warning(:editor, "[file-tree] #{message}")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
+  end
+
+  @spec new_file_creation_failure_message(
+          :create_parent | :create_file,
+          String.t(),
+          term()
+        ) :: String.t()
+  defp new_file_creation_failure_message(:create_parent, path, reason) do
+    "New file failed to create parent directory #{path}: #{format_file_error(reason)}"
+  end
+
+  defp new_file_creation_failure_message(:create_file, path, reason) do
+    "New file failed to create #{path}: #{format_file_error(reason)}"
+  end
+
+  @spec format_file_error(term()) :: String.t()
+  defp format_file_error(reason) when is_atom(reason) do
+    reason
+    |> :file.format_error()
+    |> to_string()
+    |> readable_file_error(reason)
+  end
+
+  defp format_file_error(reason), do: inspect(reason)
+
+  @spec readable_file_error(String.t(), atom()) :: String.t()
+  defp readable_file_error("unknown POSIX error", reason), do: inspect(reason)
+  defp readable_file_error(message, _reason), do: message
 
   @spec confirm_new_folder(state(), map()) :: state()
   defp confirm_new_folder(state, editing) do
@@ -1068,6 +1130,15 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
+  @spec new_entry_parent_path(FileTree.t()) :: String.t()
+  defp new_entry_parent_path(tree) do
+    case FileTree.selected_entry(tree) do
+      %{dir?: true, path: path} -> path
+      %{path: path} -> Path.dirname(path)
+      nil -> tree.root
+    end
+  end
+
   @spec ensure_expanded(FileTree.t(), String.t()) :: FileTree.t()
   defp ensure_expanded(tree, dir_path) do
     if MapSet.member?(tree.expanded, dir_path), do: tree, else: FileTree.toggle_expand(tree)
@@ -1080,17 +1151,12 @@ defmodule MingaEditor.Commands.FileTree do
     editing = FileTreeState.editing(file_tree_state(state))
     entries = FileTree.visible_entries(tree)
 
-    case editing.type do
-      type when type in [:new_file, :new_folder] ->
-        prev_entry = if editing.index > 0, do: Enum.at(entries, editing.index - 1)
+    case editing do
+      %{type: type, parent_path: parent_path}
+      when type in [:new_file, :new_folder] and is_binary(parent_path) ->
+        parent_path
 
-        case prev_entry do
-          %{dir?: true, path: path} -> path
-          %{path: path} -> Path.dirname(path)
-          nil -> tree.root
-        end
-
-      :rename ->
+      %{type: :rename} ->
         case Enum.at(entries, editing.index) do
           %{path: path} -> Path.dirname(path)
           nil -> tree.root

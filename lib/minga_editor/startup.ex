@@ -202,7 +202,13 @@ defmodule MingaEditor.Startup do
         Interaction.new(
           editing_model: editing_model,
           keymap_server: keymap_server,
-          options_server: options_server
+          options_server: options_server,
+          file_tree_new_file_backend:
+            Keyword.get(
+              opts,
+              :file_tree_new_file_backend,
+              MingaEditor.Commands.FileTree.SystemNewFileBackend
+            )
         ),
       extension_surfaces:
         ExtensionSurfaces.new(

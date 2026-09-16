@@ -91,13 +91,14 @@ defmodule MingaEditor.State.FileTreeEditingTest do
 
   describe "interaction" do
     test "start_editing/5 stores the admitted operation token for a new entry" do
-      ft = FileTreeState.start_editing(%FileTreeState{}, 3, :new_file, 101)
+      ft = FileTreeState.start_editing(%FileTreeState{}, 3, :new_file, "/tmp/project", 101)
 
       assert FileTreeState.editing?(ft)
       assert FileTreeState.editing(ft).index == 3
       assert FileTreeState.editing(ft).type == :new_file
       assert FileTreeState.editing(ft).text == ""
       assert FileTreeState.editing(ft).original_name == nil
+      assert FileTreeState.editing(ft).parent_path == "/tmp/project"
       assert FileTreeState.editing(ft).source_path == nil
       assert FileTreeState.editing(ft).token == 101
     end
@@ -120,7 +121,7 @@ defmodule MingaEditor.State.FileTreeEditingTest do
     end
 
     test "native confirmation text is accepted only for the current operation token" do
-      ft = FileTreeState.start_editing(%FileTreeState{}, 0, :new_file, 101)
+      ft = FileTreeState.start_editing(%FileTreeState{}, 0, :new_file, "/tmp", 101)
       token = FileTreeState.editing(ft).token
 
       assert {:stale, ^ft} = FileTreeState.accept_edit_confirmation(ft, token + 1, "wrong.txt")
@@ -134,7 +135,7 @@ defmodule MingaEditor.State.FileTreeEditingTest do
     test "update_editing_text/2 updates only active editing" do
       ft =
         %FileTreeState{}
-        |> FileTreeState.start_editing(0, :new_file, 1)
+        |> FileTreeState.start_editing(0, :new_file, "/tmp", 1)
         |> FileTreeState.update_editing_text("café.txt")
 
       assert FileTreeState.editing(ft).text == "café.txt"
@@ -144,7 +145,7 @@ defmodule MingaEditor.State.FileTreeEditingTest do
     test "cancel_editing/1 returns to browse" do
       ft =
         %FileTreeState{}
-        |> FileTreeState.start_editing(0, :new_file, 1, "partial")
+        |> FileTreeState.start_editing(0, :new_file, "/tmp", 1, "partial")
         |> FileTreeState.cancel_editing()
 
       assert ft.interaction == :browse
@@ -158,7 +159,7 @@ defmodule MingaEditor.State.FileTreeEditingTest do
 
       filtering =
         opened
-        |> FileTreeState.start_editing(0, :new_file, 1)
+        |> FileTreeState.start_editing(0, :new_file, "/tmp", 1)
         |> FileTreeState.start_filtering()
 
       assert filtering.interaction == :filtering
@@ -166,7 +167,7 @@ defmodule MingaEditor.State.FileTreeEditingTest do
 
       assert filtering |> FileTreeState.toggle_help() |> then(& &1.interaction) == :help
 
-      editing = FileTreeState.start_editing(opened, 0, :new_file, 1, "name?")
+      editing = FileTreeState.start_editing(opened, 0, :new_file, "/tmp", 1, "name?")
       assert FileTreeState.toggle_help(editing).interaction == editing.interaction
     end
 
@@ -182,22 +183,22 @@ defmodule MingaEditor.State.FileTreeEditingTest do
       assert FileTreeState.hide_help(opened).interaction == :browse
 
       assert opened
-             |> FileTreeState.start_editing(0, :new_file, 1)
+             |> FileTreeState.start_editing(0, :new_file, "/tmp", 1)
              |> FileTreeState.loading()
              |> then(& &1.interaction) == :browse
 
       assert opened
-             |> FileTreeState.start_editing(0, :new_file, 1)
+             |> FileTreeState.start_editing(0, :new_file, "/tmp", 1)
              |> FileTreeState.begin_root_scan(tree, :project)
              |> then(& &1.interaction) == :browse
 
       assert opened
-             |> FileTreeState.start_editing(0, :new_file, 1)
+             |> FileTreeState.start_editing(0, :new_file, "/tmp", 1)
              |> FileTreeState.error(:enoent)
              |> then(& &1.interaction) == :browse
 
       assert opened
-             |> FileTreeState.start_editing(0, :new_file, 1)
+             |> FileTreeState.start_editing(0, :new_file, "/tmp", 1)
              |> FileTreeState.close()
              |> then(& &1.interaction) == :browse
     end
