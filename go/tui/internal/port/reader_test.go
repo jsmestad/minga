@@ -1,11 +1,34 @@
 package port
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
+
+func TestReadPacketsReportsTruncatedPacket(t *testing.T) {
+	truncated := []byte{0, 0, 0, 2, generated.OPSetCursorShape}
+	err := readPackets(bytes.NewReader(truncated), func(tea.Msg) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("readPackets error = %v, want io.ErrUnexpectedEOF", err)
+	}
+}
+
+func TestReadPacketsReportsCleanEOFWithoutSending(t *testing.T) {
+	sent := 0
+	err := readPackets(bytes.NewReader(nil), func(tea.Msg) { sent++ })
+	if err != nil {
+		t.Fatalf("readPackets error = %v, want nil", err)
+	}
+	if sent != 0 {
+		t.Fatalf("readPackets sent %d messages for clean EOF, want 0", sent)
+	}
+}
 
 // Regression for the gui_indent_guides (0x91) desync: an opcode the Go renderer
 // does not explicitly decode must advance by its real framed length, not swallow

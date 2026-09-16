@@ -18,6 +18,48 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
+func TestSendRejectsAfterTransportTermination(t *testing.T) {
+	out := make(chan []byte, 1)
+	done := make(chan struct{})
+	close(done)
+	model := NewWithTransport(80, 24, out, done, nil)
+
+	if model.send([]byte("rejected")) {
+		t.Fatal("send reported queue admission after transport termination")
+	}
+	if got := len(out); got != 0 {
+		t.Fatalf("queue contains %d packets after rejected send, want 0", got)
+	}
+}
+
+func TestBlockedSendUnwindsWhenTransportTerminates(t *testing.T) {
+	out := make(chan []byte, 1)
+	out <- []byte("existing")
+	done := make(chan struct{})
+	model := NewWithTransport(80, 24, out, done, nil)
+	started := make(chan struct{})
+	result := make(chan bool, 1)
+
+	go func() {
+		close(started)
+		result <- model.send([]byte("blocked"))
+	}()
+	<-started
+	select {
+	case admitted := <-result:
+		t.Fatalf("full queue send completed before termination: admitted=%v", admitted)
+	default:
+	}
+
+	close(done)
+	if admitted := <-result; admitted {
+		t.Fatal("blocked send reported queue admission after transport termination")
+	}
+	if got := len(out); got != 1 {
+		t.Fatalf("queue contains %d packets after cancellation, want the original packet only", got)
+	}
+}
+
 func testThemeCommand() protocol.Command {
 	colors := map[byte]uint32{
 		themeEditorBG:         0x1E1F2A,
