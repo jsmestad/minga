@@ -2007,6 +2007,17 @@ struct CommandDispatcherStagingTests {
         )
     }
 
+    private func config(cursorBlink: Bool, fontSize: Int = 13) -> Wire.ConfigState {
+        Wire.ConfigState(
+            options: [
+                "cursor_blink": .bool(cursorBlink),
+                "font_size": .int(fontSize),
+            ],
+            themePreviews: [],
+            keybindings: []
+        )
+    }
+
     private func decodedFrame(_ commands: [RenderCommand]) throws -> DecodedFrame {
         let decoded = try commands.map { command in
             DecodedCommand(
@@ -3394,6 +3405,147 @@ struct CommandDispatcherStagingTests {
         #expect(effectCount == 0)
     }
 
+    @Test("settings from a frame missing its required theme remain unpublished")
+    @MainActor func rejectedConfigStatePreservesLastGoodSettings() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var cursorBlinkChanges: [Bool] = []
+        var results: [FrameTransactionResult] = []
+        gui.settingsState.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: false, fontSize: 14)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: true, fontSize: 18)))
+
+        #expect(gui.settingsState.cursorBlink == false)
+        #expect(gui.settingsState.fontSize == 14)
+        #expect(cursorBlinkChanges == [false])
+
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.settingsState.cursorBlink == false)
+        #expect(gui.settingsState.fontSize == 14)
+        #expect(cursorBlinkChanges == [false])
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .missingTheme
+        ))
+    }
+
+    @Test("settings from an abandoned frame never publish")
+    @MainActor func abandonedConfigStatePreservesLastGoodSettings() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var cursorBlinkChanges: [Bool] = []
+        gui.settingsState.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: false, fontSize: 14)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: true, fontSize: 18)))
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        #expect(gui.settingsState.cursorBlink == false)
+        #expect(gui.settingsState.fontSize == 14)
+        #expect(cursorBlinkChanges == [false])
+    }
+
+    @Test("settings publish once when their complete frame commits")
+    @MainActor func committedConfigStatePublishesOnce() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var cursorBlinkChanges: [Bool] = []
+        gui.settingsState.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: false, fontSize: 18)))
+
+        #expect(gui.settingsState.isLoading)
+        #expect(gui.settingsState.cursorBlink)
+        #expect(cursorBlinkChanges.isEmpty)
+
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.settingsState.isLoading == false)
+        #expect(gui.settingsState.cursorBlink == false)
+        #expect(gui.settingsState.fontSize == 18)
+        #expect(cursorBlinkChanges == [false])
+    }
+
+    @Test("repeated settings replace in place under the staging resource limit")
+    @MainActor func repeatedConfigStateUsesLastUpdateAndReplacementWeight() throws {
+        let staging = FrameResourceWeight(
+            commands: 2, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var cursorBlinkChanges: [Bool] = []
+        var results: [FrameTransactionResult] = []
+        gui.settingsState.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: true, fontSize: 14)))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: false, fontSize: 18)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.settingsState.cursorBlink == false)
+        #expect(gui.settingsState.fontSize == 18)
+        #expect(cursorBlinkChanges == [false])
+        #expect(results == [.applied(generation: 1, frameSeq: 1)])
+    }
+
+    @Test("settings remain last-good when another staged command exceeds the resource limit")
+    @MainActor func resourceRejectedConfigStatePreservesLastGoodSettings() throws {
+        let staging = FrameResourceWeight(
+            commands: 2, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var cursorBlinkChanges: [Bool] = []
+        var results: [FrameTransactionResult] = []
+        gui.settingsState.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: false, fontSize: 14)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiConfigState(config(cursorBlink: true, fontSize: 18)))
+        dispatcher.dispatch(.setTitle("staged"))
+        dispatcher.dispatch(.setWindowBg(r: 0x22, g: 0x33, b: 0x44))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.settingsState.cursorBlink == false)
+        #expect(gui.settingsState.fontSize == 14)
+        #expect(cursorBlinkChanges == [false])
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .resourcePolicy
+        ))
+    }
+
     @Test("invalid transcript operations reject without publishing sibling state")
     @MainActor func invalidTranscriptRejectsWholeTransaction() throws {
         let invalidCommands: [(RenderCommand, PreparedFrameRejection)] = [
@@ -3718,16 +3870,26 @@ struct CommandDispatcherStagingTests {
         #expect(requested.isEmpty)
     }
 
-    @Test("gui_config_state applies immediately with no open transaction")
-    @MainActor func guiConfigStateAppliesOutOfBand() throws {
-        let (dispatcher, _) = makeDispatcher()
+    @Test("gui_config_state outside a transaction rejects without mutating settings")
+    @MainActor func guiConfigStateOutOfBandRejects() throws {
+        let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
+        var cursorBlinkChanges: [Bool] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
+        gui.settingsState.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
 
-        let configState = Wire.ConfigState(options: [:], themePreviews: [], keybindings: [])
+        let configState = Wire.ConfigState(
+            options: ["cursor_blink": .bool(false)],
+            themePreviews: [],
+            keybindings: []
+        )
         dispatcher.dispatch(.guiConfigState(configState))
 
-        #expect(requested.isEmpty)
+        #expect(gui.settingsState.isLoading)
+        #expect(gui.settingsState.cursorBlink)
+        #expect(cursorBlinkChanges.isEmpty)
+        #expect(requested == [0])
+        #expect(gui.resyncState.pending)
     }
 
     @Test("clipboard_write applies immediately with no open transaction")

@@ -61,4 +61,29 @@ struct SettingsStateTests {
         #expect(state.keybindings.count == 1)
         #expect(cursorBlinkChanges == [false])
     }
+
+    @Test("cursor blink callback reports each committed value transition once")
+    func cursorBlinkCallbackTracksCommittedTransitions() {
+        let state = SettingsState()
+        var cursorBlinkChanges: [Bool] = []
+        state.onCursorBlinkChanged = { cursorBlinkChanges.append($0) }
+
+        let disabled = Wire.ConfigState(
+            options: ["cursor_blink": .bool(false)],
+            themePreviews: [],
+            keybindings: []
+        )
+        let enabled = Wire.ConfigState(
+            options: ["cursor_blink": .bool(true)],
+            themePreviews: [],
+            keybindings: []
+        )
+
+        state.apply(configState: disabled)
+        state.apply(configState: disabled)
+        state.apply(configState: enabled)
+        state.apply(configState: enabled)
+
+        #expect(cursorBlinkChanges == [false, true])
+    }
 }

@@ -81,6 +81,38 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
   end
 
+  test "config_query refreshes settings and submits a framed keyframe response", %{
+    sidebar_registry: table
+  } do
+    capabilities = %Capabilities{frontend_type: :native_gui, semantic_ui: true}
+    owner = self()
+    renderer = spawn(fn -> renderer_probe(owner) end)
+    on_exit(fn -> Process.exit(renderer, :kill) end)
+    state = base_state(table, backend: :gui, capabilities: capabilities)
+    state = %{state | render: MingaEditor.State.Render.connect_renderer(state.render, renderer)}
+    snapshot = MingaEditor.Input.Router.capture_snapshot(state)
+    revision = state.render.render_correlation.latest_intent_revision
+
+    handled = GuiActionHandler.dispatch(state, :config_query)
+
+    assert handled.appearance.gui_config_state != nil
+    assert handled.render.render_correlation.keyframe_pending?
+
+    rendered = MingaEditor.Input.Router.post_action_housekeeping(handled, snapshot)
+
+    assert rendered.render.render_correlation.latest_intent_revision == revision + 1
+
+    assert_receive {:renderer_reset,
+                    %MingaEditor.RenderPipeline.Intent{
+                      frame: %MingaEditor.RenderPipeline.FrameIntent{
+                        force_keyframe?: false,
+                        gui_config_state: config_state
+                      }
+                    }}
+
+    assert config_state == handled.appearance.gui_config_state
+  end
+
   test "space leader replay is key-local and outer housekeeping submits exactly one render", %{
     sidebar_registry: table
   } do
@@ -849,6 +881,15 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   end
 
   defp clear_window_reset_pending(state), do: state
+
+  defp renderer_probe(owner) do
+    receive do
+      {:"$gen_call", from, {:reset_connection, intent, _seq, _pushed_at}} ->
+        GenServer.reply(from, :ok)
+        send(owner, {:renderer_reset, intent})
+        renderer_probe(owner)
+    end
+  end
 
   defp power_thermal_events_registry do
     :"power_thermal_events_#{System.unique_integer([:positive])}"
