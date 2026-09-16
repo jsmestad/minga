@@ -65,11 +65,13 @@ struct TemporalOffscreenMetalTests {
     }
 
     private func windowWithGutter(windowId: UInt16, rows: [GUIVisualRow],
-                                  scrollLeft: UInt16 = 0) throws -> GUIWindowContent {
+                                  scrollLeft: UInt16 = 0,
+                                  cursorline: GUICursorline? = nil) throws -> GUIWindowContent {
         try GUIWindowContent(
             windowId: windowId, fullRefresh: true, cursorRow: 0, cursorCol: 0,
             cursorShape: .block, scrollLeft: scrollLeft, rows: rows, selection: nil,
-            searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            cursorline: cursorline
         )
     }
 
@@ -92,6 +94,100 @@ struct TemporalOffscreenMetalTests {
             return nil
         }
         return (device, queue)
+    }
+
+    private func blankRows(startingAt firstRowId: UInt64, count: UInt16) -> [GUIVisualRow] {
+        (0..<Int(count)).map { offset -> GUIVisualRow in
+            let rowId = firstRowId + UInt64(offset)
+            return GUIVisualRow(
+                rowType: .normal, rowId: rowId, bufLine: UInt32(offset),
+                contentHash: UInt32(truncatingIfNeeded: rowId), text: "", spans: []
+            )
+        }
+    }
+
+    @Test("cursor-line background excludes gutter padding and adjacent panes")
+    @MainActor
+    func cursorlineExcludesGutterPaddingAndAdjacentPanes() async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        let cellW = Float(fontManager.cellWidth)
+        let cellH = Float(fontManager.cellHeight)
+        let paneCols: UInt16 = 18
+        let rowCount: UInt16 = 4
+        let totalCols = paneCols * 2
+        let width = Int((Float(totalCols) * cellW).rounded(.up))
+        let height = Int((Float(rowCount) * cellH).rounded(.up))
+
+        var frameState = FrameState(cols: totalCols, rows: rowCount)
+        frameState.defaultBg = Self.neutral
+        frameState.totalLineCount = UInt32(rowCount)
+        let gutters: [UInt16: Wire.WindowGutter] = [
+            1: gutter(windowId: 1, cols: paneCols, rows: rowCount),
+            2: Wire.WindowGutter(
+                windowId: 2, contentRow: 0, contentCol: paneCols,
+                contentHeight: rowCount, isActive: false, contentWidth: paneCols,
+                cursorLine: 0, lineNumberStyle: .hybrid,
+                lineNumberWidth: 4, signColWidth: 1, entries: []
+            )
+        ]
+        let leftRows = blankRows(startingAt: 1, count: rowCount)
+        let rightRows = blankRows(startingAt: 101, count: rowCount)
+        let left = try windowWithGutter(
+            windowId: 1, rows: leftRows, scrollLeft: 3,
+            cursorline: GUICursorline(row: 1, bg: Self.colorA)
+        )
+        let right = try windowWithGutter(windowId: 2, rows: rightRows)
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        guard let renderer = makeRenderer(factories: factories, fontManager: fontManager),
+              let texture = OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height) else {
+            Issue.record("renderer or drawable texture unavailable")
+            return
+        }
+        let drawable = ReadbackDrawable(texture: texture)
+
+        let outcome = await waiter.awaitOutcome {
+            renderer.render(
+                frameState: frameState, fontManager: fontManager,
+                windowContents: [1: left, 2: right], windowGutters: gutters,
+                drawableProvider: { drawable }, viewportSize: CGSize(width: width, height: height),
+                contentScale: 1, presentationWindowId: 1, presentationInputSeq: 1,
+                onPresented: { waiter.succeed($0) }
+            )
+        }
+        guard case .presented = outcome,
+              let image = await OffscreenReadback.read(texture: texture, queue: queue) else {
+            Issue.record("cursor-line frame did not present: \(outcome)")
+            return
+        }
+
+        let cursorline = Self.expectedColor(Self.colorA)
+        let rowTop = Int(cellH)
+        let rowBottom = min(height, Int((cellH * 2).rounded(.up)))
+        let gutterCellsRight = Int((cellW * 5).rounded(.up))
+        let textOrigin = cellW * 5 + Float(CoreTextMetalRenderer.gutterPixelPaddingPt)
+        let paddingRight = Int(textOrigin.rounded(.down))
+        let textLeft = Int(textOrigin.rounded(.up))
+        let splitX = Int((Float(paneCols) * cellW).rounded())
+
+        #expect(image.matching(
+            x0: 0, y0: rowTop, x1: gutterCellsRight, y1: rowBottom,
+            reference: cursorline, thresholdSquared: 0.02
+        ) == 0, "cursor-line color entered line-number or sign cells")
+        #expect(image.matching(
+            x0: gutterCellsRight, y0: rowTop, x1: paddingRight, y1: rowBottom,
+            reference: cursorline, thresholdSquared: 0.02
+        ) == 0, "cursor-line color entered gutter padding")
+        #expect(image.matching(
+            x0: textLeft, y0: rowTop, x1: splitX, y1: rowBottom,
+            reference: cursorline, thresholdSquared: 0.02
+        ) > 0, "cursor-line color did not begin in the text region")
+        #expect(image.matching(
+            x0: splitX, y0: rowTop, x1: width, y1: rowBottom,
+            reference: cursorline, thresholdSquared: 0.02
+        ) == 0, "cursor-line color crossed into the adjacent pane")
     }
 
     // MARK: 1. Sequence of production frames: every drawable-copy-completed frame is nonblank
