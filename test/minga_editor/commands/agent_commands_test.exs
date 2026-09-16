@@ -58,6 +58,28 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
+  defmodule PendingModelSession do
+    use GenServer
+
+    @spec start_link(pid()) :: GenServer.on_start()
+    def start_link(test_pid), do: GenServer.start_link(__MODULE__, test_pid)
+
+    @impl GenServer
+    def init(test_pid), do: {:ok, test_pid}
+
+    @impl GenServer
+    def handle_call({:set_model, model}, _from, test_pid) do
+      send(test_pid, {:pending_model_accepted, model})
+      {:reply, {:pending, :credential_discovery}, test_pid}
+    end
+
+    @impl GenServer
+    def handle_cast({:add_system_message, message, :info}, test_pid) do
+      send(test_pid, {:pending_model_message, message})
+      {:noreply, test_pid}
+    end
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp command!(name) do
@@ -240,12 +262,20 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     def handle_call(:get_provider, _from, state), do: {:reply, Map.get(state, :provider), state}
 
     def handle_call(:editor_snapshot, _from, state) do
+      credentials_configured = Map.get(state, :credentials_configured, true)
+
       snapshot = %{
         status: Map.get(state, :status, :idle),
         pending_approval: nil,
         error: Map.get(state, :error),
         active_tool_name: nil,
-        credentials_configured: Map.get(state, :credentials_configured, true)
+        credentials_configured: credentials_configured,
+        credential_readiness:
+          Map.get(
+            state,
+            :credential_readiness,
+            if(credentials_configured, do: :configured, else: :unconfigured)
+          )
       }
 
       {:reply, snapshot, state}
@@ -392,6 +422,36 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
                "draft prompt"
+    end
+
+    test "blocks submit and preserves the draft while credential discovery is pending" do
+      {:ok, session} =
+        ReadinessSession.start_link(
+          provider: nil,
+          credentials_configured: false,
+          credential_readiness: :checking,
+          notify: self()
+        )
+
+      state =
+        base_state(session: session)
+        |> AgentCommands.input_paste("draft prompt")
+        |> replace_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("ollama:llama3")
+          |> Panel.set_provider_name("ollama")
+        end)
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.shell_runtime.state.notice.message ==
+               "Checking local Ollama availability. Your prompt was preserved."
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "draft prompt"
+
+      refute_receive {:readiness_session_prompt, _prompt}
     end
 
     test "blocks submit as starting when credentials exist but no provider is attached yet" do
@@ -543,7 +603,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "preserves the prompt when an attached session rejects locally" do
       for {error, expected_message} <- [
             {:provider_not_ready, "Agent provider still starting"},
-            {:credentials_not_configured, "No provider credentials are configured"}
+            {:credentials_not_configured, "No provider credentials are configured"},
+            {:credential_discovery_pending, "Checking local Ollama availability"}
           ] do
         {:ok, session} =
           Session.start_link(
@@ -891,6 +952,24 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert new_state.workspace.agent_ui.panel.model_name == "openai:o4-mini"
       assert new_state.workspace.agent_ui.panel.thinking_level == "high"
       assert new_state.shell_runtime.state.notice.message == "Model: openai:o4-mini [2/3]"
+    end
+  end
+
+  describe "set_model/2" do
+    test "reports an accepted model change as pending instead of an error" do
+      {:ok, session} = PendingModelSession.start_link(self())
+
+      state = AgentCommands.set_model(base_state(session: session), "ollama:model-b")
+
+      assert_receive {:pending_model_accepted, "ollama:model-b"}
+
+      assert_receive {:pending_model_message,
+                      "Model change accepted: ollama:model-b. Checking local Ollama availability."}
+
+      assert state.workspace.agent_ui.panel.model_name == "ollama:model-b"
+
+      assert state.shell_runtime.state.notice.message ==
+               "Model change accepted: ollama:model-b. Checking local Ollama availability."
     end
   end
 

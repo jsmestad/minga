@@ -3,9 +3,13 @@ defmodule MingaAgent.SessionRecoveryTest do
 
   alias Minga.Test.StubProvider
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Credentials.AvailabilityCheck
+  alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
   alias MingaAgent.Session.ProviderLifecycle
+  alias MingaAgent.SessionStore
+  alias MingaAgent.TurnUsage
 
   # Provider startup runs synchronously inside the Session process
   # (`start_provider/1` -> `provider_module.start_link/1` -> `Native.init/1`).
@@ -34,6 +38,15 @@ defmodule MingaAgent.SessionRecoveryTest do
 
   defp start_session(opts, initial_credentials_state) do
     {checker, credentials_configured_fn} = start_credential_checker(initial_credentials_state)
+    test_pid = self()
+
+    credential_probe_fn = fn _snapshot ->
+      send(test_pid, {:credential_probe_started, self()})
+
+      receive do
+        {:release_credential_probe, ^test_pid} -> {:unavailable, :test}
+      end
+    end
 
     provider_opts =
       Keyword.get(opts, :provider_opts, [])
@@ -44,7 +57,15 @@ defmodule MingaAgent.SessionRecoveryTest do
         opts
         |> Keyword.put(:provider_opts, provider_opts)
         |> Keyword.put(:credentials_configured_fn, credentials_configured_fn)
+        |> Keyword.put(:credential_probe_fn, credential_probe_fn)
       )
+
+    if not initial_credentials_state and Keyword.get(opts, :provider) == Native do
+      assert_receive {:credential_probe_started, worker}, 1_000
+      monitor = Process.monitor(worker)
+      send(worker, {:release_credential_probe, self()})
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    end
 
     # `start_link/1` schedules `:start_provider` when credentials are already
     # configured; wait it out here so callers observe a settled session.
@@ -165,6 +186,332 @@ defmodule MingaAgent.SessionRecoveryTest do
     end
   end
 
+  defp empty_credential_snapshot do
+    CredentialSnapshot.new(%{}, false, "http://ollama.test")
+  end
+
+  defp start_held_discovery_session(opts \\ []) do
+    test_pid = self()
+
+    {:ok, sequence} = Agent.start_link(fn -> 0 end)
+
+    probe = fn _snapshot ->
+      index = Agent.get_and_update(sequence, fn value -> {value + 1, value + 1} end)
+      send(test_pid, {:credential_probe_started, index, self()})
+
+      receive do
+        {:credential_probe_result, result} -> result
+        :crash_credential_probe -> exit(:probe_crash)
+      end
+    end
+
+    session_opts =
+      [
+        provider: Native,
+        provider_opts: [model: AgentConfig.unconfigured_model(), skip_api_key_env: true],
+        credentials_snapshot_fn: &empty_credential_snapshot/0,
+        credential_probe_fn: probe
+      ]
+      |> Keyword.merge(opts)
+
+    session = start_supervised!({Session, session_opts})
+    {session, sequence}
+  end
+
+  defp start_running_held_model_session do
+    {checker, credentials_configured_fn} = start_credential_checker(true)
+    test_pid = self()
+    {:ok, sequence} = Agent.start_link(fn -> 0 end)
+
+    probe = fn _snapshot ->
+      index = Agent.get_and_update(sequence, fn value -> {value + 1, value + 1} end)
+      send(test_pid, {:credential_probe_started, index, self()})
+
+      receive do
+        {:credential_probe_result, result} -> result
+      end
+    end
+
+    session =
+      start_supervised!(
+        {Session,
+         provider: Native,
+         provider_opts: [model: "anthropic:model-a", skip_api_key_env: true],
+         credentials_configured_fn: credentials_configured_fn,
+         credentials_snapshot_fn: &empty_credential_snapshot/0,
+         credential_probe_fn: probe}
+      )
+
+    await_provider_startup(session)
+    provider = Session.get_provider(session)
+    assert is_pid(provider)
+    Agent.update(checker, fn _configured? -> false end)
+    {session, provider}
+  end
+
+  test "held credential discovery leaves Session queries and prompt refusal responsive" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+
+    assert Session.status(session) == :idle
+
+    assert %{credential_readiness: :checking, credentials_configured: false} =
+             Session.editor_snapshot(session)
+
+    messages = Session.messages(session)
+
+    assert {:error, :credential_discovery_pending} =
+             Session.send_prompt(session, "draft must remain with caller")
+
+    assert Session.messages(session) == messages
+
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+
+    send(worker, {:credential_probe_result, {:unavailable, :held_open}})
+    assert_receive {:agent_event, ^session, {:credentials_status, :unconfigured}}, 1_000
+  end
+
+  test "model change invalidates a late discovery result and keeps only the newest worker" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, first_worker}, 1_000
+    first_monitor = Process.monitor(first_worker)
+
+    first_state = :sys.get_state(session)
+    {:running, first_request, first_task, _timer_ref} = first_state.credential_availability.phase
+
+    assert {:pending, :credential_discovery} =
+             Session.set_model(session, "ollama:llama3")
+
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
+    assert_receive {:credential_probe_started, 2, second_worker}, 1_000
+
+    send(session, {first_task.ref, {first_request.token, :available}})
+    assert Session.editor_snapshot(session).credential_readiness == :checking
+    assert Session.get_provider(session) == nil
+
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+
+    send(second_worker, {:credential_probe_result, {:unavailable, :newest_result}})
+    assert_receive {:agent_event, ^session, {:credentials_status, :unconfigured}}, 1_000
+    assert Session.get_provider(session) == nil
+  end
+
+  test "new_session stops and replaces a held probe with the new logical session identity" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, first_worker}, 1_000
+    first_monitor = Process.monitor(first_worker)
+    old_state = :sys.get_state(session)
+    {:running, old_request, old_task, _timer_ref} = old_state.credential_availability.phase
+    old_session_id = old_state.session_id
+
+    assert :ok = Session.new_session(session)
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
+    assert_receive {:credential_probe_started, 2, second_worker}, 1_000
+
+    new_state = :sys.get_state(session)
+    {:running, new_request, _new_task, _new_timer_ref} = new_state.credential_availability.phase
+    refute new_state.session_id == old_session_id
+    assert new_request.session_id == new_state.session_id
+
+    send(session, {old_task.ref, {old_request.token, :available}})
+    assert Session.editor_snapshot(session).credential_readiness == :checking
+    send(second_worker, {:credential_probe_result, {:unavailable, :current_session}})
+  end
+
+  @tag :tmp_dir
+  test "load_session stops and replaces a held probe with the loaded logical identity", %{
+    tmp_dir: dir
+  } do
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: "loaded-logical-session",
+                 timestamp: "2026-09-16T00:00:00Z",
+                 model_name: "ollama:loaded",
+                 provider_name: "ollama",
+                 messages: [{:system, "Loaded", :info}],
+                 usage: %TurnUsage{}
+               },
+               dir
+             )
+
+    {session, _sequence} =
+      start_held_discovery_session(session_store_dir: dir, persist?: false)
+
+    assert_receive {:credential_probe_started, 1, first_worker}, 1_000
+    first_monitor = Process.monitor(first_worker)
+    old_state = :sys.get_state(session)
+    {:running, old_request, old_task, _timer_ref} = old_state.credential_availability.phase
+
+    assert :ok = Session.load_session(session, "loaded-logical-session")
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
+    assert_receive {:credential_probe_started, 2, second_worker}, 1_000
+
+    loaded_state = :sys.get_state(session)
+
+    {:running, loaded_request, _loaded_task, _loaded_timer_ref} =
+      loaded_state.credential_availability.phase
+
+    assert loaded_state.session_id == "loaded-logical-session"
+    assert loaded_request.session_id == "loaded-logical-session"
+    assert loaded_request.model_name == "ollama:loaded"
+
+    send(session, {old_task.ref, {old_request.token, :available}})
+    assert Session.editor_snapshot(session).credential_readiness == :checking
+    send(second_worker, {:credential_probe_result, {:unavailable, :loaded_session}})
+  end
+
+  test "repeated refreshes retain only one active discovery worker" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, first_worker}, 1_000
+    first_monitor = Process.monitor(first_worker)
+
+    assert :ok = Session.refresh_credentials(session)
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
+    assert_receive {:credential_probe_started, 2, second_worker}, 1_000
+    second_monitor = Process.monitor(second_worker)
+
+    assert :ok = Session.refresh_credentials(session)
+    assert_receive {:DOWN, ^second_monitor, :process, ^second_worker, :killed}, 1_000
+    assert_receive {:credential_probe_started, 3, third_worker}, 1_000
+
+    state = :sys.get_state(session)
+    {:running, _request, task, _timer_ref} = state.credential_availability.phase
+    assert task.pid == third_worker
+    refute Process.alive?(first_worker)
+    refute Process.alive?(second_worker)
+    assert Process.alive?(third_worker)
+
+    send(third_worker, {:credential_probe_result, {:unavailable, :done}})
+  end
+
+  test "a local credential change invalidates held discovery before its late result" do
+    {checker, credentials_configured_fn} = start_credential_checker(false)
+
+    {session, _sequence} =
+      start_held_discovery_session(credentials_configured_fn: credentials_configured_fn)
+
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    worker_monitor = Process.monitor(worker)
+    first_state = :sys.get_state(session)
+    {:running, first_request, first_task, _timer_ref} = first_state.credential_availability.phase
+
+    Agent.update(checker, fn _configured? -> true end)
+    assert :ok = Session.refresh_credentials(session)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_000
+    assert :configured = Session.editor_snapshot(session).credential_readiness
+
+    send(session, {first_task.ref, {first_request.token, {:unavailable, :late_result}}})
+    assert :configured = Session.editor_snapshot(session).credential_readiness
+  end
+
+  test "credential discovery timeout kills the worker and settles readiness" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    worker_monitor = Process.monitor(worker)
+
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+
+    state = :sys.get_state(session)
+    {:running, request, _task, _timer_ref} = state.credential_availability.phase
+    send(session, {:credential_probe_timeout, request.token})
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_000
+    assert_receive {:agent_event, ^session, {:credentials_status, :unconfigured}}, 1_000
+    refute AvailabilityCheck.checking?(:sys.get_state(session).credential_availability)
+  end
+
+  test "credential discovery worker crash settles readiness" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+
+    send(worker, :crash_credential_probe)
+    assert_receive {:agent_event, ^session, {:credentials_status, :unconfigured}}, 1_000
+    refute AvailabilityCheck.checking?(:sys.get_state(session).credential_availability)
+  end
+
+  test "Session shutdown reclaims its credential discovery worker" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    worker_monitor = Process.monitor(worker)
+
+    :ok = GenServer.stop(session)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_000
+  end
+
+  test "abrupt Session death reclaims its credential discovery worker" do
+    {session, _sequence} = start_held_discovery_session()
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    session_monitor = Process.monitor(session)
+    worker_monitor = Process.monitor(worker)
+
+    Process.exit(session, :kill)
+
+    assert_receive {:DOWN, ^session_monitor, :process, ^session, :killed}, 1_000
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_000
+  end
+
+  test "available Ollama discovery marks credentials configured and starts the chosen provider once" do
+    {session, _sequence} =
+      start_held_discovery_session(
+        provider_opts: [model: "ollama:llama3", skip_api_key_env: true]
+      )
+
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+
+    send(worker, {:credential_probe_result, :available})
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}, 1_000
+    assert is_pid(Session.get_provider(session))
+  end
+
+  test "an injected native LLM client remains ready without live discovery" do
+    test_pid = self()
+    llm_client = fn _model, _messages, _opts -> {:ok, []} end
+
+    session =
+      start_supervised!(
+        {Session,
+         provider: Native,
+         provider_opts: [
+           model: "anthropic:test",
+           llm_client: llm_client,
+           skip_api_key_env: true
+         ],
+         credentials_snapshot_fn: &empty_credential_snapshot/0,
+         credential_probe_fn: fn _snapshot ->
+           send(test_pid, :unexpected_credential_probe)
+           :available
+         end}
+      )
+
+    await_provider_startup(session)
+    assert Session.editor_snapshot(session).credential_readiness == :configured
+    assert is_pid(Session.get_provider(session))
+    refute_received :unexpected_credential_probe
+  end
+
+  test "failed credential worker startup settles instead of leaving checking state" do
+    session =
+      start_supervised!(
+        {Session,
+         provider: Native,
+         provider_opts: [model: AgentConfig.unconfigured_model(), skip_api_key_env: true],
+         credentials_snapshot_fn: &empty_credential_snapshot/0,
+         credential_task_supervisor: :missing_credential_task_supervisor}
+      )
+
+    assert %{credential_readiness: :unconfigured, credentials_configured: false} =
+             Session.editor_snapshot(session)
+  end
+
   test "refresh_credentials/1 starts a provider only after credentials flip true and model is concrete" do
     {session, checker} =
       start_session(
@@ -176,7 +523,14 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert Session.editor_snapshot(session).credentials_configured == false
     assert {:error, :credentials_not_configured} = Session.send_prompt(session, "draft prompt")
 
-    assert :ok = Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
+    assert {:pending, :credential_discovery} =
+             Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
+
+    assert_receive {:credential_probe_started, worker}, 1_000
+    monitor = Process.monitor(worker)
+    send(worker, {:release_credential_probe, self()})
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    await_provider_startup(session)
     assert Session.get_provider(session) == nil
 
     Agent.update(checker, fn _ -> true end)
@@ -205,6 +559,89 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert metadata.model_name == "claude-opus-4-20250514@anthropic"
     assert metadata.provider_name == "anthropic"
     assert Session.subagent_context(session).provider_name == "anthropic"
+  end
+
+  test "set_model/2 applies a pending model exactly once after current discovery succeeds" do
+    {session, provider} = start_running_held_model_session()
+    :erlang.trace(provider, true, [:receive])
+
+    assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    refute_receive {:trace, ^provider, :receive, {:"$gen_call", _from, {:set_model, _model}}}
+
+    send(worker, {:credential_probe_result, :available})
+
+    assert_receive {:trace, ^provider, :receive,
+                    {:"$gen_call", _from, {:set_model, "ollama:model-b"}}},
+                   1_000
+
+    assert {:ok, %{model: %{id: "ollama:model-b"}}} = Native.get_state(provider)
+
+    refute_receive {:trace, ^provider, :receive,
+                    {:"$gen_call", _from, {:set_model, "ollama:model-b"}}},
+                   50
+  end
+
+  test "a stale successful discovery never applies an obsolete pending model" do
+    {session, provider} = start_running_held_model_session()
+    :erlang.trace(provider, true, [:receive])
+
+    assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
+    assert_receive {:credential_probe_started, 1, first_worker}, 1_000
+    first_state = :sys.get_state(session)
+    {:running, first_request, first_task, _timer_ref} = first_state.credential_availability.phase
+
+    assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-c")
+    assert_receive {:credential_probe_started, 2, second_worker}, 1_000
+
+    send(session, {first_task.ref, {first_request.token, :available}})
+    assert Session.editor_snapshot(session).credential_readiness == :checking
+    assert {:ok, %{model: %{id: "anthropic:model-a"}}} = Native.get_state(provider)
+
+    refute_receive {:trace, ^provider, :receive,
+                    {:"$gen_call", _from, {:set_model, "ollama:model-b"}}}
+
+    refute_receive {:trace, ^provider, :receive,
+                    {:"$gen_call", _from, {:set_model, "ollama:model-c"}}}
+
+    refute Process.alive?(first_worker)
+    send(second_worker, {:credential_probe_result, {:unavailable, :newest}})
+  end
+
+  test "an unavailable current discovery does not apply its pending model" do
+    {session, provider} = start_running_held_model_session()
+    :erlang.trace(provider, true, [:receive])
+
+    assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
+    assert_receive {:credential_probe_started, 1, worker}, 1_000
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+    send(worker, {:credential_probe_result, {:unavailable, :offline}})
+
+    assert_receive {:agent_event, ^session, {:credentials_status, :unconfigured}}, 1_000
+    assert {:ok, %{model: %{id: "anthropic:model-a"}}} = Native.get_state(provider)
+
+    refute_receive {:trace, ^provider, :receive,
+                    {:"$gen_call", _from, {:set_model, "ollama:model-b"}}}
+  end
+
+  test "set_model/2 reports pending discovery even when a provider is already running" do
+    {session, checker} =
+      start_session(
+        [provider: Native, provider_opts: [model: "anthropic:claude-sonnet-4-20250514"]],
+        true
+      )
+
+    assert is_pid(Session.get_provider(session))
+    Agent.update(checker, fn _configured? -> false end)
+
+    assert {:pending, :credential_discovery} =
+             Session.set_model(session, "ollama:llama3")
+
+    assert_receive {:credential_probe_started, worker}, 1_000
+    monitor = Process.monitor(worker)
+    send(worker, {:release_credential_probe, self()})
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
   end
 
   test "subagent_context uses session provider metadata for native providers" do
@@ -496,7 +933,7 @@ defmodule MingaAgent.SessionRecoveryTest do
       )
 
     assert :ok = Session.subscribe(unconfigured_session, self())
-    assert_receive {:agent_event, ^unconfigured_session, {:credentials_status, false}}
+    assert_receive {:agent_event, ^unconfigured_session, {:credentials_status, :unconfigured}}
 
     {configured_session, _checker} =
       start_session(
@@ -505,7 +942,7 @@ defmodule MingaAgent.SessionRecoveryTest do
       )
 
     assert :ok = Session.subscribe(configured_session, self())
-    assert_receive {:agent_event, ^configured_session, {:credentials_status, true}}
+    assert_receive {:agent_event, ^configured_session, {:credentials_status, :configured}}
   end
 
   test "set_model/2 updates provider metadata for provider-qualified models" do
@@ -515,7 +952,14 @@ defmodule MingaAgent.SessionRecoveryTest do
         false
       )
 
-    assert :ok = Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
+    assert {:pending, :credential_discovery} =
+             Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
+
+    assert_receive {:credential_probe_started, worker}, 1_000
+    monitor = Process.monitor(worker)
+    send(worker, {:release_credential_probe, self()})
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    await_provider_startup(session)
     metadata = Session.metadata(session)
 
     assert metadata.model_name == "anthropic:claude-sonnet-4-20250514"

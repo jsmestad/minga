@@ -48,7 +48,12 @@ defmodule MingaEditor.Commands.Agent do
   @type state :: EditorState.t()
 
   @type prompt_readiness ::
-          :no_model | :credentials_missing | :starting | {:startup_failed, String.t()} | :ready
+          :no_model
+          | :credentials_checking
+          | :credentials_missing
+          | :starting
+          | {:startup_failed, String.t()}
+          | :ready
   @type prompt_submit_status :: :ready | {:blocked, String.t()}
 
   @doc "Legacy alias for `toggle_agent_split/1`."
@@ -593,6 +598,9 @@ defmodule MingaEditor.Commands.Agent do
       {:error, :provider_not_ready} ->
         NoticeWorkflow.publish(state, provider_starting_status())
 
+      {:error, :credential_discovery_pending} ->
+        NoticeWorkflow.publish(state, credential_discovery_pending_status())
+
       {:error, :credentials_not_configured} ->
         NoticeWorkflow.publish(state, credentials_missing_status())
 
@@ -686,6 +694,8 @@ defmodule MingaEditor.Commands.Agent do
   @spec providerless_prompt_readiness(pid()) :: prompt_readiness()
   defp providerless_prompt_readiness(session) do
     case Session.editor_snapshot(session) do
+      %{credential_readiness: :checking} -> :credentials_checking
+      %{credential_readiness: :unconfigured} -> :credentials_missing
       %{credentials_configured: false} -> :credentials_missing
       %{error: error} when is_binary(error) and error != "" -> {:startup_failed, error}
       _snapshot -> :starting
@@ -703,6 +713,9 @@ defmodule MingaEditor.Commands.Agent do
   defp prompt_readiness_submit_status(:credentials_missing),
     do: {:blocked, credentials_missing_status()}
 
+  defp prompt_readiness_submit_status(:credentials_checking),
+    do: {:blocked, credential_discovery_pending_status()}
+
   defp prompt_readiness_submit_status(:starting), do: {:blocked, provider_starting_status()}
 
   defp prompt_readiness_submit_status({:startup_failed, error}) do
@@ -717,6 +730,11 @@ defmodule MingaEditor.Commands.Agent do
   @spec credentials_missing_status() :: String.t()
   defp credentials_missing_status do
     "No provider credentials are configured for this model. Your prompt was preserved. Run /auth or /login to set one up."
+  end
+
+  @spec credential_discovery_pending_status() :: String.t()
+  defp credential_discovery_pending_status do
+    "Checking local Ollama availability. Your prompt was preserved."
   end
 
   @spec provider_starting_status() :: String.t()
@@ -789,6 +807,9 @@ defmodule MingaEditor.Commands.Agent do
 
       {:error, :provider_not_ready} ->
         NoticeWorkflow.publish(state, provider_starting_status())
+
+      {:error, :credential_discovery_pending} ->
+        NoticeWorkflow.publish(state, credential_discovery_pending_status())
 
       {:error, :credentials_not_configured} ->
         NoticeWorkflow.publish(state, credentials_missing_status())
@@ -1230,6 +1251,11 @@ defmodule MingaEditor.Commands.Agent do
           :ok ->
             Session.add_system_message(session, "Model: #{model}")
             NoticeWorkflow.publish(state, "Model: #{model}")
+
+          {:pending, :credential_discovery} ->
+            message = "Model change accepted: #{model}. Checking local Ollama availability."
+            Session.add_system_message(session, message)
+            NoticeWorkflow.publish(state, message)
 
           {:error, reason} when is_binary(reason) ->
             NoticeWorkflow.publish(state, reason)
