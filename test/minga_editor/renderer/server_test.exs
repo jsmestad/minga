@@ -677,7 +677,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
     end
 
-    test "decoded retryable frame rejection reaches renderer recovery" do
+    test "decoded retryable transcript rejection reaches renderer recovery" do
       renderer = start_ack_renderer(self())
 
       RendererServer.cast_snapshot(renderer, stub_intent(), 20)
@@ -685,10 +685,10 @@ defmodule MingaEditor.Renderer.ServerTest do
       RendererServer.cast_snapshot(renderer, stub_intent(), 21)
 
       assert {:ok, decoded} =
-               MingaEditor.Frontend.Protocol.decode_event(<<0x0B, 1::32, 20::32, 0::32, 4, 1>>)
+               MingaEditor.Frontend.Protocol.decode_event(<<0x0B, 1::32, 20::32, 0::32, 11, 1>>)
 
       assert decoded ==
-               {:frame_rejected, 1, 20, 0, :base_sequence_mismatch, :retryable_recovery}
+               {:frame_rejected, 1, 20, 0, :transcript_desync, :retryable_recovery}
 
       state = build_editor_state(:tui, renderer)
       assert {:noreply, ^state} = MingaEditor.handle_info({:minga_input, decoded}, state)

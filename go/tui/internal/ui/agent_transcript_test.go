@@ -49,6 +49,29 @@ func TestResidentTranscriptFullReplace(t *testing.T) {
 	}
 }
 
+func TestResidentTranscriptDetachedCandidateDoesNotShareMutableSlice(t *testing.T) {
+	tr := newResidentTranscript()
+	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
+	tr.pinned = false
+	tr.topOffset = 4
+	tr.pendingScroll = -2
+	tr.pinTransition = pinScrolledAway
+
+	candidate := tr.detachedCandidate()
+	candidate.messages[0] = msg(9, "changed")
+	candidate.topOffset = 1
+
+	if tr.messages[0].ID != 1 || tr.messages[0].Text != "a" {
+		t.Fatalf("candidate mutated live messages: %+v", tr.messages)
+	}
+	if tr.topOffset != 4 {
+		t.Fatalf("candidate mutated live scroll offset: %d", tr.topOffset)
+	}
+	if candidate.epoch != tr.epoch || candidate.pinned != tr.pinned || candidate.pendingScroll != tr.pendingScroll || candidate.pinTransition != tr.pinTransition {
+		t.Fatalf("candidate did not preserve transcript-owned state: live=%+v candidate=%+v", tr, candidate)
+	}
+}
+
 func TestResidentTranscriptAppendUpsertsSuffix(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))

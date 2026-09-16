@@ -490,10 +490,9 @@ func assertConformancePointer(t *testing.T, model *Model, i int, step conformanc
 }
 
 // applyConformanceTranscriptFrame decodes a 0x86 gui_agent_transcript frame and
-// folds it through the real store (protocol.DecodeCommand + model.applyMutation ->
-// residentTranscript.apply), then asserts the resident store's epoch, truncated
-// flag, count, and ordered message ids. This is the shared parity assertion the
-// Swift runner mirrors byte-for-byte.
+// commits it through the production frame transaction entry point, then asserts
+// the resident store's epoch, truncated flag, count, and ordered message ids.
+// This is the shared parity assertion the Swift runner mirrors byte-for-byte.
 func applyConformanceTranscriptFrame(t *testing.T, model *Model, i int, step conformanceStep) {
 	t.Helper()
 	payload, err := base64.StdEncoding.DecodeString(step.PayloadBase64)
@@ -504,7 +503,14 @@ func applyConformanceTranscriptFrame(t *testing.T, model *Model, i int, step con
 	if err != nil {
 		t.Fatalf("step %d (%s): DecodeCommand: %v", i, step.Note, err)
 	}
-	model.applyMutation(command)
+	seq := model.lastCommittedSeq + 1
+	base := model.lastCommittedSeq
+	commands := []protocol.Command{beginFrame(seq, base)}
+	if base == 0 {
+		commands = append(commands, testThemeCommand())
+	}
+	commands = append(commands, command, commitFrame(seq))
+	model.applyCommands(commands)
 
 	if step.Expect == nil || step.Expect.Transcript == nil {
 		return
