@@ -124,11 +124,14 @@ type Model struct {
 	localPresentation localPresentation
 	inputFilter       *InputFilter
 	// transcript is the resident agent-chat transcript store (#2654). It folds
-	// gui_agent_transcript (0x86) frames and owns the local scroll offset + pin
+	// gui_agent_transcript (0x86) frames and owns the local message anchor + pin
 	// flag so j/k/wheel repaint the transcript same-frame from local data. It is
 	// a pointer so it persists across the value-copied Update loop (same lifetime
 	// trick as lineCache/latency).
 	transcript *residentTranscript
+	// transcriptRenderer owns the bounded, disposable styled-row cache for the
+	// resident transcript. It never owns semantic messages or scroll state.
+	transcriptRenderer *agentTranscriptRenderer
 }
 
 // terminalRejection deduplicates an identical deterministic terminal status.
@@ -164,27 +167,28 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}, filter *InputFilter) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
-		width:             int(width),
-		height:            int(height),
-		out:               out,
-		done:              done,
-		viewport:          vp,
-		zones:             newZoneManager(),
-		windows:           map[uint16]protocol.WindowContent{},
-		residentRows:      map[uint16]residentRows{},
-		chrome:            map[byte]protocol.ChromePayload{},
-		activePalette:     bootstrapPalette(),
-		gutters:           map[uint16]protocol.Gutter{},
-		indentGuides:      map[uint16]protocol.IndentGuides{},
-		extensionRuntimes: map[string]protocol.ExtensionRuntimePayload{},
-		latency:           latency.New(),
-		hudVisible:        latencyHUDEnvEnabled(),
-		lineCache:         newLineCache(),
-		renderWork:        &renderWorkCollector{},
-		localPresentation: newLocalPresentation(),
-		inputFilter:       filter,
-		transcript:        newResidentTranscript(),
-		now:               time.Now,
+		width:              int(width),
+		height:             int(height),
+		out:                out,
+		done:               done,
+		viewport:           vp,
+		zones:              newZoneManager(),
+		windows:            map[uint16]protocol.WindowContent{},
+		residentRows:       map[uint16]residentRows{},
+		chrome:             map[byte]protocol.ChromePayload{},
+		activePalette:      bootstrapPalette(),
+		gutters:            map[uint16]protocol.Gutter{},
+		indentGuides:       map[uint16]protocol.IndentGuides{},
+		extensionRuntimes:  map[string]protocol.ExtensionRuntimePayload{},
+		latency:            latency.New(),
+		hudVisible:         latencyHUDEnvEnabled(),
+		lineCache:          newLineCache(),
+		renderWork:         &renderWorkCollector{},
+		localPresentation:  newLocalPresentation(),
+		inputFilter:        filter,
+		transcript:         newResidentTranscript(),
+		transcriptRenderer: newAgentTranscriptRenderer(),
+		now:                time.Now,
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
@@ -300,7 +304,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case agentAnimationTickMsg:
 		m.agent.tick()
-		if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages()) {
+		if chat, ok := m.agentChat(); ok && m.agentAnimating(chat) {
 			cmd = agentAnimationTick()
 		} else {
 			m.agent.animationRunning = false
@@ -319,7 +323,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	}
 
-	if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages()) && !m.agent.animationRunning {
+	if chat, ok := m.agentChat(); ok && m.agentAnimating(chat) && !m.agent.animationRunning {
 		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
 	}

@@ -15,19 +15,14 @@ type agentPanel struct {
 	animationRunning bool
 }
 
-func (a *agentPanel) animating(chat protocol.AgentChat, messages []protocol.AgentChatMessage) bool {
+func (m Model) agentAnimating(chat protocol.AgentChat) bool {
 	if !chat.Visible {
 		return false
 	}
 	if chat.Status == 1 || chat.Status == 2 || chat.Pending != "" {
 		return true
 	}
-	for _, msg := range messages {
-		if msg.Kind == agentKindThinking || ((msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.Status == 0) {
-			return true
-		}
-	}
-	return false
+	return m.transcript != nil && m.transcript.hasAnimatedMessages()
 }
 
 func (a *agentPanel) tick() {
@@ -531,31 +526,15 @@ func (m Model) agentTranscriptMessages() []protocol.AgentChatMessage {
 
 // renderAgentResidentTranscript renders the visible transcript window from the
 // resident store, applying any queued local scroll same-frame (#2654). Pinned
-// follows the bottom; unpinned holds a top-anchored offset so a streaming append
+// follows the bottom; unpinned holds a message-slot + row anchor so a streaming append
 // does not move the reading position. It mutates the shared *transcript pointer
 // (clamp + pin edge), which persists through the value-receiver render chain.
 func (m Model) renderAgentResidentTranscript(budget int, width int) []string {
-	messages := m.agentTranscriptMessages()
 	t := m.transcript
-	if t == nil {
-		return m.agentTranscriptTail(messages, budget, width)
-	}
-	if budget <= 0 || len(messages) == 0 {
-		t.pendingScroll = 0
+	if t == nil || m.transcriptRenderer == nil {
 		return nil
 	}
-	// Only pay for the full layout when scrolled up or a scroll is pending; the
-	// common followed case renders just the bottom window.
-	if t.pendingScroll == 0 && t.pinned {
-		return m.agentTranscriptTail(messages, budget, width)
-	}
-	lines := m.agentTranscriptAllLines(messages, width)
-	maxTop := max(len(lines)-budget, 0)
-	t.resolveScroll(maxTop)
-	if t.pinned {
-		return windowBottom(lines, budget)
-	}
-	return windowTopAnchored(lines, budget, t.topOffset)
+	return m.transcriptRenderer.render(m, t, budget, width)
 }
 
 // agentTranscriptAllLines renders every message top-to-bottom with a separator
@@ -576,40 +555,6 @@ func (m Model) agentTranscriptAllLines(messages []protocol.AgentChatMessage, wid
 		first = false
 	}
 	return lines
-}
-
-// agentTranscriptTail renders the bottom `budget` lines, bounded so a followed
-// session only renders enough messages to fill the view regardless of transcript
-// length. Its output equals the bottom `budget` lines of agentTranscriptAllLines
-// (guarded by test) so the pinned and unpinned paths stay visually consistent.
-func (m Model) agentTranscriptTail(messages []protocol.AgentChatMessage, budget int, width int) []string {
-	if budget <= 0 || len(messages) == 0 {
-		return nil
-	}
-	blocks := make([][]string, 0, 8) // newest-first
-	total := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		block := m.renderAgentMessage(messages[i], width)
-		if len(block) == 0 {
-			continue
-		}
-		if len(blocks) > 0 {
-			total++ // separator above the previously added (newer) block
-		}
-		blocks = append(blocks, block)
-		total += len(block)
-		if total >= budget {
-			break
-		}
-	}
-	lines := make([]string, 0, total)
-	for k := len(blocks) - 1; k >= 0; k-- {
-		if k < len(blocks)-1 {
-			lines = append(lines, m.renderAgentTranscriptSeparator(width))
-		}
-		lines = append(lines, blocks[k]...)
-	}
-	return windowBottom(lines, budget)
 }
 
 func (m Model) renderAgentMessage(msg protocol.AgentChatMessage, width int) []string {
@@ -672,10 +617,7 @@ func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) 
 
 func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
-	headerMarker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantBorder()).Background(p.AgentPanel()).Render("  ◇")
-	headerLabel := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantLabel()).Background(p.AgentPanel()).Render(" Minga")
-	header := headerMarker + headerLabel
-	out := []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))}
+	out := []string{m.renderAgentAssistantHeader(width)}
 
 	if len(msg.MarkdownBlocks) > 0 {
 		out = append(out, m.renderAgentAssistantMarkdownBlocks(msg.MarkdownBlocks, width)...)

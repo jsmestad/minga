@@ -1,0 +1,36 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/jsmestad/minga/go/tui/internal/ui
+cpu: Apple M1
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3537125 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   4480791 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3275250 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   4015000 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3707500 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3488459 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   5230375 ns/op	  933880 B/op	   30049 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3293959 ns/op	  933880 B/op	   30049 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3244625 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3382167 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3875583 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3286708 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3795208 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3460958 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	  10089375 ns/op	 1006688 B/op	   30058 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   5328125 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   5257875 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   5384792 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3648791 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3404375 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   5544625 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3416792 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   6665083 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3653250 ns/op	  933880 B/op	   30048 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3831625 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3439042 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3385625 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   3543000 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   4654417 ns/op	  933832 B/op	   30047 allocs/op
+BenchmarkTranscriptPinnedWarmUpdateView-8   	       1	   5017667 ns/op	  933832 B/op	   30047 allocs/op
+PASS
+ok  	github.com/jsmestad/minga/go/tui/internal/ui	1.015s
