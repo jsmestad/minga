@@ -53,7 +53,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       assert %WorkspaceAgent{agent_ui: workspace_ui} = workspace.payload
       assert workspace_ui.panel.transcript.version == 0
 
-      state = AgentEvents.dispatch(state, {:credentials_status, true})
+      state = AgentEvents.dispatch(state, {:credentials_status, :configured})
       assert state.workspace.agent_ui.panel.credentials_configured
     end
 

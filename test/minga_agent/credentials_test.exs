@@ -121,6 +121,60 @@ defmodule MingaAgent.CredentialsTest do
       assert oai.source == :env
       assert ggl.configured == false
     end
+
+    test "acquires the credential file once and retains environment precedence", %{opts: opts} do
+      test_pid = self()
+
+      opts =
+        opts
+        |> Keyword.put(:env, Map.put(@nil_env, "ANTHROPIC_API_KEY", "env-secret"))
+        |> Keyword.put(:credentials_reader, fn _path ->
+          send(test_pid, :credentials_file_read)
+          {:ok, %{"anthropic" => "stored-secret", "openai" => "stored-openai-secret"}}
+        end)
+
+      snapshot = Credentials.snapshot(opts)
+      statuses = Credentials.status(snapshot, :pending)
+
+      assert_received :credentials_file_read
+      refute_received :credentials_file_read
+      assert Enum.find(statuses, &(&1.provider == "anthropic")).source == :env
+      assert Enum.find(statuses, &(&1.provider == "openai")).source == :file
+      refute inspect(statuses) =~ "env-secret"
+      refute inspect(statuses) =~ "stored-secret"
+    end
+
+    test "distinguishes pending and completed unavailable Ollama status", %{opts: opts} do
+      snapshot = Credentials.snapshot(opts)
+
+      pending = Credentials.status(snapshot, :pending) |> Enum.find(&(&1.provider == "ollama"))
+
+      unavailable =
+        Credentials.status(snapshot, {:unavailable, :timeout})
+        |> Enum.find(&(&1.provider == "ollama"))
+
+      assert pending.availability == :pending
+      refute pending.configured
+      assert unavailable.availability == {:unavailable, :timeout}
+      refute unavailable.configured
+    end
+
+    test "malformed storage remains unconfigured and OAuth remains independently configured", %{
+      opts: opts
+    } do
+      malformed_opts =
+        opts
+        |> Keyword.put(:credentials_reader, fn _path -> {:error, :malformed_json} end)
+        |> Keyword.put(:oauth_probe, fn -> true end)
+
+      snapshot = Credentials.snapshot(malformed_opts)
+      statuses = Credentials.status(snapshot, {:unavailable, :connection_refused})
+
+      assert Credentials.any_configured?(snapshot)
+      assert Enum.find(statuses, &(&1.provider == "openai_codex")).configured
+      refute Enum.find(statuses, &(&1.provider == "anthropic")).configured
+      refute Enum.find(statuses, &(&1.provider == "ollama")).configured
+    end
   end
 
   describe "any_configured?/0" do
@@ -131,6 +185,33 @@ defmodule MingaAgent.CredentialsTest do
     test "returns true when at least one key exists", %{opts: opts} do
       :ok = Credentials.store("anthropic", "some-key", opts)
       assert Credentials.any_configured?(opts)
+    end
+
+    test "does not execute the live Ollama probe", %{opts: opts} do
+      test_pid = self()
+      opts = Keyword.put(opts, :ollama_probe, fn -> send(test_pid, :unexpected_probe) end)
+
+      refute Credentials.any_configured?(opts)
+      refute_received :unexpected_probe
+    end
+  end
+
+  describe "ollama_availability/2" do
+    test "executes an explicit probe against the captured host", %{opts: opts} do
+      snapshot =
+        Credentials.snapshot(
+          Keyword.put(opts, :env, Map.put(@nil_env, "OLLAMA_HOST", "http://ollama.test"))
+        )
+
+      assert :available =
+               Credentials.ollama_availability(snapshot,
+                 ollama_probe: fn host -> host == "http://ollama.test" end
+               )
+
+      assert {:unavailable, :held_open} =
+               Credentials.ollama_availability(snapshot,
+                 ollama_probe: fn _host -> {:unavailable, :held_open} end
+               )
     end
   end
 

@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   """
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Credentials
   alias MingaEditor.Agent.Transcript
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -34,7 +35,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
           transcript: TranscriptProjection.t(),
           mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
-          credentials_configured: boolean()
+          credentials_configured: boolean(),
+          credential_readiness: Credentials.readiness()
         }
 
   defstruct visible: false,
@@ -50,7 +52,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
             transcript: TranscriptProjection.new(),
             mention_completion: nil,
             pasted_blocks: [],
-            credentials_configured: false
+            credentials_configured: false,
+            credential_readiness: :unconfigured
 
   @doc "Creates a new panel state with truthful model defaults."
   @spec new() :: t()
@@ -60,7 +63,8 @@ defmodule MingaEditor.Agent.UIState.Panel do
     %__MODULE__{
       provider_name: AgentConfig.extract_provider_prefix(model),
       model_name: model,
-      credentials_configured: false
+      credentials_configured: false,
+      credential_readiness: :unconfigured
     }
   end
 
@@ -100,7 +104,21 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec set_credentials_configured(t(), boolean()) :: t()
   def set_credentials_configured(%__MODULE__{} = panel, configured?) do
     panel = ensure_configured_model(panel)
-    %{panel | credentials_configured: configured?}
+    readiness = if configured?, do: :configured, else: :unconfigured
+    %{panel | credentials_configured: configured?, credential_readiness: readiness}
+  end
+
+  @doc "Sets explicit credential readiness while retaining the compatibility boolean."
+  @spec set_credential_readiness(t(), Credentials.readiness()) :: t()
+  def set_credential_readiness(%__MODULE__{} = panel, readiness)
+      when readiness in [:checking, :configured, :unconfigured] do
+    panel = ensure_configured_model(panel)
+
+    %{
+      panel
+      | credentials_configured: readiness == :configured,
+        credential_readiness: readiness
+    }
   end
 
   @doc "Sets the displayed provider name."

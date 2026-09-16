@@ -293,7 +293,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   test "credentials status alone updates presentation and schedules a render" do
     state = event_state()
     panel = state.workspace.agent_ui.panel
-    state = SessionEventWorkflow.credentials_status(state, true)
+    state = SessionEventWorkflow.credentials_status(state, :configured)
 
     assert state.workspace.agent_ui.panel.credentials_configured
     assert state.workspace.agent_ui.panel.transcript.version == panel.transcript.version

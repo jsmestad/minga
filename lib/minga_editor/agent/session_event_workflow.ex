@@ -58,12 +58,13 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> MingaEditor.schedule_render(16)
   end
 
-  @doc "Updates whether provider credentials are configured and schedules a render."
-  @spec credentials_status(EditorState.t(), boolean()) :: EditorState.t()
-  def credentials_status(%EditorState{} = state, configured?) when is_boolean(configured?) do
+  @doc "Updates explicit credential readiness and schedules a render."
+  @spec credentials_status(EditorState.t(), MingaAgent.Credentials.readiness()) :: EditorState.t()
+  def credentials_status(%EditorState{} = state, readiness)
+      when readiness in [:checking, :configured, :unconfigured] do
     state
     |> TraditionalWorkflow.install_agent_panel(
-      Panel.set_credentials_configured(state.workspace.agent_ui.panel, configured?)
+      Panel.set_credential_readiness(state.workspace.agent_ui.panel, readiness)
     )
     |> MingaEditor.schedule_render(16)
   end

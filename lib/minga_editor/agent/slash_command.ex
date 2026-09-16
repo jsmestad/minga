@@ -18,6 +18,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.AuthStatusEffect
   alias MingaEditor.Remote.SessionClient
   alias Minga.Config
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -724,14 +725,15 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   # ── Auth command ─────────────────────────────────────────────────────────────
 
-  @spec do_auth(state(), String.t()) :: state()
-  defp do_auth(state, "") do
-    # No args: show status for all providers
-    statuses = Credentials.status()
+  @doc false
+  @spec auth_status(state(), keyword()) :: state()
+  def auth_status(state, opts \\ []) do
+    snapshot = Keyword.get_lazy(opts, :snapshot, &Credentials.snapshot/0)
+    statuses = Credentials.status(snapshot, :pending)
 
     lines =
       Enum.map_join(statuses, "\n", fn s ->
-        icon = if s.configured, do: "✓", else: "✗"
+        icon = auth_status_icon(s)
         source_hint = format_source_hint(s)
         url_hint = dashboard_url_hint(s.provider)
         "  #{icon} #{provider_display_name(s.provider)}#{source_hint}#{url_hint}"
@@ -742,8 +744,13 @@ defmodule MingaEditor.Agent.SlashCommand do
     message =
       "API key status:\n#{lines}#{endpoint_info}\n\nUse /auth <provider> <key> to add a key.\nUse /auth revoke <provider> to remove one."
 
-    emit_system_message(state, message)
+    state = emit_system_message(state, message)
+    session = Runtime.active_session(state.shell_runtime)
+    AuthStatusEffect.schedule(state, snapshot, session, Keyword.get(opts, :effect_opts, []))
   end
+
+  @spec do_auth(state(), String.t()) :: state()
+  defp do_auth(state, ""), do: auth_status(state)
 
   defp do_auth(state, args) do
     parts = String.split(String.trim(args), " ", parts: 3)
@@ -1559,6 +1566,11 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp format_source_hint(%{source: :oauth}), do: " (chatgpt subscription)"
   defp format_source_hint(%{source: nil}), do: ""
   defp format_source_hint(%{source: source}), do: " (#{source})"
+
+  @spec auth_status_icon(Credentials.ProviderStatus.t()) :: String.t()
+  defp auth_status_icon(%{availability: :pending}), do: "…"
+  defp auth_status_icon(%{configured: true}), do: "✓"
+  defp auth_status_icon(%{configured: false}), do: "✗"
 
   # Returns a short URL hint for unconfigured providers in the /auth status display.
   # Configured providers don't need the hint (user already has a key).

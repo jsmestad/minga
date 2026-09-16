@@ -20,15 +20,24 @@ defmodule MingaAgent.Credentials do
   @typedoc "Source where a key was found."
   @type key_source :: :env | :file | :oauth | nil
 
+  alias MingaAgent.Credentials.Snapshot
+
+  @typedoc "Live Ollama availability, kept separate from local configuration."
+  @type ollama_availability :: :pending | :available | {:unavailable, term()}
+
+  @typedoc "Owner-visible credential readiness."
+  @type readiness :: :checking | :configured | :unconfigured
+
   defmodule ProviderStatus do
     @moduledoc false
-    @enforce_keys [:provider, :configured]
-    defstruct [:provider, :configured, :source]
+    @enforce_keys [:provider, :configured, :availability]
+    defstruct [:provider, :configured, :source, :availability]
 
     @type t :: %__MODULE__{
             provider: String.t(),
             configured: boolean(),
-            source: :env | :file | :local | :oauth | nil
+            source: :env | :file | :local | :oauth | nil,
+            availability: :not_applicable | MingaAgent.Credentials.ollama_availability()
           }
   end
 
@@ -120,51 +129,102 @@ defmodule MingaAgent.Credentials do
   end
 
   @doc """
-  Returns the auth status for all known providers plus Ollama and OpenAI OAuth.
+  Acquires one secret-free local credential snapshot.
+
+  The credentials file is read once. Environment values retain precedence over
+  stored values, and only their configured source is retained.
+  """
+  @spec snapshot(keyword()) :: Snapshot.t()
+  def snapshot(opts \\ []) do
+    stored = acquire_stored_credentials(opts)
+
+    sources =
+      Map.new(@known_providers, fn provider ->
+        {provider, configured_source(provider, stored, opts)}
+      end)
+      |> Map.reject(fn {_provider, source} -> is_nil(source) end)
+
+    Snapshot.new(
+      sources,
+      auth_probe(opts, :oauth_probe, &oauth_configured?/0),
+      ollama_host(opts)
+    )
+  end
+
+  @doc """
+  Returns local auth status plus an explicit Ollama availability state.
 
   Each entry shows whether a key is configured and where it was found
   (`:env`, `:file`, `:oauth`, `:local`, or `nil`). Keys themselves are never exposed.
+  Calling this function never probes the network; Ollama is `:pending` until an
+  owner executes `ollama_availability/2` outside its mailbox.
   """
   @spec status(keyword()) :: [provider_status()]
-  def status(opts \\ []) do
+  def status(opts \\ []) when is_list(opts), do: opts |> snapshot() |> status(:pending)
+
+  @doc "Returns status entries from one acquired snapshot and live Ollama result."
+  @spec status(Snapshot.t(), ollama_availability()) :: [provider_status()]
+  def status(%Snapshot{} = snapshot, availability) do
     standard =
       Enum.map(@known_providers, fn provider ->
-        case resolve(provider, opts) do
-          {:ok, _key, source} ->
-            %ProviderStatus{provider: provider, configured: true, source: source}
+        case Snapshot.provider_source(snapshot, provider) do
+          source when source in [:env, :file] ->
+            %ProviderStatus{
+              provider: provider,
+              configured: true,
+              source: source,
+              availability: :not_applicable
+            }
 
-          :error ->
-            %ProviderStatus{provider: provider, configured: false, source: nil}
+          nil ->
+            %ProviderStatus{
+              provider: provider,
+              configured: false,
+              source: nil,
+              availability: :not_applicable
+            }
         end
       end)
 
     oauth_status =
-      if auth_probe(opts, :oauth_probe, &oauth_configured?/0) do
-        %ProviderStatus{provider: "openai_codex", configured: true, source: :oauth}
+      if snapshot.oauth_configured do
+        %ProviderStatus{
+          provider: "openai_codex",
+          configured: true,
+          source: :oauth,
+          availability: :not_applicable
+        }
       else
-        %ProviderStatus{provider: "openai_codex", configured: false, source: nil}
+        %ProviderStatus{
+          provider: "openai_codex",
+          configured: false,
+          source: nil,
+          availability: :not_applicable
+        }
       end
-
-    ollama_up = auth_probe(opts, :ollama_probe, &ollama_available?/0)
 
     ollama_status = %ProviderStatus{
       provider: "ollama",
-      configured: ollama_up,
-      source: if(ollama_up, do: :local, else: nil)
+      configured: availability == :available,
+      source: if(availability == :available, do: :local, else: nil),
+      availability: availability
     }
 
     standard ++ [oauth_status, ollama_status]
   end
 
   @doc """
-  Returns true if any provider has a configured API key.
+  Returns true if any local API-key or OAuth credential is configured.
+
+  This predicate never probes the network. Owners combine it with an explicit
+  `ollama_availability/2` result when automatic local discovery is relevant.
   """
-  @spec any_configured?(keyword()) :: boolean()
-  def any_configured?(opts \\ []) do
-    Enum.any?(@known_providers, fn p -> resolve(p, opts) != :error end) or
-      auth_probe(opts, :oauth_probe, &oauth_configured?/0) or
-      auth_probe(opts, :ollama_probe, &ollama_available?/0)
-  end
+  @spec any_configured?(keyword() | Snapshot.t()) :: boolean()
+  def any_configured?(source \\ [])
+
+  def any_configured?(opts) when is_list(opts), do: opts |> snapshot() |> any_configured?()
+
+  def any_configured?(%Snapshot{} = snapshot), do: Snapshot.locally_configured?(snapshot)
 
   @doc """
   Extracts the provider name from a model string like "anthropic:claude-sonnet-4-20250514".
@@ -201,8 +261,18 @@ defmodule MingaAgent.Credentials do
   then falls back to the default localhost URL.
   """
   @spec ollama_host() :: String.t()
-  def ollama_host do
-    System.get_env(@ollama_host_var) || @ollama_default_host
+  def ollama_host, do: ollama_host([])
+
+  @doc "Returns the Ollama host using an optional captured environment map."
+  @spec ollama_host(keyword()) :: String.t()
+  def ollama_host(opts) when is_list(opts) do
+    env = Keyword.get(opts, :env, %{})
+
+    case Map.fetch(env, @ollama_host_var) do
+      {:ok, host} when is_binary(host) and host != "" -> host
+      {:ok, _missing} -> @ollama_default_host
+      :error -> System.get_env(@ollama_host_var) || @ollama_default_host
+    end
   end
 
   @doc """
@@ -212,20 +282,23 @@ defmodule MingaAgent.Credentials do
   Returns false on connection errors or timeouts.
   """
   @spec ollama_available?() :: boolean()
-  # NOTE: This check blocks the calling process for up to 2 seconds when Ollama
-  # isn't running. Called during resolve_auto/0 and status/0, so agent startup
-  # may be delayed by that amount if Ollama is unreachable.
-  def ollama_available? do
-    host = ollama_host()
+  def ollama_available?, do: ollama_availability(snapshot()) == :available
 
-    case :httpc.request(:get, {~c"#{host}/api/tags", []}, [{:timeout, 2000}], []) do
-      {:ok, {{_, 200, _}, _, _}} -> true
-      _ -> false
-    end
+  @doc "Checks live Ollama availability for a previously acquired snapshot."
+  @spec ollama_availability(Snapshot.t(), keyword()) :: ollama_availability()
+  def ollama_availability(%Snapshot{} = snapshot, opts \\ []) do
+    result =
+      case Keyword.get(opts, :ollama_probe) do
+        probe when is_function(probe, 1) -> probe.(snapshot.ollama_host)
+        probe when is_function(probe, 0) -> probe.()
+        nil -> request_ollama_tags(snapshot.ollama_host)
+      end
+
+    normalize_ollama_result(result)
   rescue
-    ArgumentError -> false
+    error -> {:unavailable, {:exception, error.__struct__}}
   catch
-    :exit, _ -> false
+    :exit, reason -> {:unavailable, {:exit, reason}}
   end
 
   @spec auth_probe(keyword(), atom(), (-> boolean())) :: boolean()
@@ -234,6 +307,58 @@ defmodule MingaAgent.Credentials do
     |> Keyword.get(key, default)
     |> then(& &1.())
   end
+
+  @spec acquire_stored_credentials(keyword()) :: map()
+  defp acquire_stored_credentials(opts) do
+    path = credentials_path(opts)
+
+    result =
+      case Keyword.get(opts, :credentials_reader) do
+        reader when is_function(reader, 1) -> reader.(path)
+        nil -> read_credentials_file(path)
+      end
+
+    case result do
+      {:ok, credentials} when is_map(credentials) -> credentials
+      _error -> %{}
+    end
+  end
+
+  @spec configured_source(provider(), map(), keyword()) :: :env | :file | nil
+  defp configured_source(provider, stored, opts) do
+    case resolve_from_env(provider, opts) do
+      {:ok, _key} -> :env
+      :error -> configured_file_source(stored, provider)
+    end
+  end
+
+  @spec configured_file_source(map(), provider()) :: :file | nil
+  defp configured_file_source(stored, provider) do
+    case Map.get(stored, provider) do
+      key when is_binary(key) and key != "" -> :file
+      _missing -> nil
+    end
+  end
+
+  @spec request_ollama_tags(String.t()) :: term()
+  defp request_ollama_tags(host) do
+    :httpc.request(:get, {~c"#{host}/api/tags", []}, [{:timeout, 2000}], [])
+  end
+
+  @spec normalize_ollama_result(term()) :: ollama_availability()
+  defp normalize_ollama_result(true), do: :available
+  defp normalize_ollama_result(:available), do: :available
+  defp normalize_ollama_result(false), do: {:unavailable, :probe_failed}
+  defp normalize_ollama_result({:unavailable, _reason} = unavailable), do: unavailable
+
+  defp normalize_ollama_result({:ok, {{_version, 200, _message}, _headers, _body}}),
+    do: :available
+
+  defp normalize_ollama_result({:ok, {{_version, status, _message}, _headers, _body}}),
+    do: {:unavailable, {:http_status, status}}
+
+  defp normalize_ollama_result({:error, reason}), do: {:unavailable, reason}
+  defp normalize_ollama_result(other), do: {:unavailable, {:unexpected_result, other}}
 
   @doc """
   Returns the path to `~/.config/minga/oauth.json` (XDG-aware).
