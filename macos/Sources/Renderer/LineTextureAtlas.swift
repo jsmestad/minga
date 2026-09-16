@@ -29,8 +29,44 @@ enum AtlasLookupResult {
     case reserved(Reservation)
 }
 
+/// Why the atlas copied an existing texture generation.
+enum AtlasTextureCopyKind: String, Sendable, Equatable {
+    case growth
+    case copyOnWrite = "copy_on_write"
+}
+
+/// One reusable physical atlas generation. Its allocator describes the exact
+/// pixels stored in `texture`, including candidates that were not published.
+private struct AtlasTextureGeneration {
+    var texture: MTLTexture?
+    var allocator = SlotAllocator()
+    var width = 0
+    var height = 0
+}
+
+/// Bounded physical texture storage shared by every logical atlas candidate.
+/// Presentation reservations guarantee that only one candidate writes a slot.
+@MainActor
+private final class AtlasTexturePool {
+    private var generations: [AtlasTextureGeneration]
+
+    init(slotCount: Int) {
+        generations = Array(repeating: AtlasTextureGeneration(), count: slotCount)
+    }
+
+    func generation(at index: Int) -> AtlasTextureGeneration {
+        generations[index]
+    }
+
+    func store(_ generation: AtlasTextureGeneration, at index: Int) {
+        generations[index] = generation
+    }
+}
+
 @MainActor
 final class LineTextureAtlas {
+    static let textureGenerationCount = 3
+
     /// The atlas texture.
     private(set) var texture: MTLTexture?
 
@@ -39,6 +75,9 @@ final class LineTextureAtlas {
     private let makeTexture: (MTLDevice, MTLTextureDescriptor) -> MTLTexture?
     private let allocateStaging: (Int) -> UnsafeMutableRawPointer?
     private let deallocateStaging: (UnsafeMutableRawPointer) -> Void
+    private let observeTextureCopy: (AtlasTextureCopyKind, Int) -> Void
+    private let texturePool: AtlasTexturePool
+    private let texturePoolSlot: Int
 
     /// Pure slot management (testable without Metal).
     private(set) var allocator = SlotAllocator()
@@ -72,38 +111,59 @@ final class LineTextureAtlas {
     /// First failure while making a private texture generation.
     private(set) var nativePresentationFailure: NativePresentationFailure?
 
-    init(device: MTLDevice, slotHeight: Int,
-         policy: FrameResourcePolicy.NativeRendererLimits = .default,
-         makeTexture: @escaping (MTLDevice, MTLTextureDescriptor) -> MTLTexture? = {
-             $0.makeTexture(descriptor: $1)
-         },
-         allocateStaging: @escaping (Int) -> UnsafeMutableRawPointer? = { malloc($0) },
-         deallocateStaging: @escaping (UnsafeMutableRawPointer) -> Void = { free($0) }) {
+    convenience init(device: MTLDevice, slotHeight: Int,
+                     policy: FrameResourcePolicy.NativeRendererLimits = .default,
+                     makeTexture: @escaping (MTLDevice, MTLTextureDescriptor) -> MTLTexture? = {
+                         $0.makeTexture(descriptor: $1)
+                     },
+                     allocateStaging: @escaping (Int) -> UnsafeMutableRawPointer? = { malloc($0) },
+                     deallocateStaging: @escaping (UnsafeMutableRawPointer) -> Void = { free($0) },
+                     observeTextureCopy: @escaping (AtlasTextureCopyKind, Int) -> Void = { _, _ in }) {
+        self.init(
+            device: device, slotHeight: slotHeight, policy: policy,
+            makeTexture: makeTexture, allocateStaging: allocateStaging,
+            deallocateStaging: deallocateStaging, observeTextureCopy: observeTextureCopy,
+            texturePool: AtlasTexturePool(slotCount: Self.textureGenerationCount),
+            texturePoolSlot: 0
+        )
+    }
+
+    private init(device: MTLDevice, slotHeight: Int,
+                 policy: FrameResourcePolicy.NativeRendererLimits,
+                 makeTexture: @escaping (MTLDevice, MTLTextureDescriptor) -> MTLTexture?,
+                 allocateStaging: @escaping (Int) -> UnsafeMutableRawPointer?,
+                 deallocateStaging: @escaping (UnsafeMutableRawPointer) -> Void,
+                 observeTextureCopy: @escaping (AtlasTextureCopyKind, Int) -> Void,
+                 texturePool: AtlasTexturePool,
+                 texturePoolSlot: Int) {
         self.device = device
         self.slotHeight = slotHeight
         self.policy = policy
         self.makeTexture = makeTexture
         self.allocateStaging = allocateStaging
         self.deallocateStaging = deallocateStaging
+        self.observeTextureCopy = observeTextureCopy
+        self.texturePool = texturePool
+        self.texturePoolSlot = texturePoolSlot
+        let generation = self.texturePool.generation(at: texturePoolSlot)
+        texture = generation.texture
+        allocator = generation.allocator
+        atlasWidth = generation.width
+        atlasHeight = generation.height
     }
 
-    /// Creates a value-isolated allocator generation. The texture remains shared
-    /// until the first write, when `commitUpload` performs a private COW copy.
-    func makeCandidate() -> LineTextureAtlas {
+    /// Selects the private physical generation reserved for this native frame.
+    /// The candidate starts from the exact allocator state stored with that texture,
+    /// so only rows changed since this slot's last use need rasterization.
+    func makeCandidate(texturePoolSlot: Int) -> LineTextureAtlas {
         let candidate = LineTextureAtlas(
             device: device, slotHeight: slotHeight, policy: policy,
             makeTexture: makeTexture, allocateStaging: allocateStaging,
-            deallocateStaging: deallocateStaging
+            deallocateStaging: deallocateStaging, observeTextureCopy: observeTextureCopy,
+            texturePool: texturePool, texturePoolSlot: texturePoolSlot
         )
-        candidate.texture = texture
-        candidate.allocator = allocator
-        candidate.atlasWidth = atlasWidth
-        candidate.atlasHeight = atlasHeight
-        candidate.textureIsShared = texture != nil
         return candidate
     }
-
-    private var textureIsShared = false
 
     /// Grow the atlas if needed. A replacement texture and allocator are built
     /// first; allocation refusal leaves the active texture/cache untouched.
@@ -158,7 +218,8 @@ final class LineTextureAtlas {
             switch copyTexture(
                 source, to: candidateTexture,
                 width: min(atlasWidth, requestedWidth),
-                height: min(atlasHeight, newHeight), frameSequence: frameSequence
+                height: min(atlasHeight, newHeight), kind: .growth,
+                frameSequence: frameSequence
             ) {
             case .success: break
             case .failure(let failure): return .failure(failure)
@@ -167,10 +228,10 @@ final class LineTextureAtlas {
         var candidateAllocator = allocator
         candidateAllocator.ensureCapacity(maxSlots: requestedSlots)
         texture = candidateTexture
-        textureIsShared = false
         atlasWidth = requestedWidth
         atlasHeight = newHeight
         allocator = candidateAllocator
+        persistTextureGeneration()
         return .success(())
     }
 
@@ -179,6 +240,7 @@ final class LineTextureAtlas {
         frameTextureUploadBytes = 0
         nativePresentationFailure = nil
         allocator.beginFrame()
+        persistTextureGeneration()
     }
 
     /// Look up an atlas entry or reserve one slot that the caller must rasterize and commit.
@@ -225,7 +287,7 @@ final class LineTextureAtlas {
             )
             return nil
         }
-        guard makeTexturePrivateIfNeeded(), let tex = texture else {
+        guard let tex = texture else {
             nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
                 phase: .atlas, dimension: .texture, reason: .allocation
             )
@@ -242,32 +304,24 @@ final class LineTextureAtlas {
         frameTextureUploads += 1
         frameTextureUploadBytes += uploadBytes
         allocator.markUploaded(slotIndex: reservation.slotIndex, contentHash: reservation.contentHash, pixelWidth: pixelWidth)
+        persistTextureGeneration()
 
         return AtlasEntry(slotIndex: reservation.slotIndex, pixelWidth: pixelWidth, pixelHeight: slotHeight)
     }
 
-    private func makeTexturePrivateIfNeeded() -> Bool {
-        guard textureIsShared, let source = texture else { return texture != nil }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm_srgb, width: atlasWidth,
-            height: atlasHeight, mipmapped: false
+    private func persistTextureGeneration() {
+        texturePool.store(
+            AtlasTextureGeneration(
+                texture: texture, allocator: allocator,
+                width: atlasWidth, height: atlasHeight
+            ),
+            at: texturePoolSlot
         )
-        descriptor.usage = .shaderRead
-        descriptor.storageMode = .managed
-        guard let candidate = makeTexture(device, descriptor) else { return false }
-        switch copyTexture(source, to: candidate, width: atlasWidth, height: atlasHeight) {
-        case .success:
-            texture = candidate
-            textureIsShared = false
-            return true
-        case .failure(let failure):
-            nativePresentationFailure = nativePresentationFailure ?? failure
-            return false
-        }
     }
 
     private func copyTexture(_ source: MTLTexture, to destination: MTLTexture,
                              width: Int, height: Int,
+                             kind: AtlasTextureCopyKind,
                              frameSequence: UInt32 = 0) -> Result<Void, NativePresentationFailure> {
         guard width > 0, height > 0 else { return .success(()) }
         let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: 4)
@@ -298,6 +352,7 @@ final class LineTextureAtlas {
         source.getBytes(storage, bytesPerRow: bytesPerRow, from: region, mipmapLevel: 0)
         destination.replace(region: region, mipmapLevel: 0,
                             withBytes: storage, bytesPerRow: bytesPerRow)
+        observeTextureCopy(kind, byteCount)
         return .success(())
     }
 
@@ -310,9 +365,11 @@ final class LineTextureAtlas {
 
     func invalidateAll() {
         allocator.invalidateAll()
+        persistTextureGeneration()
     }
 
     func invalidateWindow(_ windowId: UInt16) {
         allocator.invalidateWindow(windowId)
+        persistTextureGeneration()
     }
 }

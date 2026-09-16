@@ -476,9 +476,16 @@ private func renderFrame(
 private struct NativeRenderPerformanceMain {
     @MainActor
     static func main() async throws {
+        if CommandLine.arguments.count == 3,
+           CommandLine.arguments[1] == "--resource-investigation-output" {
+            try await runNativeResourceInvestigation(
+                outputURL: URL(fileURLWithPath: CommandLine.arguments[2])
+            )
+            return
+        }
         guard CommandLine.arguments.count == 3,
               CommandLine.arguments[1] == "--measurement-output" else {
-            FileHandle.standardError.write(Data("usage: minga-native-render-performance --measurement-output OUTPUT.json\n".utf8))
+            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --resource-investigation-output) OUTPUT.json\n".utf8))
             exit(2)
         }
         guard MTLCreateSystemDefaultDevice() != nil else {

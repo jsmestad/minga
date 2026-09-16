@@ -311,6 +311,11 @@ struct NativeRenderFactories {
     /// Called only after the command that copied into the drawable completed successfully.
     var present: (CAMetalDrawable) throws -> Void
     var reportFailure: (NativePresentationFailure) -> Void
+    /// Passive investigation hooks. Production leaves these as no-ops; the Release harness
+    /// records exact candidate, atlas-copy, and bounded-render work without changing ownership.
+    var observeCandidateObjects: (Int) -> Void
+    var observeAtlasCopy: (AtlasTextureCopyKind, Int) -> Void
+    var observeFrameMetrics: (FrameMetrics) -> Void
 
     static let production = Self(
         makeLibrary: { device in
@@ -345,7 +350,10 @@ struct NativeRenderFactories {
                    "Native presentation failed phase=%{public}@ dimension=%{public}@ reason=%{public}@ seq=%{public}u",
                    failure.phase.rawValue, failure.dimension.rawValue,
                    failure.reason.rawValue, failure.frameSequence)
-        }
+        },
+        observeCandidateObjects: { _ in },
+        observeAtlasCopy: { _, _ in },
+        observeFrameMetrics: { _ in }
     )
 }
 
@@ -360,13 +368,16 @@ struct NativePresentationGeneration: Sendable, Equatable {
     private(set) var next: UInt64 = 0
     private(set) var completed: UInt64 = 0
     private var inFlightSlots: [UInt64: Int] = [:]
+    private var nextSlot = 0
 
     var inFlightCount: Int { inFlightSlots.count }
 
     mutating func issue(slotCount: Int) -> Reservation? {
         guard slotCount > 0 else { return nil }
-        guard let slot = (0..<slotCount).first(where: { !inFlightSlots.values.contains($0) }) else { return nil }
+        let candidates = (0..<slotCount).map { (nextSlot + $0) % slotCount }
+        guard let slot = candidates.first(where: { !inFlightSlots.values.contains($0) }) else { return nil }
         next &+= 1
+        nextSlot = (slot + 1) % slotCount
         inFlightSlots[next] = slot
         return Reservation(generation: next, slot: slot)
     }

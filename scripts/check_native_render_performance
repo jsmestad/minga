@@ -7,7 +7,7 @@ ROOT="$(cd "$ROOT" && pwd)"
 DEFAULT_BUILD_DIR="${ROOT}/_build/native-render-performance"
 
 usage() {
-  echo "usage: $0 [--build BUILD_DIR | --measure BUILD_DIR OUTPUT.json | --compare BUILD_DIR --base BASE.json... --head HEAD.json...]" >&2
+  echo "usage: $0 [--build BUILD_DIR | --measure BUILD_DIR OUTPUT.json | --investigate BUILD_DIR OUTPUT.json | --compare BUILD_DIR --base BASE.json... --head HEAD.json...]" >&2
   exit 2
 }
 
@@ -62,6 +62,20 @@ measure_harness() {
     "$binary" --measurement-output "$output"
 }
 
+investigate_harness() {
+  local build_dir=$1
+  local output=$2
+  local products="$build_dir/Build/Products/Release"
+  local binary="$products/minga-native-render-performance"
+  if [[ ! -x "$binary" ]]; then
+    echo "error: native render benchmark binary not found: $binary" >&2
+    exit 2
+  fi
+  mkdir -p "$(dirname "$output")"
+  SWIFT_BACKTRACE=enable=yes \
+    "$binary" --resource-investigation-output "$output"
+}
+
 require_macos
 case "${1:-}" in
   --build)
@@ -71,6 +85,10 @@ case "${1:-}" in
   --measure)
     [[ $# -eq 3 ]] || usage
     measure_harness "$2" "$3"
+    ;;
+  --investigate)
+    [[ $# -eq 3 ]] || usage
+    investigate_harness "$2" "$3"
     ;;
   --compare)
     [[ $# -ge 8 ]] || usage

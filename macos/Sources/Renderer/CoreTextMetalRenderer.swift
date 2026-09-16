@@ -328,7 +328,7 @@ final class CoreTextMetalRenderer {
     private var maxInstanceSlots: Int = 0
 
     /// Number of renderer-owned reusable slots, matching the maximum allowed native generations in flight.
-    private static let nativeFrameSlotCount = 3
+    private static let nativeFrameSlotCount = LineTextureAtlas.textureGenerationCount
     private static let quadBufferFrameCount = nativeFrameSlotCount
 
     /// Reusable line-instance buffers, one per native frame slot. Slots grow on demand and are reused after warm-up.
@@ -371,7 +371,8 @@ final class CoreTextMetalRenderer {
 
         let linePixelHeight = Int(ceil(CGFloat(fontManager.cellHeight) * fontManager.scale))
         self.atlas = LineTextureAtlas(device: device, slotHeight: linePixelHeight,
-                                      policy: resourcePolicy, makeTexture: factories.makeTexture)
+                                      policy: resourcePolicy, makeTexture: factories.makeTexture,
+                                      observeTextureCopy: factories.observeAtlasCopy)
     }
 
     /// Render the editor from one complete committed snapshot.
@@ -514,7 +515,8 @@ final class CoreTextMetalRenderer {
         let candidateConfigurationEpoch = configurationEpoch
         let candidateRasterizer = factories.makeRasterizer()
         let candidateWindowRenderer = activeWindowRenderer.makeCandidate(rasterizer: candidateRasterizer)
-        let candidateAtlas = activeAtlas.makeCandidate()
+        let candidateAtlas = activeAtlas.makeCandidate(texturePoolSlot: nativeFrameSlot)
+        factories.observeCandidateObjects(3)
         let neededSlots = CoreTextMetalRenderer.atlasSlotDemand(
             frameState: frameState, metadata: metadata, preparedSurfaces: preparedSurfaces
         )
@@ -1564,6 +1566,7 @@ final class CoreTextMetalRenderer {
             frameMetrics.textureUploads = atlas.frameTextureUploads
             frameMetrics.textureUploadBytes = atlas.frameTextureUploadBytes
         }
+        factories.observeFrameMetrics(frameMetrics)
 
         if let failure = windowContentRenderer?.nativePresentationFailure ?? candidateAtlas.nativePresentationFailure {
             encoder.endEncoding()

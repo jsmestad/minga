@@ -297,14 +297,16 @@ struct NativeRenderResourcesTests {
         #expect(atlas.nativePresentationFailure?.requested == 1)
     }
 
-    @Test("no-growth COW staging refusal leaves the active atlas untouched")
-    @MainActor func noGrowthUploadRefusalIsAtomic() {
+    @Test("warmed atlas generation slots reuse textures without copying")
+    @MainActor func warmedAtlasGenerationSlotsReuseTextures() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
-        var refuseStaging = false
+        var textureAllocations = 0
         let atlas = LineTextureAtlas(
             device: device, slotHeight: 16, policy: policy,
-            allocateStaging: { refuseStaging ? nil : malloc($0) },
-            deallocateStaging: { free($0) }
+            makeTexture: { device, descriptor in
+                textureAllocations += 1
+                return device.makeTexture(descriptor: descriptor)
+            }
         )
         guard case .success = atlas.ensureCapacity(maxSlots: 4, width: 64) else { return }
         atlas.beginFrame()
@@ -315,26 +317,32 @@ struct NativeRenderResourcesTests {
         memset(bytes, 0x7f, 64 * 16 * 4)
         #expect(atlas.commitUpload(reservation: reservation, pointer: bytes,
                                   pixelWidth: 64, bytesPerRow: 256) != nil)
-        let activeAllocator = atlas.allocator
-        let activeTexture = atlas.texture.map(ObjectIdentifier.init)
+        let slotZeroTexture = try #require(atlas.texture.map(ObjectIdentifier.init))
 
-        let candidate = atlas.makeCandidate()
-        candidate.beginFrame()
-        guard case .reserved(let changed)? = candidate.lookupOrReserve(key: key, contentHash: 2) else { return }
-        let candidateAllocator = candidate.allocator
-        let candidateTexture = candidate.texture.map(ObjectIdentifier.init)
-        refuseStaging = true
-        #expect(candidate.commitUpload(reservation: changed, pointer: bytes,
-                                       pixelWidth: 64, bytesPerRow: 256) == nil)
-        #expect(candidate.nativePresentationFailure?.phase == .atlas)
-        #expect(candidate.nativePresentationFailure?.dimension == .atlasBytes)
-        #expect(candidate.allocator == candidateAllocator)
-        #expect(candidate.texture.map(ObjectIdentifier.init) == candidateTexture)
-        #expect(atlas.allocator == activeAllocator)
-        #expect(atlas.texture.map(ObjectIdentifier.init) == activeTexture)
+        var completed = atlas
+        for slot in 1...2 {
+            let candidate = completed.makeCandidate(texturePoolSlot: slot)
+            guard case .success = candidate.ensureCapacity(maxSlots: 4, width: 64) else { return }
+            candidate.beginFrame()
+            guard case .reserved(let cold)? = candidate.lookupOrReserve(key: key, contentHash: 1) else { return }
+            #expect(candidate.commitUpload(reservation: cold, pointer: bytes,
+                                           pixelWidth: 64, bytesPerRow: 256) != nil)
+            completed = candidate
+        }
+        #expect(textureAllocations == 3)
+
+        let reused = completed.makeCandidate(texturePoolSlot: 0)
+        guard case .success = reused.ensureCapacity(maxSlots: 4, width: 64) else { return }
+        reused.beginFrame()
+        guard case .reserved(let changed)? = reused.lookupOrReserve(key: key, contentHash: 2) else { return }
+        #expect(reused.commitUpload(reservation: changed, pointer: bytes,
+                                    pixelWidth: 64, bytesPerRow: 256) != nil)
+        #expect(textureAllocations == 3)
+        #expect(reused.texture.map(ObjectIdentifier.init) == slotZeroTexture)
+        #expect(completed.allocator.pixelWidth(forSlot: 0) == 64)
     }
 
-    @Test("growth COW staging refusal rolls back texture and allocator")
+    @Test("growth staging refusal rolls back texture and allocator")
     @MainActor func growthStagingRefusalIsAtomic() {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         var refuseStaging = false
@@ -395,6 +403,22 @@ struct NativeRenderResourcesTests {
         #expect(replacement.slot == first.slot)
         #expect(replacement.slot != second.slot)
         #expect(ordering.inFlightCount == 2)
+    }
+
+    @Test("sequential native generations rotate reusable frame slots")
+    func sequentialGenerationsRotateFrameSlots() throws {
+        var ordering = NativePresentationGeneration()
+        var slots: [Int] = []
+
+        for _ in 0..<4 {
+            let issued = ordering.issue(slotCount: 3)
+            let reservation = try #require(issued)
+            slots.append(reservation.slot)
+            let completed = ordering.complete(reservation.generation)
+            #expect(completed)
+        }
+
+        #expect(slots == [0, 1, 2, 0])
     }
 
     @Test("production raster allocator refusal is a typed local failure")
