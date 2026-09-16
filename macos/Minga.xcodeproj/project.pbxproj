@@ -208,6 +208,7 @@
 		83ACC5A2A0BF5F5F3BA34894 /* HoverPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A38E8668FFBC3522674AE29C /* HoverPopupOverlay.swift */; };
 		842F37A4A6D1D95F63E41E2A /* FrameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D59D9EEB390C8DF351D595 /* FrameState.swift */; };
 		86526CCD268BB390F0C14C53 /* AgentSurfaceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA21EF140F07296D1E16A /* AgentSurfaceTypes.swift */; };
+		86B26083ED761AA5C720A91E /* BEAMLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */; };
 		87D39424AC2980D7E33F5DB0 /* PortLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E23DC6E0ACB156F21293E87 /* PortLogger.swift */; };
 		885F2754A698ACF4B679D98F /* DecodedFrameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 892582CEE169FA9B95827153 /* DecodedFrameTests.swift */; };
 		888A35D1348A7A3CAE935561 /* DecoderFuzzTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053D515EC453DEBFF51FB6CB /* DecoderFuzzTests.swift */; };
@@ -262,6 +263,7 @@
 		A6327C6FAB3DCFD57327FBF4 /* DecoderRobustnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57B35E8311966948B1BA7AEF /* DecoderRobustnessTests.swift */; };
 		A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		A7D247B53DE01DC5F375E228 /* FileTreeHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51E88C12915EC4EBE96165AF /* FileTreeHeaderView.swift */; };
+		A7F878ABD8893EA0A324E6D6 /* BEAMLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */; };
 		A911CF7DE0346417471AF27A /* ProtocolSemanticDecode.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */; };
 		A9551F6F0EB19FB618A8DB3E /* EditorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9448826AA38AB5FC0CEB79 /* EditorSettingsView.swift */; };
 		A9EE5F81AE818C176D03A6E3 /* RecoveryManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF508EECAEFEA4ADC41409 /* RecoveryManagerTests.swift */; };
@@ -304,6 +306,7 @@
 		BBFA84AD4053D2DDA336FBAF /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E89640A29C207B9040DC67 /* EditorView.swift */; };
 		BC7E4A33AC8A2DA8D861FB64 /* ThumbDragSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11AEAD1E631064BE3B13E42C /* ThumbDragSession.swift */; };
 		BCCC8F959EDD3B7C8525BA61 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB822E0C8D06C7B45D329F /* EditorNSView.swift */; };
+		BEEF842411279AB7C445726F /* BEAMLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */; };
 		BF41C04B7AF7C400A4DC1474 /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
 		BF4E98B0BE647893CB5DA85C /* PipelineCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE75BA15B74A84B77B5B911 /* PipelineCache.swift */; };
 		BF89605C029E1F2F4EE328EA /* CoreTextMetalRendererCursorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5BA668E827BD6B77C72E9D6 /* CoreTextMetalRendererCursorTests.swift */; };
@@ -398,6 +401,7 @@
 		F6774D86515DEFEFD0F3894B /* ProtocolEventHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB164EE3CF13E41E95FFD9AA /* ProtocolEventHandoff.swift */; };
 		F6F56719C285CB9C3EA62A57 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5647A59C841B3C408994CC7 /* Assets.xcassets */; };
 		F79A7BD26DFA628C643EB253 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E89640A29C207B9040DC67 /* EditorView.swift */; };
+		F97CBAD5A30E279054B0DD6F /* BEAMLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */; };
 		F984C67E0F2861DE6A25DBD4 /* PreviewRegistry+GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */; };
 		F986D696164E7D7483EF2DB4 /* PreviewRegistry+Overlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0D41B1D748FBFE7916342C /* PreviewRegistry+Overlays.swift */; };
 		F99ACADC9C8BF572A3E6115F /* PreviewSnapshotPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E1D0E05FBEEC550591460C7 /* PreviewSnapshotPolicy.swift */; };
@@ -683,6 +687,7 @@
 		9F23F8D48BE810AB3FD81B5A /* PreparedFrameTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreparedFrameTransaction.swift; sourceTree = "<group>"; };
 		9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlotAllocatorTests.swift; sourceTree = "<group>"; };
 		A38E8668FFBC3522674AE29C /* HoverPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPopupOverlay.swift; sourceTree = "<group>"; };
+		A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BEAMLaunchConfiguration.swift; sourceTree = "<group>"; };
 		A583EB0DCE480D1A5FC7E440 /* BottomPanelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPanelState.swift; sourceTree = "<group>"; };
 		A5BA668E827BD6B77C72E9D6 /* CoreTextMetalRendererCursorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextMetalRendererCursorTests.swift; sourceTree = "<group>"; };
 		A6ADDC2FFB43010EDEF1C576 /* AgentContextBarState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContextBarState.swift; sourceTree = "<group>"; };
@@ -1078,6 +1083,7 @@
 			children = (
 				FA4E6DE435D18BF410FFA386 /* ApplicationQuitCoordinator.swift */,
 				B9FC2118EA77254CBCAE7B0B /* AppState.swift */,
+				A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */,
 				F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */,
 				8A84218125A9F97DBE87F349 /* ContentView.swift */,
 				5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */,
@@ -1616,6 +1622,7 @@
 			files = (
 				AB200EDC2BD9693D8D52CE98 /* AppState.swift in Sources */,
 				7957B1F4F4DA5A94778DEACC /* ApplicationQuitCoordinator.swift in Sources */,
+				86B26083ED761AA5C720A91E /* BEAMLaunchConfiguration.swift in Sources */,
 				19E561E5F7841B2CF1ABB085 /* BEAMProcessManager.swift in Sources */,
 				18F0DDA03D08C0B4302DCCF4 /* BitmapRasterizer.swift in Sources */,
 				B0ED5B46A4F6317344D58C88 /* ByteCursor.swift in Sources */,
@@ -1677,6 +1684,7 @@
 			files = (
 				6F9C2C373304BAEF0F5BB93F /* AppState.swift in Sources */,
 				2A311D9C73CA3B812848443F /* ApplicationQuitCoordinator.swift in Sources */,
+				F97CBAD5A30E279054B0DD6F /* BEAMLaunchConfiguration.swift in Sources */,
 				F0B5BDD2F0982B527A05CDF8 /* BEAMProcessManager.swift in Sources */,
 				53EDC20DDE726C337975B053 /* BitmapRasterizer.swift in Sources */,
 				A12056DE54484A143D4293AF /* ByteCursor.swift in Sources */,
@@ -1739,6 +1747,7 @@
 			files = (
 				A29BB96B8F84AA489CBA0C5F /* AppState.swift in Sources */,
 				1808E0AC241B5757FC71497F /* ApplicationQuitCoordinator.swift in Sources */,
+				A7F878ABD8893EA0A324E6D6 /* BEAMLaunchConfiguration.swift in Sources */,
 				E20D436BEA6628E24B9FFA2C /* BEAMProcessManager.swift in Sources */,
 				932C189ED218AC16620D8C19 /* BitmapRasterizer.swift in Sources */,
 				E2162A8A372C564E37940E11 /* ByteCursor.swift in Sources */,
@@ -1930,6 +1939,7 @@
 				F12D6284209D6D32037E6644 /* AppState.swift in Sources */,
 				715B62DED371AC2E5E15DE1A /* ApplicationQuitCoordinator.swift in Sources */,
 				D38FD803F967B7B0A3EDC7AE /* ApplicationQuitCoordinatorTests.swift in Sources */,
+				BEEF842411279AB7C445726F /* BEAMLaunchConfiguration.swift in Sources */,
 				79E8353F67F7638721A02A54 /* BEAMProcessManager.swift in Sources */,
 				43116CD030B0374BE3F4B3FE /* BEAMProcessManagerTests.swift in Sources */,
 				64A5A16E02B3E2694060F1A1 /* BitmapRasterizer.swift in Sources */,

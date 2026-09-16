@@ -24,7 +24,7 @@ final class BEAMProcessManager {
     private let appInstanceID = UUID().uuidString.lowercased()
 
     /// Optional nonce supplied only by the launcher that created this app instance.
-    private let launchNonce = BEAMProcessManager.internalLaunchNonce(
+    private let launchNonce = BEAMLaunchConfiguration.launchNonce(
         from: ProcessInfo.processInfo.arguments
     )
     /// File handle for reading protocol messages from the BEAM (BEAM's stdout).
@@ -85,154 +85,9 @@ final class BEAMProcessManager {
     /// Whether a BEAM child is currently running.
     var hasLiveProcess: Bool { process?.isRunning ?? false }
 
-    /// Resolves the BEAM release executable inside the app bundle.
-    /// Returns nil if not running as a bundled app.
-    static func beamExecutableURL() -> URL? {
-        guard let resourceURL = Bundle.main.resourceURL else { return nil }
-        let releaseURL = resourceURL
-            .appendingPathComponent("release")
-            .appendingPathComponent("bin")
-            .appendingPathComponent("minga_macos")
-
-        guard FileManager.default.fileExists(atPath: releaseURL.path) else { return nil }
-        return releaseURL
-    }
-
     /// Whether the app is running as a bundle with an embedded BEAM release.
     static var isBundleMode: Bool {
-        beamExecutableURL() != nil
-    }
-
-    /// Selects the Minga CLI arguments that the embedded BEAM should receive.
-    ///
-    /// Only flags understood by `Minga.CLI` are forwarded, while positional targets are preserved in their original order. The generated OTP release launcher does not forward arguments after its `start` command, so `start()` transports this array through `MINGA_CLI_ARGS_B64` instead.
-    static func forwardedCLIArguments(from appArguments: [String]) -> [String] {
-        var cliArguments: [String] = []
-        let valueFlags: Set<String> = ["--config", "--debug-log", "-D"]
-        let booleanFlags: Set<String> = [
-            "--editor", "--no-context", "--minimal", "--safe", "-Q"
-        ]
-        var expectsValue = false
-        var skipsInternalValue = false
-
-        for arg in appArguments.dropFirst() {
-            if skipsInternalValue {
-                skipsInternalValue = false
-                continue
-            }
-            if arg == "--minga-launch-nonce" {
-                skipsInternalValue = true
-                continue
-            }
-            if expectsValue {
-                cliArguments.append(arg)
-                expectsValue = false
-                continue
-            }
-
-            if valueFlags.contains(arg) {
-                cliArguments.append(arg)
-                expectsValue = true
-            } else if booleanFlags.contains(arg) || !arg.hasPrefix("-") {
-                cliArguments.append(arg)
-            }
-        }
-
-        return cliArguments
-    }
-
-    /// Extracts the launch nonce without forwarding this internal flag to Minga.CLI.
-    static func internalLaunchNonce(from appArguments: [String]) -> String? {
-        let arguments = Array(appArguments.dropFirst())
-        guard let index = arguments.firstIndex(of: "--minga-launch-nonce"),
-              arguments.indices.contains(index + 1)
-        else { return nil }
-
-        let value = arguments[index + 1]
-        return value.isEmpty ? nil : value
-    }
-
-    /// Encodes CLI arguments for lossless transport through the release environment.
-    static func encodedCLIArguments(_ arguments: [String]) -> String {
-        arguments.map { argument in
-            Data(argument.utf8)
-                .base64EncodedString()
-                .replacingOccurrences(of: "+", with: "-")
-                .replacingOccurrences(of: "/", with: "_")
-                .replacingOccurrences(of: "=", with: "")
-        }.joined(separator: ",")
-    }
-
-    /// Removes VM arguments that could enable distribution before application boot.
-    static func sanitizedPreVMEnvironment(_ inherited: [String: String]) -> [String: String] {
-        var environment = inherited
-        environment.removeValue(forKey: "ERL_AFLAGS")
-        environment.removeValue(forKey: "ERL_FLAGS")
-        environment.removeValue(forKey: "ERL_ZFLAGS")
-        environment.removeValue(forKey: "ELIXIR_ERL_OPTIONS")
-        environment.removeValue(forKey: "RELEASE_VM_ARGS")
-        environment["MINGA_EXPECT_DISTRIBUTION"] = "0"
-        environment["RELEASE_DISTRIBUTION"] = "none"
-        return environment
-    }
-
-    /// Darwin's private per-user temporary directory used as the validated IPC parent.
-    static func ipcRuntimeParentURL() -> URL {
-        let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
-        precondition(length > 1, "Darwin per-user temporary directory is unavailable")
-
-        var buffer = [CChar](repeating: 0, count: length)
-        precondition(
-            confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) == length,
-            "Darwin per-user temporary directory changed while reading it"
-        )
-
-        return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
-            .standardizedFileURL
-    }
-
-    /// Returns the working directory the embedded BEAM should start in.
-    ///
-    /// Finder, Spotlight, and Dock launches commonly inherit `/` as their cwd.
-    /// That is a poor default project root, so bundle launches fall back to HOME
-    /// when the inherited cwd is a launch-services placeholder rather than a user directory.
-    static func defaultWorkingDirectoryURL(
-        currentDirectoryPath: String = FileManager.default.currentDirectoryPath,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        bundleURL: URL? = Bundle.main.bundleURL,
-        fileExists: @escaping (String) -> Bool = { path in
-            var isDirectory: ObjCBool = false
-            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
-        }
-    ) -> URL {
-        let currentURL = URL(fileURLWithPath: currentDirectoryPath).standardizedFileURL
-
-        guard shouldUseHomeWorkingDirectory(currentDirectoryPath: currentDirectoryPath, environment: environment, bundleURL: bundleURL),
-              let homePath = environment["HOME"],
-              !homePath.isEmpty,
-              fileExists(homePath)
-        else {
-            return currentURL
-        }
-
-        return URL(fileURLWithPath: homePath).standardizedFileURL
-    }
-
-    private static func shouldUseHomeWorkingDirectory(
-        currentDirectoryPath: String,
-        environment: [String: String],
-        bundleURL: URL?
-    ) -> Bool {
-        let currentPath = URL(fileURLWithPath: currentDirectoryPath).standardizedFileURL.path
-
-        if currentPath == "/" || currentPath == "/Applications" || currentPath == "/System/Applications" {
-            return true
-        }
-
-        guard let bundleURL else { return false }
-
-        let bundlePath = bundleURL.standardizedFileURL.path
-        return currentPath == bundlePath || currentPath.hasPrefix(bundlePath + "/")
+        BEAMLaunchInputAcquirer.embeddedExecutableURL() != nil
     }
 
     /// Spawns the BEAM release as a child process with piped stdin/stdout.
@@ -242,7 +97,7 @@ final class BEAMProcessManager {
         if exitIntent == .restartScheduled {
             exitIntent = .running
         }
-        guard let execURL = Self.beamExecutableURL() else {
+        guard let configuration = launchConfiguration() else {
             NSLog("BEAMProcessManager: no embedded BEAM release found")
             return
         }
@@ -251,10 +106,10 @@ final class BEAMProcessManager {
         beginBackgroundActivityIfNeeded()
 
         let proc = Process()
-        proc.executableURL = execURL
-
-        let cliArguments = Self.forwardedCLIArguments(from: ProcessInfo.processInfo.arguments)
-        proc.arguments = ["start"]
+        proc.executableURL = configuration.executableURL
+        proc.arguments = configuration.arguments
+        proc.environment = configuration.environment
+        proc.currentDirectoryURL = configuration.workingDirectoryURL
 
         // Set up pipes for the port protocol.
         let stdinPipe = Pipe()
@@ -266,36 +121,6 @@ final class BEAMProcessManager {
         // The BEAM writes log messages to stderr; they'll appear in
         // Console.app and Xcode's debug output.
         proc.standardError = FileHandle.standardError
-
-        // Tell the BEAM to use connected mode (don't spawn a GUI).
-        var env = Self.sanitizedPreVMEnvironment(ProcessInfo.processInfo.environment)
-        env["MINGA_PORT_MODE"] = "connected"
-        env["MINGA_CLI_ARGS_B64"] = Self.encodedCLIArguments(cliArguments)
-        env["MINGA_APP_INSTANCE_ID"] = appInstanceID
-        env["MINGA_APP_PID"] = String(getpid())
-        env["MINGA_APP_EUID"] = String(geteuid())
-        env["MINGA_IPC_RUNTIME_PARENT"] = Self.ipcRuntimeParentURL().path
-        if let launchNonce {
-            env["MINGA_LAUNCH_NONCE"] = launchNonce
-        } else {
-            env.removeValue(forKey: "MINGA_LAUNCH_NONCE")
-        }
-
-        let workingDirectoryURL = Self.defaultWorkingDirectoryURL(environment: env)
-        proc.currentDirectoryURL = workingDirectoryURL
-        env["PWD"] = workingDirectoryURL.path
-
-        if cliArguments.contains("--safe") || cliArguments.contains("-Q") {
-            env["MINGA_SAFE_MODE"] = "1"
-        }
-
-        // This bundle boot is intentionally local. Strip inherited VM flags
-        // that could enable distribution before Elixir can reject it, and use
-        // a fresh cookie rather than the release's baked-in fallback.
-        env["RELEASE_COOKIE"] = Self.randomReleaseCookie()
-        env["MINGA_RANDOM_RELEASE_COOKIE"] = "1"
-
-        proc.environment = env
 
         proc.terminationHandler = { [weak self] process in
             Task { @MainActor in
@@ -413,11 +238,6 @@ final class BEAMProcessManager {
         return disposition
     }
 
-    private static func randomReleaseCookie() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "")
-            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
-    }
-
     // MARK: - Termination decision (pure, testable)
 
     /// What to do when the BEAM child process exits.
@@ -451,6 +271,16 @@ final class BEAMProcessManager {
     }
 
     // MARK: - Private
+
+    /// Acquires current inputs for one start or restart, then applies launch policy in one pure build.
+    private func launchConfiguration() -> BEAMLaunchConfiguration? {
+        guard let inputs = BEAMLaunchInputAcquirer.current(
+            appInstanceID: appInstanceID,
+            launchNonce: launchNonce
+        ) else { return nil }
+
+        return BEAMLaunchConfiguration.build(from: inputs)
+    }
 
     /// Handles BEAM exit. Kept non-`private` so the termination path can be
     /// exercised directly in tests that assert the main actor is not blocked.
