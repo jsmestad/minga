@@ -2116,6 +2116,7 @@ final class EditorNSView: MTKView {
     }
 
     func seedTrackpadReconciliationForTesting(windowId: UInt16, unconfirmedLines: Int, confirmedAnchorTop: UInt32, settling: Bool) {
+        scrollAnimationsReduceMotionDisabled = false
         scrollTargetWindowId = settling ? nil : windowId
         scrollSettleWindowId = settling ? windowId : nil
         scrollUnconfirmedLines = unconfirmedLines
