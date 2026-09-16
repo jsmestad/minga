@@ -78,39 +78,40 @@ struct MingaMenuCommands: Commands {
     private var latencyHUDState: LatencyHUDState { appState.gui.latencyHUDState }
 
     var body: some Commands {
-        // Replace the default text editing commands (Cmd+C/V/X/Z/A) with
-        // our own versions that route through the BEAM.
-        CommandGroup(replacing: .textEditing) {
+        CommandGroup(replacing: .undoRedo) {
             Button("Undo") {
-                NativeMenuHistoryRouter.perform(.undo, encoder: encoder)
+                routeTextEditingCommand(.undo) { $0.sendExecuteCommand(name: "undo") }
             }
             .keyboardShortcut("z", modifiers: .command)
+            .disabled(!textEditingCommandIsAvailable(.undo))
             Button("Redo") {
-                NativeMenuHistoryRouter.perform(.redo, encoder: encoder)
+                routeTextEditingCommand(.redo) { $0.sendExecuteCommand(name: "redo") }
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!textEditingCommandIsAvailable(.redo))
+        }
 
-            Divider()
-
-            Button("Cut") { routeTextEditingCommand(.cut) { encoder?.sendCmdCut() } }
+        CommandGroup(replacing: .pasteboard) {
+            Button("Cut") { routeTextEditingCommand(.cut) { $0.sendCmdCut() } }
                 .keyboardShortcut("x", modifiers: .command)
-                .disabled(!connected)
-            Button("Copy") { routeTextEditingCommand(.copy) { encoder?.sendCmdCopy() } }
+                .disabled(!textEditingCommandIsAvailable(.cut))
+            Button("Copy") { routeTextEditingCommand(.copy) { $0.sendCmdCopy() } }
                 .keyboardShortcut("c", modifiers: .command)
-                .disabled(!connected)
-            Button("Paste") { routeTextEditingCommand(.paste, fallback: pasteFromClipboard) }
+                .disabled(!textEditingCommandIsAvailable(.copy))
+            Button("Paste") { routeTextEditingCommand(.paste) { pasteFromClipboard(using: $0) } }
                 .keyboardShortcut("v", modifiers: .command)
-                .disabled(!connected)
+                .disabled(!textEditingCommandIsAvailable(.paste))
+        }
+
+        CommandGroup(replacing: .textEditing) {
             Button("Select All") {
-                routeTextEditingCommand(.selectAll) {
-                    encoder?.sendExecuteCommand(name: "select_all")
-                }
+                routeTextEditingCommand(.selectAll) { $0.sendExecuteCommand(name: "select_all") }
             }
             .keyboardShortcut("a", modifiers: .command)
-            .disabled(!connected)
+            .disabled(!textEditingCommandIsAvailable(.selectAll))
+        }
 
-            Divider()
-
+        CommandGroup(after: .textEditing) {
             Button("Find…") { encoder?.sendSearchFocus(replaceMode: false) }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(!connected)
@@ -178,16 +179,18 @@ struct MingaMenuCommands: Commands {
         }
     }
 
-    private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: () -> Void) {
-        if !NativeTextCommandRouter.perform(command) {
-            fallback()
-        }
+    private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: (InputEncoder) -> Void) {
+        NativeMenuTextRouter.perform(command, encoder: encoder, fallback: fallback)
+    }
+
+    private func textEditingCommandIsAvailable(_ command: NativeTextCommandRouter.Command) -> Bool {
+        NativeMenuTextRouter.isAvailable(command, encoder: encoder)
     }
 
     /// Reads the system pasteboard and sends a paste event to the BEAM.
-    private func pasteFromClipboard() {
+    private func pasteFromClipboard(using encoder: InputEncoder) {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
-        encoder?.sendPasteEvent(text: text)
+        encoder.sendPasteEvent(text: text)
     }
 }
 
@@ -201,7 +204,7 @@ struct MingaMenuCommands: Commands {
 /// - **Dev mode**: BEAM spawned us. We read/write our own stdin/stdout.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let appState = AppState()
+    let appState: AppState
 
     private var beamManager: BEAMProcessManager?
     private var protocolConnection: ProtocolConnection?
@@ -220,7 +223,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var acceptsOpenRequests = false
     private let frameResourcePolicy = FrameResourcePolicy.default
 
+    override init() {
+        let appState = AppState()
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MenuSnapshotProbe.connectedEnvironmentKey] == "1" {
+            appState.encoder = NullInputEncoder()
+        }
+#endif
+        self.appState = appState
+        super.init()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+#if DEBUG
+        if runMenuSnapshotProbeIfRequested() {
+            return
+        }
+#endif
+
         // Ignore SIGPIPE so broken pipe writes return EPIPE instead of
         // killing the process. Without this, any write to the BEAM pipe
         // after Ctrl+C delivers SIGPIPE (default action: terminate).
@@ -514,6 +534,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.flushPendingOpenRequests()
         }
     }
+
+#if DEBUG
+    private func runMenuSnapshotProbeIfRequested() -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        guard let outputPath = environment[MenuSnapshotProbe.outputPathEnvironmentKey] else { return false }
+        Task { @MainActor in
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            let editorResponder = NSView(frame: window.contentLayoutRect)
+            window.contentView = editorResponder
+            window.makeKeyAndOrderFront(nil)
+            try? await Task.sleep(for: .milliseconds(100))
+            do {
+                try MenuSnapshotProbe.writeMainMenu(to: outputPath)
+                window.orderOut(nil)
+                coreConnectionIsLive = false
+                NSApp.terminate(nil)
+            } catch {
+                NSLog("Minga menu snapshot probe failed: %@", String(describing: error))
+                window.orderOut(nil)
+                coreConnectionIsLive = false
+                NSApp.terminate(nil)
+            }
+        }
+        return true
+    }
+#endif
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true

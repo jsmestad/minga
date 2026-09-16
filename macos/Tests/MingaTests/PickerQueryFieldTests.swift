@@ -70,29 +70,40 @@ struct PickerQueryFieldTests {
         #expect(!NativeTextCommandRouter.route(.copy, to: NSTextField()) { _, _ in true })
     }
 
-    @Test("menu undo and redo use semantic editor commands outside native fields")
-    @MainActor func menuUndoRedoEditorFallback() {
+    @Test("standard Edit actions use exactly one editor fallback outside native fields")
+    @MainActor func menuEditorFallback() {
         let encoder = SpyEncoder()
         let editorResponder = NSView()
+        var fallbacks: [NativeTextCommandRouter.Command] = []
 
-        NativeMenuHistoryRouter.route(.undo, encoder: encoder, responder: editorResponder) { _, _ in
-            Issue.record("The editor surface must not use native text history")
-            return true
-        }
-        NativeMenuHistoryRouter.route(.redo, encoder: encoder, responder: editorResponder) { _, _ in
-            Issue.record("The editor surface must not use native text history")
-            return true
+        for command in NativeTextCommandRouter.Command.allCases {
+            NativeMenuTextRouter.route(command, encoder: encoder, responder: editorResponder) { _, _ in
+                Issue.record("The editor surface must not use native text actions")
+                return true
+            } fallback: { _ in
+                fallbacks.append(command)
+            }
         }
 
-        #expect(encoder.guiActions == [
-            .executeCommand(name: "undo"),
-            .executeCommand(name: "redo")
-        ])
-        #expect(encoder.keyPressCalls.isEmpty)
+        #expect(fallbacks == NativeTextCommandRouter.Command.allCases)
     }
 
-    @Test("menu undo and redo remain native for picker and Settings field editors")
-    @MainActor func menuUndoRedoNativeFieldOwnership() {
+    @Test("editor Select All sends the semantic document command")
+    @MainActor func editorSelectAll() {
+        let encoder = SpyEncoder()
+
+        NativeMenuTextRouter.route(.selectAll, encoder: encoder, responder: NSView()) { _, _ in
+            Issue.record("The editor surface must not use native text actions")
+            return true
+        } fallback: { fallbackEncoder in
+            fallbackEncoder.sendExecuteCommand(name: "select_all")
+        }
+
+        #expect(encoder.guiActions == [.executeCommand(name: "select_all")])
+    }
+
+    @Test("native field ownership consumes unavailable actions without falling through to the editor")
+    @MainActor func menuNativeFieldOwnership() {
         let encoder = SpyEncoder()
         let pickerQueryFieldEditor = NSTextView()
         let settingsSearchFieldEditor = NSTextView()
@@ -100,18 +111,17 @@ struct PickerQueryFieldTests {
         for fieldEditor in [pickerQueryFieldEditor, settingsSearchFieldEditor] {
             var routedSelectors: [String] = []
 
-            NativeMenuHistoryRouter.route(.undo, encoder: encoder, responder: fieldEditor) { selector, target in
-                #expect(target === fieldEditor)
-                routedSelectors.append(NSStringFromSelector(selector))
-                return false
-            }
-            NativeMenuHistoryRouter.route(.redo, encoder: encoder, responder: fieldEditor) { selector, target in
-                #expect(target === fieldEditor)
-                routedSelectors.append(NSStringFromSelector(selector))
-                return false
+            for command in NativeTextCommandRouter.Command.allCases {
+                NativeMenuTextRouter.route(command, encoder: encoder, responder: fieldEditor) { selector, target in
+                    #expect(target === fieldEditor)
+                    routedSelectors.append(NSStringFromSelector(selector))
+                    return false
+                } fallback: { _ in
+                    Issue.record("A native field action must never fall through to the editor")
+                }
             }
 
-            #expect(routedSelectors == ["undo:", "redo:"])
+            #expect(routedSelectors == ["undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:"])
         }
 
         #expect(encoder.guiActions.isEmpty)
@@ -120,33 +130,73 @@ struct PickerQueryFieldTests {
 
     @Test("disconnected editor fallback is harmless")
     @MainActor func disconnectedEditorFallback() {
-        NativeMenuHistoryRouter.route(.undo, encoder: nil, responder: nil) { _, _ in
-            Issue.record("No native responder is available")
-            return true
-        }
-        NativeMenuHistoryRouter.route(.redo, encoder: nil, responder: NSView()) { _, _ in
-            Issue.record("The editor surface must not use native text history")
-            return true
+        for command in NativeTextCommandRouter.Command.allCases {
+            NativeMenuTextRouter.route(command, encoder: nil, responder: nil) { _, _ in
+                Issue.record("No native responder is available")
+                return true
+            } fallback: { _ in
+                Issue.record("No editor connection is available")
+            }
+            #expect(!NativeMenuTextRouter.isAvailable(command, encoder: nil, responder: NSView()) { _, _ in nil })
         }
     }
 
-    @Test("disconnected editor preserves native field history ownership")
+    @Test("disconnected editor preserves native field ownership")
     @MainActor func disconnectedNativeFieldOwnership() {
         let fieldEditor = NSTextView()
         var routedSelectors: [String] = []
 
-        NativeMenuHistoryRouter.route(.undo, encoder: nil, responder: fieldEditor) { selector, target in
-            #expect(target === fieldEditor)
-            routedSelectors.append(NSStringFromSelector(selector))
-            return true
-        }
-        NativeMenuHistoryRouter.route(.redo, encoder: nil, responder: fieldEditor) { selector, target in
-            #expect(target === fieldEditor)
-            routedSelectors.append(NSStringFromSelector(selector))
-            return true
+        for command in NativeTextCommandRouter.Command.allCases {
+            NativeMenuTextRouter.route(command, encoder: nil, responder: fieldEditor) { selector, target in
+                #expect(target === fieldEditor)
+                routedSelectors.append(NSStringFromSelector(selector))
+                return true
+            } fallback: { _ in
+                Issue.record("A disconnected native field must not call an editor fallback")
+            }
         }
 
-        #expect(routedSelectors == ["undo:", "redo:"])
+        #expect(routedSelectors == ["undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:"])
+    }
+
+    @Test("Select All operates on the focused native field without a backend")
+    @MainActor func disconnectedNativeFieldSelectAll() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
+        let field = NSTextField(frame: NSRect(x: 20, y: 20, width: 280, height: 24))
+        field.stringValue = "disposable query"
+        window.contentView = NSView(frame: window.contentLayoutRect)
+        window.contentView?.addSubview(field)
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(field))
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+        fieldEditor.allowsUndo = true
+        let undoManager = try #require(fieldEditor.undoManager)
+        undoManager.removeAllActions()
+        undoManager.groupsByEvent = false
+        let isAvailable: (NativeTextCommandRouter.Command) -> Bool = { command in
+            NativeMenuTextRouter.isAvailable(command, encoder: nil, responder: fieldEditor) { selector, responder in
+                NSApp.target(forAction: selector, to: responder, from: nil)
+            }
+        }
+
+        #expect(!isAvailable(.undo))
+        #expect(!isAvailable(.redo))
+
+        NativeMenuTextRouter.route(.selectAll, encoder: nil, responder: fieldEditor) { selector, target in
+            target.tryToPerform(selector, with: nil)
+        } fallback: { _ in
+            Issue.record("The native field owns Select All")
+        }
+
+        #expect(fieldEditor.selectedRange() == NSRange(location: 0, length: fieldEditor.string.utf16.count))
+
+        fieldEditor.string = "replacement"
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: fieldEditor) { _ in }
+        undoManager.endUndoGrouping()
+        #expect(isAvailable(.undo))
+        #expect(!isAvailable(.redo))
+        window.orderOut(nil)
     }
 
     @Test("query payloads stay within the complete UTF-8 wire limit")
