@@ -45,6 +45,35 @@ struct KeyboardInputTests {
     }
 
     @MainActor
+    private func makeRequiredView(spy: SpyEncoder) -> EditorNSView? {
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
+        let guiState = GUIState()
+        let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
+        var factories = NativeRenderFactories.production
+        factories.makeLibrary = { device in
+            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+        }
+        guard let ctRenderer = CoreTextMetalRenderer(factories: factories) else { return nil }
+        ctRenderer.setupRenderers(fontManager: fm)
+        return EditorNSView(encoder: spy, dispatcher: disp,
+                            coreTextRenderer: ctRenderer, fontManager: fm)
+    }
+
+    @MainActor
+    private func makeRequiredWindowedView(spy: SpyEncoder) -> (view: EditorNSView, window: NSWindow, textField: NSTextField)? {
+        guard let view = makeRequiredView(spy: spy) else { return nil }
+        view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        let container = NSView(frame: view.frame)
+        let textField = NSTextField(frame: NSRect(x: 16, y: 16, width: 180, height: 24))
+        container.addSubview(view)
+        container.addSubview(textField)
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        return (view, window, textField)
+    }
+
+    @MainActor
     private func makeWindowedView(spy: SpyEncoder) -> (view: EditorNSView, window: NSWindow, textField: NSTextField)? {
         guard let view = makeView(spy: spy) else { return nil }
         view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -283,6 +312,135 @@ struct KeyboardInputTests {
         view.keyDown(with: event)
 
         #expect(spy.keyPressCalls[0].codepoint == 57376)
+    }
+
+    @Test("composition editing and candidate keys reach the input method without BEAM fallthrough")
+    @MainActor func compositionKeysRouteToInputMethod() throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+        var handledKeyCodes: [UInt16] = []
+        view.inputMethodEventHandlerForTesting = { event in
+            handledKeyCodes.append(event.keyCode)
+            return event.keyCode != 51
+        }
+        view.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        let keyCodes: [UInt16] = [51, 117, 123, 124, 125, 126, 116, 121, 48, 36]
+        for keyCode in keyCodes {
+            view.keyDown(with: try #require(keyEvent(keyCode: keyCode)))
+        }
+
+        #expect(handledKeyCodes == keyCodes)
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(view.hasMarkedText())
+    }
+
+    @Test("input method confirmation commits resolved text exactly once")
+    @MainActor func compositionConfirmationCommitsOnce() throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+        view.setMarkedText(
+            "にほん",
+            selectedRange: NSRange(location: 3, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        view.inputMethodEventHandlerForTesting = { event in
+            guard event.keyCode == 36 else { return false }
+            view.insertText(
+                "日本",
+                replacementRange: NSRange(location: NSNotFound, length: 0)
+            )
+            return true
+        }
+
+        view.keyDown(with: try #require(keyEvent(keyCode: 36)))
+
+        #expect(spy.keyPressCalls.map(\.codepoint) == "日本".unicodeScalars.map(\.value))
+        #expect(view.hasMarkedText() == false)
+    }
+
+    @Test("input method cancellation clears marked text without changing the document")
+    @MainActor func compositionCancellationDoesNotCommit() throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+        view.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        view.inputMethodEventHandlerForTesting = { event in
+            guard event.keyCode == 53 else { return false }
+            view.setMarkedText(
+                "",
+                selectedRange: NSRange(location: 0, length: 0),
+                replacementRange: NSRange(location: NSNotFound, length: 0)
+            )
+            return true
+        }
+
+        view.keyDown(with: try #require(keyEvent(keyCode: 53)))
+
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(view.hasMarkedText() == false)
+    }
+
+    @Test("focus loss cancels composition and rejects a late commit callback")
+    @MainActor func focusLossRejectsLateCompositionCommit() throws {
+        let spy = SpyEncoder()
+        let mounted = try #require(makeRequiredWindowedView(spy: spy))
+        #expect(mounted.window.makeFirstResponder(mounted.view))
+        mounted.view.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        #expect(mounted.window.makeFirstResponder(mounted.textField))
+        mounted.view.insertText(
+            "仮名",
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(mounted.view.hasMarkedText() == false)
+    }
+
+    @Test("connection replacement rejects old composition callbacks and admits fresh text")
+    @MainActor func connectionReplacementRejectsOldCompositionCommit() throws {
+        let oldSpy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: oldSpy))
+        view.setMarkedText(
+            "かな",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        let replacementSpy = SpyEncoder()
+        view.replaceConnection(encoder: replacementSpy)
+
+        view.insertText(
+            "仮名",
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(replacementSpy.keyPressCalls.isEmpty)
+
+        view.inputMethodEventHandlerForTesting = { event in
+            view.insertText(
+                event.characters ?? "",
+                replacementRange: NSRange(location: NSNotFound, length: 0)
+            )
+            return true
+        }
+        view.keyDown(with: try #require(keyEvent(
+            keyCode: 0,
+            characters: "a",
+            charactersIgnoringModifiers: "a"
+        )))
+
+        #expect(replacementSpy.keyPressCalls.map(\.codepoint) == [UnicodeScalar("a").value])
     }
 
     // MARK: - Modifier encoding
