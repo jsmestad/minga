@@ -1065,7 +1065,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func resetRequiredScrollPresentationClearsLocalStateOnce() throws {
         let (dispatcher, gui) = makeDispatcher()
         var resetCount = 0
-        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in resetCount += 1 }
 
         let resetPresentation = GUIScrollPresentation(
             windowId: 7,
@@ -1131,7 +1131,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func layoutGenerationChangeFiresDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1174,7 +1174,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func identicalAnchorKeyDoesNotDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
 
         let presentation = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1209,7 +1209,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func newerScrollSeqDiscardsEvenWithSameAnchorKey() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1256,7 +1256,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func unchangedScrollSeqDoesNotDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1290,11 +1290,11 @@ struct CommandDispatcherRoutingTests {
         #expect(discardCount == 0)
     }
 
-    @Test("anchorTop-only change fires scroll presentation discard")
-    @MainActor func anchorTopChangeFiresDiscard() throws {
+    @Test("ordinary anchor movement preserves local scroll presentation")
+    @MainActor func anchorEchoPreservesPresentation() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1330,7 +1330,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: shifted
         )))
-        #expect(discardCount == 1)
+        #expect(discardCount == 0)
     }
 
     @Test("guiWindowOverlayDelta updates matching retained content")
@@ -2264,7 +2264,7 @@ struct CommandDispatcherStagingTests {
     @MainActor func unrelatedEditorCommitsPreserveResidentProjection() throws {
         let (dispatcher, gui) = makeDispatcher()
         var resetCount = 0
-        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+        dispatcher.onScrollPresentationReset = { _ in resetCount += 1 }
         let observationCount = Mutex(0)
         let resetPresentation = GUIScrollPresentation(
             windowId: 7,
@@ -3083,7 +3083,7 @@ struct CommandDispatcherStagingTests {
             view: { _ in AnyView(EmptyView()) }
         )
         dispatcher.onFontChanged = { _, _, _, _ in events.append("font") }
-        dispatcher.onScrollPresentationReset = { events.append("scroll") }
+        dispatcher.onScrollPresentationReset = { _ in events.append("scroll") }
         dispatcher.onTitleChanged = { _ in events.append("title") }
         dispatcher.onWindowBgChanged = { _ in events.append("background") }
         dispatcher.onModeChanged = { _ in events.append("mode") }

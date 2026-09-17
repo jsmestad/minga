@@ -106,6 +106,104 @@ struct TemporalOffscreenMetalTests {
         }
     }
 
+    @Test("resident scrolling fills text and line numbers before the echo", arguments: [22, -22])
+    @MainActor
+    func residentScrollFillsViewport(offsetRows: Int) async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        let cellW = Float(fontManager.cellWidth)
+        let cellH = Float(fontManager.cellHeight)
+        let cols: UInt16 = 80
+        let visibleRows: UInt16 = 40
+        let totalRows: UInt32 = 1_000
+        let width = Int((Float(cols) * cellW).rounded(.up))
+        let height = Int(Float(visibleRows) * cellH)
+        var fs = FrameState(cols: cols, rows: visibleRows)
+        fs.defaultBg = Self.neutral
+        fs.gutterColors.fg = 0xBBBBBB
+        fs.totalLineCount = totalRows
+
+        func geometry(_ top: UInt32) -> GUIPaneGeometry {
+            GUIPaneGeometry(
+                windowId: 1,
+                totalRect: GUICellRect(row: 0, col: 0, width: cols, height: visibleRows),
+                contentRect: GUICellRect(row: 0, col: 0, width: cols, height: visibleRows),
+                textRect: GUICellRect(row: 0, col: 5, width: cols - 5, height: visibleRows),
+                gutterRect: GUICellRect(row: 0, col: 0, width: 5, height: visibleRows),
+                clipRect: GUICellRect(row: 0, col: 0, width: cols, height: visibleRows),
+                viewport: GUIViewportSummary(top: top, left: 0, rows: visibleRows, cols: cols - 5, totalLines: totalRows, visualRowOffset: 0, totalVisualRows: totalRows),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 1),
+                hitRegions: []
+            )
+        }
+        func scroll(_ top: UInt32) -> GUIScrollPresentation {
+            GUIScrollPresentation(windowId: 1, resetRequired: false, anchorTop: top, anchorLeft: 0,
+                anchorVisualRowOffset: 0, visibleStartLine: top, visibleEndLine: top + UInt32(visibleRows),
+                overscanStartLine: 0, overscanEndLine: totalRows, contentEpoch: 1, layoutGeneration: 1)
+        }
+        let allRows = (0..<totalRows).map { line in
+            GUIVisualRow(rowType: .normal, rowId: UInt64(line + 1), bufLine: line,
+                contentHash: line + 1, text: "Resident line \(line + 1): already loaded in memory", spans: [])
+        }
+        let initial = try GUIWindowContent(windowId: 1, fullRefresh: true, contentEpoch: 1,
+            cursorVisible: false, cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: allRows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], paneGeometry: geometry(100), scrollPresentation: scroll(100))
+        let echoed = try #require(initial.applyingRowsDelta(GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: 1, cursorVisible: false, cursorRow: 0, cursorCol: 0,
+            cursorShape: .block, scrollLeft: 0, baseRowCount: totalRows, resultRowCount: totalRows,
+            rowSplices: [], selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [], paneGeometry: geometry(UInt32(100 + offsetRows)),
+            cursorline: nil, scrollPresentation: scroll(UInt32(100 + offsetRows)))))
+        let fullGutter = Wire.WindowGutter(windowId: 1, contentRow: 0, contentCol: 0,
+            contentHeight: visibleRows, isActive: true, contentWidth: cols,
+            cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 4, signColWidth: 1,
+            entries: (0..<totalRows).map { Wire.GutterEntry(bufLine: $0, displayType: .normal, signType: .none) })
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        let renderer = try #require(makeRenderer(factories: factories, fontManager: fontManager))
+
+        for (index, fixture) in [(initial, Float(offsetRows) * cellH), (echoed, Float(0))].enumerated() {
+            let (content, offset) = fixture
+            #expect(content.rowStore.count == Int(totalRows))
+            let preparation = ResidentRenderPreparation.prepare(content: content,
+                fallbackVisibleRows: Int(visibleRows), overscanRows: RendererSignposts.configuredOverscanRows,
+                localOffsetRows: Double(offset / cellH))
+            #expect(preparation.commands.count == 44)
+            let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+            let drawable = ReadbackDrawable(texture: texture, drawableID: index + 1)
+            let outcome = await waiter.awaitOutcome {
+                renderer.render(frameState: fs, fontManager: fontManager, cursorBlinkVisible: false,
+                    windowContents: [1: content], windowGutters: [1: fullGutter],
+                    drawableProvider: { drawable }, viewportSize: CGSize(width: width, height: height),
+                    contentScale: 1, scrollOffset: SIMD2<Float>(0, offset),
+                    presentationWindowId: 1, presentationInputSeq: UInt32(index + 1),
+                    onPresented: { waiter.succeed($0) })
+            }
+            guard case .presented = outcome else {
+                Issue.record("Scroll frame did not present: \(outcome)")
+                return
+            }
+            let image = try #require(await OffscreenReadback.read(texture: texture, queue: queue))
+            let background = image.pixel(x: width - 10, y: height - 2)
+            let gutterEnd = Int(Float(5) * cellW + Float(CoreTextMetalRenderer.gutterLeftMarginPt))
+            let textStart = Int(Float(5) * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt))
+            var textRows = 0
+            var numberedRows = 0
+            for row in 0..<Int(visibleRows) {
+                let top = Int(Float(row) * cellH)
+                let bottom = Int(Float(row + 1) * cellH)
+                if image.occupancy(x0: textStart, y0: top, x1: width - 25, y1: bottom,
+                    differingFrom: background, thresholdSquared: 0.01) > 0 { textRows += 1 }
+                if image.occupancy(x0: 0, y0: top, x1: gutterEnd, y1: bottom,
+                    differingFrom: background, thresholdSquared: 0.01) > 0 { numberedRows += 1 }
+            }
+            #expect(textRows == 40)
+            #expect(numberedRows == 40)
+        }
+    }
+
     @Test("cursor-line background excludes gutter padding and adjacent panes")
     @MainActor
     func cursorlineExcludesGutterPaddingAndAdjacentPanes() async throws {

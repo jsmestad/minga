@@ -459,7 +459,7 @@ final class EditorNSView: MTKView {
 
     /// The local scroll presentation for this frame or input event.
     /// Decouples "which window shows the offset" from "a gesture is active": during a settle or
-    /// spring-back the gesture target is nil (so `onScrollPresentationReset` discards can win),
+    /// spring-back the gesture target is nil,
     /// but the offset must still land on the settling/elastic pane.
     private var localScrollPresentation: LocalScrollPresentation? {
         Self.localScrollPresentation(
@@ -528,16 +528,8 @@ final class EditorNSView: MTKView {
     /// watchdog; this view only translates its per-frame `Outcome` into encoder sends, the
     /// presentation offset, and redraw scheduling. Non-nil only for a resident pane: windowed panes
     /// keep the round-trip `sendScrollToLine` path (`thumbDragSession` stays nil). It outlives the
-    /// button-held phase until the BEAM's echo-marked commit reaches the target (or an authoritative
-    /// interrupt / watchdog fires), so discards stay gated (see `hasActiveScrollGesture`) through the
-    /// reconcile.
+    /// button-held phase until the BEAM's echo-marked commit reaches the target or an authoritative interrupt or watchdog fires.
     private var thumbDragSession: ThumbDragSession?
-
-    /// True while a trackpad scroll gesture or a resident thumb-drag presentation is in
-    /// progress. While true, authoritative-anchor discards (`onScrollPresentationReset`)
-    /// are ignored so the reconcile owns the offset instead of a mid-gesture reset
-    /// zeroing it. The thumb-drag half stays true through the post-release reconcile.
-    var hasActiveScrollGesture: Bool { scrollTargetWindowId != nil || thumbDragSession != nil }
 
     /// Cell position that owns the current precise scroll gesture.
     /// Nil means the gesture has not latched onto a scroll target yet.
@@ -638,7 +630,7 @@ final class EditorNSView: MTKView {
         }
 
         clearSmoothScrollStateIfTargetWindowMissing()
-        advancePresentationScrollAnimation()
+        advancePresentationScrollAnimation(snapshot: committedSnapshot)
         advanceThumbDragPresentation()
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             committedSnapshot.windowIds.contains(windowId) ? windowId : nil
@@ -1330,7 +1322,7 @@ final class EditorNSView: MTKView {
 
     /// The committed scroll presentation of the thumb-drag pane, or nil when it is gone.
     private func committedThumbDrag(for windowId: UInt16) -> ThumbDragSession.Committed? {
-        guard let sp = interactionContent(windowId: windowId)?.scrollPresentation else { return nil }
+        guard let sp = dispatcher.committedEditorSnapshot?.content(for: windowId)?.scrollPresentation else { return nil }
         return ThumbDragSession.Committed(anchorTop: sp.anchorTop, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration)
     }
 
@@ -2157,7 +2149,7 @@ final class EditorNSView: MTKView {
         for e in hEvents {
             sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
-        let targetWindowContent = scrollTargetWindowId.flatMap { interactionContent(windowId: $0) }
+        let targetWindowContent = scrollTargetWindowId.flatMap { dispatcher.committedEditorSnapshot?.content(for: $0) }
         let targetScrollPresentation = targetWindowContent?.scrollPresentation
         let scrollBounds = Self.presentationScrollBounds(
             for: targetWindowContent,
@@ -2287,7 +2279,7 @@ final class EditorNSView: MTKView {
         }
         scrollSettleWindowId = windowId
         if scrollLastConfirmedAnchorTop == nil {
-            scrollLastConfirmedAnchorTop = interactionContent(windowId: windowId)?.scrollPresentation?.anchorTop
+            scrollLastConfirmedAnchorTop = dispatcher.committedEditorSnapshot?.content(for: windowId)?.scrollPresentation?.anchorTop
         }
         scrollSettleAnimator.start(offset: residual, duration: duration)
         // Reflect the seeded offset immediately so this frame is continuous with the last.
@@ -2313,18 +2305,23 @@ final class EditorNSView: MTKView {
     /// The MTKView is paused, so this self-retriggers `needsDisplay` while an animation runs,
     /// mirroring the cursor animation's draw-loop self-retrigger. Discards always win: the state
     /// is cleared out from under this by `resetSmoothScrollState()` before it runs.
-    private func advancePresentationScrollAnimation() {
+    private func advancePresentationScrollAnimation(snapshot: CommittedEditorSnapshot) {
+        if let windowId = scrollTargetWindowId, let content = snapshot.content(for: windowId), let sp = content.scrollPresentation {
+            reconcileUnconfirmedLines(against: sp)
+            let offsetY = scrollAccumulator.pixelOffsetY + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
+            scrollPixelOffset.y = boundedScrollOffset(offsetY, content: content)
+        }
         guard scrollAnimateEnabled else { return }
         let now = CACurrentMediaTime()
         var keepAnimating = false
 
         if let windowId = scrollSettleWindowId {
-            if let sp = interactionContent(windowId: windowId)?.scrollPresentation {
+            if let sp = snapshot.content(for: windowId)?.scrollPresentation {
                 reconcileUnconfirmedLines(against: sp)
             }
             let residual = scrollSettleAnimator.offset(now: now)
             let offsetY = residual + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
-            scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: offsetY)
+            scrollPixelOffset.y = boundedScrollOffset(offsetY, content: snapshot.content(for: windowId))
             if scrollSettleAnimator.isActive {
                 keepAnimating = true
             } else if scrollUnconfirmedLines == 0 {
@@ -2351,6 +2348,20 @@ final class EditorNSView: MTKView {
         if keepAnimating {
             needsDisplay = true
         }
+    }
+
+    /// Projects a reconciled offset without repeating an input event's elastic pull.
+    private func boundedScrollOffset(_ offsetY: CGFloat, content: GUIWindowContent?) -> CGFloat {
+        guard !isSelectionDragActive else { return 0 }
+        guard let presentation = content?.scrollPresentation else { return offsetY }
+        let bounds = Self.presentationScrollBounds(for: content, scrollPresentation: presentation)
+        let translation = Self.presentationScrollTranslation(
+            scrollPresentation: presentation, scrollOffsetY: offsetY, scrollDeltaY: -offsetY,
+            payloadOverscanBefore: bounds.payloadBefore, payloadOverscanAfter: bounds.payloadAfter,
+            boundaryBefore: bounds.boundaryBefore, boundaryAfter: bounds.boundaryAfter
+        )
+        guard case .content(let offset) = translation else { return 0 }
+        return min(max(offset, -CGFloat(bounds.payloadBefore) * effectiveCellHeight), CGFloat(bounds.payloadAfter) * effectiveCellHeight)
     }
 
     /// Applies the pure translation decision to the live presentation offset and rubber band.
@@ -2420,6 +2431,12 @@ final class EditorNSView: MTKView {
         }
     }
 
+    /// Discards local prediction when its pane receives an authoritative reset.
+    func resetScrollPresentation(windowId: UInt16) {
+        guard [scrollTargetWindowId, scrollSettleWindowId, scrollElasticWindowId, thumbDragSession?.windowId].contains(windowId) else { return }
+        hardResetSmoothScroll()
+    }
+
     /// Resets the trackpad smooth-scroll state (offset, target, animations). It deliberately does
     /// NOT clear an in-flight thumb drag: `mouseExited` routes here, and an NSView keeps tracking a
     /// drag outside its bounds, so the drag must survive (Critical 2, policy a). The one-frame offset
@@ -2441,7 +2458,7 @@ final class EditorNSView: MTKView {
         // outlive it: if any pane owning presentation state has closed, drop the offset and cancel
         // its animation so a stale whole-cell offset can't linger after the animator finishes on a
         // vanished pane.
-        guard let available = dispatcher.visibleEditorSnapshot?.windowIds else { return }
+        guard let available = dispatcher.committedEditorSnapshot?.windowIds else { return }
         if Self.missingPresentationWindow(
             candidateWindowIds: [scrollTargetWindowId, thumbDragSession?.windowId, scrollSettleWindowId, scrollElasticWindowId],
             availableWindowIds: available
@@ -2744,7 +2761,7 @@ final class EditorNSView: MTKView {
 
         // A tick into a document boundary can't be committed by the BEAM, so predicting it would
         // park content one cell off-grid; suppress the seed (the scroll intent already sent above).
-        let windowContent = interactionContent(windowId: windowId)
+        let windowContent = dispatcher.committedEditorSnapshot?.content(for: windowId)
         let boundary = Self.presentationScrollBoundaryAvailability(
             for: windowContent,
             scrollPresentation: windowContent?.scrollPresentation
