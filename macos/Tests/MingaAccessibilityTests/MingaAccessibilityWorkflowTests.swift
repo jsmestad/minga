@@ -15,18 +15,23 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
         let runRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("minga-accessibility-\(UUID().uuidString)", isDirectory: true)
         let artifacts = runRoot.appendingPathComponent("artifacts", isDirectory: true)
+        var fixture: AccessibilityTestFixture?
         artifactDirectory = artifacts
         defer {
             launchedApplication?.terminate()
             launchedApplication = nil
+            if let runtimeParent = fixture?.runtimeParent {
+                try? FileManager.default.removeItem(at: runtimeParent)
+            }
             try? FileManager.default.removeItem(at: runRoot)
         }
 
         do {
             try FileManager.default.createDirectory(at: runRoot, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
-            let fixture = try AccessibilityTestFixture.create(at: runRoot)
-            let application = configuredApplication(fixture: fixture)
+            let createdFixture = try AccessibilityTestFixture.create(at: runRoot)
+            fixture = createdFixture
+            let application = configuredApplication(fixture: createdFixture)
             launchedApplication = application
             let client = try launch(
                 application,
