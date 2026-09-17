@@ -235,7 +235,8 @@ final class EditorNSView: MTKView {
     private var scrollerStyleTask: Task<Void, Never>?
 
     init(encoder: InputEncoder, dispatcher: CommandDispatcher,
-         coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
+         coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager,
+         reduceMotionEnabled: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
         self.encoder = encoder
         self.dispatcher = dispatcher
         self.coreTextRenderer = coreTextRenderer
@@ -254,11 +255,11 @@ final class EditorNSView: MTKView {
         layer?.isOpaque = true
         (layer as? CAMetalLayer)?.maximumDrawableCount = 3
 
-        coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        coreTextRenderer.setCursorAnimationReduceMotionDisabled(reduceMotionEnabled)
         coreTextRenderer.onNativePresentationFailure = { [weak dispatcher] frame, outcome in
             dispatcher?.nativePresentationFailed(frame: frame, outcome: outcome)
         }
-        scrollAnimationsReduceMotionDisabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        scrollAnimationsReduceMotionDisabled = reduceMotionEnabled
     }
 
     @available(*, unavailable)
@@ -2116,7 +2117,6 @@ final class EditorNSView: MTKView {
     }
 
     func seedTrackpadReconciliationForTesting(windowId: UInt16, unconfirmedLines: Int, confirmedAnchorTop: UInt32, settling: Bool) {
-        scrollAnimationsReduceMotionDisabled = false
         scrollTargetWindowId = settling ? nil : windowId
         scrollSettleWindowId = settling ? windowId : nil
         scrollUnconfirmedLines = unconfirmedLines
