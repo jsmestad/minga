@@ -58,10 +58,10 @@ struct PickerQueryField: NSViewRepresentable {
     let placeholder: String
     let isEditable: Bool
     let style: InlineEditFieldStyle
-    let encoder: (any InputEncoder)?
+    let sendAction: OutboundActionHandler?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(encoder: encoder, style: style)
+        Coordinator(sendAction: sendAction, style: style)
     }
 
     func makeNSView(context: Context) -> PickerNSTextField {
@@ -72,7 +72,7 @@ struct PickerQueryField: NSViewRepresentable {
         field.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         field.lineBreakMode = .byClipping
         field.isSelectable = true
-        field.isEditable = isEditable && encoder != nil
+        field.isEditable = isEditable && sendAction != nil
         field.delegate = context.coordinator
         field.cell?.usesSingleLineMode = true
         field.cell?.isScrollable = true
@@ -84,9 +84,9 @@ struct PickerQueryField: NSViewRepresentable {
     }
 
     func updateNSView(_ field: PickerNSTextField, context: Context) {
-        context.coordinator.encoder = encoder
+        context.coordinator.sendAction = sendAction
         context.coordinator.style = style
-        field.isEditable = isEditable && encoder != nil
+        field.isEditable = isEditable && sendAction != nil
         field.placeholderString = placeholder
         context.coordinator.apply(style: style, to: field)
 
@@ -103,13 +103,13 @@ struct PickerQueryField: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
-        var encoder: (any InputEncoder)?
+        var sendAction: OutboundActionHandler?
         var style: InlineEditFieldStyle
         var reconciler = PickerQueryReconciler()
         private var applyingAuthoritativeText = false
 
-        init(encoder: (any InputEncoder)?, style: InlineEditFieldStyle) {
-            self.encoder = encoder
+        init(sendAction: OutboundActionHandler?, style: InlineEditFieldStyle) {
+            self.sendAction = sendAction
             self.style = style
         }
 
@@ -162,12 +162,12 @@ struct PickerQueryField: NSViewRepresentable {
         func handleTextChange(field: NSTextField, editor: NSTextView) {
             guard !applyingAuthoritativeText,
                   field.isEditable,
-                  let encoder,
+                  let sendAction,
                   !editor.hasMarkedText(),
                   let edit = reconciler.recordLocalEdit(field.stringValue)
             else { return }
 
-            encoder.sendPickerQueryChanged(generation: edit.generation, editSeq: edit.sequence, text: edit.text)
+            sendAction(.pickerQueryChanged(generation: edit.generation, editSequence: edit.sequence, text: edit.text))
         }
 
         func control(_ control: NSControl, textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
@@ -180,13 +180,13 @@ struct PickerQueryField: NSViewRepresentable {
             if let event = NSApp.currentEvent,
                let command = PickerQueryKeyRouting.controlBinding(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags)
             {
-                encoder?.sendKeyPress(codepoint: command.codepoint, modifiers: command.modifiers)
+                sendAction?(.keyPress(codepoint: command.codepoint, modifiers: command.modifiers, sequence: 0))
                 return true
             }
 
             let selectorName = NSStringFromSelector(commandSelector)
             guard let command = PickerQueryKeyRouting.selectorBinding(selectorName, fieldIsEmpty: textView.string.isEmpty) else { return false }
-            encoder?.sendKeyPress(codepoint: command.codepoint, modifiers: command.modifiers)
+            sendAction?(.keyPress(codepoint: command.codepoint, modifiers: command.modifiers, sequence: 0))
             return true
         }
 

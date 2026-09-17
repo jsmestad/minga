@@ -90,8 +90,8 @@ public enum PreviewFixtures {
         ])
     }
 
-    public static func encoder() -> InputEncoder {
-        NullInputEncoder()
+    public static func encoder() -> OutboundActionEncoding {
+        ClosureOutboundActionEncoder { _ in .accepted }
     }
 
     // MARK: - State Population Helpers

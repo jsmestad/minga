@@ -31,7 +31,7 @@ private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
 struct EncoderSearchSessionTests {
     @Test("search focus carries only the requested mode")
     func focusLayout() {
-        let payload = captureFrame { $0.sendSearchFocus(replaceMode: true) }
+        let payload = captureFrame { $0.send(.searchFocus(replaceMode: true)) }
 
         #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_SEARCH_FOCUS, 1]))
     }
@@ -39,7 +39,7 @@ struct EncoderSearchSessionTests {
     @Test("search query carries session, sequence, Unicode query, and complete options")
     func queryLayout() {
         let payload = captureFrame {
-            $0.sendSearchQuery(sessionID: 7, editSeq: 3, query: "café λ", flags: SearchFlags.caseSensitive | SearchFlags.regex)
+            $0.send(.searchQuery(sessionID: 7, editSequence: 3, query: "café λ", flags: SearchFlags.caseSensitive | SearchFlags.regex))
         }
 
         #expect(payload[0] == OP_GUI_ACTION)
@@ -89,7 +89,7 @@ struct EncoderApplicationQuitTests {
     @Test("application quit request carries its u32 correlation ID")
     func requestLayout() {
         let payload = captureFrame {
-            _ = $0.sendApplicationQuitRequest(requestID: 0xA1B2_C3D4)
+            _ = $0.send(.applicationQuitRequest(requestID: 0xA1B2_C3D4)).wasAccepted
         }
 
         #expect(payload.count == 5)
@@ -100,7 +100,7 @@ struct EncoderApplicationQuitTests {
     @Test("application quit decision carries its correlation ID and decision")
     func decisionLayout() {
         let payload = captureFrame {
-            _ = $0.sendApplicationQuitDecision(requestID: 42, decision: ApplicationQuitDecision.discard.rawValue)
+            _ = $0.send(.applicationQuitDecision(requestID: 42, decision: ApplicationQuitDecision.discard.rawValue)).wasAccepted
         }
 
         #expect(payload.count == 6)
@@ -117,11 +117,11 @@ struct EncoderNativeFileDialogTests {
     @Test("multi-open result carries correlation and every selected path")
     func multiOpenLayout() {
         let payload = captureFrame {
-            _ = $0.sendFileDialogResult(
+            $0.send(.fileDialogResult(
                 requestID: 0xA1B2_C3D4,
                 outcome: 1,
                 paths: ["/tmp/one.txt", "/tmp/two.txt"]
-            )
+            ))
         }
 
         #expect(payload[0] == OP_GUI_ACTION)
@@ -139,7 +139,7 @@ struct EncoderNativeFileDialogTests {
     @Test("cancel result carries no paths")
     func cancelLayout() {
         let payload = captureFrame {
-            _ = $0.sendFileDialogResult(requestID: 7, outcome: 0, paths: [])
+            $0.send(.fileDialogResult(requestID: 7, outcome: 0, paths: []))
         }
         #expect(payload.count == 9)
         #expect(readU32(payload, 2) == 7)
@@ -154,7 +154,7 @@ struct EncoderNativeFileDialogTests {
 struct EncoderReadyTests {
     @Test("ready event has correct opcode and capabilities")
     func readyLayout() {
-        let payload = captureFrame { $0.sendReady(cols: 120, rows: 40) }
+        let payload = captureFrame { $0.send(.ready(cols: 120, rows: 40)) }
 
         // Capability format 2 carries 20 fields plus a u16 protocol-version tail.
         #expect(payload.count == 29)
@@ -184,7 +184,7 @@ struct EncoderReadyTests {
 struct EncoderRequestKeyframeTests {
     @Test("request_keyframe encodes opcode and last_good_frame_seq (#2219 child D)")
     func requestKeyframeLayout() {
-        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0x0A0B_0C0D, generation: 7) }
+        let payload = captureFrame { $0.send(.requestKeyframe(lastGoodFrameSequence: 0x0A0B_0C0D, generation: 7)) }
 
         #expect(payload.count == 9)
         #expect(payload[0] == OP_REQUEST_KEYFRAME)
@@ -194,7 +194,7 @@ struct EncoderRequestKeyframeTests {
 
     @Test("request_keyframe carries a zero seq when the frontend has no good frame")
     func requestKeyframeZeroSeq() {
-        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0, generation: 0) }
+        let payload = captureFrame { $0.send(.requestKeyframe(lastGoodFrameSequence: 0, generation: 0)) }
 
         #expect(payload.count == 9)
         #expect(payload[0] == OP_REQUEST_KEYFRAME)
@@ -203,7 +203,7 @@ struct EncoderRequestKeyframeTests {
 
     @Test("frame_applied encodes generation and frame")
     func frameAppliedLayout() {
-        let payload = captureFrame { $0.sendFrameApplied(generation: 3, frameSeq: 9) }
+        let payload = captureFrame { $0.send(.frameApplied(generation: 3, frameSequence: 9)) }
         #expect(payload.count == 9)
         #expect(payload[0] == OP_FRAME_APPLIED)
         #expect(readU32(payload, 1) == 3)
@@ -213,13 +213,13 @@ struct EncoderRequestKeyframeTests {
     @Test("frame_rejected appends the protocol-v12 disposition byte")
     func frameRejectedLayout() {
         let payload = captureFrame {
-            $0.sendFrameRejected(
+            $0.send(.frameRejected(
                 generation: 3,
-                frameSeq: 9,
-                lastAppliedFrameSeq: 7,
+                frameSequence: 9,
+                lastAppliedFrameSequence: 7,
                 reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue,
-                disposition: .terminalFrontendFailure
-            )
+                disposition: GeneratedProtocol.FrameRejectionDisposition.terminalFrontendFailure.rawValue
+            ))
         }
         #expect(payload.count == 15)
         #expect(payload[0] == OP_FRAME_REJECTED)
@@ -233,12 +233,13 @@ struct EncoderRequestKeyframeTests {
     @Test("resource-policy rejection defaults to terminal disposition")
     func frameRejectedResourcePolicyDefault() {
         let payload = captureFrame {
-            $0.sendFrameRejected(
+            $0.send(.frameRejected(
                 generation: 4,
-                frameSeq: 10,
-                lastAppliedFrameSeq: 9,
-                reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue
-            )
+                frameSequence: 10,
+                lastAppliedFrameSequence: 9,
+                reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue,
+                disposition: GeneratedProtocol.FrameRejectionDisposition.terminalFrontendFailure.rawValue
+            ))
         }
         #expect(payload[14] == GeneratedProtocol.FrameRejectionDisposition.terminalFrontendFailure.rawValue)
     }
@@ -246,7 +247,7 @@ struct EncoderRequestKeyframeTests {
     @Test("window_ref_miss encodes the targeted window")
     func windowRefMissLayout() {
         let payload = captureFrame {
-            $0.sendWindowRefMiss(generation: 3, frameSeq: 9, lastAppliedFrameSeq: 7, windowId: 12)
+            $0.send(.windowReferenceMiss(generation: 3, frameSequence: 9, lastAppliedFrameSequence: 7, windowID: 12))
         }
         #expect(payload.count == 15)
         #expect(payload[0] == OP_WINDOW_REF_MISS)
@@ -264,7 +265,7 @@ struct EncoderKeyPressTests {
     @Test("key press encodes codepoint, modifiers, and zero correlation sequence")
     func keyPressLayout() {
         // The sequence-less encoder appends a zero correlation sequence (#2215).
-        let payload = captureFrame { $0.sendKeyPress(codepoint: 27, modifiers: 0x02) }
+        let payload = captureFrame { $0.send(.keyPress(codepoint: 27, modifiers: 0x02, sequence: 0)) }
 
         #expect(payload.count == 10)
         #expect(payload[0] == OP_KEY_PRESS)
@@ -276,7 +277,7 @@ struct EncoderKeyPressTests {
     @Test("key press with large codepoint")
     func keyPressLargeCodepoint() {
         // Kitty arrow key codepoint
-        let payload = captureFrame { $0.sendKeyPress(codepoint: 57350, modifiers: 0) }
+        let payload = captureFrame { $0.send(.keyPress(codepoint: 57350, modifiers: 0, sequence: 0)) }
 
         #expect(readU32(payload, 1) == 57350)
     }
@@ -284,7 +285,7 @@ struct EncoderKeyPressTests {
     @Test("key press stamps the latency correlation sequence (#2215)")
     func keyPressCorrelationSequence() {
         let payload = captureFrame {
-            $0.sendKeyPress(codepoint: 0x61, modifiers: 0, seq: 0x0102_0304)
+            $0.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0x0102_0304))
         }
 
         #expect(payload.count == 10)
@@ -300,7 +301,7 @@ struct EncoderKeyPressTests {
 struct EncoderResizeTests {
     @Test("resize encodes cols and rows")
     func resizeLayout() {
-        let payload = captureFrame { $0.sendResize(cols: 200, rows: 50) }
+        let payload = captureFrame { $0.send(.resize(cols: 200, rows: 50)) }
 
         #expect(payload.count == 5)
         #expect(payload[0] == OP_RESIZE)
@@ -316,8 +317,8 @@ struct EncoderMouseEventTests {
     @Test("mouse event encodes all fields including click count")
     func mouseEventLayout() {
         let payload = captureFrame {
-            $0.sendMouseEvent(row: 10, col: -5, button: MOUSE_BUTTON_LEFT,
-                             modifiers: 0x01, eventType: MOUSE_PRESS, clickCount: 3)
+            $0.send(.mouse(row: 10, column: -5, button: MOUSE_BUTTON_LEFT,
+                           modifiers: 0x01, eventType: MOUSE_PRESS, clickCount: 3))
         }
 
         #expect(payload.count == 9)
@@ -333,8 +334,8 @@ struct EncoderMouseEventTests {
     @Test("scroll event uses correct button constants")
     func scrollLayout() {
         let payload = captureFrame {
-            $0.sendMouseEvent(row: 0, col: 0, button: MOUSE_SCROLL_DOWN,
-                             modifiers: 0, eventType: MOUSE_PRESS, clickCount: 1)
+            $0.send(.mouse(row: 0, column: 0, button: MOUSE_SCROLL_DOWN,
+                           modifiers: 0, eventType: MOUSE_PRESS, clickCount: 1))
         }
 
         #expect(payload[5] == MOUSE_SCROLL_DOWN)
@@ -347,7 +348,7 @@ struct EncoderMouseEventTests {
 struct EncoderPasteEventTests {
     @Test("paste event encodes text with length prefix")
     func pasteLayout() {
-        let payload = captureFrame { $0.sendPasteEvent(text: "hello\nworld") }
+        let payload = captureFrame { $0.send(.paste("hello\nworld")) }
 
         #expect(payload[0] == OP_PASTE_EVENT)
         let textLen = readU16(payload, 1)
@@ -358,7 +359,7 @@ struct EncoderPasteEventTests {
 
     @Test("paste event with unicode text")
     func pasteUnicode() {
-        let payload = captureFrame { $0.sendPasteEvent(text: "日本語") }
+        let payload = captureFrame { $0.send(.paste("日本語")) }
 
         let textLen = readU16(payload, 1)
         #expect(textLen == 9) // 3 CJK chars × 3 bytes each
@@ -368,7 +369,7 @@ struct EncoderPasteEventTests {
 
     @Test("paste event with empty text")
     func pasteEmpty() {
-        let payload = captureFrame { $0.sendPasteEvent(text: "") }
+        let payload = captureFrame { $0.send(.paste("")) }
 
         #expect(payload[0] == OP_PASTE_EVENT)
         #expect(readU16(payload, 1) == 0) // text_len = 0
@@ -382,7 +383,7 @@ struct EncoderPasteEventTests {
 struct EncoderLogMessageTests {
     @Test("log message encodes level and text")
     func logLayout() {
-        let payload = captureFrame { $0.sendLog(level: LOG_LEVEL_INFO, message: "test msg") }
+        let payload = captureFrame { $0.send(.log(level: LOG_LEVEL_INFO, message: "test msg")) }
 
         #expect(payload[0] == OP_LOG_MESSAGE)
         #expect(payload[1] == LOG_LEVEL_INFO)
@@ -399,7 +400,7 @@ struct EncoderLogMessageTests {
 struct EncoderGUIActionTests {
     @Test("select_tab encodes action type and tab ID")
     func selectTabLayout() {
-        let payload = captureFrame { $0.sendSelectTab(id: 42) }
+        let payload = captureFrame { $0.send(.selectTab(id: 42)) }
 
         #expect(payload.count == 6)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -409,7 +410,7 @@ struct EncoderGUIActionTests {
 
     @Test("close_tab encodes action type and tab ID")
     func closeTabLayout() {
-        let payload = captureFrame { $0.sendCloseTab(id: 99) }
+        let payload = captureFrame { $0.send(.closeTab(id: 99)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_CLOSE_TAB)
@@ -418,12 +419,12 @@ struct EncoderGUIActionTests {
 
     @Test("chat pin intents encode opcode and sub-opcode with no payload")
     func chatPinIntentLayout() {
-        let awayPayload = captureFrame { $0.sendChatScrolledAwayFromBottom() }
+        let awayPayload = captureFrame { $0.send(.chatScrolledAwayFromBottom) }
         #expect(awayPayload.count == 2)
         #expect(awayPayload[0] == OP_GUI_ACTION)
         #expect(awayPayload[1] == GUI_ACTION_CHAT_SCROLLED_AWAY_FROM_BOTTOM)
 
-        let returnedPayload = captureFrame { $0.sendChatReturnedToBottom() }
+        let returnedPayload = captureFrame { $0.send(.chatReturnedToBottom) }
         #expect(returnedPayload.count == 2)
         #expect(returnedPayload[0] == OP_GUI_ACTION)
         #expect(returnedPayload[1] == GUI_ACTION_CHAT_RETURNED_TO_BOTTOM)
@@ -432,7 +433,7 @@ struct EncoderGUIActionTests {
     @Test("picker_query_changed encodes correlation and complete UTF-8 text")
     func pickerQueryChangedLayout() {
         let payload = captureFrame {
-            $0.sendPickerQueryChanged(generation: 7, editSeq: 11, text: "café")
+            $0.send(.pickerQueryChanged(generation: 7, editSequence: 11, text: "café"))
         }
 
         #expect(payload[0] == OP_GUI_ACTION)
@@ -446,14 +447,14 @@ struct EncoderGUIActionTests {
 
     @Test("picker semantic activations encode the offered generation and identity")
     func pickerActivationLayouts() {
-        let item = captureFrame { $0.sendPickerItemActivate(generation: 17, activationID: 23) }
+        let item = captureFrame { $0.send(.pickerItemActivate(generation: 17, activationID: 23)) }
         #expect(item.count == 10)
         #expect(item[0] == OP_GUI_ACTION)
         #expect(item[1] == GUI_ACTION_PICKER_ITEM_ACTIVATE)
         #expect(readU32(item, 2) == 17)
         #expect(readU32(item, 6) == 23)
 
-        let action = captureFrame { $0.sendPickerActionActivate(generation: 29, activationID: 31) }
+        let action = captureFrame { $0.send(.pickerActionActivate(generation: 29, activationID: 31)) }
         #expect(action.count == 10)
         #expect(action[0] == OP_GUI_ACTION)
         #expect(action[1] == GUI_ACTION_PICKER_ACTION_ACTIVATE)
@@ -463,7 +464,7 @@ struct EncoderGUIActionTests {
 
     @Test("tab_reorder encodes action type, tab ID, and visible index")
     func tabReorderLayout() {
-        let payload = captureFrame { $0.sendTabReorder(id: 42, newIndex: 3) }
+        let payload = captureFrame { $0.send(.tabReorder(id: 42, newIndex: 3)) }
 
         #expect(payload.count == 8)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -475,10 +476,10 @@ struct EncoderGUIActionTests {
     @Test("tab id-scoped actions encode action type and tab ID")
     func tabIdScopedActionLayouts() {
         let cases: [(Data, UInt8, UInt32)] = [
-            (captureFrame { $0.sendTabPin(id: 7) }, GUI_ACTION_TAB_PIN, 7),
-            (captureFrame { $0.sendTabUnpin(id: 8) }, GUI_ACTION_TAB_UNPIN, 8),
-            (captureFrame { $0.sendTabMoveLeft(id: 9) }, GUI_ACTION_TAB_MOVE_LEFT, 9),
-            (captureFrame { $0.sendTabMoveRight(id: 10) }, GUI_ACTION_TAB_MOVE_RIGHT, 10)
+            (captureFrame { $0.send(.tabPin(id: 7)) }, GUI_ACTION_TAB_PIN, 7),
+            (captureFrame { $0.send(.tabUnpin(id: 8)) }, GUI_ACTION_TAB_UNPIN, 8),
+            (captureFrame { $0.send(.tabMoveLeft(id: 9)) }, GUI_ACTION_TAB_MOVE_LEFT, 9),
+            (captureFrame { $0.send(.tabMoveRight(id: 10)) }, GUI_ACTION_TAB_MOVE_RIGHT, 10)
         ]
 
         for (payload, action, id) in cases {
@@ -491,7 +492,7 @@ struct EncoderGUIActionTests {
 
     @Test("file_tree_click encodes index as UInt16")
     func fileTreeClickLayout() {
-        let payload = captureFrame { $0.sendFileTreeClick(index: 15) }
+        let payload = captureFrame { $0.send(.fileTreeClick(index: 15)) }
 
         #expect(payload.count == 4)
         #expect(payload[1] == GUI_ACTION_FILE_TREE_CLICK)
@@ -501,7 +502,7 @@ struct EncoderGUIActionTests {
     @Test("file_tree_drop encodes stable target identity and sources")
     func fileTreeDropLayout() {
         let payload = captureFrame {
-            $0.sendFileTreeDrop(sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"], targetIndex: 8, targetId: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0x02)
+            $0.send(.fileTreeDrop(sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"], targetIndex: 8, targetID: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0x02))
         }
 
         #expect(payload[0] == OP_GUI_ACTION)
@@ -528,10 +529,16 @@ struct EncoderGUIActionTests {
     @Test("file_tree_drop rejects overlong paths instead of truncating")
     func fileTreeDropRejectsOverlongPath() {
         let overlongPath = "/tmp/" + String(repeating: "a", count: Int(UInt16.max))
+        var result: OutboundActionResult?
         let payload = captureFrame {
-            $0.sendFileTreeDrop(sourcePaths: [overlongPath], targetIndex: 8, targetId: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0)
+            result = $0.send(.fileTreeDrop(sourcePaths: [overlongPath], targetIndex: 8, targetID: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0))
         }
 
+        guard case .rejected(.invalidPayload(let reason)) = result else {
+            Issue.record("expected invalid-payload rejection")
+            return
+        }
+        #expect(reason.contains("source path exceeds GUI protocol limit"))
         #expect(payload[0] == OP_LOG_MESSAGE)
         #expect(payload[1] == LOG_LEVEL_WARN)
         let messageLength = Int(readU16(payload, 2))
@@ -541,7 +548,7 @@ struct EncoderGUIActionTests {
 
     @Test("fold_toggle_at_line encodes window ID and buffer line")
     func foldToggleAtLineLayout() {
-        let payload = captureFrame { $0.sendFoldToggleAtLine(windowId: 7, bufferLine: 42) }
+        let payload = captureFrame { $0.send(.foldToggleAtLine(windowID: 7, bufferLine: 42)) }
 
         #expect(payload.count == 8)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -552,7 +559,7 @@ struct EncoderGUIActionTests {
 
     @Test("focus_window encodes the pane window ID and durable generation")
     func focusWindowLayout() {
-        let payload = captureFrame { $0.sendFocusWindow(windowId: 513, generation: 0x0102_0304_0506_0708) }
+        let payload = captureFrame { $0.send(.focusWindow(windowID: 513, generation: 0x0102_0304_0506_0708)) }
 
         #expect(payload.count == 12)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -563,7 +570,7 @@ struct EncoderGUIActionTests {
 
     @Test("completion_select encodes index as UInt16")
     func completionSelectLayout() {
-        let payload = captureFrame { $0.sendCompletionSelect(index: 3) }
+        let payload = captureFrame { $0.send(.completionSelect(index: 3)) }
 
         #expect(payload[1] == GUI_ACTION_COMPLETION_SELECT)
         #expect(readU16(payload, 2) == 3)
@@ -572,7 +579,7 @@ struct EncoderGUIActionTests {
 
     @Test("toggle_panel encodes panel ID")
     func togglePanelLayout() {
-        let payload = captureFrame { $0.sendTogglePanel(panel: 1) }
+        let payload = captureFrame { $0.send(.togglePanel(panel: 1)) }
 
         #expect(payload.count == 3)
         #expect(payload[1] == GUI_ACTION_TOGGLE_PANEL)
@@ -581,7 +588,7 @@ struct EncoderGUIActionTests {
 
     @Test("sidebar_action encodes id kind and action")
     func sidebarActionLayout() {
-        let payload = captureFrame { $0.sendSidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle") }
+        let payload = captureFrame { $0.send(.sidebarAction(sidebarID: "git_status", kind: "git_status", action: "toggle")) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_SIDEBAR_ACTION)
@@ -596,7 +603,7 @@ struct EncoderGUIActionTests {
 
     @Test("new_tab is just opcode + action_type")
     func newTabLayout() {
-        let payload = captureFrame { $0.sendNewTab() }
+        let payload = captureFrame { $0.send(.newTab) }
 
         #expect(payload.count == 2)
         #expect(payload[1] == GUI_ACTION_NEW_TAB)
@@ -604,7 +611,7 @@ struct EncoderGUIActionTests {
 
     @Test("system_will_sleep is just opcode + action_type")
     func systemWillSleepLayout() {
-        let payload = captureFrame { $0.sendSystemWillSleep() }
+        let payload = captureFrame { $0.send(.systemWillSleep) }
 
         #expect(payload.count == 2)
         #expect(payload[1] == GUI_ACTION_SYSTEM_WILL_SLEEP)
@@ -612,7 +619,7 @@ struct EncoderGUIActionTests {
 
     @Test("system_did_wake is just opcode + action_type")
     func systemDidWakeLayout() {
-        let payload = captureFrame { $0.sendSystemDidWake() }
+        let payload = captureFrame { $0.send(.systemDidWake) }
 
         #expect(payload.count == 2)
         #expect(payload[1] == GUI_ACTION_SYSTEM_DID_WAKE)
@@ -620,7 +627,7 @@ struct EncoderGUIActionTests {
 
     @Test("power_thermal_state encodes low power and thermal bytes")
     func powerThermalStateLayout() {
-        let payload = captureFrame { $0.sendPowerThermalState(lowPowerMode: true, thermalState: 2) }
+        let payload = captureFrame { $0.send(.powerThermalState(lowPowerMode: true, thermalState: 2)) }
 
         #expect(payload.count == 4)
         #expect(payload[1] == GUI_ACTION_POWER_THERMAL_STATE)
@@ -630,7 +637,7 @@ struct EncoderGUIActionTests {
 
     @Test("power_thermal_state encodes false low power as zero")
     func powerThermalStateFalseLowPowerLayout() {
-        let payload = captureFrame { $0.sendPowerThermalState(lowPowerMode: false, thermalState: 0) }
+        let payload = captureFrame { $0.send(.powerThermalState(lowPowerMode: false, thermalState: 0)) }
 
         #expect(payload.count == 4)
         #expect(payload[1] == GUI_ACTION_POWER_THERMAL_STATE)
@@ -641,7 +648,7 @@ struct EncoderGUIActionTests {
     @Test("observatory_inspect encodes PID with length prefix")
     func observatoryInspectLayout() {
         let pid = "<0.123.0>"
-        let payload = captureFrame { $0.sendObservatoryInspect(pid: pid) }
+        let payload = captureFrame { $0.send(.observatoryInspect(pid: pid)) }
 
         #expect(payload.count == 2 + 2 + pid.utf8.count)
         #expect(payload[1] == GUI_ACTION_OBSERVATORY_INSPECT)
@@ -651,7 +658,7 @@ struct EncoderGUIActionTests {
 
     @Test("panel_switch_tab encodes tab index")
     func panelSwitchTabLayout() {
-        let payload = captureFrame { $0.sendPanelSwitchTab(index: 2) }
+        let payload = captureFrame { $0.send(.panelSwitchTab(index: 2)) }
 
         #expect(payload.count == 3)
         #expect(payload[1] == GUI_ACTION_PANEL_SWITCH_TAB)
@@ -660,7 +667,7 @@ struct EncoderGUIActionTests {
 
     @Test("panel_resize encodes height percent")
     func panelResizeLayout() {
-        let payload = captureFrame { $0.sendPanelResize(heightPercent: 40) }
+        let payload = captureFrame { $0.send(.panelResize(heightPercent: 40)) }
 
         #expect(payload.count == 3)
         #expect(payload[1] == GUI_ACTION_PANEL_RESIZE)
@@ -670,7 +677,7 @@ struct EncoderGUIActionTests {
     @Test("open_file encodes path with length prefix")
     func openFileLayout() {
         let path = "/home/user/project/lib/editor.ex"
-        let payload = captureFrame { $0.sendOpenFile(path: path) }
+        let payload = captureFrame { $0.send(.openFile(path: path)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_OPEN_FILE)
@@ -683,7 +690,7 @@ struct EncoderGUIActionTests {
     @Test("git_commit encodes amend flag, length, and message")
     func gitCommitLayout() {
         let message = "feat: polish git panel"
-        let payload = captureFrame { $0.sendGitCommit(message: message) }
+        let payload = captureFrame { $0.send(.gitCommit(message: message)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
@@ -697,7 +704,7 @@ struct EncoderGUIActionTests {
     @Test("git_commit amend encodes amend flag, length, and message")
     func gitCommitAmendLayout() {
         let message = "fixup: previous subject"
-        let payload = captureFrame { $0.sendGitCommitAmend(message: message) }
+        let payload = captureFrame { $0.send(.gitCommitAmend(message: message)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
@@ -711,7 +718,7 @@ struct EncoderGUIActionTests {
     @Test("git_open_diff encodes path and section")
     func gitOpenDiffLayout() {
         let path = "lib/editor.ex"
-        let payload = captureFrame { $0.sendGitOpenDiff(path: path, section: 2) }
+        let payload = captureFrame { $0.send(.gitOpenDiff(path: path, section: 2)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_GIT_OPEN_DIFF)
@@ -725,7 +732,7 @@ struct EncoderGUIActionTests {
 
     @Test("agent_tool_toggle encodes stable message ID")
     func agentToolToggleLayout() {
-        let payload = captureFrame { $0.sendAgentToolToggle(messageID: 0x01020304) }
+        let payload = captureFrame { $0.send(.agentToolToggle(messageID: 0x01020304)) }
 
         #expect(payload.count == 6)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -735,7 +742,7 @@ struct EncoderGUIActionTests {
 
     @Test("execute_command encodes command name with length prefix")
     func executeCommandLayout() {
-        let payload = captureFrame { $0.sendExecuteCommand(name: "buffer_prev") }
+        let payload = captureFrame { $0.send(.executeCommand(name: "buffer_prev")) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_EXECUTE_COMMAND)
@@ -747,7 +754,7 @@ struct EncoderGUIActionTests {
 
     @Test("workspace_rename encodes id and name with length prefix")
     func workspaceRenameLayout() {
-        let payload = captureFrame { $0.sendWorkspaceRename(id: 7, name: "Research Bot") }
+        let payload = captureFrame { $0.send(.workspaceRename(id: 7, name: "Research Bot")) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_WORKSPACE_RENAME)
@@ -761,7 +768,7 @@ struct EncoderGUIActionTests {
 
     @Test("workspace_set_icon encodes id and icon with compact length prefix")
     func workspaceSetIconLayout() {
-        let payload = captureFrame { $0.sendWorkspaceSetIcon(id: 7, icon: "cpu") }
+        let payload = captureFrame { $0.send(.workspaceSetIcon(id: 7, icon: "cpu")) }
 
         #expect(payload.count == 8)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -773,7 +780,7 @@ struct EncoderGUIActionTests {
 
     @Test("workspace_close encodes just action type and workspace id")
     func workspaceCloseLayout() {
-        let payload = captureFrame { $0.sendWorkspaceClose(id: 7) }
+        let payload = captureFrame { $0.send(.workspaceClose(id: 7)) }
 
         #expect(payload.count == 4)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -784,7 +791,7 @@ struct EncoderGUIActionTests {
     @Test("notification dismiss encodes action type and notification id")
     func notificationDismissLayout() {
         let id = "build:test"
-        let payload = captureFrame { $0.sendNotificationDismiss(id: id) }
+        let payload = captureFrame { $0.send(.notificationDismiss(id: id)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_NOTIFICATION_DISMISS)
@@ -797,7 +804,7 @@ struct EncoderGUIActionTests {
     func notificationActionLayout() {
         let id = "build:test"
         let action = "show_logs"
-        let payload = captureFrame { $0.sendNotificationAction(id: id, actionId: action) }
+        let payload = captureFrame { $0.send(.notificationAction(id: id, actionID: action)) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_NOTIFICATION_ACTION)
@@ -815,7 +822,7 @@ struct EncoderGUIActionTests {
 struct EncoderSettingsTests {
     @Test("config_query encodes action with no payload")
     func configQueryLayout() {
-        let payload = captureFrame { $0.sendConfigQuery() }
+        let payload = captureFrame { $0.send(.configQuery) }
 
         #expect(payload.count == 2)
         #expect(payload[0] == OP_GUI_ACTION)
@@ -824,7 +831,7 @@ struct EncoderSettingsTests {
 
     @Test("config_update encodes typed atom payload")
     func configUpdateAtomLayout() {
-        let payload = captureFrame { $0.sendConfigUpdate(key: "theme", value: .atom("doom_one")) }
+        let payload = captureFrame { $0.send(.configUpdate(key: "theme", value: .atom("doom_one"))) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
@@ -837,14 +844,14 @@ struct EncoderSettingsTests {
 
     @Test("config_update encodes typed bool payload")
     func configUpdateBoolLayout() {
-        let payload = captureFrame { $0.sendConfigUpdate(key: "wrap", value: .bool(true)) }
+        let payload = captureFrame { $0.send(.configUpdate(key: "wrap", value: .bool(true))) }
 
         #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_CONFIG_UPDATE, 4, 0x77, 0x72, 0x61, 0x70, SETTING_VALUE_BOOL, 1]))
     }
 
     @Test("config_update encodes typed int payload")
     func configUpdateIntLayout() {
-        let payload = captureFrame { $0.sendConfigUpdate(key: "tab_width", value: .int(4)) }
+        let payload = captureFrame { $0.send(.configUpdate(key: "tab_width", value: .int(4))) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
@@ -856,7 +863,7 @@ struct EncoderSettingsTests {
 
     @Test("config_update encodes typed string payload")
     func configUpdateStringLayout() {
-        let payload = captureFrame { $0.sendConfigUpdate(key: "font_family", value: .string("Iosevka")) }
+        let payload = captureFrame { $0.send(.configUpdate(key: "font_family", value: .string("Iosevka"))) }
 
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
@@ -876,7 +883,7 @@ struct EncoderFrameHeaderTests {
     func frameHeader() {
         let pipe = Pipe()
         let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
-        encoder.sendResize(cols: 80, rows: 24)
+        encoder.send(.resize(cols: 80, rows: 24))
         #expect(encoder.waitForPendingWritesForTesting())
         pipe.fileHandleForWriting.closeFile()
         let raw = pipe.fileHandleForReading.readDataToEndOfFile()

@@ -18,17 +18,17 @@ private struct ScrollViewHeightKey: PreferenceKey {
 }
 
 public struct AgentChatView: View {
-    public init(state: AgentChatState, isInsertMode: Bool, encoder: InputEncoder? = nil, cellHeight: CGFloat = 16) {
+    public init(state: AgentChatState, isInsertMode: Bool, sendAction: OutboundActionHandler?, cellHeight: CGFloat = 16) {
         self.state = state
         self.isInsertMode = isInsertMode
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.cellHeight = cellHeight
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     /// Cell dimensions from the Metal renderer, used to size the prompt gap.
     public var cellHeight: CGFloat = 16
 
@@ -43,7 +43,7 @@ public struct AgentChatView: View {
     public var body: some View {
         VStack(spacing: 0) {
             // Header bar
-            AgentChatHeaderView(state: state, encoder: encoder)
+            AgentChatHeaderView(state: state, sendAction: sendAction)
 
             // Messages: bottom-anchored so few messages cluster near the
             // prompt input rather than leaving a void below them.
@@ -125,7 +125,7 @@ public struct AgentChatView: View {
             }
 
             // Prompt (completion popup + input capsule)
-            AgentPromptView(state: state, isInsertMode: isInsertMode, encoder: encoder)
+            AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: sendAction)
         }
         .background(theme.agentPanelBg)
     }
@@ -176,15 +176,15 @@ public struct AgentChatView: View {
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
         case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, sendAction: sendAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
         case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, sendAction: sendAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
         case .approvalToolCall(_, let name, let summary, let toolCallId, let previewKind, let previewLines):
-            AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines, encoder: encoder)
+            AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines, sendAction: sendAction)
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -559,9 +559,9 @@ public struct AgentChatView: View {
         guard scrolledUp != userHasScrolledUp else { return }
         userHasScrolledUp = scrolledUp
         if scrolledUp {
-            encoder?.sendChatScrolledAwayFromBottom()
+            sendAction?(.chatScrolledAwayFromBottom)
         } else {
-            encoder?.sendChatReturnedToBottom()
+            sendAction?(.chatReturnedToBottom)
         }
     }
 
@@ -599,6 +599,6 @@ private func agentChatPreviewState() -> AgentChatState {
 }
 
 #Preview("Agent Chat", traits: .mingaChrome) {
-    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, encoder: nil, cellHeight: 18)
+    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
         .frame(width: 760, height: 600)
 }

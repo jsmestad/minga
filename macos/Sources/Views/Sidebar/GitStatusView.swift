@@ -10,16 +10,16 @@ public struct GitStatusView: View {
     public let state: GitStatusState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     public let usesPreviewEagerLayout: Bool
 
     public init(
         state: GitStatusState,
-        encoder: InputEncoder?,
+        sendAction: OutboundActionHandler?,
         usesPreviewEagerLayout: Bool = false
     ) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.usesPreviewEagerLayout = usesPreviewEagerLayout
     }
 
@@ -81,7 +81,7 @@ public struct GitStatusView: View {
             }
             Button("Discard", role: .destructive) {
                 if let entry = fileToDiscard {
-                    encoder?.sendGitDiscardFile(path: entry.path)
+                    sendAction?(.gitDiscardFile(path: entry.path))
                     fileToDiscard = nil
                 }
             }
@@ -413,9 +413,9 @@ public struct GitStatusView: View {
         guard !state.entries(for: section).isEmpty else { return }
         switch section {
         case .staged:
-            encoder?.sendGitUnstageAll()
+            sendAction?(.gitUnstageAll)
         case .changed, .untracked:
-            encoder?.sendGitStageAll()
+            sendAction?(.gitStageAll)
         case .conflicted:
             break
         }
@@ -425,13 +425,13 @@ public struct GitStatusView: View {
         guard let entry = currentEntry(matching: offeredEntry) else { return }
         switch action {
         case .open:
-            encoder?.sendGitOpenFile(path: entry.path)
+            sendAction?(.gitOpenFile(path: entry.path))
         case .openDiff:
-            encoder?.sendGitOpenDiff(path: entry.path, section: entry.section.rawValue)
+            sendAction?(.gitOpenDiff(path: entry.path, section: entry.section.rawValue))
         case .stage:
-            encoder?.sendGitStageFile(path: entry.path)
+            sendAction?(.gitStageFile(path: entry.path))
         case .unstage:
-            encoder?.sendGitUnstageFile(path: entry.path)
+            sendAction?(.gitUnstageFile(path: entry.path))
         case .discard:
             fileToDiscard = entry
         case .copyPath:
@@ -532,16 +532,16 @@ public struct GitStatusView: View {
                 HStack(spacing: 4) {
                     if state.snapshot.behind > 0 {
                         miniButton(systemName: "arrow.down.circle", label: "Pull \(state.snapshot.behind)") {
-                            encoder?.sendGitPull()
+                            sendAction?(.gitPull)
                         }
                     }
                     if state.snapshot.ahead > 0 {
                         miniButton(systemName: "arrow.up.circle", label: "Push \(state.snapshot.ahead)") {
-                            encoder?.sendGitPush()
+                            sendAction?(.gitPush)
                         }
                     }
                     miniButton(systemName: "arrow.2.circlepath", label: "Fetch") {
-                        encoder?.sendGitFetch()
+                        sendAction?(.gitFetch)
                     }
                     Spacer()
                 }
@@ -551,9 +551,9 @@ public struct GitStatusView: View {
                     guard let submission = state.submit() else { return }
                     switch submission.action {
                     case .commit:
-                        encoder?.sendGitCommit(message: submission.message)
+                        sendAction?(.gitCommit(message: submission.message))
                     case .amend:
-                        encoder?.sendGitCommitAmend(message: submission.message)
+                        sendAction?(.gitCommitAmend(message: submission.message))
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -677,7 +677,7 @@ public struct GitStatusView: View {
 
             if action == .pullAndRetry {
                 Button("Pull & Retry") {
-                    encoder?.sendGitPullAndRetry()
+                    sendAction?(.gitPullAndRetry)
                 }
                 .font(.system(size: 10, weight: .medium))
                 .buttonStyle(.plain)
@@ -808,7 +808,7 @@ private func gitStatusPreviewState() -> GitStatusState {
 
 #Preview("Git Status") {
     let theme = PreviewFixtures.theme()
-    GitStatusView(state: gitStatusPreviewState(), encoder: nil, usesPreviewEagerLayout: true)
+    GitStatusView(state: gitStatusPreviewState(), sendAction: { _ in }, usesPreviewEagerLayout: true)
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
         .environment(\.themeColors, theme)

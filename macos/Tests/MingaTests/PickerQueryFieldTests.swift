@@ -32,7 +32,7 @@ struct PickerQueryFieldTests {
     @MainActor func coordinatorEditingPath() {
         let encoder = SpyEncoder()
         let style = InlineEditFieldStyle(textColor: .primary, selectionBackgroundColor: .accentColor, selectionForegroundColor: .primary, insertionPointColor: .accentColor)
-        let coordinator = PickerQueryField.Coordinator(encoder: encoder, style: style)
+        let coordinator = PickerQueryField.Coordinator(sendAction: { action in _ = encoder.send(action) }, style: style)
         let field = PickerNSTextField()
         let editor = NSTextView()
         field.isEditable = true
@@ -96,10 +96,10 @@ struct PickerQueryFieldTests {
             Issue.record("The editor surface must not use native text actions")
             return true
         } fallback: { fallbackEncoder in
-            fallbackEncoder.sendExecuteCommand(name: "select_all")
+            fallbackEncoder.send(.executeCommand(name: "select_all"))
         }
 
-        #expect(encoder.guiActions == [.executeCommand(name: "select_all")])
+        #expect(encoder.actions == [.executeCommand(name: "select_all")])
     }
 
     @Test("native field ownership consumes unavailable actions without falling through to the editor")
@@ -124,7 +124,7 @@ struct PickerQueryFieldTests {
             #expect(routedSelectors == ["undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:"])
         }
 
-        #expect(encoder.guiActions.isEmpty)
+        #expect(encoder.actions.isEmpty)
         #expect(encoder.keyPressCalls.isEmpty)
     }
 

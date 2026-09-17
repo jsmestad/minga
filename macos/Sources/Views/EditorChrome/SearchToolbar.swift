@@ -11,14 +11,14 @@ import SwiftUI
 
 /// Find/replace toolbar view.
 public struct SearchToolbar: View {
-    public init(searchState: SearchState, encoder: (any InputEncoder)? = nil) {
+    public init(searchState: SearchState, sendAction: OutboundActionHandler?) {
         self.searchState = searchState
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let searchState: SearchState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: (any InputEncoder)?
+    public let sendAction: OutboundActionHandler?
 
     @State private var replaceText: String = ""
 
@@ -73,7 +73,7 @@ public struct SearchToolbar: View {
         HStack(spacing: 4) {
             // Replace mode toggle (chevron)
             Button {
-                encoder?.sendSearchFocus(replaceMode: !searchState.replaceMode)
+                sendAction?(.searchFocus(replaceMode: !searchState.replaceMode))
             } label: {
                 Image(systemName: searchState.replaceMode ? "chevron.down" : "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
@@ -94,7 +94,7 @@ public struct SearchToolbar: View {
                         selectionForegroundColor: theme.editorFg,
                         insertionPointColor: theme.accent
                     ),
-                    encoder: encoder
+                    sendAction: sendAction
                 )
                 .frame(maxWidth: .infinity, minHeight: 18, alignment: .leading)
 
@@ -124,12 +124,12 @@ public struct SearchToolbar: View {
 
             // Previous match
             toolbarButton(icon: "chevron.up", label: "Previous Match") {
-                encoder?.sendSearchPrev()
+                sendAction?(.searchPrevious)
             }
 
             // Next match
             toolbarButton(icon: "chevron.down", label: "Next Match") {
-                encoder?.sendSearchNext()
+                sendAction?(.searchNext)
             }
 
             // Case sensitive toggle
@@ -151,7 +151,7 @@ public struct SearchToolbar: View {
 
             // Close button
             toolbarButton(icon: "xmark", label: "Close Search") {
-                encoder?.sendSearchDismiss()
+                sendAction?(.searchDismiss)
             }
         }
         .frame(height: 24)
@@ -182,17 +182,17 @@ public struct SearchToolbar: View {
                         .stroke(theme.popupBorder.opacity(0.4), lineWidth: 1)
                 )
                 .onSubmit {
-                    encoder?.sendSearchReplace(replacement: replaceText)
+                    sendAction?(.searchReplace(replacement: replaceText))
                 }
 
             // Replace
             toolbarButton(icon: "arrow.left.arrow.right", label: "Replace") {
-                encoder?.sendSearchReplace(replacement: replaceText)
+                sendAction?(.searchReplace(replacement: replaceText))
             }
 
             // Replace All
             toolbarButton(icon: "arrow.left.arrow.right.circle", label: "Replace All") {
-                encoder?.sendSearchReplaceAll(replacement: replaceText)
+                sendAction?(.searchReplaceAll(replacement: replaceText))
             }
 
             Spacer(minLength: 0)
@@ -243,6 +243,6 @@ public struct SearchToolbar: View {
 
     private func sendEdit(_ edit: SearchEdit?) {
         guard let edit else { return }
-        encoder?.sendSearchQuery(sessionID: edit.sessionID, editSeq: edit.sequence, query: edit.query, flags: edit.flags)
+        sendAction?(.searchQuery(sessionID: edit.sessionID, editSequence: edit.sequence, query: edit.query, flags: edit.flags))
     }
 }

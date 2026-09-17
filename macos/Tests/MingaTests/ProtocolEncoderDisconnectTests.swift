@@ -19,21 +19,21 @@ struct EncoderDisconnectTests {
         let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         // Send one frame before disconnect (should succeed).
-        encoder.sendReady(cols: 80, rows: 24)
+        encoder.send(.ready(cols: 80, rows: 24))
         #expect(encoder.waitForPendingWritesForTesting())
 
         // Disconnect the encoder.
         encoder.disconnect(reason: .expectedTeardown)
 
         // Writes after an expected teardown should be silently dropped, not crash.
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
-        encoder.sendResize(cols: 120, rows: 40)
-        encoder.sendMouseEvent(row: 5, col: 10, button: 0, modifiers: 0,
-                               eventType: 0, clickCount: 1)
-        encoder.sendPasteEvent(text: "hello")
-        encoder.sendLog(level: 1, message: "test")
-        encoder.sendSelectTab(id: 1)
-        encoder.sendExecuteCommand(name: "quit")
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
+        encoder.send(.resize(cols: 120, rows: 40))
+        encoder.send(.mouse(row: 5, column: 10, button: 0, modifiers: 0,
+                            eventType: 0, clickCount: 1))
+        encoder.send(.paste("hello"))
+        encoder.send(.log(level: 1, message: "test"))
+        encoder.send(.selectTab(id: 1))
+        encoder.send(.executeCommand(name: "quit"))
         #expect(encoder.waitForPendingWritesForTesting())
 
         // Close write end and read everything that was written.
@@ -54,7 +54,7 @@ struct EncoderDisconnectTests {
         encoder.disconnect(reason: .expectedTeardown)
 
         // Should not crash. Writes should still be dropped.
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
         #expect(encoder.waitForPendingWritesForTesting())
 
         pipe.fileHandleForWriting.closeFile()
@@ -78,14 +78,14 @@ struct EncoderDisconnectTests {
 
         // This write should hit EPIPE and auto-disconnect.
         // It must NOT crash, throw, or block.
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
 
         // Subsequent writes after expected teardown should be silently dropped (encoder is
         // now disconnected). If these crash, the auto-disconnect
         // didn't work.
-        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
-        encoder.sendResize(cols: 100, rows: 50)
-        encoder.sendPasteEvent(text: "should be dropped")
+        encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0))
+        encoder.send(.resize(cols: 100, rows: 50))
+        encoder.send(.paste("should be dropped"))
         #expect(encoder.waitForPendingWritesForTesting())
     }
 
@@ -102,7 +102,7 @@ struct EncoderDisconnectTests {
         // Simulate a burst of user input arriving after the BEAM dies.
         // None of these should crash or block.
         for i: UInt32 in 0..<100 {
-            encoder.sendKeyPress(codepoint: 0x61 + (i % 26), modifiers: 0)
+            encoder.send(.keyPress(codepoint: 0x61 + (i % 26), modifiers: 0, sequence: 0))
         }
         #expect(encoder.waitForPendingWritesForTesting())
     }
@@ -122,7 +122,7 @@ struct EncoderDisconnectTests {
             // Writer task: rapid-fire key presses.
             group.addTask {
                 for i: UInt32 in 0..<UInt32(iterations) {
-                    encoder.sendKeyPress(codepoint: 0x61 + (i % 26), modifiers: 0)
+                    encoder.send(.keyPress(codepoint: 0x61 + (i % 26), modifiers: 0, sequence: 0))
                 }
             }
 

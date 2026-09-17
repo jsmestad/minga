@@ -7,16 +7,16 @@
 import SwiftUI
 
 public struct FileTreeHeaderView: View {
-    public init(fileTreeState: FileTreeState, encoder: InputEncoder? = nil, branchName: String, leadingPadding: CGFloat) {
+    public init(fileTreeState: FileTreeState, sendAction: OutboundActionHandler?, branchName: String, leadingPadding: CGFloat) {
         self.fileTreeState = fileTreeState
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.branchName = branchName
         self.leadingPadding = leadingPadding
     }
     public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     public let branchName: String
     public let leadingPadding: CGFloat
 
@@ -98,7 +98,7 @@ public struct FileTreeHeaderView: View {
     private var actionButtons: some View {
         HStack(spacing: 0) {
             headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
-                encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
+                sendAction?(.fileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex)))
             }
 
             overflowMenu
@@ -108,13 +108,13 @@ public struct FileTreeHeaderView: View {
     private var overflowMenu: some View {
         Menu {
             Button("New Folder…") {
-                encoder?.sendFileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex))
+                sendAction?(.fileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex)))
             }
             Button("Refresh") {
-                encoder?.sendFileTreeRefresh()
+                sendAction?(.fileTreeRefresh)
             }
             Button("Collapse All") {
-                encoder?.sendFileTreeCollapseAll()
+                sendAction?(.fileTreeCollapseAll)
             }
         } label: {
             Image(systemName: "ellipsis")

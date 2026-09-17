@@ -7,15 +7,15 @@
 import SwiftUI
 
 public struct BottomPanelView: View {
-    public init(state: BottomPanelState, encoder: InputEncoder? = nil, availableHeight: CGFloat) {
+    public init(state: BottomPanelState, sendAction: OutboundActionHandler?, availableHeight: CGFloat) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.availableHeight = availableHeight
     }
     public let state: BottomPanelState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     /// Total height of the right pane (tab bar + editor + panel + status bar).
     /// Used to cap the panel at 60% of available space. Measured by the parent
     /// via a preference key so the panel itself doesn't need a GeometryReader.
@@ -79,7 +79,7 @@ public struct BottomPanelView: View {
                                 guard windowHeight > 0 else { return }
                                 let percent = Int((state.userHeight / windowHeight) * 100)
                                 let clamped = UInt8(min(max(percent, 10), 60))
-                                encoder?.sendPanelResize(heightPercent: clamped)
+                                sendAction?(.panelResize(heightPercent: clamped))
                             }
                     )
             )
@@ -97,7 +97,7 @@ public struct BottomPanelView: View {
 
             // Dismiss button
             Button(action: {
-                encoder?.sendPanelDismiss()
+                sendAction?(.panelDismiss)
             }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
@@ -116,7 +116,7 @@ public struct BottomPanelView: View {
         let isActive = tab.id == state.activeTabIndex
 
         return Button(action: {
-            encoder?.sendPanelSwitchTab(index: UInt8(tab.id))
+            sendAction?(.panelSwitchTab(index: UInt8(tab.id)))
         }) {
             Text(tab.name)
                 .font(.system(size: 11, weight: isActive ? .semibold : .regular))
@@ -151,7 +151,7 @@ public struct BottomPanelView: View {
             // Messages tab: render structured log entries
             MessagesContentView(
                 state: state.messagesState,
-                encoder: encoder
+                sendAction: sendAction
             )
         } else {
             // Placeholder for other tab types (diagnostics, terminal)

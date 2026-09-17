@@ -1,12 +1,12 @@
 import SwiftUI
 
 public struct AgentChatHeaderView: View {
-    public init(state: AgentChatState, encoder: InputEncoder? = nil) {
+    public init(state: AgentChatState, sendAction: OutboundActionHandler?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: AgentChatState
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     @Environment(\.themeColors) private var theme
 
     @State private var isModelHovered: Bool = false
@@ -43,7 +43,7 @@ public struct AgentChatHeaderView: View {
 
             Button {
                 // Send '?' to toggle help overlay
-                encoder?.sendKeyPress(codepoint: 0x3F, modifiers: 0)
+                sendAction?(.keyPress(codepoint: 0x3F, modifiers: 0, sequence: 0))
             } label: {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 13))
@@ -76,7 +76,7 @@ public struct AgentChatHeaderView: View {
     private var modelPickerButton: some View {
         Button {
             if !state.isThinking {
-                encoder?.sendExecuteCommand(name: "agent_pick_model")
+                sendAction?(.executeCommand(name: "agent_pick_model"))
             }
         } label: {
             HStack(spacing: 4) {
@@ -116,7 +116,7 @@ public struct AgentChatHeaderView: View {
             Menu {
                 ForEach(["off", "low", "medium", "high"], id: \.self) { level in
                     Button {
-                        encoder?.sendExecuteCommand(name: "agent_thinking_\(level)")
+                        sendAction?(.executeCommand(name: "agent_thinking_\(level)"))
                     } label: {
                         HStack {
                             Text(thinkingDisplayName(level))

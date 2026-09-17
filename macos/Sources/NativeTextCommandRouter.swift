@@ -65,9 +65,9 @@ enum NativeTextCommandRouter {
 enum NativeMenuTextRouter {
     static func perform(
         _ command: NativeTextCommandRouter.Command,
-        encoder: InputEncoder?,
+        encoder: OutboundActionEncoding?,
         application: NSApplication = NSApp,
-        fallback: (InputEncoder) -> Void
+        fallback: (OutboundActionEncoding) -> Void
     ) {
         route(
             command,
@@ -82,7 +82,7 @@ enum NativeMenuTextRouter {
 
     static func isAvailable(
         _ command: NativeTextCommandRouter.Command,
-        encoder: InputEncoder?,
+        encoder: OutboundActionEncoding?,
         application: NSApplication = NSApp
     ) -> Bool {
         isAvailable(
@@ -96,10 +96,10 @@ enum NativeMenuTextRouter {
 
     static func route(
         _ command: NativeTextCommandRouter.Command,
-        encoder: InputEncoder?,
+        encoder: OutboundActionEncoding?,
         responder: NSResponder?,
         sendNative: (Selector, NSResponder) -> Bool,
-        fallback: (InputEncoder) -> Void
+        fallback: (OutboundActionEncoding) -> Void
     ) {
         if NativeTextCommandRouter.handles(responder) {
             _ = NativeTextCommandRouter.route(command, to: responder, send: sendNative)
@@ -111,7 +111,7 @@ enum NativeMenuTextRouter {
 
     static func isAvailable(
         _ command: NativeTextCommandRouter.Command,
-        encoder: InputEncoder?,
+        encoder: OutboundActionEncoding?,
         responder: NSResponder?,
         target: (Selector, NSResponder) -> Any?
     ) -> Bool {

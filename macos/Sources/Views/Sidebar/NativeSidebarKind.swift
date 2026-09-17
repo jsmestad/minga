@@ -60,7 +60,7 @@ public enum NativeSidebarKind: Equatable {
 struct NativeSidebarHeader: View {
     let input: ShellHostInput
     let item: SidebarItem
-    let encoder: InputEncoder?
+    let sendAction: OutboundActionHandler?
     let projectName: String
     let gitBranch: String
     let leadingPadding: CGFloat
@@ -71,7 +71,7 @@ struct NativeSidebarHeader: View {
         case .fileTree:
             FileTreeHeaderView(
                 fileTreeState: input.fileTreeState,
-                encoder: encoder,
+                sendAction: sendAction,
                 branchName: gitBranch,
                 leadingPadding: leadingPadding
             )
@@ -97,14 +97,14 @@ struct NativeSidebarHeader: View {
 struct NativeSidebarBody: View {
     let input: ShellHostInput
     let item: SidebarItem
-    let encoder: InputEncoder?
+    let sendAction: OutboundActionHandler?
     let frameProbe: ContentViewFrameProbe?
 
     @ViewBuilder
     var body: some View {
         switch item.semanticKind {
         case .fileTree:
-            FileTreeView(fileTreeState: input.fileTreeState, encoder: encoder)
+            FileTreeView(fileTreeState: input.fileTreeState, sendAction: sendAction)
                 .background {
                     if let frameProbe {
                         frameProbe.makeView(
@@ -115,9 +115,9 @@ struct NativeSidebarBody: View {
                     }
                 }
         case .gitStatus:
-            GitStatusView(state: input.gitStatusState, encoder: encoder)
+            GitStatusView(state: input.gitStatusState, sendAction: sendAction)
         case .observatory:
-            ObservatoryView(state: input.observatoryState, encoder: encoder)
+            ObservatoryView(state: input.observatoryState, sendAction: sendAction)
         case .unsupported:
             GenericSidebarFallbackView(item: item)
         }

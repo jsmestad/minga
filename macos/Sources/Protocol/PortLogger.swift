@@ -42,11 +42,11 @@ public final class PortLogger: Sendable {
 
     /// OSAllocatedUnfairLock wraps the mutable state and is Sendable,
     /// so the compiler can verify thread safety without @unchecked.
-    private let state = OSAllocatedUnfairLock<(any InputEncoder)?>(initialState: nil)
+    private let state = OSAllocatedUnfairLock<(any OutboundActionEncoding)?>(initialState: nil)
 
     /// Set the encoder used for all subsequent log calls.
     /// Call once during app startup after the ProtocolEncoder is created.
-    public static func setup(encoder: any InputEncoder) {
+    public static func setup(encoder: any OutboundActionEncoding) {
         shared.state.withLock { $0 = encoder }
     }
 
@@ -56,8 +56,8 @@ public final class PortLogger: Sendable {
     }
 
     private static func send(level: UInt8, message: String) {
-        let encoder: (any InputEncoder)? = shared.state.withLock { $0 }
-        encoder?.sendLog(level: level, message: message)
+        let encoder: (any OutboundActionEncoding)? = shared.state.withLock { $0 }
+        encoder?.send(.log(level: level, message: message))
     }
 
     public static func error(_ message: String) {

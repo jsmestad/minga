@@ -33,10 +33,10 @@ private struct StatusBarSegmentGroup: Identifiable {
 }
 
 public struct StatusBarView: View {
-    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, encoder: InputEncoder? = nil, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
+    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: OutboundActionHandler?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
         self.state = state
         self.feedbackState = feedbackState
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.isFileTreeVisible = isFileTreeVisible
         self.isGitStatusVisible = isGitStatusVisible
         self.isBottomPanelVisible = isBottomPanelVisible
@@ -47,7 +47,7 @@ public struct StatusBarView: View {
     public var feedbackState: FeedbackState?
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     public var isFileTreeVisible: Bool = false
     public var isGitStatusVisible: Bool = false
     public var isBottomPanelVisible: Bool = false
@@ -143,7 +143,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private func commandButton<Content: View>(command: String?, tooltip: String, @ViewBuilder content: () -> Content) -> some View {
         if let command {
-            Button(action: { encoder?.sendExecuteCommand(name: command) }) {
+            Button(action: { sendAction?(.executeCommand(name: command)) }) {
                 content()
             }
             .buttonStyle(.plain)
@@ -335,7 +335,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var backgroundSubagentSegment: some View {
         Button(action: {
-            encoder?.sendExecuteCommand(name: "agent_session_switcher")
+            sendAction?(.executeCommand(name: "agent_session_switcher"))
         }) {
             HStack(spacing: 3) {
                 Image(systemName: "person.2.wave.2.fill")
@@ -365,7 +365,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private func gitSegment(command: String?) -> some View {
         Button(action: {
-            encoder?.sendExecuteCommand(name: command ?? "git_branch_picker")
+            sendAction?(.executeCommand(name: command ?? "git_branch_picker"))
         }) {
             HStack(spacing: 3) {
                 Image(systemName: "arrow.triangle.branch")
@@ -417,9 +417,9 @@ public struct StatusBarView: View {
         if hasAny {
             Button(action: {
                 if let command {
-                    encoder?.sendExecuteCommand(name: command)
+                    sendAction?(.executeCommand(name: command))
                 } else {
-                    encoder?.sendTogglePanel(panel: 1)
+                    sendAction?(.togglePanel(panel: 1))
                 }
             }) {
                 HStack(spacing: 6) {
@@ -523,7 +523,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private func indentSegment(command: String? = nil) -> some View {
         Button(action: {
-            encoder?.sendExecuteCommand(name: command ?? "indent_picker")
+            sendAction?(.executeCommand(name: command ?? "indent_picker"))
         }) {
             Text("\(state.indent.label):\(state.indent.size)")
                 .font(.system(size: 11, design: .monospaced))
@@ -539,7 +539,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private func filetypeSegment(command: String? = nil) -> some View {
         Button(action: {
-            encoder?.sendExecuteCommand(name: command ?? "set_language")
+            sendAction?(.executeCommand(name: command ?? "set_language"))
         }) {
             HStack(spacing: 3) {
                 if !state.icon.isEmpty {
@@ -566,7 +566,7 @@ public struct StatusBarView: View {
 
         if !displayText.isEmpty {
             Button(action: {
-                encoder?.sendExecuteCommand(name: command ?? "buffer_list")
+                sendAction?(.executeCommand(name: command ?? "buffer_list"))
             }) {
                 HStack(spacing: 3) {
                     Text(displayText)
@@ -698,7 +698,7 @@ public struct StatusBarView: View {
     private func customModelineGroup(_ group: StatusBarSegmentGroup) -> some View {
         HStack(spacing: 2) {
             ForEach(group.segments) { segment in
-                StatusBarModelineSegmentView(segment: segment, encoder: encoder)
+                StatusBarModelineSegmentView(segment: segment, sendAction: sendAction)
             }
         }
     }
@@ -717,7 +717,7 @@ public struct StatusBarView: View {
                 barFg: theme.modelineBarFg,
                 tooltip: "Toggle file tree (SPC o p)"
             ) {
-                encoder?.sendTogglePanel(panel: 0)
+                sendAction?(.togglePanel(panel: 0))
             }
 
             // Source control toggle
@@ -729,7 +729,7 @@ public struct StatusBarView: View {
                 barFg: theme.modelineBarFg,
                 tooltip: "Git status (SPC g g)"
             ) {
-                encoder?.sendTogglePanel(panel: 2)
+                sendAction?(.togglePanel(panel: 2))
             }
 
             // Bottom panel toggle
@@ -741,7 +741,7 @@ public struct StatusBarView: View {
                 barFg: theme.modelineBarFg,
                 tooltip: "Toggle messages (SPC b m)"
             ) {
-                encoder?.sendTogglePanel(panel: 1)
+                sendAction?(.togglePanel(panel: 1))
             }
 
             // Divider between toggle icons and informational segments
@@ -766,7 +766,7 @@ public struct StatusBarView: View {
                 barFg: theme.modelineBarFg,
                 tooltip: "Toggle agent chat (SPC a a)"
             ) {
-                encoder?.sendTogglePanel(panel: 3)
+                sendAction?(.togglePanel(panel: 3))
             }
         }
         .padding(.trailing, 8)
@@ -939,7 +939,7 @@ public enum StatusBarModelineFont {
 
 private struct StatusBarModelineSegmentView: View {
     let segment: Wire.StatusBarSegment
-    let encoder: InputEncoder?
+    let sendAction: OutboundActionHandler?
 
     var body: some View {
         if segment.command.isEmpty {
@@ -948,7 +948,7 @@ private struct StatusBarModelineSegmentView: View {
                 .accessibilityLabel(trimmedDisplayText)
         } else {
             Button(action: {
-                encoder?.sendExecuteCommand(name: segment.command)
+                sendAction?(.executeCommand(name: segment.command))
             }) {
                 segmentText
                     .contentShape(Rectangle())
@@ -1110,16 +1110,16 @@ private func statusBarAgentPreviewState() -> StatusBarState {
 }
 
 #Preview("Status Bar – Normal", traits: .mingaChrome) {
-    StatusBarView(state: statusBarPreviewState(mode: .normal), encoder: nil)
+    StatusBarView(state: statusBarPreviewState(mode: .normal), sendAction: { _ in })
         .frame(width: 800, height: 28)
 }
 
 #Preview("Status Bar – Insert", traits: .mingaChrome) {
-    StatusBarView(state: statusBarPreviewState(mode: .insert), encoder: nil)
+    StatusBarView(state: statusBarPreviewState(mode: .insert), sendAction: { _ in })
         .frame(width: 800, height: 28)
 }
 
 #Preview("Status Bar – Agent Running", traits: .mingaChrome) {
-    StatusBarView(state: statusBarAgentPreviewState(), isAgentChatVisible: true)
+    StatusBarView(state: statusBarAgentPreviewState(), sendAction: { _ in }, isAgentChatVisible: true)
         .frame(width: 800, height: 28)
 }

@@ -9,15 +9,15 @@ import SwiftUI
 import MingaProtocol
 
 public struct HoverPopupOverlay: View {
-    public init(state: HoverPopupState, encoder: InputEncoder? = nil) {
+    public init(state: HoverPopupState, sendAction: OutboundActionHandler?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
 
     @Environment(\.anchoredOverlayContext) private var overlayContext
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
 
     private let maxWidth: CGFloat = 500
 
@@ -67,7 +67,7 @@ public struct HoverPopupOverlay: View {
                         .padding(.vertical, 4)
 
                     Button("Open") {
-                        encoder?.sendHoverOpenAction()
+                        sendAction?(.hoverOpen)
                     }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12, weight: .semibold))
@@ -248,7 +248,7 @@ private func hoverPopupPreviewState() -> HoverPopupState {
 
 #Preview("Hover Popup") {
     let theme = PreviewFixtures.theme()
-    HoverPopupOverlay(state: hoverPopupPreviewState(), encoder: nil)
+    HoverPopupOverlay(state: hoverPopupPreviewState(), sendAction: { _ in })
         .frame(width: 500, height: 300)
         .background(theme.editorBg)
         .environment(\.themeColors, theme)

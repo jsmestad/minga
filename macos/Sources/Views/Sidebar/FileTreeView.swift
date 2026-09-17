@@ -12,16 +12,16 @@ import SwiftUI
 public struct FileTreeView: View {
     public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     public let usesPreviewEagerLayout: Bool
 
     public init(
         fileTreeState: FileTreeState,
-        encoder: InputEncoder?,
+        sendAction: OutboundActionHandler?,
         usesPreviewEagerLayout: Bool = false
     ) {
         self.fileTreeState = fileTreeState
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.usesPreviewEagerLayout = usesPreviewEagerLayout
     }
 
@@ -137,17 +137,17 @@ public struct FileTreeView: View {
             case .empty:
                 stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
                 Button("New File…") {
-                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
+                    sendAction?(.fileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex)))
                 }
                 .buttonStyle(primaryStateButtonStyle)
                 Button("Refresh") {
-                    encoder?.sendFileTreeRefresh()
+                    sendAction?(.fileTreeRefresh)
                 }
                 .buttonStyle(secondaryStateButtonStyle)
             case .error:
                 stateText(title: "Couldn’t load file tree", subtitle: fileTreeState.errorReason.isEmpty ? "Check project permissions, then refresh." : fileTreeState.errorReason)
                 Button("Refresh") {
-                    encoder?.sendFileTreeRefresh()
+                    sendAction?(.fileTreeRefresh)
                 }
                 .buttonStyle(primaryStateButtonStyle)
             case .hidden, .ready:
@@ -293,7 +293,7 @@ public struct FileTreeView: View {
                 .modifier(
                     FileTreeEntryAccessibilityActions(
                         entry: entry,
-                        encoder: encoder,
+                        sendAction: sendAction,
                         resolveEntry: { fileTreeState.entry(withID: $0) }
                     )
                 )
@@ -328,10 +328,10 @@ public struct FileTreeView: View {
             animDuration: animDuration,
             onActivate: onActivate,
             onEditCommit: { text in
-                encoder?.sendFileTreeEditConfirm(token: entry.editingToken, text: text)
+                sendAction?(.fileTreeEditConfirm(token: entry.editingToken, text: text))
             },
             onEditCancel: {
-                encoder?.sendFileTreeEditCancel()
+                sendAction?(.fileTreeEditCancel)
             }
         )
     }
@@ -345,12 +345,12 @@ public struct FileTreeView: View {
         if !entry.isDir {
             Button("Open") {
                 withCurrentEntry(entryId) { entry in
-                    encoder?.sendFileTreeClick(index: UInt16(entry.index))
+                    sendAction?(.fileTreeClick(index: UInt16(entry.index)))
                 }
             }
             Button("Open in Split") {
                 withCurrentEntry(entryId) { entry in
-                    encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
+                    sendAction?(.fileTreeOpenInSplit(index: UInt16(entry.index)))
                 }
             }
             Divider()
@@ -359,12 +359,12 @@ public struct FileTreeView: View {
         if entry.isDir {
             Button("New File…") {
                 withCurrentEntry(entryId) { entry in
-                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
+                    sendAction?(.fileTreeNewFile(parentIndex: UInt16(entry.index)))
                 }
             }
             Button("New Folder…") {
                 withCurrentEntry(entryId) { entry in
-                    encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
+                    sendAction?(.fileTreeNewFolder(parentIndex: UInt16(entry.index)))
                 }
             }
             Divider()
@@ -372,12 +372,12 @@ public struct FileTreeView: View {
 
         Button("Rename") {
             withCurrentEntry(entryId) { entry in
-                encoder?.sendFileTreeRename(index: UInt16(entry.index))
+                sendAction?(.fileTreeRename(index: UInt16(entry.index)))
             }
         }
         Button("Duplicate") {
             withCurrentEntry(entryId) { entry in
-                encoder?.sendFileTreeDuplicate(index: UInt16(entry.index))
+                sendAction?(.fileTreeDuplicate(index: UInt16(entry.index)))
             }
         }
 
@@ -419,7 +419,7 @@ public struct FileTreeView: View {
 
         Button(role: .destructive) {
             withCurrentEntry(entryId) { entry in
-                encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+                sendAction?(.fileTreeDelete(index: UInt16(entry.index)))
             }
         } label: {
             Text("Move to Trash")
@@ -447,15 +447,15 @@ public struct FileTreeView: View {
 
         if isDoubleClick {
             // Double-click: always open (files open permanently)
-            encoder?.sendFileTreeClick(index: UInt16(entry.index))
+            sendAction?(.fileTreeClick(index: UInt16(entry.index)))
             lastClickEntryId = nil
             lastClickTime = nil
         } else {
             // Single-click: toggle directories, select/preview files
             if entry.isDir {
-                encoder?.sendFileTreeToggle(index: UInt16(entry.index))
+                sendAction?(.fileTreeToggle(index: UInt16(entry.index)))
             } else {
-                encoder?.sendFileTreeClick(index: UInt16(entry.index))
+                sendAction?(.fileTreeClick(index: UInt16(entry.index)))
             }
             lastClickEntryId = entry.id
             lastClickTime = now
@@ -474,16 +474,9 @@ public struct FileTreeView: View {
     public func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
         let sourcePaths = urls.map(\.path).filter { !$0.isEmpty }
         guard !sourcePaths.isEmpty else { return false }
-        guard let encoder else { return false }
+        guard let sendAction else { return false }
 
-        encoder.sendFileTreeDrop(
-            sourcePaths: sourcePaths,
-            targetIndex: UInt16(entry.index),
-            targetId: entry.id,
-            targetPathHash: entry.pathHash,
-            targetPath: fileTreeState.fullPath(for: entry),
-            targetIsDir: entry.isDir,
-            modifiers: currentModifierBits()
+        sendAction(.fileTreeDrop(sourcePaths: sourcePaths, targetIndex: UInt16(entry.index), targetID: entry.id, targetPathHash: entry.pathHash, targetPath: fileTreeState.fullPath(for: entry), targetIsDirectory: entry.isDir, modifiers: currentModifierBits())
         )
 
         return true
@@ -574,7 +567,7 @@ private struct FileTreeStateButtonStyle: ButtonStyle {
 
 private struct FileTreeEntryAccessibilityActions: ViewModifier {
     let entry: FileTreeEntry
-    let encoder: InputEncoder?
+    let sendAction: OutboundActionHandler?
     let resolveEntry: (String) -> FileTreeEntry?
 
     @ViewBuilder
@@ -583,41 +576,41 @@ private struct FileTreeEntryAccessibilityActions: ViewModifier {
             content
                 .accessibilityAction(named: Text("Toggle Folder")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeToggle(index: UInt16(entry.index))
+                    sendAction?(.fileTreeToggle(index: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("New File…")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
+                    sendAction?(.fileTreeNewFile(parentIndex: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("New Folder…")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
+                    sendAction?(.fileTreeNewFolder(parentIndex: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("Rename")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeRename(index: UInt16(entry.index))
+                    sendAction?(.fileTreeRename(index: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("Move to Trash")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+                    sendAction?(.fileTreeDelete(index: UInt16(entry.index)))
                 }
         } else {
             content
                 .accessibilityAction(named: Text("Open")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeClick(index: UInt16(entry.index))
+                    sendAction?(.fileTreeClick(index: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("Open in Split")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
+                    sendAction?(.fileTreeOpenInSplit(index: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("Rename")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeRename(index: UInt16(entry.index))
+                    sendAction?(.fileTreeRename(index: UInt16(entry.index)))
                 }
                 .accessibilityAction(named: Text("Move to Trash")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+                    sendAction?(.fileTreeDelete(index: UInt16(entry.index)))
                 }
         }
     }
@@ -642,7 +635,7 @@ private func fileTreePreviewState() -> FileTreeState {
 
 #Preview("File Tree") {
     let theme = PreviewFixtures.theme()
-    FileTreeView(fileTreeState: fileTreePreviewState(), encoder: nil, usesPreviewEagerLayout: true)
+    FileTreeView(fileTreeState: fileTreePreviewState(), sendAction: { _ in }, usesPreviewEagerLayout: true)
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
         .environment(\.themeColors, theme)

@@ -1,14 +1,14 @@
 import SwiftUI
 
 public struct EditTimelineView: View {
-    public init(state: EditTimelineState, encoder: InputEncoder? = nil) {
+    public init(state: EditTimelineState, sendAction: OutboundActionHandler?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: EditTimelineState
     @Environment(\.themeColors) private var themeColors
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
 
     public var body: some View {
         if state.visible && !state.files.isEmpty {
@@ -75,7 +75,7 @@ public struct EditTimelineView: View {
                                        height: isActive || isLast ? 10 : 7)
                                 .position(x: x, y: geometry.size.height / 2)
                                 .onTapGesture {
-                                    encoder?.sendTimelineNavigate(index: UInt16(entry.index))
+                                    sendAction?(.timelineNavigate(index: UInt16(entry.index)))
                                 }
                                 .help("\(entry.toolName) (edit \(entry.index + 1)/\(count))")
                         }

@@ -3,12 +3,12 @@ import MingaProtocol
 
 public struct FrontendExtensionViewContext {
     public let theme: ThemeColors
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     public let namespace: Namespace.ID
 
-    public init(theme: ThemeColors, encoder: InputEncoder? = nil, namespace: Namespace.ID) {
+    public init(theme: ThemeColors, sendAction: OutboundActionHandler?, namespace: Namespace.ID) {
         self.theme = theme
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.namespace = namespace
     }
 }

@@ -3,14 +3,14 @@ import MingaProtocol
 
 /// Workspace header row rendered above active-workspace file tabs.
 public struct WorkspaceHeaderView: View {
-    public init(workspaceState: WorkspaceState, encoder: InputEncoder? = nil) {
+    public init(workspaceState: WorkspaceState, sendAction: OutboundActionHandler?) {
         self.workspaceState = workspaceState
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let workspaceState: WorkspaceState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
 
     @State private var isRenaming = false
     @State private var renameText = ""
@@ -75,7 +75,7 @@ public struct WorkspaceHeaderView: View {
         .onTapGesture(count: 2) { beginRename(workspace) }
         .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
             WorkspaceIconPicker(currentIcon: workspace.icon, accentColor: workspace.color) { selectedIcon in
-                encoder?.sendWorkspaceSetIcon(id: workspace.id, icon: selectedIcon)
+                sendAction?(.workspaceSetIcon(id: workspace.id, icon: selectedIcon))
                 showIconPicker = false
             }
             .frame(width: 320, height: 260)
@@ -105,7 +105,7 @@ public struct WorkspaceHeaderView: View {
 
     private var workspaceSwitcher: some View {
         Button {
-            encoder?.sendExecuteCommand(name: "workspace_next")
+            sendAction?(.executeCommand(name: "workspace_next"))
         } label: {
             Image(systemName: "rectangle.grid.1x2")
                 .font(.system(size: 12, weight: .medium))
@@ -117,7 +117,7 @@ public struct WorkspaceHeaderView: View {
         .contextMenu {
             ForEach(workspaceState.workspaces) { workspace in
                 Button {
-                    encoder?.sendExecuteCommand(name: workspaceState.switchCommand(for: workspace))
+                    sendAction?(.executeCommand(name: workspaceState.switchCommand(for: workspace)))
                 } label: {
                     Label(workspace.label, systemImage: workspaceSystemImage(workspace))
                 }
@@ -131,7 +131,7 @@ public struct WorkspaceHeaderView: View {
 
     private func agentStatusButton(_ workspace: WorkspacePresentationEntry) -> some View {
         Button {
-            encoder?.sendExecuteCommand(name: "toggle_agentic_view")
+            sendAction?(.executeCommand(name: "toggle_agentic_view"))
         } label: {
             HStack(spacing: 5) {
                 Circle()
@@ -192,7 +192,7 @@ public struct WorkspaceHeaderView: View {
 
     private func closeButton(_ workspace: WorkspacePresentationEntry) -> some View {
         Button {
-            encoder?.sendWorkspaceClose(id: workspace.id)
+            sendAction?(.workspaceClose(id: workspace.id))
         } label: {
             Image(systemName: "xmark.circle")
                 .font(.system(size: 13))
@@ -242,7 +242,7 @@ public struct WorkspaceHeaderView: View {
         isRenaming = false
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != workspace.label else { return }
-        encoder?.sendWorkspaceRename(id: workspace.id, name: trimmed)
+        sendAction?(.workspaceRename(id: workspace.id, name: trimmed))
     }
 
     private func workspaceValue(_ workspace: WorkspacePresentationEntry) -> String {

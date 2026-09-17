@@ -2,18 +2,18 @@ import SwiftUI
 import MingaProtocol
 
 public struct WorkspaceIndicatorView: View {
-    public init(workspace: WorkspacePresentationEntry, presentationRevision: UInt64, owner: TabBarState, encoder: InputEncoder? = nil, barHeight: CGFloat) {
+    public init(workspace: WorkspacePresentationEntry, presentationRevision: UInt64, owner: TabBarState, sendAction: OutboundActionHandler?, barHeight: CGFloat) {
         self.workspace = workspace
         self.presentationRevision = presentationRevision
         self.owner = owner
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.barHeight = barHeight
     }
     public let workspace: WorkspacePresentationEntry
     public let presentationRevision: UInt64
     public let owner: TabBarState
     @Environment(\.themeColors) private var theme
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     public let barHeight: CGFloat
 
     @State private var isRenaming: Bool = false
@@ -135,7 +135,7 @@ public struct WorkspaceIndicatorView: View {
     }
 
     private func showWorkspaceList() {
-        encoder?.sendExecuteCommand(name: "workspace_list")
+        sendAction?(.executeCommand(name: "workspace_list"))
     }
 
     private func showWorkspaceIconPicker() {
@@ -158,11 +158,11 @@ public struct WorkspaceIndicatorView: View {
         guard targetIsCurrent else { return }
         switch action {
         case .setIcon(let icon):
-            encoder?.sendWorkspaceSetIcon(id: workspace.id, icon: icon)
+            sendAction?(.workspaceSetIcon(id: workspace.id, icon: icon))
         case .rename(let name):
-            encoder?.sendWorkspaceRename(id: workspace.id, name: name)
+            sendAction?(.workspaceRename(id: workspace.id, name: name))
         case .close:
-            encoder?.sendWorkspaceClose(id: workspace.id)
+            sendAction?(.workspaceClose(id: workspace.id))
         }
     }
 

@@ -164,9 +164,9 @@ struct NonBlockingEncoderTests {
         let pipe = Pipe()
         let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
-        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
-        encoder.sendResize(cols: 120, rows: 40)
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
+        encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0))
+        encoder.send(.resize(cols: 120, rows: 40))
 
         #expect(encoder.waitForPendingWritesForTesting())
         pipe.fileHandleForWriting.closeFile()
@@ -184,17 +184,18 @@ struct NonBlockingEncoderTests {
         let writer = ControlledWriter()
         let encoder = makeControlledEncoder(writer: writer)
 
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0, seq: 1)
-        encoder.sendPasteEvent(text: "paste")
-        encoder.sendSelectTab(id: 42)
-        encoder.sendFrameApplied(generation: 3, frameSeq: 7)
-        encoder.sendFrameRejected(
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 1))
+        encoder.send(.paste("paste"))
+        encoder.send(.selectTab(id: 42))
+        encoder.send(.frameApplied(generation: 3, frameSequence: 7))
+        encoder.send(.frameRejected(
             generation: 3,
-            frameSeq: 8,
-            lastAppliedFrameSeq: 7,
-            reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue
-        )
-        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0, seq: 2)
+            frameSequence: 8,
+            lastAppliedFrameSequence: 7,
+            reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue,
+            disposition: GeneratedProtocol.FrameRejectionDisposition.terminalFrontendFailure.rawValue
+        ))
+        encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 2))
         #expect(encoder.waitForPendingWritesForTesting())
         #expect(writer.writtenData().isEmpty)
 
@@ -222,9 +223,9 @@ struct NonBlockingEncoderTests {
     func partialWritesRetainHeadOffset() throws {
         let writer = ControlledWriter()
         let encoder = makeControlledEncoder(writer: writer)
-        encoder.sendPasteEvent(text: "authoritative paste")
-        encoder.sendKeyPress(codepoint: 0x6B, modifiers: 0)
-        encoder.sendSelectTab(id: 9)
+        encoder.send(.paste("authoritative paste"))
+        encoder.send(.keyPress(codepoint: 0x6B, modifiers: 0, sequence: 0))
+        encoder.send(.selectTab(id: 9))
         #expect(encoder.waitForPendingWritesForTesting())
 
         writer.replaceResults([.write(7), .wouldBlock])
@@ -245,11 +246,11 @@ struct NonBlockingEncoderTests {
         let writer = ControlledWriter()
         let encoder = makeControlledEncoder(writer: writer)
 
-        encoder.sendResize(cols: 80, rows: 24)
-        encoder.sendResize(cols: 90, rows: 30)
-        encoder.sendKeyPress(codepoint: 0x78, modifiers: 0)
-        encoder.sendResize(cols: 100, rows: 40)
-        encoder.sendResize(cols: 110, rows: 50)
+        encoder.send(.resize(cols: 80, rows: 24))
+        encoder.send(.resize(cols: 90, rows: 30))
+        encoder.send(.keyPress(codepoint: 0x78, modifiers: 0, sequence: 0))
+        encoder.send(.resize(cols: 100, rows: 40))
+        encoder.send(.resize(cols: 110, rows: 50))
         #expect(encoder.waitForPendingWritesForTesting())
 
         writer.allowAllWrites()
@@ -267,10 +268,10 @@ struct NonBlockingEncoderTests {
         writer.replaceResults([.write(2), .wouldBlock])
         let encoder = makeControlledEncoder(writer: writer)
 
-        encoder.sendResize(cols: 80, rows: 24)
+        encoder.send(.resize(cols: 80, rows: 24))
         #expect(encoder.waitForPendingWritesForTesting())
         #expect(encoder.headWriteOffsetForTesting == 2)
-        encoder.sendResize(cols: 100, rows: 40)
+        encoder.send(.resize(cols: 100, rows: 40))
 
         writer.allowAllWrites()
         #expect(encoder.waitForPendingWritesForTesting())
@@ -292,7 +293,7 @@ struct NonBlockingEncoderTests {
         )
 
         let text = String(repeating: "x", count: Int(UInt16.max) - 2) + "é"
-        encoder.sendPasteEvent(text: text)
+        encoder.send(.paste(text))
         #expect(encoder.waitForPendingWritesForTesting())
         #expect(encoder.bufferedByteCount == maximumPasteFrameSize)
         writer.allowAllWrites()
@@ -322,7 +323,7 @@ struct NonBlockingEncoderTests {
         var iterator = rejections.stream.makeAsyncIterator()
 
         for text in [String(repeating: "x", count: 65_536), String(repeating: "x", count: 65_534) + "é"] {
-            encoder.sendPasteEvent(text: text)
+            encoder.send(.paste(text))
             let rejection = await iterator.next()
             #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
             #expect(encoder.waitForPendingWritesForTesting())
@@ -330,15 +331,15 @@ struct NonBlockingEncoderTests {
             #expect(writer.writtenData().isEmpty)
         }
 
-        encoder.sendPasteEvent(text: "é\n")
+        encoder.send(.paste("é\n"))
         #expect(encoder.waitForPendingWritesForTesting())
         let acceptedFrame = encoder.bufferedDataForTesting()
         #expect(acceptedFrame.isEmpty == false)
-        encoder.sendPasteEvent(text: String(repeating: "x", count: 65_536))
+        encoder.send(.paste(String(repeating: "x", count: 65_536)))
         let rejection = await iterator.next()
         #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
         #expect(encoder.bufferedDataForTesting() == acceptedFrame)
-        encoder.sendPasteEvent(text: "ok")
+        encoder.send(.paste("ok"))
         writer.allowAllWrites()
         #expect(encoder.waitForPendingWritesForTesting())
         let frames = try #require(parseFrames(writer.writtenData()))
@@ -374,8 +375,8 @@ struct NonBlockingEncoderTests {
             maximumPayloadSize: 15
         )
 
-        #expect(encoder.sendApplicationQuitRequest(requestID: 42))
-        #expect(encoder.sendApplicationQuitDecision(requestID: 42, decision: 1))
+        #expect(encoder.send(.applicationQuitRequest(requestID: 42)).wasAccepted)
+        #expect(encoder.send(.applicationQuitDecision(requestID: 42, decision: 1)).wasAccepted)
         #expect(encoder.bufferedByteCount == 19)
 
         writer.allowAllWrites()
@@ -396,9 +397,9 @@ struct NonBlockingEncoderTests {
             onTransportFailure: { failure in capture.append(failure) }
         )
 
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
-        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
-        encoder.sendPasteEvent(text: "ignored after terminal failure")
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
+        encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0))
+        encoder.send(.paste("ignored after terminal failure"))
         await awaitFailureCount(1, capture: capture)
 
         #expect(capture.failures == [OutboundTransportFailureReport(
@@ -420,9 +421,9 @@ struct NonBlockingEncoderTests {
             onTransportFailure: { failure in capture.append(failure) }
         )
 
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
         #expect(encoder.waitForPendingWritesForTesting())
-        encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
+        encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0))
         #expect(encoder.waitForPendingWritesForTesting())
         await awaitFailureCount(1, capture: capture)
 
@@ -443,8 +444,8 @@ struct NonBlockingEncoderTests {
             onTransportFailure: { failure in capture.append(failure) }
         )
 
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
-        encoder.sendPasteEvent(text: "accepted")
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
+        encoder.send(.paste("accepted"))
         #expect(encoder.waitForPendingWritesForTesting())
         let strandedBytes = encoder.bufferedByteCount
         encoder.disconnect(reason: .unexpectedPeerClosure)
@@ -508,7 +509,7 @@ struct NonBlockingEncoderTests {
         fillPipeUntilWouldBlock(pipe.fileHandleForWriting.fileDescriptor)
         let start = ContinuousClock.now
 
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
 
         #expect(start.duration(to: .now) < .milliseconds(100))
         pipe.fileHandleForWriting.closeFile()
@@ -521,8 +522,8 @@ struct NonBlockingEncoderTests {
         let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
 
         encoder.disconnect(reason: .expectedTeardown)
-        encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
-        encoder.sendPasteEvent(text: "dropped")
+        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
+        encoder.send(.paste("dropped"))
 
         #expect(encoder.waitForPendingWritesForTesting())
         pipe.fileHandleForWriting.closeFile()
@@ -540,7 +541,7 @@ struct NonBlockingEncoderTests {
             for taskIndex in 0..<8 {
                 group.addTask {
                     for offset in 0..<25 {
-                        encoder.sendKeyPress(codepoint: UInt32(0x61 + ((taskIndex + offset) % 26)), modifiers: 0)
+                        encoder.send(.keyPress(codepoint: UInt32(0x61 + ((taskIndex + offset) % 26)), modifiers: 0, sequence: 0))
                     }
                 }
             }

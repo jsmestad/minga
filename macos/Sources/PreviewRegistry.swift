@@ -280,7 +280,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
+    private static func previewEditorNSView(appState: AppState, encoder: OutboundActionEncoding) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }
@@ -509,7 +509,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
+    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: OutboundActionEncoding) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }

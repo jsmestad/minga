@@ -13,15 +13,15 @@ import SwiftUI
 import MingaProtocol
 
 public struct MessagesContentView: View {
-    public init(state: MessagesContentState, encoder: InputEncoder? = nil, usesPreviewEagerLayout: Bool = false) {
+    public init(state: MessagesContentState, sendAction: OutboundActionHandler?, usesPreviewEagerLayout: Bool = false) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.usesPreviewEagerLayout = usesPreviewEagerLayout
     }
     public let state: MessagesContentState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     /// Snapshot-only: render the list as a plain, non-lazy stack so every row
     /// lays out for capture. The live lazy ScrollView path renders blank in the
     /// preview harness (same pattern as FileTreeView / GitStatusView).
@@ -39,7 +39,7 @@ public struct MessagesContentView: View {
         if usesPreviewEagerLayout {
             VStack(spacing: 0) {
                 ForEach(state.filteredEntries) { entry in
-                    MessageEntryRow(entry: entry, encoder: encoder)
+                    MessageEntryRow(entry: entry, sendAction: sendAction)
                 }
             }
             .padding(.horizontal, Spacing.sm)
@@ -56,7 +56,7 @@ public struct MessagesContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(state.filteredEntries) { entry in
-                            MessageEntryRow(entry: entry, encoder: encoder)
+                            MessageEntryRow(entry: entry, sendAction: sendAction)
                                 .id(entry.id)
                         }
 
@@ -312,7 +312,7 @@ private struct MessagesFilterBar: View {
 private struct MessageEntryRow: View {
     let entry: MessageEntry
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    let sendAction: OutboundActionHandler?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -346,7 +346,7 @@ private struct MessageEntryRow: View {
             // Clickable file path
             if !entry.filePath.isEmpty {
                 Button(action: {
-                    encoder?.sendOpenFile(path: entry.filePath)
+                    sendAction?(.openFile(path: entry.filePath))
                 }) {
                     Text(entry.filePath)
                         .font(.system(size: 10))

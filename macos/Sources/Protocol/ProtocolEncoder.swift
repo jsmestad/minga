@@ -78,7 +78,7 @@ enum OutboundTransportInitializationError: Error, Equatable {
     }
 }
 
-final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
+final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     enum DisconnectReason: Sendable {
         case expectedTeardown
         case unexpectedPeerClosure
@@ -124,6 +124,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     private var drainPassScheduled: Bool = false
     private var drainRetryScheduled: Bool = false
     private var terminalFailureReported: Bool = false
+    private var lastAdmissionRejection: OutboundActionRejection?
 
     /// Creates an encoder. Defaults to stdout for production use.
     /// Pass a pipe's write handle for testing binary layout.
@@ -150,6 +151,144 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         self.onTransportFailure = onTransportFailure
         self.onInputRejection = onInputRejection
         writeQueue.setSpecific(key: writeQueueKey, value: ())
+    }
+
+    /// Encode and admit one typed outbound action.
+    @discardableResult
+    func send(_ action: OutboundAction) -> OutboundActionResult {
+        if case .paste(let text) = action, text.utf8.count > Int(UInt16.max) {
+            let attemptedBytes = text.utf8.count
+            let rejection = OutboundActionRejection.payloadTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: attemptedBytes)
+            let callback = onInputRejection
+            Task { @MainActor in
+                callback(.pasteTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: attemptedBytes))
+            }
+            return .rejected(rejection)
+        }
+
+        if case .searchQuery(_, _, let query, _) = action, query.utf8.count > Int(UInt16.max) {
+            return .rejected(.payloadTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: query.utf8.count))
+        }
+
+        if case .fileTreeDrop(let sourcePaths, _, let targetID, _, let targetPath, _, _) = action,
+           let error = fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetID, targetPath: targetPath) {
+            encodeLog(level: LOG_LEVEL_WARN, message: error)
+            return .rejected(.invalidPayload(error))
+        }
+
+        return withWriteQueue {
+            guard connected else { return .rejected(.disconnected) }
+            lastAdmissionRejection = nil
+            encode(action)
+            return lastAdmissionRejection.map(OutboundActionResult.rejected) ?? .accepted
+        }
+    }
+
+    private func encode(_ action: OutboundAction) {
+        switch action {
+        case .ready(let cols, let rows): encodeReady(cols: cols, rows: rows)
+        case .keyPress(let codepoint, let modifiers, let sequence): encodeKeyPress(codepoint: codepoint, modifiers: modifiers, seq: sequence)
+        case .resize(let cols, let rows): encodeResize(cols: cols, rows: rows)
+        case .requestKeyframe(let lastGoodFrameSequence, let generation): encodeRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSequence, generation: generation)
+        case .frameApplied(let generation, let frameSequence): encodeFrameApplied(generation: generation, frameSeq: frameSequence)
+        case .frameRejected(let generation, let frameSequence, let lastAppliedFrameSequence, let reason, let disposition): encodeFrameRejected(generation: generation, frameSeq: frameSequence, lastAppliedFrameSeq: lastAppliedFrameSequence, reason: reason, disposition: GeneratedProtocol.FrameRejectionDisposition.decode(disposition))
+        case .windowReferenceMiss(let generation, let frameSequence, let lastAppliedFrameSequence, let windowID): encodeWindowRefMiss(generation: generation, frameSeq: frameSequence, lastAppliedFrameSeq: lastAppliedFrameSequence, windowId: windowID)
+        case .operationNativeResult(let result): encodeOperationNativeResult(result)
+        case .nativePresentationObservation(let evidence): encodeNativePresentationObservation(evidence)
+        case .applicationQuitRequest(let requestID): _ = encodeApplicationQuitRequest(requestID: requestID)
+        case .applicationQuitDecision(let requestID, let decision): _ = encodeApplicationQuitDecision(requestID: requestID, decision: decision)
+        case .fileDialogResult(let requestID, let outcome, let paths): _ = encodeFileDialogResult(requestID: requestID, outcome: outcome, paths: paths)
+        case .mouse(let row, let column, let button, let modifiers, let eventType, let clickCount): encodeMouseEvent(row: row, col: column, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount)
+        case .scrollBatch(let windowID, let deltaLines, let direction): encodeScrollBatch(windowId: windowID, deltaLines: deltaLines, direction: direction)
+        case .paste(let text): encodePasteEvent(text: text)
+        case .log(let level, let message): encodeLog(level: level, message: message)
+        case .selectTab(let id): encodeSelectTab(id: id)
+        case .closeTab(let id): encodeCloseTab(id: id)
+        case .emptyStateActivate(let id): encodeEmptyStateActivate(id: id)
+        case .tabCopyPath(let id): encodeTabCopyPath(id: id)
+        case .tabReorder(let id, let newIndex): encodeTabReorder(id: id, newIndex: newIndex)
+        case .tabPin(let id): encodeTabPin(id: id)
+        case .tabUnpin(let id): encodeTabUnpin(id: id)
+        case .tabMoveLeft(let id): encodeTabMoveLeft(id: id)
+        case .tabMoveRight(let id): encodeTabMoveRight(id: id)
+        case .hoverOpen: encodeHoverOpenAction()
+        case .pickerQueryChanged(let generation, let editSequence, let text): encodePickerQueryChanged(generation: generation, editSeq: editSequence, text: text)
+        case .pickerItemActivate(let generation, let activationID): encodePickerItemActivate(generation: generation, activationID: activationID)
+        case .pickerActionActivate(let generation, let activationID): encodePickerActionActivate(generation: generation, activationID: activationID)
+        case .fileTreeClick(let index): encodeFileTreeClick(index: index)
+        case .fileTreeToggle(let index): encodeFileTreeToggle(index: index)
+        case .fileTreeOpenInSplit(let index): encodeFileTreeOpenInSplit(index: index)
+        case .fileTreeNewFile(let parentIndex): encodeFileTreeNewFile(parentIndex: parentIndex)
+        case .fileTreeNewFolder(let parentIndex): encodeFileTreeNewFolder(parentIndex: parentIndex)
+        case .fileTreeEditConfirm(let token, let text): encodeFileTreeEditConfirm(token: token, text: text)
+        case .fileTreeEditCancel: encodeFileTreeEditCancel()
+        case .fileTreeDelete(let index): encodeFileTreeDelete(index: index)
+        case .fileTreeRename(let index): encodeFileTreeRename(index: index)
+        case .fileTreeDuplicate(let index): encodeFileTreeDuplicate(index: index)
+        case .fileTreeMove(let sourceIndex, let targetDirectoryIndex): encodeFileTreeMove(sourceIndex: sourceIndex, targetDirIndex: targetDirectoryIndex)
+        case .fileTreeDrop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers): encodeFileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetId: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDir: targetIsDirectory, modifiers: modifiers)
+        case .fileTreeCollapseAll: encodeFileTreeCollapseAll()
+        case .fileTreeRefresh: encodeFileTreeRefresh()
+        case .completionSelect(let index): encodeCompletionSelect(index: index)
+        case .togglePanel(let panel): encodeTogglePanel(panel: panel)
+        case .sidebarAction(let sidebarID, let kind, let action): encodeSidebarAction(sidebarId: sidebarID, kind: kind, action: action)
+        case .extensionAction(let extensionID, let action, let payload): encodeExtensionAction(extensionID: extensionID, action: action, payload: payload)
+        case .newTab: encodeNewTab()
+        case .systemWillSleep: encodeSystemWillSleep()
+        case .systemDidWake: encodeSystemDidWake()
+        case .systemWillUnmount(let volumePath): encodeSystemWillUnmount(volumePath: volumePath)
+        case .powerThermalState(let lowPowerMode, let thermalState): encodePowerThermalState(lowPowerMode: lowPowerMode, thermalState: thermalState)
+        case .commandCopy: encodeCmdCopy()
+        case .commandCut: encodeCmdCut()
+        case .panelSwitchTab(let index): encodePanelSwitchTab(index: index)
+        case .panelDismiss: encodePanelDismiss()
+        case .panelResize(let heightPercent): encodePanelResize(heightPercent: heightPercent)
+        case .agentToolToggle(let messageID): encodeAgentToolToggle(messageID: messageID)
+        case .executeCommand(let name): encodeExecuteCommand(name: name)
+        case .minibufferSelect(let index): encodeMinibufferSelect(index: index)
+        case .openFile(let path): encodeOpenFile(path: path)
+        case .gitStageFile(let path): encodeGitStageFile(path: path)
+        case .gitUnstageFile(let path): encodeGitUnstageFile(path: path)
+        case .gitDiscardFile(let path): encodeGitDiscardFile(path: path)
+        case .gitStageAll: encodeGitStageAll()
+        case .gitUnstageAll: encodeGitUnstageAll()
+        case .gitCommit(let message): encodeGitCommit(message: message)
+        case .gitOpenFile(let path): encodeGitOpenFile(path: path)
+        case .gitOpenDiff(let path, let section): encodeGitOpenDiff(path: path, section: section)
+        case .gitPush: encodeGitPush()
+        case .gitPull: encodeGitPull()
+        case .gitFetch: encodeGitFetch()
+        case .gitCommitAmend(let message): encodeGitCommitAmend(message: message)
+        case .gitPullAndRetry: encodeGitPullAndRetry()
+        case .workspaceRename(let id, let name): encodeWorkspaceRename(id: id, name: name)
+        case .workspaceSetIcon(let id, let icon): encodeWorkspaceSetIcon(id: id, icon: icon)
+        case .workspaceClose(let id): encodeWorkspaceClose(id: id)
+        case .spaceLeaderChord(let codepoint, let modifiers): encodeSpaceLeaderChord(codepoint: codepoint, modifiers: modifiers)
+        case .spaceLeaderRetract(let codepoint, let modifiers): encodeSpaceLeaderRetract(codepoint: codepoint, modifiers: modifiers)
+        case .findPasteboardSearch(let text, let direction): encodeFindPasteboardSearch(text: text, direction: direction)
+        case .agentApprove: encodeAgentApprove()
+        case .agentRequestChanges: encodeAgentRequestChanges()
+        case .agentDismiss: encodeAgentDismiss()
+        case .chatScrolledAwayFromBottom: encodeChatScrolledAwayFromBottom()
+        case .chatReturnedToBottom: encodeChatReturnedToBottom()
+        case .scrollToLine(let line): encodeScrollToLine(line: line)
+        case .foldToggleAtLine(let windowID, let bufferLine): encodeFoldToggleAtLine(windowId: windowID, bufferLine: bufferLine)
+        case .focusWindow(let windowID, let generation): encodeFocusWindow(windowId: windowID, generation: generation)
+        case .configQuery: encodeConfigQuery()
+        case .configUpdate(let key, let value): encodeConfigUpdate(key: key, value: value)
+        case .notificationDismiss(let id): encodeNotificationDismiss(id: id)
+        case .notificationAction(let id, let actionID): encodeNotificationAction(id: id, actionId: actionID)
+        case .observatoryInspect(let pid): encodeObservatoryInspect(pid: pid)
+        case .fontSizeAdjust(let direction): encodeFontSizeAdjust(direction: direction)
+        case .timelineNavigate(let index): encodeTimelineNavigate(index: index)
+        case .searchFocus(let replaceMode): encodeSearchFocus(replaceMode: replaceMode)
+        case .searchQuery(let sessionID, let editSequence, let query, let flags): encodeSearchQuery(sessionID: sessionID, editSeq: editSequence, query: query, flags: flags)
+        case .searchNext: encodeSearchNext()
+        case .searchPrevious: encodeSearchPrev()
+        case .searchReplace(let replacement): encodeSearchReplace(replacement: replacement)
+        case .searchReplaceAll(let replacement): encodeSearchReplaceAll(replacement: replacement)
+        case .searchDismiss: encodeSearchDismiss()
+        }
     }
 
     /// Mark the encoder as disconnected. Called by the reader's
@@ -220,7 +359,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// `WindowContentRenderer`/`CommandDispatcher`), so it advertises
     /// `semantic_ui = true`. The BEAM uses this capability, not `frontend_type`,
     /// to select the semantic render/chrome path shared with the Go TUI.
-    func sendReady(cols: UInt16, rows: UInt16) {
+    private func encodeReady(cols: UInt16, rows: UInt16) {
         var buf = Data(count: 29)
         buf[0] = OP_READY
         writeU16(&buf, 1, cols)
@@ -244,14 +383,9 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a key press event without a latency correlation sequence.
-    func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
-        sendKeyPress(codepoint: codepoint, modifiers: modifiers, seq: 0)
-    }
-
     /// Send a key press event carrying a u32 latency correlation sequence
     /// (ticket #2215) appended after the modifiers byte.
-    func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
+    private func encodeKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
         var buf = Data(count: 10)
         buf[0] = OP_KEY_PRESS
         writeU32(&buf, 1, codepoint)
@@ -262,7 +396,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a resize event (dimensions in cells).
-    func sendResize(cols: UInt16, rows: UInt16) {
+    private func encodeResize(cols: UInt16, rows: UInt16) {
         var buf = Data(count: 5)
         buf[0] = OP_RESIZE
         writeU16(&buf, 1, cols)
@@ -271,7 +405,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Request a fresh BEAM recovery generation.
-    func sendRequestKeyframe(lastGoodFrameSeq: UInt32, generation: UInt32) {
+    private func encodeRequestKeyframe(lastGoodFrameSeq: UInt32, generation: UInt32) {
         var buf = Data(count: 9)
         buf[0] = OP_REQUEST_KEYFRAME
         writeU32(&buf, 1, lastGoodFrameSeq)
@@ -280,7 +414,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Report semantic publication, deliberately independent of Metal presentation.
-    func sendFrameApplied(generation: UInt32, frameSeq: UInt32) {
+    private func encodeFrameApplied(generation: UInt32, frameSeq: UInt32) {
         var buf = Data(count: 9)
         buf[0] = OP_FRAME_APPLIED
         writeU32(&buf, 1, generation)
@@ -288,7 +422,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendOperationNativeResult(_ result: NativeOperationResult) {
+    private func encodeOperationNativeResult(_ result: MingaProtocol.NativeOperationResult) {
         var buf = Data(count: 57)
         buf[0] = OP_OPERATION_NATIVE_RESULT
         writeU64(&buf, 1, result.operationID)
@@ -311,7 +445,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendNativePresentationObservation(_ evidence: NativePresentationEvidence) {
+    private func encodeNativePresentationObservation(_ evidence: MingaProtocol.NativePresentationEvidence) {
         var buf = Data(count: 24)
         buf[0] = OP_NATIVE_PRESENTATION_OBSERVATION
         writeU64(&buf, 1, evidence.targetToken)
@@ -323,25 +457,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf, deliveryPolicy: .coalescing(.nativePresentationObservation))
     }
 
-    func sendFrameRejected(
-        generation: UInt32,
-        frameSeq: UInt32,
-        lastAppliedFrameSeq: UInt32,
-        reason: UInt8
-    ) {
-        let generatedReason = GeneratedProtocol.FrameRejectionReason.decode(reason)
-        let disposition: GeneratedProtocol.FrameRejectionDisposition =
-            generatedReason == .resourcePolicy ? .terminalFrontendFailure : .retryableRecovery
-        sendFrameRejected(
-            generation: generation,
-            frameSeq: frameSeq,
-            lastAppliedFrameSeq: lastAppliedFrameSeq,
-            reason: reason,
-            disposition: disposition
-        )
-    }
-
-    func sendFrameRejected(
+    private func encodeFrameRejected(
         generation: UInt32,
         frameSeq: UInt32,
         lastAppliedFrameSeq: UInt32,
@@ -358,7 +474,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16) {
+    private func encodeWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16) {
         var buf = Data(count: 15)
         buf[0] = OP_WINDOW_REF_MISS
         writeU32(&buf, 1, generation)
@@ -370,7 +486,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Begin one correlated native application-quit attempt on the ordered input channel.
     @discardableResult
-    func sendApplicationQuitRequest(requestID: UInt32) -> Bool {
+    private func encodeApplicationQuitRequest(requestID: UInt32) -> Bool {
         var buf = Data(count: 5)
         buf[0] = OP_APPLICATION_QUIT_REQUEST
         writeU32(&buf, 1, requestID)
@@ -379,7 +495,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Send Save, Discard, or Cancel for the matching native application-quit attempt.
     @discardableResult
-    func sendApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool {
+    private func encodeApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool {
         var buf = Data(count: 6)
         buf[0] = OP_APPLICATION_QUIT_DECISION
         writeU32(&buf, 1, requestID)
@@ -389,7 +505,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Return one correlated native file-dialog result on the durable input channel.
     @discardableResult
-    func sendFileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String]) -> Bool {
+    private func encodeFileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String]) -> Bool {
         let encodedPaths = paths.map { Array($0.utf8).prefix(Int(UInt16.max)) }
         let pathCount = min(encodedPaths.count, Int(UInt16.max))
         let payloadSize = encodedPaths.prefix(pathCount).reduce(7) { $0 + 2 + $1.count }
@@ -412,7 +528,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Send a mouse event with click count.
     /// GUI frontends send the native `NSEvent.clickCount`; the BEAM uses it
     /// directly for double/triple-click detection (no timing needed).
-    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8) {
+    private func encodeMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8) {
         var buf = Data(count: 9)
         buf[0] = OP_MOUSE_EVENT
         writeI16(&buf, 1, row)
@@ -424,7 +540,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {
+    private func encodeScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {
         var buf = Data(count: 6)
         buf[0] = OP_SCROLL_BATCH
         writeU16(&buf, 1, windowId)
@@ -437,7 +553,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Layout: opcode(1) + text_len(2, big-endian) + text(text_len).
     /// Text is UTF-8 encoded. Maximum length is 65535 bytes (UInt16.max).
     /// Oversized input is rejected in full without changing transport state.
-    func sendPasteEvent(text: String) {
+    private func encodePasteEvent(text: String) {
         let textLen = text.utf8.count
         guard textLen <= Int(UInt16.max) else {
             let onInputRejection = self.onInputRejection
@@ -457,7 +573,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Send a log message to the BEAM for display in *Messages*.
     /// Layout: opcode(1) + level(1) + msg_len(2, big-endian) + msg(msg_len).
-    func sendLog(level: UInt8, message: String) {
+    private func encodeLog(level: UInt8, message: String) {
         let utf8 = Array(message.utf8)
         let msgLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 4 + msgLen)
@@ -473,7 +589,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     // MARK: - GUI Actions
 
     /// Send a gui_action: select_tab. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendSelectTab(id: UInt32) {
+    private func encodeSelectTab(id: UInt32) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SELECT_TAB
@@ -482,7 +598,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: close_tab. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendCloseTab(id: UInt32) {
+    private func encodeCloseTab(id: UInt32) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CLOSE_TAB
@@ -495,7 +611,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Activates a launchpad row (resume card, recent file, or action) by its
     /// semantic id. Activation is authoritative on the BEAM; the frontend only
     /// forwards the click.
-    func sendEmptyStateActivate(id: String) {
+    private func encodeEmptyStateActivate(id: String) {
         let utf8 = Array(id.utf8)
         let idLen = min(utf8.count, Int(UInt8.max))
         var buf = Data(count: 3 + idLen)
@@ -509,7 +625,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: tab_copy_path. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendTabCopyPath(id: UInt32) {
+    private func encodeTabCopyPath(id: UInt32) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TAB_COPY_PATH
@@ -518,7 +634,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: tab_reorder. Layout: opcode(1) + action_type(1) + tab_id(4) + new_index(2).
-    func sendTabReorder(id: UInt32, newIndex: UInt16) {
+    private func encodeTabReorder(id: UInt32, newIndex: UInt16) {
         var buf = Data(count: 8)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TAB_REORDER
@@ -528,26 +644,26 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: tab_pin. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendTabPin(id: UInt32) {
-        sendTabIdAction(actionType: GUI_ACTION_TAB_PIN, id: id)
+    private func encodeTabPin(id: UInt32) {
+        encodeTabIdAction(actionType: GUI_ACTION_TAB_PIN, id: id)
     }
 
     /// Send a gui_action: tab_unpin. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendTabUnpin(id: UInt32) {
-        sendTabIdAction(actionType: GUI_ACTION_TAB_UNPIN, id: id)
+    private func encodeTabUnpin(id: UInt32) {
+        encodeTabIdAction(actionType: GUI_ACTION_TAB_UNPIN, id: id)
     }
 
     /// Send a gui_action: tab_move_left. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendTabMoveLeft(id: UInt32) {
-        sendTabIdAction(actionType: GUI_ACTION_TAB_MOVE_LEFT, id: id)
+    private func encodeTabMoveLeft(id: UInt32) {
+        encodeTabIdAction(actionType: GUI_ACTION_TAB_MOVE_LEFT, id: id)
     }
 
     /// Send a gui_action: tab_move_right. Layout: opcode(1) + action_type(1) + tab_id(4).
-    func sendTabMoveRight(id: UInt32) {
-        sendTabIdAction(actionType: GUI_ACTION_TAB_MOVE_RIGHT, id: id)
+    private func encodeTabMoveRight(id: UInt32) {
+        encodeTabIdAction(actionType: GUI_ACTION_TAB_MOVE_RIGHT, id: id)
     }
 
-    private func sendTabIdAction(actionType: UInt8, id: UInt32) {
+    private func encodeTabIdAction(actionType: UInt8, id: UInt32) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = actionType
@@ -556,7 +672,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: hover_open_action. Layout: opcode(1) + action_type(1).
-    func sendHoverOpenAction() {
+    private func encodeHoverOpenAction() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_HOVER_OPEN_ACTION
@@ -564,7 +680,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: picker_query_changed with native edit correlation and complete UTF-8 text.
-    func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {
+    private func encodePickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {
         var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_QUERY_CHANGED])
         appendU32(&buf, generation)
         appendU32(&buf, editSeq)
@@ -572,14 +688,14 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendPickerItemActivate(generation: UInt32, activationID: UInt32) {
+    private func encodePickerItemActivate(generation: UInt32, activationID: UInt32) {
         var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_ITEM_ACTIVATE])
         appendU32(&buf, generation)
         appendU32(&buf, activationID)
         writeFrame(buf)
     }
 
-    func sendPickerActionActivate(generation: UInt32, activationID: UInt32) {
+    private func encodePickerActionActivate(generation: UInt32, activationID: UInt32) {
         var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_ACTION_ACTIVATE])
         appendU32(&buf, generation)
         appendU32(&buf, activationID)
@@ -587,7 +703,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_click. Layout: opcode(1) + action_type(1) + index(2).
-    func sendFileTreeClick(index: UInt16) {
+    private func encodeFileTreeClick(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_CLICK
@@ -596,7 +712,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_toggle. Layout: opcode(1) + action_type(1) + index(2).
-    func sendFileTreeToggle(index: UInt16) {
+    private func encodeFileTreeToggle(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_TOGGLE
@@ -605,7 +721,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_open_in_split. Layout: opcode(1) + action_type(1) + index(2).
-    func sendFileTreeOpenInSplit(index: UInt16) {
+    private func encodeFileTreeOpenInSplit(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT
@@ -614,7 +730,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_new_file. Layout: opcode(1) + action_type(1) + parent_index(2).
-    func sendFileTreeNewFile(parentIndex: UInt16) {
+    private func encodeFileTreeNewFile(parentIndex: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_NEW_FILE
@@ -624,7 +740,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_new_folder. Layout: opcode(1) + action_type(1) + parent_index(2).
-    func sendFileTreeNewFolder(parentIndex: UInt16) {
+    private func encodeFileTreeNewFolder(parentIndex: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_NEW_FOLDER
@@ -634,7 +750,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_edit_confirm. Layout: opcode(1) + action_type(1) + edit_token(4) + text_len(2) + text(N).
-    func sendFileTreeEditConfirm(token: UInt32, text: String) {
+    private func encodeFileTreeEditConfirm(token: UInt32, text: String) {
         let textData = text.data(using: .utf8) ?? Data()
         var buf = Data(count: 8 + textData.count)
         buf[0] = OP_GUI_ACTION
@@ -647,7 +763,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_edit_cancel. Layout: opcode(1) + action_type(1).
-    func sendFileTreeEditCancel() {
+    private func encodeFileTreeEditCancel() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_EDIT_CANCEL
@@ -655,7 +771,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_delete. Layout: opcode(1) + action_type(1) + index(2).
-    func sendFileTreeDelete(index: UInt16) {
+    private func encodeFileTreeDelete(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_DELETE
@@ -665,7 +781,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_rename. Layout: opcode(1) + action_type(1) + index(2).
-    func sendFileTreeRename(index: UInt16) {
+    private func encodeFileTreeRename(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_RENAME
@@ -675,7 +791,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_duplicate. Layout: opcode(1) + action_type(1) + index(2).
-    func sendFileTreeDuplicate(index: UInt16) {
+    private func encodeFileTreeDuplicate(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_DUPLICATE
@@ -685,7 +801,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_move. Layout: opcode(1) + action_type(1) + source(2) + target(2).
-    func sendFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16) {
+    private func encodeFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_MOVE
@@ -697,9 +813,9 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_drop. Layout: opcode(1) + action_type(1) + target_index(2) + target_hash(4) + target_kind(1) + modifiers(1) + target_id + target_path + sources.
-    func sendFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8) {
+    private func encodeFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8) {
         if let error = fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetId, targetPath: targetPath) {
-            sendLog(level: LOG_LEVEL_WARN, message: error)
+            encodeLog(level: LOG_LEVEL_WARN, message: error)
             return
         }
 
@@ -722,7 +838,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_collapse_all. Layout: opcode(1) + action_type(1).
-    func sendFileTreeCollapseAll() {
+    private func encodeFileTreeCollapseAll() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_COLLAPSE_ALL
@@ -730,7 +846,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: file_tree_refresh. Layout: opcode(1) + action_type(1).
-    func sendFileTreeRefresh() {
+    private func encodeFileTreeRefresh() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_REFRESH
@@ -738,7 +854,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: completion_select. Layout: opcode(1) + action_type(1) + index(2).
-    func sendCompletionSelect(index: UInt16) {
+    private func encodeCompletionSelect(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_COMPLETION_SELECT
@@ -748,7 +864,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
 
     /// Send a gui_action: toggle_panel. Layout: opcode(1) + action_type(1) + panel(1).
-    func sendTogglePanel(panel: UInt8) {
+    private func encodeTogglePanel(panel: UInt8) {
         var buf = Data(count: 3)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TOGGLE_PANEL
@@ -757,7 +873,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: sidebar_action. Layout: opcode(1) + action_type(1) + id + kind + action.
-    func sendSidebarAction(sidebarId: String, kind: String, action: String) {
+    private func encodeSidebarAction(sidebarId: String, kind: String, action: String) {
         var buf = Data([OP_GUI_ACTION, GUI_ACTION_SIDEBAR_ACTION])
         appendString16(&buf, sidebarId)
         appendString16(&buf, kind)
@@ -766,7 +882,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: extension_action. Layout: opcode(1) + action_type(1) + extension_id + action + opaque payload.
-    func sendExtensionAction(extensionID: String, action: String, payload: Data) {
+    private func encodeExtensionAction(extensionID: String, action: String, payload: Data) {
         var buf = Data([OP_GUI_ACTION, GUI_ACTION_EXTENSION_ACTION])
         appendString16(&buf, extensionID)
         appendString16(&buf, action)
@@ -775,7 +891,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: new_tab. Layout: opcode(1) + action_type(1).
-    func sendNewTab() {
+    private func encodeNewTab() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_NEW_TAB
@@ -783,7 +899,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: system_will_sleep. Layout: opcode(1) + action_type(1).
-    func sendSystemWillSleep() {
+    private func encodeSystemWillSleep() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SYSTEM_WILL_SLEEP
@@ -791,7 +907,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: system_did_wake. Layout: opcode(1) + action_type(1).
-    func sendSystemDidWake() {
+    private func encodeSystemDidWake() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SYSTEM_DID_WAKE
@@ -800,7 +916,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Send a gui_action: system_will_unmount.
     /// Layout: opcode(1) + action_type(1) + path_len(2) + path(path_len).
-    func sendSystemWillUnmount(volumePath: String) {
+    private func encodeSystemWillUnmount(volumePath: String) {
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_SYSTEM_WILL_UNMOUNT)
@@ -809,7 +925,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: power_thermal_state. Layout: opcode(1) + action_type(1) + low_power(1) + thermal_state(1).
-    func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {
+    private func encodePowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_POWER_THERMAL_STATE
@@ -819,7 +935,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: cmd_copy (mode-aware copy from menu bar).
-    func sendCmdCopy() {
+    private func encodeCmdCopy() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CMD_COPY
@@ -827,7 +943,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: cmd_cut (mode-aware cut from menu bar).
-    func sendCmdCut() {
+    private func encodeCmdCut() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CMD_CUT
@@ -835,7 +951,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: panel_switch_tab. Layout: opcode(1) + action_type(1) + tab_index(1).
-    func sendPanelSwitchTab(index: UInt8) {
+    private func encodePanelSwitchTab(index: UInt8) {
         var buf = Data(count: 3)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_PANEL_SWITCH_TAB
@@ -844,7 +960,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: panel_dismiss. Layout: opcode(1) + action_type(1).
-    func sendPanelDismiss() {
+    private func encodePanelDismiss() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_PANEL_DISMISS
@@ -852,7 +968,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: panel_resize. Layout: opcode(1) + action_type(1) + height_percent(1).
-    func sendPanelResize(heightPercent: UInt8) {
+    private func encodePanelResize(heightPercent: UInt8) {
         var buf = Data(count: 3)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_PANEL_RESIZE
@@ -862,7 +978,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
 
     /// Send a gui_action: agent_tool_toggle. Layout: opcode(1) + action_type(1) + message_id(4).
-    func sendAgentToolToggle(messageID: UInt32) {
+    private func encodeAgentToolToggle(messageID: UInt32) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_TOOL_TOGGLE
@@ -874,7 +990,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     ///
     /// Dispatches a named command through the BEAM's command registry.
     /// The command name must match a registered atom (e.g., "buffer_prev", "find_file").
-    func sendExecuteCommand(name: String) {
+    private func encodeExecuteCommand(name: String) {
         let utf8 = Array(name.utf8)
         let nameLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 4 + nameLen)
@@ -888,7 +1004,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: minibuffer_select. Accepts a candidate by index.
-    func sendMinibufferSelect(index: UInt16) {
+    private func encodeMinibufferSelect(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_MINIBUFFER_SELECT
@@ -897,7 +1013,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: open_file. Layout: opcode(1) + action_type(1) + path_len(2) + path(path_len).
-    func sendOpenFile(path: String) {
+    private func encodeOpenFile(path: String) {
         let utf8 = Array(path.utf8)
         let pathLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 4 + pathLen)
@@ -912,37 +1028,37 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     // MARK: - Git Status Actions
 
-    func sendGitStageFile(path: String) {
-        sendGitPathAction(GUI_ACTION_GIT_STAGE_FILE, path: path)
+    private func encodeGitStageFile(path: String) {
+        encodeGitPathAction(GUI_ACTION_GIT_STAGE_FILE, path: path)
     }
 
-    func sendGitUnstageFile(path: String) {
-        sendGitPathAction(GUI_ACTION_GIT_UNSTAGE_FILE, path: path)
+    private func encodeGitUnstageFile(path: String) {
+        encodeGitPathAction(GUI_ACTION_GIT_UNSTAGE_FILE, path: path)
     }
 
-    func sendGitDiscardFile(path: String) {
-        sendGitPathAction(GUI_ACTION_GIT_DISCARD_FILE, path: path)
+    private func encodeGitDiscardFile(path: String) {
+        encodeGitPathAction(GUI_ACTION_GIT_DISCARD_FILE, path: path)
     }
 
-    func sendGitStageAll() {
+    private func encodeGitStageAll() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_STAGE_ALL
         writeFrame(buf)
     }
 
-    func sendGitUnstageAll() {
+    private func encodeGitUnstageAll() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_UNSTAGE_ALL
         writeFrame(buf)
     }
 
-    func sendGitCommit(message: String) {
-        sendGitCommit(message: message, amend: false)
+    private func encodeGitCommit(message: String) {
+        encodeGitCommit(message: message, amend: false)
     }
 
-    private func sendGitCommit(message: String, amend: Bool) {
+    private func encodeGitCommit(message: String, amend: Bool) {
         let utf8 = Array(message.utf8)
         let msgLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 5 + msgLen)
@@ -956,11 +1072,11 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendGitOpenFile(path: String) {
-        sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
+    private func encodeGitOpenFile(path: String) {
+        encodeGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
     }
 
-    func sendGitOpenDiff(path: String, section: UInt8) {
+    private func encodeGitOpenDiff(path: String, section: UInt8) {
         let utf8 = Array(path.utf8)
         let pathLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 5 + pathLen)
@@ -974,40 +1090,40 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendGitPush() {
+    private func encodeGitPush() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_PUSH
         writeFrame(buf)
     }
 
-    func sendGitPull() {
+    private func encodeGitPull() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_PULL
         writeFrame(buf)
     }
 
-    func sendGitFetch() {
+    private func encodeGitFetch() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_FETCH
         writeFrame(buf)
     }
 
-    func sendGitCommitAmend(message: String) {
-        sendGitCommit(message: message, amend: true)
+    private func encodeGitCommitAmend(message: String) {
+        encodeGitCommit(message: message, amend: true)
     }
 
     /// Send a gui_action: git_pull_and_retry. Layout: opcode(1) + action_type(1).
-    func sendGitPullAndRetry() {
+    private func encodeGitPullAndRetry() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_PULL_AND_RETRY
         writeFrame(buf)
     }
 
-    func sendWorkspaceRename(id: UInt16, name: String) {
+    private func encodeWorkspaceRename(id: UInt16, name: String) {
         let utf8 = Array(name.utf8)
         let nameLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 6 + nameLen)
@@ -1021,7 +1137,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendWorkspaceSetIcon(id: UInt16, icon: String) {
+    private func encodeWorkspaceSetIcon(id: UInt16, icon: String) {
         let utf8 = Array(icon.utf8)
         let iconLen = min(utf8.count, 255)
         var buf = Data(count: 5 + iconLen)
@@ -1035,7 +1151,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendWorkspaceClose(id: UInt16) {
+    private func encodeWorkspaceClose(id: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_WORKSPACE_CLOSE
@@ -1046,7 +1162,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Send a gui_action: space_leader_chord.
     /// Clean chord: SPC was never sent. The BEAM enters leader mode directly.
     /// Layout: opcode(1) + action_type(1) + codepoint(4) + modifiers(1).
-    func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {
+    private func encodeSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {
         var buf = Data(count: 7)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SPACE_LEADER_CHORD
@@ -1059,7 +1175,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Fallback chord: SPC was already sent (grace timer fired). The BEAM
     /// deletes the space and enters leader mode.
     /// Same wire format as chord (the BEAM needs the key that triggered it).
-    func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) {
+    private func encodeSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) {
         var buf = Data(count: 7)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SPACE_LEADER_RETRACT
@@ -1071,7 +1187,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Send a gui_action: find_pasteboard_search.
     /// Layout: opcode(1) + action_type(1) + direction(1) + text_len(2) + text.
     /// Direction: 0 = forward (Cmd+G), 1 = backward (Cmd+Shift+G).
-    func sendFindPasteboardSearch(text: String, direction: UInt8) {
+    private func encodeFindPasteboardSearch(text: String, direction: UInt8) {
         let utf8 = Array(text.utf8)
         let textLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 5 + textLen)
@@ -1085,7 +1201,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    private func sendGitPathAction(_ actionType: UInt8, path: String) {
+    private func encodeGitPathAction(_ actionType: UInt8, path: String) {
         let utf8 = Array(path.utf8)
         let pathLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 4 + pathLen)
@@ -1099,7 +1215,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: agent_approve. Layout: opcode(1) + action_type(1).
-    func sendAgentApprove() {
+    private func encodeAgentApprove() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_APPROVE
@@ -1107,7 +1223,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: agent_request_changes. Layout: opcode(1) + action_type(1).
-    func sendAgentRequestChanges() {
+    private func encodeAgentRequestChanges() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_REQUEST_CHANGES
@@ -1115,7 +1231,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: agent_dismiss. Layout: opcode(1) + action_type(1).
-    func sendAgentDismiss() {
+    private func encodeAgentDismiss() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_DISMISS
@@ -1125,7 +1241,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Send a gui_action: chat_scrolled_away_from_bottom. Layout: opcode(1) + action_type(1).
     /// Reports that the reader scrolled away from the transcript bottom (#2654),
     /// pausing BEAM-side auto-follow.
-    func sendChatScrolledAwayFromBottom() {
+    private func encodeChatScrolledAwayFromBottom() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CHAT_SCROLLED_AWAY_FROM_BOTTOM
@@ -1135,7 +1251,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// Send a gui_action: chat_returned_to_bottom. Layout: opcode(1) + action_type(1).
     /// Reports that the reader returned to the transcript bottom (#2654),
     /// re-pinning BEAM-side auto-follow.
-    func sendChatReturnedToBottom() {
+    private func encodeChatReturnedToBottom() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CHAT_RETURNED_TO_BOTTOM
@@ -1144,7 +1260,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
 
     /// Send a gui_action: scroll_to_line. Layout: opcode(1) + action_type(1) + line(4).
-    func sendScrollToLine(line: UInt32) {
+    private func encodeScrollToLine(line: UInt32) {
         var buf = Data(count: 6)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SCROLL_TO_LINE
@@ -1153,7 +1269,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: fold_toggle_at_line. Layout: opcode(1) + action_type(1) + window_id(2) + buffer_line(4).
-    func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
+    private func encodeFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
         var buf = Data(count: 8)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FOLD_TOGGLE_AT_LINE
@@ -1163,7 +1279,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: focus_window. Layout: opcode(1) + action_type(1) + window_id(2) + pane_generation(8).
-    func sendFocusWindow(windowId: UInt16, generation: UInt64) {
+    private func encodeFocusWindow(windowId: UInt16, generation: UInt64) {
         var buf = Data(count: 12)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FOCUS_WINDOW
@@ -1173,7 +1289,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: config_query. Layout: opcode(1) + action_type(1).
-    func sendConfigQuery() {
+    private func encodeConfigQuery() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CONFIG_QUERY
@@ -1181,7 +1297,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: config_update. Layout: opcode(1) + action_type(1) + key_len(1) + key + value.
-    func sendConfigUpdate(key: String, value: SettingValue) {
+    private func encodeConfigUpdate(key: String, value: SettingValue) {
         let keyBytes = Array(key.utf8.prefix(Int(UInt8.max)))
         var buf = Data()
         buf.append(OP_GUI_ACTION)
@@ -1193,7 +1309,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: notification_dismiss. Layout: opcode(1) + action_type(1) + id_len(2) + id.
-    func sendNotificationDismiss(id: String) {
+    private func encodeNotificationDismiss(id: String) {
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_NOTIFICATION_DISMISS)
@@ -1202,7 +1318,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: notification_action. Layout: opcode(1) + action_type(1) + id_len(2) + id + action_len(2) + action_id.
-    func sendNotificationAction(id: String, actionId: String) {
+    private func encodeNotificationAction(id: String, actionId: String) {
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_NOTIFICATION_ACTION)
@@ -1212,7 +1328,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: observatory_inspect. Layout: opcode(1) + action_type(1) + pid_len(2) + pid.
-    func sendObservatoryInspect(pid: String) {
+    private func encodeObservatoryInspect(pid: String) {
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_OBSERVATORY_INSPECT)
@@ -1222,7 +1338,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Send a gui_action: font_size_adjust. Layout: opcode(1) + action_type(1) + direction(1).
     /// Direction: 0x00 = decrease, 0x01 = increase, 0x02 = reset.
-    func sendFontSizeAdjust(direction: UInt8) {
+    private func encodeFontSizeAdjust(direction: UInt8) {
         var buf = Data(count: 3)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FONT_SIZE_ADJUST
@@ -1231,7 +1347,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: timeline_navigate. Layout: opcode(1) + action_type(1) + index(2).
-    func sendTimelineNavigate(index: UInt16) {
+    private func encodeTimelineNavigate(index: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TIMELINE_NAVIGATE
@@ -1242,7 +1358,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     // MARK: - Search Toolbar Actions
 
     /// Send a gui_action: search_focus. Layout: opcode(1) + action_type(1) + replace_mode(1).
-    func sendSearchFocus(replaceMode: Bool) {
+    private func encodeSearchFocus(replaceMode: Bool) {
         var buf = Data(count: 3)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_FOCUS
@@ -1252,7 +1368,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     /// Send a correlated gui_action: search_query.
     /// Layout: opcode(1) + action_type(1) + session_id(4) + edit_seq(4) + query_len(2) + query + flags(1).
-    func sendSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {
+    private func encodeSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {
         let utf8 = Array(query.utf8)
         guard utf8.count <= Int(UInt16.max) else { return }
         let queryLen = utf8.count
@@ -1270,7 +1386,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: search_next. Layout: opcode(1) + action_type(1).
-    func sendSearchNext() {
+    private func encodeSearchNext() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_NEXT
@@ -1278,7 +1394,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: search_prev. Layout: opcode(1) + action_type(1).
-    func sendSearchPrev() {
+    private func encodeSearchPrev() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_PREV
@@ -1286,7 +1402,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: search_replace. Layout: opcode(1) + action_type(1) + replacement_len(2) + replacement.
-    func sendSearchReplace(replacement: String) {
+    private func encodeSearchReplace(replacement: String) {
         let utf8 = Array(replacement.utf8)
         let repLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 4 + repLen)
@@ -1300,7 +1416,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: search_replace_all. Layout: opcode(1) + action_type(1) + replacement_len(2) + replacement.
-    func sendSearchReplaceAll(replacement: String) {
+    private func encodeSearchReplaceAll(replacement: String) {
         let utf8 = Array(replacement.utf8)
         let repLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 4 + repLen)
@@ -1314,7 +1430,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     /// Send a gui_action: search_dismiss. Layout: opcode(1) + action_type(1).
-    func sendSearchDismiss() {
+    private func encodeSearchDismiss() {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_DISMISS
@@ -1367,7 +1483,11 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// backpressure returns EAGAIN instead of freezing the caller.
     private func writeFrame(_ payload: Data, deliveryPolicy: DeliveryPolicy = .durable) {
         withWriteQueue {
-            guard admit(payload: payload, deliveryPolicy: deliveryPolicy) else { return }
+            if let rejection = admit(payload: payload, deliveryPolicy: deliveryPolicy) {
+                lastAdmissionRejection = rejection
+                return
+            }
+            lastAdmissionRejection = nil
             scheduleDrainPass()
         }
     }
@@ -1378,7 +1498,11 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// A false result lets AppKit cancel termination instead of approving a quit that the BEAM never received.
     private func writeCriticalFrame(_ payload: Data) -> Bool {
         withWriteQueue {
-            guard admit(payload: payload, deliveryPolicy: .durable) else { return false }
+            if let rejection = admit(payload: payload, deliveryPolicy: .durable) {
+                lastAdmissionRejection = rejection
+                return false
+            }
+            lastAdmissionRejection = nil
             scheduleDrainPass()
             return true
         }
@@ -1391,27 +1515,27 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         return writeQueue.sync(execute: operation)
     }
 
-    private func admit(payload: Data, deliveryPolicy: DeliveryPolicy) -> Bool {
-        guard connected else { return false }
+    private func admit(payload: Data, deliveryPolicy: DeliveryPolicy) -> OutboundActionRejection? {
+        guard connected else { return .disconnected }
         guard payload.count <= maximumPayloadSize else {
             failTransport(.frameTooLarge(limit: maximumPayloadSize, payloadBytes: payload.count))
-            return false
+            return .payloadTooLarge(limitBytes: maximumPayloadSize, attemptedBytes: payload.count)
         }
 
         let frame = QueuedFrame(bytes: makeFrame(payload), deliveryPolicy: deliveryPolicy)
         if replaceCoalescibleTail(with: frame) {
-            return true
+            return nil
         }
 
         guard frame.bytes.count <= maxBufferSize,
               bufferSize <= maxBufferSize - frame.bytes.count else {
             failTransport(.capacityExhausted(limit: maxBufferSize, attemptedFrameBytes: frame.bytes.count))
-            return false
+            return .capacityExhausted(limitBytes: maxBufferSize, attemptedBytes: frame.bytes.count)
         }
 
         queuedFrames.append(frame)
         bufferSize += frame.bytes.count
-        return true
+        return nil
     }
 
     private func replaceCoalescibleTail(with frame: QueuedFrame) -> Bool {

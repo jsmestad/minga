@@ -34,13 +34,13 @@ public struct TabContextMenuMoveItem: Identifiable, Equatable {
 
 /// The tab bar strip rendered above the editor area.
 public struct TabBarView: View {
-    public init(tabBarState: TabBarState, encoder: InputEncoder? = nil) {
+    public init(tabBarState: TabBarState, sendAction: OutboundActionHandler?) {
         self.tabBarState = tabBarState
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let tabBarState: TabBarState
     @Environment(\.themeColors) private var theme
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
 
     @State private var hoverTabId: UInt32?
     @State private var dropTargetTabId: UInt32?
@@ -72,13 +72,13 @@ public struct TabBarView: View {
                 systemIcon: "chevron.left",
                 tooltip: "Previous tab (SPC b p)"
             ) {
-                encoder?.sendExecuteCommand(name: "buffer_prev")
+                sendAction?(.executeCommand(name: "buffer_prev"))
             }
             tabBarButton(
                 systemIcon: "chevron.right",
                 tooltip: "Next tab (SPC b n)"
             ) {
-                encoder?.sendExecuteCommand(name: "buffer_next")
+                sendAction?(.executeCommand(name: "buffer_next"))
             }
 
             // Thin separator after nav arrows
@@ -90,7 +90,7 @@ public struct TabBarView: View {
                     workspace: activeWorkspace,
                     presentationRevision: tabBarState.workspacePresentationRevision,
                     owner: tabBarState,
-                    encoder: encoder,
+                    sendAction: sendAction,
                     barHeight: barHeight
                 )
                 groupSeparator(color: activeWorkspace.color)
@@ -113,12 +113,12 @@ public struct TabBarView: View {
             // New tab / new agent dropdown
             Menu {
                 Button(action: {
-                    encoder?.sendNewTab()
+                    sendAction?(.newTab)
                 }) {
                     Label("New File", systemImage: "doc")
                 }
                 Button(action: {
-                    encoder?.sendExecuteCommand(name: "toggle_agentic_view")
+                    sendAction?(.executeCommand(name: "toggle_agentic_view"))
                 }) {
                     Label("Agent", systemImage: "cpu")
                 }
@@ -139,13 +139,13 @@ public struct TabBarView: View {
                 systemIcon: "rectangle.split.2x1",
                 tooltip: "Split right (SPC w v)"
             ) {
-                encoder?.sendExecuteCommand(name: "split_vertical")
+                sendAction?(.executeCommand(name: "split_vertical"))
             }
             tabBarButton(
                 systemIcon: "rectangle.expand.vertical",
                 tooltip: "Split below (SPC w s)"
             ) {
-                encoder?.sendExecuteCommand(name: "split_horizontal")
+                sendAction?(.executeCommand(name: "split_horizontal"))
             }
         }
         .focusable(false)
@@ -169,10 +169,10 @@ public struct TabBarView: View {
                     }
                     if value.translation.width < -swipeThreshold {
                         // Swipe left: next workspace
-                        encoder?.sendExecuteCommand(name: "workspace_next")
+                        sendAction?(.executeCommand(name: "workspace_next"))
                     } else if value.translation.width > swipeThreshold {
                         // Swipe right: previous workspace
-                        encoder?.sendExecuteCommand(name: "workspace_prev")
+                        sendAction?(.executeCommand(name: "workspace_prev"))
                     }
                     swiping = false
                     swipeDelta = 0
@@ -183,13 +183,13 @@ public struct TabBarView: View {
     public func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
         switch action {
         case .pin:
-            encoder?.sendTabPin(id: tab.id)
+            sendAction?(.tabPin(id: tab.id))
         case .unpin:
-            encoder?.sendTabUnpin(id: tab.id)
+            sendAction?(.tabUnpin(id: tab.id))
         case .moveLeft:
-            encoder?.sendTabMoveLeft(id: tab.id)
+            sendAction?(.tabMoveLeft(id: tab.id))
         case .moveRight:
-            encoder?.sendTabMoveRight(id: tab.id)
+            sendAction?(.tabMoveRight(id: tab.id))
         }
     }
 
@@ -204,7 +204,7 @@ public struct TabBarView: View {
         guard let reorder = tabBarState.tabDropReorder(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex) else {
             return false
         }
-        encoder?.sendTabReorder(id: reorder.id, newIndex: reorder.newIndex)
+        sendAction?(.tabReorder(id: reorder.id, newIndex: reorder.newIndex))
         return true
     }
 
@@ -270,7 +270,7 @@ public struct TabBarView: View {
 
         Button(action: {
             // Switch to this workspace by id (activates its first tab on the BEAM side)
-            encoder?.sendExecuteCommand(name: workspaceGotoCommand(for: workspace))
+            sendAction?(.executeCommand(name: workspaceGotoCommand(for: workspace)))
         }) {
             HStack(spacing: 4) {
                 Image(systemName: workspace.icon.isEmpty ? "cpu" : workspace.icon)
@@ -298,11 +298,11 @@ public struct TabBarView: View {
         .pointingHandCursor()
         .contextMenu {
             Button("Switch to Workspace") {
-                encoder?.sendExecuteCommand(name: workspaceGotoCommand(for: workspace))
+                sendAction?(.executeCommand(name: workspaceGotoCommand(for: workspace)))
             }
             Divider()
             Button("Close Workspace") {
-                encoder?.sendWorkspaceClose(id: workspace.id)
+                sendAction?(.workspaceClose(id: workspace.id))
             }
         }
     }
@@ -466,15 +466,15 @@ public struct TabBarView: View {
     @ViewBuilder
     private func closeTabMenuItems(for tab: TabEntry) -> some View {
         Button("Close") {
-            encoder?.sendCloseTab(id: tab.id)
+            sendAction?(.closeTab(id: tab.id))
         }
         Button("Close Others") {
-            encoder?.sendSelectTab(id: tab.id)
-            encoder?.sendExecuteCommand(name: "close_other_tabs")
+            sendAction?(.selectTab(id: tab.id))
+            sendAction?(.executeCommand(name: "close_other_tabs"))
         }
         Button("Close All") {
-            encoder?.sendSelectTab(id: tab.id)
-            encoder?.sendExecuteCommand(name: "kill_all_buffers")
+            sendAction?(.selectTab(id: tab.id))
+            sendAction?(.executeCommand(name: "kill_all_buffers"))
         }
     }
 
@@ -487,21 +487,21 @@ public struct TabBarView: View {
     private func fileTabContextMenu(for tab: TabEntry) -> some View {
         closeTabMenuItems(for: tab)
         Button("Close to the Right") {
-            encoder?.sendSelectTab(id: tab.id)
-            encoder?.sendExecuteCommand(name: "close_tabs_to_right")
+            sendAction?(.selectTab(id: tab.id))
+            sendAction?(.executeCommand(name: "close_tabs_to_right"))
         }
 
         Divider()
 
         Button("Copy Path") {
-            encoder?.sendTabCopyPath(id: tab.id)
+            sendAction?(.tabCopyPath(id: tab.id))
         }
 
         Divider()
 
         Button("Reveal in File Tree") {
-            encoder?.sendSelectTab(id: tab.id)
-            encoder?.sendExecuteCommand(name: "tree_reveal_active")
+            sendAction?(.selectTab(id: tab.id))
+            sendAction?(.executeCommand(name: "tree_reveal_active"))
         }
 
         Divider()
@@ -576,12 +576,12 @@ public struct TabBarView: View {
 
     private func selectTab(_ tab: TabEntry) {
         guard tabBarState.displayTabs.contains(where: { representsSameTab($0, tab) }) else { return }
-        encoder?.sendSelectTab(id: tab.id)
+        sendAction?(.selectTab(id: tab.id))
     }
 
     private func closeTab(_ tab: TabEntry) {
         guard tabBarState.displayTabs.contains(where: { representsSameTab($0, tab) }) else { return }
-        encoder?.sendCloseTab(id: tab.id)
+        sendAction?(.closeTab(id: tab.id))
     }
 
     private func representsSameTab(_ lhs: TabEntry, _ rhs: TabEntry) -> Bool {
@@ -720,7 +720,7 @@ private func tabBarPinnedPreviewState() -> TabBarState {
 
 #Preview("Tab Bar") {
     let theme = PreviewFixtures.theme()
-    TabBarView(tabBarState: tabBarPreviewState(), encoder: nil)
+    TabBarView(tabBarState: tabBarPreviewState(), sendAction: { _ in })
         .frame(width: 800, height: 34)
         .background(theme.tabBg)
         .environment(\.themeColors, theme)
@@ -728,7 +728,7 @@ private func tabBarPinnedPreviewState() -> TabBarState {
 
 #Preview("Tab Bar – Pinned & Modified") {
     let theme = PreviewFixtures.theme()
-    TabBarView(tabBarState: tabBarPinnedPreviewState(), encoder: nil)
+    TabBarView(tabBarState: tabBarPinnedPreviewState(), sendAction: { _ in })
         .frame(width: 800, height: 34)
         .background(theme.tabBg)
         .environment(\.themeColors, theme)

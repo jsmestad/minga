@@ -75,7 +75,7 @@ struct MingaApp: App {
         }
 
         Settings {
-            SettingsView(state: appDelegate.appState.gui.settingsState, encoder: appDelegate.appState.encoder)
+            SettingsView(state: appDelegate.appState.gui.settingsState, sendAction: { action in appDelegate.appState.encoder?.send(action) })
         }
     }
 }
@@ -202,29 +202,29 @@ private struct SingletonEditorWindowProbe: View {
 struct MingaMenuCommands: Commands {
     let appState: AppState
 
-    private var encoder: InputEncoder? { appState.encoder }
+    private var encoder: OutboundActionEncoding? { appState.encoder }
     private var connected: Bool { encoder != nil }
     private var latencyHUDState: LatencyHUDState { appState.gui.latencyHUDState }
 
     var body: some Commands {
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") {
-                routeTextEditingCommand(.undo) { $0.sendExecuteCommand(name: "undo") }
+                routeTextEditingCommand(.undo) { $0.send(.executeCommand(name: "undo")) }
             }
             .keyboardShortcut("z", modifiers: .command)
             .disabled(!textEditingCommandIsAvailable(.undo))
             Button("Redo") {
-                routeTextEditingCommand(.redo) { $0.sendExecuteCommand(name: "redo") }
+                routeTextEditingCommand(.redo) { $0.send(.executeCommand(name: "redo")) }
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
             .disabled(!textEditingCommandIsAvailable(.redo))
         }
 
         CommandGroup(replacing: .pasteboard) {
-            Button("Cut") { routeTextEditingCommand(.cut) { $0.sendCmdCut() } }
+            Button("Cut") { routeTextEditingCommand(.cut) { $0.send(.commandCut) } }
                 .keyboardShortcut("x", modifiers: .command)
                 .disabled(!textEditingCommandIsAvailable(.cut))
-            Button("Copy") { routeTextEditingCommand(.copy) { $0.sendCmdCopy() } }
+            Button("Copy") { routeTextEditingCommand(.copy) { $0.send(.commandCopy) } }
                 .keyboardShortcut("c", modifiers: .command)
                 .disabled(!textEditingCommandIsAvailable(.copy))
             Button("Paste") { routeTextEditingCommand(.paste) { pasteFromClipboard(using: $0) } }
@@ -234,18 +234,18 @@ struct MingaMenuCommands: Commands {
 
         CommandGroup(replacing: .textEditing) {
             Button("Select All") {
-                routeTextEditingCommand(.selectAll) { $0.sendExecuteCommand(name: "select_all") }
+                routeTextEditingCommand(.selectAll) { $0.send(.executeCommand(name: "select_all")) }
             }
             .keyboardShortcut("a", modifiers: .command)
             .disabled(!textEditingCommandIsAvailable(.selectAll))
         }
 
         CommandGroup(after: .textEditing) {
-            Button("Find…") { encoder?.sendSearchFocus(replaceMode: false) }
+            Button("Find…") { encoder?.send(.searchFocus(replaceMode: false)) }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(!connected)
 
-            Button("Find and Replace…") { encoder?.sendSearchFocus(replaceMode: true) }
+            Button("Find and Replace…") { encoder?.send(.searchFocus(replaceMode: true)) }
                 .keyboardShortcut("h", modifiers: .command)
                 .disabled(!connected)
         }
@@ -254,48 +254,48 @@ struct MingaMenuCommands: Commands {
         // SwiftUI provides the default "New Window" item; we replace it with
         // "New Buffer" which opens an empty scratch buffer in the BEAM.
         CommandGroup(replacing: .newItem) {
-            Button("New Buffer") { encoder?.sendExecuteCommand(name: "new_buffer") }
+            Button("New Buffer") { encoder?.send(.executeCommand(name: "new_buffer")) }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(!connected)
         }
 
         CommandGroup(after: .newItem) {
-            Button("Open…") { encoder?.sendExecuteCommand(name: "open_file_dialog") }
+            Button("Open…") { encoder?.send(.executeCommand(name: "open_file_dialog")) }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(!connected)
 
             Divider()
 
-            Button("Save") { encoder?.sendExecuteCommand(name: "save") }
+            Button("Save") { encoder?.send(.executeCommand(name: "save")) }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(!connected)
 
-            Button("Save As…") { encoder?.sendExecuteCommand(name: "save_as_dialog") }
+            Button("Save As…") { encoder?.send(.executeCommand(name: "save_as_dialog")) }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(!connected)
 
             Divider()
 
-            Button("Close Tab") { encoder?.sendExecuteCommand(name: "quit") }
+            Button("Close Tab") { encoder?.send(.executeCommand(name: "quit")) }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(!connected)
         }
 
         // View menu
         CommandMenu("View") {
-            Button("Toggle File Tree") { encoder?.sendTogglePanel(panel: 0) }
+            Button("Toggle File Tree") { encoder?.send(.togglePanel(panel: 0)) }
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(!connected)
 
             Divider()
 
-            Button("Increase Font Size") { encoder?.sendFontSizeAdjust(direction: 0x01) }
+            Button("Increase Font Size") { encoder?.send(.fontSizeAdjust(direction: 0x01)) }
                 .keyboardShortcut("+", modifiers: .command)
                 .disabled(!connected)
-            Button("Decrease Font Size") { encoder?.sendFontSizeAdjust(direction: 0x00) }
+            Button("Decrease Font Size") { encoder?.send(.fontSizeAdjust(direction: 0x00)) }
                 .keyboardShortcut("-", modifiers: .command)
                 .disabled(!connected)
-            Button("Reset Font Size") { encoder?.sendFontSizeAdjust(direction: 0x02) }
+            Button("Reset Font Size") { encoder?.send(.fontSizeAdjust(direction: 0x02)) }
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(!connected)
 
@@ -312,7 +312,7 @@ struct MingaMenuCommands: Commands {
         }
     }
 
-    private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: (InputEncoder) -> Void) {
+    private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: (OutboundActionEncoding) -> Void) {
         NativeMenuTextRouter.perform(command, encoder: encoder, fallback: fallback)
     }
 
@@ -321,9 +321,9 @@ struct MingaMenuCommands: Commands {
     }
 
     /// Reads the system pasteboard and sends a paste event to the BEAM.
-    private func pasteFromClipboard(using encoder: InputEncoder) {
+    private func pasteFromClipboard(using encoder: OutboundActionEncoding) {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
-        encoder.sendPasteEvent(text: text)
+        encoder.send(.paste(text))
     }
 }
 
@@ -361,7 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appState = AppState()
 #if DEBUG
         if ProcessInfo.processInfo.environment[MenuSnapshotProbe.connectedEnvironmentKey] == "1" {
-            appState.encoder = NullInputEncoder()
+            appState.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
         }
 #endif
         self.appState = appState
@@ -495,10 +495,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.fontManager = fm
         disp.replaceConnection(with: connectionID)
         disp.onOperationNativeResult = { [weak self] result in
-            self?.encoder?.sendOperationNativeResult(result)
+            self?.encoder?.send(.operationNativeResult(result))
         }
         disp.onNativePresentationObservation = { [weak self] evidence in
-            self?.encoder?.sendNativePresentationObservation(evidence)
+            self?.encoder?.send(.nativePresentationObservation(evidence))
         }
         disp.requestPresentationFocus = { [weak self] in
             self?.editorNSView?.focusPolicy.requestPresentationFocus() == true
@@ -507,13 +507,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let quitCoordinator = ApplicationQuitCoordinator(
             sendRequest: { [weak self] requestID in
-                self?.encoder?.sendApplicationQuitRequest(requestID: requestID) ?? false
+                self?.encoder?.send(.applicationQuitRequest(requestID: requestID)).wasAccepted ?? false
             },
             sendDecision: { [weak self] requestID, decision in
-                self?.encoder?.sendApplicationQuitDecision(
-                    requestID: requestID,
-                    decision: decision.rawValue
-                ) ?? false
+                self?.encoder?.send(.applicationQuitDecision(requestID: requestID, decision: decision.rawValue)).wasAccepted ?? false
             },
             presentDecision: { [weak self] dirtyCount, completion in
                 self?.presentApplicationQuitDecision(dirtyCount: dirtyCount, completion: completion)
@@ -552,7 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nsView.editorInput = appState.gui.editorInput
         ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
-        appState.gui.settingsState.encoder = enc
+        appState.gui.settingsState.sendAction = { action in enc.send(action) }
         appState.gui.settingsState.onCursorBlinkChanged = { [weak nsView] enabled in
             nsView?.setCursorBlinkEnabled(enabled)
         }
@@ -584,22 +581,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let encoder = self?.encoder else { return }
             switch result {
             case .applied(let generation, let frameSeq):
-                encoder.sendFrameApplied(generation: generation, frameSeq: frameSeq)
+                encoder.send(.frameApplied(generation: generation, frameSequence: frameSeq))
             case .rejected(let generation, let frameSeq, let lastApplied, let reason):
-                encoder.sendFrameRejected(
+                encoder.send(.frameRejected(
                     generation: generation,
-                    frameSeq: frameSeq,
-                    lastAppliedFrameSeq: lastApplied,
+                    frameSequence: frameSeq,
+                    lastAppliedFrameSequence: lastApplied,
                     reason: reason.wireCode,
-                    disposition: reason.disposition
-                )
+                    disposition: reason.disposition.rawValue
+                ))
             case .windowRefMiss(let generation, let frameSeq, let lastApplied, let windowId):
-                encoder.sendWindowRefMiss(
+                encoder.send(.windowReferenceMiss(
                     generation: generation,
-                    frameSeq: frameSeq,
-                    lastAppliedFrameSeq: lastApplied,
-                    windowId: windowId
-                )
+                    frameSequence: frameSeq,
+                    lastAppliedFrameSequence: lastApplied,
+                    windowID: windowId
+                ))
             }
         }
         disp.onFrameReady = { [weak nsView] in
@@ -777,7 +774,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentFileDialog(_ request: NativeFileDialogRequest) {
         guard activeFilePanel == nil else {
-            _ = encoder?.sendFileDialogResult(requestID: request.requestID, outcome: 0, paths: [])
+            encoder?.send(.fileDialogResult(requestID: request.requestID, outcome: 0, paths: []))
             return
         }
         guard let requestEncoder = encoder else { return }
@@ -835,7 +832,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         encoder: ProtocolEncoder
     ) {
         guard response == .OK, let panel else {
-            _ = encoder.sendFileDialogResult(requestID: request.requestID, outcome: 0, paths: [])
+            encoder.send(.fileDialogResult(requestID: request.requestID, outcome: 0, paths: []))
             return
         }
 
@@ -843,21 +840,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .open:
             let paths = (panel as? NSOpenPanel)?.urls.map { $0.standardizedFileURL.path } ?? []
             let outcome: UInt8 = paths.isEmpty ? 0 : 1
-            _ = encoder.sendFileDialogResult(
+            encoder.send(.fileDialogResult(
                 requestID: request.requestID,
                 outcome: outcome,
                 paths: paths
-            )
+            ))
         case .saveAs:
             guard let path = panel.url?.standardizedFileURL.path else {
-                _ = encoder.sendFileDialogResult(requestID: request.requestID, outcome: 0, paths: [])
+                encoder.send(.fileDialogResult(requestID: request.requestID, outcome: 0, paths: []))
                 return
             }
-            _ = encoder.sendFileDialogResult(
+            encoder.send(.fileDialogResult(
                 requestID: request.requestID,
                 outcome: 2,
                 paths: [path]
-            )
+            ))
         }
     }
 
@@ -883,7 +880,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls where url.isFileURL {
             let fileURL = url.standardizedFileURL
             if acceptsOpenRequests, let encoder {
-                encoder.sendOpenFile(path: fileURL.path)
+                encoder.send(.openFile(path: fileURL.path))
             } else {
                 pendingFileURLs.append(fileURL)
             }
@@ -896,7 +893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingFileURLs.removeAll()
 
         for url in urls {
-            encoder.sendOpenFile(path: url.path)
+            encoder.send(.openFile(path: url.path))
         }
     }
 
@@ -911,14 +908,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.willSleepNotification) {
                     guard let self else { return }
                     PortLogger.info("System will sleep")
-                    self.encoder?.sendSystemWillSleep()
+                    self.encoder?.send(.systemWillSleep)
                 }
             },
             Task { @MainActor [weak self] in
                 for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.didWakeNotification) {
                     guard let self else { return }
                     PortLogger.info("System did wake")
-                    self.encoder?.sendSystemDidWake()
+                    self.encoder?.send(.systemDidWake)
                 }
             },
             Task { @MainActor [weak self] in
@@ -929,7 +926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
                     PortLogger.info("Volume will unmount: \(volumePath)")
-                    self.encoder?.sendSystemWillUnmount(volumePath: volumePath)
+                    self.encoder?.send(.systemWillUnmount(volumePath: volumePath))
                 }
             },
             Task { @MainActor [weak self] in
@@ -996,7 +993,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let thermalName = PowerThermalPolicy.thermalStateName(thermalState)
 
         editorNSView?.applyPowerThermalPolicy(lowPowerMode: lowPowerMode, thermalState: thermalState)
-        encoder?.sendPowerThermalState(lowPowerMode: lowPowerMode, thermalState: encodedThermalState)
+        encoder?.send(.powerThermalState(lowPowerMode: lowPowerMode, thermalState: encodedThermalState))
         PortLogger.info("\(reason): low_power=\(lowPowerMode), thermal=\(thermalName), cursor_blink_multiplier=\(policy.cursorBlinkMultiplier)")
     }
 
@@ -1030,7 +1027,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let gutterPad: CGFloat = (nsView.dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
             let cols = UInt16(max((nsView.bounds.width - gutterPad) / CGFloat(nsView.cellWidth), 1))
             let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
-            replacement.encoder.sendReady(cols: cols, rows: rows)
+            replacement.encoder.send(.ready(cols: cols, rows: rows))
         }
 
         sendCurrentPowerThermalState(reason: "Power state after BEAM reconnect")
@@ -1145,7 +1142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.dispatcher?.replaceConnection(with: connectionID)
                 self.editorNSView?.invalidateConnection()
                 self.appState.encoder = nil
-                self.appState.gui.settingsState.encoder = nil
+                self.appState.gui.settingsState.sendAction = nil
                 self.applicationQuitCoordinator?.replaceConnection()
                 self.coreConnectionIsLive = false
                 PortLogger.clearEncoder()
@@ -1181,7 +1178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let connection else { return nil }
         protocolConnection = connection
         appState.encoder = connection.encoder
-        appState.gui.settingsState.encoder = connection.encoder
+        appState.gui.settingsState.sendAction = { action in connection.encoder.send(action) }
         editorNSView?.installConnectionEncoder(connection.encoder)
         PortLogger.setup(encoder: connection.encoder)
         return connection
@@ -1241,8 +1238,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             protocolConnection = nil
         }
         appState.encoder = nil
-        appState.gui.settingsState.encoder = nil
-        editorNSView?.encoder = NullInputEncoder()
+        appState.gui.settingsState.sendAction = nil
+        editorNSView?.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
         if let manager = beamManager {
             recoveryManager?.presentTransportFailure(
                 message: report.userFacingMessage,

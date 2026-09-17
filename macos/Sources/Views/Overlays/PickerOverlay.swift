@@ -8,14 +8,14 @@ import SwiftUI
 import MingaProtocol
 
 public struct PickerOverlay: View {
-    public init(state: PickerState, encoder: InputEncoder? = nil) {
+    public init(state: PickerState, sendAction: OutboundActionHandler?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: PickerState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
@@ -107,7 +107,7 @@ public struct PickerOverlay: View {
                     selectionForegroundColor: theme.popupFg,
                     insertionPointColor: theme.accent
                 ),
-                encoder: encoder
+                sendAction: sendAction
             )
             .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
 
@@ -337,12 +337,12 @@ public struct PickerOverlay: View {
 
     private func activate(_ item: PickerItem) {
         guard item.activation.isAvailable else { return }
-        encoder?.sendPickerItemActivate(generation: item.activation.generation, activationID: item.activation.activationID)
+        sendAction?(.pickerItemActivate(generation: item.activation.generation, activationID: item.activation.activationID))
     }
 
     private func activate(_ entry: PickerActionEntry) {
         guard entry.activation.isAvailable else { return }
-        encoder?.sendPickerActionActivate(generation: entry.activation.generation, activationID: entry.activation.activationID)
+        sendAction?(.pickerActionActivate(generation: entry.activation.generation, activationID: entry.activation.activationID))
     }
 
     private func updateAccessibilityFocus() {
@@ -542,7 +542,7 @@ private func pickerPreviewState() -> PickerState {
     let theme = PreviewFixtures.theme()
     ZStack(alignment: .top) {
         theme.editorBg
-        PickerOverlay(state: pickerPreviewState(), encoder: nil)
+        PickerOverlay(state: pickerPreviewState(), sendAction: { _ in })
     }
     .frame(width: 700, height: 500)
     .clipped()

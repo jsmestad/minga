@@ -18,5 +18,5 @@ final class AppState {
     /// All GUI chrome sub-states in a single container.
     let gui = GUIState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
-    var encoder: InputEncoder?
+    var encoder: OutboundActionEncoding?
 }

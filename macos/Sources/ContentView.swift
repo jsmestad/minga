@@ -187,7 +187,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
     let metrics: GUIFramePresentationMetrics
     let geometry: EditorGeometry
     let viewportHeight: CGFloat
-    let encoder: InputEncoder?
+    let sendAction: OutboundActionHandler?
     let frameProbe: ContentViewFrameProbe?
     @ViewBuilder let extensionContent: () -> ExtensionContent
 
@@ -203,7 +203,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
 
             if let content = input.hoverPopupState.content {
                 anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
-                    HoverPopupOverlay(state: input.hoverPopupState, encoder: encoder)
+                    HoverPopupOverlay(state: input.hoverPopupState, sendAction: sendAction)
                         .allowsHitTesting(true)
                 }
                 .zIndex(20)
@@ -211,7 +211,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
 
             if let content = input.completionState.content {
                 anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
-                    CompletionOverlay(state: input.completionState, encoder: encoder)
+                    CompletionOverlay(state: input.completionState, sendAction: sendAction)
                         .background {
                             probe(
                                 .editorOverlay,
@@ -483,8 +483,14 @@ struct StartupOverlay: View {
 /// One shared background eliminates visual seams between sidebar and editor.
 public struct ContentView<EditorSurface: View>: View {
     let gui: GUIState
-    let encoderProvider: () -> InputEncoder?
-    var encoder: InputEncoder? { encoderProvider() }
+    let encoderProvider: () -> OutboundActionEncoding?
+    var encoder: OutboundActionEncoding? { encoderProvider() }
+    var sendAction: OutboundActionHandler? {
+        guard let encoder else { return nil }
+        return { action in
+            encoder.send(action)
+        }
+    }
     /// Editor geometry read just-in-time inside the body. This is a closure (not
     /// a stored value) so each read reflects the live editor metrics: a value
     /// computed in MingaApp's body would go stale because MingaApp under-renders
@@ -509,7 +515,7 @@ public struct ContentView<EditorSurface: View>: View {
 
     public init(
         gui: GUIState,
-        encoder: @escaping () -> InputEncoder?,
+        encoder: @escaping () -> OutboundActionEncoding?,
         editorGeometry: @escaping () -> EditorGeometry,
         chrome: WindowChrome,
         onAgentChatVisibleChange: @escaping (Bool) -> Void,
@@ -526,7 +532,7 @@ public struct ContentView<EditorSurface: View>: View {
 
     init(
         gui: GUIState,
-        encoder: @escaping () -> InputEncoder?,
+        encoder: @escaping () -> OutboundActionEncoding?,
         editorGeometry: @escaping () -> EditorGeometry,
         chrome: WindowChrome,
         onAgentChatVisibleChange: @escaping (Bool) -> Void,
@@ -677,14 +683,14 @@ public struct ContentView<EditorSurface: View>: View {
                     if input.workspaceState.shouldShowHeader {
                         WorkspaceHeaderView(
                             workspaceState: input.workspaceState,
-                            encoder: encoder
+                            sendAction: sendAction
                         )
                     }
 
                     if !input.tabBarState.displayTabs.isEmpty {
                         TabBarView(
                             tabBarState: input.tabBarState,
-                            encoder: encoder
+                            sendAction: sendAction
                         )
                         .background {
                             frameProbeView(
@@ -724,7 +730,7 @@ public struct ContentView<EditorSurface: View>: View {
             NativeSidebarHeader(
                 input: input,
                 item: activeSidebar,
-                encoder: encoder,
+                sendAction: sendAction,
                 projectName: projectName(input),
                 gitBranch: input.statusBarState.gitBranch,
                 leadingPadding: sidebarHeaderLeadingPadding
@@ -770,14 +776,14 @@ public struct ContentView<EditorSurface: View>: View {
             ActivityBar(
                 input: input,
                 sidebarHostState: input.sidebarHostState,
-                encoder: encoder
+                sendAction: sendAction
             )
 
             if let activeSidebar = input.sidebarHostState.activeSidebar {
                 SidebarContainer(
                     input: input,
                     activeSidebar: activeSidebar,
-                    encoder: encoder,
+                    sendAction: sendAction,
                     sidebarWidth: $sidebarWidth,
                     frameProbe: frameProbe
                 )
@@ -799,19 +805,25 @@ public struct ContentView<EditorSurface: View>: View {
             if input.agentContextBarState.visible {
                 AgentContextBar(
                     state: input.agentContextBarState,
-                    encoder: encoder
+                    onReview: { action in
+                        switch action {
+                        case .approve: sendAction?(.agentApprove)
+                        case .requestChanges: sendAction?(.agentRequestChanges)
+                        case .dismiss: sendAction?(.agentDismiss)
+                        }
+                    }
                 )
             } else {
                 BreadcrumbBar(
                     state: input.breadcrumbState,
-                    encoder: encoder
+                    sendAction: sendAction
                 )
             }
 
             if input.searchState.visible {
                 SearchToolbar(
                     searchState: input.searchState,
-                    encoder: encoder
+                    sendAction: sendAction
                 )
                 .transition(
                     reduceMotion
@@ -839,13 +851,13 @@ public struct ContentView<EditorSurface: View>: View {
 
             EditTimelineView(
                 state: input.editTimelineState,
-                encoder: encoder
+                sendAction: sendAction
             )
 
             if input.bottomPanelState.visible {
                 BottomPanelView(
                     state: input.bottomPanelState,
-                    encoder: encoder,
+                    sendAction: sendAction,
                     availableHeight: rightPaneHeight
                 )
             }
@@ -855,7 +867,7 @@ public struct ContentView<EditorSurface: View>: View {
             if input.minibufferState.visible {
                 MinibufferView(
                     state: input.minibufferState,
-                    encoder: encoder
+                    sendAction: sendAction
                 )
                 .transition(
                     reduceMotion
@@ -898,7 +910,7 @@ public struct ContentView<EditorSurface: View>: View {
                 AgentChatView(
                     state: input.agentChatState,
                     isInsertMode: input.statusBarState.isInsertMode,
-                    encoder: encoder,
+                    sendAction: sendAction,
                     cellHeight: geo.cellHeight
                 )
             }
@@ -906,7 +918,7 @@ public struct ContentView<EditorSurface: View>: View {
             if input.emptyStateState.visible {
                 EmptyStateView(
                     state: input.emptyStateState,
-                    encoder: encoder
+                    sendAction: sendAction
                 )
                 .background {
                     frameProbeView(
@@ -922,7 +934,7 @@ public struct ContentView<EditorSurface: View>: View {
                 metrics: metrics,
                 geometry: geo,
                 viewportHeight: rightPaneHeight,
-                encoder: encoder,
+                sendAction: sendAction,
                 frameProbe: frameProbe
             ) {
                 extensionOverlayLayer(overlayInput)
@@ -1131,7 +1143,7 @@ public struct ContentView<EditorSurface: View>: View {
         StatusBarView(
             state: input.statusBarState,
             feedbackState: input.feedbackState,
-            encoder: encoder,
+            sendAction: sendAction,
             isFileTreeVisible: input.fileTreeState.visible,
             isGitStatusVisible: input.gitStatusState.snapshot.visible,
             isBottomPanelVisible: input.bottomPanelState.visible,
@@ -1146,7 +1158,7 @@ public struct ContentView<EditorSurface: View>: View {
     private func frontendExtensionRuntimeLayer(_ input: WindowOverlayHostInput) -> some View {
         let context = FrontendExtensionViewContext(
             theme: input.currentTheme,
-            encoder: encoder,
+            sendAction: sendAction,
             namespace: frontendExtensionNamespace
         )
         ForEach(input.frontendExtensions.activeExtensionIDs, id: \.self) { extensionID in
@@ -1171,7 +1183,7 @@ public struct ContentView<EditorSurface: View>: View {
 
         PickerOverlay(
             state: input.pickerState,
-            encoder: encoder
+            sendAction: sendAction
         )
         .background {
             frameProbeView(
@@ -1195,7 +1207,7 @@ public struct ContentView<EditorSurface: View>: View {
 
         NotificationCenterView(
             state: input.notificationCenterState,
-            encoder: encoder,
+            sendAction: sendAction,
             bottomInset: notificationCenterBottomInset(input)
         )
 
@@ -1204,7 +1216,7 @@ public struct ContentView<EditorSurface: View>: View {
         ResyncOverlay(
             state: input.resyncState,
             onRetry: { lastGoodFrameSeq, generation in
-                encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq, generation: generation)
+                encoder?.send(.requestKeyframe(lastGoodFrameSequence: lastGoodFrameSeq, generation: generation))
             }
         )
 
@@ -1257,7 +1269,7 @@ private func fullShellPreviewGUI() -> GUIState {
 #Preview("Full Shell", traits: .mingaChrome) {
     ContentView(
         gui: fullShellPreviewGUI(),
-        encoder: { NullInputEncoder() },
+        encoder: { ClosureOutboundActionEncoder { _ in .accepted } },
         editorGeometry: { .preview },
         chrome: .preview,
         onAgentChatVisibleChange: { _ in }

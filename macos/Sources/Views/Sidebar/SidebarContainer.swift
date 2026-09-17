@@ -33,18 +33,18 @@ public enum SidebarSizing {
 }
 
 public struct SidebarContainer: View {
-    public init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, sidebarWidth: Binding<CGFloat>) {
+    public init(input: ShellHostInput, activeSidebar: SidebarItem, sendAction: OutboundActionHandler?, sidebarWidth: Binding<CGFloat>) {
         self.input = input
         self.activeSidebar = activeSidebar
-        self.encoder = encoder
+        self.sendAction = sendAction
         self._sidebarWidth = sidebarWidth
         frameProbe = nil
     }
 
-    init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, sidebarWidth: Binding<CGFloat>, frameProbe: ContentViewFrameProbe?) {
+    init(input: ShellHostInput, activeSidebar: SidebarItem, sendAction: OutboundActionHandler?, sidebarWidth: Binding<CGFloat>, frameProbe: ContentViewFrameProbe?) {
         self.input = input
         self.activeSidebar = activeSidebar
-        self.encoder = encoder
+        self.sendAction = sendAction
         self._sidebarWidth = sidebarWidth
         self.frameProbe = frameProbe
     }
@@ -53,7 +53,7 @@ public struct SidebarContainer: View {
     public let activeSidebar: SidebarItem
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: OutboundActionHandler?
     @Binding public var sidebarWidth: CGFloat
     let frameProbe: ContentViewFrameProbe?
 
@@ -66,7 +66,7 @@ public struct SidebarContainer: View {
                 NativeSidebarBody(
                     input: input,
                     item: activeSidebar,
-                    encoder: encoder,
+                    sendAction: sendAction,
                     frameProbe: frameProbe
                 )
             }

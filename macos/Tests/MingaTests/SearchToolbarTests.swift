@@ -60,7 +60,7 @@ struct SearchSessionReconciliationTests {
         state.update(active: true, matchCount: 0, currentIndex: 0, flags: 0, query: "", sessionID: 5, acknowledgedEditSeq: 0)
         let encoder = SpyEncoder()
         let style = InlineEditFieldStyle(textColor: .white, selectionBackgroundColor: .blue, selectionForegroundColor: .white, insertionPointColor: .blue)
-        let coordinator = SearchQueryField.Coordinator(searchState: state, encoder: encoder, style: style)
+        let coordinator = SearchQueryField.Coordinator(searchState: state, sendAction: { action in _ = encoder.send(action) }, style: style)
         let field = SearchNSTextField()
         field.isEditable = true
         let editor = NSTextView()

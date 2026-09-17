@@ -41,7 +41,7 @@ extension PreviewRegistry {
             modelineRightSegments: rightSegments
         ))
 
-        return StatusBarView(state: state, encoder: nil)
+        return StatusBarView(state: state, sendAction: { _ in })
             .frame(width: width, height: 28)
             .background(theme.editorBg)
             .environment(theme)
@@ -62,7 +62,7 @@ extension PreviewRegistry {
         let theme = PreviewFixtures.theme()
         state.update(crashed: false, version: "v0.9", focusedId: focusedId, sections: sections)
 
-        return EmptyStateView(state: state, encoder: nil)
+        return EmptyStateView(state: state, sendAction: { _ in })
             .frame(width: 900, height: 640)
             .background(theme.editorBg)
             .environment(theme)
@@ -85,7 +85,7 @@ extension PreviewRegistry {
             Wire.TabEntry(id: 5, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E7A8}", label: "main.rs"),
         ])
 
-        return TabBarView(tabBarState: state, encoder: nil)
+        return TabBarView(tabBarState: state, sendAction: { _ in })
             .frame(width: width, height: 36)
             .background(theme.editorBg)
             .environment(theme)
@@ -113,7 +113,7 @@ extension PreviewRegistry {
             Wire.TabEntry(id: 10, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "application_supervisor_configuration.ex"),
         ])
 
-        return TabBarView(tabBarState: state, encoder: nil)
+        return TabBarView(tabBarState: state, sendAction: { _ in })
             .frame(width: width, height: 36)
             .background(theme.editorBg)
             .environment(theme)
@@ -142,7 +142,7 @@ extension PreviewRegistry {
             ),
         ])
 
-        return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
+        return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
             .environment(theme)
@@ -213,7 +213,7 @@ extension PreviewRegistry {
             ),
         ])
 
-        return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
+        return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
             .environment(theme)
@@ -323,7 +323,7 @@ extension PreviewRegistry {
             ),
         ])
 
-        return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
+        return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
             .environment(theme)
@@ -347,7 +347,7 @@ extension PreviewRegistry {
         )
         populateMessages(state.messagesState)
 
-        return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
+        return BottomPanelView(state: state, sendAction: { _ in }, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
             .environment(theme)
@@ -367,7 +367,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
+        return BottomPanelView(state: state, sendAction: { _ in }, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
             .environment(theme)
@@ -404,7 +404,7 @@ extension PreviewRegistry {
 
         state.messagesState.activeLevels = [.warning, .error]
 
-        return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
+        return BottomPanelView(state: state, sendAction: { _ in }, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
             .environment(theme)
@@ -419,7 +419,7 @@ extension PreviewRegistry {
 
         return MessagesContentView(
             state: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "MessagesContentView")
         )
         .frame(width: 800, height: 360)
@@ -448,7 +448,7 @@ extension PreviewRegistry {
         let appState = AppState()
         let encoder = PreviewFixtures.encoder()
         appState.encoder = encoder
-        appState.gui.settingsState.encoder = encoder
+        appState.gui.settingsState.sendAction = { action in encoder.send(action) }
 
         // Populate settings state to skip the loading spinner
         let settings = appState.gui.settingsState
@@ -472,7 +472,7 @@ extension PreviewRegistry {
             Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
         ]
 
-        return SettingsView(state: appState.gui.settingsState, encoder: appState.encoder)
+        return SettingsView(state: appState.gui.settingsState, sendAction: { action in appState.encoder?.send(action) })
             .frame(width: 600, height: 480)
             .environment(\.themeColors, appState.gui.themeColors)
     }
@@ -494,7 +494,7 @@ extension PreviewRegistry {
             Wire.ObservatoryNode(pid: "<0.140.0>", parentPid: "<0.100.0>", name: "Elixir.Minga.LSP.Client", processClass: 3, depth: 1, memory: 155_648, messageQueueLen: 2, reductions: 88_440, sparkline: [0.16, 0.18, 0.26, 0.22, 0.28, 0.24]),
         ])
 
-        return ObservatoryView(state: state, encoder: nil)
+        return ObservatoryView(state: state, sendAction: { _ in })
             .frame(width: 320, height: 640)
             .background(theme.treeBg)
             .environment(theme)

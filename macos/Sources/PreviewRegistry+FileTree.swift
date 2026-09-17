@@ -19,7 +19,7 @@ extension PreviewRegistry {
     static func fileTreeBodyPreview() -> some View {
         FileTreeView(
             fileTreeState: fileTreeState(),
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView")
         )
     }
@@ -56,7 +56,7 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeEmpty")
         )
         .frame(width: 280, height: 600)
@@ -82,7 +82,7 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeError")
         )
         .frame(width: 280, height: 600)
@@ -107,7 +107,7 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeDeep")
         )
         .frame(width: 280, height: 600)
@@ -144,7 +144,7 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeRename")
         )
         .frame(width: 280, height: 600)
