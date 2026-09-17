@@ -10,10 +10,11 @@ defmodule MingaEditor.State.Highlighting do
 
   @type t :: %__MODULE__{
           highlights: %{pid() => Highlight.t()},
-          syntax_overrides: %{pid() => Theme.syntax()}
+          syntax_overrides: %{pid() => Theme.syntax()},
+          revisions: %{pid() => reference()}
         }
 
-  defstruct highlights: %{}, syntax_overrides: %{}
+  defstruct highlights: %{}, syntax_overrides: %{}, revisions: %{}
 
   @doc "Replaces syntax overrides."
   @spec set_syntax_overrides(t(), %{pid() => Theme.syntax()}) :: t()
@@ -24,13 +25,24 @@ defmodule MingaEditor.State.Highlighting do
   @doc "Stores highlight data for a buffer."
   @spec put_highlight(t(), pid(), Highlight.t()) :: t()
   def put_highlight(%__MODULE__{} = state, pid, highlight) do
-    %{state | highlights: Map.put(state.highlights, pid, highlight)}
+    %{
+      state
+      | highlights: Map.put(state.highlights, pid, highlight),
+        revisions: Map.put(state.revisions, pid, revision_for(state, pid, highlight))
+    }
   end
 
   @doc "Replaces the highlight map."
   @spec set_highlights(t(), %{pid() => Highlight.t()}) :: t()
   def set_highlights(%__MODULE__{} = state, highlights) when is_map(highlights) do
-    %{state | highlights: highlights}
+    %{
+      state
+      | highlights: highlights,
+        revisions:
+          Map.new(highlights, fn {pid, highlight} ->
+            {pid, revision_for(state, pid, highlight)}
+          end)
+    }
   end
 
   @doc """
@@ -49,7 +61,12 @@ defmodule MingaEditor.State.Highlighting do
         end
       end)
 
-    %{state | highlights: rethemed}
+    %{
+      state
+      | highlights: rethemed,
+        revisions:
+          Map.new(rethemed, fn {pid, highlight} -> {pid, revision_for(state, pid, highlight)} end)
+    }
   end
 
   @doc "Removes all highlight presentation state for a buffer."
@@ -58,7 +75,21 @@ defmodule MingaEditor.State.Highlighting do
     %{
       state
       | highlights: Map.delete(state.highlights, buffer_pid),
-        syntax_overrides: Map.delete(state.syntax_overrides, buffer_pid)
+        syntax_overrides: Map.delete(state.syntax_overrides, buffer_pid),
+        revisions: Map.delete(state.revisions, buffer_pid)
     }
+  end
+
+  @doc "Restores the highlight payload of a render snapshot without changing its source revisions."
+  @spec restore_render_payload(t(), %{pid() => Highlight.t()}) :: t()
+  def restore_render_payload(%__MODULE__{} = state, highlights) when is_map(highlights),
+    do: %{state | highlights: highlights}
+
+  @spec revision_for(t(), pid(), Highlight.t()) :: reference()
+  defp revision_for(%__MODULE__{highlights: highlights, revisions: revisions}, buffer, highlight) do
+    case Map.fetch(highlights, buffer) do
+      {:ok, ^highlight} -> Map.fetch!(revisions, buffer)
+      _changed -> make_ref()
+    end
   end
 end

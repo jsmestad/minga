@@ -10,10 +10,14 @@ defmodule MingaEditor.State.Render do
   alias MingaEditor.FocusTree
   alias MingaEditor.Layout
   alias MingaEditor.State.RenderCorrelation
+  alias MingaEditor.Renderer.Submission
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.UI.Panel.MessageStore
 
   @type t :: %__MODULE__{
           renderer: pid() | nil,
+          submitted_highlights: Submission.revisions() | nil,
+          submitted_semantic_tokens: Submission.revisions(),
           render_correlation: term(),
           message_store: MessageStore.t(),
           layout: Layout.t() | nil,
@@ -22,6 +26,8 @@ defmodule MingaEditor.State.Render do
         }
 
   defstruct renderer: nil,
+            submitted_highlights: nil,
+            submitted_semantic_tokens: %{},
             render_correlation: RenderCorrelation.new(),
             message_store: %MessageStore{},
             layout: nil,
@@ -34,9 +40,35 @@ defmodule MingaEditor.State.Render do
 
   @doc "Records the renderer process currently serving this editor."
   @spec connect_renderer(t(), pid() | nil) :: t()
+  def connect_renderer(%__MODULE__{renderer: renderer} = render, renderer), do: render
+
   def connect_renderer(%__MODULE__{} = render, renderer)
       when is_pid(renderer) or is_nil(renderer),
-      do: %{render | renderer: renderer}
+      do: %{
+        render
+        | renderer: renderer,
+          submitted_highlights: nil,
+          submitted_semantic_tokens: %{}
+      }
+
+  @doc "Packs one frame and remembers source revisions sent to the connected renderer."
+  @spec prepare_submission(t(), Intent.t(), Submission.revisions()) :: {t(), Submission.t()}
+  def prepare_submission(%__MODULE__{} = render, %Intent{} = intent, semantic_revisions) do
+    submission =
+      case render.submitted_highlights do
+        nil ->
+          Submission.full(intent)
+
+        previous ->
+          Submission.delta(intent, previous, render.submitted_semantic_tokens, semantic_revisions)
+      end
+
+    {%{
+       render
+       | submitted_highlights: intent.frame.highlighting.revisions,
+         submitted_semantic_tokens: semantic_revisions
+     }, submission}
+  end
 
   @doc "Commits correlation state produced by a render scheduling transition."
   @spec accept_correlation(t(), RenderCorrelation.t()) :: t()

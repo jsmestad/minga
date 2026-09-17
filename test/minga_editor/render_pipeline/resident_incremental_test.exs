@@ -16,6 +16,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Renderer.BufferChanges
   alias Minga.Perf.ProductionGate
   alias MingaEditor.Renderer.RenderReceipt
+  alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState
 
@@ -375,7 +376,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
             intent.revision
           )
 
-        request_bytes = :erlang.external_size(intent)
+        request_bytes = :erlang.external_size(Submission.full(intent))
         receipt_bytes = :erlang.external_size(receipt)
 
         measurement = %{
@@ -416,7 +417,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         intent.revision
       )
 
-    {:erlang.external_size(intent), :erlang.external_size(receipt)}
+    {:erlang.external_size(Submission.full(intent)), :erlang.external_size(receipt)}
   end
 
   defp drain_render_measurements(acc) do

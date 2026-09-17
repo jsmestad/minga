@@ -56,10 +56,13 @@ defmodule Minga.Perf.ProductionGate do
   end
 
   @doc "Checks serialized BEAM process-boundary terms."
-  @spec boundary_failures(measurement()) :: [String.t()]
+  @spec boundary_failures(%{
+          required(:request_bytes) => non_neg_integer(),
+          required(:receipt_bytes) => non_neg_integer()
+        }) :: [String.t()]
   def boundary_failures(measurement) do
     []
-    |> exceed(measurement.request_bytes, @max_boundary_bytes, "RenderIntent bytes")
+    |> exceed(measurement.request_bytes, @max_boundary_bytes, "RenderSubmission bytes")
     |> exceed(measurement.receipt_bytes, @max_boundary_bytes, "RenderReceipt bytes")
     |> Enum.reverse()
   end

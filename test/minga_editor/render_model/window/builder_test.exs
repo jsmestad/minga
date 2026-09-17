@@ -1068,9 +1068,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         %{
           state
           | parser:
-              MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
-                highlights: %{buffer => highlight}
-              })
+              MingaEditor.State.Parser.accept_highlighting(
+                state.parser,
+                Highlighting.set_highlights(%Highlighting{}, %{buffer => highlight})
+              )
         }
 
       window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)

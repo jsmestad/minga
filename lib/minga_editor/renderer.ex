@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer do
   """
 
   alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State, as: EditorState
 
@@ -42,7 +43,7 @@ defmodule MingaEditor.Renderer do
   end
 
   @doc """
-  Pushes a typed, cache-free render intent to `Renderer.Server` for asynchronous rendering. The focused receipt later updates only editor-owned layout, focus, and interaction observations.
+  Pushes a typed, cache-free render submission to `Renderer.Server` for asynchronous rendering. The focused receipt later updates only editor-owned layout, focus, and interaction observations.
 
   Headless and other synchronous paths use a persistent unnamed `Renderer.Server`, so they preserve the same renderer-owned state boundary without copying caches into the Editor.
   """
@@ -56,13 +57,13 @@ defmodule MingaEditor.Renderer do
     if async_render?(state) do
       {state, revision} = EditorState.submit_render_intent(state)
       {keyframe?, state} = EditorState.take_keyframe_request(state)
-      intent = Intent.from_editor_state(state, revision)
+      {state, submission} = prepare_submission(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
 
       if keyframe? do
-        :ok = RendererServer.reset_connection(pid, intent, seq)
+        :ok = RendererServer.reset_connection(pid, submission, seq)
       else
-        RendererServer.cast_snapshot(pid, intent, seq)
+        RendererServer.cast_snapshot(pid, submission, seq)
       end
 
       state
@@ -87,10 +88,10 @@ defmodule MingaEditor.Renderer do
     {state, renderer} = ensure_synchronous_renderer(state)
     {state, revision} = EditorState.submit_render_intent(state)
     {_keyframe?, state} = EditorState.take_keyframe_request(state)
-    intent = Intent.from_editor_state(state, revision)
+    {state, submission} = prepare_submission(state, revision)
     seq = System.unique_integer([:positive, :monotonic])
 
-    case RendererServer.reset_sync(renderer, intent, seq) do
+    case RendererServer.reset_sync(renderer, submission, seq) do
       {:ok, receipt} -> EditorState.integrate_synchronous_renderer_receipt(state, receipt)
       {:error, error} -> log_synchronous_error(state, seq, error)
     end
@@ -102,9 +103,9 @@ defmodule MingaEditor.Renderer do
     if async_render?(state) do
       {state, revision} = EditorState.submit_render_intent(state)
       {_keyframe?, state} = EditorState.take_keyframe_request(state)
-      intent = Intent.from_editor_state(state, revision)
+      {state, submission} = prepare_submission(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
-      :ok = RendererServer.reset_connection(pid, intent, seq)
+      :ok = RendererServer.reset_connection(pid, submission, seq)
       state
     else
       render(state)
@@ -121,9 +122,9 @@ defmodule MingaEditor.Renderer do
 
       {true, state} ->
         {state, revision} = EditorState.submit_render_intent(state)
-        intent = Intent.from_editor_state(state, revision)
+        {state, submission} = prepare_submission(state, revision)
         seq = System.unique_integer([:positive, :monotonic])
-        :ok = RendererServer.reset_connection(renderer, intent, seq)
+        :ok = RendererServer.reset_connection(renderer, submission, seq)
         state
     end
   end
@@ -131,9 +132,9 @@ defmodule MingaEditor.Renderer do
   @spec continue_synchronous_render(state(), pid(), boolean()) :: state()
   defp continue_synchronous_render(state, renderer, true) do
     {state, revision} = EditorState.submit_render_intent(state)
-    intent = Intent.from_editor_state(state, revision)
+    {state, submission} = prepare_submission(state, revision)
     seq = System.unique_integer([:positive, :monotonic])
-    RendererServer.cast_snapshot(renderer, intent, seq)
+    RendererServer.cast_snapshot(renderer, submission, seq)
     state
   end
 
@@ -160,9 +161,9 @@ defmodule MingaEditor.Renderer do
     {state, revision} = EditorState.submit_render_intent(state)
     {keyframe?, state} = EditorState.take_keyframe_request(state)
     seq = System.unique_integer([:positive, :monotonic])
-    intent = Intent.from_editor_state(state, revision)
+    {state, submission} = prepare_submission(state, revision)
 
-    case dispatch_render_buffer(renderer, intent, seq, keyframe?, state.frontend.backend) do
+    case dispatch_render_buffer(renderer, submission, seq, keyframe?, state.frontend.backend) do
       :async -> state
       {:ok, receipt} -> EditorState.integrate_synchronous_renderer_receipt(state, receipt)
       {:error, error} -> log_synchronous_error(state, seq, error)
@@ -171,7 +172,7 @@ defmodule MingaEditor.Renderer do
 
   @spec dispatch_render_buffer(
           pid(),
-          Intent.t(),
+          Submission.t(),
           non_neg_integer(),
           boolean(),
           EditorState.backend()
@@ -179,20 +180,34 @@ defmodule MingaEditor.Renderer do
           :async
           | {:ok, MingaEditor.Renderer.RenderReceipt.t()}
           | {:error, Exception.t()}
-  defp dispatch_render_buffer(renderer, intent, seq, true, :headless),
-    do: RendererServer.reset_sync(renderer, intent, seq)
+  defp dispatch_render_buffer(renderer, submission, seq, true, :headless),
+    do: RendererServer.reset_sync(renderer, submission, seq)
 
-  defp dispatch_render_buffer(renderer, intent, seq, true, _backend) do
-    :ok = RendererServer.reset_connection(renderer, intent, seq)
+  defp dispatch_render_buffer(renderer, submission, seq, true, _backend) do
+    :ok = RendererServer.reset_connection(renderer, submission, seq)
     :async
   end
 
-  defp dispatch_render_buffer(renderer, intent, seq, false, :headless),
-    do: RendererServer.render_sync(renderer, intent, seq)
+  defp dispatch_render_buffer(renderer, submission, seq, false, :headless),
+    do: RendererServer.render_sync(renderer, submission, seq)
 
-  defp dispatch_render_buffer(renderer, intent, seq, false, _backend) do
-    RendererServer.cast_snapshot(renderer, intent, seq)
+  defp dispatch_render_buffer(renderer, submission, seq, false, _backend) do
+    RendererServer.cast_snapshot(renderer, submission, seq)
     :async
+  end
+
+  @spec prepare_submission(state(), non_neg_integer()) :: {state(), Submission.t()}
+  defp prepare_submission(state, revision) do
+    intent = Intent.from_editor_state(state, revision)
+
+    {render, submission} =
+      MingaEditor.State.Render.prepare_submission(
+        state.render,
+        intent,
+        state.lsp.semantic_token_revisions
+      )
+
+    {%{state | render: render}, submission}
   end
 
   @spec ensure_synchronous_renderer(state()) :: {state(), pid()}

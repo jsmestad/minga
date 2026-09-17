@@ -14,6 +14,7 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.AckLease
+  alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RejectionState
@@ -36,6 +37,8 @@ defmodule MingaEditor.Renderer.State do
 
   @type t :: %__MODULE__{
           editor_pid: editor_ref(),
+          highlights: Submission.highlights(),
+          semantic_tokens: Submission.semantic_tokens(),
           frame_credit: frame_credit(),
           ack_timeout_ms: pos_integer(),
           font_registry: FontRegistry.t(),
@@ -50,6 +53,8 @@ defmodule MingaEditor.Renderer.State do
         }
 
   defstruct editor_pid: nil,
+            highlights: %{},
+            semantic_tokens: %{},
             frame_credit: :idle,
             ack_timeout_ms: 2_000,
             font_registry: FontRegistry.new(),
@@ -79,6 +84,15 @@ defmodule MingaEditor.Renderer.State do
   def reserve_recovery_generation(%__MODULE__{generation_reserver: reserver})
       when is_function(reserver, 0),
       do: reserver.()
+
+  @doc "Installs presentation updates before any submission can be rejected or coalesced."
+  @spec receive_submission(t(), Submission.t()) :: {t(), Intent.t()}
+  def receive_submission(%__MODULE__{} = state, submission) do
+    {intent, highlights, semantic_tokens} =
+      Submission.materialize(submission, state.highlights, state.semantic_tokens)
+
+    {%{state | highlights: highlights, semantic_tokens: semantic_tokens}, intent}
+  end
 
   @spec accept_intent(t(), Intent.t()) :: {:accepted, t()} | {:blocked, t()}
   def accept_intent(%__MODULE__{} = state, %Intent{} = intent) do

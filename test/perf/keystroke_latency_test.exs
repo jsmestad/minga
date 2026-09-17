@@ -27,6 +27,7 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
+  alias MingaEditor.Renderer.Submission
   alias Minga.Test.HeadlessPort
 
   @moduletag :perf
@@ -82,7 +83,7 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
     # coalesced away under burst load.
     for seq <- 1..@iterations do
       frame_ref = HeadlessPort.prepare_await(port)
-      RendererServer.cast_snapshot(renderer, snapshot, seq)
+      RendererServer.cast_snapshot(renderer, Submission.full(snapshot), seq)
       assert {:ok, _screen} = HeadlessPort.collect_frame(frame_ref, 5_000)
     end
 
