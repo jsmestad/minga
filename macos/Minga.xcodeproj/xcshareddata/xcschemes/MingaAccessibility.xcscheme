@@ -79,6 +79,11 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "MINGA_AX_RUNTIME_PARENT"
+            value = "$(MINGA_AX_RUNTIME_PARENT)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "MINGA_AX_VARIANT"
             value = "$(MINGA_AX_VARIANT)"
             isEnabled = "YES">
