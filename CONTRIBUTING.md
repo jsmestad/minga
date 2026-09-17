@@ -69,6 +69,7 @@ See `AGENTS.md` (in the repo root) for the full project structure, coding standa
 |-----|---------------|
 | [README.md](README.md) | Project overview and quick start |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Two-process design, supervision, port protocol |
+| [docs/MACOS_ACCESSIBILITY_TESTING.md](docs/MACOS_ACCESSIBILITY_TESTING.md) | Real launched-app macOS accessibility validation |
 | `AGENTS.md` | Coding standards, project structure, how to add features |
 
 ## How to Add Things

@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+artifact_root=${MINGA_AX_ARTIFACT_ROOT:-"$repo_root/_build/macos-accessibility"}
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+artifact_dir="$artifact_root/$run_id"
+state_root=$(mktemp -d "${TMPDIR:-/tmp}/minga-accessibility.XXXXXX")
+derived_data="$state_root/DerivedData"
+test_bundle_id="com.minga.editor.accessibility-runner"
+app_path="$derived_data/Build/Products/Debug/Minga.app"
+
+mkdir -p "$artifact_dir"
+chmod 700 "$state_root"
+
+infrastructure_failure() {
+  local message=$1
+  printf 'INFRASTRUCTURE: %s\n' "$message" | tee "$artifact_dir/infrastructure-failure.txt" >&2
+  exit 2
+}
+
+terminate_owned_process() {
+  local pid=$1
+  kill -TERM "$pid" 2>/dev/null || return 0
+  for _attempt in {1..30}; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
+cleanup_process() {
+  local pid_file=$1
+  [[ -f "$pid_file" ]] || return 0
+
+  local pid
+  pid=$(tr -cd '0-9' < "$pid_file")
+  [[ -n "$pid" ]] || return 0
+
+  local command
+  command=$(ps -p "$pid" -o command= 2>/dev/null || true)
+  case "$command" in
+    "$app_path/Contents/MacOS/Minga"*)
+      terminate_owned_process "$pid"
+      ;;
+  esac
+}
+
+cleanup() {
+  cleanup_process "$state_root/cold/app.pid"
+  cleanup_process "$state_root/warm/app.pid"
+
+  while IFS= read -r process; do
+    local pid=${process%% *}
+    local command=${process#* }
+    case "$command" in
+      "$app_path/Contents/MacOS/Minga"*)
+        terminate_owned_process "$pid"
+        ;;
+      *"$app_path/Contents/Resources/release/"*)
+        terminate_owned_process "$pid"
+        ;;
+    esac
+  done < <(ps -axo pid=,command= | sed -E 's/^[[:space:]]+//')
+
+  case "$state_root" in
+    "${TMPDIR:-/tmp}"/minga-accessibility.*|/tmp/minga-accessibility.*|/private/tmp/minga-accessibility.*)
+      rm -rf "$state_root"
+      ;;
+  esac
+}
+trap cleanup EXIT INT TERM
+
+[[ $(uname -s) == Darwin ]] || infrastructure_failure "the launched-app accessibility check requires macOS"
+for command in git mix xcodebuild xcodegen codesign ditto python3; do
+  command -v "$command" >/dev/null 2>&1 || infrastructure_failure "required command is unavailable: $command"
+done
+
+console_user=$(stat -f '%Su' /dev/console 2>/dev/null || true)
+case "$console_user" in
+  ""|root|loginwindow)
+    infrastructure_failure "an interactive macOS GUI login session is required"
+    ;;
+esac
+
+if ! launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+  infrastructure_failure "the current user does not have a launchd GUI session"
+fi
+
+expected_xcodegen=$(tr -d '[:space:]' < "$repo_root/.xcodegen-version")
+actual_xcodegen=$(xcodegen --version | sed -E 's/^Version:[[:space:]]*//')
+[[ "$actual_xcodegen" == "$expected_xcodegen" ]] || infrastructure_failure "XcodeGen $expected_xcodegen is required, found $actual_xcodegen. Run scripts/install_xcodegen <dir>."
+
+printf 'Artifacts: %s\n' "$artifact_dir"
+
+(
+  cd "$repo_root"
+  MIX_ENV=prod mix deps.get
+  MIX_ENV=prod mix native.build.tui
+  MIX_ENV=prod mix release minga_macos --overwrite
+) 2>&1 | tee "$artifact_dir/release-build.log"
+
+(
+  cd "$repo_root/macos"
+  xcodegen generate
+  xcodebuild build-for-testing \
+    -project Minga.xcodeproj \
+    -scheme MingaAccessibility \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "$derived_data" \
+    MINGA_APP_BUNDLE_IDENTIFIER="$test_bundle_id"
+) 2>&1 | tee "$artifact_dir/xcode-build.log"
+
+[[ -d "$app_path" ]] || infrastructure_failure "Xcode did not produce the isolated Minga test app at $app_path"
+release_path="$repo_root/_build/prod/rel/minga_macos"
+[[ -x "$release_path/bin/minga_macos" ]] || infrastructure_failure "the embedded BEAM release was not built"
+
+rm -rf "$app_path/Contents/Resources/release"
+ditto "$release_path" "$app_path/Contents/Resources/release"
+codesign --force --deep --sign - --options runtime --entitlements "$repo_root/macos/Entitlements.plist" "$app_path"
+codesign --verify --deep --strict "$app_path"
+
+record_xctest_infrastructure_failure() {
+  local log_path=$1
+  local marker_path=$2
+
+  if grep -Eq 'Timed out while enabling automation mode|failed to initialize for UI testing|not authorized to perform UI testing|not permitted to perform UI testing' "$log_path"; then
+    printf '%s\n' 'INFRASTRUCTURE: Xcode could not initialize macOS UI automation. Confirm that the interactive GUI session allows Xcode UI testing, then rerun the command.' > "$marker_path"
+    return 0
+  fi
+
+  return 1
+}
+
+run_variant() {
+  local variant=$1
+  local variant_root="$state_root/$variant"
+  local variant_artifacts="$artifact_dir/$variant"
+  local started_seconds=$SECONDS
+  mkdir -p "$variant_root" "$variant_artifacts"
+  chmod 700 "$variant_root"
+
+  set +e
+  (
+    cd "$repo_root/macos"
+    MINGA_AX_RUN_ROOT="$variant_root" \
+      MINGA_AX_ARTIFACTS="$variant_artifacts" \
+      MINGA_AX_VARIANT="$variant" \
+      MINGA_AX_APP_BUNDLE_ID="$test_bundle_id" \
+      xcodebuild test-without-building \
+        -project Minga.xcodeproj \
+        -scheme MingaAccessibility \
+        -configuration Debug \
+        -destination 'platform=macOS' \
+        -derivedDataPath "$derived_data" \
+        -resultBundlePath "$variant_artifacts/MingaAccessibility.xcresult" \
+        -test-timeouts-enabled YES \
+        -maximum-test-execution-time-allowance 120 \
+        -only-testing:MingaAccessibilityTests/MingaAccessibilityWorkflowTests/testRealApplicationAccessibilityNavigationAndFocus \
+        MINGA_APP_BUNDLE_IDENTIFIER="$test_bundle_id"
+  ) 2>&1 | tee "$variant_artifacts/xcode-test.log"
+  local status=${PIPESTATUS[0]}
+  set -e
+  printf '{"operation":"xcode-test","milliseconds":%d}\n' \
+    "$(((SECONDS - started_seconds) * 1000))" > "$variant_artifacts/runner-timing.json"
+
+  if [[ $status -ne 0 ]]; then
+    record_xctest_infrastructure_failure "$variant_artifacts/xcode-test.log" "$variant_artifacts/infrastructure-failure.txt" || true
+    if [[ -f "$variant_artifacts/infrastructure-failure.txt" ]]; then
+      printf 'Accessibility %s run failed because a macOS prerequisite is missing. See %s\n' "$variant" "$variant_artifacts/infrastructure-failure.txt" >&2
+      return 2
+    fi
+    printf 'Accessibility %s run found a product failure. See %s\n' "$variant" "$variant_artifacts" >&2
+    return 1
+  fi
+}
+
+run_variant cold
+run_variant warm
+
+printf 'Minga launched-app accessibility workflow passed cold and warm runs.\n'
+printf 'Evidence: %s\n' "$artifact_dir"
