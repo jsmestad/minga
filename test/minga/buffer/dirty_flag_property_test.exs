@@ -18,6 +18,7 @@ defmodule Minga.Buffer.DirtyFlagPropertyTest do
       File.write!(path, "start")
 
       buffer = start_supervised!({BufferProcess, file_path: path}, id: child_id)
+      assert {:ok, 0} = BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
 
       try do
         initial = %{id: 0, content: "start", cursor: 0}
