@@ -493,10 +493,21 @@ defmodule Minga.Integration.GUIProtocolTest do
         cursor_row: 5,
         cursor_col: 0,
         selected_offset: selected_offset,
+        selected_item_id: "def-id",
         documentation: "Defines a function.",
+        total_count: 12,
+        matched_count: 2,
+        incomplete?: true,
         items:
-          Enum.map(visible_items, fn item ->
-            %Completion.Item{kind: item.kind, label: item.label, detail: item.detail || ""}
+          Enum.with_index(visible_items, fn item, index ->
+            %Completion.Item{
+              id: if(index == 0, do: "def-id", else: "defmodule-id"),
+              source: "elixir-ls",
+              kind: item.kind,
+              label: item.label,
+              detail: item.detail || "",
+              match_ranges: [%{start: 0, length: 3}]
+            }
           end)
       }
 
@@ -508,9 +519,17 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["anchor_row"] == 5
       assert decoded["anchor_col"] == 0
       assert decoded["selected_index"] == 0
+      assert decoded["selected_item_id"] == "def-id"
       assert Enum.count(decoded["items"]) == 2
-      assert hd(decoded["items"])["label"] == "def"
+      first = hd(decoded["items"])
+      assert first["label"] == "def"
+      assert first["id"] == "def-id"
+      assert first["source"] == "elixir-ls"
+      assert first["match_ranges"] == [%{"start" => 0, "length" => 3}]
       assert decoded["documentation"] == "Defines a function."
+      assert decoded["total_count"] == 12
+      assert decoded["matched_count"] == 2
+      assert decoded["incomplete"] == true
     end
   end
 

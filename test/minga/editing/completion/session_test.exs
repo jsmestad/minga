@@ -151,7 +151,87 @@ defmodule Minga.Editing.Completion.SessionTest do
              )
 
     assert merged.selected_item_id == selected.id
+    assert merged.selection_origin == :user
     assert Session.find_item(merged, selected.id).label == "d"
+  end
+
+  test "a higher-ranked item from a later provider replaces the automatic default" do
+    session = new_session()
+    {session, first_ref} = register(session, :first)
+
+    assert {:ok, session} =
+             Session.accept_batch(
+               session,
+               batch(session, :first, self(), first_ref, [%{"label" => "zulu"}])
+             )
+
+    assert Session.find_item(session, session.selected_item_id).label == "zulu"
+    assert session.selection_origin == :automatic
+    {session, second_ref} = register(session, :second)
+
+    assert {:ok, merged} =
+             Session.accept_batch(
+               session,
+               batch(session, :second, self(), second_ref, [%{"label" => "alpha"}])
+             )
+
+    assert Session.find_item(merged, merged.selected_item_id).label == "alpha"
+    assert merged.selection_origin == :automatic
+  end
+
+  test "a preselected item from a later provider replaces the automatic default" do
+    session = new_session()
+    {session, first_ref} = register(session, :first)
+
+    assert {:ok, session} =
+             Session.accept_batch(
+               session,
+               batch(session, :first, self(), first_ref, [%{"label" => "alpha"}])
+             )
+
+    {session, second_ref} = register(session, :second)
+
+    assert {:ok, merged} =
+             Session.accept_batch(
+               session,
+               batch(session, :second, self(), second_ref, [
+                 %{"label" => "zulu", "preselect" => true}
+               ])
+             )
+
+    assert Session.find_item(merged, merged.selected_item_id).label == "zulu"
+    assert merged.selection_origin == :automatic
+  end
+
+  test "later provider ranking cannot replace an explicit user selection" do
+    session = new_session()
+    {session, first_ref} = register(session, :first)
+
+    assert {:ok, session} =
+             Session.accept_batch(
+               session,
+               batch(session, :first, self(), first_ref, [
+                 %{"label" => "alpha"},
+                 %{"label" => "charlie"}
+               ])
+             )
+
+    selected = Enum.find(Session.items(session), &(&1.label == "charlie"))
+    session = Session.select(session, selected.id)
+    assert session.selection_origin == :user
+    {session, second_ref} = register(session, :second)
+
+    assert {:ok, merged} =
+             Session.accept_batch(
+               session,
+               batch(session, :second, self(), second_ref, [
+                 %{"label" => "bravo", "preselect" => true}
+               ])
+             )
+
+    assert merged.selected_item_id == selected.id
+    assert Session.find_item(merged, merged.selected_item_id).label == "charlie"
+    assert merged.selection_origin == :user
   end
 
   test "resolve requires the exact selected session provider item and request identity" do

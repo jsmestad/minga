@@ -234,18 +234,30 @@ struct GUICompletionDecoderTests {
         data.append(1) // kind
         appendString16(&data, "def") // label
         appendString16(&data, "keyword") // detail
+        appendString8(&data, "def-id") // stable id
+        appendString16(&data, "elixir-ls") // source
+        data.append(1) // match range count
+        appendU16(&data, 0)
+        appendU16(&data, 3)
 
         // Item 2
         data.append(6) // kind (variable)
         appendString16(&data, "my_var") // label
         appendString16(&data, "String.t()") // detail
+        appendString8(&data, "var-id") // stable id
+        appendString16(&data, "elixir-ls") // source
+        data.append(0) // match range count
 
         appendString16(&data, "Defines a function.") // documentation (selected item's doc preview)
+        appendString8(&data, "def-id")
+        appendU32(&data, 200)
+        appendU32(&data, 2)
+        data.append(1)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation) = cmd else {
+        guard case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, _, let items, let documentation, _, _, _) = cmd else {
             Issue.record("Expected .guiCompletion"); return
         }
 
@@ -257,6 +269,9 @@ struct GUICompletionDecoderTests {
         #expect(items[0].kind == .function)
         #expect(items[0].label == "def")
         #expect(items[0].detail == "keyword")
+        #expect(items[0].id == "def-id")
+        #expect(items[0].source == "elixir-ls")
+        #expect(items[0].matchRanges == [Wire.CompletionMatchRange(start: 0, length: 3)])
         #expect(items[1].label == "my_var")
         #expect(items[1].detail == "String.t()")
         #expect(documentation == "Defines a function.")
@@ -269,7 +284,7 @@ struct GUICompletionDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiCompletion(let visible, _, _, _, let items, let documentation) = cmd else {
+        guard case .guiCompletion(let visible, _, _, _, _, let items, let documentation, _, _, _) = cmd else {
             Issue.record("Expected .guiCompletion"); return
         }
         #expect(visible == false)

@@ -261,7 +261,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:empty_state_activate, item_id :: String.t()}
           | {:file_tree_click, index :: non_neg_integer()}
           | {:file_tree_toggle, index :: non_neg_integer()}
-          | {:completion_select, index :: non_neg_integer()}
+          | {:completion_select, item_id :: String.t()}
           | {:breadcrumb_click, segment_index :: non_neg_integer()}
           | {:toggle_panel, panel :: non_neg_integer()}
           | :new_tab
@@ -709,8 +709,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
 
-  def decode_gui_action(@gui_action_completion_select, <<index::16>>),
-    do: {:ok, {:completion_select, index}}
+  def decode_gui_action(
+        @gui_action_completion_select,
+        <<length::8, item_id::binary-size(length)>>
+      ),
+      do: {:ok, {:completion_select, item_id}}
 
   def decode_gui_action(@gui_action_breadcrumb_click, <<index::8>>),
     do: {:ok, {:breadcrumb_click, index}}

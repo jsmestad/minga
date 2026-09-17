@@ -104,13 +104,13 @@ struct GUIActionEncoderTests {
         #expect(spy.actions == [.fileTreeToggle(index: 3)])
     }
 
-    @Test("sendCompletionSelect records index")
+    @Test("sendCompletionSelect records stable item ID")
     func completionSelect() {
         let spy = SpyEncoder()
         let encoder: OutboundActionEncoding = spy
-        encoder.send(.completionSelect(index: 0))
+        encoder.send(.completionSelect(itemID: "item-0"))
 
-        #expect(spy.actions == [.completionSelect(index: 0)])
+        #expect(spy.actions == [.completionSelect(itemID: "item-0")])
     }
 
 

@@ -3,7 +3,10 @@ defmodule MingaEditor.Input.CompletionKeyTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editing.Completion
+  alias Minga.Editing.Completion.ProviderBatch
+  alias Minga.Editing.Completion.Session
   alias Minga.Mode
+  alias MingaEditor.CompletionTrigger
   alias MingaEditor.Input.Completion, as: CompletionInput
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
@@ -21,6 +24,42 @@ defmodule MingaEditor.Input.CompletionKeyTest do
   defp completion_state do
     completion = Completion.new(sample_items(), {0, 0})
     payload = CompletionPayload.new(1, completion: completion)
+
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: nil, backend: :headless},
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{
+            modal: {:completion, payload},
+            whichkey: %WhichKey{}
+          }
+        ),
+      workspace: %MingaEditor.Session.State{
+        editing: %VimState{mode: :insert, mode_state: Mode.initial_state()}
+      }
+    }
+  end
+
+  defp session_completion_state do
+    session = Session.new(make_ref(), 1, self(), 7, {0, 0})
+    request_ref = make_ref()
+    session = Session.register_requests(session, [{:provider, self(), request_ref}])
+
+    batch =
+      ProviderBatch.from_response(
+        session.id,
+        session.generation,
+        :provider,
+        self(),
+        request_ref,
+        %{"items" => [%{"label" => "append"}, %{"label" => "apply"}]}
+      )
+
+    {:ok, session} = Session.accept_batch(session, batch)
+    completion = Completion.new(Session.index(session), {0, 0}, session.selected_item_id)
+    trigger = CompletionTrigger.new() |> CompletionTrigger.put_session(session)
+    payload = CompletionPayload.new(1, completion: completion, trigger: trigger)
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, backend: :headless},
@@ -89,6 +128,19 @@ defmodule MingaEditor.Input.CompletionKeyTest do
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_up_legacy, 0)
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 0
+    end
+
+    test "navigation marks a session selection as user-owned" do
+      state = session_completion_state()
+
+      {:handled, state} = CompletionInput.handle_key(state, @arrow_down_kitty, 0)
+
+      completion = MingaEditor.Shell.Traditional.ModalWorkflow.completion(state)
+      trigger = MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state)
+      session = CompletionTrigger.session(trigger)
+
+      assert session.selection_origin == :user
+      assert session.selected_item_id == completion.selected_item_id
     end
   end
 end

@@ -73,14 +73,24 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   end
 
   @doc """
-  Replaces the inner `Completion.t()` on the payload, preserving owner,
-  trigger, and opened_at. The only sanctioned way to update completion
-  state from outside this module (Rule 2: state ownership).
+  Replaces the inner `Completion.t()` on the payload while preserving lifecycle ownership.
+
+  Automatic ranking, filtering, and resolve updates use this transition. They must not turn the current default into a user-owned selection.
   """
   @spec put_completion(t(), completion_or_nil()) :: t()
   def put_completion(%__MODULE__{} = payload, completion)
       when is_struct(completion, Completion) or is_nil(completion) do
-    %{payload | completion: completion, trigger: sync_selection(payload.trigger, completion)}
+    %{payload | completion: completion}
+  end
+
+  @doc "Records a completion value selected by explicit user navigation."
+  @spec navigate(t(), Completion.t()) :: t()
+  def navigate(%__MODULE__{} = payload, %Completion{} = completion) do
+    %{
+      payload
+      | completion: completion,
+        trigger: CompletionTrigger.sync_selection(payload.trigger, completion)
+    }
   end
 
   @doc """
@@ -91,10 +101,4 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   def put_trigger(%__MODULE__{} = payload, %CompletionTrigger{} = trigger) do
     %{payload | trigger: trigger}
   end
-
-  @spec sync_selection(CompletionTrigger.t(), completion_or_nil()) :: CompletionTrigger.t()
-  defp sync_selection(trigger, %Completion{} = completion),
-    do: CompletionTrigger.sync_selection(trigger, completion)
-
-  defp sync_selection(trigger, nil), do: trigger
 end

@@ -568,12 +568,14 @@ struct EncoderGUIActionTests {
         #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
     }
 
-    @Test("completion_select encodes index as UInt16")
+    @Test("completion_select encodes stable item ID as string8")
     func completionSelectLayout() {
-        let payload = captureFrame { $0.send(.completionSelect(index: 3)) }
+        let payload = captureFrame { $0.send(.completionSelect(itemID: "item-3")) }
 
+        #expect(payload.count == 9)
         #expect(payload[1] == GUI_ACTION_COMPLETION_SELECT)
-        #expect(readU16(payload, 2) == 3)
+        #expect(payload[2] == 6)
+        #expect(String(decoding: payload[3...], as: UTF8.self) == "item-3")
     }
 
 

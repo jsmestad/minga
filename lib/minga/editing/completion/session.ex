@@ -6,6 +6,7 @@ defmodule Minga.Editing.Completion.Session do
   """
 
   alias Minga.Editing.Completion.Item
+  alias Minga.Editing.Completion.Index
   alias Minga.Editing.Completion.ProviderBatch
 
   @typedoc "Provider request identity and cancellation target."
@@ -13,6 +14,9 @@ defmodule Minga.Editing.Completion.Session do
 
   @typedoc "Stable resolve identity for one selected item."
   @type resolve_identity :: {reference(), Item.provider_id(), Item.id()}
+
+  @typedoc "Whether ranking or explicit user navigation owns the current selection."
+  @type selection_origin :: :automatic | :user
 
   @typedoc "Resolve work owned by this session."
   @type resolve :: %{
@@ -31,7 +35,9 @@ defmodule Minga.Editing.Completion.Session do
             provider_order: [],
             provider_requests: %{},
             batches: %{},
+            index: %Index{},
             selected_item_id: nil,
+            selection_origin: :automatic,
             previewed_item_id: nil,
             resolve: nil,
             debounce_timer: nil,
@@ -46,7 +52,9 @@ defmodule Minga.Editing.Completion.Session do
           provider_order: [Item.provider_id()],
           provider_requests: %{Item.provider_id() => provider_request()},
           batches: %{Item.provider_id() => ProviderBatch.t()},
+          index: Index.t(),
           selected_item_id: Item.id() | nil,
+          selection_origin: selection_origin(),
           previewed_item_id: Item.id() | nil,
           resolve: resolve() | nil,
           debounce_timer: reference() | nil,
@@ -156,7 +164,8 @@ defmodule Minga.Editing.Completion.Session do
          expected == {batch.client, batch.request_ref} do
       provider_requests = Map.delete(session.provider_requests, batch.provider_id)
       batches = Map.put(session.batches, batch.provider_id, batch)
-      next = %{session | provider_requests: provider_requests, batches: batches}
+      index = Index.put_provider(session.index, batch.provider_id, batch.items, batch.incomplete)
+      next = %{session | provider_requests: provider_requests, batches: batches, index: index}
       {:ok, preserve_selection(next)}
     else
       :stale
@@ -179,24 +188,20 @@ defmodule Minga.Editing.Completion.Session do
 
   @doc "Returns every candidate in deterministic provider and sort order."
   @spec items(t()) :: [Item.t()]
-  def items(%__MODULE__{} = session) do
-    session.provider_order
-    |> Enum.flat_map(fn provider_id ->
-      case Map.fetch(session.batches, provider_id) do
-        {:ok, batch} -> batch.items
-        :error -> []
-      end
-    end)
-    |> Enum.sort_by(&{&1.sort_text, &1.label, &1.id})
-  end
+  def items(%__MODULE__{} = session), do: Index.all_items(session.index)
 
-  @doc "Selects one item by stable identity. Unknown or stale identities are ignored."
+  @doc "Returns the provider-aware normalized index owned by this session."
+  @spec index(t()) :: Index.t()
+  def index(%__MODULE__{index: index}), do: index
+
+  @doc "Records an explicit user selection by stable identity. Unknown or stale identities are ignored."
   @spec select(t(), Item.id() | nil) :: t()
-  def select(%__MODULE__{} = session, nil), do: %{session | selected_item_id: nil}
+  def select(%__MODULE__{} = session, nil),
+    do: %{session | selected_item_id: nil, selection_origin: :automatic}
 
   def select(%__MODULE__{} = session, item_id) do
-    if Enum.any?(items(session), &(&1.id == item_id)),
-      do: %{session | selected_item_id: item_id},
+    if Index.find_item(session.index, item_id) != nil,
+      do: %{session | selected_item_id: item_id, selection_origin: :user},
       else: session
   end
 
@@ -290,7 +295,8 @@ defmodule Minga.Editing.Completion.Session do
       {:ok, batch} ->
         items = Enum.map(batch.items, &resolve_matching_item(&1, item_id, documentation))
         batches = Map.put(session.batches, provider_id, %{batch | items: items})
-        {:ok, %{session | batches: batches, resolve: nil}}
+        index = Index.update_item(session.index, item_id, &Item.resolve(&1, documentation))
+        {:ok, %{session | batches: batches, index: index, resolve: nil}}
 
       :error ->
         :stale
@@ -309,7 +315,9 @@ defmodule Minga.Editing.Completion.Session do
        session
        | provider_requests: %{},
          batches: %{},
+         index: Index.empty(),
          selected_item_id: nil,
+         selection_origin: :automatic,
          previewed_item_id: nil,
          resolve: nil,
          debounce_timer: nil,
@@ -327,16 +335,26 @@ defmodule Minga.Editing.Completion.Session do
   @doc "Finds one item by stable identity."
   @spec find_item(t(), Item.id()) :: Item.t() | nil
   def find_item(%__MODULE__{} = session, item_id),
-    do: Enum.find(items(session), &(&1.id == item_id))
+    do: Index.find_item(session.index, item_id)
 
   @spec preserve_selection(t()) :: t()
-  defp preserve_selection(%__MODULE__{} = session) do
-    available = items(session)
+  defp preserve_selection(%__MODULE__{selection_origin: :user} = session) do
+    case Index.find_item(session.index, session.selected_item_id) do
+      %Item{} ->
+        session
 
-    case Enum.find(available, &(&1.id == session.selected_item_id)) do
-      %Item{} -> session
-      nil -> %{session | selected_item_id: first_item_id(available)}
+      nil ->
+        select_automatic_default(session)
     end
+  end
+
+  defp preserve_selection(%__MODULE__{selection_origin: :automatic} = session),
+    do: select_automatic_default(session)
+
+  @spec select_automatic_default(t()) :: t()
+  defp select_automatic_default(%__MODULE__{} = session) do
+    first = session.index |> Index.snapshot("", 1) |> Map.fetch!(:items) |> first_item_id()
+    %{session | selected_item_id: first, selection_origin: :automatic}
   end
 
   @spec first_item_id([Item.t()]) :: Item.id() | nil

@@ -7,7 +7,7 @@ import MingaProtocol
 @Suite("CompletionState local preview")
 struct CompletionStateTests {
     private func makeItems(_ count: Int) -> [Wire.CompletionItem] {
-        (0..<count).map { i in Wire.CompletionItem(kind: 1, label: "item\(i)", detail: "") }
+        (0..<count).map { i in Wire.CompletionItem(kind: 1, label: "item\(i)", detail: "", id: "item-\(i)") }
     }
 
     @Test("previewNavigation increments without mutating selectedIndex")
@@ -60,6 +60,23 @@ struct CompletionStateTests {
 
         state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 1, rawItems: makeItems(5), documentation: "")
         #expect(state.content?.previewSelectedIndex == nil)
+    }
+
+    @Test("update retains preview by stable ID when ranking changes")
+    func updateRetainsPreviewByStableID() {
+        let state = CompletionState()
+        let items = makeItems(5)
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: items, documentation: "")
+
+        _ = state.previewNavigation(delta: 1)
+        let reordered = [items[4], items[1], items[0]]
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 2, selectedItemID: "item-0", rawItems: reordered, documentation: "", totalCount: 50_000, matchedCount: 3, incomplete: true)
+
+        #expect(state.content?.effectiveSelectedItemID == "item-1")
+        #expect(state.content?.effectiveSelectedIndex == 1)
+        #expect(state.content?.totalCount == 50_000)
+        #expect(state.content?.matchedCount == 3)
+        #expect(state.content?.incomplete == true)
     }
 
     @Test("hide clears preview index")

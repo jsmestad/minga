@@ -107,6 +107,18 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
 
   def update_completion(%EditorState{} = state, _update), do: state
 
+  @doc "Updates completion after explicit user navigation."
+  @spec navigate_completion(EditorState.t(), (Minga.Editing.Completion.t() ->
+                                                Minga.Editing.Completion.t())) ::
+          EditorState.t()
+  def navigate_completion(
+        %EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state,
+        update
+      ),
+      do: update_shell_state(state, &ShellState.navigate_modal_completion(&1, update))
+
+  def navigate_completion(%EditorState{} = state, _update), do: state
+
   @doc "Records completion-trigger lifecycle with current tab context."
   @spec put_completion_trigger(EditorState.t(), MingaEditor.CompletionTrigger.t()) ::
           EditorState.t()

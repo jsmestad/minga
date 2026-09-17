@@ -158,8 +158,15 @@ private func randomGuiCompletion() -> Data {
         data.append(UInt8.random(in: 0...15))  // kind
         data.append(randomString16Field(maxLen: 15))  // label
         data.append(randomString16Field(maxLen: 15))  // detail
+        data.append(randomString8Field(maxLen: 15))  // stable id
+        data.append(randomString16Field(maxLen: 15))  // source
+        data.append(0)  // match range count
     }
     data.append(randomString16Field(maxLen: 40))  // documentation (selected item's doc preview)
+    data.append(randomString8Field(maxLen: 15))  // selected item id
+    appendRandomU32(&data)  // total count
+    appendRandomU32(&data)  // matched count
+    data.append(Bool.random() ? 1 : 0)  // incomplete
     return data
 }
 

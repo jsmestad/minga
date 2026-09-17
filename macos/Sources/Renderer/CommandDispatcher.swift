@@ -1160,8 +1160,8 @@ final class CommandDispatcher {
         case .guiFileTreeSelection(let selectedId, let focused):
             guiState.fileTreeState.updateSelection(selectedId: selectedId, focused: focused)
 
-        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation):
-            guiState.completionState.update(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items, documentation: documentation)
+        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete):
+            guiState.completionState.update(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, rawItems: items, documentation: documentation, totalCount: totalCount, matchedCount: matchedCount, incomplete: incomplete)
 
         case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
             if visible {

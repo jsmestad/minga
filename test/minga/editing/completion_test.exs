@@ -104,12 +104,12 @@ defmodule Minga.Editing.CompletionTest do
       refute Completion.active?(filtered)
     end
 
-    test "resets selection to 0" do
+    test "preserves stable selection across refilter" do
       comp = Completion.new(@sample_items, {0, 0})
       comp = Completion.move_down(comp)
       assert comp.selected == 1
       filtered = Completion.filter(comp, "a")
-      assert filtered.selected == 0
+      assert Completion.selected_item(filtered).id == Completion.selected_item(comp).id
     end
 
     test "case-insensitive matching" do

@@ -167,8 +167,8 @@ struct CompletionOverlayViewTests {
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1,
             rawItems: [
-                Wire.CompletionItem(kind: 1, label: "def", detail: "keyword"),
-                Wire.CompletionItem(kind: 2, label: "defmodule", detail: "module"),
+                Wire.CompletionItem(kind: 1, label: "def", detail: "keyword", id: "def"),
+                Wire.CompletionItem(kind: 2, label: "defmodule", detail: "module", id: "defmodule"),
             ],
             documentation: ""
         )
@@ -180,7 +180,7 @@ struct CompletionOverlayViewTests {
 
         #expect(try selected.accessibilityValue().string() == "selected, module")
         try selected.tap()
-        #expect(recorder.actions == [.select(index: 1)])
+        #expect(recorder.actions == [.select(itemID: "defmodule")])
     }
 
     @Test("Retained completion choice cannot activate a replacement item")
@@ -188,7 +188,7 @@ struct CompletionOverlayViewTests {
         let state = CompletionState()
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
-            rawItems: [Wire.CompletionItem(kind: 1, label: "original", detail: "function")],
+            rawItems: [Wire.CompletionItem(kind: 1, label: "original", detail: "function", id: "original")],
             documentation: ""
         )
         let recorder = LocalActionRecorder<CompletionOverlay.Action>()
@@ -198,7 +198,7 @@ struct CompletionOverlayViewTests {
 
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
-            rawItems: [Wire.CompletionItem(kind: 2, label: "replacement", detail: "module")],
+            rawItems: [Wire.CompletionItem(kind: 2, label: "replacement", detail: "module", id: "replacement")],
             documentation: ""
         )
         try retained.tap()
@@ -206,10 +206,10 @@ struct CompletionOverlayViewTests {
         #expect(recorder.actions.isEmpty)
     }
 
-    @Test("Retained completion choice rejects an identical replacement presentation")
-    @MainActor func identicalReplacementCompletionIsRejected() throws {
+    @Test("Retained completion choice activates the same stable item after reconciliation")
+    @MainActor func identicalStableCompletionIsAccepted() throws {
         let state = CompletionState()
-        let item = Wire.CompletionItem(kind: 1, label: "same label", detail: "same detail")
+        let item = Wire.CompletionItem(kind: 1, label: "same label", detail: "same detail", id: "stable-item")
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
             rawItems: [item], documentation: ""
@@ -219,15 +219,13 @@ struct CompletionOverlayViewTests {
             .environment(\.themeColors, ThemeColors())
         let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
 
-        // The wire presentation does not expose the LSP insertion edit. A new owner
-        // revision distinguishes replacement offers even when all visible fields match.
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
             rawItems: [item], documentation: ""
         )
         try retained.tap()
 
-        #expect(recorder.actions.isEmpty)
+        #expect(recorder.actions == [.select(itemID: "stable-item")])
     }
 }
 

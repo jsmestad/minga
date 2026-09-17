@@ -55,8 +55,19 @@ func appendWireString16(data []byte, text string) []byte {
 }
 
 func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
-	// header(7) + items(1: kind 'foo' 'bar') + documentation string16 "doc".
-	bytes := []byte{1, 0, 3, 0, 7, 0, 1, 0, 1, 1, 0, 3, 'f', 'o', 'o', 0, 3, 'b', 'a', 'r', 0, 3, 'd', 'o', 'c'}
+	bytes := []byte{1, 0, 3, 0, 7, 0, 1, 0, 1, 1}
+	bytes = appendWireString16(bytes, "foo")
+	bytes = appendWireString16(bytes, "bar")
+	bytes = appendWireString8(bytes, "stable-id")
+	bytes = appendWireString16(bytes, "lsp:elixir")
+	bytes = append(bytes, 1)
+	bytes = appendWireU16(bytes, 0)
+	bytes = appendWireU16(bytes, 3)
+	bytes = appendWireString16(bytes, "doc")
+	bytes = appendWireString8(bytes, "stable-id")
+	bytes = appendWireU32(bytes, 120)
+	bytes = appendWireU32(bytes, 42)
+	bytes = append(bytes, 1)
 	f, consumed, err := generated.DecodeGuiCompletionFields(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -70,8 +81,14 @@ func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	if len(f.Items) != 1 || f.Items[0].Kind != 1 || f.Items[0].Label != "foo" || f.Items[0].Detail != "bar" {
 		t.Fatalf("items mismatch: %+v", f.Items)
 	}
+	if f.Items[0].ID != "stable-id" || f.Items[0].Source != "lsp:elixir" || !reflect.DeepEqual(f.Items[0].MatchRanges, []generated.CompletionMatchRange{{Start: 0, Length: 3}}) {
+		t.Fatalf("item metadata mismatch: %+v", f.Items[0])
+	}
 	if f.Documentation != "doc" {
 		t.Fatalf("documentation = %q, want \"doc\"", f.Documentation)
+	}
+	if f.SelectedItemID != "stable-id" || f.TotalCount != 120 || f.MatchedCount != 42 || f.Incomplete != 1 {
+		t.Fatalf("snapshot metadata mismatch: %+v", f)
 	}
 }
 
@@ -79,7 +96,12 @@ func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 // so the generated decoders surface them as typed constants rather than bare
 // bytes. This pins the byte<->constant mapping and the typed field shape.
 func TestDecodeCompletionItemKindIsTypedEnum(t *testing.T) {
-	bytes := []byte{12, 0, 1, 'x', 0, 0}
+	bytes := []byte{12}
+	bytes = appendWireString16(bytes, "x")
+	bytes = appendWireString16(bytes, "")
+	bytes = appendWireString8(bytes, "item-id")
+	bytes = appendWireString16(bytes, "source")
+	bytes = append(bytes, 0)
 	item, _, err := generated.DecodeCompletionItem(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)

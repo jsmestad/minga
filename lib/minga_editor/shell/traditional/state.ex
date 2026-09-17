@@ -451,6 +451,13 @@ defmodule MingaEditor.Shell.Traditional.State do
   def update_modal_completion(%__MODULE__{} = state, update),
     do: %{state | modal: ModalOverlay.update_completion(state.modal, update)}
 
+  @doc "Updates completion and records explicit user navigation."
+  @spec navigate_modal_completion(t(), (Minga.Editing.Completion.t() ->
+                                          Minga.Editing.Completion.t())) ::
+          t()
+  def navigate_modal_completion(%__MODULE__{} = state, update),
+    do: %{state | modal: ModalOverlay.navigate_completion(state.modal, update)}
+
   @doc "Records completion trigger lifecycle with explicit active-tab context."
   @spec put_modal_completion_trigger(t(), MingaEditor.CompletionTrigger.t(), Tab.id() | nil) ::
           t()

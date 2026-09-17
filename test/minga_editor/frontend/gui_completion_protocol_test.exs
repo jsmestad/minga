@@ -79,7 +79,9 @@ defmodule MingaEditor.Frontend.GUICompletionProtocolTest do
 
   defp decode_labels(
          <<_kind, label_len::16, label::binary-size(label_len), detail_len::16,
-           _detail::binary-size(detail_len), rest::binary>>,
+           _detail::binary-size(detail_len), id_len::8, _id::binary-size(id_len), source_len::16,
+           _source::binary-size(source_len), range_count::8,
+           _ranges::binary-size(range_count * 4), rest::binary>>,
          count,
          acc
        ) do

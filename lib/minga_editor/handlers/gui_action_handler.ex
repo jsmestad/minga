@@ -390,10 +390,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Commands.FileTree.refresh(state)
   end
 
-  defp dispatch_action(state, {:completion_select, index}) do
+  defp dispatch_action(state, {:completion_select, item_id}) do
     case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       %Completion{} = comp ->
-        accept_visible_completion(state, comp, index)
+        accept_completion_item(state, comp, item_id)
 
       nil ->
         state
@@ -1244,21 +1244,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   # ── Completion helpers ─────────────────────────────────────────────
 
-  @spec accept_visible_completion(state(), Completion.t(), non_neg_integer()) :: state()
-  defp accept_visible_completion(state, comp, index) do
-    {visible, _selected_offset} = Completion.visible_items(comp)
-
-    case Enum.at(visible, index) do
-      nil ->
+  @spec accept_completion_item(state(), Completion.t(), String.t()) :: state()
+  defp accept_completion_item(state, comp, item_id) do
+    case Completion.select_wire_id(comp, item_id) do
+      :stale ->
         state
 
-      _item ->
-        updated = Completion.select_visible(comp, index)
+      {:ok, updated} ->
+        next =
+          MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, fn _ -> updated end)
 
-        MingaEditor.do_accept_completion(
-          MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, fn _ -> updated end),
-          updated
-        )
+        MingaEditor.do_accept_completion(next, updated)
     end
   end
 

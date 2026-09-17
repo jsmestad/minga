@@ -117,7 +117,7 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: CompletionOverlay.Action) -> OutboundAction {
         switch action {
-        case .select(let index): .completionSelect(index: index)
+        case .select(let itemID): .completionSelect(itemID: itemID)
         }
     }
 
