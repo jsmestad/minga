@@ -62,14 +62,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         |> Highlight.put_names(["keyword"])
         |> Highlight.put_spans(1, [Span.new(0, 3, 0)])
 
-      themed_highlight = Highlight.new(Theme.get!(:one_light).syntax)
-
-      themed_highlight = %{
-        themed_highlight
-        | version: highlight.version,
-          spans: highlight.spans,
-          capture_names: highlight.capture_names
-      }
+      themed_highlight = Highlight.retheme(highlight, Theme.get!(:one_light))
 
       ctx = %Context{
         viewport: Viewport.new(20, 80),

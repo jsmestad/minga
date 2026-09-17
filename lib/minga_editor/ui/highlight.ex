@@ -13,14 +13,24 @@ defmodule MingaEditor.UI.Highlight do
   alias MingaEditor.UI.Face.Registry, as: FaceRegistry
   alias MingaEditor.UI.Theme
 
-  @enforce_keys [:version, :spans, :capture_names, :theme, :face_registry]
-  defstruct [:version, :spans, :capture_names, :theme, :face_registry, :parser_correlation]
+  @enforce_keys [:version, :spans, :span_identity, :capture_names, :theme, :face_registry]
+  defstruct [
+    :version,
+    :spans,
+    :span_identity,
+    :capture_names,
+    :theme,
+    :face_registry,
+    :parser_correlation
+  ]
 
   @typep span_tuple :: tuple()
+  @typep span_identity :: {:stored, reference()} | {:composed, non_neg_integer()}
   @typedoc "Highlight state for a buffer."
   @type t :: %__MODULE__{
           version: non_neg_integer(),
           spans: span_tuple(),
+          span_identity: span_identity(),
           capture_names: tuple(),
           theme: Theme.syntax(),
           face_registry: FaceRegistry.t(),
@@ -56,6 +66,7 @@ defmodule MingaEditor.UI.Highlight do
     %__MODULE__{
       version: 0,
       spans: {},
+      span_identity: {:stored, make_ref()},
       capture_names: {},
       theme: syntax,
       face_registry: registry,
@@ -71,6 +82,7 @@ defmodule MingaEditor.UI.Highlight do
     %__MODULE__{
       version: 0,
       spans: {},
+      span_identity: {:stored, make_ref()},
       capture_names: {},
       theme: theme.syntax,
       face_registry: registry,
@@ -125,6 +137,25 @@ defmodule MingaEditor.UI.Highlight do
     %{hl | theme: theme.syntax, face_registry: FaceRegistry.from_theme(theme)}
   end
 
+  @doc "Applies the effective face registry, including buffer-local overrides."
+  @spec with_face_registry(t(), FaceRegistry.t()) :: t()
+  def with_face_registry(%__MODULE__{} = hl, %FaceRegistry{} = registry) do
+    %{hl | face_registry: registry}
+  end
+
+  @doc """
+  Returns a render cache fingerprint without traversing document spans.
+
+  Stored spans receive a cheap identity on each accepted update, including identical replacements. Composed spans use a content digest so repeated semantic composition during rendering remains stable. Names, palette, face overrides, and parser correlation keep their existing invalidation behavior.
+  """
+  @spec fingerprint(t()) :: non_neg_integer()
+  def fingerprint(%__MODULE__{} = hl) do
+    :erlang.phash2(
+      {hl.version, hl.span_identity, hl.capture_names, hl.theme, hl.face_registry,
+       hl.parser_correlation}
+    )
+  end
+
   @doc "Stores capture names from a `highlight_names` event."
   @spec put_names(t(), [String.t()]) :: t()
   def put_names(%__MODULE__{} = hl, names) when is_list(names) do
@@ -144,7 +175,14 @@ defmodule MingaEditor.UI.Highlight do
   end
 
   def put_spans(%__MODULE__{} = hl, version, spans) when is_list(spans) do
-    %{hl | version: version, spans: spans |> validate_spans() |> List.to_tuple()}
+    spans = spans |> validate_spans() |> List.to_tuple()
+
+    %{
+      hl
+      | version: version,
+        spans: spans,
+        span_identity: {:stored, make_ref()}
+    }
   end
 
   @spec compose_semantic_layer(t(), {non_neg_integer(), tuple(), tuple()} | {tuple(), tuple()}) ::
@@ -162,11 +200,14 @@ defmodule MingaEditor.UI.Highlight do
         %{span | capture_id: Map.fetch!(name_to_id, elem(names, id))}
       end)
 
+    spans =
+      List.to_tuple(Enum.sort_by(Tuple.to_list(hl.spans) ++ semantic_spans, & &1.start_byte))
+
     %{
       hl
       | capture_names: List.to_tuple(capture_names),
-        spans:
-          List.to_tuple(Enum.sort_by(Tuple.to_list(hl.spans) ++ semantic_spans, & &1.start_byte))
+        spans: spans,
+        span_identity: {:composed, :erlang.phash2(spans, 4_294_967_296)}
     }
   end
 

@@ -3,7 +3,9 @@ defmodule Minga.HighlightTest do
 
   alias Minga.Core.Face
   alias Minga.Language.Highlight.Span
+  alias Minga.Parser.EventCorrelation
   alias MingaEditor.UI.Highlight
+  alias MingaEditor.UI.Theme
 
   defp assert_segments(result, expected) do
     assert Enum.count(result) == Enum.count(expected),
@@ -27,6 +29,104 @@ defmodule Minga.HighlightTest do
     Highlight.new(theme)
     |> Highlight.put_names(Keyword.get(attrs, :capture_names, []))
     |> Highlight.put_spans(Keyword.get(attrs, :version, 1), Keyword.get(attrs, :spans, []))
+  end
+
+  describe "render fingerprint" do
+    test "every highlight input invalidates rendering, including same-version span replacements" do
+      original =
+        highlight_with(capture_names: ["keyword"], spans: [Span.new(0, 3, 0)], version: 5)
+
+      correlation = EventCorrelation.new(make_ref(), 5)
+      correlated = Highlight.correlate(original, correlation)
+
+      changes = [
+        Highlight.put_spans(original, 5, [Span.new(4, 7, 0)]),
+        Highlight.put_spans(original, 6, [Span.new(0, 3, 0)]),
+        Highlight.put_names(original, ["string"]),
+        Highlight.retheme(original, Theme.get!(:one_light)),
+        Highlight.with_face_registry(
+          original,
+          Highlight.new(%{"keyword" => [fg: 0x123456]}).face_registry
+        ),
+        Highlight.compose_semantic_layer(
+          original,
+          {5, {"@lsp.type.variable"}, {Span.new(0, 3, 0, 0, 2)}}
+        ),
+        correlated
+      ]
+
+      for changed <- changes do
+        refute Highlight.fingerprint(changed) == Highlight.fingerprint(original)
+      end
+
+      refute Highlight.fingerprint(Highlight.reset_parser_version(correlated)) ==
+               Highlight.fingerprint(correlated)
+
+      accepted =
+        Highlight.accept_correlation(correlated, EventCorrelation.new(correlation.generation, 6))
+
+      refute Highlight.fingerprint(accepted) == Highlight.fingerprint(correlated)
+    end
+
+    test "accepted span updates advance identity while repeated semantic composition stays stable" do
+      spans = [Span.new(0, 3, 0)]
+      original = highlight_with(capture_names: ["keyword"], spans: spans, version: 5)
+      rebuilt = highlight_with(capture_names: ["keyword"], spans: spans, version: 5)
+      refute Highlight.fingerprint(original) == Highlight.fingerprint(rebuilt)
+
+      refute Highlight.fingerprint(Highlight.put_spans(original, 5, spans)) ==
+               Highlight.fingerprint(original)
+
+      assert Highlight.fingerprint(original) ==
+               Highlight.fingerprint(
+                 Highlight.with_face_registry(original, original.face_registry)
+               )
+
+      assert Highlight.put_spans(original, 4, [Span.new(4, 7, 0)]) == original
+
+      semantic = {5, {"@lsp.type.variable"}, {Span.new(0, 3, 0, 0, 2)}}
+      composed = Highlight.compose_semantic_layer(original, semantic)
+
+      assert Highlight.fingerprint(composed) ==
+               Highlight.fingerprint(Highlight.compose_semantic_layer(rebuilt, semantic))
+
+      assert Highlight.fingerprint(composed) ==
+               Highlight.fingerprint(
+                 Highlight.compose_semantic_layer(
+                   original,
+                   {6, elem(semantic, 1), elem(semantic, 2)}
+                 )
+               )
+
+      changed =
+        Highlight.compose_semantic_layer(
+          original,
+          {5, {"@lsp.type.variable"}, {Span.new(4, 7, 0, 0, 2)}}
+        )
+
+      refute Highlight.fingerprint(composed) == Highlight.fingerprint(changed)
+    end
+
+    test "fingerprint reductions do not grow with the document's span count" do
+      small = highlight_with(capture_names: ["keyword"], spans: [Span.new(0, 3, 0)])
+
+      large =
+        highlight_with(
+          capture_names: ["keyword"],
+          spans: for(i <- 0..64_999, do: Span.new(i * 4, i * 4 + 3, 0))
+        )
+
+      small_cost = fingerprint_reductions(small)
+      large_cost = fingerprint_reductions(large)
+      assert large_cost <= small_cost * 2 + 200
+    end
+  end
+
+  defp fingerprint_reductions(highlight) do
+    {:reductions, before_count} = Process.info(self(), :reductions)
+    Enum.each(1..50, fn _ -> Highlight.fingerprint(highlight) end)
+    {:reductions, after_count} = Process.info(self(), :reductions)
+    after_count - before_count
   end
 
   describe "state construction and versioning" do
