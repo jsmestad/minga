@@ -926,8 +926,8 @@ struct TabBarViewViewTests {
         WorkspacePresentationSnapshot(
             version: 1,
             activeWorkspaceId: id,
-            mode: 0,
-            flags: 0,
+            mode: .editor,
+            flags: [],
             workspaces: [
                 Wire.WorkspaceEntry(
                     id: id,
@@ -1000,7 +1000,7 @@ struct TabBarViewViewTests {
     @Test("Workspace indicator controls have explicit native actions")
     @MainActor func workspaceIndicatorAccessibilityContract() throws {
         let snapshot = WorkspacePresentationSnapshot(
-            version: 1, activeWorkspaceId: 7, mode: 0, flags: 0,
+            version: 1, activeWorkspaceId: 7, mode: .editor, flags: [],
             workspaces: [
                 Wire.WorkspaceEntry(id: 7, kind: 0, status: 1, flags: 0, colorR: 0, colorG: 0, colorB: 255,
                                     tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0,
@@ -1757,7 +1757,7 @@ struct MinibufferViewAccessibilityTests {
     @MainActor func candidateActivation() throws {
         let state = MinibufferState()
         state.update(
-            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "org", context: "", selectedIndex: 1,
             totalCandidates: 2,
             rawCandidates: [
@@ -1782,7 +1782,7 @@ struct MinibufferViewAccessibilityTests {
     @MainActor func staleCandidateActivationIsRejected() throws {
         let state = MinibufferState()
         state.update(
-            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "old", context: "", selectedIndex: 0,
             totalCandidates: 1,
             rawCandidates: [
@@ -1795,7 +1795,7 @@ struct MinibufferViewAccessibilityTests {
         let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
 
         state.update(
-            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "new", context: "", selectedIndex: 0,
             totalCandidates: 1,
             rawCandidates: [
