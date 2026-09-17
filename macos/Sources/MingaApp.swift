@@ -24,12 +24,20 @@ private let defaultFontSize: CGFloat = 13.0
 private let defaultWindowWidth: CGFloat = 1200
 private let defaultWindowHeight: CGFloat = 800
 
+/// Stable identity for the one editor scene owned by a frontend process.
+///
+/// Minga cannot use `WindowGroup` until the renderer, encoder, GUI state, `EditorNSView`, and BEAM session are all owned per scene. Sharing any of those application-singleton resources across editor windows is unsupported.
+private enum EditorScene {
+    static let id = "editor"
+    static let windowIdentifier = NSUserInterfaceItemIdentifier("MingaEditorWindow")
+}
+
 @main
 struct MingaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup {
+        Window("Minga", id: EditorScene.id) {
             ContentView(
                 gui: appDelegate.appState.gui,
                 encoder: { [appState = appDelegate.appState] in appState.encoder },
@@ -53,8 +61,15 @@ struct MingaApp: App {
                 // first responder from the EditorNSView.
                 .focusable(false)
                 .focusEffectDisabled()
+                .background(EditorWindowIdentifierSetter())
+                .overlay(
+                    SingletonEditorWindowProbe {
+                        appDelegate.finishSingletonEditorWindowProbe()
+                    }
+                )
         }
         .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: defaultWindowWidth, height: defaultWindowHeight)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
         }
@@ -62,6 +77,120 @@ struct MingaApp: App {
         Settings {
             SettingsView(state: appDelegate.appState.gui.settingsState, encoder: appDelegate.appState.encoder)
         }
+    }
+}
+
+/// Identifies the editor window for lifecycle checks without changing its scene identity.
+private struct EditorWindowIdentifierSetter: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        identifyWindow(containing: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        identifyWindow(containing: nsView)
+    }
+
+    private func identifyWindow(containing view: NSView) {
+        DispatchQueue.main.async {
+            view.window?.identifier = EditorScene.windowIdentifier
+        }
+    }
+}
+
+private struct SingletonEditorWindowProbeSnapshot: Codable {
+    let editorWindowCount: Int
+    let reusedExistingWindow: Bool
+    let editorWindowIsVisible: Bool
+}
+
+/// Deterministic launch probe for the singleton editor scene contract.
+private struct SingletonEditorWindowProbe: View {
+    static let outputPathEnvironmentKey = "MINGA_SINGLETON_EDITOR_WINDOW_PROBE_PATH"
+    @MainActor private static var hasStarted = false
+
+    @Environment(\.openWindow) private var openWindow
+
+    let onComplete: @MainActor () -> Void
+
+    static var isRequested: Bool {
+        outputPath != nil
+    }
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .task {
+                await runIfRequested()
+            }
+    }
+
+    @MainActor
+    private func runIfRequested() async {
+        guard let outputPath = Self.outputPath else { return }
+        guard !Self.hasStarted else { return }
+        Self.hasStarted = true
+        guard let originalWindow = await waitForEditorWindow(visible: true) else {
+            write(
+                SingletonEditorWindowProbeSnapshot(
+                    editorWindowCount: editorWindows.count,
+                    reusedExistingWindow: false,
+                    editorWindowIsVisible: false
+                ),
+                to: outputPath
+            )
+            onComplete()
+            return
+        }
+
+        openWindow(id: EditorScene.id)
+        openWindow(id: EditorScene.id)
+        try? await Task.sleep(for: .milliseconds(100))
+
+        let reopenedWindow = editorWindows.first(where: \.isVisible)
+        write(
+            SingletonEditorWindowProbeSnapshot(
+                editorWindowCount: editorWindows.count,
+                reusedExistingWindow: reopenedWindow === originalWindow,
+                editorWindowIsVisible: reopenedWindow?.isVisible == true
+            ),
+            to: outputPath
+        )
+        onComplete()
+    }
+
+    @MainActor
+    private var editorWindows: [NSWindow] {
+        NSApp.windows.filter { $0.identifier == EditorScene.windowIdentifier }
+    }
+
+    @MainActor
+    private func waitForEditorWindow(visible: Bool) async -> NSWindow? {
+        for _ in 0..<100 {
+            if let window = editorWindows.first(where: { $0.isVisible == visible }) {
+                return window
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return nil
+    }
+
+    private func write(_ snapshot: SingletonEditorWindowProbeSnapshot, to path: String) {
+        do {
+            let data = try JSONEncoder().encode(snapshot)
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            NSLog("Singleton editor window probe failed: %@", String(describing: error))
+        }
+    }
+
+    private static var outputPath: String? {
+#if DEBUG
+        ProcessInfo.processInfo.environment[outputPathEnvironmentKey]
+#else
+        nil
+#endif
     }
 }
 
@@ -237,6 +366,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
 #if DEBUG
         if runMenuSnapshotProbeIfRequested() {
+            return
+        }
+        if SingletonEditorWindowProbe.isRequested {
+            coreConnectionIsLive = false
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate()
             return
         }
 #endif
@@ -533,6 +668,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.acceptsOpenRequests = true
             self.flushPendingOpenRequests()
         }
+    }
+
+    func finishSingletonEditorWindowProbe() {
+        coreConnectionIsLive = false
+        NSApp.terminate(nil)
     }
 
 #if DEBUG
