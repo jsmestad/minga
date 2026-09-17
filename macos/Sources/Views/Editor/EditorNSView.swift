@@ -148,6 +148,7 @@ final class EditorNSView: MTKView {
     private(set) var capacityRetryScheduleCount = 0
     private var pendingCapacityRedrawStartedAt: CFTimeInterval?
     private var capacityRetryTask: Task<Void, Never>?
+    private var presentationAvailabilityEpoch: UInt64 = 0
 
     /// Multiplier applied to system cursor blink timing under thermal or low-power pressure. A value of 0 keeps the cursor solid.
     private var cursorBlinkMultiplier: UInt64 = 1
@@ -287,6 +288,7 @@ final class EditorNSView: MTKView {
 
     /// Cleans up window-bound observers and monitors.
     private func cleanupWindowResources() {
+        invalidatePresentationAvailability()
         cancelPendingCapacityRedraw()
         dispatcher.discardPendingPresentation(reason: .hidden)
         cleanupBlinkResources()
@@ -566,6 +568,7 @@ final class EditorNSView: MTKView {
 
     /// Discards every local interaction tied to the replaced BEAM and disables input.
     func invalidateConnection() {
+        invalidatePresentationAvailability()
         cancelPendingCapacityRedraw()
         self.encoder = NullInputEncoder()
         inputConnectionGeneration &+= 1
@@ -653,6 +656,7 @@ final class EditorNSView: MTKView {
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.capturePresentationInputSeq()
         let connectionID = dispatcher.connectionID
+        let presentationAvailabilityEpoch = presentationAvailabilityEpoch
         let submissionOutcome = coreTextRenderer.render(
             snapshot: committedSnapshot,
             fontManager: fontManager,
@@ -677,8 +681,11 @@ final class EditorNSView: MTKView {
             presentationInputSeq: presentationInputSeq,
             latencyRecorder: dispatcher.latency,
             connectionID: connectionID,
-            isPresentationCurrent: { [weak dispatcher] in
-                dispatcher?.isCurrentConnection(connectionID) == true
+            isPresentationCurrent: { [weak self, weak dispatcher] in
+                guard let self, let dispatcher else { return false }
+                return dispatcher.isCurrentConnection(connectionID) &&
+                    self.presentationAvailabilityEpoch == presentationAvailabilityEpoch &&
+                    self.presentationPreflightDiscardReason() == nil
             },
             onPresented: { [weak self, localScrollPresentation] snapshot in
                 self?.promotePresentedSnapshot(
@@ -749,6 +756,13 @@ final class EditorNSView: MTKView {
         hasPendingCapacityRedraw = false
         pendingCapacityRedrawStartedAt = nil
     }
+
+    private func invalidatePresentationAvailability() {
+        presentationAvailabilityEpoch &+= 1
+    }
+
+    var hasCapacityRetryTaskForTesting: Bool { capacityRetryTask != nil }
+    var inFlightNativePresentationCountForTesting: Int { coreTextRenderer.inFlightPresentationCount }
 
     private func promotePresentedSnapshot(
         _ snapshot: CommittedEditorSnapshot,
@@ -887,6 +901,7 @@ final class EditorNSView: MTKView {
 
     override func viewDidHide() {
         super.viewDidHide()
+        invalidatePresentationAvailability()
         cancelPendingCapacityRedraw()
         dispatcher.discardPendingPresentation(reason: .hidden)
     }
@@ -1065,6 +1080,7 @@ final class EditorNSView: MTKView {
     }
 
     private func handlePresentationPreflightFailure(_ reason: LatencyRecorder.DiscardReason) {
+        invalidatePresentationAvailability()
         if reason == .occluded {
             dispatcher.deferOccludedPresentation()
         } else {

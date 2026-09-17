@@ -116,6 +116,47 @@ private struct MountedEditorSurface: View {
     }
 }
 
+@MainActor
+private final class ControlledPresentationWindow: NSWindow {
+    var controlledOcclusionState: NSWindow.OcclusionState = .visible
+    override var occlusionState: NSWindow.OcclusionState { controlledOcclusionState }
+    override var isVisible: Bool { true }
+}
+
+@MainActor
+private final class NativeCompletionQueue {
+    typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+
+    private(set) var completions: [Completion] = []
+    private(set) var presentationCount = 0
+
+    func append(_ completion: @escaping Completion) {
+        completions.append(completion)
+    }
+
+    func complete(_ index: Int) {
+        completions[index](true, Int(MTLCommandBufferStatus.completed.rawValue))
+    }
+
+    func present(_ drawable: CAMetalDrawable) {
+        presentationCount += 1
+        drawable.present()
+    }
+}
+
+@MainActor
+private struct NativeSaturationFixture {
+    let dispatcher: CommandDispatcher
+    let view: EditorNSView
+    let window: ControlledPresentationWindow
+    let completions: NativeCompletionQueue
+}
+
+enum NativeSurfaceCancellation: CaseIterable {
+    case hidden
+    case teardown
+}
+
 @Suite("Content view", .serialized)
 @MainActor
 struct ContentViewTests {
@@ -597,6 +638,82 @@ struct ContentViewTests {
         return try #require(dispatcher.committedEditorSnapshot)
     }
 
+    private func makeNativeSaturationFixture() throws -> NativeSaturationFixture {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let size = CGSize(width: 640, height: 480)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb,
+            width: Int(size.width),
+            height: Int(size.height),
+            mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        let texture = try #require(device.makeTexture(descriptor: descriptor))
+        let drawable = ReadbackDrawable(texture: texture)
+        let completions = NativeCompletionQueue()
+        var factories = NativeRenderFactories.production
+        factories.makeLibrary = { device in
+            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+        }
+        factories.observeCompletion = { _, completion in completions.append(completion) }
+        factories.present = { completions.present($0) }
+
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let view = try makeEditorNSView(
+            gui: gui,
+            dispatcher: dispatcher,
+            encoder: NullInputEncoder(),
+            factories: factories
+        )
+        view.drawableProvider = { drawable }
+        view.autoResizeDrawable = false
+        view.frame = NSRect(origin: .zero, size: size)
+        let window = ControlledPresentationWindow(
+            contentRect: view.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        view.drawableSize = size
+        return NativeSaturationFixture(
+            dispatcher: dispatcher,
+            view: view,
+            window: window,
+            completions: completions
+        )
+    }
+
+    private func saturateNativePresentation(_ fixture: NativeSaturationFixture) throws {
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 1, anchorTop: 10)
+        for _ in 0..<3 { fixture.view.draw(fixture.view.bounds) }
+        #expect(fixture.completions.completions.count == 3)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 3)
+
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 2, anchorTop: 11)
+        fixture.view.draw(fixture.view.bounds)
+        #expect(fixture.view.hasPendingCapacityRedraw)
+        #expect(fixture.completions.completions.count == 3)
+    }
+
+    private func establishVisibleFrameAndQueueSecondPresentationStage(
+        _ fixture: NativeSaturationFixture
+    ) {
+        fixture.completions.complete(0)
+        #expect(fixture.completions.completions.count == 4)
+        guard fixture.completions.completions.count == 4 else { return }
+        fixture.completions.complete(3)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(fixture.completions.presentationCount == 1)
+        #expect(fixture.view.hasCapacityRetryTaskForTesting)
+
+        fixture.completions.complete(1)
+        #expect(fixture.completions.completions.count == 5)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 2)
+    }
+
     @Test("native saturation coalesces the newest committed snapshot and retries after complete slot release")
     func saturatedNativePresentationRetriesLatestCommit() async throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -726,6 +843,67 @@ struct ContentViewTests {
         #expect(view.capacityRetryScheduleCount == 0)
         #expect(completions.count == 3)
         #expect(dispatcher.visibleEditorSnapshot == nil)
+    }
+
+    @Test("occlusion retains one saturated redraw without a retry loop or late promotion")
+    func occlusionRetainsOneDeferredNativeRedraw() async throws {
+        let fixture = try makeNativeSaturationFixture()
+        defer { fixture.window.contentView = nil }
+        try saturateNativePresentation(fixture)
+        establishVisibleFrameAndQueueSecondPresentationStage(fixture)
+
+        fixture.window.controlledOcclusionState = []
+        NotificationCenter.default.post(
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: fixture.window
+        )
+        fixture.completions.complete(4)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 1)
+        fixture.completions.complete(2)
+        #expect(fixture.completions.completions.count == 5)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 0)
+
+        for _ in 0..<10 { await Task.yield() }
+        #expect(fixture.view.hasPendingCapacityRedraw)
+        #expect(!fixture.view.hasCapacityRetryTaskForTesting)
+        #expect(fixture.view.capacityRetryScheduleCount == 0)
+        #expect(fixture.completions.presentationCount == 1)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+    }
+
+    @Test(
+        "hidden state and teardown cancel a saturated redraw task and reject late promotion",
+        arguments: NativeSurfaceCancellation.allCases
+    )
+    func unavailableSurfaceCancelsDeferredNativeRedraw(
+        transition: NativeSurfaceCancellation
+    ) async throws {
+        let fixture = try makeNativeSaturationFixture()
+        try saturateNativePresentation(fixture)
+        establishVisibleFrameAndQueueSecondPresentationStage(fixture)
+
+        switch transition {
+        case .hidden:
+            fixture.view.isHidden = true
+        case .teardown:
+            fixture.window.contentView = nil
+        }
+        #expect(!fixture.view.hasPendingCapacityRedraw)
+        #expect(!fixture.view.hasCapacityRetryTaskForTesting)
+
+        fixture.completions.complete(4)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 1)
+        fixture.completions.complete(2)
+        #expect(fixture.completions.completions.count == 5)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 0)
+
+        for _ in 0..<10 { await Task.yield() }
+        #expect(fixture.view.capacityRetryScheduleCount == 0)
+        #expect(fixture.completions.presentationCount == 1)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        if transition == .hidden {
+            fixture.window.contentView = nil
+        }
     }
 
     @Test("draw reconciles a live trackpad prediction against its captured committed snapshot exactly once")
