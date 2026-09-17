@@ -28,7 +28,10 @@ struct AccessibilityTestFixture {
         let home = root.appendingPathComponent("home", isDirectory: true)
         let runtimeParent = root.appendingPathComponent("ipc", isDirectory: true)
         let configDirectory = root.appendingPathComponent("xdg-config/minga", isDirectory: true)
-        for directory in [project, home, runtimeParent, configDirectory] {
+        let gitDirectory = project.appendingPathComponent(".git", isDirectory: true)
+        let gitObjects = gitDirectory.appendingPathComponent("objects", isDirectory: true)
+        let gitHeads = gitDirectory.appendingPathComponent("refs/heads", isDirectory: true)
+        for directory in [project, home, runtimeParent, configDirectory, gitObjects, gitHeads] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
         try FileManager.default.setAttributes(
@@ -38,11 +41,11 @@ struct AccessibilityTestFixture {
         let config = configDirectory.appendingPathComponent("config.exs")
         let alpha = project.appendingPathComponent("alpha_target.ex")
         let beta = project.appendingPathComponent("beta_target.ex")
+        try write("ref: refs/heads/main\n", to: gitDirectory.appendingPathComponent("HEAD"))
+        try write("[core]\n\trepositoryformatversion = 0\n\tbare = false\n", to: gitDirectory.appendingPathComponent("config"))
         try write("use Minga.Config\n", to: config)
         try write("ALPHA PANE λ🙂\nsecond alpha line\n", to: alpha)
         try write("BETA PANE é🙂\nsecond beta line\n", to: beta)
-        try runGit(["init", "--quiet", project.path])
-        try runGit(["-C", project.path, "add", "--", alpha.lastPathComponent, beta.lastPathComponent])
         return AccessibilityTestFixture(
             home: home,
             runtimeParent: runtimeParent,
@@ -56,21 +59,6 @@ struct AccessibilityTestFixture {
         try Data(contents.utf8).write(to: url, options: .atomic)
     }
 
-    private static func runGit(_ arguments: [String]) throws {
-        let process = Process()
-        let standardError = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = standardError
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let errorData = standardError.fileHandleForReading.readDataToEndOfFile()
-            let error = String(data: errorData, encoding: .utf8) ?? "unknown Git error"
-            throw WorkflowFailure.unmet("Fixture Git setup failed: \(error)")
-        }
-    }
 }
 
 @MainActor
