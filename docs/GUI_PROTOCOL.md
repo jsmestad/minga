@@ -647,6 +647,7 @@ A full 0x80 message is sent for the first frame, epoch changes, full refreshes, 
 | 0x08 | PaneGeometry | window-scoped pane geometry, viewport summary, gutter metrics, and hit regions |
 | 0x09 | Cursorline | window-local cursorline row and background color |
 | 0x0A | ScrollPresentation | metadata for safe client-local presentation scrolling and reconciliation |
+| 0x0C | Accessibility | BEAM-owned pane generation, UTF-16 cursor and selection ranges, and label |
 
 ```
 opcode(1) + payload_len(4) + section_count(1) + sections...
@@ -729,7 +730,15 @@ Pane geometry section:
   Per hit region: kind(1) + rect(8) + window_id(2)
 
 Rects are cell-space tuples encoded as row(2), col(2), width(2), height(2). Hit region kinds are 1=text, 2=gutter, 3=fold_control, 4=modeline, 5=divider, 6=status_bar. Swift converts these rects to pixels, but pane ownership and input targets come from the BEAM-authored geometry.
+
+Accessibility label section:
+  generation(8) + cursor_row(2) + cursor_utf16(4)
+  selection_range_count(2)
+  Per selection range: row(2) + start_utf16(4) + end_utf16(4)
+  label_len(2) + label(label_len)
 ```
+
+The accessibility label names the pane's BEAM-owned buffer identity. It uses the buffer display name, a read-only suffix when applicable, and `[no file]` when the pane has no file identity. `generation` changes when a pane ID presents different content, so the BEAM can reject a queued native focus action for a stale pane lifetime. The cursor uses `0xFFFF` and `0xFFFFFFFF` when absent. Cursor and selection offsets are row-local UTF-16 boundaries resolved by the BEAM from the exact composed visual rows. This mapping covers zero-width tabs and does not ask native clients to reinterpret source positions. Native frontends expose one virtual text area for each visible pane. They derive its value, selection, bounds, and active-pane state from the exact visible presentation snapshot, never from a newer committed but unpresented frame. The editor container is an accessibility group and must not repeat the pane text.
 
 The `ScrollPresentation` section is the shared contract for local scroll feel (an **offset transform** in the local-presentation taxonomy; see ARCHITECTURE.md "Frontend-local interaction state"). The BEAM commits an anchor (`anchor_top`, `anchor_left`, `anchor_visual_row_offset`) and identifies the row/content/layout basis for that anchor with the frame transaction, `content_epoch`, row IDs/content hashes, and `layout_generation`. The frontend may keep ephemeral presentation state (local offset, velocity or momentum, overscan consumption, and reconciliation target) derived from this section, but that state is not editor state and may be discarded at any time. The reconciliation key for offset transforms is `{contentEpoch, layoutGeneration, anchorTop, anchorLeft}`: any change in this key means the BEAM moved the anchor and local offsets must be discarded. `visible_end_line` and `overscan_end_line` are exclusive bounds, so the visible and overscan line ranges are half-open: `start_line <= line < end_line`. Local presentation scroll is safe only inside `clip_rect` and only while the needed rows are already committed or retained inside `overscan_start_line..overscan_end_line`; when the range is only the visible range, the client must not expose blank space by extrapolating beyond cached rows.
 
@@ -756,7 +765,7 @@ When `gui_window_content` is present for a window, the BEAM does not send draw_t
 Cursor-only retained rendering update for one GUI window. The BEAM sends this when the durable rows and non-cursor overlays are unchanged but cursor position, cursor visibility, cursor shape, or cursorline changed. It may also send the same minimal payload as a per-frame liveness marker for an unchanged retained window, so the frontend does not prune valid retained content during clear-backed batches.
 
 ```
-opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + optional_cursorline
+opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + optional_cursorline + accessibility_cursor_utf16(4)
 
 Flags:
   bit 0: cursor_visible
@@ -766,6 +775,8 @@ Cursor shape: 0 = block, 1 = beam, 2 = underline
 
 If cursorline_present:
   local_row(2) + r(1) + g(1) + b(1)
+
+accessibility_cursor_utf16 is the BEAM-resolved row-local UTF-16 cursor offset. 0xFFFFFFFF means no accessible cursor.
 ```
 
 The frontend applies the delta only when it already has `gui_window_content` for the same `window_id` and `content_epoch`. If the epoch is missing or stale, it ignores the delta and waits for the next full 0x80 refresh.
@@ -799,8 +810,8 @@ Per row or insert entry:
   if entry_type == 0: row_id(8) + content_hash(4)
   if entry_type == 1: full row payload, same row encoding used by 0x80 section 0x02
 
-Sections 0x03-0x0A:
-  same selection, search, diagnostics, document highlights, annotations, geometry, cursorline, and scroll-presentation sections used by 0x80
+Sections 0x03-0x0A and 0x0C:
+  same selection, search, diagnostics, document highlights, annotations, geometry, cursorline, scroll-presentation, and accessibility sections used by 0x80
 ```
 
 A v11 producer emits section 0x0B for A2 and omits section 0x02. Decoders keep the v10 section 0x02 form for replay, but reject an A2 command that carries both forms. All splice coordinates address the same immutable base sequence. Splices must be strictly ascending and non-overlapping, each deletion must fit within `base_row_count`, and applying the exact arithmetic `base - deleted + inserted` must equal `result_row_count`. Empty or trailing bytes, duplicate row identities, invalid buffer-line ordering, and malformed entry tags reject the staged frame.
@@ -1180,6 +1191,7 @@ opcode(1) + action_type(1) + payload...
 | 0x61 | picker_action_activate | activation_generation(4) + activation_id(4) | Activate the exact Actions entry offered by the current BEAM-owned picker snapshot |
 | 0x62 | search_focus | replace_mode(1) | Open or focus the native search toolbar |
 | 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
+| 0x64 | focus_window | window_id(2) + generation(8) | Request semantic activation of the exact accessible pane; the BEAM ignores a stale pane generation |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

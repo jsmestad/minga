@@ -121,6 +121,23 @@ The one-window, eight-family ordinary first-allocation result is a localized inc
 
 GPU completion is the closest reliable native callback currently used; it is later and more honest than semantic apply, but is not a claim about photon timing. Screen-sleep, hidden, occluded, nil-drawable, superseded, scheduling-impossible, renderer-dropped, and GPU-failed samples are discarded with typed reasons. Hidden and occluded surfaces are rejected before drawable acquisition or presentation-sequence selection, so a retained occluded drawable cannot resolve as presented. The HUD labels `apply` and `present` separately. A frame acknowledgement updates apply only and cannot resolve presentation.
 
+## macOS pane accessibility projection
+
+Run `scripts/check_accessibility_performance` to build the shipping projection path with Release optimization and measure calling-thread CPU time. The `accessibility-visible-pane-v1` fixture warms for 200 iterations and measures 1,000 projection builds for one and four panes at 5,000 and 65,536 resident rows. It also measures one row whose source text is 4 KiB below the 64 MiB wire payload ceiling. Each measured iteration builds the pane projection from the visible resident slice and reads its text length, insertion range, and insertion bounds. Production attaches that immutable projection when it atomically promotes the matching visible presentation, so accessibility child queries reuse it. The harness records `ResidentRowStore` row visits and UTF-16 units inspected while mapping the horizontal slice, so a document-size or long-line regression is visible even when timing is noisy.
+
+The issue #3321 implementation measurement ran on macOS 26.6.1, build 25G76, with 8 logical CPUs:
+
+| Panes | Resident rows per pane | Rows visited per query | p50 | p95 |
+|---:|---:|---:|---:|---:|
+| 1 | 5,000 | 81 | 0.094 ms | 0.103 ms |
+| 4 | 5,000 | 324 | 0.376 ms | 0.432 ms |
+| 1 | 65,536 | 81 | 0.094 ms | 0.098 ms |
+| 4 | 65,536 | 324 | 0.377 ms | 0.419 ms |
+
+The resident document size does not change row visits or median query time. The 65,536-row four-pane p95 showed scheduler noise, but the exact row counters remain bounded by the exposed 80-row viewport and pane count. The four-pane fixture visits exactly four times the rows and takes about four times the median CPU time of one pane.
+
+The legal-payload long-line case used 67,104,768 UTF-8 source bytes. Each query visited one row and 154 UTF-16 units, with 0.006 ms p50 and 0.006 ms p95. The projection therefore inspects only the horizontally exposed prefix instead of scanning the full source row.
+
 ## Local validation
 
 ```sh

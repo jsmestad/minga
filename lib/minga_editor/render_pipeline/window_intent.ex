@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
   alias MingaEditor.Window
 
   @fields [
+    :accessibility_generation,
     :content,
     :viewport,
     :cursor,
@@ -19,6 +20,7 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
   defstruct @fields
 
   @type t :: %__MODULE__{
+          accessibility_generation: pos_integer(),
           content: MingaEditor.Window.Content.t(),
           viewport: MingaEditor.Viewport.t(),
           cursor: Minga.Buffer.position(),
@@ -34,6 +36,7 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
   @spec from_window(Window.t()) :: t()
   def from_window(%Window{} = window) do
     %__MODULE__{
+      accessibility_generation: window.accessibility_generation,
       content: window.content,
       viewport: window.viewport,
       cursor: window.cursor,

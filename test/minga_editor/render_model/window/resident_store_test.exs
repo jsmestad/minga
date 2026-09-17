@@ -19,8 +19,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
 
   alias Minga.RenderModel.Window.ContentDigest
   alias Minga.RenderModel.Window.Row
-  alias MingaEditor.RenderModel.Window.VisualRow
+  alias Minga.Core.Decorations
   alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
+  alias MingaEditor.RenderModel.Window.VisualRow
 
   @max_rows 100
 
@@ -65,7 +67,13 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
     ResidentStore.entry(
       row.row_id,
       row.content_hash,
-      VisualRow.new(row, row.text, 0, byte_size(row.text), 0, byte_size(row.text), 0)
+      VisualRow.new(
+        row,
+        SourceOffsetMap.new(row.text, row.text, Decorations.new(), index),
+        0,
+        byte_size(row.text),
+        0
+      )
     )
   end
 

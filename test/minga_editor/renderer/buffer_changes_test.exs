@@ -212,7 +212,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     end
 
     window_intent_fields =
-      ~w(authoritative_scroll_seq content cursor fold_map fold_ranges popup_meta scroll_detach_cursor scroll_echo_top scroll_velocity viewport)a
+      ~w(accessibility_generation authoritative_scroll_seq content cursor fold_map fold_ranges popup_meta scroll_detach_cursor scroll_echo_top scroll_velocity viewport)a
 
     render_window_fields = [:id, :render_cache | window_intent_fields] |> Enum.sort()
 

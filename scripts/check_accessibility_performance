@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${MINGA_ACCESSIBILITY_PERFORMANCE_ROOT:-$SCRIPT_ROOT}"
+ROOT="$(cd "$ROOT" && pwd)"
+BUILD_DIR="${MINGA_ACCESSIBILITY_PERFORMANCE_BUILD_DIR:-$ROOT/_build/accessibility-performance}"
+OUTPUT="${1:-$ROOT/accessibility_performance.json}"
+
+command -v xcodegen >/dev/null || {
+  echo "error: accessibility performance measurement requires xcodegen" >&2
+  exit 2
+}
+
+(cd "$ROOT" && mix protocol.gen >/dev/null)
+(cd "$ROOT/macos" && xcodegen generate >/dev/null)
+xcodebuild build \
+  -project "$ROOT/macos/Minga.xcodeproj" \
+  -scheme NativeRenderPerformance \
+  -configuration Release \
+  -derivedDataPath "$BUILD_DIR" \
+  CODE_SIGNING_ALLOWED=NO \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS="MINGA_SNAPSHOT_RENDERER MINGA_TRANSCRIPT_ACCOUNTING" \
+  MINGA_NATIVE_RENDER_SKIP_PROTOCOL_GEN=1 >/dev/null
+
+mkdir -p "$BUILD_DIR/Build/Products/Frameworks"
+ln -sfn ../Release/MingaProtocol.framework "$BUILD_DIR/Build/Products/Frameworks/MingaProtocol.framework"
+ln -sfn ../Release/MingaUI.framework "$BUILD_DIR/Build/Products/Frameworks/MingaUI.framework"
+
+"$BUILD_DIR/Build/Products/Release/minga-native-render-performance" --accessibility-measurement-output "$OUTPUT"

@@ -1162,6 +1162,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: focus_window. Layout: opcode(1) + action_type(1) + window_id(2) + pane_generation(8).
+    func sendFocusWindow(windowId: UInt16, generation: UInt64) {
+        var buf = Data(count: 12)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FOCUS_WINDOW
+        writeU16(&buf, 2, windowId)
+        writeU64(&buf, 4, generation)
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: config_query. Layout: opcode(1) + action_type(1).
     func sendConfigQuery() {
         var buf = Data(count: 2)

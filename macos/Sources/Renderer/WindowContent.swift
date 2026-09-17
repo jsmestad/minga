@@ -10,6 +10,115 @@
 
 import Foundation
 
+// MARK: - Display column mapping
+
+/// Maps the BEAM's display-column coordinates to grapheme and UTF-16 boundaries.
+///
+/// The map follows `Minga.Core.Unicode.grapheme_width/1`. It keeps AppKit text
+/// ranges coherent without treating display columns as string offsets.
+public struct GUIDisplayColumnMap: Sendable {
+    private struct Entry: Sendable {
+        let displayRange: Range<Int>
+        let utf16Range: Range<Int>
+    }
+
+    private let entries: [Entry]
+    public let displayWidth: Int
+    public let utf16Length: Int
+    /// UTF-16 units inspected while constructing this bounded map.
+    public let utf16UnitsVisited: Int
+
+    public init(_ text: String, limitedTo requestedDisplayRange: Range<Int>? = nil) {
+        var entries: [Entry] = []
+        if let requestedDisplayRange {
+            entries.reserveCapacity(max(requestedDisplayRange.count, 0))
+        }
+        var displayColumn = 0
+        var utf16Offset = 0
+        for character in text {
+            let width = Self.width(of: character)
+            if let requestedDisplayRange,
+               displayColumn > requestedDisplayRange.upperBound
+                || (displayColumn == requestedDisplayRange.upperBound && width > 0) { break }
+            let utf16Count = String(character).utf16.count
+            let nextDisplayColumn = displayColumn + width
+            let intersectsRequestedRange = requestedDisplayRange.map {
+                if width == 0 {
+                    return displayColumn >= $0.lowerBound && displayColumn <= $0.upperBound
+                }
+                return nextDisplayColumn > $0.lowerBound && displayColumn < $0.upperBound
+            } ?? true
+            if intersectsRequestedRange {
+                entries.append(Entry(
+                    displayRange: displayColumn..<nextDisplayColumn,
+                    utf16Range: utf16Offset..<(utf16Offset + utf16Count)
+                ))
+            }
+            displayColumn = nextDisplayColumn
+            utf16Offset += utf16Count
+        }
+        self.entries = entries
+        displayWidth = displayColumn
+        utf16Length = utf16Offset
+        utf16UnitsVisited = utf16Offset
+    }
+
+    /// Returns the UTF-16 range occupied by graphemes that intersect the display-column range.
+    public func utf16Range(intersecting displayRange: Range<Int>) -> Range<Int>? {
+        guard !displayRange.isEmpty else {
+            let offset = utf16Offset(at: displayRange.lowerBound)
+            return offset..<offset
+        }
+        let matches = entries.filter { entry in
+            if entry.displayRange.isEmpty {
+                return entry.displayRange.lowerBound >= displayRange.lowerBound
+                    && entry.displayRange.lowerBound <= displayRange.upperBound
+            }
+            return entry.displayRange.overlaps(displayRange)
+        }
+        guard let first = matches.first, let last = matches.last else { return nil }
+        return first.utf16Range.lowerBound..<last.utf16Range.upperBound
+    }
+
+    /// Returns a clamped UTF-16 insertion offset for one display-column boundary.
+    public func utf16Offset(at displayColumn: Int) -> Int {
+        let column = min(max(displayColumn, 0), displayWidth)
+        if column == displayWidth { return utf16Length }
+        guard let entry = entries.first(where: { $0.displayRange.contains(column) || $0.displayRange.lowerBound >= column }) else {
+            return utf16Length
+        }
+        return entry.utf16Range.lowerBound
+    }
+
+    /// Returns the display-column boundary at or before one UTF-16 offset.
+    public func displayColumn(atUTF16Offset utf16Offset: Int) -> Int {
+        let offset = min(max(utf16Offset, 0), utf16Length)
+        if offset == utf16Length { return displayWidth }
+        guard let entry = entries.first(where: { $0.utf16Range.contains(offset) || $0.utf16Range.lowerBound >= offset }) else {
+            return displayWidth
+        }
+        return entry.displayRange.lowerBound
+    }
+
+    private static func width(of character: Character) -> Int {
+        guard let scalar = character.unicodeScalars.first else { return 0 }
+        let value = scalar.value
+        if value <= 0x001F || value == 0x007F || (value >= 0x0300 && value <= 0x036F)
+            || (value >= 0x1AB0 && value <= 0x1AFF) || (value >= 0x1DC0 && value <= 0x1DFF)
+            || (value >= 0x20D0 && value <= 0x20FF) || (value >= 0xFE20 && value <= 0xFE2F)
+            || value == 0x200B || value == 0x200C || value == 0x200D || value == 0xFEFF
+            || (value >= 0xFE00 && value <= 0xFE0F) || (value >= 0xE0100 && value <= 0xE01EF) { return 0 }
+        if (value >= 0x4E00 && value <= 0x9FFF) || (value >= 0x3400 && value <= 0x4DBF)
+            || (value >= 0x20000 && value <= 0x2EBEF) || (value >= 0x30000 && value <= 0x3134F)
+            || (value >= 0xF900 && value <= 0xFAFF) || (value >= 0x2F800 && value <= 0x2FA1F)
+            || (value >= 0xAC00 && value <= 0xD7AF) || (value >= 0x2E80 && value <= 0x33FF)
+            || (value >= 0xFE30 && value <= 0xFE6F) || (value >= 0xFF01 && value <= 0xFF60)
+            || (value >= 0xFFE0 && value <= 0xFFE6) || (value >= 0x1F1E0 && value <= 0x1F1FF)
+            || (value >= 0x1F300 && value <= 0x1FAFF) { return 2 }
+        return 1
+    }
+}
+
 // MARK: - Row type
 
 /// What kind of content a visual row represents.
@@ -99,6 +208,30 @@ public struct GUISelectionOverlay: Sendable, Equatable {
         self.startCol = startCol
         self.endRow = endRow
         self.endCol = endCol
+    }
+}
+
+/// One BEAM-resolved UTF-16 selection range on a presented visual row.
+public struct GUIAccessibilityRange: Sendable, Equatable {
+    public let row: UInt16
+    public let startUTF16: UInt32
+    public let endUTF16: UInt32
+
+    public init(row: UInt16, startUTF16: UInt32, endUTF16: UInt32) {
+        self.row = row
+        self.startUTF16 = startUTF16
+        self.endUTF16 = endUTF16
+    }
+}
+
+/// One BEAM-resolved cursor position on a presented visual row.
+public struct GUIAccessibilityCursor: Sendable, Equatable {
+    public let row: UInt16
+    public let utf16: UInt32
+
+    public init(row: UInt16, utf16: UInt32) {
+        self.row = row
+        self.utf16 = utf16
     }
 }
 
@@ -337,8 +470,9 @@ public struct GUIWindowOverlayDelta: Sendable, Equatable {
     public let cursorCol: UInt16
     public let cursorShape: CursorShape
     public let cursorline: GUICursorline?
+    public let accessibilityCursorUTF16: UInt32?
 
-    public init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape, cursorline: GUICursorline?) {
+    public init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape, cursorline: GUICursorline?, accessibilityCursorUTF16: UInt32? = nil) {
         self.windowId = windowId
         self.contentEpoch = contentEpoch
         self.cursorVisible = cursorVisible
@@ -346,6 +480,7 @@ public struct GUIWindowOverlayDelta: Sendable, Equatable {
         self.cursorCol = cursorCol
         self.cursorShape = cursorShape
         self.cursorline = cursorline
+        self.accessibilityCursorUTF16 = accessibilityCursorUTF16
     }
 }
 
@@ -400,6 +535,10 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
     public let paneGeometry: GUIPaneGeometry?
     public let cursorline: GUICursorline?
     public let scrollPresentation: GUIScrollPresentation?
+    public let accessibilityLabel: String
+    public let accessibilityGeneration: UInt64
+    public let accessibilityCursor: GUIAccessibilityCursor?
+    public let accessibilitySelectionRanges: [GUIAccessibilityRange]
 
     public init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16,
          cursorCol: UInt16, cursorShape: CursorShape, scrollLeft: UInt16,
@@ -407,7 +546,11 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
          searchMatches: [GUISearchMatch], diagnosticUnderlines: [GUIDiagnosticUnderline],
          documentHighlights: [GUIDocumentHighlight], lineAnnotations: [GUILineAnnotation],
          paneGeometry: GUIPaneGeometry?, cursorline: GUICursorline?,
-         scrollPresentation: GUIScrollPresentation? = nil) {
+         scrollPresentation: GUIScrollPresentation? = nil,
+         accessibilityLabel: String = "",
+         accessibilityGeneration: UInt64 = 0,
+         accessibilityCursor: GUIAccessibilityCursor? = nil,
+         accessibilitySelectionRanges: [GUIAccessibilityRange] = []) {
         self.windowId = windowId
         self.contentEpoch = contentEpoch
         self.cursorVisible = cursorVisible
@@ -427,6 +570,10 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityGeneration = accessibilityGeneration
+        self.accessibilityCursor = accessibilityCursor
+        self.accessibilitySelectionRanges = accessibilitySelectionRanges
     }
 
     /// Creates a protocol-v11 A2 delta containing immutable-base row splices.
@@ -437,7 +584,11 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
          diagnosticUnderlines: [GUIDiagnosticUnderline],
          documentHighlights: [GUIDocumentHighlight], lineAnnotations: [GUILineAnnotation],
          paneGeometry: GUIPaneGeometry?, cursorline: GUICursorline?,
-         scrollPresentation: GUIScrollPresentation? = nil) {
+         scrollPresentation: GUIScrollPresentation? = nil,
+         accessibilityLabel: String = "",
+         accessibilityGeneration: UInt64 = 0,
+         accessibilityCursor: GUIAccessibilityCursor? = nil,
+         accessibilitySelectionRanges: [GUIAccessibilityRange] = []) {
         self.windowId = windowId
         self.contentEpoch = contentEpoch
         self.cursorVisible = cursorVisible
@@ -457,6 +608,10 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityGeneration = accessibilityGeneration
+        self.accessibilityCursor = accessibilityCursor
+        self.accessibilitySelectionRanges = accessibilitySelectionRanges
     }
 }
 
@@ -541,6 +696,14 @@ public final class GUIWindowContent: Sendable {
     public let paneGeometry: GUIPaneGeometry?
     public let cursorline: GUICursorline?
     public let scrollPresentation: GUIScrollPresentation?
+    /// User-facing buffer identity for the pane's accessibility text area.
+    public let accessibilityLabel: String
+    /// BEAM-owned identity for the lifetime of the content presented by this pane ID.
+    public let accessibilityGeneration: UInt64
+    /// BEAM-resolved cursor position as visual row and row-local UTF-16 offset.
+    public let accessibilityCursor: GUIAccessibilityCursor?
+    /// BEAM-resolved row-local UTF-16 ranges for the visible selection.
+    public let accessibilitySelectionRanges: [GUIAccessibilityRange]
     /// Exact immutable ownership retained by this published window.
     public let resourceWeight: FrameResourceWeight
 
@@ -555,13 +718,18 @@ public final class GUIWindowContent: Sendable {
          paneGeometry: GUIPaneGeometry? = nil,
          cursorline: GUICursorline? = nil,
          scrollPresentation: GUIScrollPresentation? = nil,
+         accessibilityLabel: String = "",
+         accessibilityGeneration: UInt64 = 0,
+         accessibilityCursor: GUIAccessibilityCursor? = nil,
+         accessibilitySelectionRanges: [GUIAccessibilityRange] = [],
          residentLimit: FrameResourceWeight = FrameResourcePolicy.default.resident.weightPerWindow) throws {
         let rowWeight = try ResidentRowStore.weight(of: rows)
         let completeWeight = try Self.resourceWeight(
             rowWeight: rowWeight, selection: selection, searchMatches: searchMatches,
             diagnosticUnderlines: diagnosticUnderlines,
             documentHighlights: documentHighlights, lineAnnotations: lineAnnotations,
-            paneGeometry: paneGeometry
+            paneGeometry: paneGeometry, accessibilityLabel: accessibilityLabel,
+            accessibilitySelectionRanges: accessibilitySelectionRanges
         )
         try Self.validate(completeWeight, limit: residentLimit)
         let store = try ResidentRowStore(
@@ -586,6 +754,10 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityGeneration = accessibilityGeneration
+        self.accessibilityCursor = accessibilityCursor
+        self.accessibilitySelectionRanges = accessibilitySelectionRanges
         self.resourceWeight = completeWeight
     }
 
@@ -597,6 +769,9 @@ public final class GUIWindowContent: Sendable {
          diagnosticUnderlines: [GUIDiagnosticUnderline], documentHighlights: [GUIDocumentHighlight],
          lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?,
          cursorline: GUICursorline?, scrollPresentation: GUIScrollPresentation?,
+         accessibilityLabel: String, accessibilityGeneration: UInt64,
+         accessibilityCursor: GUIAccessibilityCursor?,
+         accessibilitySelectionRanges: [GUIAccessibilityRange],
          resourceWeight: FrameResourceWeight) {
         self.renderIdentity = renderIdentity
         self.windowId = windowId
@@ -617,6 +792,10 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityGeneration = accessibilityGeneration
+        self.accessibilityCursor = accessibilityCursor
+        self.accessibilitySelectionRanges = accessibilitySelectionRanges
         self.resourceWeight = resourceWeight
     }
 
@@ -631,7 +810,11 @@ public final class GUIWindowContent: Sendable {
             searchMatches: searchMatches, diagnosticUnderlines: diagnosticUnderlines,
             documentHighlights: documentHighlights, lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry, cursorline: cursorline,
-            scrollPresentation: scrollPresentation, resourceWeight: resourceWeight
+            scrollPresentation: scrollPresentation, accessibilityLabel: accessibilityLabel,
+            accessibilityGeneration: accessibilityGeneration,
+            accessibilityCursor: accessibilityCursor,
+            accessibilitySelectionRanges: accessibilitySelectionRanges,
+            resourceWeight: resourceWeight
         )
     }
 
@@ -659,6 +842,12 @@ public final class GUIWindowContent: Sendable {
             paneGeometry: paneGeometry,
             cursorline: delta.cursorline,
             scrollPresentation: scrollPresentation,
+            accessibilityLabel: accessibilityLabel,
+            accessibilityGeneration: accessibilityGeneration,
+            accessibilityCursor: delta.accessibilityCursorUTF16.map {
+                GUIAccessibilityCursor(row: delta.cursorRow, utf16: $0)
+            },
+            accessibilitySelectionRanges: accessibilitySelectionRanges,
             resourceWeight: resourceWeight
         )
     }
@@ -873,7 +1062,9 @@ public final class GUIWindowContent: Sendable {
             searchMatches: delta.searchMatches,
             diagnosticUnderlines: delta.diagnosticUnderlines,
             documentHighlights: delta.documentHighlights,
-            lineAnnotations: delta.lineAnnotations, paneGeometry: nextPaneGeometry
+            lineAnnotations: delta.lineAnnotations, paneGeometry: nextPaneGeometry,
+            accessibilityLabel: delta.accessibilityLabel,
+            accessibilitySelectionRanges: delta.accessibilitySelectionRanges
         )
         try Self.validate(resultingWeight, limit: residentLimit)
         return GUIWindowContent(
@@ -895,6 +1086,10 @@ public final class GUIWindowContent: Sendable {
             paneGeometry: nextPaneGeometry,
             cursorline: delta.cursorline,
             scrollPresentation: scrollPresentation,
+            accessibilityLabel: delta.accessibilityLabel,
+            accessibilityGeneration: delta.accessibilityGeneration,
+            accessibilityCursor: delta.accessibilityCursor,
+            accessibilitySelectionRanges: delta.accessibilitySelectionRanges,
             resourceWeight: resultingWeight
         )
     }
@@ -904,11 +1099,14 @@ public final class GUIWindowContent: Sendable {
         searchMatches: [GUISearchMatch],
         diagnosticUnderlines: [GUIDiagnosticUnderline],
         documentHighlights: [GUIDocumentHighlight],
-        lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?
+        lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?,
+        accessibilityLabel: String,
+        accessibilitySelectionRanges: [GUIAccessibilityRange]
     ) throws -> FrameResourceWeight {
         let overlayCount = try [
             searchMatches.count, diagnosticUnderlines.count, documentHighlights.count,
-            lineAnnotations.count, selection == nil ? 0 : 1
+            lineAnnotations.count, selection == nil ? 0 : 1,
+            accessibilitySelectionRanges.count
         ].reduce(into: 0) { total, count in
             let (next, overflow) = total.addingReportingOverflow(count)
             guard !overflow else { throw FrameResourceError.arithmeticOverflow }
@@ -917,7 +1115,7 @@ public final class GUIWindowContent: Sendable {
         let hitRegionCount = paneGeometry?.hitRegions.count ?? 0
         let (arrayEntries, arrayOverflow) = overlayCount.addingReportingOverflow(hitRegionCount)
         guard !arrayOverflow else { throw FrameResourceError.arithmeticOverflow }
-        let annotationBytes = try lineAnnotations.reduce(into: 0) { total, annotation in
+        let annotationBytes = try lineAnnotations.reduce(into: accessibilityLabel.utf8.count) { total, annotation in
             let (next, overflow) = total.addingReportingOverflow(annotation.text.utf8.count)
             guard !overflow else { throw FrameResourceError.arithmeticOverflow }
             total = next

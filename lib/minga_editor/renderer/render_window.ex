@@ -41,6 +41,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
 
   @fields [
     :id,
+    :accessibility_generation,
     :content,
     :viewport,
     :cursor,
@@ -56,6 +57,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
 
   @type t :: %__MODULE__{
           id: id(),
+          accessibility_generation: pos_integer(),
           content: Content.t(),
           viewport: Viewport.t(),
           cursor: Buffer.position(),
@@ -76,6 +78,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
   def materialize(id, %WindowIntent{} = carrier, %RenderCache{} = cache) do
     %__MODULE__{
       id: id,
+      accessibility_generation: carrier.accessibility_generation,
       content: carrier.content,
       viewport: carrier.viewport,
       cursor: carrier.cursor,

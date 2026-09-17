@@ -465,7 +465,9 @@ struct ContentViewTests {
                 overscanEndLine: totalLines,
                 contentEpoch: contentEpoch,
                 layoutGeneration: 1
-            )
+            ),
+            accessibilityGeneration: UInt64(contentEpoch),
+            accessibilityCursor: GUIAccessibilityCursor(row: cursorRow, utf16: UInt32(cursorCol))
         )
     }
 
@@ -858,9 +860,10 @@ struct ContentViewTests {
         #expect(dispatcher.committedEditorSnapshot?.frameSeq == 2)
         #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
 
-        #expect((editorView.accessibilityValue() as? String)?.contains("visible row 1") == true)
-        #expect((editorView.accessibilityValue() as? String)?.contains("committed row") == false)
-        #expect(editorView.accessibilityInsertionPointLineNumber() == 1)
+        let visiblePane = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
+        #expect((visiblePane.accessibilityValue() as? String)?.contains("visible row 1") == true)
+        #expect((visiblePane.accessibilityValue() as? String)?.contains("committed row") == false)
+        #expect(visiblePane.accessibilityInsertionPointLineNumber() == 0)
         let scrollY = editorView.bounds.height * 0.75
         let visibleLine = EditorScrollTrack.line(
             forY: scrollY,
@@ -913,7 +916,8 @@ struct ContentViewTests {
         let committedSnapshot = try #require(dispatcher.committedEditorSnapshot)
         dispatcher.promoteVisibleEditorPresentation(snapshot: committedSnapshot, localTransform: nil)
         #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 2)
-        #expect((editorView.accessibilityValue() as? String)?.contains("committed row 1") == true)
+        let committedPane = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
+        #expect((committedPane.accessibilityValue() as? String)?.contains("committed row 1") == true)
         editorView.mouseDown(with: textEvent)
         #expect(spy.mouseEventCalls.last?.row == 0)
         #expect(spy.mouseEventCalls.last?.col == 9)
@@ -957,9 +961,10 @@ struct ContentViewTests {
         let screenPoint = window.convertPoint(toScreen: windowPoint)
         let imeA = editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
         let characterA = editorView.characterIndex(for: screenPoint)
-        let rangeA = editorView.accessibilitySelectedTextRange()
-        #expect((editorView.accessibilityValue() as? String)?.contains("pane A row 0") == true)
-        #expect(editorView.accessibilityInsertionPointLineNumber() == 0)
+        let paneA = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
+        let rangeA = paneA.accessibilitySelectedTextRange()
+        #expect((paneA.accessibilityValue() as? String)?.contains("pane A row 0") == true)
+        #expect(paneA.accessibilityInsertionPointLineNumber() == 0)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
@@ -969,9 +974,11 @@ struct ContentViewTests {
         #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
         #expect(editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil) == imeA)
         #expect(editorView.characterIndex(for: screenPoint) == characterA)
-        #expect(editorView.accessibilitySelectedTextRange() == rangeA)
-        #expect(editorView.accessibilityInsertionPointLineNumber() == 0)
-        #expect((editorView.accessibilityValue() as? String)?.contains("pane A row 0") == true)
+        let stillPaneA = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
+        #expect(stillPaneA === paneA)
+        #expect(stillPaneA.accessibilitySelectedTextRange() == rangeA)
+        #expect(stillPaneA.accessibilityInsertionPointLineNumber() == 0)
+        #expect((stillPaneA.accessibilityValue() as? String)?.contains("pane A row 0") == true)
 
         let click = try #require(mouseEvent(type: .leftMouseDown, locationInWindow: windowPoint, windowNumber: window.windowNumber))
         editorView.mouseDown(with: click)
@@ -981,9 +988,12 @@ struct ContentViewTests {
         let imeB = editorView.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
         #expect(imeB.minX > imeA.minX)
         #expect(editorView.characterIndex(for: screenPoint) != characterA)
-        #expect(editorView.accessibilitySelectedTextRange() != rangeA)
-        #expect(editorView.accessibilityInsertionPointLineNumber() == 2)
-        #expect((editorView.accessibilityValue() as? String)?.contains("pane B successor row 0") == true)
+        let paneB = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
+        #expect(paneB !== paneA)
+        #expect(paneA.accessibilityValue() == nil)
+        #expect(paneB.accessibilitySelectedTextRange() != rangeA)
+        #expect(paneB.accessibilityInsertionPointLineNumber() == 2)
+        #expect((paneB.accessibilityValue() as? String)?.contains("pane B successor row 0") == true)
         editorView.mouseDown(with: click)
         let promotedClick = try #require(spy.mouseEventCalls.last)
         #expect(promotedClick.row != visibleClick.row || promotedClick.col != visibleClick.col)
@@ -1024,6 +1034,81 @@ struct ContentViewTests {
 
         #expect(spy.keyPressCalls.isEmpty)
         #expect(editorView.hasMarkedText() == false)
+    }
+
+    @Test("editor group exposes stable pane text areas and preserves native focus semantics")
+    @MainActor
+    func editorPaneAccessibilityElements() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "left", foldLine: 10, contentEpoch: 1, windowId: 1, paneCol: 0, paneWidth: 40)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 10, windowId: 1, paneCol: 0, paneWidth: 40, isActive: true)))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "right", foldLine: 20, contentEpoch: 2, windowId: 2, paneCol: 40, paneWidth: 40)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 20, windowId: 2, paneCol: 40, paneWidth: 40, isActive: false)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        editorView.frame = frame
+        let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editorView
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(nil))
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+
+        #expect(editorView.accessibilityRole() == .group)
+        #expect(editorView.accessibilityValue() == nil)
+        let initialChildren = try #require(editorView.accessibilityChildren() as? [EditorPaneAccessibilityElement])
+        #expect(initialChildren.count == 2)
+        #expect(initialChildren.map { $0.accessibilityRole() } == [.textArea, .textArea])
+        #expect(initialChildren.compactMap { $0.accessibilityLabel() } == ["Editor pane 1", "Editor pane 2"])
+        #expect(initialChildren[0].accessibilityFrame().maxX <= initialChildren[1].accessibilityFrame().minX)
+        #expect((initialChildren[0].accessibilityValue() as? String)?.contains("left row 0") == true)
+        #expect((initialChildren[1].accessibilityValue() as? String)?.contains("right row 0") == true)
+        #expect(!initialChildren[0].isAccessibilityFocused())
+
+        #expect(window.makeFirstResponder(editorView))
+        #expect(initialChildren[0].isAccessibilityFocused() == (NSApp.isActive && window.isKeyWindow))
+        #expect(!initialChildren[1].isAccessibilityFocused())
+        window.orderOut(nil)
+        #expect(!initialChildren[0].isAccessibilityFocused())
+        initialChildren[1].setAccessibilityFocused(true)
+        await Task.yield()
+        await Task.yield()
+        #expect(window.isVisible)
+        #expect(window.firstResponder === editorView)
+        if NSApp.isActive && window.isKeyWindow {
+            #expect(spy.guiActions.last == .focusWindow(windowId: 2, generation: 2))
+        } else {
+            #expect(spy.guiActions.last == nil)
+        }
+        #expect(!initialChildren[1].isAccessibilityFocused())
+
+        let sameFrameChildren = try #require(editorView.accessibilityChildren() as? [EditorPaneAccessibilityElement])
+        #expect(sameFrameChildren[0] === initialChildren[0])
+        #expect(sameFrameChildren[1] === initialChildren[1])
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "replacement", foldLine: 30, contentEpoch: 3, windowId: 2, paneCol: 0, paneWidth: 80)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 30, windowId: 2, paneCol: 0, paneWidth: 80, isActive: true)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+
+        let replacement = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
+        #expect(replacement !== initialChildren[1])
+        #expect(initialChildren[1].accessibilityValue() == nil)
+        let actionCount = spy.guiActions.count
+        initialChildren[1].setAccessibilityFocused(true)
+        #expect(spy.guiActions.count == actionCount)
     }
 
     @Test(

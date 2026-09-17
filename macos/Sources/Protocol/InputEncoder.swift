@@ -134,6 +134,7 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendChatScrolledAwayFromBottom()
     func sendChatReturnedToBottom()
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
+    func sendFocusWindow(windowId: UInt16, generation: UInt64)
 
     // Native settings actions
     func sendConfigQuery()
@@ -192,6 +193,9 @@ public extension InputEncoder {
     func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {}
     func sendPickerItemActivate(generation: UInt32, activationID: UInt32) {}
     func sendPickerActionActivate(generation: UInt32, activationID: UInt32) {}
+
+    /// Default no-op so alternate frontends can omit accessibility pane activation.
+    func sendFocusWindow(windowId: UInt16, generation: UInt64) {}
 
     /// Default no-op so existing test spies do not need to implement settings actions.
     func sendConfigQuery() {}
@@ -318,5 +322,6 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendChatScrolledAwayFromBottom() {}
     public func sendChatReturnedToBottom() {}
     public func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {}
+    public func sendFocusWindow(windowId: UInt16, generation: UInt64) {}
     public func sendObservatoryInspect(pid: String) {}
 }

@@ -25,6 +25,7 @@ defmodule MingaEditor.Window do
 
   @type t :: %__MODULE__{
           id: id(),
+          accessibility_generation: pos_integer(),
           content: Content.t(),
           viewport: Viewport.t(),
           cursor: Buffer.position(),
@@ -46,6 +47,7 @@ defmodule MingaEditor.Window do
     :id,
     :content,
     :viewport,
+    accessibility_generation: 0,
     cursor: {0, 0},
     pinned: false,
     fold_map: %FoldMap{folds: []},
@@ -73,6 +75,7 @@ defmodule MingaEditor.Window do
              is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
     %__MODULE__{
       id: id,
+      accessibility_generation: new_accessibility_generation(),
       content: Content.buffer(buffer),
       viewport: Viewport.new(rows, cols)
     }
@@ -87,6 +90,7 @@ defmodule MingaEditor.Window do
              cols > 0 do
     %__MODULE__{
       id: id,
+      accessibility_generation: new_accessibility_generation(),
       content: Content.agent_chat(),
       viewport: Viewport.new(rows, cols),
       pinned: true
@@ -100,6 +104,7 @@ defmodule MingaEditor.Window do
              cols > 0 do
     %__MODULE__{
       id: id,
+      accessibility_generation: new_accessibility_generation(),
       content: Content.empty(),
       viewport: Viewport.new(rows, cols)
     }
@@ -113,15 +118,23 @@ defmodule MingaEditor.Window do
   content. Any cached buffer rendering is invalidated.
   """
   @spec show_empty_state(t()) :: t()
+  def show_empty_state(%__MODULE__{content: {:empty, :semantic}} = window), do: window
+
   def show_empty_state(%__MODULE__{} = window) do
-    %{window | content: Content.empty()}
+    %{window | content: Content.empty(), accessibility_generation: new_accessibility_generation()}
     |> set_document_symbols([])
   end
 
   @doc "Switches the window from the launchpad back to a buffer."
   @spec show_buffer(t(), pid()) :: t()
+  def show_buffer(%__MODULE__{content: {:buffer, buffer}} = window, buffer), do: window
+
   def show_buffer(%__MODULE__{} = window, buffer) when is_pid(buffer) do
-    %{window | content: Content.buffer(buffer)}
+    %{
+      window
+      | content: Content.buffer(buffer),
+        accessibility_generation: new_accessibility_generation()
+    }
     |> set_document_symbols([])
   end
 
@@ -133,11 +146,20 @@ defmodule MingaEditor.Window do
              is_tuple(cursor) do
     %__MODULE__{
       id: id,
+      accessibility_generation: new_accessibility_generation(),
       content: Content.buffer(buffer),
       viewport: Viewport.new(rows, cols),
       cursor: cursor
     }
   end
+
+  @doc "Returns the durable accessibility generation for this pane content."
+  @spec accessibility_generation(t()) :: pos_integer()
+  def accessibility_generation(%__MODULE__{accessibility_generation: generation}), do: generation
+
+  @spec new_accessibility_generation() :: pos_integer()
+  defp new_accessibility_generation,
+    do: :erlang.unique_integer([:positive, :monotonic])
 
   @doc "Remembers the buffer cursor last observed while this window was active."
   @spec remember_cursor(t(), Buffer.position()) :: t()

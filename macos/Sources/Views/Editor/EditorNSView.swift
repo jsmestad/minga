@@ -231,6 +231,14 @@ final class EditorNSView: MTKView {
     /// Task observing accessibility display options changes.
     private var accessibilityTask: Task<Void, Never>?
 
+    /// Stable virtual accessibility elements keyed by core, pane, and buffer lifetime.
+    private var accessibilityPaneCache: [EditorAccessibilityIdentity: EditorPaneAccessibilityElement] = [:]
+    private var accessibilityProjections: [EditorAccessibilityProjection] = []
+    private var accessibilityProjectionKey: AccessibilityProjectionKey?
+    private var lastAccessibilityIdentities: Set<EditorAccessibilityIdentity> = []
+    private var lastAccessibilitySelections: [EditorAccessibilityIdentity: String] = [:]
+    private var lastAccessibilityActiveIdentity: EditorAccessibilityIdentity?
+
     /// Task observing system scroller style changes.
     private var scrollerStyleTask: Task<Void, Never>?
 
@@ -556,6 +564,7 @@ final class EditorNSView: MTKView {
     func invalidateConnection() {
         self.encoder = NullInputEncoder()
         inputConnectionGeneration &+= 1
+        invalidateAccessibilityConnection()
         consumeLeftGestureTail = consumeLeftGestureTail || leftMousePressActive || leftMouseDownPoint != nil || isDraggingScrollIndicator
         consumeRightGestureTail = consumeRightGestureTail || rightMousePressActive || contextMenuShownForRightClick
         consumeMiddleGestureTail = consumeMiddleGestureTail || middleMousePressActive
@@ -692,6 +701,7 @@ final class EditorNSView: MTKView {
             connectionID: connectionID
         )
         cancelIMECompositionIfTargetChanged()
+        publishAccessibilityPresentationChanges()
         Task { @MainActor [weak self] in
             await Task.yield()
             guard let self else { return }
@@ -705,7 +715,6 @@ final class EditorNSView: MTKView {
         if cursor.0 != lastAccessibilityCursorRow || cursor.1 != lastAccessibilityCursorCol {
             lastAccessibilityCursorRow = cursor.0
             lastAccessibilityCursorCol = cursor.1
-            NSAccessibility.post(element: self, notification: .selectedTextChanged)
             resetCursorBlink()
         }
     }
@@ -963,6 +972,7 @@ final class EditorNSView: MTKView {
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         focusPolicy.windowDidBecomeKey()
+        refreshAccessibilityNativeFocus()
         resetCursorBlink()
     }
 
@@ -976,6 +986,7 @@ final class EditorNSView: MTKView {
     }
 
     @objc private func windowDidResignKey(_ notification: Notification) {
+        refreshAccessibilityNativeFocus()
         stopCursorBlink()
         // The window lost key while the thumb may still be held (system modal, Cmd-Tab, Mission
         // Control): no mouseUp is guaranteed, so discard the drag with its final target flushed
@@ -1009,14 +1020,20 @@ final class EditorNSView: MTKView {
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
-        if result { resetCursorBlink() }
+        if result {
+            refreshAccessibilityNativeFocus()
+            resetCursorBlink()
+        }
         return result
     }
 
     override func resignFirstResponder() -> Bool {
         cancelIMEComposition()
         let result = super.resignFirstResponder()
-        if result { stopCursorBlink() }
+        if result {
+            refreshAccessibilityNativeFocus()
+            stopCursorBlink()
+        }
         return result
     }
 
@@ -3641,58 +3658,53 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
     }
 
     private func accessibilityCursorOffset() -> Int {
-        editorPresentationSnapshot?.activeSurface?.cursorLineOffset ?? 0
-    }
-
-    private func visibleAccessibilityRows() -> [GUIVisualRow] {
-        guard let snapshot = editorPresentationSnapshot else { return [] }
-        var rows: [GUIVisualRow] = []
-        for surface in snapshot.surfaces.sorted(by: { $0.windowId < $1.windowId }) {
-            let visibleRange = surface.visibleRowRange
-            guard !visibleRange.isEmpty else { continue }
-            rows.append(contentsOf: surface.content.rowStore.rows(in: visibleRange).rows)
-        }
-        return rows
+        synchronizeAccessibilityPresentation()
+        return accessibilityProjections.first(where: \.isActivePane)?.insertionRange?.location ?? 0
     }
 }
 
 // MARK: - NSAccessibility (VoiceOver support)
 
+private struct AccessibilityProjectionKey: Equatable {
+    let connectionID: UInt64
+    let generation: UInt32
+    let frameSeq: UInt32
+    let localTransform: EditorLocalPresentationTransform?
+    let cellWidth: CGFloat
+    let cellHeight: CGFloat
+}
+
 extension EditorNSView {
     override func accessibilityRole() -> NSAccessibility.Role? {
-        return .textArea
+        return .group
     }
 
     override func accessibilityRoleDescription() -> String? {
-        return "code editor"
+        return "editor panes"
     }
 
-    /// Returns the full text content of all visible lines.
-    /// Reads from the same visible editor snapshot that backs pointer interaction.
     override func accessibilityValue() -> Any? {
-        let lines = visibleAccessibilityRows().map(\.text)
-        return lines.isEmpty ? "" : lines.joined(separator: "\n")
+        return nil
     }
 
     override func accessibilityNumberOfCharacters() -> Int {
-        let rows = visibleAccessibilityRows()
-        return rows.enumerated().reduce(0) { count, element in
-            let newline = element.offset < rows.count - 1 ? 1 : 0
-            return count + element.element.text.count + newline
-        }
+        return 0
     }
 
     override func accessibilityInsertionPointLineNumber() -> Int {
-        return Int(editorPresentationSnapshot?.activeSurface?.content.cursorRow ?? 0)
+        return NSNotFound
     }
 
     override func accessibilitySelectedText() -> String? {
-        // No visual selection tracking in the GUI (owned by BEAM).
-        return ""
+        return nil
     }
 
     override func accessibilitySelectedTextRange() -> NSRange {
-        return NSRange(location: accessibilityCursorOffset(), length: 0)
+        return NSRange(location: NSNotFound, length: 0)
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        accessibilityPaneElements()
     }
 
     override func isAccessibilityElement() -> Bool {
@@ -3701,6 +3713,139 @@ extension EditorNSView {
 
     override func isAccessibilityEnabled() -> Bool {
         return true
+    }
+
+    var accessibilityHasNativeKeyboardFocus: Bool {
+        NSApp.isActive && window?.isKeyWindow == true && window?.firstResponder === self
+    }
+
+    func accessibilityProjection(for identity: EditorAccessibilityIdentity) -> EditorAccessibilityProjection? {
+        synchronizeAccessibilityPresentation()
+        return accessibilityProjections.first { $0.identity == identity }
+    }
+
+    func accessibilityScreenRect(for localRect: CGRect) -> NSRect {
+        guard let window else { return localRect }
+        return window.convertToScreen(convert(localRect, to: nil))
+    }
+
+    func accessibilityLocalPoint(fromScreen point: NSPoint) -> NSPoint {
+        guard let window else { return point }
+        return convert(window.convertPoint(fromScreen: point), from: nil)
+    }
+
+    func requestAccessibilityFocus(for identity: EditorAccessibilityIdentity) {
+        guard accessibilityProjection(for: identity) != nil,
+              focusPolicy.requestAccessibilityFocus() else { return }
+        refreshAccessibilityNativeFocus()
+        encoder.sendFocusWindow(windowId: identity.windowID, generation: identity.generation)
+    }
+
+    private func accessibilityPaneElements() -> [EditorPaneAccessibilityElement] {
+        synchronizeAccessibilityPresentation()
+        let projections = accessibilityProjections
+        let identities = Set(projections.map(\.identity))
+        for (identity, element) in accessibilityPaneCache where !identities.contains(identity) {
+            element.invalidate()
+        }
+        accessibilityPaneCache = accessibilityPaneCache.filter { identities.contains($0.key) }
+        return projections.map { projection in
+            if let existing = accessibilityPaneCache[projection.identity] {
+                existing.update(projection: projection, owner: self)
+                return existing
+            }
+            let element = EditorPaneAccessibilityElement(owner: self, projection: projection)
+            accessibilityPaneCache[projection.identity] = element
+            return element
+        }
+    }
+
+    private func buildAccessibilityProjections() -> [EditorAccessibilityProjection] {
+        guard let presentation = editorPresentation, cellWidth > 0, effectiveCellHeight > 0 else { return [] }
+        let snapshot = presentation.snapshot
+        return snapshot.surfaces
+            .sorted { lhs, rhs in
+                let left = lhs.paneGeometry.textRect
+                let right = rhs.paneGeometry.textRect
+                return (left.row, left.col, lhs.windowId) < (right.row, right.col, rhs.windowId)
+            }
+            .map { surface in
+                EditorAccessibilityProjection.build(
+                    surface: surface,
+                    connectionID: dispatcher.connectionID,
+                    isActivePane: snapshot.activeSurface?.windowId == surface.windowId,
+                    localTransform: presentation.localTransform,
+                    cellWidth: cellWidth,
+                    cellHeight: effectiveCellHeight
+                )
+            }
+    }
+
+    private func synchronizeAccessibilityPresentation() {
+        guard let presentation = editorPresentation else {
+            accessibilityProjectionKey = nil
+            accessibilityProjections = []
+            return
+        }
+        let snapshot = presentation.snapshot
+        let key = AccessibilityProjectionKey(
+            connectionID: dispatcher.connectionID,
+            generation: snapshot.generation,
+            frameSeq: snapshot.frameSeq,
+            localTransform: presentation.localTransform,
+            cellWidth: cellWidth,
+            cellHeight: effectiveCellHeight
+        )
+        guard key != accessibilityProjectionKey else { return }
+        accessibilityProjectionKey = key
+        accessibilityProjections = buildAccessibilityProjections()
+    }
+
+    private func refreshAccessibilityNativeFocus() {
+        let focused = accessibilityHasNativeKeyboardFocus
+        for element in accessibilityPaneCache.values {
+            element.updateNativeKeyboardFocus(focused)
+        }
+    }
+
+    private func invalidateAccessibilityConnection() {
+        for element in accessibilityPaneCache.values {
+            element.invalidate()
+        }
+        accessibilityPaneCache.removeAll(keepingCapacity: true)
+        accessibilityProjections.removeAll(keepingCapacity: true)
+        accessibilityProjectionKey = nil
+        lastAccessibilityIdentities.removeAll(keepingCapacity: true)
+        lastAccessibilitySelections.removeAll(keepingCapacity: true)
+        lastAccessibilityActiveIdentity = nil
+    }
+
+    private func publishAccessibilityPresentationChanges() {
+        synchronizeAccessibilityPresentation()
+        let projections = accessibilityProjections
+        let paneElements = accessibilityPaneElements()
+        let identities = Set(projections.map(\.identity))
+        if identities != lastAccessibilityIdentities {
+            lastAccessibilityIdentities = identities
+            NSAccessibility.post(element: self, notification: .layoutChanged)
+        }
+
+        let selections = Dictionary(uniqueKeysWithValues: projections.map { projection in
+            let ranges = projection.selectedRanges.isEmpty ? projection.insertionRange.map { [$0] } ?? [] : projection.selectedRanges
+            return (projection.identity, ranges.map(NSStringFromRange).joined(separator: ","))
+        })
+        for projection in projections where selections[projection.identity] != lastAccessibilitySelections[projection.identity] {
+            if let element = paneElements.first(where: { $0.identity == projection.identity }) {
+                NSAccessibility.post(element: element, notification: .selectedTextChanged)
+            }
+        }
+        lastAccessibilitySelections = selections
+
+        let activeIdentity = projections.first(where: \.isActivePane)?.identity
+        if activeIdentity != lastAccessibilityActiveIdentity {
+            lastAccessibilityActiveIdentity = activeIdentity
+            NSAccessibility.post(element: self, notification: .focusedUIElementChanged)
+        }
     }
 }
 

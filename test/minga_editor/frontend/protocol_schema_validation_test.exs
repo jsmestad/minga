@@ -316,6 +316,17 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     end
   end
 
+  describe "gui_window_content accessibility encoding" do
+    test "pane label uses an exact string16 payload", _context do
+      binary = WindowEncoder.encode_window_content(full_render_window())
+      {section_count, sections_binary} = window_sections(binary)
+
+      assert extract_section_payload(sections_binary, section_count, 0x0C) ==
+               <<73::64, 2::16, 5::32, 2::16, 1::16, 2::32, 4::32, 2::16, 0::32, 3::32, 12::16,
+                 "test.ex [RO]">>
+    end
+  end
+
   describe "gui_status_bar modeline encoding" do
     test "v2 segments include names, text, and click targets", _context do
       model = full_status_bar_model()
@@ -788,6 +799,10 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       annotations: [
         %Annotation{row: 0, kind: :inline_pill, fg: 0xFFFFFF, bg: 0x000000, text: "ann"}
       ],
+      accessibility_label: "test.ex [RO]",
+      accessibility_generation: 73,
+      accessibility_cursor: {2, 5},
+      accessibility_selection_ranges: [{1, 2, 4}, {2, 0, 3}],
       geometry: geometry,
       cursorline: %Cursorline{row: 0, bg_rgb: 0x1A1A2E}
     )

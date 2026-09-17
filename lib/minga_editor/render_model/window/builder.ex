@@ -30,7 +30,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
+  alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.Renderer.Context
   alias Minga.RenderModel.Window, as: RenderWindow
@@ -315,6 +317,25 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
+    raw_selection =
+      ContentHelpers.visual_selection_bounds(state, {cursor_line, scroll.cursor_byte_col})
+
+    accessibility_selection_ranges =
+      accessibility_selection_ranges(
+        raw_selection,
+        visual_entries,
+        lines,
+        first_line
+      )
+
+    accessibility_cursor =
+      accessibility_cursor(
+        cursor_visible,
+        {display_cursor_row, display_cursor_col},
+        {cursor_line, scroll.cursor_byte_col},
+        Enum.find(visual_entries, &(&1.display_row == display_cursor_row))
+      )
+
     # Search matches in display coordinates
     viewport_bottom = viewport.top + visible_row_count
 
@@ -365,6 +386,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     render_window = %RenderWindow{
       window_id: win_id,
       content_kind: content_kind,
+      accessibility_label: accessibility_label(snapshot),
+      accessibility_generation: window.accessibility_generation,
+      accessibility_cursor: accessibility_cursor,
+      accessibility_selection_ranges: accessibility_selection_ranges,
       rect: rect,
       rows: presentation_rows,
       cursor_row: display_cursor_row,
@@ -404,6 +429,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        row_slot_allocator: row_slot_allocator
      }, font_registry}
   end
+
+  @spec accessibility_label(Minga.Buffer.RenderSnapshot.t()) :: String.t()
+  defp accessibility_label(%{name: name, read_only: read_only}) when is_binary(name) do
+    append_read_only_label(name, read_only)
+  end
+
+  defp accessibility_label(%{file_path: path, read_only: read_only}) when is_binary(path) do
+    append_read_only_label(Path.basename(path), read_only)
+  end
+
+  defp accessibility_label(_snapshot), do: "[no file]"
+
+  @spec append_read_only_label(String.t(), boolean()) :: String.t()
+  defp append_read_only_label(label, true), do: label <> " [RO]"
+  defp append_read_only_label(label, false), do: label
 
   @spec adapter_full_snapshot_pending?(map(), non_neg_integer()) :: boolean()
   defp adapter_full_snapshot_pending?(state, window_id) do
@@ -1073,7 +1113,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     entry =
       row
       |> Row.reposition(buf_line)
-      |> visual_entry(0, Unicode.display_width(row.text), 0)
+      |> visual_entry(line_text, ctx, 0, Unicode.display_width(row.text), 0)
       |> VisualRow.with_retention(input_hash, reused?)
 
     {entry, font_registry}
@@ -1174,11 +1214,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, font_registry)
 
     entries =
-      composed_text
-      |> wrap_composed_entries(
+      wrap_composed_entries(
+        composed_text,
+        line_text,
         spans,
         buf_line,
         durable_source_id(params.retain_ctx, buf_line),
+        ctx,
         wrap_opts
       )
       |> Enum.map(&stamp_wrapped_entry(&1, wrap_line_hash))
@@ -1225,13 +1267,18 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec wrap_composed_entries(
           String.t(),
+          String.t(),
           [Span.t()],
           non_neg_integer(),
           non_neg_integer(),
+          Context.t(),
           keyword()
         ) :: [visual_row_entry()]
-  defp wrap_composed_entries(composed_text, spans, buf_line, source_id, opts) do
+  defp wrap_composed_entries(composed_text, source_text, spans, buf_line, source_id, ctx, opts) do
     [visual_rows] = WrapMap.compute([composed_text], Keyword.fetch!(opts, :content_width), opts)
+    decorations = composition_decorations(ctx, buf_line)
+    source_offset_map = SourceOffsetMap.new(source_text, composed_text, decorations, buf_line)
+    source_line_width = Unicode.display_width(source_text)
 
     visual_rows
     |> Enum.with_index()
@@ -1241,11 +1288,41 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       row_spans = spans_for_visual_row(spans, composed_text, visual_row)
       source_start = visual_row_source_start(composed_text, visual_row)
       source_end = visual_row_source_end(source_start, visual_row)
-      source_start_byte = Map.get(visual_row, :byte_offset, 0)
+      composed_start_byte = Map.get(visual_row, :byte_offset, 0)
 
-      source_end_byte =
-        source_start_byte +
+      composed_end_byte =
+        composed_start_byte +
           byte_size(Map.get(visual_row, :source_text, Map.get(visual_row, :text, "")))
+
+      source_start_col =
+        Decorations.display_col_to_buf_col(
+          decorations,
+          buf_line,
+          source_start,
+          source_line_width
+        )
+
+      source_end_col =
+        Decorations.display_col_to_buf_col(
+          decorations,
+          buf_line,
+          source_end,
+          source_line_width
+        )
+
+      source_start_byte = Unicode.display_col_to_byte(source_text, source_start_col)
+      source_end_byte = Unicode.display_col_to_byte(source_text, source_end_col)
+      composed_start_utf16 = utf16_offset(composed_text, composed_start_byte)
+      composed_end_utf16 = utf16_offset(composed_text, composed_end_byte)
+
+      source_offset_map =
+        SourceOffsetMap.slice(
+          source_offset_map,
+          source_start_byte,
+          source_end_byte,
+          composed_start_utf16,
+          composed_end_utf16
+        )
 
       indent_width = Map.get(visual_row, :indent_width, 0)
 
@@ -1261,11 +1338,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
       VisualRow.new(
         row,
-        composed_text,
+        source_offset_map,
         source_start,
         source_end,
-        source_start_byte,
-        source_end_byte,
         indent_width
       )
     end)
@@ -1303,18 +1378,46 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end
   end
 
-  @spec visual_entry(Row.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec visual_entry(
+          Row.t(),
+          String.t(),
+          Context.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           visual_row_entry()
-  defp visual_entry(%Row{} = row, source_start_col, source_end_col, indent_width) do
+  defp visual_entry(
+         %Row{} = row,
+         source_text,
+         %Context{} = ctx,
+         source_start_col,
+         source_end_col,
+         indent_width
+       ) do
+    decorations = composition_decorations(ctx, row.buf_line)
+
     VisualRow.new(
       row,
-      row.text,
+      SourceOffsetMap.new(source_text, row.text, decorations, row.buf_line),
       source_start_col,
       source_end_col,
-      0,
-      byte_size(row.text),
       indent_width
     )
+  end
+
+  @spec source_text_for_entry(Row.t(), [String.t()], non_neg_integer()) :: String.t()
+  defp source_text_for_entry(%Row{row_type: row_type, buf_line: buf_line}, lines, first_line)
+       when row_type in [:normal, :fold_start],
+       do: line_at(lines, buf_line, first_line)
+
+  defp source_text_for_entry(%Row{text: text}, _lines, _first_line), do: text
+
+  @spec composition_decorations(Context.t(), non_neg_integer()) :: Decorations.t()
+  defp composition_decorations(%Context{} = ctx, buf_line) do
+    ctx
+    |> maybe_reveal_conceals(buf_line)
+    |> Map.fetch!(:decorations)
   end
 
   @spec spans_for_visual_row([Span.t()], String.t(), WrapMap.visual_row()) :: [Span.t()]
@@ -1396,7 +1499,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
           entry =
             row
-            |> visual_entry(0, Unicode.display_width(row.text), 0)
+            |> visual_entry(
+              source_text_for_entry(row, lines, first_line),
+              ctx,
+              0,
+              Unicode.display_width(row.text),
+              0
+            )
             |> VisualRow.with_retention(input_hash, reused?)
 
           {entry, {counters, registry}}
@@ -2512,6 +2621,173 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          true
        ) do
     build_wrapped_line_selection(start_line, end_line, visual_entries)
+  end
+
+  @spec accessibility_selection_ranges(
+          Selection.visual_selection(),
+          [visual_row_entry()],
+          [String.t()],
+          non_neg_integer()
+        ) :: [{non_neg_integer(), non_neg_integer(), non_neg_integer()}]
+  defp accessibility_selection_ranges(nil, _entries, _lines, _first_line), do: []
+
+  defp accessibility_selection_ranges(
+         {:char, {start_line, start_byte}, {end_line, end_byte}},
+         entries,
+         lines,
+         first_line
+       ) do
+    end_source = line_at(lines, end_line, first_line)
+    end_exclusive = Unicode.next_grapheme_byte_offset(end_source, end_byte)
+
+    entries
+    |> Enum.filter(&source_selection_entry?(&1, start_line, end_line))
+    |> Enum.flat_map(fn entry ->
+      accessibility_char_range(entry, start_line, start_byte, end_line, end_exclusive)
+    end)
+  end
+
+  defp accessibility_selection_ranges(
+         {:line, start_line, end_line},
+         entries,
+         _lines,
+         _first_line
+       ) do
+    entries
+    |> Enum.filter(&source_selection_entry?(&1, start_line, end_line))
+    |> Enum.map(fn entry ->
+      {entry.display_row, 0, utf16_offset(entry.row.text, byte_size(entry.row.text))}
+    end)
+  end
+
+  @spec source_selection_entry?(visual_row_entry(), non_neg_integer(), non_neg_integer()) ::
+          boolean()
+  defp source_selection_entry?(%VisualRow{row: %Row{row_type: row_type}}, _start, _end)
+       when row_type in [:virtual_line, :block],
+       do: false
+
+  defp source_selection_entry?(%VisualRow{buf_line: line}, start_line, end_line),
+    do: line >= start_line and line <= end_line
+
+  @spec accessibility_char_range(
+          visual_row_entry(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [{non_neg_integer(), non_neg_integer(), non_neg_integer()}]
+  defp accessibility_char_range(entry, start_line, start_byte, end_line, end_exclusive) do
+    range_start = if entry.buf_line == start_line, do: start_byte, else: entry.source_start_byte
+    range_end = if entry.buf_line == end_line, do: end_exclusive, else: entry.source_end_byte
+    selected_start = max(range_start, entry.source_start_byte)
+    selected_end = min(range_end, entry.source_end_byte)
+    start_clipped = entry.buf_line != start_line or range_start < entry.source_start_byte
+    end_clipped = entry.buf_line != end_line or range_end > entry.source_end_byte
+
+    accessibility_entry_utf16_range(
+      entry,
+      selected_start,
+      selected_end,
+      start_clipped,
+      end_clipped
+    )
+  end
+
+  @spec accessibility_entry_utf16_range(
+          visual_row_entry(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          boolean()
+        ) :: [{non_neg_integer(), non_neg_integer(), non_neg_integer()}]
+  defp accessibility_entry_utf16_range(_entry, start_byte, end_byte, _start_clipped, _end_clipped)
+       when end_byte <= start_byte,
+       do: []
+
+  defp accessibility_entry_utf16_range(
+         entry,
+         start_byte,
+         end_byte,
+         start_clipped,
+         end_clipped
+       ) do
+    row_utf16 = utf16_offset(entry.row.text, byte_size(entry.row.text))
+    indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
+
+    start_utf16 =
+      accessibility_composed_utf16(entry, start_byte, :start, indent_utf16, start_clipped)
+
+    end_utf16 =
+      accessibility_composed_utf16(entry, end_byte, :end, indent_utf16, end_clipped)
+
+    if end_utf16 > start_utf16 do
+      [{entry.display_row, min(start_utf16, row_utf16), min(end_utf16, row_utf16)}]
+    else
+      []
+    end
+  end
+
+  @spec accessibility_composed_utf16(
+          visual_row_entry(),
+          non_neg_integer(),
+          SourceOffsetMap.affinity(),
+          non_neg_integer(),
+          boolean()
+        ) :: non_neg_integer()
+  defp accessibility_composed_utf16(_entry, _source_byte, :start, _indent_utf16, true), do: 0
+
+  defp accessibility_composed_utf16(entry, _source_byte, :end, _indent_utf16, true) do
+    utf16_offset(entry.row.text, byte_size(entry.row.text))
+  end
+
+  defp accessibility_composed_utf16(entry, source_byte, affinity, indent_utf16, false) do
+    composed_utf16 =
+      SourceOffsetMap.source_to_composed_utf16(entry.source_offset_map, source_byte, affinity)
+
+    composed_utf16
+    |> Kernel.-(entry.composed_start_utf16)
+    |> Kernel.+(indent_utf16)
+    |> max(0)
+    |> min(utf16_offset(entry.row.text, byte_size(entry.row.text)))
+  end
+
+  @spec accessibility_cursor(
+          boolean(),
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()},
+          visual_row_entry() | nil
+        ) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp accessibility_cursor(false, _display, _source_position, _entry),
+    do: nil
+
+  defp accessibility_cursor(
+         true,
+         {row_index, _display_col},
+         {_cursor_line, cursor_byte},
+         %VisualRow{} = entry
+       ) do
+    row_utf16 = utf16_offset(entry.row.text, byte_size(entry.row.text))
+    indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
+
+    cursor_utf16 =
+      entry.source_offset_map
+      |> SourceOffsetMap.source_to_composed_utf16(cursor_byte, :start)
+      |> Kernel.-(entry.composed_start_utf16)
+      |> Kernel.+(indent_utf16)
+      |> max(0)
+      |> min(row_utf16)
+
+    {row_index, cursor_utf16}
+  end
+
+  defp accessibility_cursor(true, _display, _source_position, nil), do: nil
+
+  @spec utf16_offset(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp utf16_offset(text, byte_offset) do
+    text
+    |> binary_part(0, min(byte_offset, byte_size(text)))
+    |> String.to_charlist()
+    |> Enum.reduce(0, fn codepoint, units -> units + if(codepoint > 0xFFFF, do: 2, else: 1) end)
   end
 
   @spec build_search_matches(

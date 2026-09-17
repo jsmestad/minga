@@ -275,7 +275,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       picker_item_activate: 0x60,
       picker_action_activate: 0x61,
       search_focus: 0x62,
-      file_dialog_result: 0x63
+      file_dialog_result: 0x63,
+      focus_window: 0x64
     )
   end
 

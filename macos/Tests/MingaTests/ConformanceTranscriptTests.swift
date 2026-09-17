@@ -145,6 +145,55 @@ struct ConformanceTranscriptTests {
                     "\(name) step \(index): cursor_row = \(window.cursorRow), want \(wantCursor)")
         }
 
+        if let wantGeneration = expect["accessibility_generation"] as? Int, let window {
+            #expect(window.accessibilityGeneration == UInt64(wantGeneration),
+                    "\(name) step \(index): accessibility generation = \(window.accessibilityGeneration), want \(wantGeneration)")
+        }
+
+        if let wantCursor = expect["accessibility_cursor"] as? [Int], wantCursor.count == 2, let window {
+            #expect(window.accessibilityCursor?.row == UInt16(wantCursor[0]) && window.accessibilityCursor?.utf16 == UInt32(wantCursor[1]),
+                    "\(name) step \(index): accessibility cursor mismatch")
+        }
+
+        if let wantRanges = expect["accessibility_ranges"] as? [[Int]], let window {
+            let expected = wantRanges.map { GUIAccessibilityRange(row: UInt16($0[0]), startUTF16: UInt32($0[1]), endUTF16: UInt32($0[2])) }
+            #expect(window.accessibilitySelectionRanges == expected,
+                    "\(name) step \(index): accessibility ranges mismatch")
+        }
+
+        if let wantLeft = expect["viewport_left"] as? Int, let viewport = window?.paneGeometry?.viewport {
+            #expect(Int(viewport.left) == wantLeft,
+                    "\(name) step \(index): viewport left = \(viewport.left), want \(wantLeft)")
+        }
+
+        if let wantTypes = expect["row_types"] as? [Int], let window {
+            #expect(window.rows.map { Int($0.rowType.rawValue) } == wantTypes,
+                    "\(name) step \(index): accessibility fixture row types mismatch")
+        }
+
+        if let wantText = expect["row_text"] as? [String], let window {
+            #expect(window.rows.map(\.text) == wantText,
+                    "\(name) step \(index): accessibility fixture row text mismatch")
+        }
+
+        if let wantSelectedText = expect["accessibility_selected_text"] as? String,
+           let window,
+           let geometry = window.paneGeometry {
+            let surface = PresentedWindowSurface(
+                content: window, gutter: .none, paneGeometry: geometry, indentGuides: nil
+            )
+            let projection = EditorAccessibilityProjection.build(
+                surface: surface,
+                connectionID: 1,
+                isActivePane: true,
+                localTransform: nil,
+                cellWidth: 8,
+                cellHeight: 16
+            )
+            #expect(projection.selectedText == wantSelectedText,
+                    "\(name) step \(index): accessibility selected text = \(String(describing: projection.selectedText)), want \(wantSelectedText.debugDescription)")
+        }
+
         if let wantDiscarded = expect["offset_discarded"] as? Bool {
             #expect(offsetDiscarded == wantDiscarded,
                     "\(name) step \(index): offset_discarded = \(offsetDiscarded), want \(wantDiscarded)")

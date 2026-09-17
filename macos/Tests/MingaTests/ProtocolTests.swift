@@ -92,6 +92,31 @@ private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
+    @Test("Parser commands accept their exact 12-byte fixed payloads")
+    func decodeExactLengthParserCommands() throws {
+        var parseBuffer = Data([OP_PARSE_BUFFER])
+        appendWireU32(&parseBuffer, 7)
+        appendWireU32(&parseBuffer, 11)
+        appendWireU32(&parseBuffer, 0)
+
+        let (_, parseSize) = try decodeCommand(data: parseBuffer, offset: 0)
+        #expect(parseSize == 13)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: Data(parseBuffer.dropLast()), offset: 0)
+        }
+
+        var queryLanguage = Data([OP_QUERY_LANGUAGE_AT])
+        appendWireU32(&queryLanguage, 7)
+        appendWireU32(&queryLanguage, 23)
+        appendWireU32(&queryLanguage, 41)
+
+        let (_, querySize) = try decodeCommand(data: queryLanguage, offset: 0)
+        #expect(querySize == 13)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: Data(queryLanguage.dropLast()), offset: 0)
+        }
+    }
+
     @Test("Decode application quit response with buffer-specific failure detail")
     func decodeApplicationQuitResponse() throws {
         var body = Data()
@@ -1092,6 +1117,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitCommitAmend(message: String)
         case gitPullAndRetry
         case foldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
+        case focusWindow(windowId: UInt16, generation: UInt64)
         case observatoryInspect(pid: String)
         case chatScrolledAwayFromBottom
         case chatReturnedToBottom
@@ -1223,6 +1249,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendScrollToLine(line: UInt32) { /* no-op for tests */ }
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
         state.withLock { $0.guiActions.append(.foldToggleAtLine(windowId: windowId, bufferLine: bufferLine)) }
+    }
+    func sendFocusWindow(windowId: UInt16, generation: UInt64) {
+        state.withLock { $0.guiActions.append(.focusWindow(windowId: windowId, generation: generation)) }
     }
     func sendObservatoryInspect(pid: String) {
         state.withLock { $0.guiActions.append(.observatoryInspect(pid: pid)) }

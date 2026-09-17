@@ -217,4 +217,5 @@ const (
 	GUIActionPickerActionActivate       byte = 0x61
 	GUIActionSearchFocus                byte = 0x62
 	GUIActionFileDialogResult           byte = 0x63
+	GUIActionFocusWindow                byte = 0x64
 )

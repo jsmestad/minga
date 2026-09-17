@@ -236,6 +236,66 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert new_panel.height_percent == 45
   end
 
+  test "accessibility pane focus uses the window focus workflow", %{sidebar_registry: table} do
+    panel = %BottomPanel{visible: true, focused: true, filter: :all, height_percent: 30}
+
+    state =
+      base_state(table)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
+    active_id = state.workspace.windows.active
+
+    generation =
+      state.workspace.windows.map |> Map.fetch!(active_id) |> Window.accessibility_generation()
+
+    focused = GuiActionHandler.dispatch(state, {:focus_window, active_id, generation})
+
+    refute focused.shell_runtime.state.bottom_panel.focused
+    assert focused.workspace.windows.active == state.workspace.windows.active
+  end
+
+  test "queued accessibility focus cannot target replacement content", %{sidebar_registry: table} do
+    panel = %BottomPanel{visible: true, focused: true, filter: :all, height_percent: 30}
+    state = base_state(table)
+    active_id = state.workspace.windows.active
+    old_window = Map.fetch!(state.workspace.windows.map, active_id)
+    old_generation = Window.accessibility_generation(old_window)
+    replacement = Window.show_empty_state(old_window)
+    refute Window.accessibility_generation(replacement) == old_generation
+
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_bottom_panel(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        panel
+      )
+
+    state = %{
+      state
+      | workspace: SessionState.replace_window(state.workspace, active_id, replacement),
+        shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+
+    stale = GuiActionHandler.dispatch(state, {:focus_window, active_id, old_generation})
+    assert stale.shell_runtime.state.bottom_panel.focused
+
+    current_generation = Window.accessibility_generation(replacement)
+    focused = GuiActionHandler.dispatch(state, {:focus_window, active_id, current_generation})
+    refute focused.shell_runtime.state.bottom_panel.focused
+  end
+
   test "panel_resize clamps through the owner", %{sidebar_registry: table} do
     state = base_state(table)
 

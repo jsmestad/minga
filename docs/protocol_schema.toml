@@ -1272,6 +1272,14 @@ value = 0x62
 name = "file_dialog_result"
 value = 0x63
 
+# AppKit requests semantic pane activation after it has accepted native
+# keyboard focus for a virtual accessibility text area. The pane generation is
+# copied from the visible presentation and lets the BEAM reject an action queued
+# for pane content that has since closed or been replaced under the same ID.
+[[gui_actions]]
+name = "focus_window"
+value = 0x64
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -1540,6 +1548,14 @@ fields = [
   { name = "end_row", type = "u16" },
   { name = "end_col", type = "u16" },
   { name = "severity", type = "u8" },
+]
+
+[[structures]]
+name = "accessibility_range"
+fields = [
+  { name = "row", type = "u16" },
+  { name = "start_utf16", type = "u32" },
+  { name = "end_utf16", type = "u32" },
 ]
 
 [[structures]]
@@ -1839,6 +1855,23 @@ fields = [
   { name = "scroll_seq", type = "u32" },
 ]
 
+# Pane-local accessibility metadata. `generation` identifies the BEAM-owned
+# pane-content lifetime; it remains stable across frames, scrolling, and layout
+# changes, then changes when the pane ID presents different content. `label` is
+# the BEAM-owned display name of the buffer-like source shown by this window.
+# Native clients combine it with `window_id` when they need an unambiguous label.
+[[sections]]
+opcode = "gui_window_content"
+id = 0x0C
+name = "accessibility"
+fields = [
+  { name = "generation", type = "u64" },
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_utf16", type = "u32" },
+  { name = "selection_ranges", type = "counted_array", count_type = "u16", element = "accessibility_range" },
+  { name = "label", type = "string16" },
+]
+
 # gui_status_bar (0x76) sections
 
 [[sections]]
@@ -2047,6 +2080,18 @@ layout = "counted_array"
 count_type = "u32"
 element = "row"
 
+[[sections]]
+opcode = "gui_window_viewport_delta"
+id = 0x0C
+name = "accessibility"
+fields = [
+  { name = "generation", type = "u64" },
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_utf16", type = "u32" },
+  { name = "selection_ranges", type = "counted_array", count_type = "u16", element = "accessibility_range" },
+  { name = "label", type = "string16" },
+]
+
 # gui_window_rows_delta (0xA2) sections
 
 [[sections]]
@@ -2083,6 +2128,18 @@ opcode = "gui_window_rows_delta"
 id = 0x0B
 name = "row_splices"
 layout = "custom"
+
+[[sections]]
+opcode = "gui_window_rows_delta"
+id = 0x0C
+name = "accessibility"
+fields = [
+  { name = "generation", type = "u64" },
+  { name = "cursor_row", type = "u16" },
+  { name = "cursor_utf16", type = "u32" },
+  { name = "selection_ranges", type = "counted_array", count_type = "u16", element = "accessibility_range" },
+  { name = "label", type = "string16" },
+]
 
 # gui_surface_layout (0xA4) sections
 

@@ -64,6 +64,11 @@ private func readU32(_ data: Data, _ offset: Int) -> UInt32 {
     UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3])
 }
 
+/// Read a big-endian UInt64 from data at offset.
+private func readU64(_ data: Data, _ offset: Int) -> UInt64 {
+    (0..<8).reduce(0) { ($0 << 8) | UInt64(data[offset + $1]) }
+}
+
 /// Read a big-endian Int16 from data at offset.
 private func readI16(_ data: Data, _ offset: Int) -> Int16 {
     Int16(bitPattern: readU16(data, offset))
@@ -543,6 +548,17 @@ struct EncoderGUIActionTests {
         #expect(payload[1] == GUI_ACTION_FOLD_TOGGLE_AT_LINE)
         #expect(readU16(payload, 2) == 7)
         #expect(readU32(payload, 4) == 42)
+    }
+
+    @Test("focus_window encodes the pane window ID and durable generation")
+    func focusWindowLayout() {
+        let payload = captureFrame { $0.sendFocusWindow(windowId: 513, generation: 0x0102_0304_0506_0708) }
+
+        #expect(payload.count == 12)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_FOCUS_WINDOW)
+        #expect(readU16(payload, 2) == 513)
+        #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
     }
 
     @Test("completion_select encodes index as UInt16")
