@@ -77,7 +77,6 @@ struct CommandDispatcherRoutingTests {
         #expect(seeded.windowGutters[1] != nil)
         #expect(seeded.gutterCol == 7)
         #expect(seeded.windowIndentGuides[1] != nil)
-        #expect(dispatcher.frameState.viewportTopLine == 9)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
@@ -89,7 +88,6 @@ struct CommandDispatcherRoutingTests {
         #expect(pruned.windowIndentGuides.isEmpty)
         #expect(pruned.windowIds.isEmpty)
         #expect(pruned.gutterCol == 0)
-        #expect(dispatcher.frameState.viewportTopLine == 0xFFFF_FFFF)
     }
 
     @Test("keyframe commit prunes stale split separator metadata")
@@ -2038,6 +2036,43 @@ struct CommandDispatcherStagingTests {
         )
     }
 
+    private func residentWindowContent(
+        epoch: UInt32,
+        rowCount: Int = 24,
+        totalLines: UInt32 = 24,
+        mode: ResidentRowStoreMode = .sequential
+    ) throws -> GUIWindowContent {
+        let rows = (0..<rowCount).map { index in
+            GUIVisualRow(
+                rowType: .normal, rowId: UInt64(index + 1), bufLine: UInt32(index),
+                contentHash: UInt32(index + 1), text: "row \(index)", spans: []
+            )
+        }
+        return try GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: epoch,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rowStoreMode: mode,
+            rows: rows, selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: residentGeometry(totalLines: totalLines)
+        )
+    }
+
+    private func residentGeometry(totalLines: UInt32) -> GUIPaneGeometry {
+        let rect = GUICellRect(row: 0, col: 0, width: 80, height: 24)
+        return GUIPaneGeometry(
+            windowId: 7, totalRect: rect, contentRect: rect, textRect: rect,
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+            clipRect: rect,
+            viewport: GUIViewportSummary(
+                top: 0, left: 0, rows: 24, cols: 80, totalLines: totalLines,
+                visualRowOffset: 0, totalVisualRows: totalLines
+            ),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+            hitRegions: []
+        )
+    }
+
     private func status(mode: UInt8 = 1) -> StatusBarUpdate {
         StatusBarUpdate(
             contentKind: 0, mode: mode, cursorLine: 4, cursorCol: 2,
@@ -2050,6 +2085,40 @@ struct CommandDispatcherStagingTests {
             iconColorR: 0, iconColorG: 0, iconColorB: 0,
             filename: "Commit.swift", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: ""
+        )
+    }
+
+    private func residentGutter(
+        windowId: UInt16 = 7,
+        epoch: UInt32,
+        lineCount: UInt32 = 24,
+        cursorLine: UInt32 = 0,
+        overrides: [Wire.GutterEntry]
+    ) throws -> Wire.WindowGutter {
+        let entries = try #require(Wire.GutterEntries.resident(
+            contentEpoch: epoch, lineCount: lineCount, overrides: overrides
+        ))
+        return Wire.WindowGutter(
+            windowId: windowId, contentRow: 0, contentCol: 0, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: cursorLine,
+            lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0,
+            entries: entries
+        )
+    }
+
+    private func retainedGutterUpdate(
+        windowId: UInt16 = 7,
+        epoch: UInt32,
+        lineCount: UInt32 = 24,
+        cursorLine: UInt32
+    ) -> Wire.WindowGutterUpdate {
+        Wire.WindowGutterUpdate(
+            windowId: windowId, contentRow: 0, contentCol: 0, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: cursorLine,
+            lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0,
+            entryUpdate: .retainResident(Wire.ResidentGutterIdentity(
+                contentEpoch: epoch, lineCount: lineCount
+            ))
         )
     }
 
@@ -2160,6 +2229,255 @@ struct CommandDispatcherStagingTests {
             generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
             reason: .missingFontResource(fontId: 7)
         ))
+    }
+
+    @Test("full snapshot promotes row-store mode within the durable content epoch")
+    @MainActor func fullSnapshotPromotesResidentMode() throws {
+        let (dispatcher, _) = makeDispatcher()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42, mode: .windowed)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.lastCommittedFrameSeq == 1)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42)))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(epoch: 42, overrides: [])))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(dispatcher.lastCommittedFrameSeq == 2)
+        #expect(dispatcher.committedEditorSnapshot?.windowContents[7]?.rowStore.mode == .sequential)
+    }
+
+    @Test("resident gutter rejects a windowed row store")
+    @MainActor func residentGutterRejectsWindowedStore() throws {
+        let (dispatcher, _) = makeDispatcher()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42, mode: .windowed)))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(epoch: 42, overrides: [])))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.lastCommittedFrameSeq == 0)
+    }
+
+    @Test("incomplete sequential document rejects even without a gutter")
+    @MainActor func incompleteSequentialStoreWithoutGutterRejects() throws {
+        let (dispatcher, _) = makeDispatcher()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42, rowCount: 12, totalLines: 300)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.lastCommittedFrameSeq == 0)
+    }
+
+    @Test("resident gutter retains a matching base and explicit empty replacement clears overrides")
+    @MainActor func residentGutterRetainAndClear() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let warning = Wire.GutterEntry(
+            bufLine: 5, displayType: .normal, signType: .diagWarning
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42)))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42, overrides: [warning]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiGutter(data: retainedGutterUpdate(
+            epoch: 42, cursorLine: 6
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        let retained = try #require(dispatcher.committedEditorSnapshot?.windowGutters[7])
+        #expect(retained.cursorLine == 6)
+        #expect(retained.entries[5].signType == .diagWarning)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42, cursorLine: 7, overrides: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        let cleared = try #require(dispatcher.committedEditorSnapshot?.windowGutters[7])
+        #expect(cleared.cursorLine == 7)
+        #expect(cleared.entries[5].signType == .none)
+    }
+
+    @Test("resident gutter epoch switch replaces its base and stale retain rejects transaction")
+    @MainActor func residentGutterEpochSwitchAndReject() throws {
+        let (dispatcher, _) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42)))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42,
+            overrides: [Wire.GutterEntry(
+                bufLine: 5, displayType: .normal, signType: .diagWarning
+            )]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 43)))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 43,
+            overrides: [Wire.GutterEntry(
+                bufLine: 8, displayType: .normal, signType: .gitAdded
+            )]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        let switched = try #require(dispatcher.committedEditorSnapshot?.windowGutters[7])
+        #expect(switched.entries.residentIdentity == Wire.ResidentGutterIdentity(
+            contentEpoch: 43, lineCount: 24
+        ))
+        #expect(switched.entries[5].signType == .none)
+        #expect(switched.entries[8].signType == .gitAdded)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiGutter(data: retainedGutterUpdate(
+            epoch: 42, cursorLine: 9
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 3, lastAppliedFrameSeq: 2,
+            reason: .invalidResidentGutter(windowId: 7, contentEpoch: 42)
+        ))
+        #expect(dispatcher.committedEditorSnapshot?.frameSeq == 2)
+    }
+
+    @Test("resident gutter replacement rejects a line count outside the final row store")
+    @MainActor func residentGutterLineCountRejects() throws {
+        let (dispatcher, _) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(
+            epoch: 42, rowCount: 12, totalLines: 12
+        )))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42, lineCount: 300, overrides: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .invalidResidentGutter(windowId: 7, contentEpoch: 42)
+        ))
+        #expect(dispatcher.committedEditorSnapshot == nil)
+    }
+
+    @Test("resident gutter retain rejects on a keyframe without a committed base")
+    @MainActor func residentGutterKeyframeRetainRejects() throws {
+        let (dispatcher, _) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(epoch: 42)))
+        dispatcher.dispatch(.guiGutter(data: retainedGutterUpdate(
+            epoch: 42, cursorLine: 0
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .invalidResidentGutter(windowId: 7, contentEpoch: 42)
+        ))
+        #expect(dispatcher.committedEditorSnapshot == nil)
+    }
+
+    @Test("sequential A2 insert and delete project retained suffix rows by final index")
+    @MainActor func sequentialStructuralEditProjectsSuffixRows() throws {
+        let (dispatcher, _) = makeDispatcher()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try residentWindowContent(
+            epoch: 42, rowCount: 300, totalLines: 300
+        )))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42, lineCount: 300, overrides: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let inserted: [GUIWindowRowDeltaEntry] = (0..<3).map { (offset: Int) in
+            let row = GUIVisualRow(
+                rowType: .normal, rowId: UInt64(1_001 + offset),
+                bufLine: UInt32(50 + offset), contentHash: UInt32(1_001 + offset),
+                text: "inserted \(offset)", spans: []
+            )
+            return .full(row)
+        }
+        let insertDelta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: 300, resultRowCount: 302,
+            rowSplices: [GUIWindowRowSplice(
+                startIndex: 50, deleteCount: 1, insertEntries: inserted
+            )],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [],
+            paneGeometry: residentGeometry(totalLines: 302), cursorline: nil
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: insertDelta))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42, lineCount: 302,
+            overrides: [Wire.GutterEntry(
+                bufLine: 53, displayType: .normal, signType: .diagWarning
+            )]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        let insertedSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(insertedSnapshot.windowContents[7]?.rowStore.mode == .sequential)
+        let shiftedSuffix = try #require(insertedSnapshot.windowContents[7]?.rowStore.row(at: 53))
+        #expect(shiftedSuffix.text == "row 51")
+        #expect(shiftedSuffix.bufLine == 53)
+        #expect(insertedSnapshot.windowGutters[7]?.entries.entry(rowIndex: 53)?.signType == .diagWarning)
+
+        let restoredLine = GUIWindowRowDeltaEntry.full(GUIVisualRow(
+            rowType: .normal, rowId: 51, bufLine: 50,
+            contentHash: 51, text: "row 50", spans: []
+        ))
+        let deleteDelta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: 302, resultRowCount: 300,
+            rowSplices: [GUIWindowRowSplice(
+                startIndex: 50, deleteCount: 3, insertEntries: [restoredLine]
+            )],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [],
+            paneGeometry: residentGeometry(totalLines: 300), cursorline: nil
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: deleteDelta))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            epoch: 42, lineCount: 300,
+            overrides: [Wire.GutterEntry(
+                bufLine: 51, displayType: .normal, signType: .gitAdded
+            )]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        let restoredSnapshot = try #require(dispatcher.committedEditorSnapshot)
+        let restoredSuffix = try #require(restoredSnapshot.windowContents[7]?.rowStore.row(at: 51))
+        #expect(restoredSuffix.text == "row 51")
+        #expect(restoredSuffix.bufLine == 51)
+        #expect(restoredSnapshot.windowGutters[7]?.entries.entry(rowIndex: 51)?.signType == .gitAdded)
     }
 
     @Test("late old title and background effects cannot overwrite replacement chrome")

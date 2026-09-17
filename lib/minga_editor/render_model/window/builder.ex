@@ -35,6 +35,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.Renderer.Context
+  alias MingaEditor.Renderer.RenderWindow, as: RendererWindow
   alias Minga.RenderModel.Window, as: RenderWindow
   alias Minga.RenderModel.Window.ContentDigest
   alias MingaEditor.RenderModel.Window.BuildResult
@@ -45,6 +46,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.Gutter.ResidentRows
   alias Minga.RenderModel.Window.GutterEntry
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.HitRegion
@@ -225,16 +227,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         payload_overscan_before
       )
 
-    # Full-document residence (#2653): the window carries every laid-out row so the
-    # frontend store is complete and a fast scroll can never outrun it. The gutter
-    # (build_gutter below) uses the same entry set as the rows so the Go side can
-    # index both by absolute row position; indent guides are independently
-    # viewport-windowed off `scroll.lines`. Only the row set and its retained-row
-    # cache become resident.
-    #
-    # The resident entries feed only `presentation_rows` (the `.row` of each),
-    # which never carries the entry-level `display_row`, so the residence path
-    # skips the whole-document re-index `trim_visual_entries/3` would do (#2658).
+    # Resident text payloads are partial; store extent and gutter describe the complete document.
     resident_entries =
       resident_presentation_entries(
         scroll,
@@ -383,6 +376,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     geometry = build_geometry(state, scroll, content_kind)
 
+    row_store_mode = row_store_mode(scroll)
+
     render_window = %RenderWindow{
       window_id: win_id,
       content_kind: content_kind,
@@ -402,7 +397,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
       annotations: annotations,
-      gutter: build_gutter(scroll, ctx, content_kind, resident_entries),
+      gutter: build_gutter(scroll, ctx, content_kind, resident_entries, row_store_mode),
       cursorline:
         build_cursorline(content_row, display_cursor_row, is_active, cursor_on_screen?, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
@@ -416,7 +411,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       # Set only on the residence path; the GUI adapter gates the content
       # frame-emit on it instead of hashing the full rows list (#2658).
       content_digest: content_digest,
-      row_delta: if(resident_result, do: resident_result.row_delta, else: nil)
+      row_delta: if(resident_result, do: resident_result.row_delta, else: nil),
+      row_store_mode: row_store_mode
     }
 
     {render_window,
@@ -472,6 +468,23 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   # ── Full-document residence incremental build (#2658) ──────────────────────
 
+  @doc "Resolves the resident composition plan from the same context used by the builder."
+  @spec plan_resident_build(WindowScroll.t(), Context.t()) :: ResidentBuild.plan() | :windowed
+  def plan_resident_build(%WindowScroll{full_residence: false}, _ctx), do: :windowed
+
+  def plan_resident_build(%WindowScroll{} = scroll, ctx) do
+    window = scroll.window
+
+    ResidentBuild.plan(RendererWindow.resident_build(window), %{
+      compose_fp: composition_fingerprint(ctx),
+      highlight_fp: highlight_content_fingerprint(ctx.highlight),
+      reset?: scroll.full_refresh,
+      hydration_reason: RendererWindow.hydration_reason(window),
+      edit_deltas: RendererWindow.pending_edit_deltas(window),
+      line_count: scroll.snapshot.line_count
+    })
+  end
+
   # Runs the persistent ResidentBuild for the residence path, returning the full
   # resident entry list and the frame's retained/digest result. The full build
   # and the dirty-line splice both compose through `compose_sequential_entry/6`,
@@ -497,7 +510,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          font_registry
        ) do
     inputs = %{
-      line_texts: lines,
+      source: resident_source(first_line, lines, snapshot.line_count),
       line_count: snapshot.line_count,
       compose_fp: retain_ctx.compose_fp,
       highlight_fp: highlight_content_fingerprint(ctx.highlight),
@@ -525,6 +538,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       end
     }
 
+    plan =
+      Keyword.get_lazy(opts, :resident_plan, fn ->
+        ResidentBuild.plan(Keyword.get(opts, :resident_build), inputs)
+      end)
+
+    inputs = Map.put(inputs, :plan, plan)
+
     {state, result, font_registry} =
       ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
 
@@ -542,6 +562,23 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        |> Map.put(:context_start, context_start), font_registry}
     end
   end
+
+  @spec row_store_mode(WindowScroll.t()) :: :windowed | {:resident, non_neg_integer()}
+  defp row_store_mode(%WindowScroll{full_residence: true, snapshot: snapshot}),
+    do: {:resident, snapshot.line_count}
+
+  defp row_store_mode(%WindowScroll{full_residence: false}), do: :windowed
+
+  @spec resident_source(non_neg_integer(), [String.t()], non_neg_integer()) ::
+          ResidentBuild.source()
+  defp resident_source(0, lines, count) do
+    case length(lines) do
+      ^count -> {:complete, lines}
+      _ -> {:range, 0, lines}
+    end
+  end
+
+  defp resident_source(first, lines, _count), do: {:range, first, lines}
 
   # Composes entries for exactly the dirty sequential line indices, reusing the
   # masked highlight batch so only dirty rows produce styled segments (#2658).
@@ -652,27 +689,29 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         ) :: retain_ctx()
   defp retain_ctx(%Context{} = ctx, prev, prev_wrap, line_identity, decoration_slots)
        when is_map(prev) and is_map(prev_wrap) and is_map(decoration_slots) do
-    conceal_cursor =
-      if Decorations.has_conceal_ranges?(ctx.decorations), do: ctx.cursor_line, else: nil
-
-    compose_fp =
-      :erlang.phash2({
-        ctx.decorations,
-        ctx.show_invisible,
-        ctx.tab_width,
-        ctx.whitespace_face,
-        ctx.hl_todo_faces,
-        ctx.highlight != nil,
-        conceal_cursor
-      })
-
     %{
       prev: prev,
       prev_wrap: prev_wrap,
-      compose_fp: compose_fp,
+      compose_fp: composition_fingerprint(ctx),
       line_identity: line_identity,
       decoration_slots: decoration_slots
     }
+  end
+
+  @spec composition_fingerprint(Context.t()) :: non_neg_integer()
+  defp composition_fingerprint(ctx) do
+    conceal_cursor =
+      if Decorations.has_conceal_ranges?(ctx.decorations), do: ctx.cursor_line, else: nil
+
+    :erlang.phash2({
+      ctx.composition_key || Decorations.text_composition_key(ctx.decorations),
+      ctx.show_invisible,
+      ctx.tab_width,
+      ctx.whitespace_face,
+      ctx.hl_todo_faces,
+      ctx.highlight != nil,
+      conceal_cursor
+    })
   end
 
   # Cheap per-row input fingerprint: the line text, its highlight segments, and
@@ -2089,9 +2128,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           WindowScroll.t(),
           Context.t(),
           RenderWindow.content_kind(),
-          [visual_row_entry()]
+          [visual_row_entry()],
+          :windowed | {:resident, non_neg_integer()}
         ) :: Gutter.t() | nil
-  defp build_gutter(%WindowScroll{} = scroll, %Context{} = ctx, content_kind, visual_entries)
+  defp build_gutter(
+         %WindowScroll{} = scroll,
+         %Context{} = ctx,
+         content_kind,
+         visual_entries,
+         row_store_mode
+       )
        when content_kind in [:buffer, :agent_chat] do
     %WindowScroll{
       win_layout: %{content: {content_row, content_col, full_width, content_height}},
@@ -2121,11 +2167,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       line_number_style: line_number_style,
       line_number_width: line_number_width,
       sign_col_width: sign_col_width,
-      entries: build_gutter_entries(scroll, ctx, line_count, visual_entries)
+      entries: build_gutter_entries(scroll, ctx, line_count, visual_entries, row_store_mode)
     }
   end
 
-  defp build_gutter(_scroll, _ctx, _content_kind, _visual_entries), do: nil
+  defp build_gutter(_scroll, _ctx, _content_kind, _visual_entries, _mode), do: nil
 
   @spec build_geometry(state(), WindowScroll.t(), RenderWindow.content_kind()) :: PaneGeometry.t()
   defp build_geometry(state, %WindowScroll{} = scroll, content_kind) do
@@ -2330,15 +2376,53 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           WindowScroll.t(),
           Context.t(),
           non_neg_integer(),
-          [visual_row_entry()]
-        ) :: [GutterEntry.t()]
-  defp build_gutter_entries(_scroll, _ctx, 0, _visual_entries), do: []
+          [visual_row_entry()],
+          :windowed | {:resident, non_neg_integer()}
+        ) :: [GutterEntry.t()] | ResidentRows.t()
+
+  defp build_gutter_entries(scroll, ctx, line_count, _entries, {:resident, line_count}) do
+    fold_ranges = scroll.window.fold_ranges
+    fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)
+    fold_end_by_start = Map.new(fold_ranges, &{&1.start_line, &1.end_line})
+
+    # Normal rows have no sign by default; only semantic exceptions need stored entries.
+    annotation_lines =
+      for annotation <- ctx.decorations.annotations,
+          annotation.kind == :gutter_icon,
+          do: annotation.line
+
+    overrides =
+      (Map.keys(ctx.git_signs) ++
+         Map.keys(ctx.diagnostic_signs) ++
+         MapSet.to_list(fold_start_lines) ++ annotation_lines)
+      |> Enum.uniq()
+      |> Enum.filter(&(&1 >= 0 and &1 < line_count))
+      |> Enum.sort()
+      |> Enum.map(fn line ->
+        resolve_gutter_entry(
+          {line, :normal},
+          fold_start_lines,
+          fold_end_by_start,
+          ctx,
+          line_count
+        )
+      end)
+
+    %ResidentRows{
+      content_epoch: scroll.content_epoch,
+      line_count: line_count,
+      overrides: overrides
+    }
+  end
+
+  defp build_gutter_entries(_scroll, _ctx, 0, _visual_entries, :windowed), do: []
 
   defp build_gutter_entries(
          %WindowScroll{} = scroll,
          %Context{} = ctx,
          line_count,
-         visual_entries
+         visual_entries,
+         :windowed
        ) do
     fold_ranges = scroll.window.fold_ranges
     fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)

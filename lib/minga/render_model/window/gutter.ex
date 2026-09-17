@@ -43,6 +43,6 @@ defmodule Minga.RenderModel.Window.Gutter do
           line_number_style: line_number_style(),
           line_number_width: non_neg_integer(),
           sign_col_width: non_neg_integer(),
-          entries: [GutterEntry.t()]
+          entries: [GutterEntry.t()] | __MODULE__.ResidentRows.t()
         }
 end

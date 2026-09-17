@@ -60,7 +60,7 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
 
   def from_window(%Window{geometry: %PaneGeometry{} = geometry} = window) do
     {overscan_start_line, overscan_end_line} =
-      line_range(window.rows, geometry.viewport.top, window.contiguous_rows)
+      resident_line_range(window, geometry)
 
     visible_start_line = max(geometry.viewport.top, overscan_start_line)
     visible_end_line = min(visible_start_line + geometry.viewport.rows, overscan_end_line)
@@ -80,6 +80,14 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
       scroll_seq: window.scroll_seq
     }
   end
+
+  @spec resident_line_range(Window.t(), PaneGeometry.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp resident_line_range(%Window{row_store_mode: {:resident, count}}, _geometry),
+    do: {0, count}
+
+  defp resident_line_range(window, geometry),
+    do: line_range(window.rows, geometry.viewport.top, window.contiguous_rows)
 
   @spec line_range([Row.t()], non_neg_integer(), boolean()) ::
           {non_neg_integer(), non_neg_integer()}

@@ -130,6 +130,15 @@ defmodule Minga.Core.Decorations do
   @spec without_conceals(t()) :: t()
   def without_conceals(%__MODULE__{} = decs), do: %{decs | conceal_ranges: []}
 
+  @doc "Returns the decoration content that can affect text composition, excluding gutter markers and lookup caches."
+  @spec text_composition_key(t()) :: tuple()
+  def text_composition_key(%__MODULE__{} = decs) do
+    annotations = Enum.reject(decs.annotations, &(&1.kind == :gutter_icon))
+
+    {decs.highlights, decs.virtual_texts, annotations, decs.fold_regions, decs.block_decorations,
+     decs.conceal_ranges}
+  end
+
   # ── Highlight range API ──────────────────────────────────────────────────
 
   @doc """

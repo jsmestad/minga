@@ -460,6 +460,24 @@ struct WindowContentDecoderTests {
         #expect(content.scrollLeft == 25)
     }
 
+    @Test("Decode sequential complete-residence header flag")
+    func decodeSequentialResidenceFlag() throws {
+        var builder = WindowContentBuilder()
+        builder.flags = 0x07
+        builder.rows = [WindowContentBuilder.RowBuilder(
+            rowId: 1, bufLine: 99, text: "first"
+        )]
+
+        let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = cmd else {
+            Issue.record("Expected .guiWindowContent")
+            return
+        }
+
+        #expect(content.rowStore.mode == .sequential)
+        #expect(content.rowStore.row(at: 0)?.bufLine == 0)
+    }
+
     @Test("Decode accessibility pane label")
     func decodeAccessibilityLabel() throws {
         var builder = WindowContentBuilder()

@@ -96,7 +96,7 @@ defmodule MingaEditor.RenderPipeline do
     # Reset the per-frame rasterized-row counter before any window composes (#2287).
     input = Content.reset_rows_rasterized(input)
 
-    # Pre-stage snapshot boundary: Buffer GenServer reads happen before the named render stages.
+    # Prefetch bounded input; Content fetches complete source if composition planning requires hydration.
     {prefetched_scrolls, input} = BufferPrefetch.prefetch_scrolls(input, layout)
 
     # Classify the frame's render path now that prefetch has resolved per-window

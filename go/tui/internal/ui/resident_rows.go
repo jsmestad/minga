@@ -11,8 +11,9 @@ import (
 // path-copied, so a splice copies metadata proportional to tree depth rather
 // than copying or scanning the resident document.
 type residentRows struct {
-	root    *rowRope
-	locator *rowLocator
+	root       *rowRope
+	locator    *rowLocator
+	sequential bool
 }
 
 type rowRope struct {
@@ -25,7 +26,11 @@ type rowRope struct {
 const residentLeafRows = 256
 
 func newResidentRows(rows []protocol.WindowRow) (residentRows, error) {
-	var store residentRows
+	return newResidentRowsWithMode(rows, false)
+}
+
+func newResidentRowsWithMode(rows []protocol.WindowRow, sequential bool) (residentRows, error) {
+	store := residentRows{sequential: sequential}
 	leaves := make([]*rowRope, 0, (len(rows)+residentLeafRows-1)/residentLeafRows)
 	var previousBufferLine uint32
 	hasPreviousBufferLine := false
@@ -34,7 +39,7 @@ func newResidentRows(rows []protocol.WindowRow) (residentRows, error) {
 		owned := append([]protocol.WindowRow(nil), rows[start:end]...)
 		leaves = append(leaves, ropeLeaf(owned))
 		for _, row := range owned {
-			if hasPreviousBufferLine && row.BufferLine < previousBufferLine {
+			if !sequential && hasPreviousBufferLine && row.BufferLine < previousBufferLine {
 				return residentRows{}, fmt.Errorf("resident rows out of buffer-line order")
 			}
 			previousBufferLine = row.BufferLine
@@ -185,11 +190,23 @@ func ropeRange(n *rowRope, start, end int, out *[]protocol.WindowRow) {
 	ropeRange(n.right, start-lc, end-lc, out)
 }
 
-func (s residentRows) count() int                               { return ropeCount(s.root) }
-func (s residentRows) get(index int) (protocol.WindowRow, bool) { return ropeGet(s.root, index) }
+func (s residentRows) count() int { return ropeCount(s.root) }
+func (s residentRows) get(index int) (protocol.WindowRow, bool) {
+	row, ok := ropeGet(s.root, index)
+	if ok && s.sequential {
+		row.BufferLine = uint32(index)
+	}
+	return row, ok
+}
 func (s residentRows) rangeRows(start, count int) []protocol.WindowRow {
 	out := make([]protocol.WindowRow, 0, max(count, 0))
 	ropeRange(s.root, start, start+count, &out)
+	if s.sequential {
+		base := max(start, 0)
+		for index := range out {
+			out[index].BufferLine = uint32(base + index)
+		}
+	}
 	return out
 }
 func (s residentRows) materialize() []protocol.WindowRow { return s.rangeRows(0, s.count()) }
@@ -215,7 +232,7 @@ func (s residentRows) resolveRows(rows []protocol.WindowRow) (residentRows, bool
 		}
 		resolved[i] = row
 	}
-	next, err := newResidentRows(resolved)
+	next, err := newResidentRowsWithMode(resolved, s.sequential)
 	return next, false, err
 }
 
@@ -277,14 +294,16 @@ func (s residentRows) splice(delta protocol.WindowContent, work *renderWorkColle
 		if err != nil {
 			return s, false, err
 		}
-		result = residentRows{root: ropeJoin(ropeJoin(left, inserted), right), locator: locator}
+		result = residentRows{root: ropeJoin(ropeJoin(left, inserted), right), locator: locator, sequential: s.sequential}
 		checkStart := max(actual-1, 0)
 		checkEnd := min(actual+len(resolved)+1, result.count())
-		for index := checkStart + 1; index < checkEnd; index++ {
-			previous, _ := result.get(index - 1)
-			current, _ := result.get(index)
-			if current.BufferLine < previous.BufferLine {
-				return s, false, fmt.Errorf("retained rows out of buffer-line order")
+		if !s.sequential {
+			for index := checkStart + 1; index < checkEnd; index++ {
+				previous, _ := result.get(index - 1)
+				current, _ := result.get(index)
+				if current.BufferLine < previous.BufferLine {
+					return s, false, fmt.Errorf("retained rows out of buffer-line order")
+				}
 			}
 		}
 		offset += len(resolved) - deleteCount

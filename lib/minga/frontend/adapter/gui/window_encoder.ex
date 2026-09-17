@@ -108,6 +108,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_gutter_window 0x01
   @section_gutter_config 0x02
   @section_gutter_entries 0x03
+  @section_gutter_resident 0x04
+  @section_gutter_overrides 0x05
   @no_fold_range 0xFFFF_FFFF
 
   @typedoc "Per-section byte metrics for encoded window content."
@@ -187,9 +189,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   end
 
   @doc "Encodes per-frame window metadata with byte metrics."
-  @spec encode_frame_metadata_with_metrics(RenderWindow.t()) :: {[binary()], metrics()}
-  def encode_frame_metadata_with_metrics(%RenderWindow{} = window) do
-    gutter = encode_gutter(window.gutter)
+  @spec encode_frame_metadata_with_metrics(RenderWindow.t(), boolean()) :: {[binary()], metrics()}
+  def encode_frame_metadata_with_metrics(%RenderWindow{} = window, retain_gutter? \\ false) do
+    gutter = encode_gutter(window.gutter, retain_gutter?)
     metadata = encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
 
     {gutter ++ metadata,
@@ -208,10 +210,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_window_content_with_metrics(RenderWindow.t()) :: {binary(), metrics()}
   def encode_window_content_with_metrics(%RenderWindow{} = sw) do
     command = :gui_window_content
-    # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible
+    # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible, bit 2 = sequential resident rows
     flags =
       if(sw.full_refresh, do: 1, else: 0) |||
-        if Map.get(sw, :cursor_visible, true), do: 0x02, else: 0
+        if(Map.get(sw, :cursor_visible, true), do: 0x02, else: 0) |||
+        resident_row_flags(sw.row_store_mode)
 
     header_payload =
       command
@@ -359,6 +362,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       {:error, reason} -> raise ArgumentError, "invalid row splice plan: #{reason}"
     end
   end
+
+  @spec resident_row_flags(:windowed | {:resident, non_neg_integer()}) :: non_neg_integer()
+  defp resident_row_flags(:windowed), do: 0
+  defp resident_row_flags({:resident, _count}), do: 0x04
 
   @spec delta_sections(RenderWindow.t(), non_neg_integer(), binary(), atom()) :: [binary()]
   defp delta_sections(%RenderWindow{} = sw, row_section_id, rows_payload, command) do
@@ -791,20 +798,13 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   # ── Gutter ──────────────────────────────────────────────────────────────
 
-  @spec encode_gutter(Gutter.t() | nil) :: [binary()]
-  defp encode_gutter(nil), do: []
-  defp encode_gutter(%Gutter{} = gutter), do: [encode_gutter_binary(gutter)]
+  @spec encode_gutter(Gutter.t() | nil, boolean()) :: [binary()]
+  defp encode_gutter(nil, _retain?), do: []
+  defp encode_gutter(%Gutter{} = gutter, retain?), do: [encode_gutter_binary(gutter, retain?)]
 
-  @spec encode_gutter_binary(Gutter.t()) :: binary()
-  defp encode_gutter_binary(%Gutter{} = gutter) do
+  @spec encode_gutter_binary(Gutter.t(), boolean()) :: binary()
+  defp encode_gutter_binary(%Gutter{} = gutter, retain?) do
     command = :gui_gutter
-
-    entries_payload =
-      command
-      |> Writer.new()
-      |> Writer.uint16(:entry_count, Enum.count(gutter.entries))
-      |> Writer.append(Enum.map(gutter.entries, &encode_gutter_entry/1))
-      |> Writer.finish()
 
     window_payload =
       command
@@ -826,11 +826,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       |> Writer.uint8(:sign_col_width, gutter.sign_col_width)
       |> Writer.finish()
 
-    sections = [
-      encode_gutter_section(@section_gutter_window, window_payload),
-      encode_gutter_section(@section_gutter_config, config_payload),
-      encode_gutter_section(@section_gutter_entries, entries_payload)
-    ]
+    sections =
+      [
+        encode_gutter_section(@section_gutter_window, window_payload),
+        encode_gutter_section(@section_gutter_config, config_payload)
+      ] ++ gutter_entry_sections(gutter.entries, retain?)
 
     command
     |> Writer.new()
@@ -838,6 +838,67 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     |> Writer.uint8(:section_count, Enum.count(sections))
     |> Writer.append(sections)
     |> Writer.finish()
+  end
+
+  @spec gutter_entry_sections([GutterEntry.t()] | Gutter.ResidentRows.t(), boolean()) :: [
+          binary()
+        ]
+  defp gutter_entry_sections(%Gutter.ResidentRows{} = rows, retain?) do
+    header =
+      :gui_gutter
+      |> Writer.new()
+      |> Writer.uint32(:content_epoch, rows.content_epoch)
+      |> Writer.uint32(:line_count, rows.line_count)
+      |> Writer.uint8(:retain_overrides, if(retain?, do: 1, else: 0))
+      |> Writer.finish()
+
+    overrides = if retain?, do: [], else: gutter_override_chunks(rows.overrides)
+    [encode_gutter_section(@section_gutter_resident, header) | overrides]
+  end
+
+  defp gutter_entry_sections(entries, _retain?),
+    do: [gutter_entries_section(@section_gutter_entries, entries)]
+
+  @spec gutter_override_chunks([GutterEntry.t()]) :: [binary()]
+  defp gutter_override_chunks([]), do: [gutter_entries_section(@section_gutter_overrides, [])]
+
+  defp gutter_override_chunks(entries) do
+    entries
+    |> Enum.map(&encode_gutter_entry/1)
+    |> Enum.chunk_while({[], 2}, &gutter_entry_chunk/2, &finish_gutter_entry_chunk/1)
+    |> Enum.map(fn encoded ->
+      payload =
+        :gui_gutter
+        |> Writer.new()
+        |> Writer.uint16(:entry_count, length(encoded))
+        |> Writer.append(encoded)
+        |> Writer.finish()
+
+      encode_gutter_section(@section_gutter_overrides, payload)
+    end)
+  end
+
+  @spec gutter_entry_chunk(binary(), {[binary()], non_neg_integer()}) :: tuple()
+  defp gutter_entry_chunk(entry, {entries, size}) when size + byte_size(entry) <= 65_535,
+    do: {:cont, {[entry | entries], size + byte_size(entry)}}
+
+  defp gutter_entry_chunk(entry, {entries, _size}),
+    do: {:cont, Enum.reverse(entries), {[entry], 2 + byte_size(entry)}}
+
+  @spec finish_gutter_entry_chunk({[binary()], non_neg_integer()}) :: tuple()
+  defp finish_gutter_entry_chunk({entries, _size}),
+    do: {:cont, Enum.reverse(entries), {[], 2}}
+
+  @spec gutter_entries_section(non_neg_integer(), [GutterEntry.t()]) :: binary()
+  defp gutter_entries_section(section, entries) do
+    payload =
+      :gui_gutter
+      |> Writer.new()
+      |> Writer.uint16(:entry_count, length(entries))
+      |> Writer.append(Enum.map(entries, &encode_gutter_entry/1))
+      |> Writer.finish()
+
+    encode_gutter_section(section, payload)
   end
 
   @spec encode_gutter_section(non_neg_integer(), binary()) :: binary()

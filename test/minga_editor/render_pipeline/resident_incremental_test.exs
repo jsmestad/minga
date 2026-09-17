@@ -6,6 +6,9 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Layout
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.Gutter.ResidentRows
+  alias Minga.RenderModel.Window.ScrollPresentation
+  alias Minga.Core.Decorations
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.RenderPipeline
@@ -38,9 +41,10 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     })
   end
 
-  defp build_frame(%{editor: editor, renderer: renderer}) do
+  defp build_frame(%{editor: editor, renderer: renderer} = state) do
     editor = MingaEditor.WindowFocus.remember_active_cursor(editor)
     intent = Intent.from_editor_state(editor)
+    intent = if Map.get(state, :keyframe?, false), do: Intent.force_keyframe(intent), else: intent
     {renderer, input} = BufferChanges.prepare(renderer, intent)
     input = Content.reset_rows_rasterized(input)
     input = RenderPipeline.compute_layout(input)
@@ -73,6 +77,29 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   end
 
   describe "digest consistency" do
+    test "promotion replaces storage while preserving durable content identity" do
+      {first, state} = build_frame(resident_state(300))
+      assert first.row_store_mode == :windowed
+      {promoted, state} = build_frame(state)
+      assert promoted.row_store_mode == {:resident, 300}
+      assert promoted.content_epoch == first.content_epoch
+      assert promoted.full_refresh
+      {unchanged, _state} = build_frame(state)
+      assert unchanged.content_epoch == promoted.content_epoch
+      refute unchanged.full_refresh
+      assert unchanged.row_delta.splices == []
+    end
+
+    test "unchanged resident frames preserve gutter rows after promotion" do
+      {model, _state} = build_frame(warm(resident_state(300)))
+
+      assert model.row_delta.splices == []
+      assert %ResidentRows{line_count: 300, overrides: []} = model.gutter.entries
+      assert model.row_store_mode == {:resident, 300}
+      presentation = ScrollPresentation.from_window(model)
+      assert {presentation.overscan_start_line, presentation.overscan_end_line} == {0, 300}
+    end
+
     test "content_digest always equals a from-scratch digest of the emitted rows" do
       # First-paint-then-promote (#2679): warm one frame so residence is promoted.
       {model, _state} = build_frame(warm(resident_state(300)))
@@ -160,6 +187,293 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert after_model.row_delta.splices == []
       assert after_model.rows == []
     end
+  end
+
+  describe "resident presentation oracle" do
+    test "encoded partial updates display the same grid as complete frames" do
+      alias Minga.Frontend.Adapter.GUI
+      alias Minga.Frontend.Adapter.GUI.Caches
+      alias Minga.Test.HeadlessPort
+
+      incremental_port =
+        start_supervised!(
+          Supervisor.child_spec({HeadlessPort, width: 60, height: 14}, id: :incremental)
+        )
+
+      fresh_port =
+        start_supervised!(
+          Supervisor.child_spec({HeadlessPort, width: 60, height: 14}, id: :fresh)
+        )
+
+      state = warm(resident_state(300))
+
+      operations = [
+        :recovery,
+        :unchanged,
+        :scroll,
+        :insert_many,
+        :unchanged,
+        :delete_many,
+        :sign,
+        :clear_sign,
+        :search,
+        :text_style,
+        :unchanged,
+        :recovery
+      ]
+
+      Enum.reduce(Enum.with_index(operations, 1), {state, Caches.new()}, fn {operation, seq},
+                                                                            {state, caches} ->
+        state = perform_presentation_operation(state, operation)
+        {model, state} = build_frame(state)
+        fresh = fresh_resident_frame(state.editor)
+        caches = if operation == :recovery, do: Caches.new(), else: caches
+        {commands, caches} = GUI.encode_windows([model], caches)
+        {fresh_commands, _} = GUI.encode_windows([fresh], Caches.new())
+        base = if operation == :recovery, do: 0, else: seq - 1
+        :accepted = HeadlessPort.send_transaction(incremental_port, seq, base, 0, commands)
+        :accepted = HeadlessPort.send_transaction(fresh_port, seq, 0, 0, fresh_commands)
+
+        assert HeadlessPort.production_state(incremental_port).outcome == :accepted,
+               inspect(operation)
+
+        assert HeadlessPort.production_state(fresh_port).outcome == :accepted, inspect(operation)
+
+        assert HeadlessPort.get_screen(incremental_port).grid ==
+                 HeadlessPort.get_screen(fresh_port).grid,
+               inspect(operation)
+
+        {state, Caches.acknowledge_pending_window_deltas(caches)}
+      end)
+    end
+
+    test "deep-scroll reuse resolves cursor columns from the current resident viewport" do
+      content =
+        Enum.join(List.duplicate("x", 40) ++ List.duplicate(String.duplicate("l", 80), 260), "\n")
+
+      editor = gui_state(content: content, rows: 12, cols: 60, filetype: :text)
+      BufferProcess.set_option(editor.workspace.buffers.active, :wrap, false)
+      state = warm(editor)
+      BufferProcess.move_to(editor.workspace.buffers.active, {120, 40})
+      {incremental, state} = build_frame(state)
+      fresh = fresh_resident_frame(state.editor)
+      assert incremental.cursor_col == 40
+      assert incremental.cursor_col == fresh.cursor_col
+      assert incremental.row_delta.splices == []
+    end
+
+    test "partial updates match a fresh render through motion, edits, signs, and recovery" do
+      state = warm(resident_state(300))
+      initial = fresh_resident_frame(state.editor)
+
+      operations = [
+        :unchanged,
+        :scroll,
+        :insert,
+        :unchanged,
+        :delete,
+        :sign,
+        :unchanged,
+        :scroll,
+        :clear_sign,
+        :search,
+        :unchanged,
+        :text_style,
+        :recovery,
+        :unchanged
+      ]
+
+      Enum.reduce(operations, {state, initial.rows}, fn operation, {state, rows} ->
+        state = perform_presentation_operation(state, operation)
+        {incremental, state} = build_frame(state)
+        oracle = fresh_resident_frame(state.editor)
+        rows = apply_row_update(rows, incremental)
+
+        assert length(rows) == length(oracle.rows),
+               "#{operation}: incremental #{length(rows)} rows, fresh #{length(oracle.rows)} rows"
+
+        assert Enum.map(rows, &{&1.text, &1.spans}) == Enum.map(oracle.rows, &{&1.text, &1.spans}),
+               inspect(operation)
+
+        assert incremental.accessibility_cursor == oracle.accessibility_cursor, inspect(operation)
+        assert incremental.row_store_mode == oracle.row_store_mode
+        assert gutter_projection(incremental) == gutter_projection(oracle), inspect(operation)
+        assert scroll_projection(incremental) == scroll_projection(oracle), inspect(operation)
+
+        {state, rows}
+      end)
+    end
+
+    test "a sign-only change and its removal update the complete resident gutter" do
+      state = warm(resident_state(300))
+      state = perform_presentation_operation(state, :sign)
+      {signed, state} = build_frame(state)
+      assert %ResidentRows{overrides: [entry]} = signed.gutter.entries
+      assert signed.row_delta.splices == []
+      assert {entry.buf_line, entry.sign_type, entry.sign_text} == {220, :annotation, "!"}
+
+      {reused, state} = build_frame(state)
+      assert reused.rows == []
+      assert reused.gutter.entries == signed.gutter.entries
+
+      state = perform_presentation_operation(state, :clear_sign)
+      {cleared, _state} = build_frame(state)
+      assert %ResidentRows{line_count: 300, overrides: []} = cleared.gutter.entries
+    end
+
+    test "a text composition change fetches complete source before replacing residence" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      state = perform_presentation_operation(state, :text_style)
+      calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+      assert Enum.any?(calls.messages, &match?({:render_lines, _, 0, 300}, &1))
+    end
+
+    test "offscreen search hydration uses complete context and then reuses it" do
+      state = warm(resident_state(300))
+      state = perform_presentation_operation(state, :scroll)
+      state = perform_presentation_operation(state, :search)
+      {model, state} = build_frame(state)
+      fresh = fresh_resident_frame(state.editor)
+      assert Enum.at(model.rows, 220).spans == Enum.at(fresh.rows, 220).spans
+      assert Enum.any?(Enum.at(model.rows, 220).spans, &(&1.bg != nil))
+      {reused, state} = build_frame(state)
+      assert reused.row_delta.splices == []
+
+      calls =
+        trace_buffer_calls(state.editor.workspace.buffers.active, fn -> build_frame(state) end)
+
+      refute Enum.any?(calls.messages, &match?({:render_lines, _, 0, 300}, &1))
+    end
+
+    test "hydration reapplies substitute preview to the complete source" do
+      state = warm(resident_state(300))
+      state = perform_presentation_operation(state, :scroll)
+      mode = %Minga.Mode.CommandState{input: "%s/line 221:/replacement/g"}
+
+      workspace =
+        MingaEditor.Session.State.transition_mode(state.editor.workspace, :command, mode)
+
+      state = %{state | editor: %{state.editor | workspace: workspace}}
+      {model, state} = build_frame(state)
+      fresh = fresh_resident_frame(state.editor)
+      assert Enum.at(model.rows, 220).text =~ "replacement"
+
+      assert Enum.map(model.rows, &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+
+      {reused, _state} = build_frame(state)
+      assert reused.row_delta.splices == []
+    end
+  end
+
+  defp fresh_resident_frame(editor) do
+    {_arming_frame, state} = build_frame(editor)
+    {model, _state} = build_frame(Map.put(state, :keyframe?, true))
+    assert model.row_delta == nil
+    model
+  end
+
+  defp perform_presentation_operation(state, :unchanged), do: state
+  defp perform_presentation_operation(state, :recovery), do: Map.put(state, :keyframe?, true)
+
+  defp perform_presentation_operation(state, :scroll) do
+    BufferProcess.move_to(state.editor.workspace.buffers.active, {120, 0})
+    state
+  end
+
+  defp perform_presentation_operation(state, :insert) do
+    buffer = state.editor.workspace.buffers.active
+    BufferProcess.move_to(buffer, {50, 0})
+    BufferProcess.insert_text(buffer, "inserted\n")
+    state
+  end
+
+  defp perform_presentation_operation(state, :delete) do
+    BufferProcess.delete_lines(state.editor.workspace.buffers.active, 50, 50)
+    state
+  end
+
+  defp perform_presentation_operation(state, :insert_many) do
+    buffer = state.editor.workspace.buffers.active
+    BufferProcess.move_to(buffer, {50, 0})
+    BufferProcess.insert_text(buffer, "first\nsecond\nthird\n")
+    state
+  end
+
+  defp perform_presentation_operation(state, :delete_many) do
+    BufferProcess.delete_lines(state.editor.workspace.buffers.active, 50, 52)
+    state
+  end
+
+  defp perform_presentation_operation(state, :sign) do
+    BufferProcess.batch_decorations(state.editor.workspace.buffers.active, fn decorations ->
+      {_id, decorations} =
+        Decorations.add_annotation(decorations, 220, "!",
+          kind: :gutter_icon,
+          group: :gutter_oracle,
+          fg: 0xFF0000
+        )
+
+      decorations
+    end)
+
+    state
+  end
+
+  defp perform_presentation_operation(state, :clear_sign) do
+    BufferProcess.batch_decorations(
+      state.editor.workspace.buffers.active,
+      &Decorations.remove_group(&1, :gutter_oracle)
+    )
+
+    state
+  end
+
+  defp perform_presentation_operation(state, :text_style) do
+    BufferProcess.batch_decorations(state.editor.workspace.buffers.active, fn decorations ->
+      {_id, decorations} =
+        Decorations.add_highlight(decorations, {220, 0}, {220, 4},
+          style: Minga.Core.Face.new(fg: 0xFF0000)
+        )
+
+      decorations
+    end)
+
+    state
+  end
+
+  defp perform_presentation_operation(state, :search) do
+    search = %Minga.Mode.SearchState{input: "line 221:", direction: :forward}
+    workspace = MingaEditor.Session.State.transition_mode(state.editor.workspace, :search, search)
+    %{state | editor: %{state.editor | workspace: workspace}}
+  end
+
+  defp apply_row_update(_rows, %{row_delta: nil, rows: rows}), do: rows
+
+  defp apply_row_update(rows, %{row_delta: delta}) do
+    assert length(rows) == delta.base_row_count
+
+    result =
+      Enum.reduce(Enum.reverse(delta.splices), rows, fn splice, rows ->
+        Enum.take(rows, splice.start_index) ++
+          splice.insert_rows ++ Enum.drop(rows, splice.start_index + splice.delete_count)
+      end)
+
+    assert length(result) == delta.result_row_count
+    result
+  end
+
+  defp gutter_projection(%{gutter: %{entries: %ResidentRows{} = rows} = gutter}) do
+    {rows.line_count, rows.overrides, gutter.cursor_line, gutter.line_number_style,
+     gutter.line_number_width, gutter.sign_col_width}
+  end
+
+  defp scroll_projection(model) do
+    presentation = ScrollPresentation.from_window(model)
+
+    {presentation.anchor_top, presentation.visible_start_line, presentation.visible_end_line,
+     presentation.overscan_start_line, presentation.overscan_end_line}
   end
 
   describe "uncommitted consume retry" do

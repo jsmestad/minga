@@ -1659,15 +1659,16 @@ struct GUIGutterDecoderTests {
         #expect(gutterData.lineNumberStyle == .hybrid)
         #expect(gutterData.lineNumberWidth == 4)
         #expect(gutterData.signColWidth == 1)
-        #expect(gutterData.entries.count == 4)
-        #expect(gutterData.entries[0].bufLine == 8)
-        #expect(gutterData.entries[0].signType == .gitAdded)
-        #expect(gutterData.entries[1].displayType == .foldStart)
-        #expect(gutterData.entries[1].foldEndLine == 14)
-        #expect(gutterData.entries[2].displayType == .wrapContinuation)
-        #expect(gutterData.entries[2].signType == .diagError)
-        #expect(gutterData.entries[3].displayType == .blank)
-        #expect(gutterData.entries[3].signType == .gitRemoved)
+        let decodedEntries = try #require(gutterData.replacementEntries)
+        #expect(decodedEntries.count == 4)
+        #expect(decodedEntries[0].bufLine == 8)
+        #expect(decodedEntries[0].signType == .gitAdded)
+        #expect(decodedEntries[1].displayType == .foldStart)
+        #expect(decodedEntries[1].foldEndLine == 14)
+        #expect(decodedEntries[2].displayType == .wrapContinuation)
+        #expect(decodedEntries[2].signType == .diagError)
+        #expect(decodedEntries[3].displayType == .blank)
+        #expect(decodedEntries[3].signType == .gitRemoved)
     }
 
     @Test("Decode gui_gutter with legacy window section layout")
@@ -1705,7 +1706,136 @@ struct GUIGutterDecoderTests {
         #expect(gutterData.contentHeight == 24)
         #expect(gutterData.isActive == true)
         #expect(gutterData.contentWidth == 0)
-        #expect(gutterData.entries.count == 1)
+        #expect(gutterData.replacementEntries?.count == 1)
+    }
+
+    @Test("Decode resident gutter replacement and retain transitions")
+    func decodeResidentGutterTransitions() throws {
+        let replacement = try decodeCommand(
+            data: residentGutterData(epoch: 7, lineCount: 100, retain: false, overrides: [
+                Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .diagWarning)
+            ]),
+            offset: 0
+        ).0
+        guard case .guiGutter(let replacementUpdate) = replacement,
+              case .replace(let entries) = replacementUpdate.entryUpdate else {
+            Issue.record("Expected resident replacement")
+            return
+        }
+        #expect(entries.count == 100)
+        #expect(entries[0].bufLine == 0)
+        #expect(entries[0].displayType == .normal)
+        #expect(entries[0].signType == .none)
+        #expect(entries[42].displayType == .foldStart)
+        #expect(entries[42].signType == .diagWarning)
+
+        let retain = try decodeCommand(
+            data: residentGutterData(epoch: 7, lineCount: 100, retain: true),
+            offset: 0
+        ).0
+        guard case .guiGutter(let retainUpdate) = retain,
+              case .retainResident(let identity) = retainUpdate.entryUpdate else {
+            Issue.record("Expected resident retain")
+            return
+        }
+        #expect(identity == Wire.ResidentGutterIdentity(contentEpoch: 7, lineCount: 100))
+    }
+
+    @Test("Resident gutter replacement requires explicit complete override section")
+    func residentReplacementRequiresOverridesSection() {
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(
+                data: residentGutterData(
+                    epoch: 7, lineCount: 100, retain: false,
+                    overrides: nil
+                ),
+                offset: 0
+            )
+        }
+    }
+
+    @Test("Resident gutter retain forbids an override section")
+    func residentRetainRejectsOverridesSection() {
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(
+                data: residentGutterData(
+                    epoch: 7, lineCount: 100, retain: true,
+                    overrides: []
+                ),
+                offset: 0
+            )
+        }
+    }
+
+    @Test("Resident gutter replacement rejects duplicate and out-of-range overrides")
+    func residentReplacementValidatesOverrideIdentity() {
+        let duplicate = Wire.GutterEntry(
+            bufLine: 42, displayType: .normal, signType: .none
+        )
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(
+                data: residentGutterData(
+                    epoch: 7, lineCount: 100, retain: false,
+                    overrides: [duplicate, duplicate]
+                ),
+                offset: 0
+            )
+        }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(
+                data: residentGutterData(
+                    epoch: 7, lineCount: 100, retain: false,
+                    overrides: [Wire.GutterEntry(
+                        bufLine: 100, displayType: .normal, signType: .none
+                    )]
+                ),
+                offset: 0
+            )
+        }
+    }
+
+    private func residentGutterData(
+        epoch: UInt32,
+        lineCount: UInt32,
+        retain: Bool,
+        overrides: [Wire.GutterEntry]? = nil
+    ) -> Data {
+        var window = Data()
+        appendU16(&window, 1)
+        appendU16(&window, 0)
+        appendU16(&window, 0)
+        appendU16(&window, 24)
+        window.append(1)
+        appendU16(&window, 80)
+
+        var config = Data()
+        appendU32(&config, 10)
+        config.append(0)
+        config.append(4)
+        config.append(1)
+
+        var resident = Data()
+        appendU32(&resident, epoch)
+        appendU32(&resident, lineCount)
+        resident.append(retain ? 1 : 0)
+
+        var data = Data([OP_GUI_GUTTER, overrides == nil ? 3 : 4])
+        data.append(contentsOf: buildSectionData(0x01, window))
+        data.append(contentsOf: buildSectionData(0x02, config))
+        data.append(contentsOf: buildSectionData(0x04, resident))
+        if let overrides {
+            var section = Data()
+            appendU16(&section, UInt16(overrides.count))
+            for entry in overrides {
+                appendU32(&section, entry.bufLine)
+                section.append(entry.displayType.rawValue)
+                section.append(entry.signType.rawValue)
+                appendU32(&section, entry.foldEndLine ?? UInt32.max)
+            }
+            data.append(contentsOf: buildSectionData(0x05, section))
+        }
+        return data
     }
 
     @Test("Truncated gui_gutter entry throws malformed")

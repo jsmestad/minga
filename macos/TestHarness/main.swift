@@ -296,21 +296,42 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
 
     case .guiGutter(let data):
-        let entries = data.entries.map { e -> [String: Any] in
+        let gutterEntries: [Wire.GutterEntry]
+        let residentIdentity: Wire.ResidentGutterIdentity?
+        let retainOverrides: Bool
+        switch data.entryUpdate {
+        case .replace(let replacement):
+            residentIdentity = replacement.residentIdentity
+            gutterEntries = replacement.residentOverrides ?? Array(replacement)
+            retainOverrides = false
+        case .retainResident(let identity):
+            residentIdentity = identity
+            gutterEntries = []
+            retainOverrides = true
+        }
+        let entries = gutterEntries.map { e -> [String: Any] in
             ["buf_line": Int(e.bufLine),
              "display_type": Int(e.displayType.rawValue),
              "sign_type": Int(e.signType.rawValue),
              "fold_end_line": e.foldEndLine.map { Int($0) } ?? NSNull()]
         }
-        return ["type": "gui_gutter", "window_id": Int(data.windowId),
-                "content_row": Int(data.contentRow), "content_col": Int(data.contentCol),
-                "content_height": Int(data.contentHeight),
-                "content_width": Int(data.contentWidth), "is_active": data.isActive,
-                "cursor_line": Int(data.cursorLine),
-                "line_number_style": Int(data.lineNumberStyle.rawValue),
-                "line_number_width": Int(data.lineNumberWidth),
-                "sign_col_width": Int(data.signColWidth),
-                "entries": entries]
+        var result: [String: Any] = [
+            "type": "gui_gutter", "window_id": Int(data.windowId),
+            "content_row": Int(data.contentRow), "content_col": Int(data.contentCol),
+            "content_height": Int(data.contentHeight),
+            "content_width": Int(data.contentWidth), "is_active": data.isActive,
+            "cursor_line": Int(data.cursorLine),
+            "line_number_style": Int(data.lineNumberStyle.rawValue),
+            "line_number_width": Int(data.lineNumberWidth),
+            "sign_col_width": Int(data.signColWidth),
+            "entries": entries
+        ]
+        if let residentIdentity {
+            result["content_epoch"] = Int(residentIdentity.contentEpoch)
+            result["line_count"] = Int(residentIdentity.lineCount)
+            result["retain_overrides"] = retainOverrides
+        }
+        return result
 
     case .guiWindowContent(let data):
         let decodedRows = data.rowStore.rows(in: 0..<data.rowStore.count).rows

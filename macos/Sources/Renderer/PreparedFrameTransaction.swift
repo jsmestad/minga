@@ -77,6 +77,7 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
     case incompatibleWindowGeometry(windowId: UInt16)
     case invalidActiveWindow(windowId: UInt16)
     case windowEpochMismatch(windowId: UInt16, expected: UInt32, actual: UInt32)
+    case invalidResidentGutter(windowId: UInt16, contentEpoch: UInt32)
     case invalidRetainedRows(windowId: UInt16, contentEpoch: UInt32)
     case invalidRowSplice(windowId: UInt16, contentEpoch: UInt32)
     case missingFontResource(fontId: UInt8)
@@ -100,7 +101,8 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
              .incompatibleWindowGeometry, .invalidActiveWindow:
             return GeneratedProtocol.FrameRejectionReason.missingWindowReference.rawValue
         case .windowEpochMismatch: return GeneratedProtocol.FrameRejectionReason.windowEpochMismatch.rawValue
-        case .invalidRetainedRows: return GeneratedProtocol.FrameRejectionReason.invalidRetainedRows.rawValue
+        case .invalidResidentGutter, .invalidRetainedRows:
+            return GeneratedProtocol.FrameRejectionReason.invalidRetainedRows.rawValue
         case .missingFontResource: return GeneratedProtocol.FrameRejectionReason.missingFontResource.rawValue
         case .transcriptBeforeSeed, .transcriptEpochMismatch, .transcriptDesynced: return GeneratedProtocol.FrameRejectionReason.transcriptDesync.rawValue
         case .decodeFailure: return GeneratedProtocol.FrameRejectionReason.decodeFailure.rawValue
@@ -147,6 +149,8 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
             return "active window \(windowId) is not present in the committed editor snapshot"
         case .windowEpochMismatch(let windowId, let expected, let actual):
             return "window \(windowId) epoch \(actual) != \(expected)"
+        case .invalidResidentGutter(let windowId, let epoch):
+            return "window \(windowId) has invalid resident gutter state for epoch \(epoch)"
         case .invalidRetainedRows(let windowId, let epoch):
             return "window \(windowId) has invalid retained rows for epoch \(epoch)"
         case .invalidRowSplice(let windowId, let epoch):
@@ -335,6 +339,7 @@ struct PreparedFrameTransactionBuilder {
     private var theme: PreparedThemeUpdate?
     private var semanticImpact: GUIFrameImpact = []
     private var workingWindows: [UInt16: GUIWindowContent]
+    private let committedGutters: [UInt16: Wire.WindowGutter]
     private var workingGutters: [UInt16: Wire.WindowGutter]
     private var workingIndentGuides: [UInt16: IndentGuideData]
     private var changedWindows: [UInt16: GUIWindowContent] = [:]
@@ -378,6 +383,7 @@ struct PreparedFrameTransactionBuilder {
         self.baseFrameSeq = baseFrameSeq
         self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
+        self.committedGutters = committedGutters
         self.workingGutters = baseFrameSeq == 0 ? [:] : committedGutters
         self.workingIndentGuides = baseFrameSeq == 0 ? [:] : committedIndentGuides
         self.committedMetadata = committedMetadata
@@ -435,7 +441,20 @@ struct PreparedFrameTransactionBuilder {
         case .guiGutter(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
-            workingGutters[data.windowId] = data
+            let committedBase = baseFrameSeq == 0 ? nil : committedGutters[data.windowId]
+            guard let resolved = data.resolved(reusing: committedBase) else {
+                let epoch: UInt32
+                if case .retainResident(let identity) = data.entryUpdate {
+                    epoch = identity.contentEpoch
+                } else {
+                    epoch = 0
+                }
+                rejection = .invalidResidentGutter(
+                    windowId: data.windowId, contentEpoch: epoch
+                )
+                return
+            }
+            workingGutters[data.windowId] = resolved
             stageReplacing(
                 command, key: .window(kind: .gutter, id: data.windowId),
                 weight: resourceWeight, domain: .window
@@ -520,6 +539,16 @@ struct PreparedFrameTransactionBuilder {
         let liveWindowIds = Set(workingWindows.keys)
         if let missingReference = referencedWindowIds.subtracting(liveWindowIds).min() {
             return .failure(.missingWindowReference(windowId: missingReference))
+        }
+        for content in workingWindows.values where content.rowStore.mode == .sequential {
+            guard let viewport = content.paneGeometry?.viewport,
+                  content.rowStore.count == Int(viewport.totalLines),
+                  viewport.totalVisualRows == viewport.totalLines else {
+                return .failure(.invalidRetainedRows(windowId: content.windowId, contentEpoch: content.contentEpoch))
+            }
+        }
+        if let residentGutterFailure = residentGutterFailure() {
+            return .failure(residentGutterFailure)
         }
         if let missingFont = requiredFontIds.subtracting(registeredFontIds).min() {
             return .failure(.missingFontResource(fontId: missingFont))
@@ -620,9 +649,6 @@ struct PreparedFrameTransactionBuilder {
                 gitDeletedFg: themeColors.gitDeletedFgRGB
             )
         }
-        if baseFrameSeq == 0 {
-            prepared.viewportTopLine = 0xFFFF_FFFF
-        }
         for command in metadataCommands.commands + windowCommands.commands + focusCommands.commands {
             switch command {
             case .guiLineSpacing(let spacing):
@@ -636,10 +662,6 @@ struct PreparedFrameTransactionBuilder {
             case .guiCursorline(let row, let r, let g, let b):
                 prepared.cursorlineRow = row
                 prepared.cursorlineBg = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-            case .guiGutter(let data):
-                if data.isActive, let firstEntry = data.entries.first {
-                    prepared.viewportTopLine = firstEntry.bufLine
-                }
             case .guiStatusBar(let update):
                 prepared.totalLineCount = update.lineCount
             default:
@@ -685,6 +707,28 @@ struct PreparedFrameTransactionBuilder {
             }
         }
         return metadata
+    }
+
+    private func residentGutterFailure() -> PreparedFrameRejection? {
+        for gutter in workingGutters.values {
+            guard let identity = gutter.entries.residentIdentity else { continue }
+            guard let content = workingWindows[gutter.windowId] else { continue }
+            guard content.contentEpoch == identity.contentEpoch else {
+                return .windowEpochMismatch(
+                    windowId: gutter.windowId,
+                    expected: content.contentEpoch,
+                    actual: identity.contentEpoch
+                )
+            }
+            guard content.rowStore.mode == .sequential,
+                  UInt64(content.rowStore.count) == UInt64(identity.lineCount) else {
+                return .invalidResidentGutter(
+                    windowId: gutter.windowId,
+                    contentEpoch: identity.contentEpoch
+                )
+            }
+        }
+        return nil
     }
 
     private mutating func resolveOverlayDelta(_ delta: GUIWindowOverlayDelta) {

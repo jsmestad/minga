@@ -49,8 +49,7 @@ struct FrameState {
     // Gutter theme colors
     var gutterColors: GutterThemeColors = GutterThemeColors()
 
-    // Scroll indicator (derived from gutter + status bar data)
-    var viewportTopLine: UInt32 = 0xFFFF_FFFF
+    // Scroll indicator chrome. Viewport geometry belongs to PresentedWindowSurface.
     var totalLineCount: UInt32 = 0
     var scrollIndicatorColor: UInt32 = 0x555555
 

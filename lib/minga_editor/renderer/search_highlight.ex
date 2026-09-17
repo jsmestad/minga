@@ -52,6 +52,21 @@ defmodule MingaEditor.Renderer.SearchHighlight do
     end
   end
 
+  @doc "Returns source-independent search and substitute inputs for resident composition."
+  @spec composition_key(state()) :: tuple()
+  def composition_key(state),
+    do: {active_search_pattern(state), substitute_input(state), current_confirm_match(state)}
+
+  @spec substitute_input(state()) :: String.t() | nil
+  defp substitute_input(%{
+         workspace: %{
+           editing: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}
+         }
+       }),
+       do: input
+
+  defp substitute_input(_state), do: nil
+
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   @spec substitute_preview_lines(

@@ -465,7 +465,6 @@ private func investigationFixture(paneCount: Int, cols: UInt16 = investigationCo
     var frameState = FrameState(cols: cols, rows: investigationRows)
     frameState.defaultBg = 0x1E1E1E
     frameState.totalLineCount = UInt32(investigationResidentRows)
-    frameState.viewportTopLine = 0
     var metadata = EditorSnapshotMetadata.empty
     metadata.gutterCol = gutterWidth
     return InvestigationFixture(

@@ -162,11 +162,27 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	if !command.Window.CursorVisible {
 		t.Fatalf("full window header should decode cursor_visible from flags: %+v", command.Window)
 	}
+	if command.Window.SequentialRows {
+		t.Fatalf("ordinary full window should remain windowed: %+v", command.Window)
+	}
 	if len(command.Window.Rows) != 1 || command.Window.Rows[0].Text != "hi" {
 		t.Fatalf("rows decoded incorrectly: %+v", command.Window.Rows)
 	}
 	if got := command.Window.Rows[0].Spans[0].FG; got != 0xFFFFFF {
 		t.Fatalf("span fg = 0x%06X, want 0xFFFFFF", got)
+	}
+}
+
+func TestDecodeWindowContentSequentialRowsFlag(t *testing.T) {
+	header := []byte{0, 7, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11}
+	packet := windowContentPacket(section32(0x01, header), section32(0x02, []byte{0, 0, 0, 0}))
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if !command.Window.CursorVisible || !command.Window.SequentialRows {
+		t.Fatalf("sequential residence flag decoded incorrectly: %+v", command.Window)
 	}
 }
 
@@ -878,6 +894,99 @@ func TestDecodeGutterChrome(t *testing.T) {
 	gutter := command.Chrome.WindowGutter
 	if gutter.WindowID != 7 || gutter.ContentRow != 1 || gutter.ContentCol != 2 || gutter.CursorLine != 4 || gutter.LineNumberWidth != 4 || len(gutter.Entries) != 2 || gutter.Entries[1].DisplayType != 3 {
 		t.Fatalf("gutter decoded incorrectly: %+v", gutter)
+	}
+}
+
+func TestDecodeResidentGutterChunksAndImplicitBaseline(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 1, 0, 2, 0, 3, 1, 0, 80})
+	config := section(0x02, []byte{0, 0, 0, 1, 1, 4, 2})
+	resident := section(0x04, []byte{0, 0, 0, 44, 0, 0, 0, 4, 0})
+	firstChunk := []byte{0, 1, 0, 0, 0, 1, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF}
+	secondChunk := []byte{0, 1, 0, 0, 0, 3, 0, 8, 0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0xBB, 0xCC, 1, 'A'}
+	packet := []byte{generated.OPGuiGutter, 5}
+	packet = append(packet, window...)
+	packet = append(packet, config...)
+	packet = append(packet, resident...)
+	packet = append(packet, section(0x05, firstChunk)...)
+	packet = append(packet, section(0x05, secondChunk)...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	gutter := command.Chrome.WindowGutter
+	if gutter.DecodeError != "" || gutter.Resident == nil || gutter.Resident.ContentEpoch != 44 || gutter.EntryCount() != 4 || len(gutter.Resident.Overrides) != 2 {
+		t.Fatalf("resident gutter decoded incorrectly: %+v", gutter)
+	}
+	baseline, ok := gutter.EntryAt(0)
+	if !ok || baseline.BufferLine != 0 || baseline.DisplayType != 0 || baseline.SignType != 0 {
+		t.Fatalf("implicit baseline = %+v, %v", baseline, ok)
+	}
+	annotation, ok := gutter.EntryAt(3)
+	if !ok || annotation.SignType != 8 || annotation.SignFG != 0xAABBCC || annotation.SignText != "A" {
+		t.Fatalf("chunked annotation override = %+v, %v", annotation, ok)
+	}
+}
+
+func TestDecodeResidentGutterAcceptsExplicitEmptySnapshot(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 0, 0, 0, 0, 3, 1, 0, 80})
+	config := section(0x02, []byte{0, 0, 0, 1, 1, 4, 2})
+	resident := section(0x04, []byte{0, 0, 0, 44, 0, 0, 0, 4, 0})
+	packet := []byte{generated.OPGuiGutter, 4}
+	packet = append(packet, window...)
+	packet = append(packet, config...)
+	packet = append(packet, resident...)
+	packet = append(packet, section(0x05, []byte{0, 0})...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	gutter := command.Chrome.WindowGutter
+	if gutter.DecodeError != "" || gutter.Resident == nil || len(gutter.Resident.Overrides) != 0 {
+		t.Fatalf("explicit empty resident snapshot decoded incorrectly: %+v", gutter)
+	}
+}
+
+func TestDecodeResidentGutterRequiresWindowAndConfig(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 0, 0, 0, 0, 3, 1, 0, 80})
+	config := section(0x02, []byte{0, 0, 0, 1, 1, 4, 2})
+	resident := section(0x04, []byte{0, 0, 0, 44, 0, 0, 0, 4, 0})
+	overrides := section(0x05, []byte{0, 0})
+
+	for name, sections := range map[string][][]byte{
+		"missing config": {window, resident, overrides},
+		"missing window": {config, resident, overrides},
+	} {
+		t.Run(name, func(t *testing.T) {
+			packet := []byte{generated.OPGuiGutter, byte(len(sections))}
+			for _, section := range sections {
+				packet = append(packet, section...)
+			}
+			command, err := DecodeCommand(packet)
+			if err != nil {
+				t.Fatalf("DecodeCommand returned error: %v", err)
+			}
+			if command.Chrome.WindowGutter.DecodeError == "" {
+				t.Fatalf("resident gutter with %s was accepted", name)
+			}
+		})
+	}
+}
+
+func TestDecodeResidentGutterRejectsSnapshotWithoutOverrideSection(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 0, 0, 0, 0, 3, 1, 0, 80})
+	resident := section(0x04, []byte{0, 0, 0, 44, 0, 0, 0, 4, 0})
+	packet := []byte{generated.OPGuiGutter, 2}
+	packet = append(packet, window...)
+	packet = append(packet, resident...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Chrome.WindowGutter.DecodeError == "" {
+		t.Fatal("resident snapshot without section 0x05 was accepted")
 	}
 }
 

@@ -8,6 +8,8 @@ defmodule Minga.RenderModel.Window do
 
   `content_digest` is a BEAM-internal, never-encoded incremental fingerprint of the row set (`Minga.RenderModel.Window.ContentDigest`), set only on the full-document residence path. When present, the GUI adapter's content frame-emit gate uses it instead of hashing the whole `rows` list, so an edit-frame gate is O(changed rows) rather than O(document). It is `nil` off the residence path, where the adapter keeps hashing `rows` directly.
 
+  `row_store_mode` describes the complete row-store extent independently of this frame's payload. `{:resident, line_count}` is a complete sequential document; when `row_delta` is present, `rows` contains only inserted payloads and can be empty. Gutters and scroll bounds must use the resident extent instead of interpreting this partial payload as a snapshot. `:windowed` carries a dense viewport row set.
+
   `scroll_seq` is the monotonic scroll-authority sequence (#2661) encoded onto `ScrollPresentation`. It advances when the committed viewport top changes for a reason other than an echoed frontend scroll report, or when an authoritative viewport-jump command explicitly marked the window even though the top was unchanged (#2652); see `MingaEditor.Window.settle_scroll_seq/1`. Frontends discard their local offset on any increase, so a BEAM-initiated jump racing a local scroll is distinguished from the frontend's own reported delta being reflected back.
   """
 
@@ -58,6 +60,7 @@ defmodule Minga.RenderModel.Window do
             contiguous_rows: false,
             content_digest: nil,
             row_delta: nil,
+            row_store_mode: :windowed,
             scroll_seq: 0
 
   @type t :: %__MODULE__{
@@ -90,6 +93,7 @@ defmodule Minga.RenderModel.Window do
           contiguous_rows: boolean(),
           content_digest: Minga.RenderModel.Window.ContentDigest.t() | nil,
           row_delta: Minga.RenderModel.Window.RowDelta.t() | nil,
+          row_store_mode: :windowed | {:resident, non_neg_integer()},
           scroll_seq: non_neg_integer()
         }
 end

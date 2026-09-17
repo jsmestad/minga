@@ -507,6 +507,12 @@ type GuiGutterConfig struct {
 	SignColWidth    uint8
 }
 
+type GuiGutterResident struct {
+	ContentEpoch    uint32
+	LineCount       uint32
+	RetainOverrides uint8
+}
+
 type GuiWindowViewportDeltaHeader struct {
 	WindowID     uint16
 	ContentEpoch uint32

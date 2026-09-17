@@ -52,6 +52,12 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiGutterEntries":
 		v, n, err := DecodeGuiGutterEntries(payload, 0, len(payload))
 		return v, n, err
+	case "GuiGutterResident":
+		v, n, err := DecodeGuiGutterResident(payload, 0, len(payload))
+		return v, n, err
+	case "GuiGutterResidentOverrides":
+		v, n, err := DecodeGuiGutterResidentOverrides(payload, 0, len(payload))
+		return v, n, err
 	case "GuiGutterSepFields":
 		v, n, err := DecodeGuiGutterSepFields(payload, 0, len(payload))
 		return v, n, err

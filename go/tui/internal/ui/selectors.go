@@ -85,7 +85,7 @@ func (m Model) statusBar() (protocol.StatusBar, bool) {
 
 func (m Model) windowGutter(windowID uint16) (protocol.Gutter, bool) {
 	gutter, ok := m.gutters[windowID]
-	if ok && (len(gutter.Entries) > 0 || gutter.LineNumberWidth > 0 || gutter.SignColWidth > 0) {
+	if ok && (gutter.EntryCount() > 0 || gutter.LineNumberWidth > 0 || gutter.SignColWidth > 0) {
 		return gutter, true
 	}
 	return protocol.Gutter{}, false

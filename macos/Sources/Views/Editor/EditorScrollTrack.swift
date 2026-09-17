@@ -6,6 +6,14 @@ import CoreGraphics
 /// unit-tested without AppKit (issue #2358). The live hit-testing and drag
 /// handling still live in `EditorNSView`; only this math is shared.
 enum EditorScrollTrack {
+    /// One authoritative scroll presentation shared by drawing and hit testing.
+    struct Metrics: Equatable {
+        let totalLines: UInt32
+        let visibleRows: UInt32
+        let viewportTopLine: CGFloat
+        let resident: Bool
+    }
+
     /// Geometry of the rendered scrollbar thumb within the editor track.
     struct Thumb {
         /// Top-down Y position of the thumb within the track.
@@ -24,6 +32,59 @@ enum EditorScrollTrack {
 
     /// Minimum thumb height, matching the renderer's 20px minimum translated into view coordinates.
     static let minThumbHeight: CGFloat = 20.0
+
+    /// Resolves scroll metrics from the active pane and the local transform used for this draw.
+    static func metrics(
+        surface: PresentedWindowSurface,
+        localTransform: EditorLocalPresentationTransform?,
+        cellHeight: CGFloat
+    ) -> Metrics? {
+        let viewport = surface.paneGeometry.viewport
+        guard viewport.totalLines > 0, viewport.rows > 0, cellHeight > 0 else { return nil }
+        let localOffset = localTransform?.windowId == surface.windowId
+            ? localTransform?.offset.y ?? 0
+            : 0
+        let topLine = max(0, CGFloat(viewport.top) + localOffset / cellHeight)
+        let resident = surface.content.scrollPresentation.map {
+            $0.overscanStartLine == 0 && $0.overscanEndLine >= viewport.totalLines
+        } ?? false
+        return Metrics(
+            totalLines: viewport.totalLines,
+            visibleRows: UInt32(viewport.rows),
+            viewportTopLine: topLine,
+            resident: resident
+        )
+    }
+
+    /// Returns true when the editor should intercept a right-edge click for these metrics.
+    static func shouldCaptureTrackClick(
+        metrics: Metrics,
+        scrollIndicatorAlpha: Float,
+        alwaysShowScrollbar: Bool
+    ) -> Bool {
+        guard metrics.totalLines > metrics.visibleRows else { return false }
+        return alwaysShowScrollbar || scrollIndicatorAlpha > 0
+    }
+
+    /// Computes thumb geometry from the same metrics used by renderer and pointer handling.
+    static func thumb(
+        viewHeight: CGFloat,
+        metrics: Metrics,
+        minThumbHeight: CGFloat = Self.minThumbHeight
+    ) -> Thumb? {
+        guard metrics.totalLines > metrics.visibleRows, viewHeight > 0 else { return nil }
+        let proportion = CGFloat(metrics.visibleRows) / CGFloat(metrics.totalLines)
+        let thumbHeight = min(viewHeight, max(proportion * viewHeight, minThumbHeight))
+        let travelHeight = max(viewHeight - thumbHeight, 0)
+        let maxTop = maxScrollableTop(
+            totalLines: metrics.totalLines,
+            visibleRows: metrics.visibleRows,
+            resident: metrics.resident
+        )
+        let clampedTopLine = min(metrics.viewportTopLine, CGFloat(maxTop))
+        let y = travelHeight > 0 ? (clampedTopLine / CGFloat(maxTop)) * travelHeight : 0
+        return Thumb(y: y, height: thumbHeight, travelHeight: travelHeight)
+    }
 
     /// Whether a point falls within the scroll-track hit region of a view whose
     /// width is `viewWidth`.
@@ -60,13 +121,16 @@ enum EditorScrollTrack {
         guard totalLines > visibleRows, viewHeight > 0 else { return nil }
         guard viewportTopLine != 0xFFFF_FFFF else { return nil }
 
-        let proportion = CGFloat(visibleRows) / CGFloat(totalLines)
-        let thumbHeight = min(viewHeight, max(proportion * viewHeight, minThumbHeight))
-        let travelHeight = max(viewHeight - thumbHeight, 0)
-        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows, resident: resident)
-        let clampedTopLine = min(viewportTopLine, maxTop)
-        let y = travelHeight > 0 ? (CGFloat(clampedTopLine) / CGFloat(maxTop)) * travelHeight : 0
-        return Thumb(y: y, height: thumbHeight, travelHeight: travelHeight)
+        return thumb(
+            viewHeight: viewHeight,
+            metrics: Metrics(
+                totalLines: totalLines,
+                visibleRows: visibleRows,
+                viewportTopLine: CGFloat(viewportTopLine),
+                resident: resident
+            ),
+            minThumbHeight: minThumbHeight
+        )
     }
 
     /// Returns the pointer offset inside the current thumb when the pointer is grabbing the thumb.

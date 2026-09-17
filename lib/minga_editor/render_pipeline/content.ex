@@ -22,6 +22,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
   alias MingaEditor.RenderModel.Window.BuildResult
@@ -79,10 +80,16 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   # ── Private ──────────────────────────────────────────────────────────────
 
-  @spec build_window_model_with_slot_reset(state(), WindowScroll.t(), Window.t(), Context.t()) ::
+  @spec build_window_model_with_slot_reset(
+          state(),
+          WindowScroll.t(),
+          Window.t(),
+          Context.t(),
+          MingaEditor.RenderModel.Window.ResidentBuild.plan() | :windowed
+        ) ::
           {Minga.RenderModel.Window.t(), BuildResult.t(), Window.t(),
            MingaEditor.UI.FontRegistry.t()}
-  defp build_window_model_with_slot_reset(state, scroll, window, render_ctx) do
+  defp build_window_model_with_slot_reset(state, scroll, window, render_ctx, plan) do
     result =
       Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.window.id}, fn ->
         WindowModelBuilder.build_with_stats(
@@ -94,6 +101,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           retained_rows: Window.retained_rows(window),
           retained_wrap_lines: Window.retained_wrap_lines(window),
           resident_build: Window.resident_build(window),
+          resident_plan: plan,
           hydration_reason: Window.hydration_reason(window),
           edit_deltas: Window.pending_edit_deltas(window),
           row_slot_allocator: Window.row_slot_allocator(window)
@@ -114,7 +122,56 @@ defmodule MingaEditor.RenderPipeline.Content do
           full_refresh: true
       }
 
-      build_window_model_with_slot_reset(state, reset_scroll, reset_window, render_ctx)
+      {reset_scroll, render_ctx, state, plan} = prepare_window_source(state, reset_scroll)
+      build_window_model_with_slot_reset(state, reset_scroll, reset_window, render_ctx, plan)
+  end
+
+  @spec prepare_window_source(state(), WindowScroll.t()) ::
+          {WindowScroll.t(), Context.t(), state(),
+           MingaEditor.RenderModel.Window.ResidentBuild.plan() | :windowed}
+  defp prepare_window_source(state, scroll) do
+    {ctx, state} = build_render_context(state, scroll)
+    plan = WindowModelBuilder.plan_resident_build(scroll, ctx)
+    prepare_planned_source(state, scroll, ctx, plan)
+  end
+
+  @spec prepare_planned_source(
+          state(),
+          WindowScroll.t(),
+          Context.t(),
+          MingaEditor.RenderModel.Window.ResidentBuild.plan() | :windowed
+        ) ::
+          {WindowScroll.t(), Context.t(), state(),
+           MingaEditor.RenderModel.Window.ResidentBuild.plan() | :windowed}
+  defp prepare_planned_source(state, scroll, _ctx, {:hydrate, _reason} = plan) do
+    scroll = BufferPrefetch.ensure_resident_source(state, scroll, plan)
+    {ctx, state} = build_render_context(state, scroll)
+    {scroll, ctx, state, plan}
+  end
+
+  defp prepare_planned_source(state, scroll, ctx, plan), do: {scroll, ctx, state, plan}
+
+  @spec build_render_context(state(), WindowScroll.t()) :: {Context.t(), state()}
+  defp build_render_context(state, scroll) do
+    ContentHelpers.build_render_ctx(state, scroll.window, %{
+      viewport: scroll.viewport,
+      cursor: {scroll.cursor_line, scroll.cursor_byte_col},
+      cursor_col: scroll.cursor_col,
+      lines: scroll.lines,
+      first_line: scroll.first_line,
+      preview_matches: scroll.preview_matches,
+      gutter_w: scroll.gutter_w,
+      content_w: scroll.content_w,
+      has_sign_column: scroll.has_sign_column,
+      file_path: scroll.snapshot.file_path,
+      options: scroll.snapshot.options,
+      decorations: scroll.snapshot.decorations,
+      git_signs: scroll.git_signs,
+      is_active: scroll.is_active,
+      wrap_on: scroll.wrap_on,
+      line_number_style: scroll.line_number_style,
+      width_oracle: scroll.width_oracle
+    })
   end
 
   @spec add_rows_rasterized(state(), non_neg_integer()) :: state()
@@ -125,6 +182,8 @@ defmodule MingaEditor.RenderPipeline.Content do
   @spec build_window_content(state(), WindowScroll.t()) ::
           {WindowContent.t(), Cursor.t() | nil, state()}
   defp build_window_content(state, scroll) do
+    {scroll, render_ctx, state, plan} = prepare_window_source(state, scroll)
+
     %WindowScroll{
       win_layout: win_layout,
       is_active: is_active,
@@ -137,39 +196,11 @@ defmodule MingaEditor.RenderPipeline.Content do
       snapshot: snapshot,
       gutter_w: gutter_w,
       content_w: content_w,
-      has_sign_column: has_sign_column,
-      preview_matches: preview_matches,
-      line_number_style: line_number_style,
       wrap_on: wrap_on,
-      width_oracle: width_oracle,
       window: window
     } = scroll
 
     {row_off, col_off, _content_width, _content_height} = win_layout.content
-
-    cursor = {cursor_line, cursor_byte_col}
-
-    # Build per-frame render context (also updates caches on state)
-    {render_ctx, state} =
-      ContentHelpers.build_render_ctx(state, window, %{
-        viewport: viewport,
-        cursor: cursor,
-        cursor_col: cursor_col,
-        lines: lines,
-        first_line: first_line,
-        preview_matches: preview_matches,
-        gutter_w: gutter_w,
-        content_w: content_w,
-        has_sign_column: has_sign_column,
-        file_path: snapshot.file_path,
-        options: snapshot.options,
-        decorations: snapshot.decorations,
-        git_signs: scroll.git_signs,
-        is_active: is_active,
-        wrap_on: wrap_on,
-        line_number_style: line_number_style,
-        width_oracle: width_oracle
-      })
 
     # Compute context fingerprint and check for context changes.
     # If any context input (visual selection, search, highlights, signs,
@@ -225,7 +256,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     # Carry the previous frame's retained rows so unchanged rows are reused
     # without recomposing, and capture how many rows were freshly rasterized (#2287).
     {window_model, build_result, window, font_registry} =
-      build_window_model_with_slot_reset(state, scroll, window, render_ctx)
+      build_window_model_with_slot_reset(state, scroll, window, render_ctx, plan)
 
     window =
       window

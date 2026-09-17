@@ -103,3 +103,42 @@ func TestNewResidentRowsRejectsDecreasingBufferLines(t *testing.T) {
 		t.Fatal("decreasing buffer-line order accepted")
 	}
 }
+
+func TestSequentialResidentRowsProjectBufferLinesAcrossStructuralSplices(t *testing.T) {
+	rows := []protocol.WindowRow{
+		{ID: 1, BufferLine: 0, Text: "zero"},
+		{ID: 2, BufferLine: 1, Text: "one"},
+		{ID: 3, BufferLine: 2, Text: "two"},
+	}
+	store, err := newResidentRowsWithMode(rows, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert := protocol.WindowContent{
+		BaseRowCount: 3, ResultRowCount: 5,
+		RowSplices: []protocol.WindowRowSplice{{
+			StartIndex: 1,
+			InsertRows: []protocol.WindowRow{{ID: 4, BufferLine: 1, Text: "inserted one"}, {ID: 5, BufferLine: 2, Text: "inserted two"}},
+		}},
+	}
+	store, miss, err := store.splice(insert, nil)
+	if err != nil || miss {
+		t.Fatalf("sequential insert failed: miss=%v err=%v", miss, err)
+	}
+	for index, row := range store.materialize() {
+		if row.BufferLine != uint32(index) {
+			t.Fatalf("inserted row %d projects buffer line %d", index, row.BufferLine)
+		}
+	}
+	deleteInserted := protocol.WindowContent{
+		BaseRowCount: 5, ResultRowCount: 3,
+		RowSplices: []protocol.WindowRowSplice{{StartIndex: 1, DeleteCount: 2}},
+	}
+	store, miss, err = store.splice(deleteInserted, nil)
+	if err != nil || miss {
+		t.Fatalf("sequential deletion failed: miss=%v err=%v", miss, err)
+	}
+	if got := store.materialize(); !reflect.DeepEqual(got, rows) {
+		t.Fatalf("sequential deletion did not restore projected rows: %+v", got)
+	}
+}

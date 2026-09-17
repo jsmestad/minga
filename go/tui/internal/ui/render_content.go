@@ -859,10 +859,10 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int, cursorlin
 		style = style.Background(clBG)
 		bg = clBG
 	}
-	if rowIndex < 0 || rowIndex >= len(gutter.Entries) {
+	entry, ok := gutter.EntryAt(rowIndex)
+	if !ok {
 		return style.Render(strings.Repeat(" ", width))
 	}
-	entry := gutter.Entries[rowIndex]
 	if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {
 		style = style.Foreground(m.palette().GutterCurrentText()).Bold(true)
 	}

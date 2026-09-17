@@ -151,6 +151,9 @@ type WindowContent struct {
 	AnnotationsSet bool
 	GeometrySet    bool
 	ScrollSet      bool
+	// SequentialRows marks a complete non-wrapped row store whose current
+	// BufferLine is always its resident index. Structural deltas retain the mode.
+	SequentialRows bool
 }
 
 type Cursorline struct {
@@ -412,6 +415,7 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) bool
 		window.ScrollLeft = hdr.ScrollLeft
 		window.ScrollLeftSet = true
 		window.ContentEpoch = hdr.ContentEpoch
+		window.SequentialRows = hdr.Flags&0x04 != 0
 		return true
 	}
 

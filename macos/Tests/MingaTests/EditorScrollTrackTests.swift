@@ -1,8 +1,57 @@
 import Testing
 import CoreGraphics
+import MingaProtocol
 
 @Suite("Editor scroll-track geometry (issue #2358)")
 struct EditorScrollTrackTests {
+    @Test("active surface viewport and local transform produce one thumb metric")
+    func surfaceMetricsIncludeLocalScroll() throws {
+        let viewport = GUIViewportSummary(
+            top: 40, left: 0, rows: 20, cols: 80,
+            totalLines: 100, visualRowOffset: 0, totalVisualRows: 100
+        )
+        let rect = GUICellRect(row: 0, col: 0, width: 80, height: 20)
+        let geometry = GUIPaneGeometry(
+            windowId: 1, totalRect: rect, contentRect: rect, textRect: rect,
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 20),
+            clipRect: rect, viewport: viewport,
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+            hitRegions: []
+        )
+        let presentation = GUIScrollPresentation(
+            windowId: 1, resetRequired: false, anchorTop: 40, anchorLeft: 0,
+            anchorVisualRowOffset: 0, visibleStartLine: 40, visibleEndLine: 60,
+            overscanStartLine: 0, overscanEndLine: 100, contentEpoch: 7,
+            layoutGeneration: 1
+        )
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 7,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], paneGeometry: geometry,
+            scrollPresentation: presentation
+        )
+        let surface = PresentedWindowSurface(
+            content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil
+        )
+        let local = EditorLocalPresentationTransform(
+            windowId: 1, offset: CGPoint(x: 0, y: 25)
+        )
+
+        let metrics = try #require(EditorScrollTrack.metrics(
+            surface: surface, localTransform: local, cellHeight: 10
+        ))
+        #expect(metrics.viewportTopLine == 42.5)
+        #expect(metrics.totalLines == 100)
+        #expect(metrics.visibleRows == 20)
+        #expect(metrics.resident)
+
+        let thumb = try #require(EditorScrollTrack.thumb(
+            viewHeight: 100, metrics: metrics
+        ))
+        #expect(abs(thumb.y - (42.5 / 99 * 80)) < 0.001)
+    }
+
     @Test("clicking the top of the track maps to the first line")
     func topMapsToFirstLine() {
         let line = EditorScrollTrack.line(

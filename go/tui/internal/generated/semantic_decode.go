@@ -962,6 +962,49 @@ func DecodeGuiGutterEntries(data []byte, offset int, windowEnd int) ([]GutterEnt
 	return items, pos, nil
 }
 
+func DecodeGuiGutterResident(data []byte, offset int, windowEnd int) (GuiGutterResident, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+4, "content_epoch"); err != nil {
+		return GuiGutterResident{}, offset, err
+	}
+	contentEpoch := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "line_count"); err != nil {
+		return GuiGutterResident{}, offset, err
+	}
+	lineCount := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "retain_overrides"); err != nil {
+		return GuiGutterResident{}, offset, err
+	}
+	retainOverrides := data[pos]
+	pos++
+	return GuiGutterResident{
+		ContentEpoch:    contentEpoch,
+		LineCount:       lineCount,
+		RetainOverrides: retainOverrides,
+	}, pos, nil
+}
+
+func DecodeGuiGutterResidentOverrides(data []byte, offset int, windowEnd int) ([]GutterEntry, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "resident_overrides count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	items := make([]GutterEntry, 0, min(count, len(data)-pos))
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeGutterEntry(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
 // Section decoders for gui_picker
 
 func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHeader, int, error) {

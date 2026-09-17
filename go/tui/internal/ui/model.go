@@ -693,15 +693,11 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		)
 	}
 
-	if m.staging.base == 0 {
-		m.lineCache.reset()
-		m.renderWork.fullResets++
-	}
-
 	// Validate every window reference against a temporary snapshot before any
 	// publication. Missing refs use targeted recovery; wrong epochs reject the
 	// entire frame through the generation-aware status contract.
-	if failure := m.validateWindowReferences(); failure != nil {
+	windowSnapshot, failure := m.validateWindowReferences()
+	if failure != nil {
 		if failure.targeted {
 			m.lastFrameOutcome = frameOutcomeRecoveryRequired
 			generation, seq := m.staging.generation, m.staging.seq
@@ -716,11 +712,31 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		return m.rejectStaging(cmds, failure.reason, description)
 	}
 
+	gutterCandidate, gutterFailure := m.prepareGutterCandidate(windowSnapshot)
+	if gutterFailure != nil {
+		if gutterFailure.targeted {
+			m.lastFrameOutcome = frameOutcomeRecoveryRequired
+			generation, seq := m.staging.generation, m.staging.seq
+			m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, gutterFailure.windowID))
+			m.staging = nil
+			return cmds
+		}
+		return m.rejectStaging(cmds, gutterFailure.reason, gutterFailure.description)
+	}
+
+	if m.staging.base == 0 {
+		m.lineCache.reset()
+		m.renderWork.fullResets++
+	}
+
 	// Valid: replay the buffer atomically through the live mutation path.
 	generation, seq := m.staging.generation, m.staging.seq
 	for _, staged := range m.staging.commands {
 		m.applyMutation(staged)
 	}
+	// Gutter state is prepared as a detached frame candidate so retain updates,
+	// keyframe clears, and structural replacements publish atomically.
+	m.gutters = gutterCandidate
 	if transcriptCandidate != nil {
 		m.transcript = transcriptCandidate
 	}
@@ -835,9 +851,21 @@ type windowReferenceFailure struct {
 	targeted bool
 }
 
+type windowReferenceSnapshot struct {
+	windows map[uint16]protocol.WindowContent
+	stores  map[uint16]residentRows
+}
+
+type gutterReferenceFailure struct {
+	windowID    uint16
+	reason      byte
+	targeted    bool
+	description string
+}
+
 // validateWindowReferences resolves deltas against a temporary window snapshot.
 // It performs no observable writes, so any failure is reported before publication.
-func (m *Model) validateWindowReferences() *windowReferenceFailure {
+func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowReferenceFailure) {
 	working := make(map[uint16]protocol.WindowContent, len(m.windows))
 	stores := make(map[uint16]residentRows, len(m.residentRows))
 	for id, window := range m.windows {
@@ -849,50 +877,116 @@ func (m *Model) validateWindowReferences() *windowReferenceFailure {
 	for _, command := range m.staging.commands {
 		switch command.Kind {
 		case protocol.CommandWindowContent:
-			store, err := newResidentRows(command.Window.Rows)
+			store, err := newResidentRowsWithMode(command.Window.Rows, command.Window.SequentialRows)
 			if err != nil {
-				return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
+				return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
 			}
 			working[command.Window.ID] = command.Window
 			stores[command.Window.ID] = store
 		case protocol.CommandWindowDelta:
 			previous, ok := working[command.Window.ID]
 			if !ok {
-				return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+				return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 			}
 			if previous.ContentEpoch != command.Window.ContentEpoch {
-				return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectWindowEpoch}
+				return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectWindowEpoch}
 			}
 			if command.Window.RowSplicesSet {
 				store, exists := stores[command.Window.ID]
 				if !exists {
-					return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+					return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 				}
 				next, refMiss, err := store.splice(command.Window, m.renderWork)
 				if err != nil {
 					if refMiss {
-						return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+						return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 					}
-					return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
+					return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
 				}
 				stores[command.Window.ID] = next
 				previous.Rows = compatibilityRows(next)
 			} else if command.Window.Rows != nil {
 				store, exists := stores[command.Window.ID]
 				if !exists {
-					return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+					return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 				}
 				next, refMiss, err := store.resolveRows(command.Window.Rows)
 				if err != nil {
-					return &windowReferenceFailure{windowID: command.Window.ID, targeted: refMiss}
+					return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: refMiss}
 				}
 				stores[command.Window.ID] = next
 				previous.Rows = compatibilityRows(next)
 			}
+			if command.Window.GeometrySet {
+				previous.Geometry = command.Window.Geometry
+				previous.GeometrySet = true
+			}
 			working[command.Window.ID] = previous
 		}
 	}
-	return nil
+	for id, window := range working {
+		store := stores[id]
+		if store.sequential && (!window.GeometrySet || store.count() != int(window.Geometry.TotalLines) || window.Geometry.TotalVisualRows != window.Geometry.TotalLines) {
+			return nil, &windowReferenceFailure{windowID: id, reason: protocol.RejectInvalidRetainedRows}
+		}
+	}
+	return &windowReferenceSnapshot{windows: working, stores: stores}, nil
+}
+
+// prepareGutterCandidate resolves resident gutter updates against the frame's
+// already-validated window snapshot. A keyframe starts from an empty gutter
+// set; a delta starts from the last committed set. Nothing here mutates live
+// state, so a failed retain key or document extent cannot partially publish.
+func (m *Model) prepareGutterCandidate(snapshot *windowReferenceSnapshot) (map[uint16]protocol.Gutter, *gutterReferenceFailure) {
+	candidate := make(map[uint16]protocol.Gutter, len(m.gutters))
+	if m.staging.base != 0 {
+		for id, gutter := range m.gutters {
+			candidate[id] = gutter
+		}
+	}
+
+	for _, command := range m.staging.commands {
+		if command.Kind != protocol.CommandChrome || command.Chrome.Opcode != generated.OPGuiGutter {
+			continue
+		}
+		next := command.Chrome.WindowGutter
+		if next.DecodeError != "" {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectDecodeFailure, description: next.DecodeError}
+		}
+		if next.Resident == nil {
+			candidate[next.WindowID] = next
+			continue
+		}
+
+		window, windowOK := snapshot.windows[next.WindowID]
+		store, storeOK := snapshot.stores[next.WindowID]
+		if !windowOK || !storeOK {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, targeted: true}
+		}
+		if window.ContentEpoch != next.Resident.ContentEpoch {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectWindowEpoch, description: "gutter content epoch mismatch"}
+		}
+		if !store.sequential {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectInvalidRetainedRows, description: "resident gutter requires sequential rows"}
+		}
+		if store.count() != int(next.Resident.LineCount) {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectInvalidRetainedRows, description: "gutter line count mismatch"}
+		}
+
+		if next.Resident.RetainOverrides {
+			previous, ok := m.gutters[next.WindowID]
+			if m.staging.base == 0 || !ok || previous.Resident == nil || previous.Resident.ContentEpoch != next.Resident.ContentEpoch || previous.Resident.LineCount != next.Resident.LineCount {
+				return nil, &gutterReferenceFailure{windowID: next.WindowID, targeted: true}
+			}
+			next.Resident = &protocol.ResidentGutterEntries{
+				ContentEpoch: previous.Resident.ContentEpoch,
+				LineCount:    previous.Resident.LineCount,
+				Overrides:    previous.Resident.Overrides,
+			}
+		}
+		candidate[next.WindowID] = next
+	}
+	return candidate, nil
 }
 
 // applyMutation runs a single command through the live per-command mutation
@@ -1003,7 +1097,7 @@ func (m *Model) applyExtensionRuntime(payload protocol.ExtensionRuntimePayload) 
 }
 
 func (m *Model) putWindow(window protocol.WindowContent) {
-	store, err := newResidentRows(window.Rows)
+	store, err := newResidentRowsWithMode(window.Rows, window.SequentialRows)
 	if err != nil {
 		m.removeWindow(window.ID)
 		return
