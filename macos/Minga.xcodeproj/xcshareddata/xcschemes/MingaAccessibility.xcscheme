@@ -79,13 +79,48 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "MINGA_AX_CONFIG"
+            value = "$(MINGA_AX_CONFIG)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "MINGA_AX_DEBUG_LOG"
+            value = "$(MINGA_AX_DEBUG_LOG)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "MINGA_AX_HOME"
+            value = "$(MINGA_AX_HOME)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "MINGA_AX_RUNTIME_PARENT"
             value = "$(MINGA_AX_RUNTIME_PARENT)"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "MINGA_AX_SOURCE"
+            value = "$(MINGA_AX_SOURCE)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "MINGA_AX_VARIANT"
             value = "$(MINGA_AX_VARIANT)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "MINGA_AX_XDG_CACHE_HOME"
+            value = "$(MINGA_AX_XDG_CACHE_HOME)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "MINGA_AX_XDG_CONFIG_HOME"
+            value = "$(MINGA_AX_XDG_CONFIG_HOME)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "MINGA_AX_XDG_DATA_HOME"
+            value = "$(MINGA_AX_XDG_DATA_HOME)"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

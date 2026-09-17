@@ -27,47 +27,78 @@ enum AccessibilityClientError: Error, CustomStringConvertible {
 @MainActor
 final class AccessibilityClient {
     private let application: XCUIApplication
-    private let maximumElements = 240
-    private let pollInterval: TimeInterval = 0.05
+    private let maximumFailureElements = 120
+    private let pollInterval: TimeInterval = 0.25
 
     init(application: XCUIApplication) {
         self.application = application
     }
 
+    func elements(
+        ofType type: XCUIElement.ElementType,
+        identifierPrefix: String? = nil,
+        label: String? = nil,
+        labelContains: String? = nil
+    ) -> XCUIElementQuery {
+        var predicates: [NSPredicate] = []
+        if let identifierPrefix {
+            predicates.append(NSPredicate(format: "identifier BEGINSWITH %@", identifierPrefix))
+        }
+        if let label {
+            predicates.append(NSPredicate(format: "label == %@", label))
+        }
+        if let labelContains {
+            predicates.append(NSPredicate(format: "label CONTAINS %@", labelContains))
+        }
+
+        let query = application.descendants(matching: type)
+        guard !predicates.isEmpty else { return query }
+        return query.matching(NSCompoundPredicate(andPredicateWithSubpredicates: predicates))
+    }
+
     func waitForNode(
         _ description: String,
         timeout: TimeInterval = 12,
+        query: XCUIElementQuery,
         matching predicate: (AccessibilityNode) -> Bool
     ) throws -> AccessibilityNode {
-        try wait(description, timeout: timeout) {
-            try self.nodes().first(where: predicate)
+        let element = query.firstMatch
+        return try wait(description, timeout: timeout, waitingFor: element) {
+            guard element.exists, let node = try? self.snapshot(element), predicate(node) else { return nil }
+            return node
         }
     }
 
     func waitForNodes(
         _ description: String,
         timeout: TimeInterval = 12,
-        matching predicate: (AccessibilityNode) -> Bool,
+        query: XCUIElementQuery,
         until accepted: ([AccessibilityNode]) -> Bool
     ) throws -> [AccessibilityNode] {
-        try wait(description, timeout: timeout) {
-            let matches = try self.nodes().filter(predicate)
+        try wait(description, timeout: timeout, waitingFor: query.firstMatch) {
+            guard query.firstMatch.exists else { return nil }
+            let matches = try query.allElementsBoundByIndex.map(self.snapshot)
             return accepted(matches) ? matches : nil
         }
     }
 
-    func waitUntil(
+    func waitForAbsence(
         _ description: String,
         timeout: TimeInterval = 12,
-        predicate: () throws -> Bool
+        query: XCUIElementQuery
     ) throws {
-        let _: Bool = try wait(description, timeout: timeout) {
-            try predicate() ? true : nil
+        let _: Bool = try wait(description, timeout: timeout, waitingFor: query.firstMatch) {
+            query.firstMatch.exists ? nil : true
         }
     }
 
-    func nodeExists(matching predicate: (AccessibilityNode) -> Bool) throws -> Bool {
-        try nodes().contains(where: predicate)
+    func nodeExists(
+        query: XCUIElementQuery,
+        matching predicate: (AccessibilityNode) -> Bool
+    ) throws -> Bool {
+        let element = query.firstMatch
+        guard element.exists else { return false }
+        return predicate(try snapshot(element))
     }
 
     func performPress(on node: AccessibilityNode) throws {
@@ -90,7 +121,8 @@ final class AccessibilityClient {
 
     func boundedTreeDump() -> String {
         do {
-            let snapshots = try nodes()
+            let elements = application.descendants(matching: .any).allElementsBoundByIndex
+            let snapshots = try elements.prefix(maximumFailureElements).map(snapshot)
             let lines = snapshots.enumerated().map { index, node in
                 [
                     "\(index): role=\(node.role)",
@@ -100,15 +132,13 @@ final class AccessibilityClient {
                     "focused=\(String(describing: node.focused))"
                 ].joined(separator: " ")
             }
-            return lines.joined(separator: "\n")
+            let suffix = elements.count > maximumFailureElements
+                ? "\n... truncated \(elements.count - maximumFailureElements) elements"
+                : ""
+            return lines.joined(separator: "\n") + suffix
         } catch {
             return "Unable to collect XCTest accessibility tree: \(error)"
         }
-    }
-
-    private func nodes() throws -> [AccessibilityNode] {
-        let elements = application.descendants(matching: .any).allElementsBoundByIndex
-        return try elements.prefix(maximumElements).map(snapshot)
     }
 
     private func snapshot(_ element: XCUIElement) throws -> AccessibilityNode {
@@ -127,18 +157,47 @@ final class AccessibilityClient {
     private func wait<T>(
         _ description: String,
         timeout: TimeInterval,
+        waitingFor element: XCUIElement,
         predicate: () throws -> T?
     ) throws -> T {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = try? predicate() { return value }
-            RunLoop.current.run(
-                mode: .default,
-                before: min(Date().addingTimeInterval(pollInterval), deadline)
-            )
+            try throwIfConnectionFailed()
+            if let value = try predicate() { return value }
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            let interval = min(pollInterval, remaining)
+            if element.exists {
+                RunLoop.current.run(
+                    mode: .default,
+                    before: Date().addingTimeInterval(interval)
+                )
+            } else {
+                _ = element.waitForExistence(timeout: interval)
+            }
         } while Date() < deadline
 
+        try throwIfConnectionFailed()
         throw AccessibilityClientError.timeout(description, timeout)
+    }
+
+    private func throwIfConnectionFailed() throws {
+        for title in ["Editor Connection Failed", "Editor Core Stopped"] {
+            let alert = application.alerts[title]
+            guard alert.exists else { continue }
+            let details = alert.descendants(matching: .staticText).allElementsBoundByIndex
+                .map(\.label)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            throw AccessibilityClientError.condition(
+                details.isEmpty ? "\(title) appeared" : "\(title): \(details)"
+            )
+        }
+
+        let protocolError = elements(ofType: .any, identifierPrefix: "protocol-error-overlay").firstMatch
+        if protocolError.exists {
+            throw AccessibilityClientError.condition("The protocol error overlay appeared before the editor became ready")
+        }
     }
 
     private func emptyAsNil(_ value: String) -> String? {

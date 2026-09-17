@@ -5,34 +5,24 @@ import XCTest
 final class MingaAccessibilityWorkflowTests: XCTestCase {
     private let timeout: TimeInterval = 15
     private var accessibilityClient: AccessibilityClient?
-    private var artifactDirectory: URL?
     private var launchedApplication: XCUIApplication?
     private var timings: [OperationTiming] = []
 
     func testRealApplicationAccessibilityNavigationAndFocus() throws {
         let environment = ProcessInfo.processInfo.environment
         let variant = environment["MINGA_AX_VARIANT"] ?? "unspecified"
-        let runRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("minga-accessibility-\(UUID().uuidString)", isDirectory: true)
-        let artifacts = runRoot.appendingPathComponent("artifacts", isDirectory: true)
-        artifactDirectory = artifacts
         defer {
             launchedApplication?.terminate()
             launchedApplication = nil
-            try? FileManager.default.removeItem(at: runRoot)
         }
 
         do {
-            try FileManager.default.createDirectory(at: runRoot, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
-            let runtimeParent = try requiredAbsoluteURL(environment, key: "MINGA_AX_RUNTIME_PARENT")
-            let fixture = try AccessibilityTestFixture.create(at: runRoot, runtimeParent: runtimeParent)
-            let application = configuredApplication(fixture: fixture)
+            let inputs = try AccessibilityTestInputs.fromEnvironment(environment)
+            let application = configuredApplication(inputs: inputs)
             launchedApplication = application
             let client = try launch(
                 application,
                 environment: environment,
-                runRoot: runRoot,
                 variant: variant
             )
             accessibilityClient = client
@@ -54,10 +44,18 @@ private extension MingaAccessibilityWorkflowTests {
     }
 
     func verifyInitialEditorFocus(app: XCUIApplication, client: AccessibilityClient) throws {
+        let alphaQuery = client.elements(
+            ofType: .textView,
+            identifierPrefix: "minga.editor.",
+            labelContains: "alpha_target.ex"
+        )
         let alpha = try timed("first-frame") {
-            try client.waitForNode("the first fixture editor pane", timeout: timeout) {
-                self.isEditorPane($0, named: "alpha_target.ex")
-                    && $0.value?.contains("ALPHA PANE λ🙂") == true
+            try client.waitForNode(
+                "the first fixture editor pane",
+                timeout: timeout,
+                query: alphaQuery
+            ) {
+                $0.value?.contains("ALPHA PANE λ🙂") == true
             }
         }
         try require(
@@ -68,9 +66,12 @@ private extension MingaAccessibilityWorkflowTests {
         app.typeText("v")
         app.typeKey(.escape, modifierFlags: [])
         _ = try timed("focus-after-mode-cycle") {
-            try client.waitForNode("alpha editor focus after entering and leaving visual mode", timeout: timeout) {
-                self.isEditorPane($0, named: "alpha_target.ex")
-                    && $0.focused == true
+            try client.waitForNode(
+                "alpha editor focus after entering and leaving visual mode",
+                timeout: timeout,
+                query: alphaQuery
+            ) {
+                $0.focused == true
             }
         }
     }
@@ -79,26 +80,37 @@ private extension MingaAccessibilityWorkflowTests {
         try openProjectPicker(app: app, client: client)
         app.typeText("target")
 
+        let betaChoiceQuery = client.elements(
+            ofType: .button,
+            identifierPrefix: "picker-choice-",
+            label: "beta_target.ex"
+        )
         let betaChoice = try timed("picker-filter") {
-            try client.waitForNode("a nonselected beta_target.ex picker choice", timeout: timeout) {
-                $0.role == .button
-                    && $0.identifier?.hasPrefix("picker-choice-") == true
-                    && $0.label == "beta_target.ex"
-                    && $0.value?.hasPrefix("available") == true
+            try client.waitForNode(
+                "a nonselected beta_target.ex picker choice",
+                timeout: timeout,
+                query: betaChoiceQuery
+            ) {
+                $0.value?.hasPrefix("available") == true
             }
         }
         try require(betaChoice.identifier?.isEmpty == false, "The beta picker choice lacks semantic identity")
 
         try timed("picker-ax-activation") {
             try client.performPress(on: betaChoice)
-            try client.waitUntil("the picker to dismiss after accessibility activation", timeout: timeout) {
-                try !client.nodeExists { $0.label == "Find file choices" }
-            }
+            try client.waitForAbsence(
+                "the picker to dismiss after accessibility activation",
+                timeout: timeout,
+                query: findFileChoicesQuery(client: client)
+            )
         }
 
-        _ = try client.waitForNode("the activated beta_target.ex editor", timeout: timeout) {
-            self.isEditorPane($0, named: "beta_target.ex")
-                && $0.value?.contains("BETA PANE é🙂") == true
+        _ = try client.waitForNode(
+            "the activated beta_target.ex editor",
+            timeout: timeout,
+            query: editorPaneQuery(named: "beta_target.ex", client: client)
+        ) {
+            $0.value?.contains("BETA PANE é🙂") == true
                 && $0.focused == true
         }
         try require(
@@ -110,16 +122,23 @@ private extension MingaAccessibilityWorkflowTests {
     func dismissPickerAndVerifyBeta(app: XCUIApplication, client: AccessibilityClient) throws {
         try openProjectPicker(app: app, client: client)
         app.typeText("alpha")
-        _ = try client.waitForNode("the filtered alpha_target.ex picker choice", timeout: timeout) {
-            $0.role == .button
-                && $0.identifier?.hasPrefix("picker-choice-") == true
-                && $0.label == "alpha_target.ex"
-        }
+        _ = try client.waitForNode(
+            "the filtered alpha_target.ex picker choice",
+            timeout: timeout,
+            query: client.elements(
+                ofType: .button,
+                identifierPrefix: "picker-choice-",
+                label: "alpha_target.ex"
+            )
+        ) { _ in true }
         app.typeKey(.escape, modifierFlags: [])
         _ = try timed("picker-dismissal-focus-return") {
-            try client.waitForNode("beta editor focus after picker dismissal", timeout: timeout) {
-                self.isEditorPane($0, named: "beta_target.ex")
-                    && $0.value?.contains("BETA PANE é🙂") == true
+            try client.waitForNode(
+                "beta editor focus after picker dismissal",
+                timeout: timeout,
+                query: editorPaneQuery(named: "beta_target.ex", client: client)
+            ) {
+                $0.value?.contains("BETA PANE é🙂") == true
                     && $0.focused == true
             }
         }
@@ -135,7 +154,7 @@ private extension MingaAccessibilityWorkflowTests {
             try client.waitForNodes(
                 "two distinct editor panes",
                 timeout: timeout,
-                matching: { $0.role == .textView },
+                query: client.elements(ofType: .textView, identifierPrefix: "minga.editor."),
                 until: { $0.count == 2 && Set($0.compactMap(\.identifier)).count == 2 }
             )
         }
@@ -144,10 +163,12 @@ private extension MingaAccessibilityWorkflowTests {
             "The split did not expose the expected beta fixture in both panes"
         )
 
-        let alphaTab = try client.waitForNode("the inactive alpha_target.ex tab", timeout: timeout) {
-            $0.role == .button
-                && $0.label == "File tab alpha_target.ex"
-                && $0.value?.hasPrefix("inactive") == true
+        let alphaTab = try client.waitForNode(
+            "the inactive alpha_target.ex tab",
+            timeout: timeout,
+            query: fileTabQuery(named: "alpha_target.ex", client: client)
+        ) {
+            $0.value?.hasPrefix("inactive") == true
         }
         try timed("tab-ax-activation") { try client.performPress(on: alphaTab) }
 
@@ -173,7 +194,7 @@ private extension MingaAccessibilityWorkflowTests {
         try client.waitForNodes(
             "alpha and beta in distinct panes",
             timeout: timeout,
-            matching: { $0.role == .textView },
+            query: client.elements(ofType: .textView, identifierPrefix: "minga.editor."),
             until: { panes in
                 panes.count == 2
                     && panes.contains { self.isEditorPane($0, named: "alpha_target.ex") }
@@ -185,39 +206,41 @@ private extension MingaAccessibilityWorkflowTests {
     func verifyFocusedBeta(client: AccessibilityClient) throws {
         let focusedBeta = try client.waitForNode(
             "beta_target.ex to own real keyboard focus",
-            timeout: timeout
+            timeout: timeout,
+            query: editorPaneQuery(named: "beta_target.ex", client: client)
         ) {
-            self.isEditorPane($0, named: "beta_target.ex") && $0.focused == true
+            $0.focused == true
         }
         try require(
             focusedBeta.value?.contains("BETA PANE é🙂") == true,
             "Focused beta pane exposes the wrong text"
         )
         try require(
-            try client.nodeExists { self.isEditorPane($0, named: "alpha_target.ex") && $0.focused == false },
+            try client.nodeExists(
+                query: editorPaneQuery(named: "alpha_target.ex", client: client)
+            ) { $0.focused == false },
             "Alpha remained AX-focused after focusing the named beta pane"
         )
     }
 }
 
 private extension MingaAccessibilityWorkflowTests {
-    func configuredApplication(fixture: AccessibilityTestFixture) -> XCUIApplication {
+    func configuredApplication(inputs: AccessibilityTestInputs) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = [
             "--editor",
-            "--config", fixture.config.path,
-            "--debug-log", fixture.debugLog.path,
-            "--minga-ipc-runtime-parent", fixture.runtimeParent.path,
-            fixture.alpha.path
+            "--config", inputs.config.path,
+            "--debug-log", inputs.debugLog.path,
+            "--minga-ipc-runtime-parent", inputs.runtimeParent.path,
+            inputs.alpha.path
         ]
-        application.launchEnvironment = isolatedEnvironment(root: fixture.home)
+        application.launchEnvironment = isolatedEnvironment(inputs: inputs)
         return application
     }
 
     func launch(
         _ application: XCUIApplication,
         environment: [String: String],
-        runRoot: URL,
         variant: String
     ) throws -> AccessibilityClient {
         let bundleIdentifier = try requiredEnvironmentValue(environment, key: "MINGA_AX_APP_BUNDLE_ID")
@@ -225,31 +248,36 @@ private extension MingaAccessibilityWorkflowTests {
         let executableURL = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath().standardizedFileURL
         try timed("launch-\(variant)") {
             application.launch()
-            let pid = try RunningApplicationLocator.pid(
+            _ = try RunningApplicationLocator.pid(
                 bundleIdentifier: bundleIdentifier,
                 executableURL: executableURL,
                 timeout: timeout
             )
-            try write("\(pid)\n", to: runRoot.appendingPathComponent("app.pid"))
         }
         return AccessibilityClient(application: application)
     }
 
     func openProjectPicker(app: XCUIApplication, client: AccessibilityClient) throws {
         app.typeText("  ")
-        _ = try client.waitForNode("the Find file choices container", timeout: timeout) {
-            $0.label == "Find file choices" && $0.value?.contains("choices") == true
+        _ = try client.waitForNode(
+            "the Find file choices container",
+            timeout: timeout,
+            query: findFileChoicesQuery(client: client)
+        ) {
+            $0.value?.contains("choices") == true
         }
-        _ = try client.waitForNode("the focused native picker query field", timeout: timeout) {
-            $0.role == .textField && $0.focused == true
+        _ = try client.waitForNode(
+            "the focused native picker query field",
+            timeout: timeout,
+            query: client.elements(ofType: .textField)
+        ) {
+            $0.focused == true
         }
     }
 
     func activeFileTabExists(named fileName: String, client: AccessibilityClient) throws -> Bool {
-        try client.nodeExists {
-            $0.role == .button
-                && $0.label == "File tab \(fileName)"
-                && $0.value?.hasPrefix("active") == true
+        try client.nodeExists(query: fileTabQuery(named: fileName, client: client)) {
+            $0.value?.hasPrefix("active") == true
         }
     }
 
@@ -257,13 +285,29 @@ private extension MingaAccessibilityWorkflowTests {
         node.role == .textView && node.label?.contains(fileName) == true
     }
 
-    func isolatedEnvironment(root: URL) -> [String: String] {
+    func editorPaneQuery(named fileName: String, client: AccessibilityClient) -> XCUIElementQuery {
+        client.elements(
+            ofType: .textView,
+            identifierPrefix: "minga.editor.",
+            labelContains: fileName
+        )
+    }
+
+    func fileTabQuery(named fileName: String, client: AccessibilityClient) -> XCUIElementQuery {
+        client.elements(ofType: .button, label: "File tab \(fileName)")
+    }
+
+    func findFileChoicesQuery(client: AccessibilityClient) -> XCUIElementQuery {
+        client.elements(ofType: .any, label: "Find file choices")
+    }
+
+    func isolatedEnvironment(inputs: AccessibilityTestInputs) -> [String: String] {
         [
-            "HOME": root.path,
-            "CFFIXED_USER_HOME": root.path,
-            "XDG_CONFIG_HOME": root.appendingPathComponent("xdg-config", isDirectory: true).path,
-            "XDG_DATA_HOME": root.appendingPathComponent("xdg-data", isDirectory: true).path,
-            "XDG_CACHE_HOME": root.appendingPathComponent("xdg-cache", isDirectory: true).path,
+            "HOME": inputs.home.path,
+            "CFFIXED_USER_HOME": inputs.home.path,
+            "XDG_CONFIG_HOME": inputs.xdgConfigHome.path,
+            "XDG_DATA_HOME": inputs.xdgDataHome.path,
+            "XDG_CACHE_HOME": inputs.xdgCacheHome.path,
             "MINGA_AX_ISOLATED_RUN": "1"
         ]
     }
@@ -297,14 +341,6 @@ private extension MingaAccessibilityWorkflowTests {
         return value
     }
 
-    func requiredAbsoluteURL(_ environment: [String: String], key: String) throws -> URL {
-        let value = try requiredEnvironmentValue(environment, key: key)
-        guard value.hasPrefix("/") else {
-            throw WorkflowFailure.unmet("INFRASTRUCTURE: \(key) must be an absolute path")
-        }
-        return URL(fileURLWithPath: value, isDirectory: true)
-    }
-
     func captureFailure(message: String) {
         attachText(message, name: "Minga accessibility failure")
         if let launchedApplication, launchedApplication.exists {
@@ -313,27 +349,14 @@ private extension MingaAccessibilityWorkflowTests {
             attachment.name = "Minga accessibility failure"
             attachment.lifetime = .keepAlways
             add(attachment)
-            if let artifactDirectory {
-                try? screenshot.pngRepresentation.write(
-                    to: artifactDirectory.appendingPathComponent("failure.png"),
-                    options: .atomic
-                )
-            }
         }
-        guard let artifactDirectory else { return }
-        try? write(message + "\n", to: artifactDirectory.appendingPathComponent("failure.txt"))
         if let accessibilityClient {
             let tree = accessibilityClient.boundedTreeDump()
             attachText(tree, name: "Bounded accessibility tree")
-            try? write(
-                tree + "\n",
-                to: artifactDirectory.appendingPathComponent("accessibility-tree.txt")
-            )
         }
     }
 
     func writeTimings(variant: String, status: String) throws {
-        guard let artifactDirectory else { return }
         let payload: [String: Any] = [
             "variant": variant,
             "status": status,
@@ -349,7 +372,6 @@ private extension MingaAccessibilityWorkflowTests {
         attachment.name = "Accessibility workflow timings"
         attachment.lifetime = .keepAlways
         add(attachment)
-        try data.write(to: artifactDirectory.appendingPathComponent("timings.json"), options: .atomic)
     }
 
     func attachText(_ contents: String, name: String) {
@@ -357,9 +379,5 @@ private extension MingaAccessibilityWorkflowTests {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-    }
-
-    func write(_ contents: String, to url: URL) throws {
-        try Data(contents.utf8).write(to: url, options: .atomic)
     }
 }

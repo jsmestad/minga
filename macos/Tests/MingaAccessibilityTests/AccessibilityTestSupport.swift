@@ -16,40 +16,39 @@ enum WorkflowFailure: Error, CustomStringConvertible {
     }
 }
 
-struct AccessibilityTestFixture {
+struct AccessibilityTestInputs {
     let home: URL
+    let xdgConfigHome: URL
+    let xdgDataHome: URL
+    let xdgCacheHome: URL
     let runtimeParent: URL
     let config: URL
     let debugLog: URL
     let alpha: URL
 
-    static func create(at root: URL, runtimeParent: URL) throws -> AccessibilityTestFixture {
-        let project = root.appendingPathComponent("fixture-project", isDirectory: true)
-        let home = root.appendingPathComponent("home", isDirectory: true)
-        let configDirectory = root.appendingPathComponent("xdg-config/minga", isDirectory: true)
-        for directory in [project, home, configDirectory] {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        }
-        let config = configDirectory.appendingPathComponent("config.exs")
-        let alpha = project.appendingPathComponent("alpha_target.ex")
-        let beta = project.appendingPathComponent("beta_target.ex")
-        try write("", to: project.appendingPathComponent(".minga"))
-        try write("use Minga.Config\n", to: config)
-        try write("ALPHA PANE λ🙂\nsecond alpha line\n", to: alpha)
-        try write("BETA PANE é🙂\nsecond beta line\n", to: beta)
-        return AccessibilityTestFixture(
-            home: home,
-            runtimeParent: runtimeParent,
-            config: config,
-            debugLog: root.appendingPathComponent("minga-debug.log"),
-            alpha: alpha
+    static func fromEnvironment(_ environment: [String: String]) throws -> AccessibilityTestInputs {
+        AccessibilityTestInputs(
+            home: try requiredAbsoluteURL(environment, key: "MINGA_AX_HOME", isDirectory: true),
+            xdgConfigHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_CONFIG_HOME", isDirectory: true),
+            xdgDataHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_DATA_HOME", isDirectory: true),
+            xdgCacheHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_CACHE_HOME", isDirectory: true),
+            runtimeParent: try requiredAbsoluteURL(environment, key: "MINGA_AX_RUNTIME_PARENT", isDirectory: true),
+            config: try requiredAbsoluteURL(environment, key: "MINGA_AX_CONFIG"),
+            debugLog: try requiredAbsoluteURL(environment, key: "MINGA_AX_DEBUG_LOG"),
+            alpha: try requiredAbsoluteURL(environment, key: "MINGA_AX_SOURCE")
         )
     }
 
-    private static func write(_ contents: String, to url: URL) throws {
-        try Data(contents.utf8).write(to: url, options: .atomic)
+    private static func requiredAbsoluteURL(
+        _ environment: [String: String],
+        key: String,
+        isDirectory: Bool = false
+    ) throws -> URL {
+        guard let value = environment[key], value.hasPrefix("/") else {
+            throw WorkflowFailure.unmet("INFRASTRUCTURE: \(key) must be an absolute path")
+        }
+        return URL(fileURLWithPath: value, isDirectory: isDirectory)
     }
-
 }
 
 @MainActor

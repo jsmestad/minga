@@ -6,8 +6,8 @@ artifact_root=${MINGA_AX_ARTIFACT_ROOT:-"$repo_root/_build/macos-accessibility"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 artifact_dir="$artifact_root/$run_id"
 state_root=$(mktemp -d "${TMPDIR:-/tmp}/minga-accessibility.XXXXXX")
-# The XCTest runner's sandbox temp path is too long for Darwin AF_UNIX sockets, so the unsandboxed app receives this short harness-owned parent.
-ipc_root=$(mktemp -d /tmp/minga-ax.XXXXXX)
+# Darwin limits AF_UNIX paths to 103 bytes. Keep the harness-owned IPC parent short and outside XCTest's sandbox-rewritten temporary directory.
+ipc_root=$(mktemp -d /private/tmp/ma.XXXXXX)
 derived_data="$state_root/DerivedData"
 test_bundle_id="com.minga.editor.accessibility-runner.r${run_id//-/}"
 app_path="$derived_data/Build/Products/Debug/Minga.app"
@@ -33,27 +33,7 @@ terminate_owned_process() {
   kill -KILL "$pid" 2>/dev/null || true
 }
 
-cleanup_process() {
-  local pid_file=$1
-  [[ -f "$pid_file" ]] || return 0
-
-  local pid
-  pid=$(tr -cd '0-9' < "$pid_file")
-  [[ -n "$pid" ]] || return 0
-
-  local command
-  command=$(ps -p "$pid" -o command= 2>/dev/null || true)
-  case "$command" in
-    "$app_path/Contents/MacOS/Minga"*)
-      terminate_owned_process "$pid"
-      ;;
-  esac
-}
-
 cleanup() {
-  cleanup_process "$state_root/cold/app.pid"
-  cleanup_process "$state_root/warm/app.pid"
-
   while IFS= read -r process; do
     local pid=${process%% *}
     local command=${process#* }
@@ -74,7 +54,7 @@ cleanup() {
   esac
 
   case "$ipc_root" in
-    /tmp/minga-ax.*|/private/tmp/minga-ax.*)
+    /private/tmp/ma.*)
       rm -rf "$ipc_root"
       ;;
   esac
@@ -100,6 +80,10 @@ fi
 expected_xcodegen=$(tr -d '[:space:]' < "$repo_root/.xcodegen-version")
 actual_xcodegen=$(xcodegen --version | sed -E 's/^Version:[[:space:]]*//')
 [[ "$actual_xcodegen" == "$expected_xcodegen" ]] || infrastructure_failure "XcodeGen $expected_xcodegen is required, found $actual_xcodegen. Run scripts/install_xcodegen <dir>."
+
+maximum_socket_path="$ipc_root/warm/com.minga.editor/control-XXXXXXXXXXXXXXXX.sock"
+maximum_socket_bytes=$(printf '%s' "$maximum_socket_path" | wc -c | tr -d '[:space:]')
+[[ "$maximum_socket_bytes" -le 103 ]] || infrastructure_failure "the longest accessibility IPC socket path is $maximum_socket_bytes bytes; Darwin allows at most 103"
 
 printf 'Artifacts: %s\n' "$artifact_dir"
 
@@ -148,9 +132,38 @@ run_variant() {
   local variant_root="$state_root/$variant"
   local variant_artifacts="$artifact_dir/$variant"
   local runtime_parent="$ipc_root/$variant"
+  local home="$variant_root/home"
+  local xdg_config_home="$variant_root/xdg-config"
+  local xdg_data_home="$variant_root/xdg-data"
+  local xdg_cache_home="$variant_root/xdg-cache"
+  local config_directory="$xdg_config_home/minga"
+  local project="$variant_root/fixture-project"
+  local config="$config_directory/config.exs"
+  local source="$project/alpha_target.ex"
+  local debug_log="$variant_artifacts/minga-debug.log"
   local started_seconds=$SECONDS
-  mkdir -p "$variant_root" "$variant_artifacts" "$runtime_parent"
-  chmod 700 "$variant_root" "$runtime_parent"
+  mkdir -p \
+    "$home" \
+    "$config_directory" \
+    "$xdg_data_home" \
+    "$xdg_cache_home" \
+    "$project" \
+    "$variant_artifacts" \
+    "$runtime_parent"
+  chmod 700 \
+    "$variant_root" \
+    "$home" \
+    "$xdg_config_home" \
+    "$xdg_data_home" \
+    "$xdg_cache_home" \
+    "$project" \
+    "$runtime_parent"
+  : > "$project/.minga"
+  printf '%s\n' 'use Minga.Config' > "$config"
+  printf '%s\n' 'ALPHA PANE λ🙂' 'second alpha line' > "$source"
+  printf '%s\n' 'BETA PANE é🙂' 'second beta line' > "$project/beta_target.ex"
+  : > "$debug_log"
+  chmod 600 "$debug_log"
 
   set +e
   (
@@ -169,7 +182,14 @@ run_variant() {
         MINGA_AX_VARIANT="$variant" \
         MINGA_AX_APP_BUNDLE_ID="$test_bundle_id" \
         MINGA_AX_APP_EXECUTABLE="$app_executable" \
-        MINGA_AX_RUNTIME_PARENT="$runtime_parent"
+        MINGA_AX_RUNTIME_PARENT="$runtime_parent" \
+        MINGA_AX_HOME="$home" \
+        MINGA_AX_XDG_CONFIG_HOME="$xdg_config_home" \
+        MINGA_AX_XDG_DATA_HOME="$xdg_data_home" \
+        MINGA_AX_XDG_CACHE_HOME="$xdg_cache_home" \
+        MINGA_AX_CONFIG="$config" \
+        MINGA_AX_SOURCE="$source" \
+        MINGA_AX_DEBUG_LOG="$debug_log"
   ) 2>&1 | tee "$variant_artifacts/xcode-test.log"
   local status=${PIPESTATUS[0]}
   set -e
