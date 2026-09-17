@@ -42,6 +42,9 @@ enum BEAMLaunchInputAcquirer {
 
         let processInfo = ProcessInfo.processInfo
         let environment = processInfo.environment
+        let runtimeParentURL = BEAMLaunchConfiguration.ipcRuntimeParentURL(
+            from: processInfo.arguments
+        ) ?? ipcRuntimeParentURL()
         return BEAMLaunchInputs(
             executableURL: executableURL,
             appArguments: processInfo.arguments,
@@ -49,7 +52,7 @@ enum BEAMLaunchInputAcquirer {
             currentDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
             bundleURL: Bundle.main.bundleURL,
             validHomeDirectoryURL: validHomeDirectoryURL(environment: environment),
-            ipcRuntimeParentURL: ipcRuntimeParentURL(),
+            ipcRuntimeParentURL: runtimeParentURL,
             appPID: getpid(),
             appEUID: geteuid(),
             appInstanceID: appInstanceID,
@@ -151,6 +154,22 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
         return value.isEmpty ? nil : value
     }
 
+    /// Extracts an isolated native IPC parent supplied by a test launcher.
+    ///
+    /// The flag stays inside the app process and is never forwarded to the
+    /// embedded CLI. The BEAM validates ownership and permissions before it
+    /// creates any runtime entries below this directory.
+    static func ipcRuntimeParentURL(from appArguments: [String]) -> URL? {
+        let arguments = Array(appArguments.dropFirst())
+        guard let index = arguments.firstIndex(of: "--minga-ipc-runtime-parent"),
+              arguments.indices.contains(index + 1)
+        else { return nil }
+
+        let path = arguments[index + 1]
+        guard path.hasPrefix("/"), !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+    }
+
     private static func forwardedCLIArguments(from appArguments: [String]) -> [String] {
         var cliArguments: [String] = []
         let valueFlags: Set<String> = ["--config", "--debug-log", "-D"]
@@ -165,7 +184,7 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
                 skipsInternalValue = false
                 continue
             }
-            if argument == "--minga-launch-nonce" {
+            if argument == "--minga-launch-nonce" || argument == "--minga-ipc-runtime-parent" {
                 skipsInternalValue = true
                 continue
             }

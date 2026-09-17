@@ -11,6 +11,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    MINGA_APP_BUNDLE_IDENTIFIER: com.minga.editor
     # NOTE: The Metal toolchain pin (TOOLCHAINS) is intentionally NOT global.
     # It lives only on the targets that compile Metal (Minga, MingaTests,
     # PreviewHost) so the Metal-free framework targets (MingaProtocol, MingaUI)
@@ -206,7 +207,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Minga
-        PRODUCT_BUNDLE_IDENTIFIER: com.minga.editor
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MINGA_APP_BUNDLE_IDENTIFIER)"
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_FILE: Info.plist
@@ -283,6 +284,7 @@ targets:
           # Standalone optimized executable; unit tests cover its comparator separately.
           - "Performance/**"
           - "NativePerformance/**"
+          - "MingaAccessibilityTests/**"
       - path: Sources
         type: group
         excludes:
@@ -367,6 +369,20 @@ targets:
           fi
           mix protocol.gen
         basedOnDependencyAnalysis: false
+
+  MingaAccessibilityTests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/MingaAccessibilityTests
+        type: group
+    settings:
+      base:
+        PRODUCT_NAME: MingaAccessibilityTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.minga.editor.accessibility-tests
+        GENERATE_INFOPLIST_FILE: "YES"
+    dependencies:
+      - target: Minga
 
   NativeRenderPerformance:
     type: tool
@@ -564,3 +580,12 @@ schemes:
     build:
       targets:
         PreviewHost: all
+  MingaAccessibility:
+    build:
+      parallelizeBuild: false
+      targets:
+        Minga: all
+        MingaAccessibilityTests: [test]
+    test:
+      targets:
+        - MingaAccessibilityTests
