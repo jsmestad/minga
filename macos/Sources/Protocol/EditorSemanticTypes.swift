@@ -181,7 +181,7 @@ public enum MinibufferMode: Equatable, Sendable {
 }
 
 /// Semantic kind of a completion candidate.
-public enum CompletionKind: Equatable, Sendable {
+public enum CompletionKind: Equatable, Hashable, Sendable {
     case function
     case method
     case variable

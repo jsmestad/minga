@@ -231,7 +231,7 @@ private struct CompletionAccessibilityIdentity: Hashable {
     let anchorRow: Int
     let anchorCol: Int
     let id: Int
-    let kind: UInt8
+    let kind: CompletionKind
     let label: String
     let detail: String
 }
