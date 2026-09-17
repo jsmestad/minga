@@ -621,6 +621,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             os_signpost(.end, log: startupLog, name: "AppStartup")
 
+            // The application can finish launching before SwiftUI has installed a key editor window.
+            // Activate again at the first committed frame, when the editor can become first responder.
+            self.activateEditorAfterFirstRender()
+
             let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
             withAnimation(.easeOut(duration: duration)) {
                 self.appState.hasReceivedFirstFrame = true
@@ -629,6 +633,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.acceptsOpenRequests = true
             self.flushPendingOpenRequests()
         }
+    }
+
+    private func activateEditorAfterFirstRender() {
+        guard let editorNSView else { return }
+        _ = editorNSView.focusPolicy.requestPresentationFocus()
     }
 
     /// Delivers every application-owned prepared effect to its existing resource owner.

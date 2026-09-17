@@ -270,6 +270,18 @@ struct MouseInputTests {
         #expect(window.firstResponder === view)
     }
 
+    @Test("presentation focus yields to active native text editing")
+    @MainActor func presentationFocusYieldsToNativeTextInput() throws {
+        let spy = SpyEncoder()
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
+
+        #expect(window.makeFirstResponder(textField))
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+
+        #expect(!view.focusPolicy.requestPresentationFocus())
+        #expect(window.firstResponder === fieldEditor)
+    }
+
     @Test("native modal close restoration is immediate for an attached editor and a no-op while detached")
     @MainActor func nativeModalCloseRestorationLifecycle() throws {
         let spy = SpyEncoder()
