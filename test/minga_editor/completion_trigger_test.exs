@@ -6,6 +6,8 @@ defmodule MingaEditor.CompletionTriggerTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Editing.Completion.Session
+  alias Minga.Editing.Completion.ProviderBatch
   alias MingaEditor.CompletionTrigger
 
   describe "new/0" do
@@ -13,7 +15,7 @@ defmodule MingaEditor.CompletionTriggerTest do
       trigger = CompletionTrigger.new()
 
       assert trigger == %CompletionTrigger{phase: :idle, gen: 0}
-      assert Map.keys(Map.from_struct(trigger)) |> Enum.sort() == [:gen, :phase]
+      assert Map.keys(Map.from_struct(trigger)) |> Enum.sort() == [:gen, :phase, :session]
       assert CompletionTrigger.generation(trigger) == 0
     end
   end
@@ -31,10 +33,16 @@ defmodule MingaEditor.CompletionTriggerTest do
       Minga.LSP.SyncServer.put_clients(buf, [self(), self()])
 
       try do
-        assert {%CompletionTrigger{phase: {:pending, {0, 2}}, gen: 1},
+        assert {%CompletionTrigger{
+                  phase: {:pending, {0, 2}},
+                  gen: 1,
+                  session: %Session{id: session_id}
+                },
                 [
-                  {primary_ref, :primary, ^me, ^buf, version, 1, {0, 2}},
-                  {secondary_ref, :secondary, ^me, ^buf, version, 1, {0, 2}}
+                  {primary_ref, :primary, {:lsp_client, ^me}, ^me, ^buf, version, session_id, 1,
+                   {0, 2}},
+                  {secondary_ref, :secondary, {:lsp_client, ^me}, ^me, ^buf, version, session_id,
+                   1, {0, 2}}
                 ]} =
                  CompletionTrigger.maybe_trigger(
                    CompletionTrigger.new(),
@@ -160,8 +168,14 @@ defmodule MingaEditor.CompletionTriggerTest do
       Minga.LSP.SyncServer.put_clients(buf, [self()])
 
       try do
-        assert {%CompletionTrigger{phase: {:pending, {0, 3}}},
-                [{ref, :primary, _client, ^buf, _version, 1, {0, 3}}]} =
+        assert {%CompletionTrigger{
+                  phase: {:pending, {0, 3}},
+                  session: %Session{id: session_id}
+                },
+                [
+                  {ref, :primary, {:lsp_client, client}, client, ^buf, _version, session_id, 1,
+                   {0, 3}}
+                ]} =
                  CompletionTrigger.maybe_trigger(
                    CompletionTrigger.new(),
                    ".",
@@ -208,8 +222,14 @@ defmodule MingaEditor.CompletionTriggerTest do
       timer = Process.send_after(self(), :old_debounce, 10_000)
       trigger = %CompletionTrigger{phase: {:debounced, timer, [me], buf, version, {0, 3}}, gen: 4}
 
-      assert {%CompletionTrigger{phase: {:pending, {0, 3}}, gen: 4},
-              [{ref, :primary, ^me, ^buf, ^version, 4, {0, 3}}]} =
+      assert {%CompletionTrigger{
+                phase: {:pending, {0, 3}},
+                gen: 4,
+                session: %Session{id: session_id}
+              },
+              [
+                {ref, :primary, {:lsp_client, ^me}, ^me, ^buf, ^version, session_id, 4, {0, 3}}
+              ]} =
                CompletionTrigger.flush_debounce(trigger, 4)
 
       assert_receive {:"$gen_cast",
@@ -254,6 +274,63 @@ defmodule MingaEditor.CompletionTriggerTest do
 
       assert CompletionTrigger.dismiss(trigger) == %CompletionTrigger{phase: :idle, gen: 6}
       assert Process.read_timer(timer) == false
+    end
+
+    test "cancels every provider request independently" do
+      first_ref = make_ref()
+      second_ref = make_ref()
+
+      session =
+        Session.new(make_ref(), 1, self(), 0, {0, 0})
+        |> Session.register_requests([
+          {:first, self(), first_ref},
+          {:second, self(), second_ref}
+        ])
+
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1, session: session}
+
+      assert CompletionTrigger.dismiss(trigger) == %CompletionTrigger{phase: :idle, gen: 1}
+      assert_receive {:"$gen_cast", {:cancel_request, ^first_ref}}
+      assert_receive {:"$gen_cast", {:cancel_request, ^second_ref}}
+    end
+  end
+
+  describe "retrigger_incomplete/2" do
+    test "uses trigger kind 3 and retains the stable session id", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "test_incomplete_retrigger.ex")
+      File.write!(path, "hello")
+      {:ok, buf} = BufferProcess.start_link(file_path: path)
+      BufferProcess.move_to(buf, {0, 5})
+      context = Minga.Buffer.cursor_context(buf)
+      session = Session.new(make_ref(), 1, buf, context.version, {0, 0})
+      request_ref = make_ref()
+      session = Session.register_requests(session, [{:provider, self(), request_ref}])
+
+      batch =
+        ProviderBatch.from_response(
+          session.id,
+          1,
+          :provider,
+          self(),
+          request_ref,
+          %{"isIncomplete" => true, "items" => [%{"label" => "hello"}]}
+        )
+
+      assert {:ok, session} = Session.accept_batch(session, batch)
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1, session: session}
+
+      assert {%CompletionTrigger{session: %Session{id: session_id, generation: 2}},
+              [{ref, :primary, :provider, client, ^buf, version, session_id, 2, {0, 0}}]} =
+               CompletionTrigger.retrigger_incomplete(trigger, context)
+
+      assert client == self()
+      assert version == context.version
+
+      assert_receive {:"$gen_cast",
+                      {:async_request, "textDocument/completion", params, _caller, ^ref}}
+
+      assert params["context"] == %{"triggerKind" => 3}
+      GenServer.stop(buf)
     end
   end
 end

@@ -921,8 +921,12 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       new_trigger = ModalWorkflow.completion_trigger(new_state)
       assert %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1} = new_trigger
 
-      assert LSPState.fetch_pending_request(new_state.lsp, ref) ==
-               {:ok, {:completion_result, :primary, client, buffer, version, 1, {0, 0}}}
+      assert {:ok,
+              {:completion_result, :primary, {:lsp_client, ^client}, ^client, ^ref, ^buffer,
+               ^version, session_id, 1, {0, 0}}} =
+               LSPState.fetch_pending_request(new_state.lsp, ref)
+
+      assert is_reference(session_id)
     end
 
     test "completion resolve routes the request and records the pending ref" do

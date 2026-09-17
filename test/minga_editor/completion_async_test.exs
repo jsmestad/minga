@@ -5,6 +5,7 @@ defmodule MingaEditor.CompletionAsyncTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
+  alias Minga.Editing.Completion.Session, as: CompletionSession
   alias MingaEditor.CompletionHandling
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Buffers
@@ -37,6 +38,7 @@ defmodule MingaEditor.CompletionAsyncTest do
   describe "(a) parse/sort/filter runs off the Editor process" do
     test "the synchronous handler leaves the menu pending and the built menu arrives async" do
       ctx = start_editor("hello")
+      on_exit(fn -> Minga.LSP.SyncServer.remove_buffer(ctx.buffer) end)
       state = editor_state(ctx)
       buffer = state.workspace.buffers.active
       Minga.LSP.SyncServer.put_clients(buffer, [self()])
@@ -363,6 +365,88 @@ defmodule MingaEditor.CompletionAsyncTest do
 
       assert ModalOverlay.match(result.shell_runtime.state.modal, :completion)
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(result) == nil
+    end
+  end
+
+  describe "session-owned runtime path" do
+    test "provider response is accepted only by its exact live session request" do
+      ctx = start_editor("hello")
+      on_exit(fn -> Minga.LSP.SyncServer.remove_buffer(ctx.buffer) end)
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
+      provider_id = {:lsp_client, self()}
+      request_ref = make_ref()
+      session_id = make_ref()
+
+      session =
+        CompletionSession.new(session_id, 1, buffer, version, {0, 0})
+        |> CompletionSession.register_requests([{provider_id, self(), request_ref}])
+
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1, session: session}
+      owner = state.shell_runtime.state.tab_bar.active_id
+      payload = CompletionPayload.new(owner, trigger: trigger)
+
+      state =
+        state
+        |> Map.put(:workspace, SessionState.transition_mode(state.workspace, :insert))
+        |> ModalWorkflow.open({:completion, payload})
+
+      Minga.LSP.SyncServer.put_clients(buffer, [self()])
+
+      result =
+        {:ok,
+         %{
+           "isIncomplete" => true,
+           "items" => [%{"label" => "hello", "sortText" => "hello"}]
+         }}
+
+      fact =
+        {request_ref, :primary, provider_id, self(), buffer, version, session_id, 1, {0, 0}}
+
+      returned =
+        CompletionHandling.handle_completion_result(state, fact, result)
+
+      assert_receive {:completion_processed, ^fact, batch},
+                     @sync_timeout
+
+      applied = CompletionHandling.apply_processed(returned, fact, batch)
+
+      assert labels(ModalWorkflow.completion(applied)) == ["hello"]
+      live_session = applied |> ModalWorkflow.completion_trigger() |> CompletionTrigger.session()
+      assert CompletionSession.incomplete_providers(live_session) == [{provider_id, self()}]
+    end
+
+    test "mode switch rejects a late provider response before background processing" do
+      ctx = start_editor("hello")
+      on_exit(fn -> Minga.LSP.SyncServer.remove_buffer(ctx.buffer) end)
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      version = Minga.Buffer.version(buffer)
+      provider_id = {:lsp_client, self()}
+      request_ref = make_ref()
+      session_id = make_ref()
+
+      session =
+        CompletionSession.new(session_id, 1, buffer, version, {0, 0})
+        |> CompletionSession.register_requests([{provider_id, self(), request_ref}])
+
+      payload =
+        CompletionPayload.new(state.shell_runtime.state.tab_bar.active_id,
+          trigger: %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1, session: session}
+        )
+
+      state = ModalWorkflow.open(state, {:completion, payload})
+      Minga.LSP.SyncServer.put_clients(buffer, [self()])
+
+      fact =
+        {request_ref, :primary, provider_id, self(), buffer, version, session_id, 1, {0, 0}}
+
+      returned =
+        CompletionHandling.handle_completion_result(state, fact, {:ok, [%{"label" => "late"}]})
+
+      assert returned == state
+      refute_receive {:completion_processed, ^fact, _}, 50
     end
   end
 end

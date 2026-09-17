@@ -81,6 +81,16 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   def handle(
         %{shell_runtime: %{state: %ShellState{}}} = state,
+        {:completion_resolve, session_id, gen, provider_id, item_id}
+      ) do
+    {CompletionHandling.flush_resolve(state, session_id, gen, provider_id, item_id), []}
+  end
+
+  def handle(state, {:completion_resolve, _session_id, _gen, _provider_id, _item_id}),
+    do: {state, []}
+
+  def handle(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
         {:completion_resolve, gen, raw_item}
       ) do
     {CompletionHandling.flush_resolve(state, gen, raw_item), []}
@@ -177,6 +187,19 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   defp dispatch_pending_response(
+         {:completion_result, role, provider_id, client, request_ref, buffer, version, session_id,
+          gen, trigger_pos},
+         state,
+         result
+       ) do
+    CompletionHandling.handle_completion_result(
+      state,
+      {request_ref, role, provider_id, client, buffer, version, session_id, gen, trigger_pos},
+      result
+    )
+  end
+
+  defp dispatch_pending_response(
          {:completion_result, role, client, buffer, version, gen, trigger_pos},
          state,
          result
@@ -194,12 +217,34 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   defp dispatch_pending_response(
+         {:completion_resolve, client, request_ref, buffer, version, session_id, gen, provider_id,
+          item_id, _raw_item},
+         state,
+         result
+       ) do
+    identity = {session_id, provider_id, item_id}
+
+    if completion_resolve_current?(
+         state,
+         client,
+         request_ref,
+         buffer,
+         version,
+         session_id,
+         gen,
+         identity
+       ),
+       do: apply_completion_resolve_response(state, identity, request_ref, result),
+       else: state
+  end
+
+  defp dispatch_pending_response(
          {:completion_resolve, client, buffer, version, gen, raw_item},
          state,
          result
        ) do
-    if completion_resolve_current?(state, client, buffer, version, gen, raw_item),
-      do: apply_completion_resolve_response(state, raw_item, result),
+    if legacy_completion_resolve_current?(state, client, buffer, version, gen, raw_item),
+      do: CompletionHandling.handle_resolve_response(state, raw_item, result),
       else: state
   end
 
@@ -261,15 +306,21 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     BufferManagement.continue_after_format(state, continuation, terminal)
   end
 
-  @spec apply_completion_resolve_response(EditorState.t(), map(), term()) :: EditorState.t()
+  @spec apply_completion_resolve_response(
+          EditorState.t(),
+          Minga.Editing.Completion.Session.resolve_identity(),
+          reference(),
+          term()
+        ) :: EditorState.t()
   defp apply_completion_resolve_response(
          %{shell_runtime: %{state: %ShellState{}}} = state,
-         raw_item,
+         identity,
+         request_ref,
          result
        ),
-       do: CompletionHandling.handle_resolve_response(state, raw_item, result)
+       do: CompletionHandling.handle_resolve_response(state, identity, request_ref, result)
 
-  defp apply_completion_resolve_response(state, _raw_item, _result), do: state
+  defp apply_completion_resolve_response(state, _identity, _request_ref, _result), do: state
 
   @spec apply_signature_help_response(EditorState.t(), term()) :: EditorState.t()
   defp apply_signature_help_response(%{shell_runtime: %{state: %ShellState{}}} = state, result),
@@ -428,30 +479,64 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   @spec completion_resolve_current?(
           EditorState.t(),
           pid(),
+          reference(),
+          pid(),
+          non_neg_integer(),
+          reference(),
+          non_neg_integer(),
+          Minga.Editing.Completion.Session.resolve_identity()
+        ) :: boolean()
+  defp completion_resolve_current?(
+         state,
+         client,
+         request_ref,
+         buffer,
+         version,
+         session_id,
+         gen,
+         identity
+       ) do
+    trigger = MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state)
+    session = CompletionTrigger.session(trigger)
+
+    Minga.Editing.inserting?(state) and
+      state.workspace.buffers.active == buffer and
+      buffer_value(buffer, &Minga.Buffer.version/1) == version and
+      client in Minga.LSP.SyncServer.clients_for_buffer(buffer) and
+      match?(%Minga.Editing.Completion.Session{}, session) and
+      Minga.Editing.Completion.Session.current?(session, session_id, gen, buffer, version) and
+      Minga.Editing.Completion.Session.resolve_current?(session, identity, request_ref)
+  end
+
+  @spec legacy_completion_resolve_current?(
+          EditorState.t(),
+          pid(),
           pid(),
           non_neg_integer(),
           non_neg_integer(),
           map()
         ) :: boolean()
-  defp completion_resolve_current?(state, client, buffer, version, gen, raw_item) do
+  defp legacy_completion_resolve_current?(state, client, buffer, version, gen, raw_item) do
     state.workspace.buffers.active == buffer and
       buffer_value(buffer, &Minga.Buffer.version/1) == version and
-      match?([^client | _], Minga.LSP.SyncServer.clients_for_buffer(buffer)) and
-      MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state)
-      |> CompletionTrigger.generation()
-      |> Kernel.==(gen) and
-      completion_selected_raw?(state, raw_item)
+      client in Minga.LSP.SyncServer.clients_for_buffer(buffer) and
+      CompletionTrigger.generation(
+        MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state)
+      ) == gen and legacy_completion_selected_raw?(state, raw_item)
   end
 
-  @spec completion_selected_raw?(EditorState.t(), map()) :: boolean()
-  defp completion_selected_raw?(%{shell_runtime: %{state: %ShellState{}}} = state, raw_item) do
+  @spec legacy_completion_selected_raw?(EditorState.t(), map()) :: boolean()
+  defp legacy_completion_selected_raw?(
+         %{shell_runtime: %{state: %ShellState{}}} = state,
+         raw_item
+       ) do
     case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       nil -> false
       completion -> Minga.Editing.Completion.selected_raw?(completion, raw_item)
     end
   end
 
-  defp completion_selected_raw?(_state, _raw_item), do: false
+  defp legacy_completion_selected_raw?(_state, _raw_item), do: false
 
   @spec signature_help_current?(
           EditorState.t(),

@@ -210,6 +210,21 @@ defmodule MingaEditor.State.LSP do
     )
   end
 
+  @typedoc "Lazy resolve request identity tracked until its LSP response arrives."
+  @type resolve_tracking_fact ::
+          {reference(), pid(), pid(), non_neg_integer(), reference(), non_neg_integer(),
+           Minga.Editing.Completion.Item.provider_id(), Minga.Editing.Completion.Item.id(), map()}
+
+  @doc "Tracks one provider-owned completion result request."
+  @spec track_completion_result_request(t(), MingaEditor.CompletionTrigger.tracking_fact()) :: t()
+  def track_completion_result_request(%__MODULE__{} = lsp, fact) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_completion_result(lsp.pending_requests, fact)
+    )
+  end
+
+  @doc "Tracks a legacy completion request that predates stable session ownership."
   @spec track_completion_result_request(
           t(),
           reference(),
@@ -220,16 +235,7 @@ defmodule MingaEditor.State.LSP do
           non_neg_integer(),
           {non_neg_integer(), non_neg_integer()}
         ) :: t()
-  def track_completion_result_request(
-        %__MODULE__{} = lsp,
-        ref,
-        role,
-        client,
-        buffer,
-        version,
-        gen,
-        pos
-      ) do
+  def track_completion_result_request(lsp, ref, role, client, buffer, version, gen, pos) do
     accept_pending(
       lsp,
       PendingRequests.track_completion_result(
@@ -245,6 +251,16 @@ defmodule MingaEditor.State.LSP do
     )
   end
 
+  @doc "Tracks one lazy completion resolve request by its stable identity."
+  @spec track_completion_resolve_request(t(), resolve_tracking_fact()) :: t()
+  def track_completion_resolve_request(%__MODULE__{} = lsp, fact) do
+    accept_pending(
+      lsp,
+      PendingRequests.track_completion_resolve(lsp.pending_requests, fact)
+    )
+  end
+
+  @doc "Tracks a legacy completion resolve request that predates stable item identity."
   @spec track_completion_resolve_request(
           t(),
           reference(),
@@ -254,15 +270,7 @@ defmodule MingaEditor.State.LSP do
           non_neg_integer(),
           map()
         ) :: t()
-  def track_completion_resolve_request(
-        %__MODULE__{} = lsp,
-        ref,
-        client,
-        buffer,
-        version,
-        gen,
-        raw_item
-      ) do
+  def track_completion_resolve_request(lsp, ref, client, buffer, version, gen, raw_item) do
     accept_pending(
       lsp,
       PendingRequests.track_completion_resolve(
