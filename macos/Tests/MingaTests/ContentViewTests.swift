@@ -663,7 +663,7 @@ struct ContentViewTests {
         let view = try makeEditorNSView(
             gui: gui,
             dispatcher: dispatcher,
-            encoder: NullInputEncoder(),
+            encoder: ClosureOutboundActionEncoder { _ in .accepted },
             factories: factories
         )
         view.drawableProvider = { drawable }
@@ -744,7 +744,7 @@ struct ContentViewTests {
         let view = try makeEditorNSView(
             gui: gui,
             dispatcher: dispatcher,
-            encoder: NullInputEncoder(),
+            encoder: ClosureOutboundActionEncoder { _ in .accepted },
             factories: factories
         )
         view.drawableProvider = { drawable }
@@ -821,7 +821,7 @@ struct ContentViewTests {
         let view = try makeEditorNSView(
             gui: gui,
             dispatcher: dispatcher,
-            encoder: NullInputEncoder(),
+            encoder: ClosureOutboundActionEncoder { _ in .accepted },
             factories: factories
         )
         view.drawableProvider = { drawable }
