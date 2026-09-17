@@ -105,6 +105,9 @@ final class CommandDispatcher {
     /// Delivers the BEAM-owned result for one correlated AppKit quit request.
     var onApplicationQuitResponse: ((ApplicationQuitResponse) -> Void)?
 
+    /// Presents one correlated BEAM-owned native file-dialog request.
+    var onFileDialogRequest: ((NativeFileDialogRequest) -> Void)?
+
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
 
@@ -491,6 +494,9 @@ final class CommandDispatcher {
 
         case .applicationQuitResponse:
             applyLocal(command)
+
+        case .guiRequest(let request):
+            onFileDialogRequest?(request)
 
         case .presentationOperation(let operation):
             let focusReady = requestPresentationFocus?() ?? false
@@ -1071,6 +1077,9 @@ final class CommandDispatcher {
 
         case .applicationQuitResponse(let response):
             effects.append(.applicationQuitResponse(response))
+
+        case .guiRequest:
+            break
 
         case .setFont(let family, let size, let ligatures, let weight):
             effects.append(.fontChanged(

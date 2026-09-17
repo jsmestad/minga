@@ -336,11 +336,27 @@ struct KeyboardInputTests {
     @MainActor func systemCommandShortcutsYield() throws {
         guard let quit = keyEvent(keyCode: 12, modifiers: .command, characters: "q", charactersIgnoringModifiers: "q") else { return }
         guard let paste = keyEvent(keyCode: 9, modifiers: .command, characters: "v", charactersIgnoringModifiers: "v") else { return }
+        guard let saveAs = keyEvent(keyCode: 1, modifiers: [.command, .shift], characters: "S", charactersIgnoringModifiers: "s") else { return }
         guard let modifiedQuit = keyEvent(keyCode: 12, modifiers: [.command, .shift], characters: "Q", charactersIgnoringModifiers: "q") else { return }
 
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(quit))
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(paste))
+        #expect(EditorNSView.shouldYieldSystemCommandShortcut(saveAs))
         #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))
+    }
+
+    @Test("native modal scope suspends focus reclamation and restores the editor")
+    @MainActor func nativeModalFocusLifecycle() throws {
+        let spy = SpyEncoder()
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
+        window.makeFirstResponder(textField)
+
+        view.focusPolicy.beginNativeModal()
+        view.focusPolicy.pointerReturnedToEditor()
+        #expect(window.firstResponder === textField)
+
+        view.focusPolicy.endNativeModalAndRestore()
+        #expect(window.firstResponder === view)
     }
 
     @Test("agent overlay routes key down, repeat, key up, and modifiers exactly once while yielding native input and system shortcuts")

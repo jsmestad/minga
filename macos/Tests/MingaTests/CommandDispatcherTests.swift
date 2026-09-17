@@ -188,6 +188,22 @@ struct CommandDispatcherRoutingTests {
         #expect(received == [expected])
     }
 
+    @Test("native file-dialog request is delivered outside frame transactions")
+    @MainActor func nativeFileDialogRequestRouting() {
+        let (dispatcher, _) = makeDispatcher()
+        let expected = NativeFileDialogRequest(
+            requestID: 23,
+            kind: .open,
+            suggestedPath: ""
+        )
+        var received: [NativeFileDialogRequest] = []
+        dispatcher.onFileDialogRequest = { received.append($0) }
+
+        dispatcher.dispatch(.guiRequest(expected))
+
+        #expect(received == [expected])
+    }
+
     @Test("setWindowBg updates frameState defaultBg")
     @MainActor func setWindowBgCommand() throws {
         let (dispatcher, _) = makeDispatcher()

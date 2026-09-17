@@ -51,7 +51,7 @@ opcode(1) + payload_length(2, big-endian) + payload(payload_length)
 
 This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
 
-Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exceptions are `0x86 gui_agent_transcript`, which carries a 32-bit length-prefixed payload (`len32`) because the resident transcript can exceed 64KB, and `0x88 gui_agent_context`, which carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. Both occupy legacy opcode slots but self-describe their length so a frontend that recognizes the opcode can size and skip them; the schema's generated `command_size` sizes both from their declared framing. If a frontend encounters an *unknown* opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `clipboard_write` and `gui_file_tree` do.
+Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exceptions are `0x86 gui_agent_transcript`, which carries a 32-bit length-prefixed payload (`len32`) because the resident transcript can exceed 64KB, `0x87 gui_request`, which carries a 16-bit length-prefixed native request, and `0x88 gui_agent_context`, which carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. These opcodes occupy legacy slots but self-describe their length so a frontend that recognizes the opcode can size and skip them; the schema's generated `command_size` sizes them from their declared framing. If a frontend encounters an *unknown* opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `clipboard_write` and `gui_file_tree` do.
 
 The BEAM-side encoder must use a documented length-prefixed envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
 
@@ -1000,6 +1000,18 @@ Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present,
 
 `base_count` is the count of unchanged leading messages **of the remainder** (after the `trim_front` drop), i.e. keep `[0, base_count)` and upsert from there. It is **not** the store's resident count, and is normally less than it on every streaming patch (the patched last message is part of the upserted suffix). A frontend desyncs (drops the delta and requests / awaits the next `full_replace`) only when its resident count is **less than** `trim_front + base_count`, meaning the delta cannot be applied against what the store holds. Because eviction rides `trim_front`, an over-cap session in steady streaming keeps emitting bounded appends rather than degrading to a full replace per frame.
 
+### 0x87 — gui_request
+
+Requests an AppKit-native Open or Save As panel. The BEAM owns the request lifecycle and the target buffer. The frontend owns only native panel presentation and returns the selected filesystem paths through `file_dialog_result`.
+
+```
+opcode(1) + payload_len(2) + request_id(4) + request_type(1) + suggested_path_len(2) + suggested_path
+```
+
+`request_type` is 0 for Open and 1 for Save As. Open uses an empty suggested path and permits multiple file selections. Save As carries the current full path when one exists, otherwise the buffer display name. The frontend must return the same `request_id`, including on cancel. A result for a stale request is ignored. Save As completion always applies to the originating buffer, even if the user changes tabs before the panel completes.
+
+This command is an out-of-band lifecycle command. It is not retained or coalesced with render frames. The native frontend must suspend editor focus reclamation while the panel is open and restore the editor as first responder after acceptance or cancellation.
+
 ### 0x88 — gui_agent_context
 
 Agent activity chrome for the native agent context bar. The BEAM owns the visible task, elapsed timestamp, approval state, progress summary, and the current todo plan snapshot.
@@ -1166,6 +1178,8 @@ opcode(1) + action_type(1) + payload...
 | 0x5F | picker_query_changed | generation(4) + edit_seq(4) + query_len(2) + query | Replace the native picker's complete query when the edit belongs to the active generation and is newer than the last acknowledged edit |
 | 0x60 | picker_item_activate | activation_generation(4) + activation_id(4) | Activate the exact picker item offered by the current BEAM-owned picker snapshot |
 | 0x61 | picker_action_activate | activation_generation(4) + activation_id(4) | Activate the exact Actions entry offered by the current BEAM-owned picker snapshot |
+| 0x62 | search_focus | replace_mode(1) | Open or focus the native search toolbar |
+| 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1185,6 +1199,8 @@ Older path-only `git_open_diff` payloads are accepted as a compatibility fallbac
 For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. Frontends should send both the target index and stable target identity so the BEAM can reject stale drops safely; drops onto files are resolved to the file's parent directory by the BEAM.
 
 For `extension_action`, shared decoding stops after `extension_id` and `action`; the remaining bytes are passed unchanged to the active shell or extension adapter. Frontends should use this only for extension-owned actions, not for shared chrome interactions that need a durable cross-frontend contract.
+
+For `file_dialog_result`, `outcome` is 0 for cancel, 1 for Open, and 2 for Save As. Cancel requires zero paths, Open requires one or more `string16` paths, and Save As requires exactly one `string16` path. The BEAM clears the matching request before applying the result. Cancel and write failure preserve buffer contents and dirty state.
 
 ## Settings State (0x97)
 

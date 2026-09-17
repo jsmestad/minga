@@ -18,7 +18,8 @@ defmodule MingaEditor.Frontend.FrameTransaction do
     Opcodes.set_font_fallback(),
     Opcodes.register_font(),
     Opcodes.clipboard_write(),
-    Opcodes.presentation_operation()
+    Opcodes.presentation_operation(),
+    Opcodes.gui_request()
   ]
 
   @retired_frame_body_opcodes [0x12, 0x13, 0x14, 0x1A]

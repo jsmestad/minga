@@ -111,6 +111,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x5F       | picker_query_changed    |
   | 0x60       | picker_item_activate    |
   | 0x61       | picker_action_activate  |
+  | 0x62       | search_focus            |
+  | 0x63       | file_dialog_result      |
 
   """
 
@@ -214,6 +216,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
   @gui_action_search_focus Opcodes.gui_action_search_focus()
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
+  @gui_action_file_dialog_result Opcodes.gui_action_file_dialog_result()
 
   @search_flag_replace_mode 0x01
   @search_flag_case_sensitive 0x02
@@ -347,6 +350,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :float_popup_dismiss
           | :chat_scrolled_away_from_bottom
           | :chat_returned_to_bottom
+          | {:file_dialog_result, request_id :: non_neg_integer(),
+             :cancel | {:open, [String.t()]} | {:save_as, String.t()}}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1031,7 +1036,38 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_chat_returned_to_bottom, <<>>),
     do: {:ok, :chat_returned_to_bottom}
 
+  def decode_gui_action(
+        @gui_action_file_dialog_result,
+        <<request_id::32, outcome::8, path_count::16, paths::binary>>
+      ) do
+    decode_file_dialog_result(request_id, outcome, path_count, paths)
+  end
+
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_file_dialog_result(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          binary()
+        ) ::
+          {:ok, gui_action()} | :error
+  defp decode_file_dialog_result(request_id, 0, 0, <<>>),
+    do: {:ok, {:file_dialog_result, request_id, :cancel}}
+
+  defp decode_file_dialog_result(request_id, 1, path_count, paths) when path_count > 0 do
+    with {:ok, decoded_paths, <<>>} <- decode_string16_list(paths, path_count) do
+      {:ok, {:file_dialog_result, request_id, {:open, decoded_paths}}}
+    end
+  end
+
+  defp decode_file_dialog_result(request_id, 2, 1, paths) do
+    with {:ok, [path], <<>>} <- decode_string16_list(paths, 1) do
+      {:ok, {:file_dialog_result, request_id, {:save_as, path}}}
+    end
+  end
+
+  defp decode_file_dialog_result(_request_id, _outcome, _path_count, _paths), do: :error
 
   @spec decode_sidebar_action(binary()) :: {:ok, gui_action()} | :error
   defp decode_sidebar_action(

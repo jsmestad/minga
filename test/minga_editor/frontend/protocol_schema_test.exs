@@ -164,6 +164,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_split_separators: 0x84,
       gui_git_status: 0x85,
       gui_agent_transcript: 0x86,
+      gui_request: 0x87,
       gui_agent_context: 0x88,
       gui_hover_action: 0x96,
       gui_config_state: 0x97,
@@ -273,7 +274,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       picker_query_changed: 0x5F,
       picker_item_activate: 0x60,
       picker_action_activate: 0x61,
-      search_focus: 0x62
+      search_focus: 0x62,
+      file_dialog_result: 0x63
     )
   end
 

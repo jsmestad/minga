@@ -387,6 +387,28 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         return writeCriticalFrame(buf)
     }
 
+    /// Return one correlated native file-dialog result on the durable input channel.
+    @discardableResult
+    func sendFileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String]) -> Bool {
+        let encodedPaths = paths.map { Array($0.utf8).prefix(Int(UInt16.max)) }
+        let pathCount = min(encodedPaths.count, Int(UInt16.max))
+        let payloadSize = encodedPaths.prefix(pathCount).reduce(7) { $0 + 2 + $1.count }
+        var buf = Data(count: 2 + payloadSize)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_DIALOG_RESULT
+        writeU32(&buf, 2, requestID)
+        buf[6] = outcome
+        writeU16(&buf, 7, UInt16(pathCount))
+        var offset = 9
+        for path in encodedPaths.prefix(pathCount) {
+            writeU16(&buf, offset, UInt16(path.count))
+            offset += 2
+            buf.replaceSubrange(offset..<offset + path.count, with: path)
+            offset += path.count
+        }
+        return writeCriticalFrame(buf)
+    }
+
     /// Send a mouse event with click count.
     /// GUI frontends send the native `NSEvent.clickCount`; the BEAM uses it
     /// directly for double/triple-click detection (no timing needed).

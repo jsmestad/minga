@@ -131,7 +131,7 @@ struct MingaMenuCommands: Commands {
         }
 
         CommandGroup(after: .newItem) {
-            Button("Open…") { encoder?.sendExecuteCommand(name: "find_file") }
+            Button("Open…") { encoder?.sendExecuteCommand(name: "open_file_dialog") }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(!connected)
 
@@ -139,6 +139,10 @@ struct MingaMenuCommands: Commands {
 
             Button("Save") { encoder?.sendExecuteCommand(name: "save") }
                 .keyboardShortcut("s", modifiers: .command)
+                .disabled(!connected)
+
+            Button("Save As…") { encoder?.sendExecuteCommand(name: "save_as_dialog") }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(!connected)
 
             Divider()
@@ -212,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dispatcher: CommandDispatcher?
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
+    private var activeFilePanel: NSSavePanel?
     private var inputRejectionAlert: NSAlert?
     private var coreConnectionIsLive = true
     private var recoveryManager: RecoveryManager?
@@ -394,6 +399,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.applicationQuitCoordinator = quitCoordinator
         disp.onApplicationQuitResponse = { [weak quitCoordinator] response in
             quitCoordinator?.receive(response)
+        }
+        disp.onFileDialogRequest = { [weak self] request in
+            self?.presentFileDialog(request)
         }
 
         // Wire the latency HUD (ticket #2215) to the recorder. The snapshot is
@@ -631,6 +639,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.beginSheetModal(for: window) { _ in }
         } else {
             alert.runModal()
+        }
+    }
+
+    private func presentFileDialog(_ request: NativeFileDialogRequest) {
+        guard activeFilePanel == nil else {
+            _ = encoder?.sendFileDialogResult(requestID: request.requestID, outcome: 0, paths: [])
+            return
+        }
+        guard let requestEncoder = encoder else { return }
+
+        let panel: NSSavePanel
+        switch request.kind {
+        case .open:
+            let openPanel = NSOpenPanel()
+            openPanel.allowsMultipleSelection = true
+            openPanel.canChooseFiles = true
+            openPanel.canChooseDirectories = false
+            panel = openPanel
+        case .saveAs:
+            let savePanel = NSSavePanel()
+            configureSavePanel(savePanel, suggestedPath: request.suggestedPath)
+            panel = savePanel
+        }
+
+        activeFilePanel = panel
+        editorNSView?.focusPolicy.beginNativeModal()
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self, weak panel] response in
+            guard let self else { return }
+            if let panel, self.activeFilePanel === panel {
+                self.activeFilePanel = nil
+            }
+            self.sendFileDialogResult(
+                request,
+                response: response,
+                panel: panel,
+                encoder: requestEncoder
+            )
+            self.editorNSView?.focusPolicy.endNativeModalAndRestore()
+        }
+
+        if let window = editorNSView?.window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(panel.runModal())
+        }
+    }
+
+    private func configureSavePanel(_ panel: NSSavePanel, suggestedPath: String) {
+        guard !suggestedPath.isEmpty else { return }
+        let url = URL(fileURLWithPath: suggestedPath)
+        panel.nameFieldStringValue = url.lastPathComponent
+        if suggestedPath.hasPrefix("/") {
+            panel.directoryURL = url.deletingLastPathComponent()
+        }
+    }
+
+    private func sendFileDialogResult(
+        _ request: NativeFileDialogRequest,
+        response: NSApplication.ModalResponse,
+        panel: NSSavePanel?,
+        encoder: ProtocolEncoder
+    ) {
+        guard response == .OK, let panel else {
+            _ = encoder.sendFileDialogResult(requestID: request.requestID, outcome: 0, paths: [])
+            return
+        }
+
+        switch request.kind {
+        case .open:
+            let paths = (panel as? NSOpenPanel)?.urls.map { $0.standardizedFileURL.path } ?? []
+            let outcome: UInt8 = paths.isEmpty ? 0 : 1
+            _ = encoder.sendFileDialogResult(
+                requestID: request.requestID,
+                outcome: outcome,
+                paths: paths
+            )
+        case .saveAs:
+            guard let path = panel.url?.standardizedFileURL.path else {
+                _ = encoder.sendFileDialogResult(requestID: request.requestID, outcome: 0, paths: [])
+                return
+            }
+            _ = encoder.sendFileDialogResult(
+                requestID: request.requestID,
+                outcome: 2,
+                paths: [path]
+            )
         }
     }
 

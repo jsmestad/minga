@@ -23,12 +23,15 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Commands.Search, as: SearchCommands
+  alias MingaEditor.Frontend.Capabilities, as: FrontendCapabilities
+  alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
   alias MingaEditor.PickerUI
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -202,10 +205,20 @@ defmodule MingaEditor.Commands.BufferManagement do
       ),
       do: state
 
-  def execute(%{workspace: %{buffers: %{active: _}}} = state, :save) do
-    {_status, state} = save_active_buffer(state)
-    state
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save) do
+    case Buffer.file_path(buf) do
+      nil -> save_unnamed_buffer(state, buf)
+      _path -> save_named_buffer(state)
+    end
   end
+
+  def execute(state, :open_file_dialog), do: request_file_dialog(state, :open)
+
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save_as_dialog)
+      when is_pid(buf),
+      do: request_file_dialog(state, {:save_as, buf})
+
+  def execute(state, :save_as_dialog), do: NoticeWorkflow.publish(state, "No active buffer")
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
     case Buffer.force_save(buf) do
@@ -750,6 +763,136 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:error, reason} ->
         Minga.Log.warning(:editor, "Failed to open config: #{inspect(reason)}")
         state
+    end
+  end
+
+  @doc "Applies a correlated native file-dialog result to its BEAM-owned origin."
+  @spec handle_file_dialog_result(
+          state(),
+          non_neg_integer(),
+          :cancel | {:open, [String.t()]} | {:save_as, String.t()}
+        ) :: state()
+  def handle_file_dialog_result(%EditorState{} = state, request_id, result)
+      when request_id in 0..0xFFFFFFFF do
+    case FrontendState.take_file_dialog(state.frontend, request_id) do
+      {:ok, request, frontend} ->
+        state
+        |> EditorState.accept_file_dialog_transition(frontend)
+        |> apply_file_dialog_result(request, result)
+
+      :stale ->
+        Minga.Log.warning(:editor, "Ignored stale native file-dialog result #{request_id}")
+        state
+    end
+  end
+
+  @spec save_unnamed_buffer(state(), pid()) :: state()
+  defp save_unnamed_buffer(state, buf) do
+    if FrontendCapabilities.gui?(state.frontend.capabilities) do
+      request_file_dialog(state, {:save_as, buf})
+    else
+      NoticeWorkflow.publish(state, "No file name — use :w <filename>")
+    end
+  end
+
+  @spec save_named_buffer(state()) :: state()
+  defp save_named_buffer(state) do
+    {_status, state} = save_active_buffer(state)
+    state
+  end
+
+  @spec request_file_dialog(state(), :open | {:save_as, pid()}) :: state()
+  defp request_file_dialog(%EditorState{} = state, request) do
+    if FrontendCapabilities.gui?(state.frontend.capabilities) do
+      begin_file_dialog_request(state, request)
+    else
+      NoticeWorkflow.publish(state, "Native file dialogs require the macOS GUI")
+    end
+  end
+
+  @spec begin_file_dialog_request(state(), :open | {:save_as, pid()}) :: state()
+  defp begin_file_dialog_request(state, request) do
+    case FrontendState.begin_file_dialog(state.frontend, request) do
+      {:ok, request_id, frontend} ->
+        state = EditorState.accept_file_dialog_transition(state, frontend)
+        emit_file_dialog_request(state, request_id, request)
+
+      {:error, :busy} ->
+        NoticeWorkflow.publish(state, "A file dialog is already open")
+    end
+  end
+
+  @spec emit_file_dialog_request(state(), non_neg_integer(), :open | {:save_as, pid()}) :: state()
+  defp emit_file_dialog_request(state, request_id, request) do
+    {request_type, suggested_path} = file_dialog_request_payload(request)
+    command = Protocol.encode_gui_request(request_id, request_type, suggested_path)
+
+    case MingaEditor.Frontend.send_lifecycle_command(state.frontend.port_manager, command) do
+      :accepted -> state
+      admission -> reject_file_dialog_request(state, request_id, admission)
+    end
+  catch
+    :exit, reason -> reject_file_dialog_request(state, request_id, reason)
+  end
+
+  @spec file_dialog_request_payload(:open | {:save_as, pid()}) ::
+          {Protocol.file_dialog_request_type(), String.t()}
+  defp file_dialog_request_payload(:open), do: {:open, ""}
+
+  defp file_dialog_request_payload({:save_as, buffer}) do
+    suggested_path = Buffer.file_path(buffer) || Helpers.buffer_display_name(buffer)
+    {:save_as, suggested_path}
+  end
+
+  @spec reject_file_dialog_request(state(), non_neg_integer(), term()) :: state()
+  defp reject_file_dialog_request(state, request_id, reason) do
+    frontend = FrontendState.cancel_file_dialog(state.frontend, request_id)
+    Minga.Log.warning(:editor, "Native file dialog was not admitted: #{inspect(reason)}")
+
+    state
+    |> EditorState.accept_file_dialog_transition(frontend)
+    |> NoticeWorkflow.publish("Could not open native file dialog")
+  end
+
+  @spec apply_file_dialog_result(
+          state(),
+          FrontendState.file_dialog_request(),
+          :cancel | {:open, [String.t()]} | {:save_as, String.t()}
+        ) :: state()
+  defp apply_file_dialog_result(state, _request, :cancel), do: state
+
+  defp apply_file_dialog_result(state, {:open, _request_id}, {:open, paths}),
+    do: Enum.reduce(paths, state, &open_dialog_path/2)
+
+  defp apply_file_dialog_result(
+         state,
+         {:save_as, _request_id, buffer},
+         {:save_as, path}
+       ) do
+    if BufferRegistry.buffer_tracked?(state, buffer) do
+      save_buffer_as(state, buffer, path, overwrite: true)
+    else
+      NoticeWorkflow.publish(state, "Save As failed: original buffer is no longer open")
+    end
+  end
+
+  defp apply_file_dialog_result(state, request, result) do
+    Minga.Log.warning(
+      :editor,
+      "Ignored mismatched native file-dialog result: request=#{inspect(request)} result=#{inspect(result)}"
+    )
+
+    state
+  end
+
+  @spec open_dialog_path(String.t(), state()) :: state()
+  defp open_dialog_path(path, state) do
+    case BufferRegistry.open_file_by_path_result(state, path) do
+      {:ok, next_state} ->
+        next_state
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(state, "Could not open #{path}: #{inspect(reason)}")
     end
   end
 
@@ -3059,6 +3202,15 @@ defmodule MingaEditor.Commands.BufferManagement do
          overwrite: overwrite
        )
        when is_pid(buf) do
+    save_buffer_as(state, buf, path, overwrite: overwrite)
+  end
+
+  defp save_buffer_as(state, _path, _opts) do
+    NoticeWorkflow.publish(state, "No active buffer")
+  end
+
+  @spec save_buffer_as(state(), pid(), String.t(), overwrite: boolean()) :: state()
+  defp save_buffer_as(state, buf, path, overwrite: overwrite) when is_pid(buf) do
     case Buffer.prepare_save_as(buf, Path.expand(path), overwrite) do
       {:ok, intent} ->
         write_buffer_as(state, buf, intent)
@@ -3069,10 +3221,6 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:error, reason} ->
         NoticeWorkflow.publish(state, "Save failed: #{inspect(reason)}")
     end
-  end
-
-  defp save_buffer_as(state, _path, _opts) do
-    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   @spec write_buffer_as(state(), pid(), Buffer.save_intent()) :: state()
@@ -3409,6 +3557,8 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   command(:save, "Save the current file", requires_buffer: true)
+  command(:open_file_dialog, "Open files with the native dialog", requires_buffer: false)
+  command(:save_as_dialog, "Save the current file as", requires_buffer: true)
   command(:force_save, "Force save the current file", requires_buffer: true)
   command(:reload, "Reload file from disk", requires_buffer: true)
   command(:quit, "Close tab or quit", requires_buffer: false)

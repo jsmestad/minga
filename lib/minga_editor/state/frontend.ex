@@ -14,6 +14,11 @@ defmodule MingaEditor.State.Frontend do
 
   @type backend :: :tui | :gui | :native_gui | :headless
   @type rendering_policy :: :enabled | :disabled
+  @type file_dialog_request_id :: 0..0xFFFFFFFF
+  @type file_dialog_request ::
+          :idle
+          | {:open, file_dialog_request_id()}
+          | {:save_as, file_dialog_request_id(), pid()}
 
   @type t :: %__MODULE__{
           backend: backend(),
@@ -23,7 +28,9 @@ defmodule MingaEditor.State.Frontend do
           capabilities: Capabilities.t(),
           resource_pressure: ResourcePressure.t(),
           native_presentation: NativePresentationObservation.t() | nil,
-          last_input_seq: non_neg_integer()
+          last_input_seq: non_neg_integer(),
+          file_dialog: file_dialog_request(),
+          next_file_dialog_request_id: file_dialog_request_id()
         }
 
   defstruct backend: :headless,
@@ -33,7 +40,9 @@ defmodule MingaEditor.State.Frontend do
             capabilities: %Capabilities{},
             resource_pressure: ResourcePressure.new(),
             native_presentation: nil,
-            last_input_seq: 0
+            last_input_seq: 0,
+            file_dialog: :idle,
+            next_file_dialog_request_id: 1
 
   @doc "Builds frontend state from editor startup options."
   @spec new(keyword()) :: t()
@@ -83,9 +92,71 @@ defmodule MingaEditor.State.Frontend do
       ),
       do: %{frontend | native_presentation: observation}
 
+  @doc "Begins one native file-dialog request and retains its BEAM-owned origin."
+  @spec begin_file_dialog(t(), :open | {:save_as, pid()}) ::
+          {:ok, file_dialog_request_id(), t()} | {:error, :busy}
+  def begin_file_dialog(%__MODULE__{file_dialog: :idle} = frontend, :open) do
+    request_id = frontend.next_file_dialog_request_id
+
+    {:ok, request_id,
+     %{
+       frontend
+       | file_dialog: {:open, request_id},
+         next_file_dialog_request_id: next_request_id(request_id)
+     }}
+  end
+
+  def begin_file_dialog(%__MODULE__{file_dialog: :idle} = frontend, {:save_as, buffer})
+      when is_pid(buffer) do
+    request_id = frontend.next_file_dialog_request_id
+
+    {:ok, request_id,
+     %{
+       frontend
+       | file_dialog: {:save_as, request_id, buffer},
+         next_file_dialog_request_id: next_request_id(request_id)
+     }}
+  end
+
+  def begin_file_dialog(%__MODULE__{}, _request), do: {:error, :busy}
+
+  @doc "Takes the matching file-dialog origin and rejects stale or mismatched results."
+  @spec take_file_dialog(t(), file_dialog_request_id()) ::
+          {:ok, file_dialog_request(), t()} | :stale
+  def take_file_dialog(
+        %__MODULE__{file_dialog: {:open, request_id}} = frontend,
+        request_id
+      ),
+      do: {:ok, frontend.file_dialog, %{frontend | file_dialog: :idle}}
+
+  def take_file_dialog(
+        %__MODULE__{file_dialog: {:save_as, request_id, _buffer}} = frontend,
+        request_id
+      ),
+      do: {:ok, frontend.file_dialog, %{frontend | file_dialog: :idle}}
+
+  def take_file_dialog(%__MODULE__{}, _request_id), do: :stale
+
+  @doc "Clears a request whose frontend command was not admitted."
+  @spec cancel_file_dialog(t(), file_dialog_request_id()) :: t()
+  def cancel_file_dialog(%__MODULE__{} = frontend, request_id) do
+    case take_file_dialog(frontend, request_id) do
+      {:ok, _request, next} -> next
+      :stale -> frontend
+    end
+  end
+
+  @doc "Drops connection-scoped file-dialog ownership without reusing its request id."
+  @spec clear_file_dialog(t()) :: t()
+  def clear_file_dialog(%__MODULE__{} = frontend), do: %{frontend | file_dialog: :idle}
+
   @doc "Correlates the next committed frame with the latest frontend input."
   @spec correlate_input(t(), non_neg_integer()) :: t()
   def correlate_input(%__MODULE__{} = frontend, sequence)
       when is_integer(sequence) and sequence >= 0,
       do: %{frontend | last_input_seq: sequence}
+
+  @spec next_request_id(file_dialog_request_id()) :: file_dialog_request_id()
+  defp next_request_id(0xFFFFFFFF), do: 1
+  defp next_request_id(request_id), do: request_id + 1
 end
