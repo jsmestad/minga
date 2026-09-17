@@ -28,10 +28,7 @@ struct AccessibilityTestFixture {
         let home = root.appendingPathComponent("home", isDirectory: true)
         let runtimeParent = root.appendingPathComponent("ipc", isDirectory: true)
         let configDirectory = root.appendingPathComponent("xdg-config/minga", isDirectory: true)
-        let gitDirectory = project.appendingPathComponent(".git", isDirectory: true)
-        let gitObjects = gitDirectory.appendingPathComponent("objects", isDirectory: true)
-        let gitHeads = gitDirectory.appendingPathComponent("refs/heads", isDirectory: true)
-        for directory in [project, home, runtimeParent, configDirectory, gitObjects, gitHeads] {
+        for directory in [project, home, runtimeParent, configDirectory] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
         try FileManager.default.setAttributes(
@@ -41,8 +38,7 @@ struct AccessibilityTestFixture {
         let config = configDirectory.appendingPathComponent("config.exs")
         let alpha = project.appendingPathComponent("alpha_target.ex")
         let beta = project.appendingPathComponent("beta_target.ex")
-        try write("ref: refs/heads/main\n", to: gitDirectory.appendingPathComponent("HEAD"))
-        try write("[core]\n\trepositoryformatversion = 0\n\tbare = false\n", to: gitDirectory.appendingPathComponent("config"))
+        try write("", to: project.appendingPathComponent(".minga"))
         try write("use Minga.Config\n", to: config)
         try write("ALPHA PANE λ🙂\nsecond alpha line\n", to: alpha)
         try write("BETA PANE é🙂\nsecond beta line\n", to: beta)
