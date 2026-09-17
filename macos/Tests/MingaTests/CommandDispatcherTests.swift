@@ -2042,7 +2042,7 @@ struct CommandDispatcherStagingTests {
         totalLines: UInt32 = 24,
         mode: ResidentRowStoreMode = .sequential
     ) throws -> GUIWindowContent {
-        let rows = (0..<rowCount).map { index in
+        let rows: [GUIVisualRow] = (0..<rowCount).map { index -> GUIVisualRow in
             GUIVisualRow(
                 rowType: .normal, rowId: UInt64(index + 1), bufLine: UInt32(index),
                 contentHash: UInt32(index + 1), text: "row \(index)", spans: []
