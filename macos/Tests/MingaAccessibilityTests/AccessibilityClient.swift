@@ -1,27 +1,21 @@
-import ApplicationServices
 import Foundation
+import XCTest
 
 struct AccessibilityNode {
-    let element: AXUIElement
-    let role: String
+    let element: XCUIElement
+    let role: XCUIElement.ElementType
     let identifier: String?
     let label: String?
     let value: String?
-    let selectedText: String?
-    let selectedTextRange: NSRange?
     let focused: Bool?
-    let actions: [String]
 }
 
 enum AccessibilityClientError: Error, CustomStringConvertible {
-    case api(String, AXError)
     case condition(String)
     case timeout(String, TimeInterval)
 
     var description: String {
         switch self {
-        case .api(let operation, let error):
-            return "AX API failed during \(operation): \(error.rawValue)"
         case .condition(let message):
             return message
         case .timeout(let condition, let seconds):
@@ -30,19 +24,14 @@ enum AccessibilityClientError: Error, CustomStringConvertible {
     }
 }
 
+@MainActor
 final class AccessibilityClient {
-    private struct PendingElement {
-        let element: AXUIElement
-        let depth: Int
-    }
-
-    private let application: AXUIElement
-    private let maximumDepth = 10
+    private let application: XCUIApplication
     private let maximumElements = 240
     private let pollInterval: TimeInterval = 0.05
 
-    init(processIdentifier: pid_t) {
-        application = AXUIElementCreateApplication(processIdentifier)
+    init(application: XCUIApplication) {
+        self.application = application
     }
 
     func waitForNode(
@@ -82,117 +71,56 @@ final class AccessibilityClient {
     }
 
     func performPress(on node: AccessibilityNode) throws {
-        guard node.actions.contains(kAXPressAction as String) else {
+        guard node.role == .button else {
             throw AccessibilityClientError.condition(
-                "Required AXPress action is missing from \(summary(node))"
+                "Required button action is missing from \(summary(node))"
             )
         }
-        let result = AXUIElementPerformAction(node.element, kAXPressAction as CFString)
-        guard result == .success else {
-            throw AccessibilityClientError.api("AXPress on \(summary(node))", result)
-        }
+        node.element.click()
     }
 
     func focus(_ node: AccessibilityNode) throws {
-        var settable = DarwinBoolean(false)
-        let settableResult = AXUIElementIsAttributeSettable(
-            node.element,
-            kAXFocusedAttribute as CFString,
-            &settable
-        )
-        guard settableResult == .success else {
-            throw AccessibilityClientError.api(
-                "checking AXFocused settable state on \(summary(node))",
-                settableResult
-            )
-        }
-        guard settable.boolValue else {
+        guard node.role == .textView else {
             throw AccessibilityClientError.condition(
-                "AXFocused is not settable on \(summary(node))"
+                "Required text-area focus action is missing from \(summary(node))"
             )
         }
-
-        let result = AXUIElementSetAttributeValue(
-            node.element,
-            kAXFocusedAttribute as CFString,
-            kCFBooleanTrue
-        )
-        guard result == .success else {
-            throw AccessibilityClientError.api("setting AXFocused on \(summary(node))", result)
-        }
+        node.element.click()
     }
 
     func boundedTreeDump() -> String {
         do {
             let snapshots = try nodes()
             let lines = snapshots.enumerated().map { index, node in
-                let range = node.selectedTextRange.map { "{\($0.location),\($0.length)}" } ?? "nil"
-                return [
+                [
                     "\(index): role=\(node.role)",
                     "id=\(node.identifier ?? "nil")",
                     "label=\(node.label ?? "nil")",
                     "value=\(bounded(node.value))",
-                    "focused=\(String(describing: node.focused))",
-                    "selected=\(bounded(node.selectedText))",
-                    "range=\(range)",
-                    "actions=\(node.actions)"
+                    "focused=\(String(describing: node.focused))"
                 ].joined(separator: " ")
             }
             return lines.joined(separator: "\n")
         } catch {
-            return "Unable to collect AX tree: \(error)"
+            return "Unable to collect XCTest accessibility tree: \(error)"
         }
     }
 
     private func nodes() throws -> [AccessibilityNode] {
-        var pending = [PendingElement(element: application, depth: 0)]
-        var result: [AccessibilityNode] = []
-
-        while let current = pending.first, result.count < maximumElements {
-            pending.removeFirst()
-            result.append(try snapshot(current.element))
-            guard current.depth < maximumDepth else { continue }
-
-            let children = try optionalAttribute(
-                current.element,
-                kAXChildrenAttribute as String
-            ) as? [AXUIElement] ?? []
-            pending.append(contentsOf: children.prefix(maximumElements - result.count).map {
-                PendingElement(element: $0, depth: current.depth + 1)
-            })
-        }
-
-        return result
+        let elements = application.descendants(matching: .any).allElementsBoundByIndex
+        return try elements.prefix(maximumElements).map(snapshot)
     }
 
-    private func snapshot(_ element: AXUIElement) throws -> AccessibilityNode {
-        let role = try stringAttribute(element, kAXRoleAttribute as String) ?? "unknown"
-        let title = try stringAttribute(element, kAXTitleAttribute as String)
-        let description = try stringAttribute(element, kAXDescriptionAttribute as String)
-        let identifier = try stringAttribute(element, kAXIdentifierAttribute as String)
-        let value = try optionalAttribute(element, kAXValueAttribute as String)
-
-        var actionNames: CFArray?
-        let actionResult = AXUIElementCopyActionNames(element, &actionNames)
-        let actions: [String]
-        if actionResult == .success {
-            actions = actionNames as? [String] ?? []
-        } else if actionResult == .actionUnsupported || actionResult == .attributeUnsupported {
-            actions = []
-        } else {
-            throw AccessibilityClientError.api("reading AX actions", actionResult)
-        }
-
+    private func snapshot(_ element: XCUIElement) throws -> AccessibilityNode {
+        let snapshot = try element.snapshot()
+        let representation = snapshot.dictionaryRepresentation
         return AccessibilityNode(
             element: element,
-            role: role,
-            identifier: identifier,
-            label: description ?? title,
-            value: describe(value),
-            selectedText: try stringAttribute(element, kAXSelectedTextAttribute as String),
-            selectedTextRange: try rangeAttribute(element, kAXSelectedTextRangeAttribute as String),
-            focused: try boolAttribute(element, kAXFocusedAttribute as String),
-            actions: actions
+            role: snapshot.elementType,
+            identifier: emptyAsNil(snapshot.identifier),
+            label: emptyAsNil(snapshot.label),
+            value: describe(snapshot.value),
+            focused: representation[.hasFocus] as? Bool
         )
     }
 
@@ -203,11 +131,7 @@ final class AccessibilityClient {
     ) throws -> T {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            do {
-                if let value = try predicate() { return value }
-            } catch AccessibilityClientError.api(_, .cannotComplete) {
-                // A live application's AX hierarchy can be momentarily unavailable while AppKit commits a frame.
-            }
+            if let value = try? predicate() { return value }
             RunLoop.current.run(
                 mode: .default,
                 before: min(Date().addingTimeInterval(pollInterval), deadline)
@@ -217,36 +141,8 @@ final class AccessibilityClient {
         throw AccessibilityClientError.timeout(description, timeout)
     }
 
-    private func optionalAttribute(_ element: AXUIElement, _ attribute: String) throws -> Any? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-        switch result {
-        case .success:
-            return value
-        case .noValue, .attributeUnsupported:
-            return nil
-        default:
-            throw AccessibilityClientError.api("reading \(attribute)", result)
-        }
-    }
-
-    private func stringAttribute(_ element: AXUIElement, _ attribute: String) throws -> String? {
-        try optionalAttribute(element, attribute) as? String
-    }
-
-    private func boolAttribute(_ element: AXUIElement, _ attribute: String) throws -> Bool? {
-        try optionalAttribute(element, attribute) as? Bool
-    }
-
-    private func rangeAttribute(_ element: AXUIElement, _ attribute: String) throws -> NSRange? {
-        guard let value = try optionalAttribute(element, attribute) else { return nil }
-        guard CFGetTypeID(value as CFTypeRef) == AXValueGetTypeID() else { return nil }
-
-        let axValue = unsafeDowncast(value as AnyObject, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cfRange else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
-        return NSRange(location: range.location, length: range.length)
+    private func emptyAsNil(_ value: String) -> String? {
+        value.isEmpty ? nil : value
     }
 
     private func describe(_ value: Any?) -> String? {
