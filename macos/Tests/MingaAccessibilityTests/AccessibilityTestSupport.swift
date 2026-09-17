@@ -26,9 +26,9 @@ struct AccessibilityTestFixture {
     static func create(at root: URL) throws -> AccessibilityTestFixture {
         let project = root.appendingPathComponent("fixture-project", isDirectory: true)
         let home = root.appendingPathComponent("home", isDirectory: true)
-        // Darwin limits AF_UNIX socket paths to 103 bytes. XCTest's temporary directory can consume half of that budget before Minga adds its socket name.
-        let runtimeParent = URL(fileURLWithPath: "/tmp", isDirectory: true)
-            .appendingPathComponent("minga-ax-\(UUID().uuidString)", isDirectory: true)
+        // Darwin limits AF_UNIX socket paths to 103 bytes. Keep the isolated parent name short while remaining inside XCTest's writable temporary directory.
+        let runtimeParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent(String(UUID().uuidString.prefix(6)), isDirectory: true)
         let configDirectory = root.appendingPathComponent("xdg-config/minga", isDirectory: true)
         var keepRuntimeParent = false
         defer {
