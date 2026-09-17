@@ -122,7 +122,8 @@ struct ContentViewTests {
     private func makeEditorNSView(
         gui: GUIState,
         dispatcher: CommandDispatcher,
-        encoder: InputEncoder
+        encoder: InputEncoder,
+        reduceMotionEnabled: Bool = false
     ) throws -> EditorNSView {
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         var factories = NativeRenderFactories.production
@@ -135,7 +136,8 @@ struct ContentViewTests {
             encoder: encoder,
             dispatcher: dispatcher,
             coreTextRenderer: renderer,
-            fontManager: fontManager
+            fontManager: fontManager,
+            reduceMotionEnabled: reduceMotionEnabled
         )
         view.editorInput = gui.editorInput
         return view
@@ -344,6 +346,32 @@ struct ContentViewTests {
         #expect((firstVisualTop - CGFloat(10) * editor.cellHeight) * CGFloat(direction) >= 0)
         #expect((secondVisualTop - CGFloat(10) * editor.cellHeight) * CGFloat(direction) <= 2 * editor.cellHeight)
         #expect((secondVisualTop - firstVisualTop) * CGFloat(direction) >= 0)
+    }
+
+    @Test("Reduce Motion sends discrete wheel input without local presentation")
+    func reduceMotionSuppressesDiscreteWheelPresentation() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy, reduceMotionEnabled: true)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let initial = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(snapshot: initial, localTransform: nil)
+        let event = MountedPreciseScrollEvent(
+            locationInWindow: editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight * 6), to: nil),
+            windowNumber: 0, deltaY: -editor.cellHeight, phase: []
+        )
+        event.preciseDeltas = false
+
+        editor.scrollWheel(with: event)
+
+        #expect(spy.mouseEventCalls.count == 1)
+        #expect(editor.interactionSnapshot.scrollWindowId == nil)
+        #expect(editor.interactionSnapshot.scrollOffset == .zero)
     }
 
     @Test("windowed scrolling keeps unavailable rows hidden during live and settling frames", arguments: [false, true], [0, 2])
