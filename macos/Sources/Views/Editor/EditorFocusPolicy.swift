@@ -109,6 +109,20 @@ final class EditorFocusPolicy {
         return window.firstResponder is NSText
     }
 
+    /// Returns native keyboard focus to the editor for an accessibility focus request.
+    func requestAccessibilityFocus() -> Bool {
+        guard let window = attachedWindow,
+              let editorView,
+              editorView.window === window
+        else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        if window.firstResponder !== editorView {
+            window.makeFirstResponder(editorView)
+        }
+        return NSApp.isActive && window.isKeyWindow && window.firstResponder === editorView
+    }
+
     /// Activates the app and returns whether the requested editor focus postcondition now holds.
     func requestPresentationFocus() -> Bool {
         guard nativeModalDepth == 0 else { return false }

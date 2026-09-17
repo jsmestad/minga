@@ -28,6 +28,10 @@ struct WindowContentBuilder {
     var paneGeometryPayload: Data?
     var cursorline: (row: UInt16, r: UInt8, g: UInt8, b: UInt8)?
     var scrollPresentationPayload: Data?
+    var accessibilityLabel: String?
+    var accessibilityGeneration: UInt64 = 0
+    var accessibilityCursor: (row: UInt16, utf16: UInt32)?
+    var accessibilitySelectionRanges: [GUIAccessibilityRange] = []
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
@@ -142,6 +146,22 @@ struct WindowContentBuilder {
         }
         if let scrollPresentationPayload {
             sections.append(buildSection(0x0A, scrollPresentationPayload))
+        }
+        if let accessibilityLabel {
+            var payload = Data()
+            let bytes = Array(accessibilityLabel.utf8)
+            appendU64(&payload, accessibilityGeneration)
+            appendU16(&payload, accessibilityCursor?.row ?? UInt16.max)
+            appendU32(&payload, accessibilityCursor?.utf16 ?? UInt32.max)
+            appendU16(&payload, UInt16(accessibilitySelectionRanges.count))
+            for range in accessibilitySelectionRanges {
+                appendU16(&payload, range.row)
+                appendU32(&payload, range.startUTF16)
+                appendU32(&payload, range.endUTF16)
+            }
+            appendU16(&payload, UInt16(bytes.count))
+            payload.append(contentsOf: bytes)
+            sections.append(buildSection(0x0C, payload))
         }
 
         var data = Data()
@@ -317,6 +337,19 @@ struct WindowContentDecoderTests {
             sections.append(deltaSection(0x0A, scrollPresentationPayload))
         }
 
+        var accessibility = Data()
+        deltaAppendU64(&accessibility, 73)
+        deltaAppendU16(&accessibility, 1)
+        deltaAppendU32(&accessibility, 5)
+        deltaAppendU16(&accessibility, 1)
+        deltaAppendU16(&accessibility, 1)
+        deltaAppendU32(&accessibility, 2)
+        deltaAppendU32(&accessibility, 4)
+        let label = Data("lib/minga.ex".utf8)
+        deltaAppendU16(&accessibility, UInt16(label.count))
+        accessibility.append(label)
+        sections.append(deltaSection(0x0C, accessibility))
+
         var data = Data()
         data.append(opcode)
         data.append(UInt8(sections.count))
@@ -427,6 +460,33 @@ struct WindowContentDecoderTests {
         #expect(content.scrollLeft == 25)
     }
 
+    @Test("Decode accessibility pane label")
+    func decodeAccessibilityLabel() throws {
+        var builder = WindowContentBuilder()
+        builder.accessibilityLabel = "lib/minga.ex [RO]"
+        builder.accessibilityGeneration = 73
+        builder.accessibilityCursor = (row: 2, utf16: 5)
+        builder.accessibilitySelectionRanges = [
+            GUIAccessibilityRange(row: 1, startUTF16: 2, endUTF16: 4),
+            GUIAccessibilityRange(row: 2, startUTF16: 0, endUTF16: 3),
+        ]
+
+        let (command, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = command else {
+            Issue.record("Expected .guiWindowContent")
+            return
+        }
+
+        #expect(content.accessibilityLabel == "lib/minga.ex [RO]")
+        #expect(content.accessibilityGeneration == 73)
+        #expect(content.accessibilityCursor?.row == 2)
+        #expect(content.accessibilityCursor?.utf16 == 5)
+        #expect(content.accessibilitySelectionRanges == [
+            GUIAccessibilityRange(row: 1, startUTF16: 2, endUTF16: 4),
+            GUIAccessibilityRange(row: 2, startUTF16: 0, endUTF16: 3),
+        ])
+    }
+
     @Test("Decode overlay delta without cursorline")
     func decodeOverlayDeltaWithoutCursorline() throws {
         var data = Data([OP_GUI_WINDOW_OVERLAY_DELTA])
@@ -436,11 +496,12 @@ struct WindowContentDecoderTests {
         data.append(contentsOf: [0x00, 0x03]) // cursor_row
         data.append(contentsOf: [0x00, 0x07]) // cursor_col
         data.append(0x01) // beam
+        data.append(contentsOf: [0xFF, 0xFF, 0xFF, 0xFF]) // no accessibility cursor
         data.append(OP_COMMIT_FRAME) // next opcode proves consumed size stays aligned
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
 
-        #expect(size == 13)
+        #expect(size == 17)
         #expect(data[size] == OP_COMMIT_FRAME)
         guard case .guiWindowOverlayDelta(let delta) = cmd else {
             Issue.record("Expected .guiWindowOverlayDelta"); return
@@ -453,6 +514,7 @@ struct WindowContentDecoderTests {
         #expect(delta.cursorCol == 7)
         #expect(delta.cursorShape == .beam)
         #expect(delta.cursorline == nil)
+        #expect(delta.accessibilityCursorUTF16 == nil)
     }
 
     @Test("Decode overlay delta with cursor and cursorline")
@@ -466,6 +528,7 @@ struct WindowContentDecoderTests {
         data.append(0x01) // beam
         data.append(contentsOf: [0x00, 0x02]) // cursorline row
         data.append(contentsOf: [0x11, 0x22, 0x33]) // cursorline bg
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x09]) // accessibility cursor UTF-16
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
 
@@ -481,6 +544,29 @@ struct WindowContentDecoderTests {
         #expect(delta.cursorCol == 7)
         #expect(delta.cursorShape == .beam)
         #expect(delta.cursorline == GUICursorline(row: 2, bg: 0x112233))
+        #expect(delta.accessibilityCursorUTF16 == 9)
+    }
+
+    @Test("Overlay delta replaces the retained accessibility cursor")
+    func overlayDeltaUpdatesAccessibilityCursor() throws {
+        let row = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "a🙂b", spans: [])
+        let content = try GUIWindowContent(
+            windowId: 9, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [row], selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: [],
+            accessibilityLabel: "buffer", accessibilityGeneration: 73,
+            accessibilityCursor: GUIAccessibilityCursor(row: 0, utf16: 0)
+        )
+        let delta = GUIWindowOverlayDelta(
+            windowId: 9, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 2, cursorShape: .beam,
+            cursorline: nil, accessibilityCursorUTF16: 3
+        )
+
+        let updated = try #require(content.applyingOverlayDelta(delta))
+        #expect(updated.accessibilityGeneration == 73)
+        #expect(updated.accessibilityCursor == GUIAccessibilityCursor(row: 0, utf16: 3))
     }
 
     @Test("Decode cursor_visible flag from flags byte bit 1")
@@ -924,6 +1010,11 @@ struct WindowContentDecoderTests {
         #expect(delta.cursorShape == .beam)
         #expect(delta.scrollLeft == 2)
         #expect(delta.rows.count == 2)
+        #expect(delta.accessibilityGeneration == 73)
+        #expect(delta.accessibilityCursor == GUIAccessibilityCursor(row: 1, utf16: 5))
+        #expect(delta.accessibilitySelectionRanges == [
+            GUIAccessibilityRange(row: 1, startUTF16: 2, endUTF16: 4)
+        ])
 
         guard case .reference(let rowId, let contentHash) = delta.rows[0] else {
             Issue.record("Expected retained row ref"); return
@@ -952,6 +1043,7 @@ struct WindowContentDecoderTests {
         #expect(delta.windowId == 7)
         #expect(delta.contentEpoch == 42)
         #expect(delta.rows.count == 2)
+        #expect(delta.accessibilityLabel == "lib/minga.ex")
     }
 
     @Test("Decode protocol-v11 row splices and reject ambiguous legacy rows")
@@ -1090,7 +1182,8 @@ struct WindowContentDecoderTests {
             selection: nil,
             searchMatches: [],
             diagnosticUnderlines: [],
-            documentHighlights: []
+            documentHighlights: [],
+            accessibilityLabel: "old label"
         )
 
         let delta = GUIWindowRowsDelta(
@@ -1108,7 +1201,13 @@ struct WindowContentDecoderTests {
             documentHighlights: [],
             lineAnnotations: [],
             paneGeometry: nil,
-            cursorline: nil
+            cursorline: nil,
+            accessibilityLabel: "new label",
+            accessibilityGeneration: 73,
+            accessibilityCursor: GUIAccessibilityCursor(row: 1, utf16: 5),
+            accessibilitySelectionRanges: [
+                GUIAccessibilityRange(row: 1, startUTF16: 2, endUTF16: 4)
+            ]
         )
 
         guard let updated = content.applyingRowsDelta(delta) else {
@@ -1119,6 +1218,12 @@ struct WindowContentDecoderTests {
         #expect(updated.cursorShape == CursorShape.beam)
         #expect(updated.cursorRow == 1)
         #expect(updated.scrollLeft == 3)
+        #expect(updated.accessibilityLabel == "new label")
+        #expect(updated.accessibilityGeneration == 73)
+        #expect(updated.accessibilityCursor == GUIAccessibilityCursor(row: 1, utf16: 5))
+        #expect(updated.accessibilitySelectionRanges == [
+            GUIAccessibilityRange(row: 1, startUTF16: 2, endUTF16: 4)
+        ])
     }
 
     @Test("Rows delta fails when a retained ref is missing")
@@ -1314,7 +1419,8 @@ struct WindowContentDecoderTests {
         let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows,
-            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            accessibilityLabel: "old label"
         )
         let middle = count / 2
         let front = GUIVisualRow(
@@ -1342,13 +1448,15 @@ struct WindowContentDecoderTests {
                                    insertEntries: [.full(tail)])
             ],
             selection: nil, searchMatches: [], diagnosticUnderlines: [],
-            documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil
+            documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil,
+            accessibilityLabel: "new label"
         )
 
         let updated = try content.applyingRowsDeltaChecked(delta).get()
         #expect(updated.rowStore.row(at: 0) == front)
         #expect(updated.rowStore.row(at: middle) == replacement)
         #expect(updated.rowStore.row(at: count - 1) == tail)
+        #expect(updated.accessibilityLabel == "new label")
         #expect(updated.rowStoreOperationCounters.splices == 3)
         #expect(updated.rowStoreOperationCounters.changedRowsValidated == 3)
         #expect(updated.rowStoreOperationCounters.idsResolved == 0)

@@ -3,8 +3,9 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
 
   alias Minga.Core.Unicode
   alias Minga.RenderModel.Window.Row
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
 
-  @enforce_keys ~w(row buf_line visual_index display_row source_text source_start_byte source_end_byte source_start_col source_end_col indent_width row_width)a
+  @enforce_keys ~w(row buf_line visual_index display_row source_text source_offset_map source_start_byte source_end_byte source_start_col source_end_col composed_start_utf16 composed_end_utf16 indent_width row_width)a
   defstruct @enforce_keys ++ [input_hash: nil, reused?: false, wrap_line_hash: nil]
 
   @type t :: %__MODULE__{
@@ -13,10 +14,13 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
           visual_index: non_neg_integer(),
           display_row: non_neg_integer(),
           source_text: String.t(),
+          source_offset_map: SourceOffsetMap.t(),
           source_start_byte: non_neg_integer(),
           source_end_byte: non_neg_integer(),
           source_start_col: non_neg_integer(),
           source_end_col: non_neg_integer(),
+          composed_start_utf16: non_neg_integer(),
+          composed_end_utf16: non_neg_integer(),
           indent_width: non_neg_integer(),
           row_width: non_neg_integer(),
           input_hash: non_neg_integer() | nil,
@@ -26,20 +30,16 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
 
   @spec new(
           Row.t(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
+          SourceOffsetMap.t(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) :: t()
   def new(
         %Row{} = row,
-        source_text,
+        %SourceOffsetMap{} = source_offset_map,
         source_start_col,
         source_end_col,
-        source_start_byte,
-        source_end_byte,
         indent_width
       ) do
     %__MODULE__{
@@ -47,11 +47,14 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
       buf_line: row.buf_line,
       visual_index: row.visual_index,
       display_row: 0,
-      source_text: source_text,
-      source_start_byte: source_start_byte,
-      source_end_byte: source_end_byte,
+      source_text: source_offset_map.source_text,
+      source_offset_map: source_offset_map,
+      source_start_byte: source_offset_map.source_start_byte,
+      source_end_byte: source_offset_map.source_end_byte,
       source_start_col: source_start_col,
       source_end_col: source_end_col,
+      composed_start_utf16: source_offset_map.composed_start_utf16,
+      composed_end_utf16: source_offset_map.composed_end_utf16,
       indent_width: indent_width,
       row_width: Unicode.display_width(row.text)
     }

@@ -113,6 +113,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x61       | picker_action_activate  |
   | 0x62       | search_focus            |
   | 0x63       | file_dialog_result      |
+  | 0x64       | focus_window            |
 
   """
 
@@ -208,6 +209,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
   @gui_action_picker_item_activate Opcodes.gui_action_picker_item_activate()
   @gui_action_picker_action_activate Opcodes.gui_action_picker_action_activate()
+  @gui_action_focus_window Opcodes.gui_action_focus_window()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
   @gui_action_search_prev Opcodes.gui_action_search_prev()
@@ -303,6 +305,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_drop, DropIntent.t()}
           | {:fold_toggle_at_line, window_id :: non_neg_integer(),
              buffer_line :: non_neg_integer()}
+          | {:focus_window, window_id :: non_neg_integer(), generation :: non_neg_integer()}
           | {:file_tree_open_in_split, index :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
           | {:tab_reorder, id :: pos_integer(), new_index :: non_neg_integer()}
@@ -886,6 +889,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_fold_toggle_at_line, <<window_id::16, buffer_line::32>>),
     do: {:ok, {:fold_toggle_at_line, window_id, buffer_line}}
+
+  def decode_gui_action(@gui_action_focus_window, <<window_id::16, generation::64>>),
+    do: {:ok, {:focus_window, window_id, generation}}
 
   def decode_gui_action(@gui_action_system_will_sleep, <<>>),
     do: {:ok, :system_will_sleep}

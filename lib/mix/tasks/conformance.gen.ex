@@ -27,6 +27,7 @@ defmodule Mix.Tasks.Conformance.Gen do
   use Mix.Task
 
   alias Minga.Config.Options
+  alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
@@ -99,6 +100,7 @@ defmodule Mix.Tasks.Conformance.Gen do
       cursor_only_overlay_delta(),
       layout_generation_full_replace(),
       reset_required_discard(),
+      accessibility_mapping(),
       production_render_boundaries(),
       drag_selection_active_offset(),
       hml_after_scroll_report(),
@@ -388,6 +390,120 @@ defmodule Mix.Tasks.Conformance.Gen do
           %{
             "store_present" => true,
             "offset_discarded" => true
+          }
+        )
+      ]
+    )
+  end
+
+  @spec accessibility_mapping() :: transcript()
+  defp accessibility_mapping do
+    tab_window =
+      window(
+        window_id: 7,
+        rows: [accessibility_row(0, :normal, "\t\ta🙂b")],
+        content_width: 1,
+        content_height: 1,
+        viewport_left: 0,
+        full_refresh: false,
+        accessibility_generation: 90,
+        accessibility_cursor: {0, 0},
+        accessibility_selection_ranges: [{0, 0, 1}],
+        selection: %Minga.RenderModel.Window.Selection{
+          type: :char,
+          start_row: 0,
+          start_col: 0,
+          end_row: 0,
+          end_col: 0
+        }
+      )
+
+    second_tab_window = %{tab_window | accessibility_selection_ranges: [{0, 1, 2}]}
+
+    {tab_commands, caches} = AdapterGUI.encode_windows([tab_window], Caches.new())
+    {second_tab_commands, caches} = AdapterGUI.encode_windows([second_tab_window], caches)
+
+    rows = [
+      accessibility_row(0, :normal, "a\tb"),
+      accessibility_row(1, :wrap_continuation, "wrapped 🙂"),
+      accessibility_row(2, :fold_start, "folded ··· 3 lines"),
+      accessibility_row(3, :virtual_line, "virtual note")
+    ]
+
+    win =
+      window(
+        window_id: 7,
+        rows: rows,
+        content_width: 8,
+        content_height: 4,
+        viewport_left: 1,
+        full_refresh: false,
+        accessibility_generation: 91,
+        accessibility_cursor: {0, 2},
+        accessibility_selection_ranges: [{0, 1, 2}, {1, 0, 7}, {2, 0, 6}, {3, 0, 7}],
+        selection: %Minga.RenderModel.Window.Selection{
+          type: :block,
+          start_row: 0,
+          start_col: 1,
+          end_row: 3,
+          end_col: 7
+        }
+      )
+
+    {mapping_commands, _caches} = AdapterGUI.encode_windows([win], caches)
+
+    tab_payload = window_frame_payload!(tab_commands, @op_window_content)
+    second_tab_payload = window_frame_payload!(second_tab_commands, @op_viewport_delta)
+    mapping_payload = window_frame_payload!(mapping_commands, @op_window_content)
+
+    transcript(
+      "accessibility_mapping",
+      "store",
+      %{swift: true, go: false, go_skip_reason: "macOS accessibility projection contract"},
+      "Real adapter frames carry pane lifetime, exact UTF-16 cursor and block ranges, tab text, wrap/fold/virtual row kinds, and horizontal viewport clipping metadata into the Swift decoder. A selection move between consecutive zero-width tabs must emit and apply a content delta even when display-column selection is unchanged.",
+      [
+        frame(
+          @op_window_content,
+          "BEAM-authored first zero-width tab boundary",
+          tab_payload,
+          %{
+            "store_present" => true,
+            "accessibility_generation" => 90,
+            "accessibility_cursor" => [0, 0],
+            "accessibility_ranges" => [[0, 0, 1]],
+            "accessibility_selected_text" => "\t",
+            "viewport_left" => 0,
+            "row_types" => [0],
+            "row_text" => ["\t\ta🙂b"]
+          }
+        ),
+        frame(
+          @op_viewport_delta,
+          "same display-column selection moves to the second zero-width tab",
+          second_tab_payload,
+          %{
+            "store_present" => true,
+            "accessibility_generation" => 90,
+            "accessibility_cursor" => [0, 0],
+            "accessibility_ranges" => [[0, 1, 2]],
+            "accessibility_selected_text" => "\t",
+            "viewport_left" => 0,
+            "row_types" => [0],
+            "row_text" => ["\t\ta🙂b"]
+          }
+        ),
+        frame(
+          @op_window_content,
+          "BEAM-authored accessibility mapping",
+          mapping_payload,
+          %{
+            "store_present" => true,
+            "accessibility_generation" => 91,
+            "accessibility_cursor" => [0, 2],
+            "accessibility_ranges" => [[0, 1, 2], [1, 0, 7], [2, 0, 6], [3, 0, 7]],
+            "viewport_left" => 1,
+            "row_types" => [0, 4, 1, 2],
+            "row_text" => ["a\tb", "wrapped 🙂", "folded ··· 3 lines", "virtual note"]
           }
         )
       ]
@@ -1012,13 +1128,23 @@ defmodule Mix.Tasks.Conformance.Gen do
       full_refresh: Keyword.get(opts, :full_refresh, true),
       contiguous_rows: true,
       scroll_seq: Keyword.get(opts, :scroll_seq, 0),
-      geometry: geometry(wid, top, width, height)
+      selection: Keyword.get(opts, :selection),
+      accessibility_generation: Keyword.get(opts, :accessibility_generation, 0),
+      accessibility_cursor: Keyword.get(opts, :accessibility_cursor),
+      accessibility_selection_ranges: Keyword.get(opts, :accessibility_selection_ranges, []),
+      geometry: geometry(wid, top, Keyword.get(opts, :viewport_left, 0), width, height)
     }
   end
 
-  @spec geometry(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec geometry(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           PaneGeometry.t()
-  defp geometry(wid, top, width, height) do
+  defp geometry(wid, top, left, width, height) do
     gutter = 5
 
     %PaneGeometry{
@@ -1030,7 +1156,7 @@ defmodule Mix.Tasks.Conformance.Gen do
       clip_rect: {0, 0, width, height},
       viewport: %Viewport{
         top: top,
-        left: 0,
+        left: left,
         rows: height,
         cols: width,
         total_lines: 1000,
@@ -1052,6 +1178,19 @@ defmodule Mix.Tasks.Conformance.Gen do
     %Row{
       row_id: Row.stable_id(:normal, buf_line),
       row_type: :normal,
+      buf_line: buf_line,
+      visual_index: buf_line,
+      text: text,
+      spans: [],
+      content_hash: Row.compute_hash(text, [])
+    }
+  end
+
+  @spec accessibility_row(non_neg_integer(), Row.row_type(), String.t()) :: Row.t()
+  defp accessibility_row(buf_line, row_type, text) do
+    %Row{
+      row_id: Row.stable_id(row_type, buf_line),
+      row_type: row_type,
       buf_line: buf_line,
       visual_index: buf_line,
       text: text,
@@ -1086,6 +1225,14 @@ defmodule Mix.Tasks.Conformance.Gen do
   end
 
   # ── Step + transcript shaping ─────────────────────────────────────────────
+
+  @spec window_frame_payload!([binary()], non_neg_integer()) :: binary()
+  defp window_frame_payload!(commands, expected_opcode) do
+    Enum.find(commands, fn
+      <<^expected_opcode, _rest::binary>> -> true
+      _command -> false
+    end) || raise "missing window frame opcode 0x#{Integer.to_string(expected_opcode, 16)}"
+  end
 
   @spec frame(non_neg_integer(), String.t(), binary(), map()) :: map()
   defp frame(opcode, note, payload, expect) do

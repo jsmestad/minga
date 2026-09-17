@@ -154,6 +154,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiWhichKeyFields":
 		v, n, err := DecodeGuiWhichKeyFields(payload, 0, len(payload))
 		return v, n, err
+	case "GuiWindowContentAccessibility":
+		v, n, err := DecodeGuiWindowContentAccessibility(payload, 0, len(payload))
+		return v, n, err
 	case "GuiWindowContentAnnotations":
 		v, n, err := DecodeGuiWindowContentAnnotations(payload, 0, len(payload))
 		return v, n, err
@@ -184,11 +187,17 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiWindowContentSelection":
 		v, n, err := DecodeGuiWindowContentSelection(payload, 0, len(payload))
 		return v, n, err
+	case "GuiWindowRowsDeltaAccessibility":
+		v, n, err := DecodeGuiWindowRowsDeltaAccessibility(payload, 0, len(payload))
+		return v, n, err
 	case "GuiWindowRowsDeltaHeader":
 		v, n, err := DecodeGuiWindowRowsDeltaHeader(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowRowsDeltaRows":
 		v, n, err := DecodeGuiWindowRowsDeltaRows(payload, 0, len(payload))
+		return v, n, err
+	case "GuiWindowViewportDeltaAccessibility":
+		v, n, err := DecodeGuiWindowViewportDeltaAccessibility(payload, 0, len(payload))
 		return v, n, err
 	case "GuiWindowViewportDeltaHeader":
 		v, n, err := DecodeGuiWindowViewportDeltaHeader(payload, 0, len(payload))

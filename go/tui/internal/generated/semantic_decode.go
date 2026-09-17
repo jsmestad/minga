@@ -272,6 +272,30 @@ func DecodeDiagnosticRange(data []byte, offset int, windowEnd int) (DiagnosticRa
 	}, pos, nil
 }
 
+func DecodeAccessibilityRange(data []byte, offset int, windowEnd int) (AccessibilityRange, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "row"); err != nil {
+		return AccessibilityRange{}, offset, err
+	}
+	row := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "start_utf16"); err != nil {
+		return AccessibilityRange{}, offset, err
+	}
+	startUtf16 := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "end_utf16"); err != nil {
+		return AccessibilityRange{}, offset, err
+	}
+	endUtf16 := decodeU32(data, pos)
+	pos += 4
+	return AccessibilityRange{
+		Row:        row,
+		StartUtf16: startUtf16,
+		EndUtf16:   endUtf16,
+	}, pos, nil
+}
+
 func DecodeDocumentHighlight(data []byte, offset int, windowEnd int) (DocumentHighlight, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+2, "start_row"); err != nil {
@@ -1921,6 +1945,53 @@ func DecodeGuiWindowContentScrollPresentation(data []byte, offset int, windowEnd
 	}, pos, nil
 }
 
+func DecodeGuiWindowContentAccessibility(data []byte, offset int, windowEnd int) (GuiWindowContentAccessibility, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+8, "generation"); err != nil {
+		return GuiWindowContentAccessibility{}, offset, err
+	}
+	generation := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
+		return GuiWindowContentAccessibility{}, offset, err
+	}
+	cursorRow := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "cursor_utf16"); err != nil {
+		return GuiWindowContentAccessibility{}, offset, err
+	}
+	cursorUtf16 := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+2, "selection_ranges count"); err != nil {
+		return GuiWindowContentAccessibility{}, offset, err
+	}
+	selectionRangesCount := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+selectionRangesCount*10, "selection_ranges"); err != nil {
+		return GuiWindowContentAccessibility{}, offset, err
+	}
+	selectionRanges := make([]AccessibilityRange, 0, selectionRangesCount)
+	for i := 0; i < selectionRangesCount; i++ {
+		item, nextPos, err := DecodeAccessibilityRange(data, pos, windowEnd)
+		if err != nil {
+			return GuiWindowContentAccessibility{}, offset, err
+		}
+		pos = nextPos
+		selectionRanges = append(selectionRanges, item)
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiWindowContentAccessibility{}, offset, err
+	}
+	return GuiWindowContentAccessibility{
+		Generation:      generation,
+		CursorRow:       cursorRow,
+		CursorUtf16:     cursorUtf16,
+		SelectionRanges: selectionRanges,
+		Label:           label,
+	}, pos, nil
+}
+
 // Section decoders for gui_window_rows_delta
 
 func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int, windowEnd int) (GuiWindowRowsDeltaHeader, int, error) {
@@ -1990,6 +2061,53 @@ func DecodeGuiWindowRowsDeltaRows(data []byte, offset int, windowEnd int) ([]Row
 	return items, pos, nil
 }
 
+func DecodeGuiWindowRowsDeltaAccessibility(data []byte, offset int, windowEnd int) (GuiWindowRowsDeltaAccessibility, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+8, "generation"); err != nil {
+		return GuiWindowRowsDeltaAccessibility{}, offset, err
+	}
+	generation := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
+		return GuiWindowRowsDeltaAccessibility{}, offset, err
+	}
+	cursorRow := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "cursor_utf16"); err != nil {
+		return GuiWindowRowsDeltaAccessibility{}, offset, err
+	}
+	cursorUtf16 := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+2, "selection_ranges count"); err != nil {
+		return GuiWindowRowsDeltaAccessibility{}, offset, err
+	}
+	selectionRangesCount := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+selectionRangesCount*10, "selection_ranges"); err != nil {
+		return GuiWindowRowsDeltaAccessibility{}, offset, err
+	}
+	selectionRanges := make([]AccessibilityRange, 0, selectionRangesCount)
+	for i := 0; i < selectionRangesCount; i++ {
+		item, nextPos, err := DecodeAccessibilityRange(data, pos, windowEnd)
+		if err != nil {
+			return GuiWindowRowsDeltaAccessibility{}, offset, err
+		}
+		pos = nextPos
+		selectionRanges = append(selectionRanges, item)
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiWindowRowsDeltaAccessibility{}, offset, err
+	}
+	return GuiWindowRowsDeltaAccessibility{
+		Generation:      generation,
+		CursorRow:       cursorRow,
+		CursorUtf16:     cursorUtf16,
+		SelectionRanges: selectionRanges,
+		Label:           label,
+	}, pos, nil
+}
+
 // Section decoders for gui_window_viewport_delta
 
 func DecodeGuiWindowViewportDeltaHeader(data []byte, offset int, windowEnd int) (GuiWindowViewportDeltaHeader, int, error) {
@@ -2057,6 +2175,53 @@ func DecodeGuiWindowViewportDeltaRows(data []byte, offset int, windowEnd int) ([
 		items = append(items, item)
 	}
 	return items, pos, nil
+}
+
+func DecodeGuiWindowViewportDeltaAccessibility(data []byte, offset int, windowEnd int) (GuiWindowViewportDeltaAccessibility, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+8, "generation"); err != nil {
+		return GuiWindowViewportDeltaAccessibility{}, offset, err
+	}
+	generation := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
+		return GuiWindowViewportDeltaAccessibility{}, offset, err
+	}
+	cursorRow := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "cursor_utf16"); err != nil {
+		return GuiWindowViewportDeltaAccessibility{}, offset, err
+	}
+	cursorUtf16 := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+2, "selection_ranges count"); err != nil {
+		return GuiWindowViewportDeltaAccessibility{}, offset, err
+	}
+	selectionRangesCount := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+selectionRangesCount*10, "selection_ranges"); err != nil {
+		return GuiWindowViewportDeltaAccessibility{}, offset, err
+	}
+	selectionRanges := make([]AccessibilityRange, 0, selectionRangesCount)
+	for i := 0; i < selectionRangesCount; i++ {
+		item, nextPos, err := DecodeAccessibilityRange(data, pos, windowEnd)
+		if err != nil {
+			return GuiWindowViewportDeltaAccessibility{}, offset, err
+		}
+		pos = nextPos
+		selectionRanges = append(selectionRanges, item)
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiWindowViewportDeltaAccessibility{}, offset, err
+	}
+	return GuiWindowViewportDeltaAccessibility{
+		Generation:      generation,
+		CursorRow:       cursorRow,
+		CursorUtf16:     cursorUtf16,
+		SelectionRanges: selectionRanges,
+		Label:           label,
+	}, pos, nil
 }
 
 // Command field decoder for gui_tab_bar

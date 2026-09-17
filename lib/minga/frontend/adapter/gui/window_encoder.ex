@@ -103,6 +103,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_wc_cursorline 0x09
   @section_wc_scroll_presentation 0x0A
   @section_wc_row_splices 0x0B
+  @section_wc_accessibility 0x0C
 
   @section_gutter_window 0x01
   @section_gutter_config 0x02
@@ -148,6 +149,13 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     |> Writer.uint16(:cursor_col, window.cursor_col)
     |> Writer.uint8(:cursor_shape, encode_cursor_shape(window.cursor_shape))
     |> Writer.append(cursorline || [])
+    |> Writer.uint32(
+      :accessibility_cursor_utf16,
+      case window.accessibility_cursor do
+        {_row, utf16} -> utf16
+        nil -> 0xFFFF_FFFF
+      end
+    )
     |> Writer.finish()
   end
 
@@ -228,9 +236,21 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     rows_section = encode_section(command, @section_wc_rows, rows_payload)
     overlay = overlay_sections(sw, command)
 
+    accessibility =
+      accessibility_sections(
+        sw.accessibility_label,
+        sw.accessibility_generation,
+        sw.accessibility_cursor,
+        sw.accessibility_selection_ranges,
+        command
+      )
+
     sections =
       [header_section, rows_section | overlay.sections] ++
-        overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
+        overlay.geometry ++
+        overlay.cursorline ++
+        overlay.scroll_presentation ++
+        accessibility
 
     sections_payload =
       command
@@ -255,7 +275,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       annotation_bytes: byte_size(overlay.annotations),
       metadata_bytes:
         6 + byte_size(header_section) + IO.iodata_length(overlay.geometry) +
-          IO.iodata_length(overlay.cursorline) + IO.iodata_length(overlay.scroll_presentation)
+          IO.iodata_length(overlay.cursorline) + IO.iodata_length(overlay.scroll_presentation) +
+          IO.iodata_length(accessibility)
     }
 
     {binary, metrics}
@@ -359,8 +380,17 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     rows_section = encode_section(command, row_section_id, rows_payload)
     overlay = overlay_sections(sw, command)
 
+    accessibility =
+      accessibility_sections(
+        sw.accessibility_label,
+        sw.accessibility_generation,
+        sw.accessibility_cursor,
+        sw.accessibility_selection_ranges,
+        command
+      )
+
     [header_section, rows_section | overlay.sections] ++
-      overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
+      overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation ++ accessibility
   end
 
   @spec encode_delta_row_entries([Row.t()], map(), atom()) :: {iodata(), boolean()}
@@ -462,6 +492,45 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   defp scroll_presentation_sections(payload, section_encoder),
     do: [section_encoder.(@section_wc_scroll_presentation, payload)]
+
+  @spec accessibility_sections(
+          String.t(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()} | nil,
+          [{non_neg_integer(), non_neg_integer(), non_neg_integer()}],
+          atom()
+        ) :: [binary()]
+  defp accessibility_sections(label, generation, cursor, selection_ranges, command) do
+    {cursor_row, cursor_utf16} = cursor || {0xFFFF, 0xFFFF_FFFF}
+
+    payload =
+      command
+      |> Writer.new()
+      |> Writer.uint64(:accessibility_generation, generation)
+      |> Writer.uint16(:accessibility_cursor_row, cursor_row)
+      |> Writer.uint32(:accessibility_cursor_utf16, cursor_utf16)
+      |> Writer.uint16(:accessibility_selection_count, Enum.count(selection_ranges))
+      |> Writer.append(encode_accessibility_ranges(selection_ranges, command))
+      |> Writer.string16(:accessibility_label, label)
+      |> Writer.finish()
+
+    [encode_section(command, @section_wc_accessibility, payload)]
+  end
+
+  @spec encode_accessibility_ranges(
+          [{non_neg_integer(), non_neg_integer(), non_neg_integer()}],
+          atom()
+        ) :: binary()
+  defp encode_accessibility_ranges(ranges, command) do
+    ranges
+    |> Enum.reduce(Writer.new(command), fn {row, start_utf16, end_utf16}, writer ->
+      writer
+      |> Writer.uint16(:accessibility_selection_row, row)
+      |> Writer.uint32(:accessibility_selection_start_utf16, start_utf16)
+      |> Writer.uint32(:accessibility_selection_end_utf16, end_utf16)
+    end)
+    |> Writer.finish()
+  end
 
   @spec encode_geometry(PaneGeometry.t() | nil, atom()) :: binary() | nil
   defp encode_geometry(nil, _command), do: nil

@@ -379,6 +379,8 @@ defmodule Minga.Frontend.Adapter.GUI do
     :erlang.phash2({
       window.window_id,
       window.content_kind,
+      window.accessibility_label,
+      window.accessibility_generation,
       window.rect,
       window.content_epoch,
       window.full_refresh,
@@ -389,6 +391,7 @@ defmodule Minga.Frontend.Adapter.GUI do
       # directly, keeping the fingerprint byte-identical to the windowed path.
       row_content_key(window),
       window.selection,
+      window.accessibility_selection_ranges,
       window.search_matches,
       window.diagnostic_ranges,
       window.document_highlights,
@@ -418,7 +421,8 @@ defmodule Minga.Frontend.Adapter.GUI do
       window.cursor_row,
       window.cursor_col,
       window.cursor_shape,
-      window.cursorline
+      window.cursorline,
+      window.accessibility_cursor
     })
   end
 

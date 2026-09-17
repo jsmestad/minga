@@ -48,6 +48,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.VimState
   alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.Window
+  alias MingaEditor.WindowFocus
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Feedback
@@ -704,6 +705,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:fold_toggle_at_line, window_id, line}) do
     Commands.Folding.execute_at_line(state, window_id, line)
+  end
+
+  defp dispatch_action(state, {:focus_window, window_id, generation}) do
+    WindowFocus.focus_accessibility_target(state, window_id, generation)
   end
 
   defp dispatch_action(state, :cmd_copy) do

@@ -26,6 +26,16 @@ defmodule MingaEditor.WindowFocus do
     end
   end
 
+  @doc "Focuses a pane only while its BEAM-owned accessibility generation is current."
+  @spec focus_accessibility_target(state(), Window.id(), non_neg_integer()) :: state()
+  def focus_accessibility_target(%EditorState{} = state, target_id, generation) do
+    case Windows.fetch(state.workspace.windows, target_id) do
+      {:ok, %Window{accessibility_generation: ^generation}} -> focus(state, target_id)
+      {:ok, %Window{}} -> state
+      :error -> state
+    end
+  end
+
   @doc "Focuses a window and reports why an ownership-safe transition was rejected."
   @spec focus_result(state(), Window.id()) :: focus_result()
   def focus_result(

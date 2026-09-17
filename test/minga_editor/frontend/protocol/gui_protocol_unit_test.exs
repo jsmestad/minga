@@ -19,6 +19,16 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for accessibility pane focus" do
+    test "decodes an exact window identifier" do
+      assert {:ok, {:focus_window, 513, 9_223_372_036_854_775_000}} ==
+               ProtocolGUI.decode_gui_action(0x64, <<513::16, 9_223_372_036_854_775_000::64>>)
+
+      assert :error == ProtocolGUI.decode_gui_action(0x64, <<2>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x64, <<0::16, 1::64, 1>>)
+    end
+  end
+
   describe "decode_gui_action for retired tool manager actions" do
     test "rejects old native panel action slots" do
       assert :error == ProtocolGUI.decode_gui_action(0x11, <<0::16>>)

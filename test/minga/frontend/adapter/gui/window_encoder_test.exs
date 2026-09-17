@@ -48,7 +48,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       geometry: Keyword.get(opts, :geometry, nil),
       content_epoch: Keyword.get(opts, :content_epoch, 0),
       full_refresh: Keyword.get(opts, :full_refresh, true),
-      scroll_seq: Keyword.get(opts, :scroll_seq, 0)
+      scroll_seq: Keyword.get(opts, :scroll_seq, 0),
+      accessibility_label: Keyword.get(opts, :accessibility_label, ""),
+      accessibility_generation: Keyword.get(opts, :accessibility_generation, 0),
+      accessibility_cursor: Keyword.get(opts, :accessibility_cursor, nil),
+      accessibility_selection_ranges: Keyword.get(opts, :accessibility_selection_ranges, [])
     }
   end
 
@@ -82,13 +86,14 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
         cursor_shape: :beam,
         cursor_visible: true,
         content_epoch: 42,
-        cursorline: %Cursorline{row: 12, bg_rgb: 0x112233}
+        cursorline: %Cursorline{row: 12, bg_rgb: 0x112233},
+        accessibility_cursor: {3, 9}
       )
 
     encoded = WindowEncoder.encode_overlay_delta(model)
 
     assert <<opcode::8, 9::16, 42::32, flags::8, 3::16, 7::16, shape::8, 2::16, 0x11::8, 0x22::8,
-             0x33::8>> = encoded
+             0x33::8, 9::32>> = encoded
 
     assert opcode == Opcodes.gui_window_overlay_delta()
     assert Bitwise.band(flags, 0x01) != 0
@@ -101,9 +106,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       window(window_id: 9, cursor_visible: true, content_epoch: 42, cursorline: nil)
       |> WindowEncoder.encode_overlay_delta()
 
-    assert <<opcode::8, 9::16, 42::32, flags::8, 0::16, 0::16, 0::8>> = encoded
+    assert <<opcode::8, 9::16, 42::32, flags::8, 0::16, 0::16, 0::8, 0xFFFF_FFFF::32>> = encoded
     assert opcode == Opcodes.gui_window_overlay_delta()
-    assert byte_size(encoded) == 13
+    assert byte_size(encoded) == 17
     assert Bitwise.band(flags, 0x01) != 0
     assert Bitwise.band(flags, 0x02) == 0
   end
@@ -526,6 +531,36 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     recovered_window = recovered_commands |> hd() |> GUIWindowDecoder.decode()
     assert recovered_window.full_refresh == true
     assert recovered_window.content_epoch == 7
+  end
+
+  test "adapter emits accessibility selection moves between consecutive zero-width tabs" do
+    row = %Row{
+      row_id: Row.stable_id(:normal, 0),
+      row_type: :normal,
+      buf_line: 0,
+      text: "\t\tx",
+      spans: [],
+      content_hash: Row.compute_hash("\t\tx", [])
+    }
+
+    display_selection =
+      %Selection{type: :char, start_row: 0, start_col: 0, end_row: 0, end_col: 0}
+
+    first =
+      window(
+        rows: [row],
+        full_refresh: false,
+        selection: display_selection,
+        accessibility_selection_ranges: [{0, 0, 1}]
+      )
+
+    second = %{first | accessibility_selection_ranges: [{0, 1, 2}]}
+
+    {first_commands, caches} = AdapterGUI.encode_windows([first], Caches.new())
+    {second_commands, _caches} = AdapterGUI.encode_windows([second], caches)
+
+    assert opcodes(first_commands) == [Opcodes.gui_window_content()]
+    assert opcodes(second_commands) == [Opcodes.gui_window_viewport_delta()]
   end
 
   test "adapter reports per-section byte metrics from emitted commands" do

@@ -1891,6 +1891,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   defp manual_window_intent do
     %WindowIntent{
+      accessibility_generation: 1,
       content: {:empty, :semantic},
       viewport: MingaEditor.Viewport.new(24, 80),
       cursor: {0, 0},

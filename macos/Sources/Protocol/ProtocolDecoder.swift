@@ -1946,7 +1946,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 wcSawRows = true
                 wcRows = try decodeWindowContentRows(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
-            case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
+            case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0C:
                 _ = try decodeOverlaySection(id: wcSId, data: data, start: wcSStart, length: wcSLen, end: wcSStart + wcSLen, into: &wcOverlays)
 
             default: break
@@ -1976,6 +1976,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             paneGeometry: wcOverlays.paneGeometry,
             cursorline: wcOverlays.cursorline,
             scrollPresentation: scrollPresentation,
+            accessibilityLabel: wcOverlays.accessibilityLabel,
+            accessibilityGeneration: wcOverlays.accessibilityGeneration,
+            accessibilityCursor: wcOverlays.accessibilityCursor,
+            accessibilitySelectionRanges: wcOverlays.accessibilitySelectionRanges,
             residentLimit: FrameDecodeAccounting.residentLimit
         )
         return (.guiWindowContent(data: content), 1 + 4 + wcPayloadLen)
@@ -1992,19 +1996,23 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let cursorVisible = flags & 0x01 != 0
 
         if hasCursorline {
-            guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
+            guard data.count >= rest + 21 else { throw ProtocolDecodeError.malformed }
             let cursorline = GUICursorline(row: try readU16(data, rest + 12), bg: try readU24(data, rest + 14))
+            let cursorUTF16 = try readU32(data, rest + 17)
             let delta = GUIWindowOverlayDelta(windowId: windowId, contentEpoch: contentEpoch,
                                              cursorVisible: cursorVisible, cursorRow: cursorRow,
                                              cursorCol: cursorCol, cursorShape: cursorShape,
-                                             cursorline: cursorline)
-            return (.guiWindowOverlayDelta(data: delta), 18)
+                                             cursorline: cursorline,
+                                             accessibilityCursorUTF16: cursorUTF16 == UInt32.max ? nil : cursorUTF16)
+            return (.guiWindowOverlayDelta(data: delta), 22)
         } else {
+            let cursorUTF16 = try readU32(data, rest + 12)
             let delta = GUIWindowOverlayDelta(windowId: windowId, contentEpoch: contentEpoch,
                                              cursorVisible: cursorVisible, cursorRow: cursorRow,
                                              cursorCol: cursorCol, cursorShape: cursorShape,
-                                             cursorline: nil)
-            return (.guiWindowOverlayDelta(data: delta), 13)
+                                             cursorline: nil,
+                                             accessibilityCursorUTF16: cursorUTF16 == UInt32.max ? nil : cursorUTF16)
+            return (.guiWindowOverlayDelta(data: delta), 17)
         }
 
     case OP_GUI_WINDOW_VIEWPORT_DELTA:
@@ -3228,6 +3236,10 @@ private struct DecodedOverlaySections {
     var paneGeometry: GUIPaneGeometry? = nil
     var cursorline: GUICursorline? = nil
     var scrollPresentation: GUIScrollPresentation? = nil
+    var accessibilityLabel = ""
+    var accessibilityGeneration: UInt64 = 0
+    var accessibilityCursor: GUIAccessibilityCursor? = nil
+    var accessibilitySelectionRanges: [GUIAccessibilityRange] = []
 }
 
 /// Decodes a single overlay section (IDs 0x03-0x0A) into `sections`.
@@ -3338,6 +3350,35 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
         sections.scrollPresentation = try decodeScrollPresentation(data: data, start: start, end: end)
         return true
 
+    case 0x0C: // Accessibility identity and label
+        guard length >= 18 else { throw ProtocolDecodeError.malformed }
+        sections.accessibilityGeneration = try readU64(data, start)
+        let cursorRow = try readU16(data, start + 8)
+        let cursorUTF16 = try readU32(data, start + 10)
+        if cursorRow != UInt16.max && cursorUTF16 != UInt32.max {
+            sections.accessibilityCursor = GUIAccessibilityCursor(row: cursorRow, utf16: cursorUTF16)
+        }
+        let rangeCount = Int(try readU16(data, start + 14))
+        try FrameDecodeAccounting.reserve(.overlays, rangeCount)
+        try FrameDecodeAccounting.reserve(.arrayEntries, rangeCount)
+        var position = start + 16
+        sections.accessibilitySelectionRanges.reserveCapacity(rangeCount)
+        for _ in 0..<rangeCount {
+            guard position + 10 <= end else { throw ProtocolDecodeError.malformed }
+            sections.accessibilitySelectionRanges.append(GUIAccessibilityRange(
+                row: try readU16(data, position),
+                startUTF16: try readU32(data, position + 2),
+                endUTF16: try readU32(data, position + 6)
+            ))
+            position += 10
+        }
+        guard position + 2 <= end else { throw ProtocolDecodeError.malformed }
+        let labelLength = Int(try readU16(data, position))
+        position += 2
+        guard position + labelLength == end else { throw ProtocolDecodeError.malformed }
+        sections.accessibilityLabel = try decodeUTF8(data[position..<end]) ?? ""
+        return true
+
     default:
         return false
     }
@@ -3400,7 +3441,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int,
                 data: data, start: sectionStart, end: sectionEnd
             )
 
-        case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
+        case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0C:
             _ = try decodeOverlaySection(id: sectionId, data: data, start: sectionStart, length: sectionLen, end: sectionEnd, into: &overlays)
 
         default:
@@ -3424,7 +3465,11 @@ private func decodeWindowRowsDelta(data: Data, offset: Int,
             diagnosticUnderlines: overlays.diagnosticUnderlines,
             documentHighlights: overlays.documentHighlights,
             lineAnnotations: overlays.lineAnnotations, paneGeometry: overlays.paneGeometry,
-            cursorline: overlays.cursorline, scrollPresentation: scrollPresentation
+            cursorline: overlays.cursorline, scrollPresentation: scrollPresentation,
+            accessibilityLabel: overlays.accessibilityLabel,
+            accessibilityGeneration: overlays.accessibilityGeneration,
+            accessibilityCursor: overlays.accessibilityCursor,
+            accessibilitySelectionRanges: overlays.accessibilitySelectionRanges
         )
     } else {
         delta = GUIWindowRowsDelta(
@@ -3435,7 +3480,11 @@ private func decodeWindowRowsDelta(data: Data, offset: Int,
             diagnosticUnderlines: overlays.diagnosticUnderlines,
             documentHighlights: overlays.documentHighlights,
             lineAnnotations: overlays.lineAnnotations, paneGeometry: overlays.paneGeometry,
-            cursorline: overlays.cursorline, scrollPresentation: scrollPresentation
+            cursorline: overlays.cursorline, scrollPresentation: scrollPresentation,
+            accessibilityLabel: overlays.accessibilityLabel,
+            accessibilityGeneration: overlays.accessibilityGeneration,
+            accessibilityCursor: overlays.accessibilityCursor,
+            accessibilitySelectionRanges: overlays.accessibilitySelectionRanges
         )
     }
 

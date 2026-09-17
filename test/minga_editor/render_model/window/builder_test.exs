@@ -258,6 +258,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       assert %Window{} = wf.window_model
       assert wf.window_model.content_kind == :buffer
+      assert wf.window_model.accessibility_label == "[no file]"
       assert Enum.map(wf.window_model.rows, & &1.text) == ["hello", "world"]
     end
 
@@ -589,6 +590,190 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.cursor_col == 12
     end
 
+    test "accessibility offsets retain a selected zero-width tab as UTF-16" do
+      state = gui_state(content: "\ta🙂b")
+      buffer = state.workspace.buffers.active
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 0}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+
+      assert hd(model.rows).text == "\ta🙂b"
+
+      assert model.selection == %Window.Selection{
+               type: :char,
+               start_row: 0,
+               start_col: 0,
+               end_row: 0,
+               end_col: 0
+             }
+
+      assert model.accessibility_cursor == {0, 0}
+      assert model.accessibility_selection_ranges == [{0, 0, 1}]
+    end
+
+    test "accessibility offsets map buffer bytes past inline virtual text" do
+      state = gui_state(content: "abc")
+      buffer = state.workspace.buffers.active
+
+      _virtual_id =
+        BufferProcess.add_virtual_text(buffer, {0, 0},
+          segments: [{"X", Face.new()}],
+          placement: :inline
+        )
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 0}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+
+      assert hd(model.rows).text == "Xabc"
+      assert model.selection.start_col == 1
+      assert model.selection.end_col == 2
+      assert model.accessibility_selection_ranges == [{0, 1, 2}]
+    end
+
+    test "accessibility cursor maps source bytes past a tab and inline virtual text" do
+      state = gui_state(content: "\tab")
+      buffer = state.workspace.buffers.active
+
+      _virtual_id =
+        BufferProcess.add_virtual_text(buffer, {0, 0},
+          segments: [{"X", Face.new()}],
+          placement: :inline
+        )
+
+      :ok = BufferProcess.move_to(buffer, {0, 1})
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+
+      assert hd(model.rows).text == "X\tab"
+      assert model.accessibility_cursor == {0, 2}
+    end
+
+    test "accessibility offsets map original bytes across concealed text" do
+      state = gui_state(content: "abc\nz")
+      buffer = state.workspace.buffers.active
+
+      BufferProcess.batch_decorations(buffer, fn decorations ->
+        add_conceal(decorations, {0, 0}, {0, 1})
+      end)
+
+      :ok = BufferProcess.move_to(buffer, {1, 0})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 1}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+
+      assert Enum.map(model.rows, & &1.text) |> Enum.take(2) == ["bc", "z"]
+      assert model.selection.start_col == 0
+      assert model.accessibility_selection_ranges == [{0, 0, 2}, {1, 0, 1}]
+    end
+
+    test "accessibility offsets use the cursor-line conceal reveal" do
+      state = gui_state(content: "abc")
+      buffer = state.workspace.buffers.active
+
+      BufferProcess.batch_decorations(buffer, fn decorations ->
+        add_conceal(decorations, {0, 0}, {0, 1})
+      end)
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 0}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+
+      assert hd(model.rows).text == "abc"
+      assert model.accessibility_selection_ranges == [{0, 0, 1}]
+    end
+
+    test "accessibility selection skips a virtual row anchored above its buffer line" do
+      state = gui_state(content: "zero\none")
+      buffer = state.workspace.buffers.active
+
+      _virtual_id =
+        BufferProcess.add_virtual_text(buffer, {0, 0},
+          segments: [{"virtual", Face.new()}],
+          placement: :above
+        )
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 0}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+
+      assert Enum.map(model.rows, &{&1.row_type, &1.buf_line, &1.text}) |> Enum.take(2) == [
+               {:virtual_line, 0, "virtual"},
+               {:normal, 0, "zero"}
+             ]
+
+      assert model.accessibility_selection_ranges == [{1, 0, 1}]
+    end
+
+    test "accessibility selection follows wrapped rows after vertical viewport clipping" do
+      content = "\tabcdef界ghijABCDEFGHIJ"
+      state = gui_state(rows: 2, cols: 18, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, 4} = BufferProcess.set_option(buffer, :tab_width, 4)
+      :ok = BufferProcess.move_to(buffer, {0, 16})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 0}
+        })
+
+      win_id = workspace.windows.active
+      window = Map.fetch!(workspace.windows.map, win_id)
+      viewport = Viewport.put_top_visual(window.viewport, 0, 1, 3)
+      window = EditorWindow.set_viewport(window, viewport)
+      windows = Windows.set_map(workspace.windows, Map.put(workspace.windows.map, win_id, window))
+      state = %{state | workspace: %{workspace | windows: windows}}
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+
+      assert hd(model.rows).row_type == :wrap_continuation
+      assert [{0, 0, first_end} | _] = model.accessibility_selection_ranges
+      assert first_end > 0
+
+      assert Enum.all?(model.accessibility_selection_ranges, fn {row, start, finish} ->
+               row < length(model.rows) and finish > start
+             end)
+    end
+
     test "wrapped build stats retain typed VisualRows and replay them on reuse" do
       state = gui_state(cols: 20, content: "abcdefghijABCDEFGHIJ")
       buffer = state.workspace.buffers.active
@@ -829,6 +1014,39 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
       assert fold_row.row_id == Row.stable_id(:fold_start, 0)
       assert fold_gutter.display_type == :fold_start
+    end
+
+    test "linewise accessibility selection maps to the committed fold row" do
+      state = gui_state(content: "line 1\nline 2\nline 3")
+      buffer = state.workspace.buffers.active
+      window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(0, 2)])
+      window = EditorWindow.fold_at(window, 0)
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, state.workspace.windows.active, window)
+        )
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      workspace =
+        state.workspace
+        |> Map.put(:windows, windows)
+        |> SessionState.transition_mode(:visual, %Minga.Mode.VisualState{
+          visual_type: :line,
+          visual_anchor: {0, 0}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+      fold_row = Enum.find(model.rows, &(&1.row_type == :fold_start))
+      fold_index = Enum.find_index(model.rows, &(&1.row_type == :fold_start))
+
+      assert model.accessibility_selection_ranges == [
+               {fold_index, 0, String.length(fold_row.text)}
+             ]
     end
 
     test "folded window rows preserve syntax highlight spans" do

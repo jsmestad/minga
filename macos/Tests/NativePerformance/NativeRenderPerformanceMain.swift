@@ -13,6 +13,27 @@ private let warmupFrameCount = 9
 private let measuredFrameCount = 240
 private let transcriptWarmupFrameCount = 12
 private let transcriptMeasuredFrameCount = 120
+private let accessibilityWarmupCount = 200
+private let accessibilityMeasuredCount = 1_000
+
+private struct AccessibilityPerformanceFixture: Codable {
+    let caseName: String
+    let paneCount: Int
+    let residentRows: Int
+    let sourceUTF8Bytes: Int
+    let rowsVisitedPerQuery: Int
+    let utf16UnitsVisitedPerQuery: Int
+    let p50Ms: Double
+    let p95Ms: Double
+}
+
+private struct AccessibilityPerformanceMeasurement: Codable {
+    let fixture: String
+    let warmupCount: Int
+    let measuredCount: Int
+    let environment: String
+    let results: [AccessibilityPerformanceFixture]
+}
 
 private final class BenchmarkDrawable: NSObject, CAMetalDrawable {
     let texture: MTLTexture
@@ -167,10 +188,10 @@ private func paneGeometry() -> GUIPaneGeometry {
     )
 }
 
-private func residentContent(geometry: GUIPaneGeometry) throws -> GUIWindowContent {
+private func residentContent(geometry: GUIPaneGeometry, rowCount: Int = residentRowCount) throws -> GUIWindowContent {
     var rows: [GUIVisualRow] = []
-    rows.reserveCapacity(residentRowCount)
-    for index in 0..<residentRowCount {
+    rows.reserveCapacity(rowCount)
+    for index in 0..<rowCount {
         rows.append(GUIVisualRow(
             rowType: .normal,
             rowId: UInt64(index + 1),
@@ -203,11 +224,104 @@ private func residentContent(geometry: GUIPaneGeometry) throws -> GUIWindowConte
             visibleStartLine: 0,
             visibleEndLine: UInt32(viewportRows),
             overscanStartLine: 0,
-            overscanEndLine: UInt32(residentRowCount),
+            overscanEndLine: UInt32(rowCount),
             contentEpoch: 1,
             layoutGeneration: 1,
             scrollSeq: 1
-        )
+        ),
+        accessibilityGeneration: 1,
+        accessibilityCursor: GUIAccessibilityCursor(row: 20, utf16: 8)
+    )
+}
+
+private func legalPayloadLongLineContent(geometry: GUIPaneGeometry) throws -> GUIWindowContent {
+    let text = String(repeating: "x", count: FrameResourcePolicy.default.wire.payloadBytes - 4_096)
+    return try GUIWindowContent(
+        windowId: 1,
+        fullRefresh: true,
+        contentEpoch: 1,
+        cursorVisible: true,
+        cursorRow: 0,
+        cursorCol: 0,
+        cursorShape: .block,
+        rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: text, spans: [])],
+        selection: nil,
+        searchMatches: [],
+        diagnosticUnderlines: [],
+        documentHighlights: [],
+        paneGeometry: geometry,
+        accessibilityCursor: GUIAccessibilityCursor(row: 0, utf16: 0)
+    )
+}
+
+private func measureAccessibility(
+    caseName: String,
+    content: GUIWindowContent,
+    geometry: GUIPaneGeometry,
+    paneCount: Int,
+    sourceUTF8Bytes: Int
+) -> AccessibilityPerformanceFixture {
+    let surface = PresentedWindowSurface(content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil)
+    var checksum = 0
+    for _ in 0..<accessibilityWarmupCount {
+        for paneIndex in 0..<paneCount {
+            let projection = EditorAccessibilityProjection.build(surface: surface, connectionID: 1, isActivePane: paneIndex == 0, localTransform: nil, cellWidth: 8, cellHeight: 16)
+            checksum &+= projection.value.utf16.count
+            checksum &+= projection.insertionRange?.location ?? 0
+        }
+    }
+    var samples: [Double] = []
+    samples.reserveCapacity(accessibilityMeasuredCount)
+    var rowsVisited = 0
+    var utf16UnitsVisited = 0
+    for _ in 0..<accessibilityMeasuredCount {
+        let started = threadCPUTimeNanoseconds()
+        for paneIndex in 0..<paneCount {
+            let projection = EditorAccessibilityProjection.build(surface: surface, connectionID: 1, isActivePane: paneIndex == 0, localTransform: nil, cellWidth: 8, cellHeight: 16)
+            checksum &+= projection.value.utf16.count
+            checksum &+= projection.insertionRange?.location ?? 0
+            checksum &+= Int(projection.localRect(for: projection.insertionRange ?? NSRange(location: 0, length: 0))?.width ?? 0)
+            rowsVisited = projection.rowsVisited * paneCount
+            utf16UnitsVisited = projection.utf16UnitsVisited * paneCount
+        }
+        samples.append(Double(threadCPUTimeNanoseconds() - started) / 1_000_000)
+    }
+    precondition(checksum > 0)
+    return AccessibilityPerformanceFixture(
+        caseName: caseName,
+        paneCount: paneCount,
+        residentRows: content.rowStore.count,
+        sourceUTF8Bytes: sourceUTF8Bytes,
+        rowsVisitedPerQuery: rowsVisited,
+        utf16UnitsVisitedPerQuery: utf16UnitsVisited,
+        p50Ms: percentile(samples, 0.50),
+        p95Ms: percentile(samples, 0.95)
+    )
+}
+
+private func accessibilityMeasurement() throws -> AccessibilityPerformanceMeasurement {
+    let geometry = paneGeometry()
+    let small = try residentContent(geometry: geometry, rowCount: 5_000)
+    let large = try residentContent(geometry: geometry)
+    let longLine = try legalPayloadLongLineContent(geometry: geometry)
+    return AccessibilityPerformanceMeasurement(
+        fixture: "accessibility-visible-pane-v1",
+        warmupCount: accessibilityWarmupCount,
+        measuredCount: accessibilityMeasuredCount,
+        environment: "\(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) logical CPUs",
+        results: [
+            measureAccessibility(caseName: "resident-5000", content: small, geometry: geometry, paneCount: 1, sourceUTF8Bytes: 0),
+            measureAccessibility(caseName: "resident-5000", content: small, geometry: geometry, paneCount: 4, sourceUTF8Bytes: 0),
+            measureAccessibility(caseName: "resident-65536", content: large, geometry: geometry, paneCount: 1, sourceUTF8Bytes: 0),
+            measureAccessibility(caseName: "resident-65536", content: large, geometry: geometry, paneCount: 4, sourceUTF8Bytes: 0),
+            measureAccessibility(
+                caseName: "legal-payload-long-line",
+                content: longLine,
+                geometry: geometry,
+                paneCount: 1,
+                sourceUTF8Bytes: FrameResourcePolicy.default.wire.payloadBytes - 4_096
+            ),
+        ]
     )
 }
 
@@ -483,9 +597,19 @@ private struct NativeRenderPerformanceMain {
             )
             return
         }
+        if CommandLine.arguments.count == 3,
+           CommandLine.arguments[1] == "--accessibility-measurement-output" {
+            let measurement = try accessibilityMeasurement()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(measurement)
+            try data.write(to: URL(fileURLWithPath: CommandLine.arguments[2]), options: .atomic)
+            print(String(decoding: data, as: UTF8.self))
+            return
+        }
         guard CommandLine.arguments.count == 3,
               CommandLine.arguments[1] == "--measurement-output" else {
-            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --resource-investigation-output) OUTPUT.json\n".utf8))
+            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json\n".utf8))
             exit(2)
         }
         guard MTLCreateSystemDefaultDevice() != nil else {

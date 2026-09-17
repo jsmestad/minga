@@ -190,6 +190,12 @@ type DiagnosticRange struct {
 	Severity uint8
 }
 
+type AccessibilityRange struct {
+	Row        uint16
+	StartUtf16 uint32
+	EndUtf16   uint32
+}
+
 type DocumentHighlight struct {
 	StartRow uint16
 	StartCol uint16
@@ -308,14 +314,15 @@ type GitToast struct {
 }
 
 const (
-	RectSize              = 8
-	SpanSize              = 13
-	SearchMatchSize       = 7
-	DiagnosticRangeSize   = 9
-	DocumentHighlightSize = 9
-	HitRegionSize         = 11
-	SurfacePlacementSize  = 13
-	ThemeColorSize        = 4
+	RectSize               = 8
+	SpanSize               = 13
+	SearchMatchSize        = 7
+	DiagnosticRangeSize    = 9
+	AccessibilityRangeSize = 10
+	DocumentHighlightSize  = 9
+	HitRegionSize          = 11
+	SurfacePlacementSize   = 13
+	ThemeColorSize         = 4
 )
 
 type GuiWindowContentHeader struct {
@@ -373,6 +380,14 @@ type GuiWindowContentScrollPresentation struct {
 	ContentEpoch          uint32
 	LayoutGeneration      uint32
 	ScrollSeq             uint32
+}
+
+type GuiWindowContentAccessibility struct {
+	Generation      uint64
+	CursorRow       uint16
+	CursorUtf16     uint32
+	SelectionRanges []AccessibilityRange
+	Label           string
 }
 
 type GuiStatusBarIdentity struct {
@@ -493,6 +508,14 @@ type GuiWindowViewportDeltaHeader struct {
 	ScrollLeft   uint16
 }
 
+type GuiWindowViewportDeltaAccessibility struct {
+	Generation      uint64
+	CursorRow       uint16
+	CursorUtf16     uint32
+	SelectionRanges []AccessibilityRange
+	Label           string
+}
+
 type GuiWindowRowsDeltaHeader struct {
 	WindowID     uint16
 	ContentEpoch uint32
@@ -501,6 +524,14 @@ type GuiWindowRowsDeltaHeader struct {
 	CursorCol    uint16
 	CursorShape  uint8
 	ScrollLeft   uint16
+}
+
+type GuiWindowRowsDeltaAccessibility struct {
+	Generation      uint64
+	CursorRow       uint16
+	CursorUtf16     uint32
+	SelectionRanges []AccessibilityRange
+	Label           string
 }
 
 type GuiPickerHeader struct {
