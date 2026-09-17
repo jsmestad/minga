@@ -456,7 +456,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   defp apply_buffer_face_overrides(hl, buf_pid, state) when is_pid(buf_pid) do
     case Map.get(state.intent.frame.face_override_registries, buf_pid) do
       nil -> hl
-      registry -> %{hl | face_registry: registry}
+      registry -> Highlight.with_face_registry(hl, registry)
     end
   end
 
@@ -628,7 +628,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   defp highlight_fingerprint(nil), do: nil
 
   defp highlight_fingerprint(%Highlight{} = highlight) do
-    :erlang.phash2(highlight)
+    Highlight.fingerprint(highlight)
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────

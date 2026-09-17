@@ -31,13 +31,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     hl = state.parser.highlighting
     theme = state.appearance.theme
 
-    buf_hl = %Highlight{
-      version: 0,
-      spans: {},
-      capture_names: {},
-      theme: theme.syntax,
-      face_registry: MingaEditor.UI.Face.Registry.from_theme(theme)
-    }
+    buf_hl = Highlight.from_theme(theme)
 
     updated_hl = %{hl | highlights: Map.put(hl.highlights, pid, buf_hl)}
     %{state | parser: ParserState.accept_highlighting(state.parser, updated_hl)}

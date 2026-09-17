@@ -621,7 +621,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec highlight_content_fingerprint(Highlight.t() | nil) :: integer() | nil
   defp highlight_content_fingerprint(nil), do: nil
-  defp highlight_content_fingerprint(%Highlight{} = hl), do: :erlang.phash2(hl)
+  defp highlight_content_fingerprint(%Highlight{} = hl), do: Highlight.fingerprint(hl)
 
   @spec resolve_retained_and_digest(map() | nil, [visual_row_entry()], retain_ctx()) ::
           {%{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}}, non_neg_integer(),
