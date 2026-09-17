@@ -49,7 +49,7 @@ public enum OutboundAction: Equatable, Sendable {
     case fileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8)
     case fileTreeCollapseAll
     case fileTreeRefresh
-    case completionSelect(index: UInt16)
+    case completionSelect(itemID: String)
     case togglePanel(panel: UInt8)
     case sidebarAction(sidebarID: String, kind: String, action: String)
     case extensionAction(extensionID: String, action: String, payload: Data)

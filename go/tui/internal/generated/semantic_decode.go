@@ -562,6 +562,24 @@ func DecodeThemeColor(data []byte, offset int, windowEnd int) (ThemeColor, int, 
 	}, pos, nil
 }
 
+func DecodeCompletionMatchRange(data []byte, offset int, windowEnd int) (CompletionMatchRange, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "start"); err != nil {
+		return CompletionMatchRange{}, offset, err
+	}
+	start := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+2, "length"); err != nil {
+		return CompletionMatchRange{}, offset, err
+	}
+	length := decodeU16(data, pos)
+	pos += 2
+	return CompletionMatchRange{
+		Start:  start,
+		Length: length,
+	}, pos, nil
+}
+
 func DecodeCompletionItem(data []byte, offset int, windowEnd int) (CompletionItem, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
@@ -577,10 +595,38 @@ func DecodeCompletionItem(data []byte, offset int, windowEnd int) (CompletionIte
 	if err != nil {
 		return CompletionItem{}, offset, err
 	}
+	id, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return CompletionItem{}, offset, err
+	}
+	source, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return CompletionItem{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "match_ranges count"); err != nil {
+		return CompletionItem{}, offset, err
+	}
+	matchRangesCount := int(data[pos])
+	pos += 1
+	if err := decodeRequireWindow(windowEnd, pos+matchRangesCount*4, "match_ranges"); err != nil {
+		return CompletionItem{}, offset, err
+	}
+	matchRanges := make([]CompletionMatchRange, 0, matchRangesCount)
+	for i := 0; i < matchRangesCount; i++ {
+		item, nextPos, err := DecodeCompletionMatchRange(data, pos, windowEnd)
+		if err != nil {
+			return CompletionItem{}, offset, err
+		}
+		pos = nextPos
+		matchRanges = append(matchRanges, item)
+	}
 	return CompletionItem{
-		Kind:   kind,
-		Label:  label,
-		Detail: detail,
+		Kind:        kind,
+		Label:       label,
+		Detail:      detail,
+		ID:          id,
+		Source:      source,
+		MatchRanges: matchRanges,
 	}, pos, nil
 }
 
@@ -2295,6 +2341,10 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 	var selectedOffset uint16
 	var items []CompletionItem
 	var documentation string
+	var selectedItemID string
+	var totalCount uint32
+	var matchedCount uint32
+	var incomplete uint8
 	if visible == 1 {
 		var err error
 		if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
@@ -2330,6 +2380,25 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 		if err != nil {
 			return GuiCompletionFields{}, offset, err
 		}
+		selectedItemID, pos, err = decodeString8Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		if err := decodeRequireWindow(windowEnd, pos+4, "total_count"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		totalCount = decodeU32(data, pos)
+		pos += 4
+		if err := decodeRequireWindow(windowEnd, pos+4, "matched_count"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		matchedCount = decodeU32(data, pos)
+		pos += 4
+		if err := decodeRequireWindow(windowEnd, pos+1, "incomplete"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		incomplete = data[pos]
+		pos++
 	}
 	return GuiCompletionFields{
 		Visible:        visible,
@@ -2338,6 +2407,10 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 		SelectedOffset: selectedOffset,
 		Items:          items,
 		Documentation:  documentation,
+		SelectedItemID: selectedItemID,
+		TotalCount:     totalCount,
+		MatchedCount:   matchedCount,
+		Incomplete:     incomplete,
 	}, pos, nil
 }
 

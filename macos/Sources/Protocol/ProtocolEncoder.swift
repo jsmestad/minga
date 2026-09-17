@@ -316,7 +316,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .fileTreeDrop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers): encodeFileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetId: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDir: targetIsDirectory, modifiers: modifiers)
         case .fileTreeCollapseAll: encodeFileTreeCollapseAll()
         case .fileTreeRefresh: encodeFileTreeRefresh()
-        case .completionSelect(let index): encodeCompletionSelect(index: index)
+        case .completionSelect(let itemID): encodeCompletionSelect(itemID: itemID)
         case .togglePanel(let panel): encodeTogglePanel(panel: panel)
         case .sidebarAction(let sidebarID, let kind, let action): encodeSidebarAction(sidebarId: sidebarID, kind: kind, action: action)
         case .extensionAction(let extensionID, let action, let payload): encodeExtensionAction(extensionID: extensionID, action: action, payload: payload)
@@ -928,12 +928,14 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: completion_select. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeCompletionSelect(index: UInt16) {
-        var buf = Data(count: 4)
+    /// Send a gui_action: completion_select. Layout: opcode(1) + action_type(1) + item_id(string8).
+    private func encodeCompletionSelect(itemID: String) {
+        let idBytes = Array(itemID.utf8.prefix(255))
+        var buf = Data(count: 3 + idBytes.count)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_COMPLETION_SELECT
-        writeU16(&buf, 2, index)
+        buf[2] = UInt8(idBytes.count)
+        buf.replaceSubrange(3..<(3 + idBytes.count), with: idBytes)
         writeFrame(buf)
     }
 

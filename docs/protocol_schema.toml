@@ -49,7 +49,10 @@ version = "2.0.0"
 # protocol_version 22 adds correlated native file-dialog requests and results.
 # The BEAM retains the originating save buffer; native frontends only present
 # the platform panel and return the chosen paths for the matching request id.
-protocol_version = 22
+# protocol_version 23 adds stable completion identities, provider metadata,
+# match ranges, and semantic result counts, and changes completion activation
+# from a visible row offset to the stable item identity.
+protocol_version = 23
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1641,11 +1644,21 @@ name = "theme_color"
 fields = [{ name = "slot", type = "u8" }, { name = "color", type = "rgb" }]
 
 [[structures]]
+name = "completion_match_range"
+fields = [
+  { name = "start", type = "u16" },
+  { name = "length", type = "u16" },
+]
+
+[[structures]]
 name = "completion_item"
 fields = [
   { name = "kind", type = "enum", enum = "completion_kind" },
   { name = "label", type = "string16" },
   { name = "detail", type = "string16" },
+  { name = "id", type = "string8" },
+  { name = "source", type = "string16" },
+  { name = "match_ranges", type = "counted_array", count_type = "u8", element = "completion_match_range" },
 ]
 
 [[structures]]
@@ -2299,6 +2312,10 @@ conditional_tail = { guard = "visible == 1", fields = [
   { name = "selected_offset", type = "u16" },
   { name = "items", type = "counted_array", count_type = "u16", element = "completion_item" },
   { name = "documentation", type = "string16" },
+  { name = "selected_item_id", type = "string8" },
+  { name = "total_count", type = "u32" },
+  { name = "matched_count", type = "u32" },
+  { name = "incomplete", type = "u8" },
 ] }
 
 [[command_fields]]

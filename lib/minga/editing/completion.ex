@@ -16,9 +16,13 @@ defmodule Minga.Editing.Completion do
   """
 
   alias Minga.Editing.Completion.Item
+  alias Minga.Editing.Completion.Index
+
+  @snapshot_limit 200
 
   @enforce_keys [:items, :trigger_position]
   defstruct items: [],
+            index: nil,
             filtered: [],
             selected: 0,
             filter_text: "",
@@ -26,7 +30,10 @@ defmodule Minga.Editing.Completion do
             max_visible: 10,
             resolve_timer: nil,
             last_resolved_identity: nil,
-            selected_item_id: nil
+            selected_item_id: nil,
+            total_count: 0,
+            matched_count: 0,
+            incomplete?: false
 
   @typedoc "LSP CompletionItemKind as an atom."
   @type item_kind :: Item.kind()
@@ -39,6 +46,7 @@ defmodule Minga.Editing.Completion do
 
   @type t :: %__MODULE__{
           items: [item()],
+          index: Index.t() | nil,
           filtered: [item()],
           selected: non_neg_integer(),
           filter_text: String.t(),
@@ -46,7 +54,10 @@ defmodule Minga.Editing.Completion do
           max_visible: pos_integer(),
           resolve_timer: reference() | nil,
           last_resolved_identity: map() | nil,
-          selected_item_id: Item.id() | nil
+          selected_item_id: Item.id() | nil,
+          total_count: non_neg_integer(),
+          matched_count: non_neg_integer(),
+          incomplete?: boolean()
         }
 
   # ── Constructor ──────────────────────────────────────────────────────────────
@@ -57,14 +68,45 @@ defmodule Minga.Editing.Completion do
   """
   @spec new([item()], {non_neg_integer(), non_neg_integer()}) :: t()
   def new(items, trigger_position) when is_list(items) do
-    sorted = items |> Enum.map(&normalize_item/1) |> Enum.sort_by(& &1.sort_text)
+    normalized = Enum.map(items, &normalize_item/1)
+    index = Index.from_items(normalized)
+    sorted = Index.all_items(index)
+    snapshot = Index.snapshot(index, "")
 
     %__MODULE__{
       items: sorted,
-      filtered: sorted,
+      index: index,
+      filtered: snapshot.items,
       trigger_position: trigger_position,
       selected: 0,
-      selected_item_id: first_item_id(sorted)
+      selected_item_id: first_item_id(snapshot.items),
+      total_count: snapshot.total_count,
+      matched_count: snapshot.matched_count,
+      incomplete?: snapshot.incomplete?
+    }
+  end
+
+  @spec new(Index.t(), {non_neg_integer(), non_neg_integer()}) :: t()
+  def new(%Index{} = index, trigger_position) do
+    new(index, trigger_position, nil)
+  end
+
+  @doc "Creates completion state while retaining one matching stable selection in the bounded snapshot."
+  @spec new(Index.t(), {non_neg_integer(), non_neg_integer()}, Item.id() | nil) :: t()
+  def new(%Index{} = index, trigger_position, selected_item_id) do
+    snapshot = Index.snapshot(index, "", @snapshot_limit, selected_item_id)
+    {selected, retained_item_id} = preserve_selected(snapshot.items, selected_item_id)
+
+    %__MODULE__{
+      items: [],
+      index: index,
+      filtered: snapshot.items,
+      trigger_position: trigger_position,
+      selected: selected,
+      selected_item_id: retained_item_id,
+      total_count: snapshot.total_count,
+      matched_count: snapshot.matched_count,
+      incomplete?: snapshot.incomplete?
     }
   end
 
@@ -78,20 +120,20 @@ defmodule Minga.Editing.Completion do
   """
   @spec filter(t(), String.t()) :: t()
   def filter(%__MODULE__{} = completion, prefix) when is_binary(prefix) do
-    down_prefix = String.downcase(prefix)
-
-    filtered =
-      completion.items
-      |> Enum.filter(fn item ->
-        String.starts_with?(String.downcase(item.filter_text), down_prefix)
-      end)
+    index = completion.index || Index.from_items(completion.items)
+    snapshot = Index.snapshot(index, prefix, @snapshot_limit, completion.selected_item_id)
+    {selected, selected_item_id} = preserve_selected(snapshot.items, completion.selected_item_id)
 
     %{
       completion
-      | filtered: filtered,
+      | index: index,
+        filtered: snapshot.items,
         filter_text: prefix,
-        selected: 0,
-        selected_item_id: item_id_at(filtered, 0)
+        selected: selected,
+        selected_item_id: selected_item_id,
+        total_count: snapshot.total_count,
+        matched_count: snapshot.matched_count,
+        incomplete?: snapshot.incomplete?
     }
   end
 
@@ -219,6 +261,27 @@ defmodule Minga.Editing.Completion do
   @spec count(t()) :: non_neg_integer()
   def count(%__MODULE__{filtered: filtered}), do: length(filtered)
 
+  @doc "Returns the number of semantic candidates matching the current filter before truncation."
+  @spec matched_count(t()) :: non_neg_integer()
+  def matched_count(%__MODULE__{matched_count: count}), do: count
+
+  @doc "Selects an item by its stable wire identifier. Unknown or stale identifiers are ignored."
+  @spec select_wire_id(t(), String.t()) :: {:ok, t()} | :stale
+  def select_wire_id(%__MODULE__{} = completion, wire_id) when is_binary(wire_id) do
+    case Enum.find_index(completion.filtered, &(Item.wire_id(&1) == wire_id)) do
+      nil ->
+        :stale
+
+      selected ->
+        {:ok,
+         %{
+           completion
+           | selected: selected,
+             selected_item_id: item_id_at(completion.filtered, selected)
+         }}
+    end
+  end
+
   # ── LSP Response Parsing ─────────────────────────────────────────────────────
 
   @doc """
@@ -268,40 +331,32 @@ defmodule Minga.Editing.Completion do
   @spec update_selected_documentation(t(), map(), String.t()) :: t()
   def update_selected_documentation(%__MODULE__{} = completion, raw_item, doc_text)
       when is_map(raw_item) do
-    if selected_raw?(completion, raw_item) do
-      completion
-      |> update_documentation_for_raw(raw_item, doc_text)
-      |> Map.put(:last_resolved_identity, raw_item)
-    else
-      completion
+    case selected_item(completion) do
+      %Item{id: item_id, raw: ^raw_item} ->
+        completion
+        |> update_item_documentation(item_id, doc_text)
+        |> Map.put(:last_resolved_identity, raw_item)
+
+      _ ->
+        completion
     end
   end
 
   @doc "Updates documentation for one stable item identity."
   @spec update_item_documentation(t(), Item.id(), String.t()) :: t()
   def update_item_documentation(%__MODULE__{} = completion, item_id, doc_text) do
+    index =
+      case completion.index do
+        %Index{} = index -> Index.update_item(index, item_id, &Item.resolve(&1, doc_text))
+        nil -> nil
+      end
+
     %{
       completion
-      | items: update_documentation_items_by_id(completion.items, item_id, doc_text),
+      | index: index,
+        items: update_documentation_items_by_id(completion.items, item_id, doc_text),
         filtered: update_documentation_items_by_id(completion.filtered, item_id, doc_text)
     }
-  end
-
-  @spec update_documentation_for_raw(t(), map(), String.t()) :: t()
-  defp update_documentation_for_raw(%__MODULE__{} = completion, raw_item, doc_text) do
-    %{
-      completion
-      | items: update_documentation_items(completion.items, raw_item, doc_text),
-        filtered: update_documentation_items(completion.filtered, raw_item, doc_text)
-    }
-  end
-
-  @spec update_documentation_items([item()], map(), String.t()) :: [item()]
-  defp update_documentation_items(items, raw_item, doc_text) do
-    Enum.map(items, fn
-      %{raw: ^raw_item} = item -> %{item | documentation: doc_text}
-      item -> item
-    end)
   end
 
   @spec update_documentation_items_by_id([item()], Item.id(), String.t()) :: [item()]
@@ -327,6 +382,14 @@ defmodule Minga.Editing.Completion do
   @spec normalize_item(item() | map()) :: item()
   defp normalize_item(%Item{} = item), do: item
   defp normalize_item(item) when is_map(item), do: Item.from_fields(:local, item)
+
+  @spec preserve_selected([item()], Item.id() | nil) :: {non_neg_integer(), Item.id() | nil}
+  defp preserve_selected(items, selected_item_id) do
+    case Enum.find_index(items, &(&1.id == selected_item_id)) do
+      nil -> {0, first_item_id(items)}
+      selected -> {selected, selected_item_id}
+    end
+  end
 
   @doc "Returns a single-character kind indicator for rendering."
   @spec kind_label(item_kind()) :: String.t()

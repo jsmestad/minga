@@ -9,7 +9,7 @@ import MingaProtocol
 
 public struct CompletionOverlay: View {
     public enum Action: Equatable, Sendable {
-        case select(index: UInt16)
+        case select(itemID: String)
     }
 
     public init(state: CompletionState, sendAction: ViewActionHandler<Action>?) {
@@ -26,7 +26,7 @@ public struct CompletionOverlay: View {
     private let itemHeight: CGFloat = 24
     private let popupWidth: CGFloat = 340
 
-    @State private var hoveredItemId: Int? = nil
+    @State private var hoveredItemId: String? = nil
     @AccessibilityFocusState private var accessibilityFocus: CompletionAccessibilityIdentity?
 
     private let docPaneMaxHeight: CGFloat = 160
@@ -43,9 +43,9 @@ public struct CompletionOverlay: View {
                                 }
                             }
                         }
-                        .onChange(of: content.effectiveSelectedIndex) { _, newIndex in
+                        .onChange(of: content.effectiveSelectedItemID) { _, newID in
                             withAnimation(nil) {
-                                proxy.scrollTo(newIndex, anchor: .center)
+                                proxy.scrollTo(newID, anchor: .center)
                             }
                         }
                     }
@@ -101,7 +101,7 @@ public struct CompletionOverlay: View {
 
     @ViewBuilder
     private func completionRow(_ item: CompletionItem, content: CompletionContent) -> some View {
-        let isSelected = item.id == content.effectiveSelectedIndex
+        let isSelected = item.id == content.effectiveSelectedItemID
         let identity = accessibilityIdentity(for: item, content: content)
 
         Button {
@@ -112,9 +112,14 @@ public struct CompletionOverlay: View {
                 kindBadge(item.kind)
 
                 // Label
-                Text(item.label)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
+                Text(TextHighlighting.attributedString(
+                    item.label,
+                    matchPositions: matchPositions(item.matchRanges),
+                    baseFont: .system(size: 12, design: .monospaced),
+                    matchFont: .system(size: 12, weight: .semibold, design: .monospaced),
+                    baseColor: isSelected ? theme.popupSelFg : theme.popupFg,
+                    matchColor: theme.popupKeyFg
+                ))
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
@@ -154,8 +159,8 @@ public struct CompletionOverlay: View {
 
     private var completionSelectionSignature: String? {
         guard let content = state.content,
-              let item = content.items.first(where: { $0.id == content.effectiveSelectedIndex }) else { return nil }
-        return "\(content.presentationRevision):\(item.id):\(item.kind):\(item.label):\(item.detail)"
+              let item = content.items.first(where: { $0.id == content.effectiveSelectedItemID }) else { return nil }
+        return "\(item.id):\(item.kind):\(item.label):\(item.detail)"
     }
 
     private func accessibilityIdentity(for item: CompletionItem, content: CompletionContent) -> CompletionAccessibilityIdentity {
@@ -172,23 +177,29 @@ public struct CompletionOverlay: View {
 
     private func activate(_ offeredItem: CompletionItem, offeredContent: CompletionContent) {
         guard let currentContent = state.content,
-              currentContent.presentationRevision == offeredContent.presentationRevision,
               currentContent.anchorRow == offeredContent.anchorRow,
               currentContent.anchorCol == offeredContent.anchorCol,
               let currentItem = currentContent.items.first(where: { $0.id == offeredItem.id }),
               currentItem.kind == offeredItem.kind,
               currentItem.label == offeredItem.label,
               currentItem.detail == offeredItem.detail else { return }
-        sendAction?(.select(index: UInt16(currentItem.id)))
+        sendAction?(.select(itemID: currentItem.id))
     }
 
     private func updateAccessibilityFocus() {
         guard let content = state.content,
-              let item = content.items.first(where: { $0.id == content.effectiveSelectedIndex }) else {
+              let item = content.items.first(where: { $0.id == content.effectiveSelectedItemID }) else {
             accessibilityFocus = nil
             return
         }
         accessibilityFocus = accessibilityIdentity(for: item, content: content)
+    }
+
+    private func matchPositions(_ ranges: [Wire.CompletionMatchRange]) -> Set<Int> {
+        Set(ranges.flatMap { range in
+            let start = Int(range.start)
+            return start..<(start + Int(range.length))
+        })
     }
 
     @ViewBuilder

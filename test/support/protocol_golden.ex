@@ -166,11 +166,22 @@ defmodule Minga.Test.ProtocolGolden do
       cursor_row: 3,
       cursor_col: 7,
       selected_offset: 1,
+      selected_item_id: "baz-id",
       items: [
-        %Completion.Item{kind: :function, label: "foo", detail: "bar"},
-        %Completion.Item{kind: :module, label: "Baz", detail: ""}
+        %Completion.Item{
+          id: "foo-id",
+          source: "alpha",
+          kind: :function,
+          label: "foo",
+          detail: "bar",
+          match_ranges: [%{start: 0, length: 2}]
+        },
+        %Completion.Item{id: "baz-id", source: "beta", kind: :module, label: "Baz", detail: ""}
       ],
-      documentation: "Calls foo/1.\n\nReturns the result."
+      documentation: "Calls foo/1.\n\nReturns the result.",
+      total_count: 12,
+      matched_count: 4,
+      incomplete?: true
     }
 
     unicode = %Completion{
@@ -195,7 +206,11 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_col: 0,
           selected_offset: 0,
           items: [],
-          documentation: ""
+          documentation: "",
+          selected_item_id: "",
+          total_count: 0,
+          matched_count: 0,
+          incomplete: 0
         }
       },
       %{
@@ -208,10 +223,21 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_col: 7,
           selected_offset: 1,
           items: [
-            %{kind: 1, label: "foo", detail: "bar"},
-            %{kind: 5, label: "Baz", detail: ""}
+            %{
+              kind: 1,
+              label: "foo",
+              detail: "bar",
+              id: "foo-id",
+              source: "alpha",
+              match_ranges: [%{start: 0, length: 2}]
+            },
+            %{kind: 5, label: "Baz", detail: "", id: "baz-id", source: "beta", match_ranges: []}
           ],
-          documentation: "Calls foo/1.\n\nReturns the result."
+          documentation: "Calls foo/1.\n\nReturns the result.",
+          selected_item_id: "baz-id",
+          total_count: 12,
+          matched_count: 4,
+          incomplete: 1
         }
       },
       %{
@@ -223,8 +249,14 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_row: 0,
           cursor_col: 0,
           selected_offset: 0,
-          items: [%{kind: 3, label: "café→λ", detail: "ünïcödé"}],
-          documentation: "Café λ docs → ✓"
+          items: [
+            %{kind: 3, label: "café→λ", detail: "ünïcödé", id: "", source: "", match_ranges: []}
+          ],
+          documentation: "Café λ docs → ✓",
+          selected_item_id: "",
+          total_count: 0,
+          matched_count: 0,
+          incomplete: 0
         }
       },
       %{
@@ -237,7 +269,11 @@ defmodule Minga.Test.ProtocolGolden do
           cursor_col: 2,
           selected_offset: 0,
           items: [],
-          documentation: ""
+          documentation: "",
+          selected_item_id: "",
+          total_count: 0,
+          matched_count: 0,
+          incomplete: 0
         }
       }
     ]

@@ -257,10 +257,18 @@ type ThemeColor struct {
 	Color uint32
 }
 
+type CompletionMatchRange struct {
+	Start  uint16
+	Length uint16
+}
+
 type CompletionItem struct {
-	Kind   CompletionKind
-	Label  string
-	Detail string
+	Kind        CompletionKind
+	Label       string
+	Detail      string
+	ID          string
+	Source      string
+	MatchRanges []CompletionMatchRange
 }
 
 type PickerItem struct {
@@ -314,15 +322,16 @@ type GitToast struct {
 }
 
 const (
-	RectSize               = 8
-	SpanSize               = 13
-	SearchMatchSize        = 7
-	DiagnosticRangeSize    = 9
-	AccessibilityRangeSize = 10
-	DocumentHighlightSize  = 9
-	HitRegionSize          = 11
-	SurfacePlacementSize   = 13
-	ThemeColorSize         = 4
+	RectSize                 = 8
+	SpanSize                 = 13
+	SearchMatchSize          = 7
+	DiagnosticRangeSize      = 9
+	AccessibilityRangeSize   = 10
+	DocumentHighlightSize    = 9
+	HitRegionSize            = 11
+	SurfacePlacementSize     = 13
+	ThemeColorSize           = 4
+	CompletionMatchRangeSize = 4
 )
 
 type GuiWindowContentHeader struct {
@@ -598,6 +607,10 @@ type GuiCompletionFields struct {
 	SelectedOffset uint16
 	Items          []CompletionItem
 	Documentation  string
+	SelectedItemID string
+	TotalCount     uint32
+	MatchedCount   uint32
+	Incomplete     uint8
 }
 
 type GuiWhichKeyFields struct {

@@ -45,8 +45,12 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
       cursor_row: model.cursor_row,
       cursor_col: model.cursor_col,
       selected_offset: model.selected_offset,
+      selected_item_id: model.selected_item_id,
       items: Enum.map(model.items, fn item -> Map.from_struct(item) end),
-      documentation: model.documentation
+      documentation: model.documentation,
+      total_count: model.total_count,
+      matched_count: model.matched_count,
+      incomplete: if(model.incomplete?, do: 1, else: 0)
     }
   end
 
@@ -54,6 +58,7 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
   defp fingerprint(%Completion{visible?: false}), do: :hidden
 
   defp fingerprint(%Completion{} = model) do
-    {model.visible?, model.cursor_row, model.cursor_col, model.items, model.documentation}
+    {model.visible?, model.cursor_row, model.cursor_col, model.selected_item_id, model.items,
+     model.documentation, model.total_count, model.matched_count, model.incomplete?}
   end
 end

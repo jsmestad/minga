@@ -87,7 +87,7 @@ enum RenderCommand: Sendable {
     case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
     case guiFileTreeSelection(selectedId: String, focused: Bool)
     case guiObservatory(visible: Bool, nodeCount: UInt16, nodes: [Wire.ObservatoryNode])
-    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem], documentation: String)
+    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, selectedItemID: String, items: [Wire.CompletionItem], documentation: String, totalCount: UInt32, matchedCount: UInt32, incomplete: Bool)
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
@@ -138,6 +138,14 @@ enum RenderCommand: Sendable {
     /// `crashed` marks an unclean previous shutdown. Static, data-driven sections
     /// (session/recent/start/footer) carry semantic rows the frontend lays out.
     case guiEmptyState(visible: Bool, crashed: Bool, version: String, focusedId: String, sections: [Wire.EmptyStateSection])
+}
+
+extension RenderCommand {
+    /// Compatibility constructor for callers that do not provide completion metadata.
+    static func guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem], documentation: String) -> RenderCommand {
+        let selectedItemID = items.indices.contains(Int(selectedIndex)) ? items[Int(selectedIndex)].id : ""
+        return .guiCompletion(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, items: items, documentation: documentation, totalCount: UInt32(items.count), matchedCount: UInt32(items.count), incomplete: false)
+    }
 }
 
 // MARK: - Decoder
@@ -1037,15 +1045,26 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let (fields, nextPos) = try GeneratedProtocol.decodeGuiCompletionFields(data, rest, data.count)
             try FrameDecodeAccounting.reserve(.arrayEntries, fields.items.count)
             let items = fields.items.map {
-                Wire.CompletionItem(kind: $0.kind.rawValue, label: $0.label, detail: $0.detail)
+                Wire.CompletionItem(
+                    kind: $0.kind.rawValue,
+                    label: $0.label,
+                    detail: $0.detail,
+                    id: $0.id,
+                    source: $0.source,
+                    matchRanges: $0.matchRanges.map { Wire.CompletionMatchRange(start: $0.start, length: $0.length) }
+                )
             }
             return (.guiCompletion(
                 visible: fields.visible != 0,
                 anchorRow: fields.cursorRow,
                 anchorCol: fields.cursorCol,
                 selectedIndex: fields.selectedOffset,
+                selectedItemID: fields.selectedItemID,
                 items: items,
-                documentation: fields.documentation
+                documentation: fields.documentation,
+                totalCount: fields.totalCount,
+                matchedCount: fields.matchedCount,
+                incomplete: fields.incomplete != 0
             ), nextPos - offset)
         } catch let error as FrameResourceError {
             throw error

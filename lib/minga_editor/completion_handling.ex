@@ -1163,17 +1163,16 @@ defmodule MingaEditor.CompletionHandling do
           EditorState.t()
   defp install_session_completion(state, trigger, trigger_pos) do
     session = CompletionTrigger.session(trigger)
-    items = Session.items(session)
+    index = Session.index(session)
 
-    if items == [] and session.provider_requests == %{} do
+    if index.total_count == 0 and session.provider_requests == %{} do
       dismiss(state)
     else
       context = buffer_value(state.workspace.buffers.active, &Buffer.cursor_context/1)
       prefix = typed_since_trigger(context, trigger_pos)
 
       completion =
-        items
-        |> Completion.new(trigger_pos)
+        Completion.new(index, trigger_pos, session.selected_item_id)
         |> Completion.filter(prefix)
         |> Completion.select_item(session.selected_item_id)
 

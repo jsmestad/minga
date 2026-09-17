@@ -39,8 +39,12 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
           cursor_row: cursor_row,
           cursor_col: cursor_col,
           selected_offset: selected_offset,
+          selected_item_id: selected_wire_id(comp),
           items: Enum.map(visible_items, &item_model/1),
-          documentation: selected_documentation(comp)
+          documentation: selected_documentation(comp),
+          total_count: comp.total_count,
+          matched_count: comp.matched_count,
+          incomplete?: comp.incomplete?
         }
     end
   end
@@ -83,10 +87,22 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
   @spec item_model(EditingCompletion.item()) :: Item.t()
   defp item_model(item) do
     %Item{
+      id: EditingCompletion.Item.wire_id(item),
+      source: item.source,
       kind: completion_kind(Map.get(item, :kind, :text)),
       label: Map.get(item, :label, ""),
-      detail: Map.get(item, :detail, "") || ""
+      detail: Map.get(item, :detail, "") || "",
+      match_ranges:
+        Enum.map(item.match_ranges, fn {start, length} -> %{start: start, length: length} end)
     }
+  end
+
+  @spec selected_wire_id(EditingCompletion.t()) :: String.t()
+  defp selected_wire_id(%EditingCompletion{} = completion) do
+    case EditingCompletion.selected_item(completion) do
+      %EditingCompletion.Item{} = item -> EditingCompletion.Item.wire_id(item)
+      nil -> ""
+    end
   end
 
   @spec completion_kind(atom()) :: Item.kind()

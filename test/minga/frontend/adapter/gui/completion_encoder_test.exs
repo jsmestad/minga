@@ -82,7 +82,8 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
 
       <<@op_gui_completion, 1::8, _row::16, _col::16, _sel::16, 1::16, _kind::8, label_len::16,
         _label::binary-size(label_len), detail_len::16, _detail::binary-size(detail_len),
-        doc_len::16, doc::binary-size(doc_len)>> =
+        id_len::8, _id::binary-size(id_len), source_len::16, _source::binary-size(source_len),
+        0::8, doc_len::16, doc::binary-size(doc_len), _tail::binary>> =
         CompletionEncoder.encode_command(model)
 
       assert doc == "Applies fun."
@@ -110,7 +111,9 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       assert count == 2
 
       <<1::8, label_len::16, label::binary-size(label_len), detail_len::16,
-        detail::binary-size(detail_len), _next::binary>> = rest
+        detail::binary-size(detail_len), id_len::8, _id::binary-size(id_len), source_len::16,
+        _source::binary-size(source_len), range_count::8, _ranges::binary-size(range_count * 4),
+        _next::binary>> = rest
 
       assert label == "map"
       assert detail == "Enum.map/2"

@@ -820,9 +820,9 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, {:file_tree_toggle, 7}}} = Protocol.decode_event(payload)
     end
 
-    test "completion_select with index" do
-      payload = <<0x07, 0x05, 3::16-big>>
-      assert {:ok, {:gui_action, {:completion_select, 3}}} = Protocol.decode_event(payload)
+    test "completion_select with stable item ID" do
+      payload = <<0x07, 0x05, 6, "item-3">>
+      assert {:ok, {:gui_action, {:completion_select, "item-3"}}} = Protocol.decode_event(payload)
     end
 
     test "breadcrumb_click with segment index" do

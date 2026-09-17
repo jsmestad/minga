@@ -434,16 +434,33 @@ public enum Wire {
 
     // MARK: - Completion
 
+    /// A contiguous completion-label match range in Unicode codepoint offsets.
+    public struct CompletionMatchRange: Sendable, Equatable {
+        public let start: UInt16
+        public let length: UInt16
+
+        public init(start: UInt16, length: UInt16) {
+            self.start = start
+            self.length = length
+        }
+    }
+
     /// A completion item from gui_completion.
     public struct CompletionItem: Sendable {
+        public let id: String
+        public let source: String
         public let kind: CompletionKind
         public let label: String
         public let detail: String
+        public let matchRanges: [CompletionMatchRange]
 
-        public init(kind: UInt8, label: String, detail: String) {
+        public init(kind: UInt8, label: String, detail: String, id: String = "", source: String = "", matchRanges: [CompletionMatchRange] = []) {
+            self.id = id
+            self.source = source
             self.kind = CompletionKind(rawValue: kind)
             self.label = label
             self.detail = detail
+            self.matchRanges = matchRanges
         }
     }
 
