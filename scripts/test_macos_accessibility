@@ -64,14 +64,6 @@ cleanup() {
     esac
   done < <(ps -axo pid=,command= | sed -E 's/^[[:space:]]+//')
 
-  for variant in cold warm; do
-    local variant_artifacts="$state_root/$variant/artifacts"
-    if [[ -d "$variant_artifacts" ]]; then
-      mkdir -p "$artifact_dir/$variant"
-      ditto "$variant_artifacts" "$artifact_dir/$variant"
-    fi
-  done
-
   case "$state_root" in
     "${TMPDIR:-/tmp}"/minga-accessibility.*|/tmp/minga-accessibility.*|/private/tmp/minga-accessibility.*)
       rm -rf "$state_root"
@@ -134,7 +126,7 @@ record_xctest_infrastructure_failure() {
   local log_path=$1
   local marker_path=$2
 
-  if grep -Eq 'Timed out while enabling automation mode|failed to initialize for UI testing|not authorized to perform UI testing|not permitted to perform UI testing' "$log_path"; then
+  if grep -Eq 'INFRASTRUCTURE:|Timed out while enabling automation mode|failed to initialize for UI testing|not authorized to perform UI testing|not permitted to perform UI testing' "$log_path"; then
     printf '%s\n' 'INFRASTRUCTURE: Xcode could not initialize macOS UI automation. Confirm that the interactive GUI session allows Xcode UI testing, then rerun the command.' > "$marker_path"
     return 0
   fi
@@ -145,8 +137,7 @@ record_xctest_infrastructure_failure() {
 run_variant() {
   local variant=$1
   local variant_root="$state_root/$variant"
-  local variant_artifacts="$variant_root/artifacts"
-  local retained_artifacts="$artifact_dir/$variant"
+  local variant_artifacts="$artifact_dir/$variant"
   local started_seconds=$SECONDS
   mkdir -p "$variant_root" "$variant_artifacts"
   chmod 700 "$variant_root"
@@ -165,8 +156,6 @@ run_variant() {
         -maximum-test-execution-time-allowance 120 \
         -only-testing:MingaAccessibilityTests/MingaAccessibilityWorkflowTests/testRealApplicationAccessibilityNavigationAndFocus \
         MINGA_APP_BUNDLE_IDENTIFIER="$test_bundle_id" \
-        MINGA_AX_RUN_ROOT="$variant_root" \
-        MINGA_AX_ARTIFACTS="$variant_artifacts" \
         MINGA_AX_VARIANT="$variant" \
         MINGA_AX_APP_BUNDLE_ID="$test_bundle_id" \
         MINGA_AX_APP_EXECUTABLE="$app_executable"
@@ -179,10 +168,10 @@ run_variant() {
   if [[ $status -ne 0 ]]; then
     record_xctest_infrastructure_failure "$variant_artifacts/xcode-test.log" "$variant_artifacts/infrastructure-failure.txt" || true
     if [[ -f "$variant_artifacts/infrastructure-failure.txt" ]]; then
-      printf 'Accessibility %s run failed because a macOS prerequisite is missing. See %s\n' "$variant" "$retained_artifacts/infrastructure-failure.txt" >&2
+      printf 'Accessibility %s run failed because a macOS prerequisite is missing. See %s\n' "$variant" "$variant_artifacts/infrastructure-failure.txt" >&2
       return 2
     fi
-    printf 'Accessibility %s run found a product failure. See %s\n' "$variant" "$retained_artifacts" >&2
+    printf 'Accessibility %s run found a product failure. See %s\n' "$variant" "$variant_artifacts" >&2
     return 1
   fi
 }
