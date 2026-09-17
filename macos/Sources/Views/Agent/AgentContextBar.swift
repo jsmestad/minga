@@ -171,6 +171,7 @@ public struct AgentContextBar: View {
             .clipShape(.rect(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
         .help(label)
         .pointingHandCursor()
     }

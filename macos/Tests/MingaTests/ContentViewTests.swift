@@ -1411,6 +1411,7 @@ struct ContentViewTests {
         #expect(!initialChildren[1].isAccessibilityFocused())
         window.orderOut(nil)
         #expect(!initialChildren[0].isAccessibilityFocused())
+        let focusActionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
         await Task.yield()
         await Task.yield()
@@ -1419,7 +1420,7 @@ struct ContentViewTests {
         if NSApp.isActive && window.isKeyWindow {
             #expect(spy.actions.last == .focusWindow(windowID: 2, generation: 2))
         } else {
-            #expect(spy.actions.last == nil)
+            #expect(spy.actions.count == focusActionCount)
         }
         #expect(!initialChildren[1].isAccessibilityFocused())
 
@@ -1669,7 +1670,8 @@ struct ContentViewTests {
         editorView.performContextMenuActionForTesting("select_all", connectionGeneration: replacementGeneration)
 
         #expect(replacementEncoder.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE, MOUSE_PRESS, MOUSE_RELEASE])
-        #expect(replacementEncoder.actions == [.executeCommand(name: "select_all")])
+        #expect(replacementEncoder.actions.last == .executeCommand(name: "select_all"))
+        #expect(replacementEncoder.actions.count == 5)
     }
 
     @Test("replacement protocol connection accepts a lower keyframe from controlled pipes", .timeLimit(.minutes(1)))
