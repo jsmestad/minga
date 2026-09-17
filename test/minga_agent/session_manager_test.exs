@@ -162,13 +162,17 @@ defmodule MingaAgent.SessionManagerTest do
     test "migrates a legacy token and preserves it across transcript saves and manager recovery",
          %{
            manager: manager,
+           session_supervisor: session_supervisor,
            tmp_dir: dir
          } do
       session_id = "workdir-stable"
       write_legacy_session(session_id, "persisted-token", dir)
 
       {:ok, ^session_id, pid} =
-        SessionManager.start_or_get_session(manager, session_id, session_store_dir: dir)
+        SessionManager.start_or_get_session(manager, session_id,
+          session_store_dir: dir,
+          hooks_enabled?: false
+        )
 
       assert {:ok, "persisted-token"} = SessionManager.session_token(manager, session_id)
 
@@ -177,7 +181,10 @@ defmodule MingaAgent.SessionManagerTest do
 
       :ok = Session.add_system_message(pid, "persist transcript without broker identity", :info)
       send(pid, :save_session)
-      :sys.get_state(pid)
+
+      assert {:system, "persist transcript without broker identity", :info} in Session.messages(
+               pid
+             )
 
       assert {:ok, transcript} = SessionStore.load(session_id, dir)
       refute Map.has_key?(transcript, :remote_token)
@@ -189,7 +196,13 @@ defmodule MingaAgent.SessionManagerTest do
       GenServer.stop(manager)
 
       replacement_name = :"replacement_manager_#{System.unique_integer([:positive])}"
-      {:ok, replacement_manager} = SessionManager.start_link(name: replacement_name)
+
+      {:ok, replacement_manager} =
+        SessionManager.start_link(
+          name: replacement_name,
+          session_supervisor: session_supervisor
+        )
+
       Process.unlink(replacement_manager)
 
       on_exit(fn ->
@@ -201,7 +214,8 @@ defmodule MingaAgent.SessionManagerTest do
 
       assert {:ok, ^session_id, replacement_pid} =
                SessionManager.start_or_get_session(replacement_manager, session_id,
-                 session_store_dir: dir
+                 session_store_dir: dir,
+                 hooks_enabled?: false
                )
 
       assert replacement_pid != pid
