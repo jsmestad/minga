@@ -11,6 +11,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   use ExUnit.Case, async: false
 
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
+  alias Minga.Frontend.Adapter.GUI
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
@@ -443,6 +444,72 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert e3["display_type"] == 3
       assert e3["sign_type"] == 4
     end
+
+    test "adapter resident gutter replace, retain, and clear round-trip through Swift", %{
+      harness: harness
+    } do
+      alias Minga.RenderModel.Window.Gutter.ResidentRows
+      alias Minga.RenderModel.Window.GutterEntry
+
+      model =
+        resident_window(300, 7, [
+          %GutterEntry{buf_line: 120, display_type: :normal, sign_type: :diag_error}
+        ])
+
+      {commands, caches} = GUI.encode_windows([model], Caches.new())
+      replaced = round_trip(harness, find_command(commands, Opcodes.gui_gutter()), "gui_gutter")
+
+      assert replaced["content_epoch"] == 7
+      assert replaced["line_count"] == 300
+      assert replaced["retain_overrides"] == false
+      assert [%{"buf_line" => 120, "sign_type" => 4}] = replaced["entries"]
+
+      caches = Caches.acknowledge_pending_window_deltas(caches)
+      moved = %{model | gutter: %{model.gutter | cursor_line: 50}}
+      {commands, caches} = GUI.encode_windows([moved], caches)
+      retained = round_trip(harness, find_command(commands, Opcodes.gui_gutter()), "gui_gutter")
+
+      assert retained["content_epoch"] == 7
+      assert retained["line_count"] == 300
+      assert retained["retain_overrides"] == true
+      assert retained["entries"] == []
+
+      cleared = %{
+        moved
+        | gutter: %{
+            moved.gutter
+            | entries: %ResidentRows{content_epoch: 7, line_count: 300, overrides: []}
+          }
+      }
+
+      {commands, _caches} = GUI.encode_windows([cleared], caches)
+      empty = round_trip(harness, find_command(commands, Opcodes.gui_gutter()), "gui_gutter")
+
+      assert empty["content_epoch"] == 7
+      assert empty["line_count"] == 300
+      assert empty["retain_overrides"] == false
+      assert empty["entries"] == []
+
+      :ok
+    end
+
+    test "adapter resident gutter chunks all sparse overrides through Swift", %{harness: harness} do
+      alias Minga.RenderModel.Window.GutterEntry
+
+      overrides =
+        for line <- 0..6_999,
+            do: %GutterEntry{buf_line: line, display_type: :normal, sign_type: :git_added}
+
+      {commands, _caches} =
+        GUI.encode_windows([resident_window(7_000, 9, overrides)], Caches.new())
+
+      decoded = round_trip(harness, find_command(commands, Opcodes.gui_gutter()), "gui_gutter")
+
+      assert decoded["content_epoch"] == 9
+      assert decoded["line_count"] == 7_000
+      assert decoded["retain_overrides"] == false
+      assert Enum.map(decoded["entries"], & &1["buf_line"]) == Enum.to_list(0..6_999)
+    end
   end
 
   describe "gui_completion visible" do
@@ -866,6 +933,49 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["diagnostic_count"] == 1
     end
 
+    test "round-trips the sequential resident row-store header", %{harness: harness} do
+      alias Minga.RenderModel.Window
+      alias Minga.RenderModel.Window.Row
+
+      window = %Window{
+        window_id: 7,
+        content_kind: :buffer,
+        rect: {0, 0, 80, 20},
+        full_refresh: true,
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_shape: :beam,
+        content_epoch: 11,
+        row_store_mode: {:resident, 2},
+        rows: [
+          %Row{
+            row_id: 100,
+            row_type: :normal,
+            buf_line: 41,
+            text: "first",
+            spans: [],
+            content_hash: 1
+          },
+          %Row{
+            row_id: 101,
+            row_type: :normal,
+            buf_line: 42,
+            text: "second",
+            spans: [],
+            content_hash: 2
+          }
+        ]
+      }
+
+      decoded =
+        round_trip(harness, WindowEncoder.encode_window_content(window), "gui_window_content")
+
+      assert decoded["window_id"] == 7
+      assert decoded["full_refresh"] == true
+      assert decoded["rows"] |> Enum.map(& &1["buf_line"]) == [0, 1]
+      assert decoded["rows"] |> Enum.map(& &1["text"]) == ["first", "second"]
+    end
+
     test "round-trips a large full row through the viewport delta", %{harness: harness} do
       assert_large_delta_row_round_trip(
         harness,
@@ -1034,4 +1144,51 @@ defmodule Minga.Integration.GUIProtocolTest do
          section_id
        ),
        do: find_section_payload(rest, section_id)
+
+  @spec find_command([binary()], non_neg_integer()) :: binary()
+  defp find_command(commands, opcode) do
+    Enum.find(commands, fn
+      <<^opcode, _rest::binary>> -> true
+      _command -> false
+    end)
+  end
+
+  @spec resident_window(non_neg_integer(), non_neg_integer(), [
+          Minga.RenderModel.Window.GutterEntry.t()
+        ]) :: Minga.RenderModel.Window.t()
+  defp resident_window(line_count, content_epoch, overrides) do
+    alias Minga.RenderModel.Window
+    alias Minga.RenderModel.Window.Gutter
+    alias Minga.RenderModel.Window.Gutter.ResidentRows
+
+    %Window{
+      window_id: 1,
+      content_kind: :buffer,
+      rect: {0, 0, 80, 20},
+      rows: [],
+      cursor_row: 0,
+      cursor_col: 0,
+      cursor_shape: :block,
+      content_epoch: content_epoch,
+      full_refresh: false,
+      row_store_mode: {:resident, line_count},
+      gutter: %Gutter{
+        window_id: 1,
+        content_row: 0,
+        content_col: 0,
+        content_height: 20,
+        content_width: 80,
+        is_active: true,
+        cursor_line: 0,
+        line_number_style: :absolute,
+        line_number_width: 4,
+        sign_col_width: 1,
+        entries: %ResidentRows{
+          content_epoch: content_epoch,
+          line_count: line_count,
+          overrides: overrides
+        }
+      }
+    }
+  end
 end

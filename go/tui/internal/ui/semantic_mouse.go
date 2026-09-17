@@ -337,10 +337,10 @@ func (m Model) gutterFoldMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	height := placement.height
 	sourceStart := m.presentationSourceStart(window, height)
 	sourceRowIndex := localY + sourceStart
-	if sourceRowIndex < 0 || sourceRowIndex >= len(gutter.Entries) {
+	entry, ok := gutter.EntryAt(sourceRowIndex)
+	if !ok {
 		return nil, false
 	}
-	entry := gutter.Entries[sourceRowIndex]
 	if entry.DisplayType != 1 && entry.DisplayType != 4 {
 		return nil, false
 	}

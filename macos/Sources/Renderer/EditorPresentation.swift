@@ -96,6 +96,24 @@ struct PresentedWindowSurface: Sendable {
         return min(start, content.rowStore.count)..<min(max(end, start), content.rowStore.count)
     }
 
+    /// Resolves the gutter entry for one viewport-local visual row without expanding resident data.
+    func gutterEntry(atPresentationRow presentationRow: Int) -> Wire.GutterEntry? {
+        guard presentationRow >= 0, case .present(let gutter) = gutter else { return nil }
+        let startIndex: Int
+        if let presentation = content.scrollPresentation {
+            let anchor = content.rowStore.lowerBound(bufferLine: presentation.anchorTop)
+            startIndex = min(
+                anchor + Int(presentation.anchorVisualRowOffset),
+                content.rowStore.count
+            )
+        } else {
+            startIndex = 0
+        }
+        let rowIndex = startIndex + presentationRow
+        guard content.rowStore.row(at: rowIndex) != nil else { return nil }
+        return gutter.entries.entry(rowIndex: rowIndex)
+    }
+
     var cursorLineOffset: Int {
         Int(content.cursorRow) * Int(paneGeometry.viewport.cols) + Int(content.cursorCol)
     }

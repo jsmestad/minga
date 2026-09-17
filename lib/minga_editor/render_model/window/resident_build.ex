@@ -19,8 +19,16 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
         }
   defstruct store: %ResidentStore{}, compose_fp: nil, highlight_fp: nil, line_count: 0
 
+  @type plan ::
+          :reuse
+          | {:hydrate, atom()}
+          | {:splice, non_neg_integer(), non_neg_integer(), non_neg_integer()}
+          | {:splices, [non_neg_integer()]}
+  @type source :: {:complete, [String.t()]} | {:range, non_neg_integer(), [String.t()]}
+
   @type inputs :: %{
-          required(:line_texts) => [String.t()],
+          required(:source) => source(),
+          required(:plan) => plan(),
           required(:line_count) => non_neg_integer(),
           required(:compose_fp) => integer(),
           required(:highlight_fp) => integer() | nil,
@@ -37,10 +45,12 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
 
   @spec run(t() | nil, inputs()) :: {t(), map(), FontRegistry.t()}
   def run(prev, inputs) do
+    validate_source!(inputs.source, inputs.plan)
+
     {state, result, font_registry} =
-      case transition(prev, inputs) do
-        :hydrate ->
-          hydrate(inputs, hydration_reason(prev, inputs))
+      case inputs.plan do
+        {:hydrate, reason} ->
+          hydrate(inputs, reason)
 
         :reuse ->
           reuse(prev, inputs.font_registry)
@@ -56,6 +66,34 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
       if inputs.keyframe?, do: materialize_keyframe(state, result), else: {state, result}
 
     {state, result, font_registry}
+  end
+
+  @spec validate_source!(source(), plan()) :: :ok
+  defp validate_source!(_source, {:hydrate, _reason}), do: :ok
+  defp validate_source!(_source, :reuse), do: :ok
+  defp validate_source!({:complete, lines}, plan), do: validate_source!({:range, 0, lines}, plan)
+
+  defp validate_source!({:range, first, lines}, {:splice, start, _delete, count}) do
+    if count == 0 or (start >= first and start + count <= first + length(lines)),
+      do: :ok,
+      else: raise(ArgumentError, "resident splice source does not cover inserted rows")
+  end
+
+  defp validate_source!({:range, first, lines}, {:splices, dirty}) do
+    last = first + length(lines)
+
+    if Enum.all?(dirty, &(&1 >= first and &1 < last)),
+      do: :ok,
+      else: raise(ArgumentError, "resident splice source does not cover inserted rows")
+  end
+
+  @doc "Plans source requirements before the orchestration stage fetches lines."
+  @spec plan(t() | nil, map()) :: plan()
+  def plan(prev, inputs) do
+    case transition(prev, inputs) do
+      :hydrate -> {:hydrate, hydration_reason(prev, inputs)}
+      plan -> plan
+    end
   end
 
   defp transition(nil, _), do: :hydrate
@@ -111,10 +149,19 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
 
   defp in_place_edit_lines(_deltas, _lines), do: :structural
 
-  defp hydrate(inputs, reason) do
+  defp hydrate(%{source: {:complete, lines}, line_count: count} = inputs, reason) do
+    if length(lines) != count do
+      raise ArgumentError, "resident hydration requires a complete source from line zero"
+    end
+
     Minga.Telemetry.execute([:minga, :render, :full_hydration], %{count: 1}, %{reason: reason})
     {payloads, font_registry} = inputs.build_all.(inputs.font_registry)
     store = ResidentStore.from_entries(Enum.map(payloads, &to_store_entry/1))
+
+    if ResidentStore.size(store) != count do
+      raise ArgumentError,
+            "resident hydration produced #{ResidentStore.size(store)} rows for #{count} lines"
+    end
 
     state = %__MODULE__{
       store: store,
@@ -135,6 +182,9 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
        work: ResidentStore.work(store)
      }, font_registry}
   end
+
+  defp hydrate(_inputs, _reason),
+    do: raise(ArgumentError, "resident hydration requires a complete source from line zero")
 
   defp reuse(prev, font_registry) do
     {prev,

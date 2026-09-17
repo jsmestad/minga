@@ -710,6 +710,7 @@ public final class GUIWindowContent: Sendable {
     public init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16 = 0,
+         rowStoreMode: ResidentRowStoreMode = .windowed,
          rows: [GUIVisualRow], selection: GUISelectionOverlay?,
          searchMatches: [GUISearchMatch],
          diagnosticUnderlines: [GUIDiagnosticUnderline],
@@ -733,7 +734,8 @@ public final class GUIWindowContent: Sendable {
         )
         try Self.validate(completeWeight, limit: residentLimit)
         let store = try ResidentRowStore(
-            decodedRows: rows, resourceWeight: rowWeight, limit: residentLimit
+            decodedRows: rows, resourceWeight: rowWeight,
+            mode: rowStoreMode, limit: residentLimit
         )
         self.renderIdentity = UUID()
         self.windowId = windowId
@@ -910,7 +912,8 @@ public final class GUIWindowContent: Sendable {
                 guard seenRowIDs.insert(item.rowID).inserted else {
                     throw ResidentRowStoreError.duplicateRowID(item.rowID)
                 }
-                if let previousBufferLine, previousBufferLine > item.bufferLine {
+                if rowStore.mode == .windowed,
+                   let previousBufferLine, previousBufferLine > item.bufferLine {
                     throw ResidentRowStoreError.unsortedBufferLine(
                         previous: previousBufferLine,
                         next: item.bufferLine

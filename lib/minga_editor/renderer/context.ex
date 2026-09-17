@@ -41,6 +41,7 @@ defmodule MingaEditor.Renderer.Context do
               deleted_fg: 0xFF6C6B
             },
             decorations: %Decorations{},
+            composition_key: nil,
             gutter_colors: %MingaEditor.UI.Theme.Gutter{
               fg: 0x555555,
               current_fg: 0xBBC2CF,
@@ -95,6 +96,7 @@ defmodule MingaEditor.Renderer.Context do
           diagnostic_signs: %{non_neg_integer() => Diagnostic.severity() | :diag_advisory},
           git_signs: %{non_neg_integer() => Minga.Core.Diff.hunk_type()},
           decorations: Decorations.t(),
+          composition_key: tuple() | nil,
           git_colors: MingaEditor.UI.Theme.Git.t(),
           gutter_colors: MingaEditor.UI.Theme.Gutter.t(),
           show_invisible: boolean(),

@@ -289,6 +289,37 @@ struct ResidentRowStoreTests {
         #expect(reference.rows(in: 0..<8).rows == committed.rows(in: 0..<8).rows)
     }
 
+    @Test("sequential replacement keeps the identity fast path after a structural shift")
+    func sequentialReplacementAfterStructuralShift() throws {
+        var store = try ResidentRowStore(rows: rows(0..<300), mode: .sequential)
+        try store.splice(
+            at: 50,
+            removeCount: 1,
+            inserting: rows(1_000..<1_003, bufferLine: 50)
+        )
+        #expect(store.row(at: 53)?.rowId == 52)
+        #expect(store.row(at: 53)?.bufLine == 53)
+
+        let before = store.counters
+        let replacement = row(
+            52, bufferLine: 53, text: "edited retained suffix", hash: 900_052
+        )
+        try store.applyBatch(
+            [ResidentRowSplice(
+                startIndex: 53, deleteCount: 1, insertedRows: [replacement]
+            )],
+            baseRowCount: 302,
+            resultRowCount: 302
+        )
+
+        #expect(store.row(at: 53) == replacement)
+        let work = store.counters - before
+        #expect(work.changedRowsValidated == 1)
+        #expect(work.chunksTouched == 1)
+        #expect(work.locatorNodesCopied == 13)
+        #expect(store.validateInvariants())
+    }
+
     @Test("multiple disjoint identity-preserving replacements publish atomically")
     func multipleBatchReplacements() throws {
         let original = rows(0..<300)

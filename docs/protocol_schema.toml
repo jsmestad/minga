@@ -52,7 +52,8 @@ version = "2.0.0"
 # protocol_version 23 adds stable completion identities, provider metadata,
 # match ranges, and semantic result counts, and changes completion activation
 # from a visible row offset to the stable item identity.
-protocol_version = 23
+# protocol_version 24 marks sequential resident row stores with gui_window_content header flag 0x04 and adds explicit resident gutter snapshots and retained overrides scoped to the window content epoch and row count.
+protocol_version = 24
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -2065,6 +2066,26 @@ fields = [
 opcode = "gui_gutter"
 id = 0x03
 name = "entries"
+layout = "counted_array"
+count_type = "u16"
+element = "gutter_entry"
+
+# Resident gutters have a sequential normal/no-sign baseline and sparse exceptions.
+# Retention is scoped to the exact window, content epoch, and row count.
+[[sections]]
+opcode = "gui_gutter"
+id = 0x04
+name = "resident"
+fields = [
+  { name = "content_epoch", type = "u32" },
+  { name = "line_count", type = "u32" },
+  { name = "retain_overrides", type = "u8" },
+]
+
+[[sections]]
+opcode = "gui_gutter"
+id = 0x05
+name = "resident_overrides"
 layout = "counted_array"
 count_type = "u16"
 element = "gutter_entry"

@@ -158,12 +158,21 @@ defmodule Minga.Frontend.Adapter.GUI do
   defp encode_window_with_metrics(%RenderModel.Window{} = window, cmds, %Caches{} = caches) do
     content_fp = window_content_fingerprint(window)
     overlay_fp = window_overlay_fingerprint(window)
-    {metadata, metadata_metrics} = WindowEncoder.encode_frame_metadata_with_metrics(window)
+
+    {retain_gutter?, caches} =
+      Caches.prepare_gutter(caches, window.window_id, window.gutter, window.full_refresh)
+
+    {metadata, metadata_metrics} =
+      WindowEncoder.encode_frame_metadata_with_metrics(window, retain_gutter?)
 
     previous_content_fp = Map.get(caches.last_window_content_fps, window.window_id)
     previous_overlay_fp = Map.get(caches.last_window_overlay_fps, window.window_id)
     previous_content_epoch = Map.get(caches.last_window_content_epochs, window.window_id)
-    previous_row_keys = Map.get(caches.last_window_row_keys, window.window_id, [])
+
+    previous_row_keys =
+      Map.get(caches.last_resident_row_keys, window.window_id) ||
+        Map.get(caches.last_window_row_keys, window.window_id, [])
+
     previous_rows = Map.get(caches.last_window_rows, window.window_id, [])
 
     change = %{
@@ -189,6 +198,15 @@ defmodule Minga.Frontend.Adapter.GUI do
          cmds,
          %Caches{} = caches,
          %{delta_pending?: true} = change
+       ) do
+    encode_full_window_change(window, cmds, caches, change)
+  end
+
+  defp encode_window_change(
+         %RenderModel.Window{row_store_mode: {:resident, _count}, row_delta: nil} = window,
+         cmds,
+         caches,
+         change
        ) do
     encode_full_window_change(window, cmds, caches, change)
   end
@@ -362,23 +380,15 @@ defmodule Minga.Frontend.Adapter.GUI do
           Caches.t()
   defp put_window_snapshot(caches, _window_id, nil), do: caches
 
-  defp put_window_snapshot(caches, window_id, %RenderModel.Window{} = window) do
-    row_keys = Enum.map(window.rows, &{&1.row_id, &1.content_hash})
-
-    %{
-      caches
-      | last_window_content_epochs:
-          Map.put(caches.last_window_content_epochs, window_id, window.content_epoch),
-        last_window_row_keys: Map.put(caches.last_window_row_keys, window_id, row_keys),
-        last_window_rows: Map.put(caches.last_window_rows, window_id, window.rows)
-    }
-  end
+  defp put_window_snapshot(caches, _window_id, %RenderModel.Window{} = window),
+    do: Caches.record_window_rows(caches, window)
 
   @spec window_content_fingerprint(RenderModel.Window.t()) :: integer()
   defp window_content_fingerprint(%RenderModel.Window{} = window) do
     :erlang.phash2({
       window.window_id,
       window.content_kind,
+      window.row_store_mode,
       window.accessibility_label,
       window.accessibility_generation,
       window.rect,

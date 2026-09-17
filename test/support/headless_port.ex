@@ -560,6 +560,7 @@ defmodule Minga.Test.HeadlessPort do
 
   defp apply_command(<<@op_gui_gutter, _rest::binary>> = binary, state) do
     gutter = decode_gutter(binary)
+    gutter = resolve_resident_gutter(gutter, state)
     %{state | gutters: Map.put(state.gutters, gutter.window_id, gutter)}
   end
 
@@ -740,6 +741,7 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec draw_window_rows(State.t(), map(), non_neg_integer()) :: State.t()
   defp draw_window_rows(state, %{rows: rows} = window, offset) do
+    rows = visible_resident_rows(rows, Map.get(state.gutters, window.window_id), window)
     {row0, col0} = window_text_origin(window)
     row0 = row0 + offset
     region = content_region_height(state, offset)
@@ -770,6 +772,11 @@ defmodule Minga.Test.HeadlessPort do
 
   defp draw_window_rows(state, _window, _offset), do: state
 
+  defp visible_resident_rows(rows, %{resident: {:committed, _epoch, _count, _overrides}}, window),
+    do: Enum.slice(rows, window.geometry.viewport.top, window.geometry.viewport.rows)
+
+  defp visible_resident_rows(rows, _gutter, _window), do: rows
+
   @spec draw_window_tildes(
           non_neg_integer(),
           State.t(),
@@ -796,10 +803,10 @@ defmodule Minga.Test.HeadlessPort do
   @spec draw_window_gutter(State.t(), map(), map() | nil, non_neg_integer()) :: State.t()
   defp draw_window_gutter(state, _window, nil, _offset), do: state
 
-  defp draw_window_gutter(state, _window, gutter, offset) do
+  defp draw_window_gutter(state, window, gutter, offset) do
     region = content_region_height(state, offset)
 
-    gutter.entries
+    visible_gutter_entries(gutter, window)
     |> Enum.with_index(gutter.content_row)
     |> Enum.reduce(state, fn {entry, display_row}, acc ->
       if display_row - gutter.content_row < region do
@@ -809,6 +816,23 @@ defmodule Minga.Test.HeadlessPort do
       end
     end)
   end
+
+  defp visible_gutter_entries(%{resident: {:committed, _epoch, count, overrides}}, window) do
+    top = window.geometry.viewport.top
+    visible = min(window.geometry.viewport.rows, max(count - top, 0))
+
+    for line <- top..(top + visible - 1)//1 do
+      Map.get(overrides, line, %{
+        buf_line: line,
+        display_type: :normal,
+        sign_type: :none,
+        sign_text: nil,
+        fold_end_line: 0xFFFF_FFFF
+      })
+    end
+  end
+
+  defp visible_gutter_entries(gutter, _window), do: gutter.entries
 
   @spec put_window_cursor(State.t(), map(), non_neg_integer()) :: State.t()
   defp put_window_cursor(state, window, offset) do
@@ -1156,6 +1180,29 @@ defmodule Minga.Test.HeadlessPort do
            %{start_col: start_col, end_col: end_col, fg: fg, bg: bg, attrs: attrs} | acc
          ])
 
+  defp resolve_resident_gutter(%{resident: {operation, epoch, count, overrides}} = gutter, state) do
+    window = Map.fetch!(state.windows, gutter.window_id)
+
+    true =
+      window.sequential_rows and window.content_epoch == epoch and length(window.rows) == count
+
+    overrides =
+      case operation do
+        :replace ->
+          overrides
+
+        :retain ->
+          %{resident: {:committed, ^epoch, ^count, previous}} =
+            Map.fetch!(state.gutters, gutter.window_id)
+
+          previous
+      end
+
+    %{gutter | resident: {:committed, epoch, count, overrides}}
+  end
+
+  defp resolve_resident_gutter(gutter, _state), do: gutter
+
   @spec decode_gutter(binary()) :: map()
   defp decode_gutter(<<@op_gui_gutter, section_count::8, rest::binary>>) do
     {gutter, <<>>} =
@@ -1219,6 +1266,27 @@ defmodule Minga.Test.HeadlessPort do
   defp decode_gutter_section(0x03, <<count::16, rest::binary>>, result) do
     {entries, <<>>} = decode_gutter_entries(rest, count, [])
     %{result | entries: entries}
+  end
+
+  defp decode_gutter_section(0x04, <<epoch::32, count::32, retain::8>>, result)
+       when retain in [0, 1] do
+    Map.put(result, :resident, {if(retain == 1, do: :retain, else: :replace), epoch, count, %{}})
+  end
+
+  defp decode_gutter_section(
+         0x05,
+         <<count::16, rest::binary>>,
+         %{resident: {:replace, epoch, total, overrides}} = result
+       ) do
+    {entries, <<>>} = decode_gutter_entries(rest, count, [])
+
+    overrides =
+      Enum.reduce(entries, overrides, fn entry, overrides ->
+        true = entry.buf_line < total and not Map.has_key?(overrides, entry.buf_line)
+        Map.put(overrides, entry.buf_line, entry)
+      end)
+
+    %{result | resident: {:replace, epoch, total, overrides}}
   end
 
   defp decode_gutter_section(_section_id, _payload, result), do: result

@@ -263,11 +263,29 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 		writeUint(uint64(gutter.LineNumberStyle))
 		writeUint(uint64(gutter.CursorLine))
 		writeUint(uint64(gutter.ContentHeight))
-		for _, entry := range gutter.Entries {
+		writeUint(uint64(gutter.EntryCount()))
+		writeEntry := func(entry protocol.GutterEntry) {
 			writeUint(uint64(entry.BufferLine))
 			writeUint(uint64(entry.SignType))
 			writeUint(uint64(entry.DisplayType))
+			writeUint(uint64(entry.FoldEndLine))
+			writeUint(uint64(entry.SignFG))
 			writeStr(entry.SignText)
+		}
+		if gutter.Resident != nil {
+			writeUint(uint64(gutter.Resident.ContentEpoch))
+			indexes := make([]uint32, 0, len(gutter.Resident.Overrides))
+			for index := range gutter.Resident.Overrides {
+				indexes = append(indexes, index)
+			}
+			sort.Slice(indexes, func(i, j int) bool { return indexes[i] < indexes[j] })
+			for _, index := range indexes {
+				writeEntry(gutter.Resident.Overrides[index])
+			}
+		} else {
+			for _, entry := range gutter.Entries {
+				writeEntry(entry)
+			}
 		}
 	}
 

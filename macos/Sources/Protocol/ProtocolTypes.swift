@@ -778,6 +778,128 @@ public enum Wire {
         }
     }
 
+    /// Stable identity for a resident gutter baseline.
+    public struct ResidentGutterIdentity: Sendable, Equatable {
+        public let contentEpoch: UInt32
+        public let lineCount: UInt32
+
+        /// Creates an identity for one complete buffer epoch and line count.
+        public init(contentEpoch: UInt32, lineCount: UInt32) {
+            self.contentEpoch = contentEpoch
+            self.lineCount = lineCount
+        }
+    }
+
+    /// Immutable gutter entries with O(1) lookup for dense and resident payloads.
+    ///
+    /// Resident payloads store only semantic exceptions. Every other buffer line resolves to
+    /// the protocol baseline of a normal row with no sign, without allocating a document-sized
+    /// array on each update.
+    public struct GutterEntries: RandomAccessCollection, Sendable {
+        /// Integer position used by the collection interface.
+        public typealias Index = Int
+        /// Gutter entry returned for a dense row or resident buffer line.
+        public typealias Element = GutterEntry
+
+        private enum Storage: Sendable {
+            case dense([GutterEntry])
+            case resident(identity: ResidentGutterIdentity, overrides: [UInt32: GutterEntry])
+        }
+
+        private let storage: Storage
+
+        /// Wraps a dense visual-row gutter payload.
+        public init(_ entries: [GutterEntry]) {
+            storage = .dense(entries)
+        }
+
+        /// Creates a sparse resident entry collection when every override names a unique line
+        /// inside the declared baseline.
+        public static func resident(
+            contentEpoch: UInt32,
+            lineCount: UInt32,
+            overrides: [GutterEntry]
+        ) -> GutterEntries? {
+            var byLine: [UInt32: GutterEntry] = [:]
+            byLine.reserveCapacity(overrides.count)
+            for entry in overrides {
+                guard entry.bufLine < lineCount, byLine.updateValue(entry, forKey: entry.bufLine) == nil else {
+                    return nil
+                }
+            }
+            return GutterEntries(storage: .resident(
+                identity: ResidentGutterIdentity(contentEpoch: contentEpoch, lineCount: lineCount),
+                overrides: byLine
+            ))
+        }
+
+        private init(storage: Storage) {
+            self.storage = storage
+        }
+
+        /// First valid collection position.
+        public var startIndex: Int { 0 }
+
+        /// Position after the last dense row or resident buffer line.
+        public var endIndex: Int {
+            switch storage {
+            case .dense(let entries):
+                entries.count
+            case .resident(let identity, _):
+                Int(identity.lineCount)
+            }
+        }
+
+        /// Returns a dense entry by visual-row index or a resident entry by buffer-line index.
+        public subscript(position: Int) -> GutterEntry {
+            precondition(indices.contains(position), "gutter entry index out of bounds")
+            switch storage {
+            case .dense(let entries):
+                return entries[position]
+            case .resident(_, let overrides):
+                let line = UInt32(position)
+                return overrides[line] ?? GutterEntry(
+                    bufLine: line, displayType: .normal, signType: .none
+                )
+            }
+        }
+
+        /// Resident identity used to validate retained updates. Dense payloads have no identity.
+        public var residentIdentity: ResidentGutterIdentity? {
+            switch storage {
+            case .dense:
+                nil
+            case .resident(let identity, _):
+                identity
+            }
+        }
+
+        /// Sparse resident overrides in ascending row order. Dense payloads return nil.
+        public var residentOverrides: [GutterEntry]? {
+            switch storage {
+            case .dense:
+                nil
+            case .resident(_, let overrides):
+                overrides.values.sorted { $0.bufLine < $1.bufLine }
+            }
+        }
+
+        /// Returns the entry for one absolute row-store index without materializing the resident baseline.
+        public func entry(rowIndex: Int) -> GutterEntry? {
+            switch storage {
+            case .dense(let entries):
+                guard entries.indices.contains(rowIndex) else { return nil }
+                return entries[rowIndex]
+            case .resident(let identity, let overrides):
+                guard rowIndex >= 0, UInt64(rowIndex) < UInt64(identity.lineCount) else { return nil }
+                let line = UInt32(rowIndex)
+                return overrides[line] ?? GutterEntry(
+                    bufLine: line, displayType: .normal, signType: .none
+                )
+            }
+        }
+    }
+
     /// Gutter data for one window, including its screen position.
     /// One message per window arrives each frame.
     public struct WindowGutter: Sendable {
@@ -798,9 +920,21 @@ public enum Wire {
         public let lineNumberStyle: LineNumberStyle
         public let lineNumberWidth: UInt8
         public let signColWidth: UInt8
-        public var entries: [GutterEntry]
+        public let entries: GutterEntries
 
+        /// Creates resolved gutter state from dense visual-row entries.
         public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entries: [GutterEntry]) {
+            self.init(
+                windowId: windowId, contentRow: contentRow, contentCol: contentCol,
+                contentHeight: contentHeight, isActive: isActive, contentWidth: contentWidth,
+                cursorLine: cursorLine, lineNumberStyle: lineNumberStyle,
+                lineNumberWidth: lineNumberWidth, signColWidth: signColWidth,
+                entries: GutterEntries(entries)
+            )
+        }
+
+        /// Creates resolved gutter state from an immutable entry collection.
+        public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entries: GutterEntries) {
             self.windowId = windowId
             self.contentRow = contentRow
             self.contentCol = contentCol
@@ -812,6 +946,85 @@ public enum Wire {
             self.lineNumberWidth = lineNumberWidth
             self.signColWidth = signColWidth
             self.entries = entries
+        }
+    }
+
+    /// Entry-state transition carried by one decoded gutter command.
+    public enum GutterEntryUpdate: Sendable {
+        case replace(GutterEntries)
+        case retainResident(ResidentGutterIdentity)
+    }
+
+    /// Decoded gutter metadata plus an unresolved replacement or retain transition.
+    ///
+    /// A retain transition is never committed directly. The frame transaction must resolve it
+    /// against a resident gutter with the same window, content epoch, and line count.
+    public struct WindowGutterUpdate: Sendable {
+        public let windowId: UInt16
+        public let contentRow: UInt16
+        public let contentCol: UInt16
+        public let contentHeight: UInt16
+        public let isActive: Bool
+        public let contentWidth: UInt16
+        public let cursorLine: UInt32
+        public let lineNumberStyle: LineNumberStyle
+        public let lineNumberWidth: UInt8
+        public let signColWidth: UInt8
+        public let entryUpdate: GutterEntryUpdate
+
+        /// Creates one unresolved gutter transition from decoded wire fields.
+        public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entryUpdate: GutterEntryUpdate) {
+            self.windowId = windowId
+            self.contentRow = contentRow
+            self.contentCol = contentCol
+            self.contentHeight = contentHeight
+            self.isActive = isActive
+            self.contentWidth = contentWidth
+            self.cursorLine = cursorLine
+            self.lineNumberStyle = lineNumberStyle
+            self.lineNumberWidth = lineNumberWidth
+            self.signColWidth = signColWidth
+            self.entryUpdate = entryUpdate
+        }
+
+        /// Creates a replacement transition from resolved gutter state.
+        public init(replacing gutter: WindowGutter) {
+            self.init(
+                windowId: gutter.windowId, contentRow: gutter.contentRow,
+                contentCol: gutter.contentCol, contentHeight: gutter.contentHeight,
+                isActive: gutter.isActive, contentWidth: gutter.contentWidth,
+                cursorLine: gutter.cursorLine, lineNumberStyle: gutter.lineNumberStyle,
+                lineNumberWidth: gutter.lineNumberWidth, signColWidth: gutter.signColWidth,
+                entryUpdate: .replace(gutter.entries)
+            )
+        }
+
+        /// Returns replacement entries for decoder and compatibility tests.
+        public var replacementEntries: GutterEntries? {
+            guard case .replace(let entries) = entryUpdate else { return nil }
+            return entries
+        }
+
+        /// Resolves this wire transition into immutable presentation state.
+        public func resolved(reusing previous: WindowGutter?) -> WindowGutter? {
+            let entries: GutterEntries
+            switch entryUpdate {
+            case .replace(let replacement):
+                entries = replacement
+            case .retainResident(let identity):
+                guard previous?.windowId == windowId,
+                      previous?.entries.residentIdentity == identity,
+                      let previousEntries = previous?.entries else { return nil }
+                entries = previousEntries
+            }
+
+            return WindowGutter(
+                windowId: windowId, contentRow: contentRow, contentCol: contentCol,
+                contentHeight: contentHeight, isActive: isActive, contentWidth: contentWidth,
+                cursorLine: cursorLine, lineNumberStyle: lineNumberStyle,
+                lineNumberWidth: lineNumberWidth, signColWidth: signColWidth,
+                entries: entries
+            )
         }
     }
 

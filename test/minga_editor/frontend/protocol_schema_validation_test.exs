@@ -395,14 +395,23 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         entries: [%GutterEntry{buf_line: 1, display_type: :normal, sign_type: :none}]
       }
 
-      window = minimal_render_window(gutter: gutter)
-      commands = WindowEncoder.encode(window)
+      resident = %{
+        gutter
+        | entries: %Gutter.ResidentRows{
+            content_epoch: 1,
+            line_count: 10,
+            overrides: gutter.entries
+          }
+      }
 
-      gutter_binary = Enum.find(commands, fn <<opcode, _::binary>> -> opcode == 0x7B end)
-      assert gutter_binary != nil, "no gui_gutter (0x7B) command found in encode output"
-
-      <<0x7B, section_count::8, sections_binary::binary>> = gutter_binary
-      actual_ids = extract_section_ids(sections_binary, section_count)
+      actual_ids =
+        Enum.flat_map([gutter, resident], fn model ->
+          commands = WindowEncoder.encode(minimal_render_window(gutter: model))
+          gutter_binary = Enum.find(commands, fn <<opcode, _::binary>> -> opcode == 0x7B end)
+          assert gutter_binary != nil, "no gui_gutter (0x7B) command found in encode output"
+          <<0x7B, section_count::8, sections_binary::binary>> = gutter_binary
+          extract_section_ids(sections_binary, section_count)
+        end)
 
       for {id, name} <- schema_section_ids do
         assert id in actual_ids,

@@ -155,7 +155,7 @@ final class EditorNSView: MTKView {
     private var cursorBlinkMultiplier: UInt64 = 1
 
     /// Last viewport top used for scroll indicator change detection.
-    private var lastViewportTopForScroll: UInt32 = 0xFFFF_FFFF
+    private var lastViewportTopForScroll: CGFloat?
 
     private struct GridDimensions {
         let cols: UInt16
@@ -640,17 +640,18 @@ final class EditorNSView: MTKView {
             return
         }
 
-        let fs = committedSnapshot.frameState
-
-        // Flash scroll indicator when viewport position changes (keyboard scroll, cursor movement).
-        // Skip scroll indicator updates while the user is dragging to prevent feedback loops.
-        if !isDraggingScrollIndicator &&
-            fs.viewportTopLine != lastViewportTopForScroll && fs.viewportTopLine != 0xFFFF_FFFF {
-            lastViewportTopForScroll = fs.viewportTopLine
+        let localScrollPresentation = prepareLocalScrollPresentationForDraw(committedSnapshot: committedSnapshot)
+        if !isDraggingScrollIndicator,
+           let surface = committedSnapshot.activeSurface,
+           let metrics = EditorScrollTrack.metrics(
+               surface: surface,
+               localTransform: localScrollPresentation,
+               cellHeight: effectiveCellHeight
+           ),
+           metrics.viewportTopLine != lastViewportTopForScroll {
+            lastViewportTopForScroll = metrics.viewportTopLine
             flashScrollIndicator()
         }
-
-        let localScrollPresentation = prepareLocalScrollPresentationForDraw(committedSnapshot: committedSnapshot)
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             committedSnapshot.windowIds.contains(windowId) ? windowId : nil
         }
@@ -1271,9 +1272,7 @@ final class EditorNSView: MTKView {
         guard let metrics = visibleScrollTrackMetrics else { return false }
         return EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width)
             && EditorScrollTrack.shouldCaptureTrackClick(
-                totalLines: metrics.totalLines,
-                visibleRows: metrics.visibleRows,
-                viewportTopLine: metrics.viewportTopLine,
+                metrics: metrics,
                 scrollIndicatorAlpha: coreTextRenderer.scrollIndicatorAlpha,
                 alwaysShowScrollbar: alwaysShowScrollbar
             )
@@ -1284,10 +1283,7 @@ final class EditorNSView: MTKView {
         guard let metrics = visibleScrollTrackMetrics,
               let thumb = EditorScrollTrack.thumb(
                   viewHeight: bounds.height,
-                  totalLines: metrics.totalLines,
-                  visibleRows: metrics.visibleRows,
-                  viewportTopLine: metrics.viewportTopLine,
-                  resident: metrics.resident
+                  metrics: metrics
               ) else { return nil }
         return EditorScrollTrack.dragOffset(forY: y, thumb: thumb)
     }
@@ -1316,20 +1312,13 @@ final class EditorNSView: MTKView {
         )
     }
 
-    private var visibleScrollTrackMetrics: (totalLines: UInt32, visibleRows: UInt32, viewportTopLine: UInt32, resident: Bool)? {
+    private var visibleScrollTrackMetrics: EditorScrollTrack.Metrics? {
         guard let snapshot = editorPresentationSnapshot,
               let surface = snapshot.activeSurface else { return nil }
-        let viewport = surface.paneGeometry.viewport
-        let visibleRows = viewport.rows > 0 ? UInt32(viewport.rows) : UInt32(snapshot.frameState.rows)
-        let totalLines = viewport.totalLines > 0 ? viewport.totalLines : snapshot.frameState.totalLineCount
-        return (
-            totalLines: totalLines,
-            visibleRows: visibleRows,
-            viewportTopLine: viewport.top,
-            resident: Self.thumbDragCanPresentLocally(
-                scrollPresentation: surface.content.scrollPresentation,
-                totalLines: totalLines
-            )
+        return EditorScrollTrack.metrics(
+            surface: surface,
+            localTransform: visibleLocalScrollPresentation,
+            cellHeight: effectiveCellHeight
         )
     }
 
@@ -3229,20 +3218,14 @@ final class EditorNSView: MTKView {
         guard let (gutter, rowIndex) = gutterHit(at: point) else { return nil }
         guard Int(gutter.signColWidth) >= 3 else { return nil }
 
-        let content = interactionContent(windowId: gutter.windowId)
-        let presentationBeforeRows = Self.presentationScrollPayloadOverscanBounds(
-            for: content,
-            scrollPresentation: content?.scrollPresentation
-        ).before
-        let presentationRowIndex = rowIndex + presentationBeforeRows
-        guard presentationRowIndex >= 0 && presentationRowIndex < gutter.entries.count else { return nil }
+        guard let surface = editorPresentationSnapshot?.surface(for: gutter.windowId),
+              let entry = surface.gutterEntry(atPresentationRow: rowIndex) else { return nil }
 
         let gutterX = CGFloat(gutter.contentCol) * cellWidth + CoreTextMetalRenderer.gutterLeftMarginPt
         let foldColumnOffset = CGFloat(Int(gutter.signColWidth) - 1)
         let foldStartX = gutterX + foldColumnOffset * cellWidth
         guard point.x >= foldStartX && point.x < foldStartX + cellWidth else { return nil }
 
-        let entry = gutter.entries[presentationRowIndex]
         switch entry.displayType {
         case .foldOpen, .foldStart:
             return (gutter, entry)
@@ -3261,7 +3244,10 @@ final class EditorNSView: MTKView {
             cellHeight: effectiveCellHeight
         )
         let next: (Bool, UInt16?, UInt16?)
-        if let (gutter, rowIndex) = gutterHit(at: point), rowIndex >= 0 && rowIndex < gutter.entries.count {
+        if let (gutter, rowIndex) = gutterHit(at: point),
+           editorPresentationSnapshot?.surface(for: gutter.windowId)?.gutterEntry(
+               atPresentationRow: rowIndex
+           ) != nil {
             next = (true, gutter.windowId, gutter.contentRow + UInt16(rowIndex))
         } else {
             next = (false, nil, nil)

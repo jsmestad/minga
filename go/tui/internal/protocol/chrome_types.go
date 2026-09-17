@@ -557,7 +557,45 @@ type Gutter struct {
 	LineNumberStyle byte
 	LineNumberWidth byte
 	SignColWidth    byte
+	Resident        *ResidentGutterEntries
 	Entries         []GutterEntry
+	DecodeError     string
+}
+
+// ResidentGutterEntries carries the document-sized gutter contract. Every
+// buffer-line index below LineCount has an implicit ordinary entry; Overrides
+// stores only folds and signs. RetainOverrides is a wire update instruction
+// that the frame transaction resolves before publication.
+type ResidentGutterEntries struct {
+	ContentEpoch    uint32
+	LineCount       uint32
+	RetainOverrides bool
+	Overrides       map[uint32]GutterEntry
+}
+
+// EntryCount returns the resident document extent, or the legacy dense entry
+// count when the sender does not use the resident gutter contract.
+func (g Gutter) EntryCount() int {
+	if g.Resident != nil {
+		return int(g.Resident.LineCount)
+	}
+	return len(g.Entries)
+}
+
+// EntryAt resolves one gutter entry in O(1). Resident gutters synthesize the
+// ordinary no-sign baseline instead of allocating one entry per document line.
+func (g Gutter) EntryAt(index int) (GutterEntry, bool) {
+	if index < 0 || index >= g.EntryCount() {
+		return GutterEntry{}, false
+	}
+	if g.Resident == nil {
+		return g.Entries[index], true
+	}
+	bufferLine := uint32(index)
+	if entry, ok := g.Resident.Overrides[bufferLine]; ok {
+		return entry, true
+	}
+	return GutterEntry{BufferLine: bufferLine}, true
 }
 
 type GutterEntry struct {

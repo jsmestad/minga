@@ -3,6 +3,30 @@ import Testing
 
 @Suite("Renderer resident row slicing")
 struct RendererResidentSliceTests {
+    @Test("resident gutter resolves retained suffix rows by final row-store index")
+    func residentGutterUsesFinalRowStoreIndex() throws {
+        let entries = try #require(Wire.GutterEntries.resident(
+            contentEpoch: 8,
+            lineCount: 100_000,
+            overrides: [Wire.GutterEntry(
+                bufLine: 42, displayType: .foldOpen, signType: .diagWarning
+            )]
+        ))
+
+        let retainedSuffixRow = GUIVisualRow(
+            rowType: .normal, rowId: 42, bufLine: 41,
+            contentHash: 42, text: "retained suffix", spans: []
+        )
+        let finalRowStoreIndex = 42
+        let gutter = try #require(entries.entry(rowIndex: finalRowStoreIndex))
+        #expect(entries.count == 100_000)
+        #expect(retainedSuffixRow.bufLine == 41)
+        #expect(gutter.bufLine == 42)
+        #expect(gutter.displayType == .foldOpen)
+        #expect(gutter.signType == .diagWarning)
+        #expect(entries.entry(rowIndex: 99_999)?.signType == Wire.GutterSignType.none)
+    }
+
     @Test("fixed viewport visits the same rows for 5,000 and 65,536 row documents")
     func boundedVisitedRows() throws {
         let small = try content(rowCount: 5_000, visibleStart: 2_000, visibleRows: 40)

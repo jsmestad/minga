@@ -64,6 +64,36 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     end)
   end
 
+  @doc "Fetches complete version-qualified source when the resolved composition plan requires hydration."
+  @spec ensure_resident_source(state(), WindowScroll.t(), ResidentBuild.plan() | :windowed) ::
+          WindowScroll.t()
+  def ensure_resident_source(state, %WindowScroll{} = scroll, {:hydrate, _reason}) do
+    snapshot =
+      fetch_snapshot!(
+        buffer_pid(scroll.window),
+        scroll.snapshot.version,
+        0,
+        scroll.snapshot.line_count,
+        scroll.snapshot
+      )
+
+    {lines, preview_matches} =
+      if scroll.is_active,
+        do: SearchHighlight.maybe_substitute_preview(state, snapshot.lines, 0),
+        else: {snapshot.lines, []}
+
+    %{
+      scroll
+      | snapshot: snapshot,
+        lines: lines,
+        preview_matches: preview_matches,
+        first_line: 0,
+        visible_row_start_index: scroll.viewport.top
+    }
+  end
+
+  def ensure_resident_source(_state, scroll, _plan), do: scroll
+
   # ── Private ──────────────────────────────────────────────────────────────
 
   # Scrolls a single window and detects invalidation. Guards against buffer
@@ -466,7 +496,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     case {resident_delta_fetch_range(window, params.line_count), resident_build} do
       {nil, %ResidentBuild{}} ->
         count = min(params.visible_rows, max(params.line_count - params.first_line, 1))
-        {params.first_line, count, 0}
+        {params.first_line, count, params.first_line}
 
       {nil, nil} ->
         {0, params.line_count, params.first_line}
@@ -486,7 +516,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
       {nil, %ResidentBuild{}} ->
         count = min(params.visible_rows, max(params.line_count - params.first_line, 1))
-        {params.first_line, count, 0}
+        {params.first_line, count, params.first_line}
 
       {nil, nil} ->
         {0, params.line_count, params.first_line}

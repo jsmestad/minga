@@ -36,6 +36,22 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   # ── Render context ─────────────────────────────────────────────────────────
 
+  @spec composition_key(state(), Decorations.t(), boolean()) :: tuple()
+  defp composition_key(state, decorations, is_active) do
+    {
+      Decorations.text_composition_key(decorations),
+      SearchHighlight.composition_key(state),
+      state.intent.frame.theme,
+      active_composition(state.workspace, is_active)
+    }
+  end
+
+  @spec active_composition(map(), boolean()) :: tuple() | nil
+  defp active_composition(workspace, true),
+    do: {workspace.document_highlights, workspace.cmd_hover_link}
+
+  defp active_composition(_workspace, false), do: nil
+
   @doc """
   Builds the per-frame render context for a window.
 
@@ -67,6 +83,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       end
 
     frame = state.intent.frame
+
+    composition_key = composition_key(state, decorations, is_active)
 
     search_matches =
       case preview_matches do
@@ -145,6 +163,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       editor_bg: frame.theme.editor.bg,
       has_sign_column: has_sign_column,
       decorations: decorations,
+      composition_key: composition_key,
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
       git_signs: prefetched_git_signs(params, state, window),
       gutter_colors: frame.theme.gutter,

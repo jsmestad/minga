@@ -104,7 +104,7 @@ enum RenderCommand: Sendable {
     case guiAgentTranscript(mode: UInt8, epoch: UInt32, truncated: Bool, trimFront: UInt32, baseCount: UInt32, messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
-    case guiGutter(data: Wire.WindowGutter)
+    case guiGutter(data: Wire.WindowGutterUpdate)
     case guiBottomPanel(visible: Bool, activeTabIndex: UInt8, heightPercent: UInt8,
                          filterPreset: UInt8, tabs: [Wire.BottomPanelTab],
                          entries: [Wire.MessageEntry])
@@ -141,6 +141,11 @@ enum RenderCommand: Sendable {
 }
 
 extension RenderCommand {
+    /// Compatibility constructor for tests and callers that already hold resolved gutter state.
+    static func guiGutter(data: Wire.WindowGutter) -> RenderCommand {
+        .guiGutter(data: Wire.WindowGutterUpdate(replacing: data))
+    }
+
     /// Compatibility constructor for callers that do not provide completion metadata.
     static func guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem], documentation: String) -> RenderCommand {
         let selectedItemID = items.indices.contains(Int(selectedIndex)) ? items[Int(selectedIndex)].id : ""
@@ -1772,7 +1777,13 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var style: Wire.LineNumberStyle = .hybrid
         var lnWidth: UInt8 = 0
         var signWidth: UInt8 = 0
-        var entries: [Wire.GutterEntry] = []
+        var denseEntries: [Wire.GutterEntry]?
+        var residentIdentity: Wire.ResidentGutterIdentity?
+        var retainResident = false
+        var residentOverrides: [Wire.GutterEntry] = []
+        var sawWindow = false
+        var sawConfig = false
+        var sawResidentOverrides = false
 
         for _ in 0..<gutterSectionCount {
             guard data.count >= gutterPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1785,6 +1796,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             switch gsId {
             case 0x01: // Window: window_id(2) + row(2) + col(2) + height(2) + is_active(1) [+ width(2)]
                 guard gsLen >= 9 else { break }
+                sawWindow = true
                 windowId = try readU16(data, gsStart)
                 contentRow = try readU16(data, gsStart + 2)
                 contentCol = try readU16(data, gsStart + 4)
@@ -1794,40 +1806,38 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             case 0x02: // Config: cursor_line(4) + style(1) + ln_width(1) + sign_width(1)
                 guard gsLen >= 7 else { break }
+                sawConfig = true
                 cursorLine = try readU32(data, gsStart)
                 style = Wire.LineNumberStyle(rawValue: data[gsStart + 4]) ?? .hybrid
                 lnWidth = data[gsStart + 5]
                 signWidth = data[gsStart + 6]
 
             case 0x03: // Entries: count(2) + entries...
-                guard gsLen >= 2 else { throw ProtocolDecodeError.malformed }
-                let lineCount = Int(try readU16(data, gsStart))
-                try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
-                entries.reserveCapacity(lineCount)
-                var ePos = gsStart + 2
-                for _ in 0..<lineCount {
-                    guard gsEnd >= ePos + 10 else { throw ProtocolDecodeError.malformed }
-                    let bufLine = try readU32(data, ePos)
-                    let dt = Wire.GutterDisplayType(rawValue: data[ePos + 4]) ?? .normal
-                    let st = Wire.GutterSignType(rawValue: data[ePos + 5]) ?? .none
-                    let rawFoldEndLine = try readU32(data, ePos + 6)
-                    let foldEndLine: UInt32? = rawFoldEndLine == UInt32.max ? nil : rawFoldEndLine
-                    ePos += 10
-                    if st == .annotation {
-                        guard gsEnd >= ePos + 4 else { throw ProtocolDecodeError.malformed }
-                        let fg = try readU24(data, ePos)
-                        let textLen = Int(data[ePos + 3])
-                        ePos += 4
-                        guard gsEnd >= ePos + textLen else { throw ProtocolDecodeError.malformed }
-                        let text = try decodeUTF8(data[ePos..<(ePos + textLen)]) ?? ""
-                        ePos += textLen
-                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, foldEndLine: foldEndLine, signFg: fg, signText: text))
-                    } else {
-                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, foldEndLine: foldEndLine))
-                    }
+                guard denseEntries == nil, residentIdentity == nil, !sawResidentOverrides else {
+                    throw ProtocolDecodeError.malformed
                 }
+                denseEntries = try decodeGutterEntries(
+                    data: data, start: gsStart, end: gsEnd, strict: false
+                )
+
+            case 0x04: // Resident header: content_epoch(4) + line_count(4) + retain_overrides(1)
+                guard residentIdentity == nil, denseEntries == nil, gsLen == 9 else {
+                    throw ProtocolDecodeError.malformed
+                }
+                let retainByte = data[gsStart + 8]
+                guard retainByte == 0 || retainByte == 1 else { throw ProtocolDecodeError.malformed }
+                residentIdentity = Wire.ResidentGutterIdentity(
+                    contentEpoch: try readU32(data, gsStart),
+                    lineCount: try readU32(data, gsStart + 4)
+                )
+                retainResident = retainByte == 1
+
+            case 0x05: // Complete sparse resident override snapshot, repeatable for chunking.
+                guard denseEntries == nil else { throw ProtocolDecodeError.malformed }
+                sawResidentOverrides = true
+                residentOverrides.append(contentsOf: try decodeGutterEntries(
+                    data: data, start: gsStart, end: gsEnd, strict: true
+                ))
 
             default: break
             }
@@ -1835,11 +1845,35 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             gutterPos = gsStart + gsLen
         }
 
-        let windowGutter = Wire.WindowGutter(
+        let entryUpdate: Wire.GutterEntryUpdate
+        if let denseEntries {
+            guard residentIdentity == nil, !sawResidentOverrides else {
+                throw ProtocolDecodeError.malformed
+            }
+            entryUpdate = .replace(Wire.GutterEntries(denseEntries))
+        } else if let residentIdentity {
+            guard sawWindow, sawConfig else { throw ProtocolDecodeError.malformed }
+            if retainResident {
+                guard !sawResidentOverrides else { throw ProtocolDecodeError.malformed }
+                entryUpdate = .retainResident(residentIdentity)
+            } else {
+                guard sawResidentOverrides,
+                      let entries = Wire.GutterEntries.resident(
+                          contentEpoch: residentIdentity.contentEpoch,
+                          lineCount: residentIdentity.lineCount,
+                          overrides: residentOverrides
+                      ) else { throw ProtocolDecodeError.malformed }
+                entryUpdate = .replace(entries)
+            }
+        } else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        let windowGutter = Wire.WindowGutterUpdate(
             windowId: windowId, contentRow: contentRow, contentCol: contentCol,
             contentHeight: contentHeight, isActive: isActive, contentWidth: contentWidth,
             cursorLine: cursorLine, lineNumberStyle: style, lineNumberWidth: lnWidth,
-            signColWidth: signWidth, entries: entries
+            signColWidth: signWidth, entryUpdate: entryUpdate
         )
         return (.guiGutter(data: windowGutter), gutterPos - offset)
 
@@ -1938,7 +1972,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard wcPayloadEnd >= wcSStart + wcSLen else { throw ProtocolDecodeError.malformed }
 
             switch wcSId {
-            case 0x01: // Header: window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
+            case 0x01: // Header: window_id(2) + flags(1: full_refresh, cursor_visible, sequential_residence) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
                 guard !wcSawHeader, wcSLen >= 10 else { throw ProtocolDecodeError.malformed }
                 wcSawHeader = true
                 wcWindowId = try readU16(data, wcSStart)
@@ -1977,6 +2011,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             cursorCol: wcCursorCol,
             cursorShape: wcCursorShape,
             scrollLeft: wcScrollLeft,
+            rowStoreMode: (wcFlags & 0x04) != 0 ? .sequential : .windowed,
             rows: wcRows,
             selection: wcOverlays.selection,
             searchMatches: wcOverlays.searchMatches,
@@ -4078,6 +4113,58 @@ private func validatedScrollPresentation(_ presentation: GUIScrollPresentation?,
         throw ProtocolDecodeError.malformed
     }
     return presentation
+}
+
+private func decodeGutterEntries(data: Data, start: Int, end: Int, strict: Bool) throws -> [Wire.GutterEntry] {
+    guard start + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let count = Int(try readU16(data, start))
+    var entries: [Wire.GutterEntry] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
+    entries.reserveCapacity(count)
+    var pos = start + 2
+
+    for _ in 0..<count {
+        guard pos + 10 <= end else { throw ProtocolDecodeError.malformed }
+        let rawDisplayType = data[pos + 4]
+        let rawSignType = data[pos + 5]
+        guard !strict || (
+            Wire.GutterDisplayType(rawValue: rawDisplayType) != nil &&
+                Wire.GutterSignType(rawValue: rawSignType) != nil
+        ) else { throw ProtocolDecodeError.malformed }
+        let displayType = Wire.GutterDisplayType(rawValue: rawDisplayType) ?? .normal
+        let signType = Wire.GutterSignType(rawValue: rawSignType) ?? .none
+        let bufferLine = try readU32(data, pos)
+        let rawFoldEndLine = try readU32(data, pos + 6)
+        let foldEndLine: UInt32? = rawFoldEndLine == UInt32.max ? nil : rawFoldEndLine
+        pos += 10
+
+        let entry: Wire.GutterEntry
+        if signType == .annotation {
+            guard pos + 4 <= end else { throw ProtocolDecodeError.malformed }
+            let foreground = try readU24(data, pos)
+            let textLength = Int(data[pos + 3])
+            pos += 4
+            guard pos + textLength <= end else { throw ProtocolDecodeError.malformed }
+            let decodedText = try decodeUTF8(data[pos..<(pos + textLength)])
+            guard !strict || decodedText != nil else { throw ProtocolDecodeError.malformed }
+            let text = decodedText ?? ""
+            pos += textLength
+            entry = Wire.GutterEntry(
+                bufLine: bufferLine, displayType: displayType, signType: signType,
+                foldEndLine: foldEndLine, signFg: foreground, signText: text
+            )
+        } else {
+            entry = Wire.GutterEntry(
+                bufLine: bufferLine, displayType: displayType,
+                signType: signType, foldEndLine: foldEndLine
+            )
+        }
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
+        entries.append(entry)
+    }
+
+    guard !strict || pos == end else { throw ProtocolDecodeError.malformed }
+    return entries
 }
 
 private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -> GUIScrollPresentation {

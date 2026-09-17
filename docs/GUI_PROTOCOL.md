@@ -507,6 +507,8 @@ Structured gutter data for native line number and sign rendering. One message is
 | 0x01 | Window | window_id, content_row, content_col, content_height, is_active, content_width |
 | 0x02 | Config | cursor_line, line_number_style, line_number_width, sign_col_width |
 | 0x03 | Entries | entry_count + entries (positional per entry) |
+| 0x04 | Resident | content_epoch:u32, line_count:u32, retain_overrides:u8 |
+| 0x05 | Resident overrides | entry_count:u16 + gutter entries, repeated as needed |
 
 ```
 opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1) + content_width(2)
@@ -518,6 +520,16 @@ Per entry:
 ```
 
 `window_id` matches the `window_id` field in `gui_window_content` (0x80), enabling the frontend to correlate gutter data with semantic buffer content for the same window. `content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `content_width` is the width in columns and lets the frontend clip gutter hover highlights to split boundaries. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is the width before line numbers: 0 for no sign/fold prefix, 2 for the sign column only, or 3 when the dedicated fold column is present after the sign column. `line_count` is the number of visible line entries. `fold_end_line` is the inclusive 0-indexed buffer end line for foldable rows, or `0xFFFFFFFF` when the row has no fold range.
+
+Content header flag `0x04` marks a sequential resident row store. Its current buffer-line positions equal row indexes; embedded positions on retained suffix payloads are historical after structural splices. Frontends validate splice bounds, identity, and counts and project current positions from indexes without rewriting the suffix. Windowed stores keep explicit buffer-line positions and ordering checks. Each full `0x80` snapshot replaces the row-store mode, including windowed-to-resident promotion within the same durable content epoch. `A1` and `A2` deltas inherit the committed mode and cannot change it. Final sequential stores must contain exactly `viewport.total_lines` rows, with `total_visual_rows == total_lines`, even when the gutter is hidden.
+
+Resident gutters use sections `0x04` and `0x05` instead of dense section `0x03`. They apply only to complete, sequential, unwrapped row stores. Every index below `line_count` has an implicit normal entry whose buffer line equals the index and has no sign or fold. Overrides carry the complete set of exceptional entries, keyed by buffer line. Each section payload is limited to 65,535 bytes; producers split larger override sets into repeated `0x05` chunks without dropping entries.
+
+`retain_overrides = 0` replaces the exceptions and requires at least one `0x05` section, including an explicit zero-count section to clear all exceptions. `retain_overrides = 1` carries no `0x05` section and retains the previously committed exceptions. Producers may retain only after the snapshot frame has been acknowledged. Frontends reject mixed dense/resident entries, malformed chunks, duplicate or out-of-range exception lines, and missing replacement sections.
+
+The frame transaction checks the gutter's window, epoch, and count against the final staged content row store. Retention additionally requires an exact match to the previously committed resident gutter and is invalid in a recovery keyframe. A rejected frame publishes neither its text nor its gutter. A new epoch, changed count, or recovery sends a replacement snapshot. The sparse gutter is independent of text insertion payloads; an empty text delta never means an empty gutter.
+
+The scrollbar uses pane viewport geometry plus the frontend's local scroll transform. Gutter entries identify document lines and must never supply viewport position.
 
 Line number style values:
 | Value | Style |
@@ -660,6 +672,7 @@ Header section:
 
 Flags:
   bit 0: full_refresh (1 = all rows changed, 0 = incremental)
+  bit 2: sequential resident rows (buffer line equals row-store index; full 0x80 replaces mode, A1/A2 inherit it)
   bit 1: cursor_visible (1 = show cursor, 0 = hide cursor)
 
 Cursor shape: 0 = block, 1 = beam, 2 = underline

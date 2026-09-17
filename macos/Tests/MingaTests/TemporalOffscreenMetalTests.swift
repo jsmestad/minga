@@ -66,12 +66,13 @@ struct TemporalOffscreenMetalTests {
 
     private func windowWithGutter(windowId: UInt16, rows: [GUIVisualRow],
                                   scrollLeft: UInt16 = 0,
-                                  cursorline: GUICursorline? = nil) throws -> GUIWindowContent {
+                                  cursorline: GUICursorline? = nil,
+                                  paneGeometry: GUIPaneGeometry? = nil) throws -> GUIWindowContent {
         try GUIWindowContent(
             windowId: windowId, fullRefresh: true, cursorRow: 0, cursorCol: 0,
             cursorShape: .block, scrollLeft: scrollLeft, rows: rows, selection: nil,
             searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
-            cursorline: cursorline
+            paneGeometry: paneGeometry, cursorline: cursorline
         )
     }
 
@@ -147,6 +148,7 @@ struct TemporalOffscreenMetalTests {
         }
         let initial = try GUIWindowContent(windowId: 1, fullRefresh: true, contentEpoch: 1,
             cursorVisible: false, cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rowStoreMode: .sequential,
             rows: allRows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: [], paneGeometry: geometry(100), scrollPresentation: scroll(100))
         let echoed = try #require(initial.applyingRowsDelta(GUIWindowRowsDelta(
@@ -158,12 +160,14 @@ struct TemporalOffscreenMetalTests {
         let fullGutter = Wire.WindowGutter(windowId: 1, contentRow: 0, contentCol: 0,
             contentHeight: visibleRows, isActive: true, contentWidth: cols,
             cursorLine: 0, lineNumberStyle: .absolute, lineNumberWidth: 4, signColWidth: 1,
-            entries: (0..<totalRows).map { Wire.GutterEntry(bufLine: $0, displayType: .normal, signType: .none) })
+            entries: try #require(Wire.GutterEntries.resident(contentEpoch: 1, lineCount: totalRows, overrides: [])))
         let waiter = PresentationWaiter()
         var factories = nativeTestFactories()
         factories.reportFailure = { waiter.fail($0) }
         let renderer = try #require(makeRenderer(factories: factories, fontManager: fontManager))
 
+        renderer.scrollIndicatorAlpha = 1
+        var firstPixels: [UInt8]?
         for (index, fixture) in [(initial, Float(offsetRows) * cellH), (echoed, Float(0))].enumerated() {
             let (content, offset) = fixture
             #expect(content.rowStore.count == Int(totalRows))
@@ -186,6 +190,11 @@ struct TemporalOffscreenMetalTests {
                 return
             }
             let image = try #require(await OffscreenReadback.read(texture: texture, queue: queue))
+            if let firstPixels {
+                #expect(image.bytes == firstPixels, "authoritative echo changed the visible text, gutter, or scrollbar")
+            } else {
+                firstPixels = image.bytes
+            }
             let background = image.pixel(x: width - 10, y: height - 2)
             let gutterEnd = Int(Float(5) * cellW + Float(CoreTextMetalRenderer.gutterLeftMarginPt))
             let textStart = Int(Float(5) * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt))
@@ -396,12 +405,29 @@ struct TemporalOffscreenMetalTests {
         var frameState = FrameState(cols: cols, rows: rowCount)
         frameState.defaultBg = Self.neutral
         frameState.totalLineCount = 100
-        frameState.viewportTopLine = 50
         let windowGutters: [UInt16: Wire.WindowGutter] = [1: gutter(windowId: 1, cols: cols, rows: rowCount, lineNumberWidth: 0)]
 
         let text = String(repeating: "M", count: Int(cols))
         let rows = (0..<Int(rowCount)).map { bandRow(rowId: UInt64($0), text: text, bg: Self.colorA) }
-        let content = try windowWithGutter(windowId: 1, rows: rows)
+        let rect = GUICellRect(row: 0, col: 0, width: cols, height: rowCount)
+        let content = try windowWithGutter(
+            windowId: 1,
+            rows: rows,
+            paneGeometry: GUIPaneGeometry(
+                windowId: 1,
+                totalRect: rect,
+                contentRect: rect,
+                textRect: GUICellRect(row: 0, col: 1, width: cols - 1, height: rowCount),
+                gutterRect: GUICellRect(row: 0, col: 0, width: 1, height: rowCount),
+                clipRect: rect,
+                viewport: GUIViewportSummary(
+                    top: 50, left: 0, rows: rowCount, cols: cols - 1,
+                    totalLines: 100, visualRowOffset: 0, totalVisualRows: 100
+                ),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 1),
+                hitRegions: []
+            )
+        )
         guard let texture = OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height) else {
             Issue.record("drawable texture allocation failed"); return
         }

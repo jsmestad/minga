@@ -586,8 +586,7 @@ final class CoreTextMetalRenderer {
         // This is a single-window lookup, not fragmented per-window joining.
         let cursorSurface: PresentedWindowSurface? = renderCursor?.windowId
             .flatMap { id in surfaces.first { $0.windowId == id } }
-        let activeSurface: PresentedWindowSurface? = snapshot.activeWindowId
-            .flatMap { id in surfaces.first { $0.windowId == id } }
+        let activeSurface = snapshot.activeSurface
 
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
@@ -926,8 +925,7 @@ final class CoreTextMetalRenderer {
                     targetWindowId: scrollTargetWindowId,
                     scrollOffsetPx: smoothScrollOffsetPx
                 ).y,
-                entryRange: RendererSignposts.gutterRange(for: windowGutter, slice: slice),
-                overscanBeforeRows: slice.overscanBeforeRows,
+                slice: slice,
                 atlas: candidateAtlas,
                 windowRenderer: candidateWindowRenderer,
                 bgQuads: &bgQuads,
@@ -1513,29 +1511,33 @@ final class CoreTextMetalRenderer {
         // Pass 7: Scroll indicator (overlay scrollbar).
         // A thin rect on the right edge showing viewport position within the document.
         // Only shown when the document is taller than the viewport.
-        let totalLines = frameState.totalLineCount
-        let visibleRows = UInt32(frameState.rows)
-        let viewportTop = frameState.viewportTopLine
+        let localTransform = presentationWindowId.map {
+            EditorLocalPresentationTransform(
+                windowId: $0,
+                offset: CGPoint(x: CGFloat(scrollOffset.x), y: CGFloat(scrollOffset.y))
+            )
+        }
+        let scrollMetrics = activeSurface.flatMap {
+            EditorScrollTrack.metrics(
+                surface: $0, localTransform: localTransform,
+                cellHeight: CGFloat(displayCellH)
+            )
+        }
 
-        let scrollIndicatorResident: Bool = {
-            guard let activeSurface,
-                  let scrollPresentation = activeSurface.content.scrollPresentation else { return false }
-            let perWindowTotal = activeSurface.paneGeometry.viewport.totalLines
-            return perWindowTotal > 0 && scrollPresentation.overscanStartLine == 0 && scrollPresentation.overscanEndLine >= perWindowTotal
-        }()
-
-        if totalLines > visibleRows && viewportTop != 0xFFFF_FFFF && scrollIndicatorAlpha > 0 {
+        if let scrollMetrics,
+           let thumb = EditorScrollTrack.thumb(
+               viewHeight: CGFloat(viewportSize.height),
+               metrics: scrollMetrics,
+               minThumbHeight: CGFloat(20.0 * scale)
+           ),
+           scrollIndicatorAlpha > 0 {
             let viewportH = Float(viewportSize.height)
             let indicatorWidth: Float = 6.0 * scale
             let indicatorMargin: Float = 2.0 * scale
             let trackHeight = viewportH
 
-            // Compute thumb size and position.
-            let proportion = Float(visibleRows) / Float(totalLines)
-            let thumbHeight = max(proportion * trackHeight, 20.0 * scale)
-            let maxTop = Float(EditorScrollTrack.maxScrollableTop(
-                totalLines: totalLines, visibleRows: visibleRows, resident: scrollIndicatorResident))
-            let thumbY = (Float(viewportTop) / maxTop) * (trackHeight - thumbHeight)
+            let thumbHeight = Float(thumb.height)
+            let thumbY = Float(thumb.y)
 
             let thumbX = Float(viewportSize.width) - indicatorWidth - indicatorMargin
 
@@ -1834,8 +1836,7 @@ final class CoreTextMetalRenderer {
         gutterHoverWindowId: UInt16?,
         gutterHoverRow: UInt16?,
         scrollOffsetY: Float,
-        entryRange: Range<Int>,
-        overscanBeforeRows: Int,
+        slice: RendererRowSlice,
         atlas: LineTextureAtlas,
         windowRenderer: WindowContentRenderer,
         bgQuads: inout [QuadGPU],
@@ -1848,12 +1849,13 @@ final class CoreTextMetalRenderer {
         let clipTop = Float(gutter.contentRow) * cellH * scale
         let clipBottom = Float(gutter.contentRow + gutter.contentHeight) * cellH * scale
 
-        for rowIndex in entryRange {
-            let entry = gutter.entries[rowIndex]
-            let presentationRow = rowIndex - entryRange.lowerBound - overscanBeforeRows
+        for (offset, _) in slice.rows.enumerated() {
+            let rowIndex = slice.range.lowerBound + offset
+            guard let entry = gutter.entries.entry(rowIndex: rowIndex) else { continue }
+            let presentationRow = offset - slice.overscanBeforeRows
             let screenRowInt = Int(baseRow) + presentationRow
             let screenRow = UInt16(clamping: screenRowInt)
-            let atlasRow = UInt16(clamping: rowIndex)
+            let atlasRow = UInt16(clamping: offset)
             let rowY = (Float(baseRow) + Float(presentationRow)) * cellH * scale - scrollOffsetY
             guard CoreTextMetalRenderer.clipVerticalQuad(y: rowY, height: cellH * scale, top: clipTop, bottom: clipBottom) != nil else { continue }
             let yPos = rowY
@@ -2333,10 +2335,7 @@ final class CoreTextMetalRenderer {
 
         let gutterTextures = preparedSurfaces.reduce(0) { total, preparedSurface in
             let gutter = preparedSurface.surface.renderGutter
-            return total + gutterTextureDemand(
-                gutter,
-                range: RendererSignposts.gutterRange(for: gutter, slice: preparedSurface.slice)
-            )
+            return total + gutterTextureDemand(gutter, slice: preparedSurface.slice)
         }
 
         let splitLabels = metadata.horizontalSeparators.reduce(0) { total, separator in
@@ -2383,10 +2382,7 @@ final class CoreTextMetalRenderer {
 
         let gutterTextures = gutters.values.reduce(0 as Int) { total, gutter in
             guard let slice = visibleSlices[gutter.windowId] else { return total }
-            return total + gutterTextureDemand(
-                gutter,
-                range: RendererSignposts.gutterRange(for: gutter, slice: slice)
-            )
+            return total + gutterTextureDemand(gutter, slice: slice)
         }
 
         let splitLabels = metadata.horizontalSeparators.reduce(0 as Int) { total, separator in
@@ -2402,11 +2398,13 @@ final class CoreTextMetalRenderer {
 
     private nonisolated static func gutterTextureDemand(
         _ gutter: Wire.WindowGutter,
-        range: Range<Int>
+        slice: RendererRowSlice
     ) -> Int {
         var demand = 0
-        for index in range {
-            demand += lineNumberTextureDemand(gutter) + signTextureDemand(gutter.entries[index].signType)
+        for (offset, _) in slice.rows.enumerated() {
+            let rowIndex = slice.range.lowerBound + offset
+            guard let entry = gutter.entries.entry(rowIndex: rowIndex) else { continue }
+            demand += lineNumberTextureDemand(gutter) + signTextureDemand(entry.signType)
         }
         return demand
     }

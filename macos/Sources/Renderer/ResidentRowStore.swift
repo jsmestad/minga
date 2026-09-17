@@ -112,6 +112,14 @@ struct ResidentRowMetadata: Sendable, Equatable {
 /// Structural edits rebuild only leaves intersecting the splice and the O(log n)
 /// tree paths above them. Durable row locators contain stable leaf identities, so
 /// rows after a splice never need their global indexes rewritten.
+/// Interpretation of `bufLine` metadata stored with resident rows.
+public enum ResidentRowStoreMode: Sendable, Equatable {
+    /// Rows retain their explicit BEAM-provided buffer-line ordering.
+    case windowed
+    /// The store is a complete unwrapped document, so row rank is the current buffer line.
+    case sequential
+}
+
 public struct ResidentRowStore: Sendable {
     /// Maximum rows stored in one sequence leaf.
     public static let chunkCapacity = 128
@@ -278,12 +286,17 @@ public struct ResidentRowStore: Sendable {
     }
 
     private var storage = Storage()
+    /// Row-coordinate contract retained across copy-on-write structural updates.
+    public private(set) var mode: ResidentRowStoreMode = .windowed
 
     /// Creates an empty resident row store.
-    public init() {}
+    public init(mode: ResidentRowStoreMode = .windowed) {
+        self.mode = mode
+    }
 
     /// Creates a validated store from a complete row snapshot.
-    public init(rows: [GUIVisualRow]) throws {
+    public init(rows: [GUIVisualRow], mode: ResidentRowStoreMode = .windowed) throws {
+        self.mode = mode
         try replaceAll(with: rows)
     }
 
@@ -292,17 +305,18 @@ public struct ResidentRowStore: Sendable {
     public init(
         decodedRows rows: [GUIVisualRow],
         resourceWeight: FrameResourceWeight,
+        mode: ResidentRowStoreMode = .windowed,
         limit: FrameResourceWeight? = nil
     ) throws {
         do {
-            try Self.validateRows(rows)
+            try Self.validateRows(rows, validatesBufferLineOrder: mode == .windowed)
             try Self.validate(resourceWeight, limit: limit)
         } catch let error as ResidentRowStoreError {
             throw error
         } catch is FrameResourceError {
             throw ResidentRowStoreError.resourcePolicy
         }
-
+        self.mode = mode
         self.storage = Storage(resourceWeight: resourceWeight)
         let chunks = makeChunks(rows)
         storage.root = Self.buildTree(chunks)
@@ -334,7 +348,7 @@ public struct ResidentRowStore: Sendable {
     public mutating func replaceAll(
         with rows: [GUIVisualRow], limit: FrameResourceWeight? = nil
     ) throws {
-        try Self.validateRows(rows)
+        try Self.validateRows(rows, validatesBufferLineOrder: mode == .windowed)
         let resultingWeight = try Self.weight(of: rows)
         try Self.validate(resultingWeight, limit: limit)
         ensureUniqueStorage()
@@ -351,6 +365,12 @@ public struct ResidentRowStore: Sendable {
 
     /// Returns a row by visual index in O(log chunks).
     public func row(at index: Int) -> GUIVisualRow? {
+        guard let row = rawRow(at: index) else { return nil }
+        return projected(row, at: index)
+    }
+
+    /// Returns stored row metadata without applying the sequential rank projection.
+    private func rawRow(at index: Int) -> GUIVisualRow? {
         guard index >= 0, index < count else { return nil }
         var node = storage.root
         var remaining = index
@@ -421,7 +441,10 @@ public struct ResidentRowStore: Sendable {
     /// Returns the first visual row whose buffer line is at least `bufferLine`.
     /// Multiple wraps or decorations may share a buffer line; the first is returned.
     public func lowerBound(bufferLine: UInt32) -> Int {
-        Self.lowerBound(node: storage.root, bufferLine: bufferLine, base: 0) ?? count
+        if mode == .sequential {
+            return min(Int(bufferLine), count)
+        }
+        return Self.lowerBound(node: storage.root, bufferLine: bufferLine, base: 0) ?? count
     }
 
     /// Visits exactly the requested row range plus O(log chunks) index nodes.
@@ -432,6 +455,11 @@ public struct ResidentRowStore: Sendable {
         rows.reserveCapacity(upper - lower)
         var touched = Set<UInt64>()
         Self.collect(storage.root, nodeStart: 0, range: lower..<upper, rows: &rows, touched: &touched)
+        if mode == .sequential {
+            rows = rows.enumerated().map { offset, row in
+                projected(row, at: lower + offset)
+            }
+        }
         var counters = ResidentRowStoreCounters()
         counters.rowsVisited = rows.count
         counters.chunksTouched = touched.count
@@ -467,7 +495,9 @@ public struct ResidentRowStore: Sendable {
                     index: splice.startIndex, removeCount: splice.deleteCount, rowCount: baseRowCount
                 )
             }
-            try Self.validateRows(splice.insertedRows)
+            try Self.validateRows(
+                splice.insertedRows, validatesBufferLineOrder: mode == .windowed
+            )
             previousStart = splice.startIndex
             previousEnd = splice.startIndex + splice.deleteCount
             computed = computed - splice.deleteCount + splice.insertedRows.count
@@ -557,15 +587,15 @@ public struct ResidentRowStore: Sendable {
         for row in insertedRows where storage.locators[row.rowId] != nil && !removedIDs.contains(row.rowId) {
             throw ResidentRowStoreError.duplicateRowID(row.rowId)
         }
-        try Self.validateRows(insertedRows)
-        if let first = insertedRows.first, index > 0, let previous = row(at: index - 1), previous.bufLine > first.bufLine {
+        try Self.validateRows(insertedRows, validatesBufferLineOrder: mode == .windowed)
+        if mode == .windowed, let first = insertedRows.first, index > 0, let previous = row(at: index - 1), previous.bufLine > first.bufLine {
             throw ResidentRowStoreError.unsortedBufferLine(previous: previous.bufLine, next: first.bufLine)
         }
         let followingIndex = index + removeCount
-        if let last = insertedRows.last, followingIndex < count, let following = row(at: followingIndex), last.bufLine > following.bufLine {
+        if mode == .windowed, let last = insertedRows.last, followingIndex < count, let following = row(at: followingIndex), last.bufLine > following.bufLine {
             throw ResidentRowStoreError.unsortedBufferLine(previous: last.bufLine, next: following.bufLine)
         }
-        if insertedRows.isEmpty, index > 0, followingIndex < count,
+        if mode == .windowed, insertedRows.isEmpty, index > 0, followingIndex < count,
            let previous = row(at: index - 1), let following = row(at: followingIndex),
            previous.bufLine > following.bufLine {
             throw ResidentRowStoreError.unsortedBufferLine(previous: previous.bufLine, next: following.bufLine)
@@ -664,7 +694,7 @@ public struct ResidentRowStore: Sendable {
         var previousBufferLine: UInt32?
         for chunk in chunks {
             for (offset, row) in chunk.rows.enumerated() {
-                guard previousBufferLine.map({ $0 <= row.bufLine }) ?? true,
+                guard (mode == .sequential || previousBufferLine.map({ $0 <= row.bufLine }) ?? true),
                       ids.insert(row.rowId).inserted,
                       let locator = storage.locators[row.rowId],
                       locator.chunkID == chunk.id,
@@ -703,7 +733,7 @@ public struct ResidentRowStore: Sendable {
 
         for splice in splices {
             let newRow = splice.insertedRows[0]
-            guard let oldRow = row(at: splice.startIndex), oldRow.rowId == newRow.rowId,
+            guard let oldRow = rawRow(at: splice.startIndex), oldRow.rowId == newRow.rowId,
                   let locator = storage.locators[oldRow.rowId], locator.row == oldRow else {
                 return nil
             }
@@ -717,7 +747,7 @@ public struct ResidentRowStore: Sendable {
             ))
         }
 
-        for replacement in replacements where replacement.newRow.bufLine != replacement.oldRow.bufLine {
+        for replacement in replacements where mode == .windowed && replacement.newRow.bufLine != replacement.oldRow.bufLine {
             if replacement.index > 0,
                let previous = finalRows[replacement.index - 1] ?? row(at: replacement.index - 1),
                previous.bufLine > replacement.newRow.bufLine {
@@ -914,18 +944,28 @@ public struct ResidentRowStore: Sendable {
         )
     }
 
-    static func validateRows(_ rows: [GUIVisualRow]) throws {
+    static func validateRows(
+        _ rows: [GUIVisualRow], validatesBufferLineOrder: Bool = true
+    ) throws {
         var ids = Set<UInt64>()
         var previousBufferLine: UInt32?
         for row in rows {
             if !ids.insert(row.rowId).inserted {
                 throw ResidentRowStoreError.duplicateRowID(row.rowId)
             }
-            if let previousBufferLine, previousBufferLine > row.bufLine {
+            if validatesBufferLineOrder, let previousBufferLine, previousBufferLine > row.bufLine {
                 throw ResidentRowStoreError.unsortedBufferLine(previous: previousBufferLine, next: row.bufLine)
             }
             previousBufferLine = row.bufLine
         }
+    }
+
+    private func projected(_ row: GUIVisualRow, at index: Int) -> GUIVisualRow {
+        guard mode == .sequential, row.bufLine != UInt32(index) else { return row }
+        return GUIVisualRow(
+            rowType: row.rowType, rowId: row.rowId, bufLine: UInt32(index),
+            contentHash: row.contentHash, text: row.text, spans: row.spans
+        )
     }
 
     private static func priority(for id: UInt64) -> UInt64 {
