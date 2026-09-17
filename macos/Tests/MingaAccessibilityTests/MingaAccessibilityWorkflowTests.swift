@@ -55,7 +55,8 @@ private extension MingaAccessibilityWorkflowTests {
                 timeout: timeout,
                 query: alphaQuery
             ) {
-                $0.value?.contains("ALPHA PANE λ🙂") == true
+                $0.value?.contains("ALPHA PANE λ🙂") == true && $0.selectedTextRange == NSRange(location: 0, length: 0)
+                    && $0.selectedText == nil
             }
         }
         try require(
@@ -63,15 +64,27 @@ private extension MingaAccessibilityWorkflowTests {
             "Alpha pane lacks its stable accessibility identity"
         )
         try require(alpha.focused == true, "Alpha pane is not the actual AX-focused editor after launch")
+        try require(
+            alpha.selectedTextRange == NSRange(location: 0, length: 0),
+            "Alpha pane does not expose the initial insertion position"
+        )
+
+        app.typeText("$")
+        _ = try client.waitForNode(
+            "the insertion position before the Unicode emoji", timeout: timeout, query: alphaQuery
+        ) {
+            $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
+        }
+
         app.typeText("v")
+        _ = try client.waitForNode("the visual selection of the Unicode emoji", timeout: timeout, query: alphaQuery) {
+            $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 2) && $0.selectedText == "🙂"
+        }
+
         app.typeKey(.escape, modifierFlags: [])
         _ = try timed("focus-after-mode-cycle") {
-            try client.waitForNode(
-                "alpha editor focus after entering and leaving visual mode",
-                timeout: timeout,
-                query: alphaQuery
-            ) {
-                $0.focused == true
+            try client.waitForNode("the restored alpha editor insertion state", timeout: timeout, query: alphaQuery) {
+                $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
             }
         }
     }
@@ -247,15 +260,15 @@ private extension MingaAccessibilityWorkflowTests {
         let bundleIdentifier = try requiredEnvironmentValue(environment, key: "MINGA_AX_APP_BUNDLE_ID")
         let executablePath = try requiredEnvironmentValue(environment, key: "MINGA_AX_APP_EXECUTABLE")
         let executableURL = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath().standardizedFileURL
-        try timed("launch-\(variant)") {
+        let processID = try timed("launch-\(variant)") {
             application.launch()
-            _ = try RunningApplicationLocator.pid(
+            return try RunningApplicationLocator.pid(
                 bundleIdentifier: bundleIdentifier,
                 executableURL: executableURL,
                 timeout: timeout
             )
         }
-        return AccessibilityClient(application: application)
+        return AccessibilityClient(application: application, processID: processID)
     }
 
     func openProjectPicker(app: XCUIApplication, client: AccessibilityClient) throws {
