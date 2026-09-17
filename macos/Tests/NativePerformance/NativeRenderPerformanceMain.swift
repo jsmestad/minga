@@ -416,7 +416,10 @@ private func measureTranscriptAccounting(
     fixture: TranscriptFixture
 ) throws -> NativeTranscriptAccountingMeasurement {
     let guiState = GUIState()
-    let dispatcher = CommandDispatcher(cols: viewportCols, rows: viewportRows, guiState: guiState)
+    let dispatcher = CommandDispatcher(
+        cols: viewportCols, rows: viewportRows, guiState: guiState,
+        applicationEffectSink: { _ in }
+    )
     dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
     dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
     dispatcher.dispatch(.guiAgentTranscript(
@@ -620,7 +623,10 @@ private struct NativeRenderPerformanceMain {
         let geometry = paneGeometry()
         let content = try residentContent(geometry: geometry)
         let guiState = GUIState()
-        let dispatcher = CommandDispatcher(cols: viewportCols, rows: viewportRows, guiState: guiState)
+        let dispatcher = CommandDispatcher(
+            cols: viewportCols, rows: viewportRows, guiState: guiState,
+            applicationEffectSink: { _ in }
+        )
         commitKeyframe(dispatcher: dispatcher, content: content, gutter: gutter(geometry: geometry))
         let freezeSamples = measureFreezePublication(dispatcher: dispatcher)
         let transcriptFixtures = [

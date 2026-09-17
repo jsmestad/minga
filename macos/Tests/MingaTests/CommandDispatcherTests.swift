@@ -20,13 +20,32 @@ fileprivate func completeThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {
     }
 }
 
+@MainActor
+extension CommandDispatcher {
+    convenience init(
+        cols: UInt16, rows: UInt16, guiState: GUIState,
+        resourcePolicy: FrameResourcePolicy = .default
+    ) {
+        self.init(
+            cols: cols, rows: rows, guiState: guiState,
+            resourcePolicy: resourcePolicy,
+            applicationEffectSink: { _ in }
+        )
+    }
+}
+
 @Suite("CommandDispatcher Routing")
 struct CommandDispatcherRoutingTests {
 
     @MainActor
-    private func makeDispatcher() -> (CommandDispatcher, GUIState) {
+    private func makeDispatcher(
+        applicationEffectSink: @escaping CommandDispatcher.ApplicationEffectSink = { _ in }
+    ) -> (CommandDispatcher, GUIState) {
         let gui = GUIState()
-        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            applicationEffectSink: applicationEffectSink
+        )
         return (dispatcher, gui)
     }
 
@@ -1079,9 +1098,10 @@ struct CommandDispatcherRoutingTests {
 
     @Test("reset-required scroll presentation clears local smooth-scroll state once per promoted frame")
     @MainActor func resetRequiredScrollPresentationClearsLocalStateOnce() throws {
-        let (dispatcher, gui) = makeDispatcher()
         var resetCount = 0
-        dispatcher.onScrollPresentationReset = { _ in resetCount += 1 }
+        let (dispatcher, gui) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { resetCount += 1 }
+        }
 
         let resetPresentation = GUIScrollPresentation(
             windowId: 7,
@@ -1145,9 +1165,10 @@ struct CommandDispatcherRoutingTests {
 
     @Test("layoutGeneration-only change fires scroll presentation discard")
     @MainActor func layoutGenerationChangeFiresDiscard() throws {
-        let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
+        let (dispatcher, _) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { discardCount += 1 }
+        }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1188,9 +1209,10 @@ struct CommandDispatcherRoutingTests {
 
     @Test("identical anchor key does not fire scroll presentation discard")
     @MainActor func identicalAnchorKeyDoesNotDiscard() throws {
-        let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
+        let (dispatcher, _) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { discardCount += 1 }
+        }
 
         let presentation = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1223,9 +1245,10 @@ struct CommandDispatcherRoutingTests {
 
     @Test("identical anchor key with a newer scroll_seq still fires discard (#2661 race case)")
     @MainActor func newerScrollSeqDiscardsEvenWithSameAnchorKey() throws {
-        let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
+        let (dispatcher, _) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { discardCount += 1 }
+        }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1270,9 +1293,10 @@ struct CommandDispatcherRoutingTests {
 
     @Test("an unchanged or lower scroll_seq with the same anchor key does not discard")
     @MainActor func unchangedScrollSeqDoesNotDiscard() throws {
-        let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
+        let (dispatcher, _) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { discardCount += 1 }
+        }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1308,9 +1332,10 @@ struct CommandDispatcherRoutingTests {
 
     @Test("ordinary anchor movement preserves local scroll presentation")
     @MainActor func anchorEchoPreservesPresentation() throws {
-        let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
-        dispatcher.onScrollPresentationReset = { _ in discardCount += 1 }
+        let (dispatcher, _) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { discardCount += 1 }
+        }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -1972,9 +1997,14 @@ fileprivate func editorGutter(windowId: UInt16 = 1, geometry: GUIPaneGeometry = 
 struct CommandDispatcherStagingTests {
 
     @MainActor
-    private func makeDispatcher() -> (CommandDispatcher, GUIState) {
+    private func makeDispatcher(
+        applicationEffectSink: @escaping CommandDispatcher.ApplicationEffectSink = { _ in }
+    ) -> (CommandDispatcher, GUIState) {
         let gui = GUIState()
-        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            applicationEffectSink: applicationEffectSink
+        )
         return (dispatcher, gui)
     }
 
@@ -2134,11 +2164,18 @@ struct CommandDispatcherStagingTests {
 
     @Test("late old title and background effects cannot overwrite replacement chrome")
     @MainActor func lateOldChromeEffectsAreRejected() throws {
-        let (dispatcher, _) = makeDispatcher()
         var title = ""
-        var background = NSColor.clear
-        dispatcher.onTitleChanged = { title = $0 }
-        dispatcher.onWindowBgChanged = { background = $0 }
+        var background = (red: UInt8(0), green: UInt8(0), blue: UInt8(0))
+        let (dispatcher, _) = makeDispatcher { effect in
+            switch effect {
+            case .titleChanged(let value):
+                title = value
+            case .windowBackgroundChanged(let red, let green, let blue):
+                background = (red, green, blue)
+            default:
+                break
+            }
+        }
         dispatcher.replaceConnection(with: 1)
 
         let old = try decodedFrame([
@@ -2147,7 +2184,7 @@ struct CommandDispatcherStagingTests {
         ])
         dispatcher.dispatch(old, connectionID: 1)
         #expect(title == "old")
-        #expect(background.redComponent == 1)
+        #expect(background.red == 255)
 
         dispatcher.replaceConnection(with: 2)
         let replacement = try decodedFrame([
@@ -2156,12 +2193,12 @@ struct CommandDispatcherStagingTests {
         ])
         dispatcher.dispatch(replacement, connectionID: 2)
         #expect(title == "replacement")
-        #expect(background.blueComponent == 1)
+        #expect(background.blue == 255)
 
         dispatcher.dispatch(old, connectionID: 1)
         #expect(title == "replacement")
-        #expect(background.redComponent == 0)
-        #expect(background.blueComponent == 1)
+        #expect(background.red == 0)
+        #expect(background.blue == 255)
     }
 
     @Test("late old failure and presentation cannot disturb replacement connection")
@@ -2278,9 +2315,10 @@ struct CommandDispatcherStagingTests {
 
     @Test("metadata and unrelated-window commits preserve resident projection and scroll state")
     @MainActor func unrelatedEditorCommitsPreserveResidentProjection() throws {
-        let (dispatcher, gui) = makeDispatcher()
         var resetCount = 0
-        dispatcher.onScrollPresentationReset = { _ in resetCount += 1 }
+        let (dispatcher, gui) = makeDispatcher { effect in
+            if case .scrollPresentationReset = effect { resetCount += 1 }
+        }
         let observationCount = Mutex(0)
         let resetPresentation = GUIScrollPresentation(
             windowId: 7,
@@ -3058,17 +3096,23 @@ struct CommandDispatcherStagingTests {
 
     @Test("an early prepared callback observes all later semantic state")
     @MainActor func preparedCallbackObservesCompleteState() throws {
-        let (dispatcher, gui) = makeDispatcher()
+        let gui = GUIState()
         var observation: (Bool, String?, String, Set<UInt16>, Bool)?
-        dispatcher.onFontChanged = { _, _, _, _ in
-            observation = (
-                gui.themeColors.hasAppliedTheme,
-                gui.windowContents[7]?.rows.first?.text,
-                gui.statusBarState.modeName,
-                dispatcher.committedEditorSnapshot?.windowIds ?? [],
-                gui.completionState.content != nil
-            )
-        }
+        var dispatcherReference: CommandDispatcher?
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            applicationEffectSink: { effect in
+                guard case .fontChanged = effect else { return }
+                observation = (
+                    gui.themeColors.hasAppliedTheme,
+                    gui.windowContents[7]?.rows.first?.text,
+                    gui.statusBarState.modeName,
+                    dispatcherReference?.committedEditorSnapshot?.windowIds ?? [],
+                    gui.completionState.content != nil
+                )
+            }
+        )
+        dispatcherReference = dispatcher
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
@@ -3091,22 +3135,27 @@ struct CommandDispatcherStagingTests {
 
     @Test("prepared effects replay once in canonical order before acknowledgement")
     @MainActor func preparedEffectsReplayInCanonicalOrder() throws {
-        let (dispatcher, gui) = makeDispatcher()
         var events: [String] = []
+        var applicationEffects: [ApplicationCommitEffect] = []
+        let (dispatcher, gui) = makeDispatcher { effect in
+            applicationEffects.append(effect)
+            switch effect {
+            case .fontChanged: events.append("font")
+            case .scrollPresentationReset: events.append("scroll")
+            case .titleChanged: events.append("title")
+            case .windowBackgroundChanged: events.append("background")
+            case .accessibilityModeChanged: events.append("mode")
+            case .lineSpacingChanged: events.append("spacing")
+            case .cursorAnimationChanged: events.append("cursor-animation")
+            case .agentChatVisibilityChanged: events.append("agent-chat")
+            case .linkCursorChanged: events.append("link")
+            }
+        }
         gui.frontendExtensions.register(
             extensionID: "effects-test",
             decoder: { _ in events.append("extension") },
             view: { _ in AnyView(EmptyView()) }
         )
-        dispatcher.onFontChanged = { _, _, _, _ in events.append("font") }
-        dispatcher.onScrollPresentationReset = { _ in events.append("scroll") }
-        dispatcher.onTitleChanged = { _ in events.append("title") }
-        dispatcher.onWindowBgChanged = { _ in events.append("background") }
-        dispatcher.onModeChanged = { _ in events.append("mode") }
-        dispatcher.onLineSpacingChanged = { _ in events.append("spacing") }
-        dispatcher.onCursorAnimationChanged = { _ in events.append("cursor-animation") }
-        dispatcher.onAgentChatVisibilityChanged = { _ in events.append("agent-chat") }
-        dispatcher.onLinkCursorChanged = { _ in events.append("link") }
         dispatcher.onTransactionResult = { _ in events.append("transaction") }
         dispatcher.onFirstRender = { events.append("first-render") }
         dispatcher.onFramePresented = { events.append("presented") }
@@ -3147,6 +3196,17 @@ struct CommandDispatcherStagingTests {
             "font", "scroll", "cursor-animation", "spacing", "mode",
             "background", "title", "extension", "agent-chat", "link",
             "transaction", "first-render", "presented", "ready"
+        ])
+        #expect(applicationEffects == [
+            .fontChanged(family: "Menlo", size: 14, ligatures: true, weight: 1),
+            .scrollPresentationReset(windowID: 7),
+            .cursorAnimationChanged(false),
+            .lineSpacingChanged(1.5),
+            .accessibilityModeChanged("INSERT"),
+            .windowBackgroundChanged(red: 0x22, green: 0x33, blue: 0x44),
+            .titleChanged("Committed"),
+            .agentChatVisibilityChanged(true),
+            .linkCursorChanged(true),
         ])
     }
 
@@ -3487,30 +3547,31 @@ struct CommandDispatcherStagingTests {
     @Test("incomplete, resource-rejected, and superseded frames replay no effects")
     @MainActor func nonPublishedFramesReplayNoEffects() throws {
         var effectCount = 0
-        func armEffects(_ dispatcher: CommandDispatcher) {
-            dispatcher.onTitleChanged = { _ in effectCount += 1 }
-            dispatcher.onFontChanged = { _, _, _, _ in effectCount += 1 }
+        let countRelevantEffects: CommandDispatcher.ApplicationEffectSink = { effect in
+            switch effect {
+            case .titleChanged, .fontChanged:
+                effectCount += 1
+            default:
+                break
+            }
         }
 
-        let (incomplete, _) = makeDispatcher()
-        armEffects(incomplete)
+        let (incomplete, _) = makeDispatcher(applicationEffectSink: countRelevantEffects)
         incomplete.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         incomplete.dispatch(.setTitle("incomplete"))
         incomplete.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
         incomplete.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        let (resourceRejected, _) = makeDispatcher()
-        armEffects(resourceRejected)
+        let (resourceRejected, _) = makeDispatcher(applicationEffectSink: countRelevantEffects)
         resourceRejected.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         resourceRejected.dispatch(.guiTheme(slots: completeThemeSlots()))
         resourceRejected.dispatch(.setTitle("resource rejected"))
         resourceRejected.resourcePolicyRejected()
 
-        let (superseded, _) = makeDispatcher()
+        let (superseded, _) = makeDispatcher(applicationEffectSink: countRelevantEffects)
         superseded.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 2))
         superseded.dispatch(.guiTheme(slots: completeThemeSlots()))
         superseded.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-        armEffects(superseded)
         superseded.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         superseded.dispatch(.setTitle("superseded"))
         superseded.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
@@ -3894,11 +3955,13 @@ struct CommandDispatcherStagingTests {
 
     @Test("set_title applies immediately with no open transaction")
     @MainActor func titleAppliesOutOfBand() throws {
-        let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         var title: String?
+        let (dispatcher, _) = makeDispatcher { effect in
+            guard case .titleChanged(let value) = effect else { return }
+            title = value
+        }
         dispatcher.onRequestKeyframe = { requested.append($0) }
-        dispatcher.onTitleChanged = { title = $0 }
 
         dispatcher.dispatch(.setTitle("buffer.ex"))
 
@@ -3908,16 +3971,18 @@ struct CommandDispatcherStagingTests {
 
     @Test("set_window_bg replays its local effect immediately after mutation")
     @MainActor func windowBgAppliesOutOfBand() throws {
-        let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         var callbackCount = 0
         var callbackSawInstalledState = false
+        var dispatcherReference: CommandDispatcher?
         let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
-        dispatcher.onRequestKeyframe = { requested.append($0) }
-        dispatcher.onWindowBgChanged = { _ in
+        let (dispatcher, _) = makeDispatcher { effect in
+            guard case .windowBackgroundChanged = effect else { return }
             callbackCount += 1
-            callbackSawInstalledState = dispatcher.frameState.defaultBg == expected
+            callbackSawInstalledState = dispatcherReference?.frameState.defaultBg == expected
         }
+        dispatcherReference = dispatcher
+        dispatcher.onRequestKeyframe = { requested.append($0) }
 
         dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
 
@@ -3941,13 +4006,13 @@ struct CommandDispatcherStagingTests {
 
     @Test("set_font applies immediately with no open transaction")
     @MainActor func setFontAppliesOutOfBand() throws {
-        let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         var fontArgs: (family: String, size: UInt16, ligatures: Bool, weight: UInt8)?
-        dispatcher.onRequestKeyframe = { requested.append($0) }
-        dispatcher.onFontChanged = { family, size, ligatures, weight in
+        let (dispatcher, _) = makeDispatcher { effect in
+            guard case .fontChanged(let family, let size, let ligatures, let weight) = effect else { return }
             fontArgs = (family, size, ligatures, weight)
         }
+        dispatcher.onRequestKeyframe = { requested.append($0) }
 
         dispatcher.dispatch(.setFont(family: "JetBrainsMono Nerd Font", size: 14, ligatures: true, weight: 2))
 

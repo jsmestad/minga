@@ -214,7 +214,14 @@ struct ContentViewTests {
     @Test("ordinary scroll echoes preserve wheel easing and trackpad presentation", arguments: [false, true])
     func scrollEchoPreservesPresentation(precise: Bool) throws {
         let gui = GUIState()
-        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        var resetHandler: ((UInt16) -> Void)?
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            applicationEffectSink: { effect in
+                guard case .scrollPresentationReset(let windowID) = effect else { return }
+                resetHandler?(windowID)
+            }
+        )
         let spy = SpyEncoder()
         let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
         editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -226,7 +233,7 @@ struct ContentViewTests {
         dispatcher.promoteVisibleEditorPresentation(snapshot: initial, localTransform: nil)
 
         var resetRequests = 0
-        dispatcher.onScrollPresentationReset = { [weak editor] windowId in
+        resetHandler = { [weak editor] windowId in
             resetRequests += 1
             guard let editor else { return }
             editor.resetScrollPresentation(windowId: windowId)
@@ -296,7 +303,14 @@ struct ContentViewTests {
     @Test("wheel ticks around an undisplayed echo keep moving forward", arguments: [-1, 1])
     func wheelReconciliationUsesRenderedAnchor(direction: Int) throws {
         let gui = GUIState()
-        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        var resetHandler: ((UInt16) -> Void)?
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            applicationEffectSink: { effect in
+                guard case .scrollPresentationReset(let windowID) = effect else { return }
+                resetHandler?(windowID)
+            }
+        )
         let spy = SpyEncoder()
         let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
         editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -313,7 +327,7 @@ struct ContentViewTests {
         event.preciseDeltas = false
         editor.scrollWheel(with: event)
 
-        dispatcher.onScrollPresentationReset = { [weak editor] windowId in
+        resetHandler = { [weak editor] windowId in
             guard let editor else { return }
             editor.resetScrollPresentation(windowId: windowId)
         }
