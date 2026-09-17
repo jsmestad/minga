@@ -315,7 +315,7 @@ jobs:
       - run: mix protocol.gen
 
       - name: Install pinned XcodeGen
-        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
 
       - name: Gate optimized native render preparation
         run: |
@@ -407,7 +407,7 @@ jobs:
           version: 0.16.0
 
       - name: Install pinned XcodeGen
-        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
 
       - name: Cache deps
         uses: actions/cache@v4
