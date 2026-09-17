@@ -11,16 +11,20 @@ import SwiftUI
 import MingaProtocol
 
 public struct EmptyStateView: View {
-    public init(state: EmptyStateState, encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case activate(id: String)
+    }
+
+    public init(state: EmptyStateState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
 
     public let state: EmptyStateState
     @Environment(\.themeColors) private var theme
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     /// Fixed column width for the launchpad content (GUI sibling of the TUI's ~56 columns).
     private let columnWidth: CGFloat = 480
@@ -333,7 +337,7 @@ public struct EmptyStateView: View {
             .pointingHandCursor(isEnabled: activatable)
             .onTapGesture {
                 guard activatable else { return }
-                encoder?.sendEmptyStateActivate(id: item.itemId)
+                sendAction?(.activate(id: item.itemId))
             }
     }
 

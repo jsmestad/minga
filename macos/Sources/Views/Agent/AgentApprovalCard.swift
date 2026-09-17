@@ -1,13 +1,17 @@
 import SwiftUI
 
 public struct AgentApprovalCard: View {
-    public init(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String], encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+    }
+
+    public init(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String], sendAction: ViewActionHandler<Action>?) {
         self.name = name
         self.summary = summary
         self.toolCallId = toolCallId
         self.previewKind = previewKind
         self.previewLines = previewLines
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let name: String
     public let summary: String
@@ -15,7 +19,7 @@ public struct AgentApprovalCard: View {
     public let previewKind: UInt8
     public let previewLines: [String]
     @Environment(\.themeColors) private var theme
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     public var body: some View {
         let visiblePreviewLines = Array(previewLines.prefix(8))
@@ -113,27 +117,27 @@ public struct AgentApprovalCard: View {
     private func approvalButtons(toolCallId _: String) -> some View {
         HStack(spacing: 6) {
             Button("Approve (y)") {
-                encoder?.sendKeyPress(codepoint: 0x79, modifiers: 0)
+                sendAction?(.keyPress(codepoint: 0x79, modifiers: 0, sequence: 0))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
 
             HStack(spacing: 6) {
                 Button("Trust for session (a)") {
-                    encoder?.sendKeyPress(codepoint: 0x61, modifiers: 0)
+                    sendAction?(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
                 Button("Trust for this turn (t)") {
-                    encoder?.sendKeyPress(codepoint: 0x74, modifiers: 0)
+                    sendAction?(.keyPress(codepoint: 0x74, modifiers: 0, sequence: 0))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
 
             Button("Deny (n)") {
-                encoder?.sendKeyPress(codepoint: 0x6E, modifiers: 0)
+                sendAction?(.keyPress(codepoint: 0x6E, modifiers: 0, sequence: 0))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

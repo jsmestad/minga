@@ -13,7 +13,7 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView")
         )
         .frame(width: 280, height: 600)
@@ -58,7 +58,7 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusClean")
         )
         .frame(width: 280, height: 600)
@@ -87,7 +87,7 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusConflict")
         )
         .frame(width: 280, height: 600)
@@ -128,7 +128,7 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            encoder: nil,
+            sendAction: { _ in },
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusDense")
         )
         .frame(width: 280, height: 600)

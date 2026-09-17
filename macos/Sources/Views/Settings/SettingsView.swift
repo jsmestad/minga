@@ -1,19 +1,26 @@
 import AppKit
+import MingaProtocol
 import SwiftUI
 
 /// Native macOS Settings window for common editor preferences.
 public struct SettingsView: View {
-    public let state: SettingsState
-    public let encoder: InputEncoder?
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+        case query
+        case update(key: String, value: SettingValue)
+    }
 
-    public init(state: SettingsState, encoder: InputEncoder? = nil) {
+    public let state: SettingsState
+    public let sendAction: ViewActionHandler<Action>?
+
+    public init(state: SettingsState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
 
     public var body: some View {
         TabView {
-            AppearanceSettingsView(state: state, encoder: encoder)
+            AppearanceSettingsView(state: state, onOpenFontPanel: state.openFontPanel)
                 .tabItem {
                     Label("Appearance", systemImage: "paintpalette")
                 }
@@ -23,7 +30,7 @@ public struct SettingsView: View {
                     Label("Editor", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
 
-            KeybindingsSettingsView(state: state, encoder: encoder)
+            KeybindingsSettingsView(state: state, sendAction: keybindingsAction)
                 .tabItem {
                     Label("Keybindings", systemImage: "keyboard")
                 }
@@ -32,8 +39,23 @@ public struct SettingsView: View {
         .frame(minWidth: 520, minHeight: 360)
         .background(WindowIdentifierSetter(identifier: "MingaSettingsWindow"))
         .onAppear {
-            state.query(using: encoder)
+            state.query(using: settingsStateAction)
         }
+    }
+
+    private var settingsStateAction: ViewActionHandler<SettingsState.Action>? {
+        guard let sendAction else { return nil }
+        return { action in
+            switch action {
+            case .query: sendAction(.query)
+            case .update(let key, let value): sendAction(.update(key: key, value: value))
+            }
+        }
+    }
+
+    private var keybindingsAction: ViewActionHandler<KeybindingsSettingsView.Action>? {
+        guard let sendAction else { return nil }
+        return { _ in sendAction(.executeCommand(name: "open_config")) }
     }
 }
 

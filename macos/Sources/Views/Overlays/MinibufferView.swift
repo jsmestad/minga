@@ -12,15 +12,19 @@ import SwiftUI
 import MingaProtocol
 
 public struct MinibufferView: View {
-    public init(state: MinibufferState, encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case select(index: UInt16)
+    }
+
+    public init(state: MinibufferState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: MinibufferState
     @Environment(\.themeColors) private var theme
 
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var hoveredIndex: Int? = nil
     @AccessibilityFocusState private var accessibilityFocus: Int?
@@ -286,7 +290,7 @@ public struct MinibufferView: View {
               state.inputVersion == offeredInputVersion,
               let currentCandidate = state.candidates.first(where: { $0.id == offeredCandidate.id }),
               candidatesMatch(currentCandidate, offeredCandidate) else { return }
-        encoder?.sendMinibufferSelect(index: UInt16(currentCandidate.id))
+        sendAction?(.select(index: UInt16(currentCandidate.id)))
     }
 
     private func candidatesMatch(_ lhs: MinibufferCandidate, _ rhs: MinibufferCandidate) -> Bool {
@@ -360,7 +364,7 @@ public struct MinibufferView: View {
             Wire.MinibufferCandidate(matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
         ]
     )
-    return MinibufferView(state: state, encoder: nil)
+    return MinibufferView(state: state, sendAction: { _ in })
         .frame(width: 600, height: 140)
         .background(theme.editorBg)
         .environment(theme)

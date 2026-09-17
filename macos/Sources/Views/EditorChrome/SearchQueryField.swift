@@ -3,12 +3,19 @@ import SwiftUI
 
 /// Native single-line search editor that preserves AppKit marked text until IME commit.
 struct SearchQueryField: NSViewRepresentable {
+    enum Action: Equatable, Sendable {
+        case query(sessionID: UInt32, editSequence: UInt32, query: String, flags: UInt8)
+        case previous
+        case next
+        case dismiss
+    }
+
     let searchState: SearchState
     let style: InlineEditFieldStyle
-    let encoder: (any InputEncoder)?
+    let sendAction: ViewActionHandler<Action>?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(searchState: searchState, encoder: encoder, style: style)
+        Coordinator(searchState: searchState, sendAction: sendAction, style: style)
     }
 
     func makeNSView(context: Context) -> SearchNSTextField {
@@ -19,7 +26,7 @@ struct SearchQueryField: NSViewRepresentable {
         field.font = .systemFont(ofSize: 12)
         field.lineBreakMode = .byClipping
         field.isSelectable = true
-        field.isEditable = encoder != nil
+        field.isEditable = sendAction != nil
         field.placeholderString = "Find"
         field.delegate = context.coordinator
         field.cell?.usesSingleLineMode = true
@@ -33,9 +40,9 @@ struct SearchQueryField: NSViewRepresentable {
     }
 
     func updateNSView(_ field: SearchNSTextField, context: Context) {
-        context.coordinator.encoder = encoder
+        context.coordinator.sendAction = sendAction
         context.coordinator.style = style
-        field.isEditable = encoder != nil
+        field.isEditable = sendAction != nil
         context.coordinator.apply(style: style, to: field)
         context.coordinator.reconcile(field: field, query: searchState.query)
 
@@ -52,14 +59,14 @@ struct SearchQueryField: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         let searchState: SearchState
-        var encoder: (any InputEncoder)?
+        var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle
         var sessionID: UInt32 = 0
         private var applyingAuthoritativeText = false
 
-        init(searchState: SearchState, encoder: (any InputEncoder)?, style: InlineEditFieldStyle) {
+        init(searchState: SearchState, sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle) {
             self.searchState = searchState
-            self.encoder = encoder
+            self.sendAction = sendAction
             self.style = style
         }
 
@@ -105,12 +112,12 @@ struct SearchQueryField: NSViewRepresentable {
         func handleTextChange(field: NSTextField, editor: NSTextView) {
             guard !applyingAuthoritativeText,
                   field.isEditable,
-                  let encoder,
+                  let sendAction,
                   !editor.hasMarkedText(),
                   let edit = searchState.recordQueryEdit(field.stringValue)
             else { return }
 
-            encoder.sendSearchQuery(sessionID: edit.sessionID, editSeq: edit.sequence, query: edit.query, flags: edit.flags)
+            sendAction(.query(sessionID: edit.sessionID, editSequence: edit.sequence, query: edit.query, flags: edit.flags))
         }
 
         func control(_ control: NSControl, textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
@@ -123,13 +130,13 @@ struct SearchQueryField: NSViewRepresentable {
             switch NSStringFromSelector(commandSelector) {
             case "insertNewline:", "insertNewlineIgnoringFieldEditor:":
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                    encoder?.sendSearchPrev()
+                    sendAction?(.previous)
                 } else {
-                    encoder?.sendSearchNext()
+                    sendAction?(.next)
                 }
                 return true
             case "cancelOperation:":
-                encoder?.sendSearchDismiss()
+                sendAction?(.dismiss)
                 return true
             default:
                 return false

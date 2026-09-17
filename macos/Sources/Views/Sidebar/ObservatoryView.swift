@@ -3,14 +3,18 @@ import MingaProtocol
 
 /// Native sidebar for observing the live BEAM supervision tree.
 public struct ObservatoryView: View {
-    public init(state: ObservatoryState, encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case inspect(pid: String)
+    }
+
+    public init(state: ObservatoryState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: ObservatoryState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var expandedNodeIds: Set<String> = []
     @State private var selectedNodeId: String?
@@ -76,7 +80,7 @@ public struct ObservatoryView: View {
 
             Button {
                 selectedNodeId = node.id
-                encoder?.sendObservatoryInspect(pid: node.pid)
+                sendAction?(.inspect(pid: node.pid))
             } label: {
                 Image(systemName: "info.circle")
                     .font(.caption)
@@ -194,7 +198,7 @@ public struct ObservatoryView: View {
     }
 
     private func dismissInspection() {
-        encoder?.sendObservatoryInspect(pid: "")
+        sendAction?(.inspect(pid: ""))
     }
 
     private func toggleExpanded(_ id: String) {
@@ -231,6 +235,6 @@ public struct ObservatoryView: View {
         Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 125_000, messageQueueLen: 0, reductions: 42, sparkline: [0, 0.2, 0.1]),
         Wire.ObservatoryNode(pid: "<0.2.0>", parentPid: "<0.1.0>", name: "Minga.Buffer.Process", processClass: 1, depth: 1, memory: 42_000, messageQueueLen: 2, reductions: 1024, sparkline: [0, 0.4, 0.2])
     ])
-    return ObservatoryView(state: state, encoder: nil)
+    return ObservatoryView(state: state, sendAction: { _ in })
         .environment(\.themeColors, ThemeColors())
 }

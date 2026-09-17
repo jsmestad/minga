@@ -22,7 +22,7 @@ private enum DividerCursorState: Equatable {
 /// The main editor view. Uses MTKView's built-in display link for
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
-    var encoder: InputEncoder
+    var encoder: OutboundActionEncoding
 
     /// Command dispatcher owning frame metadata.
     let dispatcher: CommandDispatcher
@@ -61,6 +61,7 @@ final class EditorNSView: MTKView {
     /// Local input identity and press ownership prevent a gesture started on one
     /// BEAM connection from sending its drag, release, or menu action to another.
     private var inputConnectionGeneration: UInt64 = 0
+    private var inputEnabled = true
     private var leftMousePressActive = false
     private var rightMousePressActive = false
     private var middleMousePressActive = false
@@ -243,7 +244,7 @@ final class EditorNSView: MTKView {
     /// Task observing system scroller style changes.
     private var scrollerStyleTask: Task<Void, Never>?
 
-    init(encoder: InputEncoder, dispatcher: CommandDispatcher,
+    init(encoder: OutboundActionEncoding, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager,
          reduceMotionEnabled: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
         self.encoder = encoder
@@ -570,7 +571,8 @@ final class EditorNSView: MTKView {
     func invalidateConnection() {
         invalidatePresentationAvailability()
         cancelPendingCapacityRedraw()
-        self.encoder = NullInputEncoder()
+        self.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
+        inputEnabled = false
         inputConnectionGeneration &+= 1
         invalidateAccessibilityConnection()
         consumeLeftGestureTail = consumeLeftGestureTail || leftMousePressActive || leftMouseDownPoint != nil || isDraggingScrollIndicator
@@ -608,12 +610,13 @@ final class EditorNSView: MTKView {
     }
 
     /// Enables input only after replacement transport construction succeeds.
-    func installConnectionEncoder(_ encoder: InputEncoder) {
+    func installConnectionEncoder(_ encoder: OutboundActionEncoding) {
         self.encoder = encoder
+        inputEnabled = true
     }
 
     /// Atomically replaces the input connection for callers that already own a valid encoder.
-    func replaceConnection(encoder: InputEncoder) {
+    func replaceConnection(encoder: OutboundActionEncoding) {
         invalidateConnection()
         installConnectionEncoder(encoder)
     }
@@ -847,7 +850,7 @@ final class EditorNSView: MTKView {
 
         if grid.cols != dispatcher.frameState.cols || grid.rows != dispatcher.frameState.rows {
             dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
-            encoder.sendResize(cols: grid.cols, rows: grid.rows)
+            encoder.send(.resize(cols: grid.cols, rows: grid.rows))
         }
 
         // Force a full re-render.
@@ -940,10 +943,10 @@ final class EditorNSView: MTKView {
         dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
 
         if readySent {
-            encoder.sendResize(cols: grid.cols, rows: grid.rows)
+            encoder.send(.resize(cols: grid.cols, rows: grid.rows))
         } else {
             readySent = true
-            encoder.sendReady(cols: grid.cols, rows: grid.rows)
+            encoder.send(.ready(cols: grid.cols, rows: grid.rows))
         }
 
         PortLogger.info("\(reason): \(grid.cols)x\(grid.rows) rows")
@@ -1128,7 +1131,7 @@ final class EditorNSView: MTKView {
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
             dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
-            encoder.sendReady(cols: grid.cols, rows: grid.rows)
+            encoder.send(.ready(cols: grid.cols, rows: grid.rows))
             os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rows)
             PortLogger.info("Window ready: \(grid.cols)x\(grid.rows) rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if inLiveResize {
@@ -1139,7 +1142,7 @@ final class EditorNSView: MTKView {
             handleLiveResize(to: grid)
         } else if grid.cols != dispatcher.frameState.cols || grid.rows != dispatcher.frameState.rows {
             dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
-            encoder.sendResize(cols: grid.cols, rows: grid.rows)
+            encoder.send(.resize(cols: grid.cols, rows: grid.rows))
             PortLogger.info("Window resized: \(grid.cols)x\(grid.rows) rows")
         }
     }
@@ -1169,8 +1172,7 @@ final class EditorNSView: MTKView {
         if leftMouseDownPoint != nil {
             let point = leftMouseDownPoint ?? .zero
             let (row, col) = rawCellPosition(at: point)
-            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                                   modifiers: 0, eventType: MOUSE_RELEASE)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: 0, eventType: MOUSE_RELEASE, clickCount: 1))
         }
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
@@ -1249,7 +1251,7 @@ final class EditorNSView: MTKView {
     /// Commits a debounced live-resize grid: updates local frame metadata and notifies the BEAM.
     private func sendLiveResize(cols: UInt16, rows: UInt16) {
         dispatcher.applyViewportResize(newCols: cols, newRows: rows)
-        encoder.sendResize(cols: cols, rows: rows)
+        encoder.send(.resize(cols: cols, rows: rows))
         PortLogger.info("Window resized (debounced): \(cols)x\(rows) rows")
     }
 
@@ -1369,11 +1371,11 @@ final class EditorNSView: MTKView {
         else {
             thumbDragSession = nil
             // Windowed pane: send the initial jump on the round-trip path (today's behavior).
-            encoder.sendScrollToLine(line: targetLine)
+            encoder.send(.scrollToLine(line: targetLine))
             return
         }
         var session = ThumbDragSession(windowId: windowId, targetLine: targetLine)
-        if let intent = session.takeIntent() { encoder.sendScrollToLine(line: intent) }
+        if let intent = session.takeIntent() { encoder.send(.scrollToLine(line: intent)) }
         thumbDragSession = session
         applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
         needsDisplay = true
@@ -1387,7 +1389,7 @@ final class EditorNSView: MTKView {
             applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
             needsDisplay = true
         } else {
-            encoder.sendScrollToLine(line: targetLine)
+            encoder.send(.scrollToLine(line: targetLine))
         }
     }
 
@@ -1397,7 +1399,7 @@ final class EditorNSView: MTKView {
     private func endThumbDragPresentation() {
         guard var session = thumbDragSession, session.phase == .dragging else { return }
         if let intent = session.release(committed: committedThumbDrag(for: session.windowId), now: CACurrentMediaTime()) {
-            encoder.sendScrollToLine(line: intent)
+            encoder.send(.scrollToLine(line: intent))
         }
         thumbDragSession = session
         needsDisplay = true
@@ -1409,7 +1411,7 @@ final class EditorNSView: MTKView {
     /// paths that must discard local presentation (Reduce Motion toggle, window resign-key).
     private func cancelThumbDragWithFlush() {
         guard var session = thumbDragSession else { return }
-        if let intent = session.cancelWithFlush() { encoder.sendScrollToLine(line: intent) }
+        if let intent = session.cancelWithFlush() { encoder.send(.scrollToLine(line: intent)) }
         thumbDragSession = nil
         scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
         needsDisplay = true
@@ -1446,7 +1448,7 @@ final class EditorNSView: MTKView {
         let buttonHeld = NSEvent.pressedMouseButtons & 0x1 != 0
         let outcome = session.advance(committed: committed, now: CACurrentMediaTime(), buttonHeld: buttonHeld)
 
-        if let intent = outcome.intent { encoder.sendScrollToLine(line: intent) }
+        if let intent = outcome.intent { encoder.send(.scrollToLine(line: intent)) }
         if outcome.finished {
             thumbDragSession = nil
             scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
@@ -1490,7 +1492,7 @@ final class EditorNSView: MTKView {
 
         if grid.cols != dispatcher.frameState.cols || grid.rows != dispatcher.frameState.rows {
             dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
-            encoder.sendResize(cols: grid.cols, rows: grid.rows)
+            encoder.send(.resize(cols: grid.cols, rows: grid.rows))
         }
     }
 
@@ -1627,7 +1629,7 @@ final class EditorNSView: MTKView {
            chars == "v"
         {
             if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
-                encoder.sendPasteEvent(text: text)
+                encoder.send(.paste(text))
             }
             return
         }
@@ -1639,7 +1641,7 @@ final class EditorNSView: MTKView {
         {
             if let findText = NSPasteboard(name: .find).string(forType: .string), !findText.isEmpty {
                 let direction: UInt8 = event.modifierFlags.contains(.shift) ? 1 : 0
-                encoder.sendFindPasteboardSearch(text: findText, direction: direction)
+                encoder.send(.findPasteboardSearch(text: findText, direction: direction))
             }
             return
         }
@@ -1719,9 +1721,7 @@ final class EditorNSView: MTKView {
         let rawPoint = convert(event.locationInWindow, from: nil)
         guard bounds.contains(rawPoint) else { return }
         let (row, col) = cellPosition(from: event)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_NONE,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_MOTION)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_NONE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_MOTION, clickCount: 1))
     }
 
     /// Shows or hides the pointing-hand cursor for a navigable Cmd+hover symbol
@@ -1800,9 +1800,7 @@ final class EditorNSView: MTKView {
         }
         let (row, col) = dividerDragState == .none ? cellPosition(from: event) : dividerPressCellPosition(at: point, state: dividerDragState)
         let cc = UInt8(clamping: event.clickCount)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_PRESS, clickCount: cc)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1823,9 +1821,7 @@ final class EditorNSView: MTKView {
 
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = dividerDragState == .none ? cellPosition(from: event) : rawCellPosition(at: point)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_RELEASE)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
         if dividerDragState != .none {
@@ -1844,9 +1840,7 @@ final class EditorNSView: MTKView {
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_PRESS, clickCount: cc)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
         contextMenuShownForRightClick = true
         let menu = buildEditorContextMenu(connectionGeneration: inputConnectionGeneration)
         activeContextMenu = menu
@@ -1869,9 +1863,7 @@ final class EditorNSView: MTKView {
         }
 
         let (row, col) = cellPosition(from: event)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_RELEASE)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
     }
 
     private struct EditorContextMenuAction {
@@ -1924,19 +1916,19 @@ final class EditorNSView: MTKView {
 
         switch action {
         case "cut":
-            encoder.sendCmdCut()
+            encoder.send(.commandCut)
         case "copy":
-            encoder.sendCmdCopy()
+            encoder.send(.commandCopy)
         case "paste":
             pasteFromClipboard()
         default:
-            encoder.sendExecuteCommand(name: action)
+            encoder.send(.executeCommand(name: action))
         }
     }
 
     private func pasteFromClipboard() {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-        encoder.sendPasteEvent(text: text)
+        encoder.send(.paste(text))
     }
 
     override func otherMouseDown(with event: NSEvent) {
@@ -1947,9 +1939,7 @@ final class EditorNSView: MTKView {
         middleMousePressActive = true
         focusPolicy.pointerReturnedToEditor()
         let (row, col) = cellPosition(from: event)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_PRESS)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_MIDDLE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: 1))
     }
 
     override func otherMouseUp(with event: NSEvent) {
@@ -1960,9 +1950,7 @@ final class EditorNSView: MTKView {
         }
         middleMousePressActive = false
         let (row, col) = cellPosition(from: event)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_RELEASE)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_MIDDLE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1982,9 +1970,7 @@ final class EditorNSView: MTKView {
             return
         }
         let (row, col) = dividerDragState == .none ? cellPosition(from: event) : rawCellPosition(at: point)
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_DRAG)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_DRAG, clickCount: 1))
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -1997,9 +1983,7 @@ final class EditorNSView: MTKView {
         guard row != lastMoveRow || col != lastMoveCol else { return }
         lastMoveRow = row
         lastMoveCol = col
-        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_NONE,
-                               modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_MOTION)
+        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_NONE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_MOTION, clickCount: 1))
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -2180,7 +2164,7 @@ final class EditorNSView: MTKView {
             consumesLeftGestureTail: consumeLeftGestureTail,
             consumesRightGestureTail: consumeRightGestureTail,
             consumesMiddleGestureTail: consumeMiddleGestureTail,
-            inputEnabled: !(encoder is NullInputEncoder)
+            inputEnabled: inputEnabled
         )
     }
 
@@ -2286,7 +2270,7 @@ final class EditorNSView: MTKView {
             }
             if deltaLines != 0 {
                 let direction: UInt8 = deltaLines > 0 ? 0 : 1
-                encoder.sendScrollBatch(windowId: windowId, deltaLines: deltaLines, direction: direction)
+                encoder.send(.scrollBatch(windowID: windowId, deltaLines: deltaLines, direction: direction))
                 scrollUnconfirmedLines += Int(deltaLines)
             }
         } else {
@@ -2891,20 +2875,16 @@ final class EditorNSView: MTKView {
     /// Discrete mouse wheel: one event per click, no accumulation.
     private func handleDiscreteScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.scrollingDeltaY > 0 {
-            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_UP,
-                                   modifiers: mods, eventType: MOUSE_PRESS)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_UP, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
             seedDiscreteScrollAnimation(row: row, col: col, lineDelta: -1)
         } else if event.scrollingDeltaY < 0 {
-            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_DOWN,
-                                   modifiers: mods, eventType: MOUSE_PRESS)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_DOWN, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
             seedDiscreteScrollAnimation(row: row, col: col, lineDelta: 1)
         }
         if event.scrollingDeltaX > 0 {
-            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_LEFT,
-                                   modifiers: mods, eventType: MOUSE_PRESS)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_LEFT, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
         } else if event.scrollingDeltaX < 0 {
-            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_RIGHT,
-                                   modifiers: mods, eventType: MOUSE_PRESS)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_RIGHT, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
         }
     }
 
@@ -2970,8 +2950,7 @@ final class EditorNSView: MTKView {
         case .scrollLeft:  button = MOUSE_SCROLL_LEFT
         case .scrollRight: button = MOUSE_SCROLL_RIGHT
         }
-        encoder.sendMouseEvent(row: row, col: col, button: button,
-                               modifiers: mods, eventType: MOUSE_PRESS)
+        encoder.send(.mouse(row: row, column: col, button: button, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
     }
 
     // MARK: - Pinch-to-zoom (magnification gesture)
@@ -3002,12 +2981,12 @@ final class EditorNSView: MTKView {
 
         while magnifyAccumulator >= magnifyStepThreshold {
             magnifyAccumulator -= magnifyStepThreshold
-            encoder.sendFontSizeAdjust(direction: fontSizeIncrease)
+            encoder.send(.fontSizeAdjust(direction: fontSizeIncrease))
         }
 
         while magnifyAccumulator <= -magnifyStepThreshold {
             magnifyAccumulator += magnifyStepThreshold
-            encoder.sendFontSizeAdjust(direction: fontSizeDecrease)
+            encoder.send(.fontSizeAdjust(direction: fontSizeDecrease))
         }
 
         if event.phase == .ended || event.phase == .cancelled {
@@ -3085,7 +3064,7 @@ final class EditorNSView: MTKView {
         dispatcher.previewFileTreeNavigation(codepoint: codepoint, modifiers: modifiers)
         recoveryManager?.onKeySent()
         let seq = dispatcher.latency.stamp()
-        encoder.sendKeyPress(codepoint: codepoint, modifiers: modifiers, seq: seq)
+        encoder.send(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: seq))
     }
 
     /// Clears stale local text-input prediction when the authoritative BEAM mode changes.
@@ -3163,12 +3142,12 @@ final class EditorNSView: MTKView {
 
     private func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {
         recoveryManager?.onKeySent()
-        encoder.sendSpaceLeaderChord(codepoint: codepoint, modifiers: modifiers)
+        encoder.send(.spaceLeaderChord(codepoint: codepoint, modifiers: modifiers))
     }
 
     private func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) {
         recoveryManager?.onKeySent()
-        encoder.sendSpaceLeaderRetract(codepoint: codepoint, modifiers: modifiers)
+        encoder.send(.spaceLeaderRetract(codepoint: codepoint, modifiers: modifiers))
     }
 
     // MARK: - Helpers
@@ -3234,7 +3213,7 @@ final class EditorNSView: MTKView {
 
     private func handleFoldChevronClick(at point: NSPoint) -> Bool {
         guard let (gutter, entry) = foldChevronEntry(at: point) else { return false }
-        encoder.sendFoldToggleAtLine(windowId: gutter.windowId, bufferLine: entry.bufLine)
+        encoder.send(.foldToggleAtLine(windowID: gutter.windowId, bufferLine: entry.bufLine))
         return true
     }
 
@@ -3817,7 +3796,7 @@ extension EditorNSView {
         guard accessibilityProjection(for: identity) != nil,
               focusPolicy.requestAccessibilityFocus() else { return }
         refreshAccessibilityNativeFocus()
-        encoder.sendFocusWindow(windowId: identity.windowID, generation: identity.generation)
+        encoder.send(.focusWindow(windowID: identity.windowID, generation: identity.generation))
     }
 
     private func accessibilityPaneElements() -> [EditorPaneAccessibilityElement] {
@@ -3989,7 +3968,7 @@ extension EditorNSView {
         }
 
         for url in urls {
-            encoder.sendOpenFile(path: url.path)
+            encoder.send(.openFile(path: url.path))
         }
 
         focusPolicy.fileDropDidComplete()

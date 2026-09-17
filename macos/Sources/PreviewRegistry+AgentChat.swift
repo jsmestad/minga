@@ -31,7 +31,7 @@ extension PreviewRegistry {
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: PreviewFixtures.agentChatMessages())
 
-        return AgentChatView(state: state, isInsertMode: true, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: true, sendAction: { _ in }, cellHeight: 18)
             .frame(width: width, height: height)
             .background(theme.agentPanelBg)
             .environment(theme)
@@ -64,7 +64,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
             .environment(theme)
@@ -98,7 +98,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
             .environment(theme)
@@ -134,7 +134,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
             .environment(theme)
@@ -178,7 +178,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: true, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: true, sendAction: { _ in }, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
             .environment(theme)
@@ -216,7 +216,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
             .environment(theme)

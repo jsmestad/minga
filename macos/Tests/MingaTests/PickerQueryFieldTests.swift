@@ -30,9 +30,9 @@ struct PickerQueryFieldTests {
 
     @Test("the AppKit coordinator sends complete correlated edits and rejects stale echoes")
     @MainActor func coordinatorEditingPath() {
-        let encoder = SpyEncoder()
+        let recorder = LocalActionRecorder<PickerQueryField.Action>()
         let style = InlineEditFieldStyle(textColor: .primary, selectionBackgroundColor: .accentColor, selectionForegroundColor: .primary, insertionPointColor: .accentColor)
-        let coordinator = PickerQueryField.Coordinator(encoder: encoder, style: style)
+        let coordinator = PickerQueryField.Coordinator(sendAction: recorder.handler, style: style)
         let field = PickerNSTextField()
         let editor = NSTextView()
         field.isEditable = true
@@ -43,7 +43,7 @@ struct PickerQueryFieldTests {
         editor.string = path
         coordinator.handleTextChange(field: field, editor: editor)
 
-        #expect(encoder.pickerQueryCalls == [SpyEncoder.PickerQuery(generation: 7, editSeq: 1, text: path)])
+        #expect(recorder.actions == [.queryChanged(generation: 7, editSequence: 1, text: path)])
 
         editor.setSelectedRange(NSRange(location: 1, length: 2))
         coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 0, authoritativeText: "")
@@ -96,10 +96,10 @@ struct PickerQueryFieldTests {
             Issue.record("The editor surface must not use native text actions")
             return true
         } fallback: { fallbackEncoder in
-            fallbackEncoder.sendExecuteCommand(name: "select_all")
+            fallbackEncoder.send(.executeCommand(name: "select_all"))
         }
 
-        #expect(encoder.guiActions == [.executeCommand(name: "select_all")])
+        #expect(encoder.actions == [.executeCommand(name: "select_all")])
     }
 
     @Test("native field ownership consumes unavailable actions without falling through to the editor")
@@ -124,7 +124,7 @@ struct PickerQueryFieldTests {
             #expect(routedSelectors == ["undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:"])
         }
 
-        #expect(encoder.guiActions.isEmpty)
+        #expect(encoder.actions.isEmpty)
         #expect(encoder.keyPressCalls.isEmpty)
     }
 

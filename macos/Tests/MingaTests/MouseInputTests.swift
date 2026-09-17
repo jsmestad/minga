@@ -586,7 +586,7 @@ struct MouseInputTests {
                                      location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }
         view.mouseDown(with: event)
 
-        #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 42)])
+        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, bufferLine: 42)])
         #expect(spy.mouseEventCalls.isEmpty)
     }
 
@@ -640,7 +640,7 @@ struct MouseInputTests {
                                      location: NSPoint(x: cw * 6.2, y: ch * 0.5)) else { return }
         view.mouseDown(with: event)
 
-        #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 10)])
+        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, bufferLine: 10)])
         #expect(spy.mouseEventCalls.isEmpty)
     }
 
@@ -687,7 +687,7 @@ struct MouseInputTests {
                                      location: NSPoint(x: cw * 7.2, y: ch * 0.5)) else { return }
         view.mouseDown(with: event)
 
-        #expect(spy.guiActions.isEmpty)
+        #expect(spy.actions.isEmpty)
         #expect(spy.mouseEventCalls.count == 1)
     }
 

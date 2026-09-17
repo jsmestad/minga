@@ -25,14 +25,18 @@ public final class BreadcrumbState {
 }
 
 public struct BreadcrumbBar: View {
-    public init(state: BreadcrumbState, encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+    }
+
+    public init(state: BreadcrumbState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: BreadcrumbState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let barHeight: CGFloat = 26
 
@@ -64,7 +68,7 @@ public struct BreadcrumbBar: View {
                     systemIcon: "magnifyingglass",
                     tooltip: "Find file (SPC f f)"
                 ) {
-                    encoder?.sendExecuteCommand(name: "find_file")
+                    sendAction?(.executeCommand(name: "find_file"))
                 }
 
                 // Open config button
@@ -72,7 +76,7 @@ public struct BreadcrumbBar: View {
                     systemIcon: "gearshape",
                     tooltip: "Open config (SPC f p)"
                 ) {
-                    encoder?.sendExecuteCommand(name: "open_config")
+                    sendAction?(.executeCommand(name: "open_config"))
                 }
             }
             .padding(.horizontal, 10)
@@ -117,6 +121,6 @@ private func breadcrumbPreviewState() -> BreadcrumbState {
 }
 
 #Preview("Breadcrumb Bar", traits: .mingaChrome) {
-    BreadcrumbBar(state: breadcrumbPreviewState(), encoder: nil)
+    BreadcrumbBar(state: breadcrumbPreviewState(), sendAction: { _ in })
         .frame(width: 700)
 }

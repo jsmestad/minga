@@ -193,9 +193,10 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 
 1. **Schema first**: add the action to `docs/protocol_schema.toml`, then run `mix protocol.gen`
 2. **Generated Swift opcodes**: use the generated `GUI_ACTION_FOO` constant from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`
-3. **ProtocolEncoder.swift**: add `sendFoo(...)` method to the `InputEncoder` protocol and `ProtocolEncoder` class
-4. **BEAM side**: add decoder clause in `lib/minga_editor/frontend/protocol.ex` and handler in the Editor
-5. **SwiftUI view**: call `encoder.sendFoo(...)` from the appropriate event handler
+3. **OutboundAction.swift**: add one typed action case. Add a consumer-local closure or enum case to the leaf view that originates it, then translate that value at the composition boundary
+4. **ProtocolEncoder.swift**: handle the new case in the exhaustive `send(_:)` encoding path, including an explicit rejection outcome when the payload cannot be encoded
+5. **BEAM side**: add decoder clause in `lib/minga_editor/frontend/protocol.ex` and handler in the Editor
+6. **SwiftUI view**: emit its consumer-local semantic action. Do not pass `ProtocolEncoder` or the full `OutboundAction` surface into a leaf view
 
 ### New render pass or Metal change
 

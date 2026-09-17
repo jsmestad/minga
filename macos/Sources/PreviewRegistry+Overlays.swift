@@ -30,7 +30,7 @@ extension PreviewRegistry {
             documentation: "Defines a struct for the module.\n\nFields are given as a keyword list."
         )
 
-        return CompletionOverlay(state: state, encoder: nil)
+        return CompletionOverlay(state: state, sendAction: { _ in })
     }
 
     // MARK: - PickerOverlay
@@ -60,7 +60,7 @@ extension PreviewRegistry {
 
         return ZStack {
             theme.editorBg
-            PickerOverlay(state: state, encoder: nil)
+            PickerOverlay(state: state, sendAction: { _ in })
         }
         .frame(width: 600, height: 400)
         .clipped()
@@ -88,7 +88,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return MinibufferView(state: state, encoder: nil)
+        return MinibufferView(state: state, sendAction: { _ in })
             .frame(width: 600, height: 140)
             .background(theme.editorBg)
             .environment(theme)
@@ -171,7 +171,7 @@ extension PreviewRegistry {
             acknowledgedEditSeq: 0
         )
 
-        return SearchToolbar(searchState: state, encoder: nil)
+        return SearchToolbar(searchState: state, sendAction: { _ in })
             .frame(width: 800, height: 40)
             .background(theme.editorBg)
             .environment(theme)
@@ -218,7 +218,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return HoverPopupOverlay(state: state, encoder: nil)
+        return HoverPopupOverlay(state: state, sendAction: { _ in })
             .frame(width: 500, height: 300)
             .background(theme.editorBg)
             .environment(theme)

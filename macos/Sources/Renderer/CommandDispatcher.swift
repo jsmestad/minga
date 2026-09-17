@@ -108,7 +108,7 @@ final class CommandDispatcher {
     /// Called on any frame-transaction invalidation (#2219 child D). The
     /// parameter is `last_good_frame_seq`: the most recent frame_seq this
     /// dispatcher committed cleanly, or 0 if it has none. The app wires this to
-    /// `ProtocolEncoder.sendRequestKeyframe(...)` so the BEAM re-sends the next
+    /// `ProtocolEncoder.send(.requestKeyframe(...))` so the BEAM re-sends the next
     /// frame as a full keyframe.
     var onRequestKeyframe: ((UInt32) -> Void)?
 

@@ -58,9 +58,9 @@ struct SearchSessionReconciliationTests {
     func preservesMarkedTextUntilCommit() {
         let state = SearchState()
         state.update(active: true, matchCount: 0, currentIndex: 0, flags: 0, query: "", sessionID: 5, acknowledgedEditSeq: 0)
-        let encoder = SpyEncoder()
+        let recorder = LocalActionRecorder<SearchQueryField.Action>()
         let style = InlineEditFieldStyle(textColor: .white, selectionBackgroundColor: .blue, selectionForegroundColor: .white, insertionPointColor: .blue)
-        let coordinator = SearchQueryField.Coordinator(searchState: state, encoder: encoder, style: style)
+        let coordinator = SearchQueryField.Coordinator(searchState: state, sendAction: recorder.handler, style: style)
         let field = SearchNSTextField()
         field.isEditable = true
         let editor = NSTextView()
@@ -68,14 +68,14 @@ struct SearchSessionReconciliationTests {
         field.stringValue = "に"
         editor.setMarkedText("に", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         coordinator.handleTextChange(field: field, editor: editor)
-        #expect(encoder.searchQueryCalls.isEmpty)
+        #expect(recorder.actions.isEmpty)
         #expect(state.query == "")
 
         editor.unmarkText()
         field.stringValue = "日本🙂"
         coordinator.handleTextChange(field: field, editor: editor)
 
-        #expect(encoder.searchQueryCalls == [.init(sessionID: 5, editSeq: 1, query: "日本🙂", flags: 0)])
+        #expect(recorder.actions == [.query(sessionID: 5, editSequence: 1, query: "日本🙂", flags: 0)])
         #expect(state.query == "日本🙂")
     }
 

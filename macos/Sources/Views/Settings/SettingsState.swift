@@ -26,6 +26,11 @@ public enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendabl
 @MainActor
 @Observable
 public final class SettingsState {
+    public enum Action: Equatable, Sendable {
+        case query
+        case update(key: String, value: SettingValue)
+    }
+
     public init() {}
 
     public var isLoading: Bool = true
@@ -42,7 +47,7 @@ public final class SettingsState {
     public var themePreviews: [Wire.ThemePreview] = []
     public var keybindings: [Wire.KeybindingEntry] = []
 
-    public var encoder: InputEncoder?
+    public var sendAction: ViewActionHandler<Action>?
     public var onCursorBlinkChanged: ((Bool) -> Void)?
 
     private var fontPanelCoordinator: FontPanelCoordinator?
@@ -66,7 +71,7 @@ public final class SettingsState {
 
     /// Invalidates configuration interactions until the replacement BEAM republishes settings.
     public func replaceConnection() {
-        encoder = nil
+        sendAction = nil
         isLoading = true
         themePreviews = []
         keybindings = []
@@ -74,20 +79,19 @@ public final class SettingsState {
     }
 
     /// Sends a settings query to the BEAM.
-    public func query(using encoder: InputEncoder?) {
-        self.encoder = encoder
+    public func query(using sendAction: ViewActionHandler<Action>?) {
+        self.sendAction = sendAction
         isLoading = true
-        encoder?.sendConfigQuery()
+        sendAction?(.query)
     }
 
     /// Sends a typed setting update to the BEAM.
     public func update(key: String, value: SettingValue) {
-        encoder?.sendConfigUpdate(key: key, value: value)
+        sendAction?(.update(key: key, value: value))
     }
 
     /// Opens the macOS system font panel and routes selections back through config updates.
-    public func openFontPanel(using encoder: InputEncoder?) {
-        self.encoder = encoder
+    public func openFontPanel() {
         let coordinator = fontPanelCoordinator ?? FontPanelCoordinator(settingsState: self)
         fontPanelCoordinator = coordinator
         NSFontManager.shared.target = coordinator

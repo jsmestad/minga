@@ -256,7 +256,7 @@ enum PreviewRegistry {
 
         let encoder = PreviewFixtures.encoder()
         appState.encoder = encoder
-        appState.gui.settingsState.encoder = encoder
+        appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: encoder)
 
         PreviewFixtures.populateFileTree(appState.gui.fileTreeState)
         PreviewFixtures.populateGitStatus(appState.gui.gitStatusState)
@@ -280,7 +280,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
+    private static func previewEditorNSView(appState: AppState, encoder: OutboundActionEncoding) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }
@@ -326,7 +326,7 @@ enum PreviewRegistry {
             guideCols: [0, 2],
             lineIndentLevels: [0, 1, 1, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         )
-        let content = try GUIWindowContent(
+        guard let content = try? GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorVisible: true,
@@ -344,7 +344,7 @@ enum PreviewRegistry {
             // per-window cursorline (CoreTextMetalRenderer drawWindowedContent),
             // not frameState, so it must be set here to render.
             cursorline: GUICursorline(row: 5, bg: 0x2C323C)
-        )
+        ) else { return }
         commitPreviewEditorFrame(
             dispatcher: dispatcher,
             defaultBg: 0x282C34,
@@ -495,7 +495,7 @@ enum PreviewRegistry {
 
         let encoder = PreviewFixtures.encoder()
         appState.encoder = encoder
-        appState.gui.settingsState.encoder = encoder
+        appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: encoder)
 
         PreviewFixtures.populateFileTree(appState.gui.fileTreeState)
         PreviewFixtures.populateGitStatus(appState.gui.gitStatusState)
@@ -509,7 +509,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
+    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: OutboundActionEncoding) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }
@@ -543,7 +543,7 @@ enum PreviewRegistry {
             signColWidth: 1,
             entries: previewDiagnosticsGutterEntries()
         )
-        let content = try GUIWindowContent(
+        guard let content = try? GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorVisible: true,
@@ -561,7 +561,7 @@ enum PreviewRegistry {
             documentHighlights: [],
             lineAnnotations: [],
             paneGeometry: previewPaneGeometry(for: gutter, totalLineCount: 1250)
-        )
+        ) else { return }
         commitPreviewEditorFrame(
             dispatcher: dispatcher,
             defaultBg: 0x282C34,

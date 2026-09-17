@@ -163,7 +163,7 @@ struct ContentViewTests {
     private func makeEditorNSView(
         gui: GUIState,
         dispatcher: CommandDispatcher,
-        encoder: InputEncoder,
+        encoder: OutboundActionEncoding,
         reduceMotionEnabled: Bool = false,
         factories overrideFactories: NativeRenderFactories? = nil
     ) throws -> EditorNSView {
@@ -663,7 +663,7 @@ struct ContentViewTests {
         let view = try makeEditorNSView(
             gui: gui,
             dispatcher: dispatcher,
-            encoder: NullInputEncoder(),
+            encoder: ClosureOutboundActionEncoder { _ in .accepted },
             factories: factories
         )
         view.drawableProvider = { drawable }
@@ -744,7 +744,7 @@ struct ContentViewTests {
         let view = try makeEditorNSView(
             gui: gui,
             dispatcher: dispatcher,
-            encoder: NullInputEncoder(),
+            encoder: ClosureOutboundActionEncoder { _ in .accepted },
             factories: factories
         )
         view.drawableProvider = { drawable }
@@ -821,7 +821,7 @@ struct ContentViewTests {
         let view = try makeEditorNSView(
             gui: gui,
             dispatcher: dispatcher,
-            encoder: NullInputEncoder(),
+            encoder: ClosureOutboundActionEncoder { _ in .accepted },
             factories: factories
         )
         view.drawableProvider = { drawable }
@@ -910,7 +910,7 @@ struct ContentViewTests {
     @MainActor func liveTrackpadDrawUsesCapturedCommit() throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
-        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: ClosureOutboundActionEncoder { _ in .accepted })
         let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
         dispatcher.promoteVisibleEditorSnapshot(visible)
         editorView.seedTrackpadReconciliationForTesting(windowId: 1, unconfirmedLines: 2, confirmedAnchorTop: 10, settling: false)
@@ -936,7 +936,7 @@ struct ContentViewTests {
     @MainActor func settleDrawUsesCapturedCommit() throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
-        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: ClosureOutboundActionEncoder { _ in .accepted })
         let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
         dispatcher.promoteVisibleEditorSnapshot(visible)
         editorView.seedTrackpadReconciliationForTesting(windowId: 1, unconfirmedLines: 2, confirmedAnchorTop: 10, settling: true)
@@ -952,7 +952,7 @@ struct ContentViewTests {
     @MainActor func upwardBatchedCommitsUseLatestCapturedCommit() throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
-        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: ClosureOutboundActionEncoder { _ in .accepted })
         let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
         dispatcher.promoteVisibleEditorSnapshot(visible)
         editorView.seedTrackpadReconciliationForTesting(windowId: 1, unconfirmedLines: -3, confirmedAnchorTop: 10, settling: false)
@@ -974,7 +974,7 @@ struct ContentViewTests {
     @MainActor func thumbDragDrawUsesCapturedCommit() throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
-        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: NullInputEncoder())
+        let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: ClosureOutboundActionEncoder { _ in .accepted })
         let visible = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
         dispatcher.promoteVisibleEditorSnapshot(visible)
         editorView.seedThumbDragReconciliationForTesting(windowId: 1, targetLine: 12, committedAnchorTop: 10)
@@ -993,9 +993,9 @@ struct ContentViewTests {
 
     @Test("resolves the current encoder instead of retaining the startup value")
     func currentEncoder() {
-        let first = NullInputEncoder()
-        let second = NullInputEncoder()
-        var current: InputEncoder? = first
+        let first = ClosureOutboundActionEncoder { _ in .accepted }
+        let second = ClosureOutboundActionEncoder { _ in .accepted }
+        var current: OutboundActionEncoding? = first
 
         let view = ContentView(
             gui: GUIState(),
@@ -1242,7 +1242,7 @@ struct ContentViewTests {
             windowNumber: window.windowNumber
         ))
         editorView.mouseDown(with: foldEvent)
-        #expect(spy.guiActions.last == .foldToggleAtLine(windowId: 1, bufferLine: 101))
+        #expect(spy.actions.last == .foldToggleAtLine(windowID: 1, bufferLine: 101))
 
         let committedSnapshot = try #require(dispatcher.committedEditorSnapshot)
         dispatcher.promoteVisibleEditorPresentation(snapshot: committedSnapshot, localTransform: nil)
@@ -1411,15 +1411,16 @@ struct ContentViewTests {
         #expect(!initialChildren[1].isAccessibilityFocused())
         window.orderOut(nil)
         #expect(!initialChildren[0].isAccessibilityFocused())
+        let focusActionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
         await Task.yield()
         await Task.yield()
         #expect(window.isVisible)
         #expect(window.firstResponder === editorView)
         if NSApp.isActive && window.isKeyWindow {
-            #expect(spy.guiActions.last == .focusWindow(windowId: 2, generation: 2))
+            #expect(spy.actions.last == .focusWindow(windowID: 2, generation: 2))
         } else {
-            #expect(spy.guiActions.last == nil)
+            #expect(spy.actions.count == focusActionCount)
         }
         #expect(!initialChildren[1].isAccessibilityFocused())
 
@@ -1437,9 +1438,9 @@ struct ContentViewTests {
         let replacement = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
         #expect(replacement !== initialChildren[1])
         #expect(initialChildren[1].accessibilityValue() == nil)
-        let actionCount = spy.guiActions.count
+        let actionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
-        #expect(spy.guiActions.count == actionCount)
+        #expect(spy.actions.count == actionCount)
     }
 
     @Test(
@@ -1657,9 +1658,9 @@ struct ContentViewTests {
         editorView.otherMouseUp(with: middleUp)
         editorView.performContextMenuActionForTesting("select_all", connectionGeneration: oldGeneration)
         #expect(intermediateEncoder.mouseEventCalls.isEmpty)
-        #expect(intermediateEncoder.guiActions.isEmpty)
+        #expect(intermediateEncoder.actions.isEmpty)
         #expect(replacementEncoder.mouseEventCalls.isEmpty)
-        #expect(replacementEncoder.guiActions.isEmpty)
+        #expect(replacementEncoder.actions.isEmpty)
 
         let replacementGeneration = editorView.interactionSnapshot.inputConnectionGeneration
         editorView.mouseDown(with: leftDown)
@@ -1669,7 +1670,8 @@ struct ContentViewTests {
         editorView.performContextMenuActionForTesting("select_all", connectionGeneration: replacementGeneration)
 
         #expect(replacementEncoder.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE, MOUSE_PRESS, MOUSE_RELEASE])
-        #expect(replacementEncoder.guiActions == [.executeCommand(name: "select_all")])
+        #expect(replacementEncoder.actions.last == .executeCommand(name: "select_all"))
+        #expect(replacementEncoder.actions.count == 5)
     }
 
     @Test("replacement protocol connection accepts a lower keyframe from controlled pipes", .timeLimit(.minutes(1)))
@@ -1721,7 +1723,7 @@ struct ContentViewTests {
         connection.start()
         #expect(editorView.interactionSnapshot.inputEnabled)
 
-        connection.encoder.sendPasteEvent(text: String(repeating: "x", count: 65_536))
+        connection.encoder.send(.paste(String(repeating: "x", count: 65_536)))
         var rejectionIterator = rejections.stream.makeAsyncIterator()
         let rejection = await rejectionIterator.next()
         #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
@@ -1776,7 +1778,7 @@ struct ContentViewTests {
             onReaderDisconnect: { _, _ in }
         )
         let editorView = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: oldConnection.encoder)
-        var activeEncoder: InputEncoder? = oldConnection.encoder
+        var activeEncoder: OutboundActionEncoding? = oldConnection.encoder
         var replacementDeliveries = 0
         var recoveryFailure: OutboundTransportInitializationError?
         oldConnection.start()

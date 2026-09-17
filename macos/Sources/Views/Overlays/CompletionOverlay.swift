@@ -8,15 +8,19 @@ import SwiftUI
 import MingaProtocol
 
 public struct CompletionOverlay: View {
-    public init(state: CompletionState, encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case select(index: UInt16)
+    }
+
+    public init(state: CompletionState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: CompletionState
     @Environment(\.themeColors) private var theme
 
     @Environment(\.anchoredOverlayContext) private var overlayContext
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let maxVisibleItems = 10
     private let itemHeight: CGFloat = 24
@@ -175,7 +179,7 @@ public struct CompletionOverlay: View {
               currentItem.kind == offeredItem.kind,
               currentItem.label == offeredItem.label,
               currentItem.detail == offeredItem.detail else { return }
-        encoder?.sendCompletionSelect(index: UInt16(currentItem.id))
+        sendAction?(.select(index: UInt16(currentItem.id)))
     }
 
     private func updateAccessibilityFocus() {
@@ -255,7 +259,7 @@ private func completionPreviewState() -> CompletionState {
 
 #Preview("Completion") {
     let theme = PreviewFixtures.theme()
-    CompletionOverlay(state: completionPreviewState(), encoder: nil)
+    CompletionOverlay(state: completionPreviewState(), sendAction: { _ in })
         .frame(width: 400, height: 300)
         .background(theme.editorBg)
         .environment(\.themeColors, theme)

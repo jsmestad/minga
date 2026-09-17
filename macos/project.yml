@@ -83,6 +83,8 @@ targets:
         type: file
       - path: Sources/Views/Shared/EditTimelineView.swift
         type: file
+      - path: Sources/Views/Shared/FrontendViewAction.swift
+        type: file
       - path: Sources/Views/Shared/EditorGeometry.swift
         type: file
       - path: Sources/Views/Shared/GUIFramePresentationMetrics.swift
@@ -99,9 +101,11 @@ targets:
         type: file
       - path: Sources/ContentView.swift
         type: file
+      - path: Sources/FrontendActionComposition.swift
+        type: file
       - path: Sources/PreviewFixtures.swift
         type: file
-      - path: Sources/Protocol/InputEncoder.swift
+      - path: Sources/Protocol/OutboundAction.swift
         type: file
       - path: Sources/Protocol/PortLogger.swift
         type: file
@@ -160,7 +164,8 @@ targets:
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           - "Protocol/OperationReceiptTypes.swift"
           # MingaUI-owned (Slice 3)
-          - "Protocol/InputEncoder.swift"
+          - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -177,6 +182,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
@@ -298,7 +304,8 @@ targets:
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
-          - "Protocol/InputEncoder.swift"
+          - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -315,6 +322,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
@@ -386,7 +394,8 @@ targets:
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
-          - "Protocol/InputEncoder.swift"
+          - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -403,6 +412,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
@@ -463,7 +473,8 @@ targets:
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
-          - "Protocol/InputEncoder.swift"
+          - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -480,6 +491,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"

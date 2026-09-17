@@ -8,6 +8,15 @@ import QuartzCore
 import os
 import MingaProtocol
 
+@MainActor
+final class LocalActionRecorder<Action: Equatable & Sendable> {
+    private(set) var actions: [Action] = []
+
+    var handler: ViewActionHandler<Action> {
+        { [self] action in actions.append(action) }
+    }
+}
+
 private func appendConfigStateU16(_ data: inout Data, _ value: UInt16) {
     data.append(UInt8((value >> 8) & 0xFF))
     data.append(UInt8(value & 0xFF))
@@ -990,12 +999,40 @@ struct ProtocolEncoderTests {
     }
 }
 
+@Suite("Frontend Action Composition")
+struct FrontendActionCompositionTests {
+    @Test("agent review actions map exhaustively")
+    func agentReviewActionsMapExhaustively() {
+        #expect(FrontendActionComposition.outbound(AgentContextBar.ReviewAction.approve) == .agentApprove)
+        #expect(FrontendActionComposition.outbound(AgentContextBar.ReviewAction.requestChanges) == .agentRequestChanges)
+        #expect(FrontendActionComposition.outbound(AgentContextBar.ReviewAction.dismiss) == .agentDismiss)
+    }
+
+    @Test("consumer actions map semantic values at composition")
+    func consumerActionsMapAtComposition() {
+        #expect(FrontendActionComposition.outbound(AgentChatView.Action.agentToolToggle(messageID: 9)) == .agentToolToggle(messageID: 9))
+        #expect(FrontendActionComposition.outbound(WorkspaceHeaderView.Action.rename(id: 3, name: "Docs")) == .workspaceRename(id: 3, name: "Docs"))
+        #expect(FrontendActionComposition.outbound(NotificationCenterView.Action.invoke(id: "build", actionID: "retry")) == .notificationAction(id: "build", actionID: "retry"))
+        #expect(FrontendActionComposition.outbound(GitStatusView.Action.openDiff(path: "lib/a.ex", section: 2)) == .gitOpenDiff(path: "lib/a.ex", section: 2))
+        #expect(FrontendActionComposition.outbound(SettingsView.Action.update(key: "editor.font_size", value: .int(15))) == .configUpdate(key: "editor.font_size", value: .int(15)))
+        #expect(FrontendActionComposition.outbound(FrontendExtensionViewContext.Action.invoke(extensionID: "outline", action: "open", payload: Data([1, 2]))) == .extensionAction(extensionID: "outline", action: "open", payload: Data([1, 2])))
+    }
+
+    @Test("settings handler is absent without a transport")
+    @MainActor func settingsHandlerIsAbsentWithoutTransport() {
+        switch FrontendActionComposition.settingsHandler(encoder: nil) {
+        case nil: break
+        case .some: Issue.record("Settings actions must be unavailable without a transport")
+        }
+    }
+}
+
 @Suite("Paste Event Encoder")
 struct PasteEventEncoderTests {
     @Test("sendPasteEvent records call with correct text")
     func sendPasteBasic() {
         let spy = SpyEncoder()
-        spy.sendPasteEvent(text: "hello\nworld\nline 3")
+        spy.send(.paste("hello\nworld\nline 3"))
         #expect(spy.pasteCalls.count == 1)
         #expect(spy.pasteCalls[0].text == "hello\nworld\nline 3")
     }
@@ -1003,7 +1040,7 @@ struct PasteEventEncoderTests {
     @Test("sendPasteEvent with empty text")
     func sendPasteEmpty() {
         let spy = SpyEncoder()
-        spy.sendPasteEvent(text: "")
+        spy.send(.paste(""))
         #expect(spy.pasteCalls.count == 1)
         #expect(spy.pasteCalls[0].text == "")
     }
@@ -1012,7 +1049,7 @@ struct PasteEventEncoderTests {
     func sendPasteUnicode() {
         let spy = SpyEncoder()
         let text = "こんにちは\n🎉 emoji\n中文"
-        spy.sendPasteEvent(text: text)
+        spy.send(.paste(text))
         #expect(spy.pasteCalls.count == 1)
         #expect(spy.pasteCalls[0].text == text)
     }
@@ -1020,7 +1057,7 @@ struct PasteEventEncoderTests {
     @Test("sendPasteEvent with single line")
     func sendPasteSingleLine() {
         let spy = SpyEncoder()
-        spy.sendPasteEvent(text: "just one line")
+        spy.send(.paste("just one line"))
         #expect(spy.pasteCalls.count == 1)
         #expect(spy.pasteCalls[0].text == "just one line")
     }
@@ -1028,8 +1065,8 @@ struct PasteEventEncoderTests {
     @Test("multiple paste events accumulate correctly")
     func sendPasteMultiple() {
         let spy = SpyEncoder()
-        spy.sendPasteEvent(text: "first paste\nwith lines")
-        spy.sendPasteEvent(text: "second paste")
+        spy.send(.paste("first paste\nwith lines"))
+        spy.send(.paste("second paste"))
         #expect(spy.pasteCalls.count == 2)
         #expect(spy.pasteCalls[0].text == "first paste\nwith lines")
         #expect(spy.pasteCalls[1].text == "second paste")
@@ -1038,12 +1075,11 @@ struct PasteEventEncoderTests {
 
 // MARK: - Spy encoder for testing resize behavior
 
-/// Spy that records all InputEncoder calls for test assertions.
+/// Spy that records all OutboundActionEncoding calls for test assertions.
 ///
 /// Uses OSAllocatedUnfairLock so it satisfies Sendable without @unchecked.
-/// GUI action calls are recorded as GUIAction enum values, allowing tests
-/// to verify that view interactions send the correct protocol events.
-final class SpyEncoder: InputEncoder, Sendable {
+/// Every call records the canonical action value used by production.
+final class SpyEncoder: OutboundActionEncoding, Sendable {
     enum LifecycleCall: Equatable, Sendable {
         case ready
         case resize
@@ -1058,74 +1094,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     struct SearchQuery: Sendable, Equatable { let sessionID: UInt32; let editSeq: UInt32; let query: String; let flags: UInt8 }
     struct MouseEvent: Sendable { let row: Int16; let col: Int16; let button: UInt8; let modifiers: UInt8; let eventType: UInt8; let clickCount: UInt8 }
 
-    /// Recorded GUI action events. Each sendFoo() call appends one entry.
-    enum GUIAction: Sendable, Equatable {
-        case selectTab(id: UInt32)
-        case closeTab(id: UInt32)
-        case tabCopyPath(id: UInt32)
-        case tabReorder(id: UInt32, newIndex: UInt16)
-        case tabPin(id: UInt32)
-        case tabUnpin(id: UInt32)
-        case tabMoveLeft(id: UInt32)
-        case tabMoveRight(id: UInt32)
-        case hoverOpenAction
-        case pickerItemActivate(generation: UInt32, activationID: UInt32)
-        case pickerActionActivate(generation: UInt32, activationID: UInt32)
-        case fileTreeClick(index: UInt16)
-        case fileTreeToggle(index: UInt16)
-        case fileTreeOpenInSplit(index: UInt16)
-        case fileTreeNewFile(parentIndex: UInt16)
-        case fileTreeNewFolder(parentIndex: UInt16)
-        case fileTreeEditConfirm(token: UInt32, text: String)
-        case fileTreeEditCancel
-        case fileTreeDelete(index: UInt16)
-        case fileTreeRename(index: UInt16)
-        case fileTreeDuplicate(index: UInt16)
-        case fileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16)
-        case fileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8)
-        case fileTreeCollapseAll
-        case fileTreeRefresh
-        case completionSelect(index: UInt16)
-        case togglePanel(panel: UInt8)
-        case sidebarAction(sidebarId: String, kind: String, action: String)
-        case newTab
-        case systemWillSleep
-        case systemDidWake
-        case systemWillUnmount(volumePath: String)
-        case cmdCopy
-        case cmdCut
-        case panelSwitchTab(index: UInt8)
-        case panelDismiss
-        case panelResize(heightPercent: UInt8)
-        case openFile(path: String)
-        case agentToolToggle(messageID: UInt32)
-        case executeCommand(name: String)
-        case minibufferSelect(index: UInt16)
-
-
-        case gitStageFile(path: String)
-        case gitUnstageFile(path: String)
-        case gitDiscardFile(path: String)
-        case gitStageAll
-        case gitUnstageAll
-        case gitCommit(message: String)
-        case gitOpenFile(path: String)
-        case gitOpenDiff(path: String, section: UInt8)
-        case gitPush
-        case gitPull
-        case gitFetch
-        case gitCommitAmend(message: String)
-        case gitPullAndRetry
-        case foldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
-        case focusWindow(windowId: UInt16, generation: UInt64)
-        case observatoryInspect(pid: String)
-        case chatScrolledAwayFromBottom
-        case chatReturnedToBottom
-    }
-
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     struct State: Sendable {
+        var actions: [OutboundAction] = []
         var resizeCalls: [Resize] = []
         var readyCalls: [Ready] = []
         var lifecycleCalls: [LifecycleCall] = []
@@ -1135,7 +1107,6 @@ final class SpyEncoder: InputEncoder, Sendable {
         var pickerQueryCalls: [PickerQuery] = []
         var searchQueryCalls: [SearchQuery] = []
         var mouseEventCalls: [MouseEvent] = []
-        var guiActions: [GUIAction] = []
     }
 
     var resizeCalls: [Resize] { state.withLock { $0.resizeCalls } }
@@ -1147,117 +1118,38 @@ final class SpyEncoder: InputEncoder, Sendable {
     var pickerQueryCalls: [PickerQuery] { state.withLock { $0.pickerQueryCalls } }
     var searchQueryCalls: [SearchQuery] { state.withLock { $0.searchQueryCalls } }
     var mouseEventCalls: [MouseEvent] { state.withLock { $0.mouseEventCalls } }
-    var guiActions: [GUIAction] { state.withLock { $0.guiActions } }
+    var actions: [OutboundAction] { state.withLock { $0.actions } }
 
-    func sendReady(cols: UInt16, rows: UInt16) {
+    @discardableResult
+    func send(_ action: OutboundAction) -> OutboundActionResult {
         state.withLock {
-            $0.readyCalls.append(Ready(cols: cols, rows: rows))
-            $0.lifecycleCalls.append(.ready)
+            $0.actions.append(action)
+            switch action {
+            case .ready(let cols, let rows):
+                $0.readyCalls.append(Ready(cols: cols, rows: rows))
+                $0.lifecycleCalls.append(.ready)
+            case .resize(let cols, let rows):
+                $0.resizeCalls.append(Resize(cols: cols, rows: rows))
+                $0.lifecycleCalls.append(.resize)
+            case .log(let level, let message):
+                $0.logCalls.append(Log(level: level, message: message))
+            case .paste(let text):
+                $0.pasteCalls.append(Paste(text: text))
+            case .keyPress(let codepoint, let modifiers, _):
+                $0.keyPressCalls.append(KeyPress(codepoint: codepoint, modifiers: modifiers))
+            case .pickerQueryChanged(let generation, let editSequence, let text):
+                $0.pickerQueryCalls.append(PickerQuery(generation: generation, editSeq: editSequence, text: text))
+            case .searchQuery(let sessionID, let editSequence, let query, let flags):
+                $0.searchQueryCalls.append(SearchQuery(sessionID: sessionID, editSeq: editSequence, query: query, flags: flags))
+            case .mouse(let row, let column, let button, let modifiers, let eventType, let clickCount):
+                $0.mouseEventCalls.append(MouseEvent(row: row, col: column, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount))
+            default:
+                break
+            }
         }
-    }
-    func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
-        state.withLock { $0.keyPressCalls.append(KeyPress(codepoint: codepoint, modifiers: modifiers)) }
-    }
-    func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {
-        state.withLock { $0.pickerQueryCalls.append(PickerQuery(generation: generation, editSeq: editSeq, text: text)) }
-    }
-    func sendSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {
-        state.withLock { $0.searchQueryCalls.append(SearchQuery(sessionID: sessionID, editSeq: editSeq, query: query, flags: flags)) }
-    }
-    func sendResize(cols: UInt16, rows: UInt16) {
-        state.withLock {
-            $0.resizeCalls.append(Resize(cols: cols, rows: rows))
-            $0.lifecycleCalls.append(.resize)
-        }
-    }
-    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8 = 1) {
-        state.withLock { $0.mouseEventCalls.append(MouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount)) }
-    }
-    func sendPasteEvent(text: String) {
-        state.withLock { $0.pasteCalls.append(Paste(text: text)) }
-    }
-    func sendLog(level: UInt8, message: String) {
-        state.withLock { $0.logCalls.append(Log(level: level, message: message)) }
+        return .accepted
     }
 
-    // GUI actions: all recorded for test assertions
-    func sendSelectTab(id: UInt32) { state.withLock { $0.guiActions.append(.selectTab(id: id)) } }
-    func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
-    func sendTabCopyPath(id: UInt32) { state.withLock { $0.guiActions.append(.tabCopyPath(id: id)) } }
-    func sendTabReorder(id: UInt32, newIndex: UInt16) { state.withLock { $0.guiActions.append(.tabReorder(id: id, newIndex: newIndex)) } }
-    func sendTabPin(id: UInt32) { state.withLock { $0.guiActions.append(.tabPin(id: id)) } }
-    func sendTabUnpin(id: UInt32) { state.withLock { $0.guiActions.append(.tabUnpin(id: id)) } }
-    func sendTabMoveLeft(id: UInt32) { state.withLock { $0.guiActions.append(.tabMoveLeft(id: id)) } }
-    func sendTabMoveRight(id: UInt32) { state.withLock { $0.guiActions.append(.tabMoveRight(id: id)) } }
-    func sendHoverOpenAction() { state.withLock { $0.guiActions.append(.hoverOpenAction) } }
-    func sendPickerItemActivate(generation: UInt32, activationID: UInt32) { state.withLock { $0.guiActions.append(.pickerItemActivate(generation: generation, activationID: activationID)) } }
-    func sendPickerActionActivate(generation: UInt32, activationID: UInt32) { state.withLock { $0.guiActions.append(.pickerActionActivate(generation: generation, activationID: activationID)) } }
-    func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
-    func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }
-    func sendFileTreeOpenInSplit(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeOpenInSplit(index: index)) } }
-    func sendFileTreeNewFile(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFile(parentIndex: parentIndex)) } }
-    func sendFileTreeNewFolder(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFolder(parentIndex: parentIndex)) } }
-    func sendFileTreeEditConfirm(token: UInt32, text: String) { state.withLock { $0.guiActions.append(.fileTreeEditConfirm(token: token, text: text)) } }
-    func sendFileTreeEditCancel() { state.withLock { $0.guiActions.append(.fileTreeEditCancel) } }
-    func sendFileTreeDelete(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeDelete(index: index)) } }
-    func sendFileTreeRename(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeRename(index: index)) } }
-    func sendFileTreeDuplicate(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeDuplicate(index: index)) } }
-    func sendFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeMove(sourceIndex: sourceIndex, targetDirIndex: targetDirIndex)) } }
-    func sendFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8) { state.withLock { $0.guiActions.append(.fileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetId: targetId, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDir: targetIsDir, modifiers: modifiers)) } }
-    func sendFileTreeCollapseAll() { state.withLock { $0.guiActions.append(.fileTreeCollapseAll) } }
-    func sendFileTreeRefresh() { state.withLock { $0.guiActions.append(.fileTreeRefresh) } }
-    func sendCompletionSelect(index: UInt16) { state.withLock { $0.guiActions.append(.completionSelect(index: index)) } }
-    func sendTogglePanel(panel: UInt8) { state.withLock { $0.guiActions.append(.togglePanel(panel: panel)) } }
-    func sendSidebarAction(sidebarId: String, kind: String, action: String) { state.withLock { $0.guiActions.append(.sidebarAction(sidebarId: sidebarId, kind: kind, action: action)) } }
-    func sendNewTab() { state.withLock { $0.guiActions.append(.newTab) } }
-    func sendSystemWillSleep() { state.withLock { $0.guiActions.append(.systemWillSleep) } }
-    func sendSystemDidWake() { state.withLock { $0.guiActions.append(.systemDidWake) } }
-    func sendSystemWillUnmount(volumePath: String) { state.withLock { $0.guiActions.append(.systemWillUnmount(volumePath: volumePath)) } }
-    func sendCmdCopy() { state.withLock { $0.guiActions.append(.cmdCopy) } }
-    func sendCmdCut() { state.withLock { $0.guiActions.append(.cmdCut) } }
-    func sendPanelSwitchTab(index: UInt8) { state.withLock { $0.guiActions.append(.panelSwitchTab(index: index)) } }
-    func sendPanelDismiss() { state.withLock { $0.guiActions.append(.panelDismiss) } }
-    func sendPanelResize(heightPercent: UInt8) { state.withLock { $0.guiActions.append(.panelResize(heightPercent: heightPercent)) } }
-    func sendOpenFile(path: String) { state.withLock { $0.guiActions.append(.openFile(path: path)) } }
-    func sendAgentToolToggle(messageID: UInt32) { state.withLock { $0.guiActions.append(.agentToolToggle(messageID: messageID)) } }
-    func sendExecuteCommand(name: String) { state.withLock { $0.guiActions.append(.executeCommand(name: name)) } }
-    func sendMinibufferSelect(index: UInt16) { state.withLock { $0.guiActions.append(.minibufferSelect(index: index)) } }
-
-
-    func sendGitStageFile(path: String) { state.withLock { $0.guiActions.append(.gitStageFile(path: path)) } }
-    func sendGitUnstageFile(path: String) { state.withLock { $0.guiActions.append(.gitUnstageFile(path: path)) } }
-    func sendGitDiscardFile(path: String) { state.withLock { $0.guiActions.append(.gitDiscardFile(path: path)) } }
-    func sendGitStageAll() { state.withLock { $0.guiActions.append(.gitStageAll) } }
-    func sendGitUnstageAll() { state.withLock { $0.guiActions.append(.gitUnstageAll) } }
-    func sendGitCommit(message: String) { state.withLock { $0.guiActions.append(.gitCommit(message: message)) } }
-    func sendGitOpenFile(path: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: path)) } }
-    func sendGitOpenDiff(path: String, section: UInt8) { state.withLock { $0.guiActions.append(.gitOpenDiff(path: path, section: section)) } }
-    func sendGitPush() { state.withLock { $0.guiActions.append(.gitPush) } }
-    func sendGitPull() { state.withLock { $0.guiActions.append(.gitPull) } }
-    func sendGitFetch() { state.withLock { $0.guiActions.append(.gitFetch) } }
-    func sendGitCommitAmend(message: String) { state.withLock { $0.guiActions.append(.gitCommitAmend(message: message)) } }
-    func sendGitPullAndRetry() { state.withLock { $0.guiActions.append(.gitPullAndRetry) } }
-    func sendWorkspaceRename(id: UInt16, name: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "rename:\(id):\(name)")) } }
-    func sendWorkspaceSetIcon(id: UInt16, icon: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "icon:\(id):\(icon)")) } }
-    func sendWorkspaceClose(id: UInt16) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "close-ws:\(id)")) } }
-    func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
-    func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
-    func sendFindPasteboardSearch(text: String, direction: UInt8) { /* no-op for tests */ }
-    func sendAgentApprove() { /* no-op for tests */ }
-    func sendAgentRequestChanges() { /* no-op for tests */ }
-    func sendAgentDismiss() { /* no-op for tests */ }
-    func sendScrollToLine(line: UInt32) { /* no-op for tests */ }
-    func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
-        state.withLock { $0.guiActions.append(.foldToggleAtLine(windowId: windowId, bufferLine: bufferLine)) }
-    }
-    func sendFocusWindow(windowId: UInt16, generation: UInt64) {
-        state.withLock { $0.guiActions.append(.focusWindow(windowId: windowId, generation: generation)) }
-    }
-    func sendObservatoryInspect(pid: String) {
-        state.withLock { $0.guiActions.append(.observatoryInspect(pid: pid)) }
-    }
-    func sendChatScrolledAwayFromBottom() { state.withLock { $0.guiActions.append(.chatScrolledAwayFromBottom) } }
-    func sendChatReturnedToBottom() { state.withLock { $0.guiActions.append(.chatReturnedToBottom) } }
 }
 
 @Suite("EditorNSView Resize")

@@ -7,14 +7,20 @@ import SwiftUI
 import MingaProtocol
 
 public struct AgentContextBar: View {
-    public init(state: AgentContextBarState, encoder: InputEncoder? = nil) {
+    public enum ReviewAction: Equatable, Sendable {
+        case approve
+        case requestChanges
+        case dismiss
+    }
+
+    public init(state: AgentContextBarState, onReview: @escaping @MainActor @Sendable (ReviewAction) -> Void) {
         self.state = state
-        self.encoder = encoder
+        self.onReview = onReview
     }
     public let state: AgentContextBarState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let onReview: @MainActor @Sendable (ReviewAction) -> Void
 
     private let barHeight: CGFloat = 28
 
@@ -120,7 +126,7 @@ public struct AgentContextBar: View {
                 systemIcon: "checkmark.circle.fill",
                 color: Color(red: 0.2, green: 0.8, blue: 0.4),
                 action: {
-                    encoder?.sendAgentApprove()
+                    onReview(.approve)
                 }
             )
 
@@ -129,7 +135,7 @@ public struct AgentContextBar: View {
                 systemIcon: "exclamationmark.triangle.fill",
                 color: Color(red: 1.0, green: 0.75, blue: 0.2),
                 action: {
-                    encoder?.sendAgentRequestChanges()
+                    onReview(.requestChanges)
                 }
             )
 
@@ -138,7 +144,7 @@ public struct AgentContextBar: View {
                 systemIcon: "xmark.circle.fill",
                 color: Color(red: 0.6, green: 0.3, blue: 0.3),
                 action: {
-                    encoder?.sendAgentDismiss()
+                    onReview(.dismiss)
                 }
             )
         }
@@ -165,6 +171,7 @@ public struct AgentContextBar: View {
             .clipShape(.rect(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
         .help(label)
         .pointingHandCursor()
     }

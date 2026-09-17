@@ -43,7 +43,7 @@ struct ActivityBarViewTests {
     @MainActor func rendersPanelIcons() throws {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
-        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -55,8 +55,8 @@ struct ActivityBarViewTests {
     @MainActor func tapSendsPanelToggle() throws {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
-        let spy = SpyEncoder()
-        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: spy)
+        let recorder = LocalActionRecorder<ActivityBar.Action>()
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, sendAction: recorder.handler)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -65,10 +65,10 @@ struct ActivityBarViewTests {
             try button.tap()
         }
 
-        #expect(spy.guiActions == [
-            .sidebarAction(sidebarId: "file_tree", kind: "file_tree", action: "toggle"),
-            .sidebarAction(sidebarId: "git_status", kind: "git_status", action: "activate"),
-            .sidebarAction(sidebarId: "observatory", kind: "observatory", action: "activate")
+        #expect(recorder.actions == [
+            .activate(sidebarID: "file_tree", kind: "file_tree", action: "toggle"),
+            .activate(sidebarID: "git_status", kind: "git_status", action: "activate"),
+            .activate(sidebarID: "observatory", kind: "observatory", action: "activate")
         ])
     }
 
@@ -80,7 +80,7 @@ struct ActivityBarViewTests {
         }
         publishGitStatus(guiState.gitStatusState, entries: entries)
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
-        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -92,7 +92,7 @@ struct ActivityBarViewTests {
     @MainActor func gitBadgeAndLabels() throws {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata(gitBadgeCount: 7))
-        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -127,9 +127,9 @@ struct SidebarContainerViewTests {
         let gitStatus = sidebarItem(id: "git_status", displayName: "Git Status", kind: "git_status")
         let observatory = sidebarItem(id: "observatory", displayName: "BEAM Observatory", kind: "observatory")
 
-        let fileTreeHeader = NativeSidebarHeader(input: guiState.shellInput, item: fileTree, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
-        let gitStatusHeader = NativeSidebarHeader(input: guiState.shellInput, item: gitStatus, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
-        let observatoryHeader = NativeSidebarHeader(input: guiState.shellInput, item: observatory, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
+        let fileTreeHeader = NativeSidebarHeader(input: guiState.shellInput, item: fileTree, sendAction: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
+        let gitStatusHeader = NativeSidebarHeader(input: guiState.shellInput, item: gitStatus, sendAction: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
+        let observatoryHeader = NativeSidebarHeader(input: guiState.shellInput, item: observatory, sendAction: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10)
 
         #expect(try fileTreeHeader.inspect().findAll(FileTreeHeaderView.self).count == 1)
         #expect(try gitStatusHeader.inspect().findAll(GitStatusHeaderView.self).count == 1)
@@ -137,9 +137,9 @@ struct SidebarContainerViewTests {
         #expect(observatoryHeaderText.contains("BEAM Observatory"))
         #expect(observatoryHeaderText.contains("0 processes"))
 
-        let fileTreeBody = NativeSidebarBody(input: guiState.shellInput, item: fileTree, encoder: nil, frameProbe: nil)
-        let gitStatusBody = NativeSidebarBody(input: guiState.shellInput, item: gitStatus, encoder: nil, frameProbe: nil)
-        let observatoryBody = NativeSidebarBody(input: guiState.shellInput, item: observatory, encoder: nil, frameProbe: nil)
+        let fileTreeBody = NativeSidebarBody(input: guiState.shellInput, item: fileTree, sendAction: nil, frameProbe: nil)
+        let gitStatusBody = NativeSidebarBody(input: guiState.shellInput, item: gitStatus, sendAction: nil, frameProbe: nil)
+        let observatoryBody = NativeSidebarBody(input: guiState.shellInput, item: observatory, sendAction: nil, frameProbe: nil)
 
         #expect(try fileTreeBody.inspect().findAll(FileTreeView.self).count == 1)
         #expect(try gitStatusBody.inspect().findAll(GitStatusView.self).count == 1)
@@ -170,7 +170,7 @@ struct SidebarContainerViewTests {
         let item = Wire.SidebarMetadata(id: "custom", displayName: "Custom Tools", semanticKind: "custom_sidebar", icon: "sparkles", order: 40, visible: true, focused: true, preferredWidth: 30, badgeCount: nil)
         guiState.sidebarHostState.update(activeId: "custom", sidebars: [item])
         let active = try #require(guiState.sidebarHostState.activeSidebar)
-        let sut = SidebarContainer(input: guiState.shellInput, activeSidebar: active, encoder: nil, sidebarWidth: .constant(240))
+        let sut = SidebarContainer(input: guiState.shellInput, activeSidebar: active, sendAction: nil, sidebarWidth: .constant(240))
             .environment(\.themeColors, ThemeColors())
         let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -184,10 +184,10 @@ struct SidebarContainerViewTests {
         let fileTree = sidebarItem(id: "file_tree", displayName: "File Tree", kind: "file_tree")
         let custom = sidebarItem(id: "custom", displayName: "Custom Tools", kind: "custom_sidebar")
 
-        let supported = NativeSidebarBody(input: guiState.shellInput, item: fileTree, encoder: nil, frameProbe: nil)
+        let supported = NativeSidebarBody(input: guiState.shellInput, item: fileTree, sendAction: nil, frameProbe: nil)
         #expect(try supported.inspect().findAll(FileTreeView.self).count == 1)
 
-        let fallback = NativeSidebarBody(input: guiState.shellInput, item: custom, encoder: nil, frameProbe: nil)
+        let fallback = NativeSidebarBody(input: guiState.shellInput, item: custom, sendAction: nil, frameProbe: nil)
             .environment(\.themeColors, ThemeColors())
         let fallbackBody = try fallback.inspect()
         let strings = fallbackBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -268,7 +268,7 @@ struct GitStatusViewEmptyStateTests {
         let state = GitStatusState()
         publishGitStatus(state, repoState: .notARepo)
 
-        let sut = GitStatusView(state: state, encoder: nil)
+        let sut = GitStatusView(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -281,7 +281,7 @@ struct GitStatusViewEmptyStateTests {
         let state = GitStatusState()
         publishGitStatus(state, repoState: .loading)
 
-        let sut = GitStatusView(state: state, encoder: nil)
+        let sut = GitStatusView(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -295,7 +295,7 @@ struct GitStatusViewEmptyStateTests {
         publishGitStatus(state)
         // No entries = clean
 
-        let sut = GitStatusView(state: state, encoder: nil)
+        let sut = GitStatusView(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -362,7 +362,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = "/Users/test/code/minga"
 
-        let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: nil, branchName: "main", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -377,7 +377,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = ""
 
-        let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: nil, branchName: "", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -390,7 +390,7 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
 
-        let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: nil, branchName: "", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -404,7 +404,7 @@ struct FileTreeViewTests {
         state.selectedIndex = 7
         let spy = SpyEncoder()
 
-        let sut = FileTreeHeaderView(fileTreeState: state, encoder: spy, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, branchName: "main", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
 
@@ -413,7 +413,7 @@ struct FileTreeViewTests {
         try buttons[2].tap()
         try buttons[3].tap()
 
-        #expect(spy.guiActions == [
+        #expect(spy.actions == [
             .fileTreeNewFile(parentIndex: 7),
             .fileTreeNewFolder(parentIndex: 7),
             .fileTreeRefresh,
@@ -427,7 +427,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = "/Users/test/code/minga"
 
-        let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: nil, branchName: "main", leadingPadding: 10)
 
         #expect(sut.accessibilityLabelText == "File tree for minga, branch main")
     }
@@ -443,7 +443,7 @@ struct FileTreeViewTests {
                                  icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
         ]
 
-        let sut = FileTreeView(fileTreeState: state, encoder: nil)
+        let sut = FileTreeView(fileTreeState: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -461,7 +461,7 @@ struct FileTreeViewTests {
                                  icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
         ]
 
-        let sut = FileTreeView(fileTreeState: state, encoder: nil)
+        let sut = FileTreeView(fileTreeState: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -479,13 +479,13 @@ struct FileTreeViewTests {
         state.entries = [entry]
         let spy = SpyEncoder()
 
-        let sut = FileTreeView(fileTreeState: state, encoder: spy)
+        let sut = FileTreeView(fileTreeState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let expectedModifiers = currentModifierBitsForTest()
         let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
 
         #expect(handled)
-        #expect(spy.guiActions == [
-            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetId: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDir: false, modifiers: expectedModifiers)
+        #expect(spy.actions == [
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetID: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDirectory: false, modifiers: expectedModifiers)
         ])
     }
 
@@ -497,7 +497,7 @@ struct FileTreeViewTests {
         let entry = sidebarFileTreeEntry(id: 0xABCD, index: 4, isDir: false, icon: "\u{E62D}", name: "file.ex", relPath: "lib/file.ex", path: "/project/lib/file.ex")
         state.entries = [entry]
 
-        let sut = FileTreeView(fileTreeState: state, encoder: nil)
+        let sut = FileTreeView(fileTreeState: state, sendAction: nil)
         let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
 
         #expect(!handled)
@@ -512,7 +512,7 @@ struct FileTreeViewTests {
                                  icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
         ]
 
-        let sut = FileTreeView(fileTreeState: state, encoder: nil)
+        let sut = FileTreeView(fileTreeState: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let fields = body.findAll(InlineEditField.self)
@@ -527,19 +527,19 @@ struct FileTreeViewTests {
         state.treeState = .empty
         state.entries = []
 
-        var strings = try FileTreeView(fileTreeState: state, encoder: nil)
+        var strings = try FileTreeView(fileTreeState: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("No files yet"))
         #expect(strings.contains("Create a file or refresh after adding project files."))
 
         state.treeState = .loading
-        strings = try FileTreeView(fileTreeState: state, encoder: nil)
+        strings = try FileTreeView(fileTreeState: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("Loading files…"))
 
         state.treeState = .error
         state.errorReason = "permission denied"
-        strings = try FileTreeView(fileTreeState: state, encoder: nil)
+        strings = try FileTreeView(fileTreeState: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("Couldn’t load file tree"))
         #expect(strings.contains("permission denied"))
@@ -711,7 +711,7 @@ struct GitStatusViewSectionTests {
         ]
         publishGitStatus(state, entries: entries)
 
-        let sut = GitStatusView(state: state, encoder: nil)
+        let sut = GitStatusView(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -745,7 +745,7 @@ struct GitStatusViewSectionTests {
             GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/minga/editor.ex"),
         ])
 
-        let sut = GitStatusView(state: state, encoder: nil)
+        let sut = GitStatusView(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -760,7 +760,7 @@ struct GitStatusViewSectionTests {
         publishGitStatus(state, entries: [
             GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/minga/editor.ex"),
         ])
-        let body = try GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+        let body = try GitStatusView(state: state, sendAction: nil, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
             .inspect()
         let stacks = body.findAll(ViewType.HStack.self)
@@ -775,7 +775,7 @@ struct GitStatusViewSectionTests {
         #expect(try row.accessibilityValue().string() == "Changes, lib/minga/editor.ex")
 
         state.toggleSection(.changed)
-        let collapsedBody = try GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+        let collapsedBody = try GitStatusView(state: state, sendAction: nil, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
             .inspect()
         let collapsed = try #require(collapsedBody.findAll(ViewType.HStack.self).first {
@@ -795,13 +795,13 @@ struct GitStatusViewSectionTests {
         state.setAmendMode(true)
         state.toggleSection(.changed)
 
-        let firstView = GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+        let firstView = GitStatusView(state: state, sendAction: nil, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
         let firstStrings = try firstView.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(firstStrings.contains("staged.ex"))
         #expect(!firstStrings.contains("changed.ex"))
 
-        let reconstructedView = GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+        let reconstructedView = GitStatusView(state: state, sendAction: nil, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
         let reconstructedStrings = try reconstructedView.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(reconstructedStrings.contains("staged.ex"))
@@ -820,14 +820,14 @@ struct GitStatusViewSectionTests {
         state.updateDraft("  commit subject  ")
         state.toggleSection(.staged)
         let spy = SpyEncoder()
-        let view = GitStatusView(state: state, encoder: spy, usesPreviewEagerLayout: true)
+        let view = GitStatusView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
         let buttons = try view.inspect().findAll(ViewType.Button.self)
         let commitButton = try #require(buttons.last)
 
         try commitButton.tap()
 
-        #expect(spy.guiActions == [.gitCommit(message: "commit subject")])
+        #expect(spy.actions == [.gitCommit(message: "commit subject")])
         #expect(state.session.draft.isEmpty)
         #expect(state.session.amendMode == false)
         #expect(state.session.collapsedSections == [.staged])
@@ -835,13 +835,13 @@ struct GitStatusViewSectionTests {
 
         state.updateDraft("amended subject")
         state.setAmendMode(true)
-        let amendView = GitStatusView(state: state, encoder: spy, usesPreviewEagerLayout: true)
+        let amendView = GitStatusView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
         let amendButton = try #require(amendView.inspect().findAll(ViewType.Button.self).last)
 
         try amendButton.tap()
 
-        #expect(spy.guiActions == [.gitCommit(message: "commit subject"), .gitCommitAmend(message: "amended subject")])
+        #expect(spy.actions == [.gitCommit(message: "commit subject"), .gitCommitAmend(message: "amended subject")])
         #expect(state.session.draft.isEmpty)
         #expect(state.session.amendMode == false)
         #expect(state.session.collapsedSections == [.staged])

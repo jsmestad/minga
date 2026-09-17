@@ -748,7 +748,7 @@ struct ProtocolConnectionTests {
         var iterator = disconnects.stream.makeAsyncIterator()
         #expect(await iterator.next() == 1)
 
-        replacement.encoder.sendReady(cols: 80, rows: 24)
+        replacement.encoder.send(.ready(cols: 80, rows: 24))
         #expect(replacement.encoder.waitForPendingWritesForTesting())
         replacementOutput.fileHandleForWriting.closeFile()
         #expect(replacementOutput.fileHandleForReading.readDataToEndOfFile().isEmpty == false)

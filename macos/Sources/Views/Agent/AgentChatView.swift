@@ -18,17 +18,25 @@ private struct ScrollViewHeightKey: PreferenceKey {
 }
 
 public struct AgentChatView: View {
-    public init(state: AgentChatState, isInsertMode: Bool, encoder: InputEncoder? = nil, cellHeight: CGFloat = 16) {
+    public enum Action: Equatable, Sendable {
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+        case executeCommand(name: String)
+        case agentToolToggle(messageID: UInt32)
+        case chatScrolledAwayFromBottom
+        case chatReturnedToBottom
+    }
+
+    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?, cellHeight: CGFloat = 16) {
         self.state = state
         self.isInsertMode = isInsertMode
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.cellHeight = cellHeight
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
     /// Cell dimensions from the Metal renderer, used to size the prompt gap.
     public var cellHeight: CGFloat = 16
 
@@ -43,7 +51,12 @@ public struct AgentChatView: View {
     public var body: some View {
         VStack(spacing: 0) {
             // Header bar
-            AgentChatHeaderView(state: state, encoder: encoder)
+            AgentChatHeaderView(state: state, sendAction: childAction { action in
+                switch action {
+                case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
+                case .executeCommand(let name): .executeCommand(name: name)
+                }
+            })
 
             // Messages: bottom-anchored so few messages cluster near the
             // prompt input rather than leaving a void below them.
@@ -125,7 +138,11 @@ public struct AgentChatView: View {
             }
 
             // Prompt (completion popup + input capsule)
-            AgentPromptView(state: state, isInsertMode: isInsertMode, encoder: encoder)
+            AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { action in
+                switch action {
+                case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
+                }
+            })
         }
         .background(theme.agentPanelBg)
     }
@@ -176,15 +193,19 @@ public struct AgentChatView: View {
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
         case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
         case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, encoder: encoder, styledLineView: { runs, fontSize, mono in
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
         case .approvalToolCall(_, let name, let summary, let toolCallId, let previewKind, let previewLines):
-            AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines, encoder: encoder)
+            AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines, sendAction: childAction { action in
+                switch action {
+                case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
+                }
+            })
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -559,10 +580,23 @@ public struct AgentChatView: View {
         guard scrolledUp != userHasScrolledUp else { return }
         userHasScrolledUp = scrolledUp
         if scrolledUp {
-            encoder?.sendChatScrolledAwayFromBottom()
+            sendAction?(.chatScrolledAwayFromBottom)
         } else {
-            encoder?.sendChatReturnedToBottom()
+            sendAction?(.chatReturnedToBottom)
         }
+    }
+
+    private var toolCallAction: ViewActionHandler<AgentToolCallCard.Action>? {
+        childAction { action in
+            switch action {
+            case .toggle(let messageID): .agentToolToggle(messageID: messageID)
+            }
+        }
+    }
+
+    private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {
+        guard let sendAction else { return nil }
+        return { action in sendAction(translate(action)) }
     }
 
     /// Scrolls to the last message with smooth animation.
@@ -599,6 +633,6 @@ private func agentChatPreviewState() -> AgentChatState {
 }
 
 #Preview("Agent Chat", traits: .mingaChrome) {
-    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, encoder: nil, cellHeight: 18)
+    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
         .frame(width: 760, height: 600)
 }

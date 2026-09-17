@@ -1,50 +1,48 @@
-/// Tests that GUI action calls through InputEncoder are correctly recorded.
-///
-/// These tests verify the contract that views use: call encoder?.sendFoo()
-/// and the correct action is dispatched. Since views accept InputEncoder?
-/// (not ProtocolEncoder), these tests use SpyEncoder to verify the protocol
-/// abstraction works end-to-end.
-///
-/// Previously, some views cast to ProtocolEncoder, which meant SpyEncoder
-/// never received the calls. The InputEncoder cast fix (commit e9212e03)
-/// made these testable.
+/// Tests that the canonical outbound values preserve action identity and order.
 
 import MingaUI
 import Testing
 import Foundation
 import os
 
-@Suite("GUI Action Recording via InputEncoder")
+@Suite("Canonical Outbound Action Recording")
 struct GUIActionEncoderTests {
+
+    @Test("an explicitly inert preview sink accepts and discards its action")
+    func deliberatePreviewDiscard() {
+        let encoder = ClosureOutboundActionEncoder { _ in .accepted }
+
+        #expect(encoder.send(.newTab) == .accepted)
+    }
 
     @Test("sendSelectTab records tab ID")
     func selectTab() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendSelectTab(id: 42)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.selectTab(id: 42))
 
-        #expect(spy.guiActions == [.selectTab(id: 42)])
+        #expect(spy.actions == [.selectTab(id: 42)])
     }
 
     @Test("sendCloseTab records tab ID")
     func closeTab() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendCloseTab(id: 99)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.closeTab(id: 99))
 
-        #expect(spy.guiActions == [.closeTab(id: 99)])
+        #expect(spy.actions == [.closeTab(id: 99)])
     }
 
     @Test("tab context menu actions record tab IDs")
     func tabContextMenuActions() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendTabPin(id: 7)
-        encoder.sendTabUnpin(id: 8)
-        encoder.sendTabMoveLeft(id: 9)
-        encoder.sendTabMoveRight(id: 10)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.tabPin(id: 7))
+        encoder.send(.tabUnpin(id: 8))
+        encoder.send(.tabMoveLeft(id: 9))
+        encoder.send(.tabMoveRight(id: 10))
 
-        #expect(spy.guiActions == [
+        #expect(spy.actions == [
             .tabPin(id: 7),
             .tabUnpin(id: 8),
             .tabMoveLeft(id: 9),
@@ -55,95 +53,95 @@ struct GUIActionEncoderTests {
     @Test("sendNewTab records action")
     func newTab() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendNewTab()
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.newTab)
 
-        #expect(spy.guiActions == [.newTab])
+        #expect(spy.actions == [.newTab])
     }
 
     @Test("sendSystemWillSleep records action")
     func systemWillSleep() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendSystemWillSleep()
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.systemWillSleep)
 
-        #expect(spy.guiActions == [.systemWillSleep])
+        #expect(spy.actions == [.systemWillSleep])
     }
 
     @Test("sendSystemDidWake records action")
     func systemDidWake() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendSystemDidWake()
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.systemDidWake)
 
-        #expect(spy.guiActions == [.systemDidWake])
+        #expect(spy.actions == [.systemDidWake])
     }
 
     @Test("sendFoldToggleAtLine records buffer line")
     func foldToggleAtLine() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendFoldToggleAtLine(windowId: 7, bufferLine: 42)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.foldToggleAtLine(windowID: 7, bufferLine: 42))
 
-        #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 42)])
+        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, bufferLine: 42)])
     }
 
     @Test("sendFileTreeClick records index")
     func fileTreeClick() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendFileTreeClick(index: 5)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.fileTreeClick(index: 5))
 
-        #expect(spy.guiActions == [.fileTreeClick(index: 5)])
+        #expect(spy.actions == [.fileTreeClick(index: 5)])
     }
 
     @Test("sendFileTreeToggle records index")
     func fileTreeToggle() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendFileTreeToggle(index: 3)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.fileTreeToggle(index: 3))
 
-        #expect(spy.guiActions == [.fileTreeToggle(index: 3)])
+        #expect(spy.actions == [.fileTreeToggle(index: 3)])
     }
 
     @Test("sendCompletionSelect records index")
     func completionSelect() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendCompletionSelect(index: 0)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.completionSelect(index: 0))
 
-        #expect(spy.guiActions == [.completionSelect(index: 0)])
+        #expect(spy.actions == [.completionSelect(index: 0)])
     }
 
 
     @Test("sendTogglePanel records panel ID")
     func togglePanel() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendTogglePanel(panel: 0)
-        encoder.sendTogglePanel(panel: 1)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.togglePanel(panel: 0))
+        encoder.send(.togglePanel(panel: 1))
 
-        #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 1)])
+        #expect(spy.actions == [.togglePanel(panel: 0), .togglePanel(panel: 1)])
     }
 
     @Test("sendSidebarAction records semantic action")
     func sidebarAction() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendSidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle")
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.sidebarAction(sidebarID: "git_status", kind: "git_status", action: "toggle"))
 
-        #expect(spy.guiActions == [.sidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle")])
+        #expect(spy.actions == [.sidebarAction(sidebarID: "git_status", kind: "git_status", action: "toggle")])
     }
 
     @Test("panel actions record correctly")
     func panelActions() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendPanelSwitchTab(index: 2)
-        encoder.sendPanelDismiss()
-        encoder.sendPanelResize(heightPercent: 40)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.panelSwitchTab(index: 2))
+        encoder.send(.panelDismiss)
+        encoder.send(.panelResize(heightPercent: 40))
 
-        #expect(spy.guiActions == [
+        #expect(spy.actions == [
             .panelSwitchTab(index: 2),
             .panelDismiss,
             .panelResize(heightPercent: 40)
@@ -153,13 +151,13 @@ struct GUIActionEncoderTests {
     @Test("file tree management actions record correctly")
     func fileTreeManagement() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendFileTreeNewFile(parentIndex: 5)
-        encoder.sendFileTreeNewFolder(parentIndex: 3)
-        encoder.sendFileTreeCollapseAll()
-        encoder.sendFileTreeRefresh()
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.fileTreeNewFile(parentIndex: 5))
+        encoder.send(.fileTreeNewFolder(parentIndex: 3))
+        encoder.send(.fileTreeCollapseAll)
+        encoder.send(.fileTreeRefresh)
 
-        #expect(spy.guiActions == [
+        #expect(spy.actions == [
             .fileTreeNewFile(parentIndex: 5), .fileTreeNewFolder(parentIndex: 3),
             .fileTreeCollapseAll, .fileTreeRefresh
         ])
@@ -168,22 +166,22 @@ struct GUIActionEncoderTests {
     @Test("file tree drop action records stable target identity and source paths")
     func fileTreeDropAction() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendFileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetId: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetID: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0))
 
-        #expect(spy.guiActions == [
-            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetId: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0)
+        #expect(spy.actions == [
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetID: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0)
         ])
     }
 
     @Test("file tree edit confirm and cancel actions record correctly")
     func fileTreeEditActions() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendFileTreeEditConfirm(token: 0x01020304, text: "newfile.txt")
-        encoder.sendFileTreeEditCancel()
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.fileTreeEditConfirm(token: 0x01020304, text: "newfile.txt"))
+        encoder.send(.fileTreeEditCancel)
 
-        #expect(spy.guiActions == [
+        #expect(spy.actions == [
             .fileTreeEditConfirm(token: 0x01020304, text: "newfile.txt"),
             .fileTreeEditCancel
         ])
@@ -193,26 +191,26 @@ struct GUIActionEncoderTests {
     @Test("sendAgentToolToggle records stable message ID")
     func agentToolToggle() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendAgentToolToggle(messageID: 0x01020304)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.agentToolToggle(messageID: 0x01020304))
 
-        #expect(spy.guiActions == [.agentToolToggle(messageID: 0x01020304)])
+        #expect(spy.actions == [.agentToolToggle(messageID: 0x01020304)])
     }
 
     @Test("sendOpenFile records path")
     func openFile() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendOpenFile(path: "/home/user/project/lib/editor.ex")
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.openFile(path: "/home/user/project/lib/editor.ex"))
 
-        #expect(spy.guiActions == [.openFile(path: "/home/user/project/lib/editor.ex")])
+        #expect(spy.actions == [.openFile(path: "/home/user/project/lib/editor.ex")])
     }
 
     @Test("key press recording captures codepoint and modifiers")
     func keyPress() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendKeyPress(codepoint: 27, modifiers: 0x02) // Escape + Ctrl
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.keyPress(codepoint: 27, modifiers: 0x02, sequence: 0)) // Escape + Ctrl
 
         #expect(spy.keyPressCalls.count == 1)
         #expect(spy.keyPressCalls[0].codepoint == 27)
@@ -222,9 +220,9 @@ struct GUIActionEncoderTests {
     @Test("mouse event recording captures all fields")
     func mouseEvent() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendMouseEvent(row: 10, col: 20, button: MOUSE_BUTTON_LEFT,
-                               modifiers: 0x01, eventType: MOUSE_PRESS, clickCount: 2)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.mouse(row: 10, column: 20, button: MOUSE_BUTTON_LEFT,
+                            modifiers: 0x01, eventType: MOUSE_PRESS, clickCount: 2))
 
         #expect(spy.mouseEventCalls.count == 1)
         #expect(spy.mouseEventCalls[0].row == 10)
@@ -236,21 +234,21 @@ struct GUIActionEncoderTests {
     @Test("sendExecuteCommand records command name")
     func executeCommand() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendExecuteCommand(name: "buffer_prev")
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.executeCommand(name: "buffer_prev"))
 
-        #expect(spy.guiActions == [.executeCommand(name: "buffer_prev")])
+        #expect(spy.actions == [.executeCommand(name: "buffer_prev")])
     }
 
     @Test("sendExecuteCommand handles various command names")
     func executeCommandVariety() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendExecuteCommand(name: "split_vertical")
-        encoder.sendExecuteCommand(name: "find_file")
-        encoder.sendExecuteCommand(name: "open_config")
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.executeCommand(name: "split_vertical"))
+        encoder.send(.executeCommand(name: "find_file"))
+        encoder.send(.executeCommand(name: "open_config"))
 
-        #expect(spy.guiActions == [
+        #expect(spy.actions == [
             .executeCommand(name: "split_vertical"),
             .executeCommand(name: "find_file"),
             .executeCommand(name: "open_config")
@@ -260,22 +258,22 @@ struct GUIActionEncoderTests {
     @Test("multiple action types accumulate independently")
     func mixedActions() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendSelectTab(id: 1)
-        encoder.sendPasteEvent(text: "hello")
-        encoder.sendFileTreeClick(index: 0)
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.selectTab(id: 1))
+        encoder.send(.paste("hello"))
+        encoder.send(.fileTreeClick(index: 0))
 
-        #expect(spy.guiActions.count == 2)
+        #expect(spy.actions.count == 3)
         #expect(spy.pasteCalls.count == 1)
     }
 
     @Test("chat pin intents record scrolled-away and returned-to-bottom")
     func chatPinIntents() {
         let spy = SpyEncoder()
-        let encoder: InputEncoder = spy
-        encoder.sendChatScrolledAwayFromBottom()
-        encoder.sendChatReturnedToBottom()
+        let encoder: OutboundActionEncoding = spy
+        encoder.send(.chatScrolledAwayFromBottom)
+        encoder.send(.chatReturnedToBottom)
 
-        #expect(spy.guiActions == [.chatScrolledAwayFromBottom, .chatReturnedToBottom])
+        #expect(spy.actions == [.chatScrolledAwayFromBottom, .chatReturnedToBottom])
     }
 }

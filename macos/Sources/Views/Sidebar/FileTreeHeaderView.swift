@@ -7,16 +7,23 @@
 import SwiftUI
 
 public struct FileTreeHeaderView: View {
-    public init(fileTreeState: FileTreeState, encoder: InputEncoder? = nil, branchName: String, leadingPadding: CGFloat) {
+    public enum Action: Equatable, Sendable {
+        case newFile(parentIndex: UInt16)
+        case newFolder(parentIndex: UInt16)
+        case refresh
+        case collapseAll
+    }
+
+    public init(fileTreeState: FileTreeState, sendAction: ViewActionHandler<Action>?, branchName: String, leadingPadding: CGFloat) {
         self.fileTreeState = fileTreeState
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.branchName = branchName
         self.leadingPadding = leadingPadding
     }
     public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
     public let branchName: String
     public let leadingPadding: CGFloat
 
@@ -98,7 +105,7 @@ public struct FileTreeHeaderView: View {
     private var actionButtons: some View {
         HStack(spacing: 0) {
             headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
-                encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
+                sendAction?(.newFile(parentIndex: UInt16(fileTreeState.selectedIndex)))
             }
 
             overflowMenu
@@ -108,13 +115,13 @@ public struct FileTreeHeaderView: View {
     private var overflowMenu: some View {
         Menu {
             Button("New Folder…") {
-                encoder?.sendFileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex))
+                sendAction?(.newFolder(parentIndex: UInt16(fileTreeState.selectedIndex)))
             }
             Button("Refresh") {
-                encoder?.sendFileTreeRefresh()
+                sendAction?(.refresh)
             }
             Button("Collapse All") {
-                encoder?.sendFileTreeCollapseAll()
+                sendAction?(.collapseAll)
             }
         } label: {
             Image(systemName: "ellipsis")

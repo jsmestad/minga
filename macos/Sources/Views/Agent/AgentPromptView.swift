@@ -3,16 +3,20 @@ import MingaProtocol
 import CoreText
 
 public struct AgentPromptView: View {
-    public init(state: AgentChatState, isInsertMode: Bool, encoder: InputEncoder? = nil) {
+    public enum Action: Equatable, Sendable {
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+    }
+
+    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.isInsertMode = isInsertMode
-        self.encoder = encoder
+        self.sendAction = sendAction
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
 
     /// Whether the agent is actively streaming a response.
     private var isStreaming: Bool { state.status.isWorking }
@@ -131,7 +135,7 @@ public struct AgentPromptView: View {
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
             if !isInsertMode && !isStreaming {
-                encoder?.sendKeyPress(codepoint: 0x69, modifiers: 0)
+                sendAction?(.keyPress(codepoint: 0x69, modifiers: 0, sequence: 0))
             }
         }
         .accessibilityElement(children: .combine)
@@ -177,10 +181,10 @@ public struct AgentPromptView: View {
         Button {
             if isStreaming {
                 // Send Ctrl+C to abort
-                encoder?.sendKeyPress(codepoint: 0x63, modifiers: 0x02)
+                sendAction?(.keyPress(codepoint: 0x63, modifiers: 0x02, sequence: 0))
             } else if canSend {
                 // Send Enter to submit
-                encoder?.sendKeyPress(codepoint: 0x0D, modifiers: 0)
+                sendAction?(.keyPress(codepoint: 0x0D, modifiers: 0, sequence: 0))
             }
         } label: {
             Image(systemName: actionButtonIcon)

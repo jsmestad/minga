@@ -54,10 +54,10 @@ struct OperationProtocolTests {
     func encodeNativeResult() {
         let pipe = Pipe()
         let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
-        let evidence = NativePresentationEvidence(targetToken: 72, applicationRevision: 44, generation: 3, frameSeq: 10, windowID: 4, focusReady: true, boundary: .metalDrawableCompleted)
-        let lastVisible = NativePresentationEvidence(targetToken: 61, applicationRevision: 43, generation: 2, frameSeq: 9, windowID: 1, focusReady: true, boundary: .metalDrawableCompleted)
+        let evidence = MingaProtocol.NativePresentationEvidence(targetToken: 72, applicationRevision: 44, generation: 3, frameSeq: 10, windowID: 4, focusReady: true, boundary: .metalDrawableCompleted)
+        let lastVisible = MingaProtocol.NativePresentationEvidence(targetToken: 61, applicationRevision: 43, generation: 2, frameSeq: 9, windowID: 1, focusReady: true, boundary: .metalDrawableCompleted)
 
-        encoder.sendOperationNativeResult(NativeOperationResult(operationID: 71, targetToken: 72, outcome: .ready, evidence: evidence, lastVisible: lastVisible))
+        encoder.send(.operationNativeResult(MingaProtocol.NativeOperationResult(operationID: 71, targetToken: 72, outcome: .ready, evidence: evidence, lastVisible: lastVisible)))
         #expect(encoder.waitForPendingWritesForTesting())
         pipe.fileHandleForWriting.closeFile()
         let framed = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -86,9 +86,9 @@ struct OperationProtocolTests {
     func encodeNativePresentationObservation() {
         let pipe = Pipe()
         let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
-        let evidence = NativePresentationEvidence(targetToken: 72, applicationRevision: 44, generation: 3, frameSeq: 10, windowID: 4, focusReady: true, boundary: .metalDrawableCompleted)
+        let evidence = MingaProtocol.NativePresentationEvidence(targetToken: 72, applicationRevision: 44, generation: 3, frameSeq: 10, windowID: 4, focusReady: true, boundary: .metalDrawableCompleted)
 
-        encoder.sendNativePresentationObservation(evidence)
+        encoder.send(.nativePresentationObservation(evidence))
         #expect(encoder.waitForPendingWritesForTesting())
         pipe.fileHandleForWriting.closeFile()
         let framed = pipe.fileHandleForReading.readDataToEndOfFile()

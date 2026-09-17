@@ -5,21 +5,26 @@ import MingaProtocol
 
 /// Renders editor notifications owned by the BEAM.
 public struct NotificationCenterView: View {
-    public init(state: NotificationCenterState, encoder: InputEncoder? = nil, bottomInset: CGFloat) {
+    public enum Action: Equatable, Sendable {
+        case dismiss(id: String)
+        case invoke(id: String, actionID: String)
+    }
+
+    public init(state: NotificationCenterState, sendAction: ViewActionHandler<Action>?, bottomInset: CGFloat) {
         self.state = state
-        self.encoder = encoder
+        self.sendAction = sendAction
         self.bottomInset = bottomInset
     }
     public let state: NotificationCenterState
     @Environment(\.themeColors) private var theme
 
-    public let encoder: InputEncoder?
+    public let sendAction: ViewActionHandler<Action>?
     public let bottomInset: CGFloat
 
     public var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
             ForEach(state.notifications) { notification in
-                NotificationCard(notification: notification, encoder: encoder)
+                NotificationCard(notification: notification, sendAction: sendAction)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -34,7 +39,7 @@ public struct NotificationCenterView: View {
 private struct NotificationCard: View {
     let notification: EditorNotification
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    let sendAction: ViewActionHandler<NotificationCenterView.Action>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -53,7 +58,7 @@ private struct NotificationCard: View {
 
                         if notification.dismissable {
                             Button {
-                                encoder?.sendNotificationDismiss(id: notification.id)
+                                sendAction?(.dismiss(id: notification.id))
                             } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 10, weight: .bold))
@@ -79,7 +84,7 @@ private struct NotificationCard: View {
                 HStack(spacing: 6) {
                     ForEach(notification.actions) { action in
                         Button(action.label) {
-                            encoder?.sendNotificationAction(id: notification.id, actionId: action.id)
+                            sendAction?(.invoke(id: notification.id, actionID: action.id))
                         }
                         .buttonStyle(.plain)
                         .font(.system(size: 11, weight: .medium))
@@ -177,7 +182,7 @@ private struct NotificationCard: View {
             ]
         ),
     ])
-    return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
+    return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
         .frame(width: 800, height: 600)
         .background(theme.editorBg)
         .environment(theme)
@@ -227,7 +232,7 @@ private struct NotificationCard: View {
             actions: []
         ),
     ])
-    return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
+    return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
         .frame(width: 800, height: 600)
         .background(theme.editorBg)
         .environment(theme)
