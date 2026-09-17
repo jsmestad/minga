@@ -137,6 +137,10 @@ defmodule Minga.Test.EditorCase do
     # reads the global Config.Options for clipboard. Each test is isolated.
     BufferProcess.set_option(buffer, :clipboard, clipboard)
 
+    # Editor tests drive saves explicitly. Disable background autosave so a
+    # shared options reset cannot race assertions about dirty buffer state.
+    BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
+
     # Pin editing model per-editor so async tests don't race on global ETS.
     editing_model = Keyword.get(opts, :editing_model, :vim)
     # Backend defaults to :headless; override to :tui for TUI-specific tests.
