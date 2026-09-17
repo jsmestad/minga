@@ -160,6 +160,75 @@ struct CompletionOverlayViewTests {
             _ = try sut.inspect().find(ViewType.Divider.self)
         }
     }
+
+    @Test("Completion choices expose selected state and activate the exact offered item")
+    @MainActor func accessibleCompletionActivation() throws {
+        let state = CompletionState()
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1,
+            rawItems: [
+                Wire.CompletionItem(kind: 1, label: "def", detail: "keyword"),
+                Wire.CompletionItem(kind: 2, label: "defmodule", detail: "module"),
+            ],
+            documentation: ""
+        )
+        let spy = SpyEncoder()
+        let sut = CompletionOverlay(state: state, encoder: spy)
+            .environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        let selected = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "defmodule" })
+
+        #expect(try selected.accessibilityValue().string() == "selected, module")
+        try selected.tap()
+        #expect(spy.guiActions == [.completionSelect(index: 1)])
+    }
+
+    @Test("Retained completion choice cannot activate a replacement item")
+    @MainActor func staleCompletionActivationIsRejected() throws {
+        let state = CompletionState()
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
+            rawItems: [Wire.CompletionItem(kind: 1, label: "original", detail: "function")],
+            documentation: ""
+        )
+        let spy = SpyEncoder()
+        let sut = CompletionOverlay(state: state, encoder: spy)
+            .environment(\.themeColors, ThemeColors())
+        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
+
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
+            rawItems: [Wire.CompletionItem(kind: 2, label: "replacement", detail: "module")],
+            documentation: ""
+        )
+        try retained.tap()
+
+        #expect(spy.guiActions.isEmpty)
+    }
+
+    @Test("Retained completion choice rejects an identical replacement presentation")
+    @MainActor func identicalReplacementCompletionIsRejected() throws {
+        let state = CompletionState()
+        let item = Wire.CompletionItem(kind: 1, label: "same label", detail: "same detail")
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
+            rawItems: [item], documentation: ""
+        )
+        let spy = SpyEncoder()
+        let sut = CompletionOverlay(state: state, encoder: spy)
+            .environment(\.themeColors, ThemeColors())
+        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
+
+        // The wire presentation does not expose the LSP insertion edit. A new owner
+        // revision distinguishes replacement offers even when all visible fields match.
+        state.update(
+            visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
+            rawItems: [item], documentation: ""
+        )
+        try retained.tap()
+
+        #expect(spy.guiActions.isEmpty)
+    }
 }
 
 // MARK: - Semantic Popups
@@ -853,6 +922,33 @@ struct StatusBarViewViewTests {
 @Suite("TabBarView View Structure")
 struct TabBarViewViewTests {
 
+    private func workspaceSnapshot(id: UInt16, label: String) -> WorkspacePresentationSnapshot {
+        WorkspacePresentationSnapshot(
+            version: 1,
+            activeWorkspaceId: id,
+            mode: 0,
+            flags: 0,
+            workspaces: [
+                Wire.WorkspaceEntry(
+                    id: id,
+                    kind: 0,
+                    status: 0,
+                    flags: 0,
+                    colorR: 0,
+                    colorG: 0,
+                    colorB: 255,
+                    tabCount: 1,
+                    draftCount: 0,
+                    conflictCount: 0,
+                    runningBackgroundCount: 0,
+                    label: label,
+                    icon: "folder"
+                ),
+            ],
+            visibleTabs: []
+        )
+    }
+
     private func wireTab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> Wire.TabEntry {
         Wire.TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColorRGB: 0, icon: "", label: label ?? "tab-\(id).ex")
     }
@@ -880,6 +976,84 @@ struct TabBarViewViewTests {
         #expect(strings.contains("test.ex"))
     }
 
+    @Test("Tabs expose active modified state and a distinct close control")
+    @MainActor func tabAccessibilityContract() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            Wire.TabEntry(id: 41, groupId: 0, isActive: true, isDirty: true, isAgent: false,
+                          hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "editor.ex"),
+        ])
+        let body = try TabBarView(tabBarState: state, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let tab = try #require(body.findAll(ViewType.HStack.self).first {
+            (try? $0.accessibilityLabel().string()) == "File tab editor.ex"
+        })
+        let close = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Close editor.ex"
+        })
+
+        #expect(try tab.accessibilityValue().string() == "active, modified")
+        #expect(try close.accessibilityLabel().string() == "Close editor.ex")
+    }
+
+    @Test("Workspace indicator controls have explicit native actions")
+    @MainActor func workspaceIndicatorAccessibilityContract() throws {
+        let snapshot = WorkspacePresentationSnapshot(
+            version: 1, activeWorkspaceId: 7, mode: 0, flags: 0,
+            workspaces: [
+                Wire.WorkspaceEntry(id: 7, kind: 0, status: 1, flags: 0, colorR: 0, colorG: 0, colorB: 255,
+                                    tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0,
+                                    label: "Project", icon: "folder"),
+            ],
+            visibleTabs: []
+        )
+        let workspace = try #require(snapshot.workspaces.first)
+        let owner = TabBarState()
+        owner.install(snapshot)
+        let spy = SpyEncoder()
+        let body = try WorkspaceIndicatorView(
+            workspace: workspace,
+            presentationRevision: owner.workspacePresentationRevision,
+            owner: owner,
+            encoder: spy,
+            barHeight: 34
+        )
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let buttons = body.findAll(ViewType.Button.self)
+        let workspaceList = try #require(buttons.first {
+            (try? $0.accessibilityLabel().string()) == "Show workspace list"
+        })
+
+        #expect(buttons.contains { (try? $0.accessibilityLabel().string()) == "Change icon for workspace Project" })
+        try workspaceList.tap()
+        #expect(spy.guiActions == [.executeCommand(name: "workspace_list")])
+    }
+
+    @Test("Retained workspace actions reject a same-ID replacement")
+    @MainActor func retainedWorkspaceActionsRejectSameIDReplacement() throws {
+        let original = workspaceSnapshot(id: 7, label: "Project")
+        let owner = TabBarState()
+        owner.install(original)
+        let spy = SpyEncoder()
+        let workspace = try #require(original.workspaces.first)
+        let sut = WorkspaceIndicatorView(
+            workspace: workspace,
+            presentationRevision: owner.workspacePresentationRevision,
+            owner: owner,
+            encoder: spy,
+            barHeight: 34
+        )
+
+        owner.install(workspaceSnapshot(id: 7, label: "Project"))
+        sut.performTargetedAction(.setIcon("star"))
+        sut.performTargetedAction(.rename("Renamed"))
+        sut.performTargetedAction(.close)
+
+        #expect(spy.guiActions.isEmpty)
+    }
+
     @Test("Native close buttons emit the represented tab IDs without selecting them")
     @MainActor func closeButtonsEmitRepresentedTabIds() throws {
         let spy = SpyEncoder()
@@ -902,6 +1076,23 @@ struct TabBarViewViewTests {
 
         #expect(closedIds.sorted() == [41, 73])
         #expect(!spy.guiActions.contains(.selectTab(id: 73)))
+    }
+
+    @Test("Retained tab close control cannot close a replacement tab")
+    @MainActor func staleCloseControlIsRejected() throws {
+        let spy = SpyEncoder()
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [wireTab(id: 41, isActive: true, label: "original.ex")])
+        let sut = TabBarView(tabBarState: state, encoder: spy)
+            .environment(\.themeColors, ThemeColors())
+        let close = try #require(sut.inspect().findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Close original.ex"
+        })
+
+        state.update(activeIndex: 0, entries: [wireTab(id: 41, isActive: true, label: "replacement.ex")])
+        try close.tap()
+
+        #expect(spy.guiActions.isEmpty)
     }
 
     @Test("Inactive tab context menu actions use id-scoped events")
@@ -1558,10 +1749,136 @@ struct BottomPanelViewTests {
     }
 }
 
+// MARK: - MinibufferView
+
+@Suite("MinibufferView accessibility")
+struct MinibufferViewAccessibilityTests {
+    @Test("Minibuffer candidates are native labelled choices")
+    @MainActor func candidateActivation() throws {
+        let state = MinibufferState()
+        state.update(
+            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            prompt: "M-x ", input: "org", context: "", selectedIndex: 1,
+            totalCandidates: 2,
+            rawCandidates: [
+                Wire.MinibufferCandidate(matchScore: 100, label: "org-mode", description: "Open Org mode", annotation: "", matchPositions: []),
+                Wire.MinibufferCandidate(matchScore: 90, label: "org-agenda", description: "Open agenda", annotation: "SPC o a", matchPositions: []),
+            ]
+        )
+        let spy = SpyEncoder()
+        let sut = MinibufferView(state: state, encoder: spy)
+            .environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        let selected = try #require(buttons.first {
+            (try? $0.accessibilityLabel().string()) == "org-agenda"
+        })
+
+        #expect(try selected.accessibilityValue().string() == "selected, Open agenda")
+        try selected.tap()
+        #expect(spy.guiActions == [.minibufferSelect(index: 1)])
+    }
+
+    @Test("Retained minibuffer choice cannot activate after query replacement")
+    @MainActor func staleCandidateActivationIsRejected() throws {
+        let state = MinibufferState()
+        state.update(
+            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            prompt: "M-x ", input: "old", context: "", selectedIndex: 0,
+            totalCandidates: 1,
+            rawCandidates: [
+                Wire.MinibufferCandidate(matchScore: 100, label: "old-command", description: "", annotation: "", matchPositions: []),
+            ]
+        )
+        let spy = SpyEncoder()
+        let sut = MinibufferView(state: state, encoder: spy)
+            .environment(\.themeColors, ThemeColors())
+        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
+
+        state.update(
+            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            prompt: "M-x ", input: "new", context: "", selectedIndex: 0,
+            totalCandidates: 1,
+            rawCandidates: [
+                Wire.MinibufferCandidate(matchScore: 100, label: "new-command", description: "", annotation: "", matchPositions: []),
+            ]
+        )
+        try retained.tap()
+
+        #expect(spy.guiActions.isEmpty)
+    }
+}
+
 // MARK: - PickerOverlay
 
 @Suite("PickerOverlay semantic activation")
 struct PickerOverlayActivationTests {
+    @Test("Picker choice container reports loading and error state")
+    @MainActor func pickerContainerStatus() throws {
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 0, totalCount: 0,
+            markedCount: 0, title: "Find File", query: "", hasPreview: false,
+            rawItems: [], actionMenu: nil, loadStatus: .loading
+        )
+        let loadingBody = try PickerOverlay(state: state, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let loadingContainer = try #require(loadingBody.findAll(ViewType.Group.self).first {
+            (try? $0.accessibilityLabel().string()) == "Find File choices"
+        })
+        #expect(try loadingContainer.accessibilityValue().string() == "Loading")
+
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 0, totalCount: 0,
+            markedCount: 0, title: "Find File", query: "", hasPreview: false,
+            rawItems: [], actionMenu: nil, loadStatus: .error("permission denied")
+        )
+        let errorBody = try PickerOverlay(state: state, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let errorContainer = try #require(errorBody.findAll(ViewType.Group.self).first {
+            (try? $0.accessibilityLabel().string()) == "Find File choices"
+        })
+        #expect(try errorContainer.accessibilityValue().string() == "Error: permission denied")
+    }
+
+    @Test("Picker choices expose selected marked and unavailable state")
+    @MainActor func pickerAccessibilityState() throws {
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 1, title: "Find File", query: "", hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0x02, label: "Selected", description: "lib/selected.ex", annotation: "", matchPositions: [], activationID: 41),
+            ],
+            actionMenu: nil, activationGeneration: 99
+        )
+        let body = try PickerOverlay(state: state, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let selected = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Selected"
+        })
+
+        #expect(try selected.accessibilityValue().string() == "selected, marked, lib/selected.ex")
+
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Find File", query: "", hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0, label: "Unavailable", description: "", annotation: "", matchPositions: [], activationID: 0),
+            ],
+            actionMenu: nil, activationGeneration: 0
+        )
+        let unavailableBody = try PickerOverlay(state: state, encoder: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let unavailable = try #require(unavailableBody.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Unavailable"
+        })
+        #expect(try unavailable.accessibilityValue().string() == "selected, unavailable")
+    }
+
     @Test("a retained nonselected result reports its original offered identity")
     @MainActor func retainedResultActivation() throws {
         let spy = SpyEncoder()

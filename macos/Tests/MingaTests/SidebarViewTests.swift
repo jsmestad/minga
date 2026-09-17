@@ -754,6 +754,36 @@ struct GitStatusViewSectionTests {
         #expect(strings.contains("editor.ex"))
     }
 
+    @Test("Git sections and rows expose names and current state without hover")
+    @MainActor func gitAccessibilityContract() throws {
+        let state = GitStatusState()
+        publishGitStatus(state, entries: [
+            GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/minga/editor.ex"),
+        ])
+        let body = try GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let stacks = body.findAll(ViewType.HStack.self)
+        let section = try #require(stacks.first {
+            (try? $0.accessibilityLabel().string()) == "Changes"
+        })
+        let row = try #require(stacks.first {
+            (try? $0.accessibilityLabel().string()) == "Modified file: editor.ex"
+        })
+
+        #expect(try section.accessibilityValue().string() == "1 files, expanded")
+        #expect(try row.accessibilityValue().string() == "Changes, lib/minga/editor.ex")
+
+        state.toggleSection(.changed)
+        let collapsedBody = try GitStatusView(state: state, encoder: nil, usesPreviewEagerLayout: true)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let collapsed = try #require(collapsedBody.findAll(ViewType.HStack.self).first {
+            (try? $0.accessibilityLabel().string()) == "Changes"
+        })
+        #expect(try collapsed.accessibilityValue().string() == "1 files, collapsed")
+    }
+
     @Test("Draft and collapsed sections survive Git sidebar view reconstruction")
     @MainActor func localSessionSurvivesViewReconstruction() throws {
         let state = GitStatusState()

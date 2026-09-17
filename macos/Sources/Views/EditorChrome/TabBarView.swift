@@ -86,7 +86,13 @@ public struct TabBarView: View {
 
             // Legacy workspace indicator, hidden when the canonical workspace header is active.
             if !tabBarState.hasCanonicalWorkspaceTabs, let activeWorkspace = tabBarState.activeWorkspace {
-                WorkspaceIndicatorView(workspace: activeWorkspace, encoder: encoder, barHeight: barHeight)
+                WorkspaceIndicatorView(
+                    workspace: activeWorkspace,
+                    presentationRevision: tabBarState.workspacePresentationRevision,
+                    owner: tabBarState,
+                    encoder: encoder,
+                    barHeight: barHeight
+                )
                 groupSeparator(color: activeWorkspace.color)
             }
 
@@ -403,7 +409,7 @@ public struct TabBarView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            encoder?.sendSelectTab(id: tab.id)
+            selectTab(tab)
         }
         .onHover { hovering in
             withAnimation(nil) {
@@ -429,9 +435,17 @@ public struct TabBarView: View {
                 dropTargetTabId = targeted ? tab.id : nil
             }
         }
+        .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("workspace-file-tab-\(tab.id)")
         .accessibilityLabel("File tab \(tab.label)")
         .accessibilityValue(tabAccessibilityValue(tab))
+        .accessibilityAddTraits(tab.isActive ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityAction {
+            selectTab(tab)
+        }
+        .accessibilityAction(named: Text("Close Tab")) {
+            closeTab(tab)
+        }
         .help(tab.label)
         .contextMenu {
             tabContextMenu(for: tab)
@@ -542,7 +556,7 @@ public struct TabBarView: View {
     @ViewBuilder
     private func closeButton(_ tab: TabEntry) -> some View {
         Button(action: {
-            encoder?.sendCloseTab(id: tab.id)
+            closeTab(tab)
         }) {
             Image(systemName: "xmark")
                 .font(.system(size: 7, weight: .bold))
@@ -554,8 +568,27 @@ public struct TabBarView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("workspace-file-tab-close-\(tab.id)")
+        .accessibilityLabel("Close \(tab.label)")
         .help("Close tab")
         .pointingHandCursor()
+    }
+
+    private func selectTab(_ tab: TabEntry) {
+        guard tabBarState.displayTabs.contains(where: { representsSameTab($0, tab) }) else { return }
+        encoder?.sendSelectTab(id: tab.id)
+    }
+
+    private func closeTab(_ tab: TabEntry) {
+        guard tabBarState.displayTabs.contains(where: { representsSameTab($0, tab) }) else { return }
+        encoder?.sendCloseTab(id: tab.id)
+    }
+
+    private func representsSameTab(_ lhs: TabEntry, _ rhs: TabEntry) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.groupId == rhs.groupId &&
+            lhs.isAgent == rhs.isAgent &&
+            lhs.label == rhs.label
     }
 
     @ViewBuilder
@@ -625,6 +658,7 @@ public struct TabBarView: View {
     private func tabAccessibilityValue(_ tab: TabEntry) -> String {
         var values: [String] = []
 
+        values.append(tab.isActive ? "active" : "inactive")
         if tab.isPinned {
             values.append("pinned")
         }
