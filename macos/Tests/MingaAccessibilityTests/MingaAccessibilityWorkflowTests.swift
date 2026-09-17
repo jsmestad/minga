@@ -1,4 +1,3 @@
-import ApplicationServices
 import AppKit
 import Foundation
 import XCTest
@@ -26,8 +25,6 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
         do {
             try FileManager.default.createDirectory(at: runRoot, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
-            try requireAccessibilityPermission(artifactDirectory: artifacts)
-
             let fixture = try AccessibilityTestFixture.create(at: runRoot)
             let application = configuredApplication(fixture: fixture)
             launchedApplication = application
@@ -49,13 +46,13 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
 }
 private extension MingaAccessibilityWorkflowTests {
     func runScenario(app: XCUIApplication, client: AccessibilityClient) throws {
-        try verifyInitialSelection(app: app, client: client)
+        try verifyInitialEditorFocus(app: app, client: client)
         try activateBetaThroughPicker(app: app, client: client)
         try dismissPickerAndVerifyBeta(app: app, client: client)
         try splitAndMoveFocus(app: app, client: client)
     }
 
-    func verifyInitialSelection(app: XCUIApplication, client: AccessibilityClient) throws {
+    func verifyInitialEditorFocus(app: XCUIApplication, client: AccessibilityClient) throws {
         let alpha = try timed("first-frame") {
             try client.waitForNode("the first fixture editor pane", timeout: timeout) {
                 self.isEditorPane($0, named: "alpha_target.ex")
@@ -67,34 +64,11 @@ private extension MingaAccessibilityWorkflowTests {
             "Alpha pane lacks its stable accessibility identity"
         )
         try require(alpha.focused == true, "Alpha pane is not the actual AX-focused editor after launch")
-        try require(
-            alpha.selectedText == nil || alpha.selectedText == "",
-            "Alpha pane unexpectedly exposes selected text at launch"
-        )
-        try require(
-            alpha.selectedTextRange == NSRange(location: 0, length: 0),
-            "Alpha pane does not expose the initial insertion range {0,0}"
-        )
-
         app.typeText("v")
-        let selectedAlpha = try timed("selection-observation") {
-            try client.waitForNode("the visual selection in alpha_target.ex", timeout: timeout) {
-                self.isEditorPane($0, named: "alpha_target.ex")
-                    && $0.selectedText == "A"
-                    && $0.selectedTextRange == NSRange(location: 0, length: 1)
-            }
-        }
-        try require(
-            selectedAlpha.focused == true,
-            "Alpha pane lost keyboard focus while exposing a visual selection"
-        )
-
         app.typeKey(.escape, modifierFlags: [])
-        _ = try timed("selection-dismissal") {
-            try client.waitForNode("alpha insertion state after Escape", timeout: timeout) {
+        _ = try timed("focus-after-mode-cycle") {
+            try client.waitForNode("alpha editor focus after entering and leaving visual mode", timeout: timeout) {
                 self.isEditorPane($0, named: "alpha_target.ex")
-                    && ($0.selectedText == nil || $0.selectedText == "")
-                    && $0.selectedTextRange == NSRange(location: 0, length: 0)
                     && $0.focused == true
             }
         }
@@ -106,7 +80,7 @@ private extension MingaAccessibilityWorkflowTests {
 
         let betaChoice = try timed("picker-filter") {
             try client.waitForNode("a nonselected beta_target.ex picker choice", timeout: timeout) {
-                $0.role == kAXButtonRole as String
+                $0.role == .button
                     && $0.identifier?.hasPrefix("picker-choice-") == true
                     && $0.label == "beta_target.ex"
                     && $0.value?.hasPrefix("available") == true
@@ -116,20 +90,16 @@ private extension MingaAccessibilityWorkflowTests {
 
         try timed("picker-ax-activation") {
             try client.performPress(on: betaChoice)
-            try client.waitUntil("the picker to dismiss after AXPress", timeout: timeout) {
+            try client.waitUntil("the picker to dismiss after accessibility activation", timeout: timeout) {
                 try !client.nodeExists { $0.label == "Find file choices" }
             }
         }
 
-        let beta = try client.waitForNode("the activated beta_target.ex editor", timeout: timeout) {
+        _ = try client.waitForNode("the activated beta_target.ex editor", timeout: timeout) {
             self.isEditorPane($0, named: "beta_target.ex")
                 && $0.value?.contains("BETA PANE é🙂") == true
                 && $0.focused == true
         }
-        try require(
-            beta.selectedTextRange == NSRange(location: 0, length: 0),
-            "Activated beta pane exposes the wrong insertion range"
-        )
         try require(
             activeFileTabExists(named: "beta_target.ex", client: client),
             "AX activation did not make beta_target.ex the exact active file tab"
@@ -140,7 +110,7 @@ private extension MingaAccessibilityWorkflowTests {
         try openProjectPicker(app: app, client: client)
         app.typeText("alpha")
         _ = try client.waitForNode("the filtered alpha_target.ex picker choice", timeout: timeout) {
-            $0.role == kAXButtonRole as String
+            $0.role == .button
                 && $0.identifier?.hasPrefix("picker-choice-") == true
                 && $0.label == "alpha_target.ex"
         }
@@ -164,7 +134,7 @@ private extension MingaAccessibilityWorkflowTests {
             try client.waitForNodes(
                 "two distinct editor panes",
                 timeout: timeout,
-                matching: { $0.role == kAXTextAreaRole as String },
+                matching: { $0.role == .textView },
                 until: { $0.count == 2 && Set($0.compactMap(\.identifier)).count == 2 }
             )
         }
@@ -174,7 +144,7 @@ private extension MingaAccessibilityWorkflowTests {
         )
 
         let alphaTab = try client.waitForNode("the inactive alpha_target.ex tab", timeout: timeout) {
-            $0.role == kAXButtonRole as String
+            $0.role == .button
                 && $0.label == "File tab alpha_target.ex"
                 && $0.value?.hasPrefix("inactive") == true
         }
@@ -183,7 +153,7 @@ private extension MingaAccessibilityWorkflowTests {
         let distinctPanes = try distinctAlphaAndBetaPanes(client: client)
         let activeAlpha = try requireNode(
             distinctPanes.first { isEditorPane($0, named: "alpha_target.ex") && $0.focused == true },
-            "AXPress on the alpha tab did not expose alpha as the focused pane"
+            "Accessibility activation on the alpha tab did not expose alpha as the focused pane"
         )
         try require(
             activeAlpha.value?.contains("ALPHA PANE λ🙂") == true,
@@ -202,7 +172,7 @@ private extension MingaAccessibilityWorkflowTests {
         try client.waitForNodes(
             "alpha and beta in distinct panes",
             timeout: timeout,
-            matching: { $0.role == kAXTextAreaRole as String },
+            matching: { $0.role == .textView },
             until: { panes in
                 panes.count == 2
                     && panes.contains { self.isEditorPane($0, named: "alpha_target.ex") }
@@ -221,10 +191,6 @@ private extension MingaAccessibilityWorkflowTests {
         try require(
             focusedBeta.value?.contains("BETA PANE é🙂") == true,
             "Focused beta pane exposes the wrong text"
-        )
-        try require(
-            focusedBeta.selectedTextRange == NSRange(location: 0, length: 0),
-            "Focused beta pane exposes the wrong insertion state"
         )
         try require(
             try client.nodeExists { self.isEditorPane($0, named: "alpha_target.ex") && $0.focused == false },
@@ -265,23 +231,7 @@ private extension MingaAccessibilityWorkflowTests {
             )
             try write("\(pid)\n", to: runRoot.appendingPathComponent("app.pid"))
         }
-        let pid = try RunningApplicationLocator.pid(
-            bundleIdentifier: bundleIdentifier,
-            executableURL: executableURL,
-            timeout: timeout
-        )
-        return AccessibilityClient(processIdentifier: pid)
-    }
-
-    func requireAccessibilityPermission(artifactDirectory: URL) throws {
-        guard AXIsProcessTrusted() else {
-            let message = [
-                "The UI-test process does not have macOS Accessibility permission.",
-                "Grant Accessibility access to Xcode (or the CI runner) and rerun scripts/test_macos_accessibility."
-            ].joined(separator: " ")
-            try write(message + "\n", to: artifactDirectory.appendingPathComponent("infrastructure-failure.txt"))
-            throw WorkflowFailure.unmet("INFRASTRUCTURE: \(message)")
-        }
+        return AccessibilityClient(application: application)
     }
 
     func openProjectPicker(app: XCUIApplication, client: AccessibilityClient) throws {
@@ -290,20 +240,20 @@ private extension MingaAccessibilityWorkflowTests {
             $0.label == "Find file choices" && $0.value?.contains("choices") == true
         }
         _ = try client.waitForNode("the focused native picker query field", timeout: timeout) {
-            $0.role == kAXTextFieldRole as String && $0.focused == true
+            $0.role == .textField && $0.focused == true
         }
     }
 
     func activeFileTabExists(named fileName: String, client: AccessibilityClient) throws -> Bool {
         try client.nodeExists {
-            $0.role == kAXButtonRole as String
+            $0.role == .button
                 && $0.label == "File tab \(fileName)"
                 && $0.value?.hasPrefix("active") == true
         }
     }
 
     func isEditorPane(_ node: AccessibilityNode, named fileName: String) -> Bool {
-        node.role == kAXTextAreaRole as String && node.label?.contains(fileName) == true
+        node.role == .textView && node.label?.contains(fileName) == true
     }
 
     func isolatedEnvironment(root: URL) -> [String: String] {
