@@ -23,26 +23,13 @@ struct AccessibilityTestFixture {
     let debugLog: URL
     let alpha: URL
 
-    static func create(at root: URL) throws -> AccessibilityTestFixture {
+    static func create(at root: URL, runtimeParent: URL) throws -> AccessibilityTestFixture {
         let project = root.appendingPathComponent("fixture-project", isDirectory: true)
         let home = root.appendingPathComponent("home", isDirectory: true)
-        // Darwin limits AF_UNIX socket paths to 103 bytes. Keep the isolated parent name short while remaining inside XCTest's writable temporary directory.
-        let runtimeParent = FileManager.default.temporaryDirectory
-            .appendingPathComponent(String(UUID().uuidString.prefix(6)), isDirectory: true)
         let configDirectory = root.appendingPathComponent("xdg-config/minga", isDirectory: true)
-        var keepRuntimeParent = false
-        defer {
-            if !keepRuntimeParent {
-                try? FileManager.default.removeItem(at: runtimeParent)
-            }
-        }
-        for directory in [project, home, runtimeParent, configDirectory] {
+        for directory in [project, home, configDirectory] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: runtimeParent.path
-        )
         let config = configDirectory.appendingPathComponent("config.exs")
         let alpha = project.appendingPathComponent("alpha_target.ex")
         let beta = project.appendingPathComponent("beta_target.ex")
@@ -50,15 +37,13 @@ struct AccessibilityTestFixture {
         try write("use Minga.Config\n", to: config)
         try write("ALPHA PANE λ🙂\nsecond alpha line\n", to: alpha)
         try write("BETA PANE é🙂\nsecond beta line\n", to: beta)
-        let fixture = AccessibilityTestFixture(
+        return AccessibilityTestFixture(
             home: home,
             runtimeParent: runtimeParent,
             config: config,
             debugLog: root.appendingPathComponent("minga-debug.log"),
             alpha: alpha
         )
-        keepRuntimeParent = true
-        return fixture
     }
 
     private static func write(_ contents: String, to url: URL) throws {

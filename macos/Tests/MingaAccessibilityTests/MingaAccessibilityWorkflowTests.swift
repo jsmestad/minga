@@ -15,23 +15,19 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
         let runRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("minga-accessibility-\(UUID().uuidString)", isDirectory: true)
         let artifacts = runRoot.appendingPathComponent("artifacts", isDirectory: true)
-        var fixture: AccessibilityTestFixture?
         artifactDirectory = artifacts
         defer {
             launchedApplication?.terminate()
             launchedApplication = nil
-            if let runtimeParent = fixture?.runtimeParent {
-                try? FileManager.default.removeItem(at: runtimeParent)
-            }
             try? FileManager.default.removeItem(at: runRoot)
         }
 
         do {
             try FileManager.default.createDirectory(at: runRoot, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
-            let createdFixture = try AccessibilityTestFixture.create(at: runRoot)
-            fixture = createdFixture
-            let application = configuredApplication(fixture: createdFixture)
+            let runtimeParent = try requiredAbsoluteURL(environment, key: "MINGA_AX_RUNTIME_PARENT")
+            let fixture = try AccessibilityTestFixture.create(at: runRoot, runtimeParent: runtimeParent)
+            let application = configuredApplication(fixture: fixture)
             launchedApplication = application
             let client = try launch(
                 application,
@@ -299,6 +295,14 @@ private extension MingaAccessibilityWorkflowTests {
             throw WorkflowFailure.unmet("INFRASTRUCTURE: \(key) is required")
         }
         return value
+    }
+
+    func requiredAbsoluteURL(_ environment: [String: String], key: String) throws -> URL {
+        let value = try requiredEnvironmentValue(environment, key: key)
+        guard value.hasPrefix("/") else {
+            throw WorkflowFailure.unmet("INFRASTRUCTURE: \(key) must be an absolute path")
+        }
+        return URL(fileURLWithPath: value, isDirectory: true)
     }
 
     func captureFailure(message: String) {
