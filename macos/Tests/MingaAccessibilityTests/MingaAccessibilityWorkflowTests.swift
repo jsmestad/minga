@@ -13,12 +13,14 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
     func testRealApplicationAccessibilityNavigationAndFocus() throws {
         let environment = ProcessInfo.processInfo.environment
         let variant = environment["MINGA_AX_VARIANT"] ?? "unspecified"
-        let runRoot = try requiredDirectoryURL(environment, key: "MINGA_AX_RUN_ROOT")
-        let artifacts = try requiredDirectoryURL(environment, key: "MINGA_AX_ARTIFACTS")
+        let runRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minga-accessibility-\(UUID().uuidString)", isDirectory: true)
+        let artifacts = runRoot.appendingPathComponent("artifacts", isDirectory: true)
         artifactDirectory = artifacts
         defer {
             launchedApplication?.terminate()
             launchedApplication = nil
+            try? FileManager.default.removeItem(at: runRoot)
         }
 
         do {
@@ -337,13 +339,6 @@ private extension MingaAccessibilityWorkflowTests {
         return node
     }
 
-    func requiredDirectoryURL(_ environment: [String: String], key: String) throws -> URL {
-        guard let path = environment[key], path.hasPrefix("/") else {
-            throw WorkflowFailure.unmet("INFRASTRUCTURE: \(key) must name an absolute isolated directory")
-        }
-        return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
-    }
-
     func requiredEnvironmentValue(_ environment: [String: String], key: String) throws -> String {
         guard let value = environment[key], !value.isEmpty else {
             throw WorkflowFailure.unmet("INFRASTRUCTURE: \(key) is required")
@@ -352,22 +347,27 @@ private extension MingaAccessibilityWorkflowTests {
     }
 
     func captureFailure(message: String) {
-        guard let artifactDirectory else { return }
+        attachText(message, name: "Minga accessibility failure")
         if let launchedApplication, launchedApplication.exists {
             let screenshot = launchedApplication.screenshot()
             let attachment = XCTAttachment(screenshot: screenshot)
             attachment.name = "Minga accessibility failure"
             attachment.lifetime = .keepAlways
             add(attachment)
-            try? screenshot.pngRepresentation.write(
-                to: artifactDirectory.appendingPathComponent("failure.png"),
-                options: .atomic
-            )
+            if let artifactDirectory {
+                try? screenshot.pngRepresentation.write(
+                    to: artifactDirectory.appendingPathComponent("failure.png"),
+                    options: .atomic
+                )
+            }
         }
+        guard let artifactDirectory else { return }
         try? write(message + "\n", to: artifactDirectory.appendingPathComponent("failure.txt"))
         if let accessibilityClient {
+            let tree = accessibilityClient.boundedTreeDump()
+            attachText(tree, name: "Bounded accessibility tree")
             try? write(
-                accessibilityClient.boundedTreeDump() + "\n",
+                tree + "\n",
                 to: artifactDirectory.appendingPathComponent("accessibility-tree.txt")
             )
         }
@@ -386,7 +386,18 @@ private extension MingaAccessibilityWorkflowTests {
             withJSONObject: payload,
             options: [.prettyPrinted, .sortedKeys]
         )
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "Accessibility workflow timings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         try data.write(to: artifactDirectory.appendingPathComponent("timings.json"), options: .atomic)
+    }
+
+    func attachText(_ contents: String, name: String) {
+        let attachment = XCTAttachment(string: contents)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func write(_ contents: String, to url: URL) throws {

@@ -79,16 +79,6 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "MINGA_AX_ARTIFACTS"
-            value = "$(MINGA_AX_ARTIFACTS)"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "MINGA_AX_RUN_ROOT"
-            value = "$(MINGA_AX_RUN_ROOT)"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
             key = "MINGA_AX_VARIANT"
             value = "$(MINGA_AX_VARIANT)"
             isEnabled = "YES">

@@ -590,8 +590,6 @@ schemes:
       targets:
         - MingaAccessibilityTests
       environmentVariables:
-        MINGA_AX_RUN_ROOT: "$(MINGA_AX_RUN_ROOT)"
-        MINGA_AX_ARTIFACTS: "$(MINGA_AX_ARTIFACTS)"
         MINGA_AX_VARIANT: "$(MINGA_AX_VARIANT)"
         MINGA_AX_APP_BUNDLE_ID: "$(MINGA_AX_APP_BUNDLE_ID)"
         MINGA_AX_APP_EXECUTABLE: "$(MINGA_AX_APP_EXECUTABLE)"
