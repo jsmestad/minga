@@ -7,6 +7,7 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
     private let timeout: TimeInterval = 15
     private var accessibilityClient: AccessibilityClient?
     private var artifactDirectory: URL?
+    private var launchedApplication: XCUIApplication?
     private var timings: [OperationTiming] = []
 
     func testRealApplicationAccessibilityNavigationAndFocus() throws {
@@ -15,10 +16,9 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
         let runRoot = try requiredDirectoryURL(environment, key: "MINGA_AX_RUN_ROOT")
         let artifacts = try requiredDirectoryURL(environment, key: "MINGA_AX_ARTIFACTS")
         artifactDirectory = artifacts
-        var launchedApplication: XCUIApplication?
         defer {
             launchedApplication?.terminate()
-            try? FileManager.default.removeItem(at: runRoot)
+            launchedApplication = nil
         }
 
         do {
@@ -252,12 +252,22 @@ private extension MingaAccessibilityWorkflowTests {
         variant: String
     ) throws -> AccessibilityClient {
         let bundleIdentifier = try requiredEnvironmentValue(environment, key: "MINGA_AX_APP_BUNDLE_ID")
+        let executablePath = try requiredEnvironmentValue(environment, key: "MINGA_AX_APP_EXECUTABLE")
+        let executableURL = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath().standardizedFileURL
         try timed("launch-\(variant)") {
             application.launch()
-            let pid = try runningApplicationPID(bundleIdentifier: bundleIdentifier)
+            let pid = try RunningApplicationLocator.pid(
+                bundleIdentifier: bundleIdentifier,
+                executableURL: executableURL,
+                timeout: timeout
+            )
             try write("\(pid)\n", to: runRoot.appendingPathComponent("app.pid"))
         }
-        let pid = try runningApplicationPID(bundleIdentifier: bundleIdentifier)
+        let pid = try RunningApplicationLocator.pid(
+            bundleIdentifier: bundleIdentifier,
+            executableURL: executableURL,
+            timeout: timeout
+        )
         return AccessibilityClient(processIdentifier: pid)
     }
 
@@ -341,34 +351,19 @@ private extension MingaAccessibilityWorkflowTests {
         return value
     }
 
-    func runningApplicationPID(bundleIdentifier: String) throws -> pid_t {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let process = NSRunningApplication
-                .runningApplications(withBundleIdentifier: bundleIdentifier)
-                .first(where: { !$0.isTerminated }) {
-                return process.processIdentifier
-            }
-            RunLoop.current.run(mode: .default, before: min(Date().addingTimeInterval(0.05), deadline))
-        } while Date() < deadline
-
-        throw WorkflowFailure.unmet(
-            "The isolated application process did not appear for bundle identifier \(bundleIdentifier)"
-        )
-    }
-
     func captureFailure(message: String) {
         guard let artifactDirectory else { return }
-        let screenshot = XCUIScreen.main.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "Minga accessibility failure"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-
-        try? screenshot.pngRepresentation.write(
-            to: artifactDirectory.appendingPathComponent("failure.png"),
-            options: .atomic
-        )
+        if let launchedApplication, launchedApplication.exists {
+            let screenshot = launchedApplication.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = "Minga accessibility failure"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            try? screenshot.pngRepresentation.write(
+                to: artifactDirectory.appendingPathComponent("failure.png"),
+                options: .atomic
+            )
+        }
         try? write(message + "\n", to: artifactDirectory.appendingPathComponent("failure.txt"))
         if let accessibilityClient {
             try? write(

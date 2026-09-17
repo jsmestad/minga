@@ -455,6 +455,10 @@ jobs:
         with:
           version: 0.16.0
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/tui/go.mod
+
       - name: Cache deps
         uses: actions/cache@v4
         with:

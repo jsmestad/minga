@@ -7,8 +7,9 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 artifact_dir="$artifact_root/$run_id"
 state_root=$(mktemp -d "${TMPDIR:-/tmp}/minga-accessibility.XXXXXX")
 derived_data="$state_root/DerivedData"
-test_bundle_id="com.minga.editor.accessibility-runner"
+test_bundle_id="com.minga.editor.accessibility-runner.r${run_id//-/}"
 app_path="$derived_data/Build/Products/Debug/Minga.app"
+app_executable="$app_path/Contents/MacOS/Minga"
 
 mkdir -p "$artifact_dir"
 chmod 700 "$state_root"
@@ -72,7 +73,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 [[ $(uname -s) == Darwin ]] || infrastructure_failure "the launched-app accessibility check requires macOS"
-for command in git mix xcodebuild xcodegen codesign ditto python3; do
+for command in git go mix xcodebuild xcodegen codesign ditto python3; do
   command -v "$command" >/dev/null 2>&1 || infrastructure_failure "required command is unavailable: $command"
 done
 
@@ -148,6 +149,7 @@ run_variant() {
       MINGA_AX_ARTIFACTS="$variant_artifacts" \
       MINGA_AX_VARIANT="$variant" \
       MINGA_AX_APP_BUNDLE_ID="$test_bundle_id" \
+      MINGA_AX_APP_EXECUTABLE="$app_executable" \
       xcodebuild test-without-building \
         -project Minga.xcodeproj \
         -scheme MingaAccessibility \
