@@ -148,11 +148,11 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
 
-    case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation):
+    case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete):
         let itemArray = items.map { i -> [String: Any] in
-            ["label": i.label, "detail": i.detail, "kind": Int(i.kind.rawValue)]
+            ["id": i.id, "source": i.source, "label": i.label, "detail": i.detail, "kind": Int(i.kind.rawValue), "match_ranges": i.matchRanges.map { ["start": Int($0.start), "length": Int($0.length)] }]
         }
-        return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "items": itemArray, "documentation": documentation]
+        return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "selected_item_id": selectedItemID, "items": itemArray, "documentation": documentation, "total_count": Int(totalCount), "matched_count": Int(matchedCount), "incomplete": incomplete]
 
     case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
         let bindingArray = bindings.map { b -> [String: Any] in
