@@ -23,7 +23,7 @@ enum ChromePresentationColor {
 
 /// Immutable UI interpretation of one canonical workspace payload.
 public struct WorkspacePresentationSnapshot {
-    public init(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
+    public init(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
         self.version = version
         self.activeWorkspaceId = activeWorkspaceId
         self.mode = mode
@@ -34,8 +34,8 @@ public struct WorkspacePresentationSnapshot {
 
     public let version: UInt8
     public let activeWorkspaceId: UInt16
-    public let mode: UInt8
-    public let flags: UInt8
+    public let mode: WorkspaceViewMode
+    public let flags: WorkspaceFlags
     public let workspaces: [WorkspacePresentationEntry]
     public let visibleTabs: [WorkspacePresentationTabEntry]
 }
@@ -43,9 +43,9 @@ public struct WorkspacePresentationSnapshot {
 /// Shared workspace value consumed by workspace-header and tab-bar state.
 public struct WorkspacePresentationEntry: Identifiable {
     public let id: UInt16
-    public let kind: UInt8
-    public let agentStatus: UInt8
-    public let flags: UInt16
+    public let kind: WorkspaceKind
+    public let agentStatus: AgentStatus
+    public let flags: WorkspaceEntryFlags
     public let color: Color
     public let tabCount: UInt16
     public let draftCount: UInt16
@@ -54,10 +54,10 @@ public struct WorkspacePresentationEntry: Identifiable {
     public let label: String
     public let icon: String
 
-    public var isManual: Bool { kind == 0 }
-    public var isAgent: Bool { kind == 1 }
-    public var hasAttention: Bool { flags & 0x0001 != 0 }
-    public var isCloseable: Bool { flags & 0x0002 != 0 }
+    public var isManual: Bool { kind == .manual }
+    public var isAgent: Bool { kind == .agent }
+    public var hasAttention: Bool { flags.contains(.attention) }
+    public var isCloseable: Bool { flags.contains(.closeable) }
 
     fileprivate init(_ entry: Wire.WorkspaceEntry) {
         id = entry.id
@@ -78,23 +78,23 @@ public struct WorkspacePresentationEntry: Identifiable {
 public struct WorkspacePresentationTabEntry: Identifiable {
     public let id: UInt32
     public let workspaceId: UInt16
-    public let kind: UInt8
-    public let flags: UInt16
+    public let kind: WorkspaceTabKind
+    public let flags: WorkspaceTabFlags
     public let pathHash: UInt32
     public let tintColor: Color?
     public let icon: String
     public let label: String
     public let path: String
 
-    public var isAgent: Bool { kind == 1 }
-    public var isDirty: Bool { flags & 0x0001 != 0 }
-    public var hasAttention: Bool { flags & 0x0002 != 0 }
-    public var isDraft: Bool { flags & 0x0004 != 0 }
-    public var isDraftElsewhere: Bool { flags & 0x0008 != 0 }
-    public var hasConflict: Bool { flags & 0x0010 != 0 }
-    public var isPinned: Bool { flags & 0x0020 != 0 }
+    public var isAgent: Bool { kind == .agent }
+    public var isDirty: Bool { flags.contains(.dirty) }
+    public var hasAttention: Bool { flags.contains(.attention) }
+    public var isDraft: Bool { flags.contains(.draft) }
+    public var isDraftElsewhere: Bool { flags.contains(.draftElsewhere) }
+    public var hasConflict: Bool { flags.contains(.conflict) }
+    public var isPinned: Bool { flags.contains(.pinned) }
     /// File tab backed by no file on disk (for example, Untitled-1).
-    public var isEphemeral: Bool { !isAgent && flags & 0x0040 != 0 }
+    public var isEphemeral: Bool { !isAgent && flags.contains(.ephemeral) }
 
     fileprivate init(_ entry: Wire.WorkspaceTabEntry) {
         id = entry.id

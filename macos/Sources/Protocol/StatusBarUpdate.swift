@@ -30,9 +30,9 @@ public struct StatusBarUpdate: Sendable {
 
     public struct WorkspaceInfo: Sendable, Equatable {
         public let id: UInt16
-        public let kind: UInt8
-        public let status: UInt8
-        public let flags: UInt16
+        public let kind: WorkspaceKind
+        public let status: AgentStatus
+        public let flags: WorkspaceEntryFlags
         public let draftCount: UInt16
         public let conflictCount: UInt16
         public let backgroundCount: UInt16
@@ -42,9 +42,9 @@ public struct StatusBarUpdate: Sendable {
 
         public init(id: UInt16, kind: UInt8, status: UInt8, flags: UInt16, draftCount: UInt16, conflictCount: UInt16, backgroundCount: UInt16, attentionCount: UInt16, label: String, icon: String) {
             self.id = id
-            self.kind = kind
-            self.status = status
-            self.flags = flags
+            self.kind = WorkspaceKind(rawValue: kind)
+            self.status = AgentStatus(rawValue: status)
+            self.flags = WorkspaceEntryFlags(rawValue: flags)
             self.draftCount = draftCount
             self.conflictCount = conflictCount
             self.backgroundCount = backgroundCount
@@ -54,13 +54,12 @@ public struct StatusBarUpdate: Sendable {
         }
     }
 
-    public let contentKind: UInt8
-    public let mode: UInt8
+    public let contentKind: EditorContentKind
+    public let mode: EditorMode
     public let cursorLine: UInt32
     public let cursorCol: UInt32
     public let lineCount: UInt32
-    public let flags: UInt8
-    public let safeMode: Bool
+    public let flags: StatusBarFlags
     public let lspStatus: UInt8
     public let gitBranch: String
     public let message: String
@@ -69,12 +68,12 @@ public struct StatusBarUpdate: Sendable {
     public let warningCount: UInt16
     public let modelName: String
     public let messageCount: UInt32
-    public let sessionStatus: UInt8
+    public let sessionStatus: AgentStatus
     public let infoCount: UInt16
     public let hintCount: UInt16
     public let macroRecording: UInt8
     public let parserStatus: UInt8
-    public let agentStatus: UInt8
+    public let agentStatus: AgentStatus
     public let activeToolName: String
     public let gitAdded: UInt16
     public let gitModified: UInt16
@@ -103,7 +102,6 @@ public struct StatusBarUpdate: Sendable {
         cursorCol: UInt32,
         lineCount: UInt32,
         flags: UInt8,
-        safeMode: Bool = false,
         lspStatus: UInt8,
         gitBranch: String,
         message: String,
@@ -138,13 +136,12 @@ public struct StatusBarUpdate: Sendable {
         workspace: WorkspaceInfo? = nil,
         pendingKeys: String = ""
     ) {
-        self.contentKind = contentKind
-        self.mode = mode
+        self.contentKind = EditorContentKind(rawValue: contentKind)
+        self.mode = EditorMode(rawValue: mode)
         self.cursorLine = cursorLine
         self.cursorCol = cursorCol
         self.lineCount = lineCount
-        self.flags = flags
-        self.safeMode = safeMode
+        self.flags = StatusBarFlags(rawValue: flags)
         self.lspStatus = lspStatus
         self.gitBranch = gitBranch
         self.message = message
@@ -153,12 +150,12 @@ public struct StatusBarUpdate: Sendable {
         self.warningCount = warningCount
         self.modelName = modelName
         self.messageCount = messageCount
-        self.sessionStatus = sessionStatus
+        self.sessionStatus = AgentStatus(rawValue: sessionStatus)
         self.infoCount = infoCount
         self.hintCount = hintCount
         self.macroRecording = macroRecording
         self.parserStatus = parserStatus
-        self.agentStatus = agentStatus
+        self.agentStatus = AgentStatus(rawValue: agentStatus)
         self.activeToolName = activeToolName
         self.gitAdded = gitAdded
         self.gitModified = gitModified
@@ -179,4 +176,7 @@ public struct StatusBarUpdate: Sendable {
         self.workspace = workspace
         self.pendingKeys = pendingKeys
     }
+
+    /// Whether the editor is running in safe mode.
+    public var safeMode: Bool { flags.contains(.safeMode) }
 }

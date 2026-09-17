@@ -57,7 +57,7 @@ public final class BottomPanelState {
         // Apply filter preset on visibility transition (hidden -> visible)
         // only if the user hasn't already changed filters manually.
         if wasHidden && visible && filterPreset == 1 {
-            messagesState.activeLevels = [2, 3]  // warning + error
+            messagesState.activeLevels = [.warning, .error]
         }
     }
 

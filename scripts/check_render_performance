@@ -40,6 +40,11 @@ build_harness() {
   # benchmark executable then compiles the shipping ProtocolDecoder against this
   # module and measures real A2 decode/apply plus shared renderer preparation.
   swiftc -O -emit-library -emit-module -module-name MingaProtocol \
+    macos/Sources/Protocol/AgentStatusTypes.swift \
+    macos/Sources/Protocol/EditorSemanticTypes.swift \
+    macos/Sources/Protocol/MessageSemanticTypes.swift \
+    macos/Sources/Protocol/WorkspaceSemanticTypes.swift \
+    macos/Sources/Protocol/TabSemanticTypes.swift \
     macos/Sources/Protocol/ProtocolTypes.swift \
     macos/Sources/Protocol/StatusBarUpdate.swift \
     macos/Sources/Protocol/GUIColorSlots.swift \

@@ -347,7 +347,7 @@ public struct MinibufferView: View {
     let state = MinibufferState()
     state.update(
         visible: true,
-        mode: MinibufferMode.command.rawValue,
+        mode: .command,
         cursorPos: 7,
         prompt: "M-x ",
         input: "org-mod",

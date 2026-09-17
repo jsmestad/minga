@@ -172,11 +172,12 @@ public struct AgentChatHeaderView: View {
 
     private var statusColor: Color {
         switch state.status {
-        case 0: return Color.gray
-        case 1: return theme.agentHeaderFg
-        case 2: return Color.orange
-        case 3: return Color.red
-        default: return Color.gray
+        case .idle: return Color.gray
+        case .thinking: return theme.agentHeaderFg
+        case .executingTool: return Color.orange
+        case .error: return Color.red
+        case .planning: return theme.agentStatusNeedsYou
+        case .unknown: return Color.gray
         }
     }
 

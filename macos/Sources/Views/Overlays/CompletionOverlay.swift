@@ -188,7 +188,7 @@ public struct CompletionOverlay: View {
     }
 
     @ViewBuilder
-    private func kindBadge(_ kind: UInt8) -> some View {
+    private func kindBadge(_ kind: CompletionKind) -> some View {
         let (letter, color) = kindDisplay(kind)
         Text(letter)
             .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -209,19 +209,19 @@ public struct CompletionOverlay: View {
     /// - `gutterWarningFg` (yellow): data things (variables, structs, enums)
     /// - `statusbarAccentFg` (accent): reference things (fields, constants)
     /// - `gitAddedFg` (green): snippets
-    private func kindDisplay(_ kind: UInt8) -> (String, Color) {
+    private func kindDisplay(_ kind: CompletionKind) -> (String, Color) {
         switch kind {
-        case 1:  return ("ƒ", theme.popupKeyFg)         // function
-        case 2:  return ("m", theme.popupKeyFg)         // method
-        case 3:  return ("v", theme.gutterWarningFg)    // variable
-        case 4:  return ("f", theme.statusbarAccentFg)  // field
-        case 5:  return ("M", theme.popupGroupFg)       // module
-        case 7:  return ("k", theme.popupGroupFg)       // keyword
-        case 8:  return ("s", theme.gitAddedFg)         // snippet
-        case 9:  return ("c", theme.statusbarAccentFg)  // constant
-        case 11: return ("S", theme.gutterWarningFg)    // struct
-        case 12: return ("E", theme.gutterWarningFg)    // enum
-        default: return ("·", theme.popupFg.opacity(0.5))
+        case .function: return ("ƒ", theme.popupKeyFg)
+        case .method: return ("m", theme.popupKeyFg)
+        case .variable: return ("v", theme.gutterWarningFg)
+        case .field: return ("f", theme.statusbarAccentFg)
+        case .module: return ("M", theme.popupGroupFg)
+        case .keyword: return ("k", theme.popupGroupFg)
+        case .snippet: return ("s", theme.gitAddedFg)
+        case .constant: return ("c", theme.statusbarAccentFg)
+        case .struct: return ("S", theme.gutterWarningFg)
+        case .enum: return ("E", theme.gutterWarningFg)
+        case .unknown: return ("·", theme.popupFg.opacity(0.5))
         }
     }
 }
@@ -231,7 +231,7 @@ private struct CompletionAccessibilityIdentity: Hashable {
     let anchorRow: Int
     let anchorCol: Int
     let id: Int
-    let kind: UInt8
+    let kind: CompletionKind
     let label: String
     let detail: String
 }

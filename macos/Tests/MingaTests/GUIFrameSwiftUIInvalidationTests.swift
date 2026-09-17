@@ -574,8 +574,8 @@ struct GUIFrameSwiftUIInvalidationTests {
             gui.tabBarState.install(WorkspacePresentationSnapshot(
                 version: 1,
                 activeWorkspaceId: 0,
-                mode: 0,
-                flags: 0,
+                mode: .editor,
+                flags: [],
                 workspaces: [],
                 visibleTabs: [Self.workspaceTab(id: UInt32(iteration + 10), label: label, path: "/tmp/\(label)")]
             ))
@@ -1172,8 +1172,8 @@ struct GUIFrameSwiftUIInvalidationTests {
         dispatcher.dispatch(.guiWorkspaces(
             version: UInt8(clamping: frameSeq),
             activeWorkspaceId: 0,
-            mode: 0,
-            flags: 0,
+            mode: .editor,
+            flags: [],
             workspaces: [],
             visibleTabs: tabs
         ))
@@ -1214,8 +1214,8 @@ struct GUIFrameSwiftUIInvalidationTests {
         dispatcher.dispatch(.guiWorkspaces(
             version: UInt8(clamping: frameSeq),
             activeWorkspaceId: 0,
-            mode: 0,
-            flags: 0,
+            mode: .editor,
+            flags: [],
             workspaces: [],
             visibleTabs: tabs
         ))

@@ -298,8 +298,8 @@ struct CommandDispatcherRoutingTests {
         dispatcher.applyForTesting(.guiWorkspaces(
             version: 1,
             activeWorkspaceId: 7,
-            mode: 1,
-            flags: 0,
+            mode: .agent,
+            flags: [],
             workspaces: workspaces,
             visibleTabs: workspaceTabs
         ))
@@ -362,8 +362,8 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.tabBarState.workspaceTabs.map(\.label) == ["first.ex", "review.ex"])
         #expect(gui.workspaceState.visibleTabs.map(\.path) == ["/tmp/first.ex", "/tmp/review.ex"])
         #expect(gui.tabBarState.workspaceTabs.map(\.path) == ["/tmp/first.ex", "/tmp/review.ex"])
-        #expect(gui.workspaceState.visibleTabs.map(\.flags) == [0x0023, 0x0040])
-        #expect(gui.tabBarState.workspaceTabs.map(\.flags) == [0x0023, 0x0040])
+        #expect(gui.workspaceState.visibleTabs.map(\.flags.rawValue) == [0x0023, 0x0040])
+        #expect(gui.tabBarState.workspaceTabs.map(\.flags.rawValue) == [0x0023, 0x0040])
 
         let displayedTabs = gui.tabBarState.displayTabs
         #expect(displayedTabs.map(\.id) == [41, 42])
@@ -393,22 +393,22 @@ struct CommandDispatcherRoutingTests {
             Wire.WorkspaceTabEntry(id: 43, workspaceId: 9, kind: 0, flags: 0x0040, pathHash: 0x87654321, tintColorRGB: 0, icon: "file", label: "untitled", path: ""),
         ]
 
-        dispatcher.applyForTesting(.guiWorkspaces(version: 3, activeWorkspaceId: 9, mode: 2, flags: 0x05, workspaces: workspaces, visibleTabs: tabs))
+        dispatcher.applyForTesting(.guiWorkspaces(version: 3, activeWorkspaceId: 9, mode: .fileTree, flags: WorkspaceFlags(rawValue: 0x05), workspaces: workspaces, visibleTabs: tabs))
 
         #expect(gui.workspaceState.activeWorkspaceId == 9)
         #expect(gui.tabBarState.activeWorkspaceId == 9)
-        #expect(gui.workspaceState.viewMode == 2)
-        #expect(gui.tabBarState.workspaceMode == 2)
-        #expect(gui.workspaceState.flags == 0x05)
-        #expect(gui.tabBarState.workspaceFlags == 0x05)
+        #expect(gui.workspaceState.viewMode == .fileTree)
+        #expect(gui.tabBarState.workspaceMode == .fileTree)
+        #expect(gui.workspaceState.flags.rawValue == 0x05)
+        #expect(gui.tabBarState.workspaceFlags.rawValue == 0x05)
         #expect(gui.workspaceState.hasCanonicalPayload)
         #expect(gui.tabBarState.hasCanonicalWorkspaceTabs)
         #expect(gui.workspaceState.workspaces.map(\.id) == [0, 9])
         #expect(gui.tabBarState.workspaces.map(\.id) == [0, 9])
-        #expect(gui.workspaceState.workspaces.map(\.agentStatus) == [1, 2])
-        #expect(gui.tabBarState.workspaces.map(\.agentStatus) == [1, 2])
-        #expect(gui.workspaceState.workspaces.map(\.flags) == [0x0001, 0x0002])
-        #expect(gui.tabBarState.workspaces.map(\.flags) == [0x0001, 0x0002])
+        #expect(gui.workspaceState.workspaces.map(\.agentStatus) == [.thinking, .executingTool])
+        #expect(gui.tabBarState.workspaces.map(\.agentStatus) == [.thinking, .executingTool])
+        #expect(gui.workspaceState.workspaces.map(\.flags.rawValue) == [0x0001, 0x0002])
+        #expect(gui.tabBarState.workspaces.map(\.flags.rawValue) == [0x0001, 0x0002])
         #expect(gui.workspaceState.workspaces.map(\.tabCount) == [2, 6])
         #expect(gui.tabBarState.workspaces.map(\.tabCount) == [2, 6])
         #expect(gui.workspaceState.workspaces.map(\.draftCount) == [3, 7])
@@ -430,7 +430,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.workspaceState.visibleTabs[1].tintColor == nil)
         #expect(gui.tabBarState.workspaceTabs[1].tintColor == nil)
 
-        dispatcher.applyForTesting(.guiWorkspaces(version: 0, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [], visibleTabs: []))
+        dispatcher.applyForTesting(.guiWorkspaces(version: 0, activeWorkspaceId: 0, mode: .editor, flags: [], workspaces: [], visibleTabs: []))
 
         #expect(gui.workspaceState.activeWorkspaceId == 0)
         #expect(gui.tabBarState.activeWorkspaceId == 0)
@@ -450,21 +450,21 @@ struct CommandDispatcherRoutingTests {
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWorkspaces(version: 1, activeWorkspaceId: 1, mode: 1, flags: 1, workspaces: [originalWorkspace], visibleTabs: []))
+        dispatcher.dispatch(.guiWorkspaces(version: 1, activeWorkspaceId: 1, mode: .agent, flags: [.hasAttention], workspaces: [originalWorkspace], visibleTabs: []))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 1))
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
-        dispatcher.dispatch(.guiWorkspaces(version: 2, activeWorkspaceId: 2, mode: 2, flags: 2, workspaces: [replacementWorkspace], visibleTabs: []))
+        dispatcher.dispatch(.guiWorkspaces(version: 2, activeWorkspaceId: 2, mode: .fileTree, flags: WorkspaceFlags(rawValue: 2), workspaces: [replacementWorkspace], visibleTabs: []))
         dispatcher.dispatch(.commitFrame(frameSeq: 99, seq: 1))
 
         #expect(gui.workspaceState.activeWorkspaceId == 1)
         #expect(gui.tabBarState.activeWorkspaceId == 1)
         #expect(gui.workspaceState.workspaces.map(\.label) == ["Original"])
         #expect(gui.tabBarState.workspaces.map(\.label) == ["Original"])
-        #expect(gui.workspaceState.viewMode == 1)
-        #expect(gui.tabBarState.workspaceMode == 1)
-        #expect(gui.workspaceState.flags == 1)
-        #expect(gui.tabBarState.workspaceFlags == 1)
+        #expect(gui.workspaceState.viewMode == .agent)
+        #expect(gui.tabBarState.workspaceMode == .agent)
+        #expect(gui.workspaceState.flags == [.hasAttention])
+        #expect(gui.tabBarState.workspaceFlags == [.hasAttention])
     }
 
     @Test("guiObservatory updates observatoryState")
@@ -875,7 +875,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiStatusBarRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
-                                           cursorCol: 9, lineCount: 500, flags: 0x0B, safeMode: true,
+                                           cursorCol: 9, lineCount: 500, flags: 0x0B,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
                                            errorCount: 3, warningCount: 7,
@@ -892,9 +892,9 @@ struct CommandDispatcherRoutingTests {
                                            modelineRightSegments: [],
                                            selection: .init(mode: 2, size: 3))))
 
-        #expect(gui.statusBarState.mode == 1)
+        #expect(gui.statusBarState.mode == .insert)
         #expect(gui.statusBarState.cursorLine == 42)
-        #expect(gui.statusBarState.safeMode == true)
+        #expect(gui.statusBarState.flags.contains(.safeMode))
         #expect(gui.statusBarState.gitBranch == "main")
         #expect(gui.statusBarState.filetype == "elixir")
         #expect(gui.statusBarState.errorCount == 3)
@@ -907,7 +907,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.activeToolName.isEmpty)
 
         dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
-                                           cursorCol: 9, lineCount: 500, flags: 0x03, safeMode: false,
+                                           cursorCol: 9, lineCount: 500, flags: 0x03,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
                                            errorCount: 3, warningCount: 7,
@@ -924,7 +924,7 @@ struct CommandDispatcherRoutingTests {
                                            modelineRightSegments: [],
                                            selection: .init(mode: 2, size: 3))))
 
-        #expect(gui.statusBarState.safeMode == false)
+        #expect(!gui.statusBarState.flags.contains(.safeMode))
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")
@@ -945,7 +945,7 @@ struct CommandDispatcherRoutingTests {
                                            backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests",
                                            modelineLeftSegments: [], modelineRightSegments: [])))
 
-        #expect(gui.statusBarState.contentKind == 1)
+        #expect(gui.statusBarState.contentKind == .agent)
         #expect(gui.statusBarState.isAgentWindow == true)
         #expect(gui.statusBarState.modelName == "claude-3-5-sonnet")
         #expect(gui.statusBarState.messageCount == 7)
@@ -1009,10 +1009,10 @@ struct CommandDispatcherRoutingTests {
         gui.agentChatState.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
             Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))
         ])
-        dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
+        dispatcher.applyForTesting(.guiAgentChat(visible: true, status: .thinking, model: "claude",
                                            thinkingLevel: "medium", prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
-                                           promptVimMode: 1, promptVisibleRows: 1,
+                                           promptMode: .insert, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
                                            pendingToolSummary: "", helpVisible: false, helpGroups: []))
 
@@ -1026,10 +1026,10 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiAgentTranscriptPopulatesMessages() throws {
         let (dispatcher, gui) = makeDispatcher()
         // Chrome frame first (visible), then the resident transcript stream.
-        dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
+        dispatcher.applyForTesting(.guiAgentChat(visible: true, status: .thinking, model: "claude",
                                            thinkingLevel: "medium", prompt: "", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
-                                           promptVimMode: 1, promptVisibleRows: 1,
+                                           promptMode: .insert, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
                                            pendingToolSummary: "", helpVisible: false, helpGroups: []))
         dispatcher.applyForTesting(.guiAgentTranscript(mode: 0, epoch: 3, truncated: false, trimFront: 0, baseCount: 0, messages: [
@@ -1044,10 +1044,10 @@ struct CommandDispatcherRoutingTests {
     @Test("guiAgentChat hidden clears agentChatState")
     @MainActor func guiAgentChatHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.applyForTesting(.guiAgentChat(visible: false, status: 0, model: "",
+        dispatcher.applyForTesting(.guiAgentChat(visible: false, status: .idle, model: "",
                                            thinkingLevel: "", prompt: "", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
-                                           promptVimMode: 0, promptVisibleRows: 1,
+                                           promptMode: .normal, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
                                            pendingToolSummary: "", helpVisible: false, helpGroups: []))
 
@@ -3080,9 +3080,9 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("atomic.ex")]))
         dispatcher.dispatch(.guiAgentChat(
-            visible: true, status: 0, model: "prepared-model", thinkingLevel: "medium",
+            visible: true, status: .idle, model: "prepared-model", thinkingLevel: "medium",
             prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
-            promptVimMode: 1, promptVisibleRows: 1, promptCompletion: nil,
+            promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil,
             pendingToolName: nil, pendingToolSummary: "", helpVisible: false,
             helpGroups: []
         ))
@@ -3175,9 +3175,9 @@ struct CommandDispatcherStagingTests {
         // Deliberately scramble input order; prepared domains define replay order.
         dispatcher.dispatch(.setLinkCursor(active: true))
         dispatcher.dispatch(.guiAgentChat(
-            visible: true, status: 0, model: "model", thinkingLevel: "medium",
+            visible: true, status: .idle, model: "model", thinkingLevel: "medium",
             prompt: "", promptLineCount: 1, promptCursorLine: 0,
-            promptCursorCol: 0, promptVimMode: 1, promptVisibleRows: 1,
+            promptCursorCol: 0, promptMode: .insert, promptVisibleRows: 1,
             promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
             helpVisible: false, helpGroups: []
         ))
@@ -3375,9 +3375,9 @@ struct CommandDispatcherStagingTests {
             messages: [Wire.ChatMessage(beamId: 2, content: .assistant(text: "more"))]
         ))
         dispatcher.dispatch(.guiAgentChat(
-            visible: true, status: 1, model: "would-publish", thinkingLevel: "high",
+            visible: true, status: .thinking, model: "would-publish", thinkingLevel: "high",
             prompt: "would-publish", promptLineCount: 1, promptCursorLine: 0,
-            promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1,
+            promptCursorCol: 0, promptMode: .normal, promptVisibleRows: 1,
             promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
             helpVisible: false, helpGroups: []
         ))

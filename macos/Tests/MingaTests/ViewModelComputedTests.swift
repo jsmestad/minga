@@ -20,8 +20,8 @@ struct WorkspacePresentationSnapshotTests {
         let snapshot = WorkspacePresentationSnapshot(
             version: 3,
             activeWorkspaceId: 9,
-            mode: 2,
-            flags: 0x05,
+            mode: .fileTree,
+            flags: WorkspaceFlags(rawValue: 0x05),
             workspaces: [
                 Wire.WorkspaceEntry(id: 0, kind: 0, status: 1, flags: 0x0001, colorR: 0x11, colorG: 0x22, colorB: 0x33, tabCount: 2, draftCount: 3, conflictCount: 4, runningBackgroundCount: 5, label: "Manual", icon: "folder"),
                 Wire.WorkspaceEntry(id: 9, kind: 1, status: 2, flags: 0x0002, colorR: 0x44, colorG: 0x55, colorB: 0x66, tabCount: 6, draftCount: 7, conflictCount: 8, runningBackgroundCount: 9, label: "Review", icon: "cpu"),
@@ -34,14 +34,14 @@ struct WorkspacePresentationSnapshotTests {
 
         #expect(snapshot.version == 3)
         #expect(snapshot.activeWorkspaceId == 9)
-        #expect(snapshot.mode == 2)
-        #expect(snapshot.flags == 0x05)
+        #expect(snapshot.mode == .fileTree)
+        #expect(snapshot.flags.rawValue == 0x05)
         #expect(snapshot.workspaces.map(\.id) == [0, 9])
 
         let workspace = try #require(snapshot.workspaces.last)
-        #expect(workspace.kind == 1)
-        #expect(workspace.agentStatus == 2)
-        #expect(workspace.flags == 0x0002)
+        #expect(workspace.kind == .agent)
+        #expect(workspace.agentStatus == .executingTool)
+        #expect(workspace.flags == [.closeable])
         #expect(workspace.color == Color(.sRGB, red: 0x44 / 255.0, green: 0x55 / 255.0, blue: 0x66 / 255.0))
         #expect(workspace.tabCount == 6)
         #expect(workspace.draftCount == 7)
@@ -53,8 +53,8 @@ struct WorkspacePresentationSnapshotTests {
         #expect(snapshot.visibleTabs.map(\.id) == [42, 43])
         let colored = snapshot.visibleTabs[0]
         #expect(colored.workspaceId == 9)
-        #expect(colored.kind == 0)
-        #expect(colored.flags == 0x003F)
+        #expect(colored.kind == .file)
+        #expect(colored.flags.rawValue == 0x003F)
         #expect(colored.pathHash == 0x12345678)
         #expect(colored.tintColor == Color(.sRGB, red: 0x7A / 255.0, green: 0xA2 / 255.0, blue: 0xF7 / 255.0))
         #expect(colored.icon == "file-code")
@@ -72,7 +72,7 @@ struct WorkspacePresentationSnapshotTests {
 
     @Test("owners install shared values but retain canonical-payload semantics")
     @MainActor func ownersRetainPresentationBehavior() {
-        let snapshot = WorkspacePresentationSnapshot(version: 0, activeWorkspaceId: 0, mode: 2, flags: 3, workspaces: [], visibleTabs: [])
+        let snapshot = WorkspacePresentationSnapshot(version: 0, activeWorkspaceId: 0, mode: .fileTree, flags: WorkspaceFlags(rawValue: 3), workspaces: [], visibleTabs: [])
         let workspaceState = WorkspaceState()
         let tabBarState = TabBarState()
 

@@ -129,7 +129,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             ["id": Int(tab.id), "label": tab.label, "icon": tab.icon,
              "is_active": tab.isActive, "is_dirty": tab.isDirty,
              "is_agent": tab.isAgent, "has_attention": tab.hasAttention,
-             "agent_status": Int(tab.agentStatus)]
+             "agent_status": Int(tab.agentStatus.rawValue)]
         }
         // The bidirectional protocol test explicitly opts in to this synthetic action.
         // Ordinary decode tests must leave no input event for a later response to consume.
@@ -150,7 +150,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
     case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items, let documentation):
         let itemArray = items.map { i -> [String: Any] in
-            ["label": i.label, "detail": i.detail, "kind": Int(i.kind)]
+            ["label": i.label, "detail": i.detail, "kind": Int(i.kind.rawValue)]
         }
         return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "items": itemArray, "documentation": documentation]
 
@@ -166,12 +166,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiStatusBar(let update):
         var result: [String: Any] = [:]
         result["type"] = "gui_status_bar"
-        result["content_kind"] = Int(update.contentKind)
-        result["mode"] = Int(update.mode)
+        result["content_kind"] = Int(update.contentKind.rawValue)
+        result["mode"] = Int(update.mode.rawValue)
         result["cursor_line"] = Int(update.cursorLine)
         result["cursor_col"] = Int(update.cursorCol)
         result["line_count"] = Int(update.lineCount)
-        result["flags"] = Int(update.flags)
+        result["flags"] = Int(update.flags.rawValue)
         result["safe_mode"] = update.safeMode
         result["lsp_status"] = Int(update.lspStatus)
         result["git_branch"] = update.gitBranch
@@ -181,12 +181,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["warning_count"] = Int(update.warningCount)
         result["model_name"] = update.modelName
         result["message_count"] = Int(update.messageCount)
-        result["session_status"] = Int(update.sessionStatus)
+        result["session_status"] = Int(update.sessionStatus.rawValue)
         result["info_count"] = Int(update.infoCount)
         result["hint_count"] = Int(update.hintCount)
         result["macro_recording"] = Int(update.macroRecording)
         result["parser_status"] = Int(update.parserStatus)
-        result["agent_status"] = Int(update.agentStatus)
+        result["agent_status"] = Int(update.agentStatus.rawValue)
         result["active_tool_name"] = update.activeToolName
         result["git_added"] = Int(update.gitAdded)
         result["git_modified"] = Int(update.gitModified)
@@ -250,14 +250,14 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         var result: [String: Any] = [
             "type": "gui_agent_chat",
             "visible": visible,
-            "status": Int(status),
+            "status": Int(status.rawValue),
             "model": model,
             "thinking_level": thinkingLevel,
             "prompt": prompt,
             "prompt_line_count": Int(promptLineCount),
             "prompt_cursor_line": Int(promptCursorLine),
             "prompt_cursor_col": Int(promptCursorCol),
-            "prompt_vim_mode": Int(promptVimMode),
+            "prompt_vim_mode": Int(promptVimMode.rawValue),
             "prompt_visible_rows": Int(promptVisibleRows),
             "has_completion": promptCompletion != nil,
             "pending_tool_name": pendingToolName ?? "",
@@ -281,7 +281,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         var entryList: [[String: Any]] = []
         for entry in entries {
-            entryList.append(["id": Int(entry.id), "level": Int(entry.level), "subsystem": Int(entry.subsystem),
+            entryList.append(["id": Int(entry.id), "level": Int(entry.level.rawValue), "subsystem": Int(entry.subsystem.rawValue),
                               "timestamp_secs": Int(entry.timestampSecs), "file_path": entry.filePath, "text": entry.text])
         }
         return ["type": "gui_bottom_panel", "visible": visible, "active_tab_index": Int(activeTabIndex),
@@ -360,7 +360,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         var result: [String: Any] = [:]
         result["type"] = "gui_minibuffer"
         result["visible"] = visible
-        result["mode"] = Int(mode)
+        result["mode"] = Int(mode.rawValue)
         result["cursor_pos"] = Int(cursorPos)
         result["prompt"] = prompt
         result["input"] = input

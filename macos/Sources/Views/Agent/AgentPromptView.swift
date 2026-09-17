@@ -15,7 +15,7 @@ public struct AgentPromptView: View {
     public let encoder: InputEncoder?
 
     /// Whether the agent is actively streaming a response.
-    private var isStreaming: Bool { state.status == 1 || state.status == 2 }
+    private var isStreaming: Bool { state.status.isWorking }
 
     /// Whether the send button should be enabled (insert mode with text).
     private var canSend: Bool { isInsertMode && !state.prompt.isEmpty && !isStreaming }
@@ -47,12 +47,13 @@ public struct AgentPromptView: View {
 
     /// Vim mode label shown in the prompt border.
     private var modeLabel: String {
-        switch state.promptVimMode {
-        case 0: return "NORMAL"
-        case 2: return "VISUAL"
-        case 3: return "V-LINE"
-        case 4: return "OP"
-        default: return "" // insert mode: no label
+        switch state.promptMode {
+        case .normal: return "NORMAL"
+        case .visual: return "VISUAL"
+        case .visualLine: return "V-LINE"
+        case .operatorPending: return "OP"
+        case .insert: return ""
+        case .unknown: return "NORMAL"
         }
     }
 
@@ -152,7 +153,7 @@ public struct AgentPromptView: View {
         let lines = state.prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let cursorLine = Int(state.promptCursorLine)
         let cursorCol = Int(state.promptCursorCol)
-        let isBlock = state.promptVimMode == 0 || state.promptVimMode >= 2
+        let isBlock = state.promptMode.usesBlockCursor
         let lineH = promptLineHeight
 
         VStack(alignment: .leading, spacing: 2) {

@@ -4,14 +4,14 @@ import SwiftUI
 import MingaProtocol
 
 public struct CompletionItem: Identifiable {
-    public init(id: Int, kind: UInt8, label: String, detail: String) {
+    public init(id: Int, kind: CompletionKind, label: String, detail: String) {
         self.id = id
         self.kind = kind
         self.label = label
         self.detail = detail
     }
     public let id: Int
-    public let kind: UInt8
+    public let kind: CompletionKind
     public let label: String
     public let detail: String
 }

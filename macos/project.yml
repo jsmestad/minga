@@ -30,6 +30,16 @@ targets:
         type: file
       - path: Sources/Protocol/StatusBarUpdate.swift
         type: file
+      - path: Sources/Protocol/AgentStatusTypes.swift
+        type: file
+      - path: Sources/Protocol/EditorSemanticTypes.swift
+        type: file
+      - path: Sources/Protocol/MessageSemanticTypes.swift
+        type: file
+      - path: Sources/Protocol/WorkspaceSemanticTypes.swift
+        type: file
+      - path: Sources/Protocol/TabSemanticTypes.swift
+        type: file
       - path: Sources/Protocol/GUIColorSlots.swift
         type: file
       - path: Sources/Protocol/FrameResourcePolicy.swift
@@ -133,6 +143,11 @@ targets:
           - "PreviewRegistry.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/AgentStatusTypes.swift"
+          - "Protocol/EditorSemanticTypes.swift"
+          - "Protocol/MessageSemanticTypes.swift"
+          - "Protocol/WorkspaceSemanticTypes.swift"
+          - "Protocol/TabSemanticTypes.swift"
           - "Protocol/GUIColorSlots.swift"
           - "Protocol/FrameResourcePolicy.swift"
           # MingaProtocol-owned (Slice 3)
@@ -267,6 +282,11 @@ targets:
           - "PreviewRegistry.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/AgentStatusTypes.swift"
+          - "Protocol/EditorSemanticTypes.swift"
+          - "Protocol/MessageSemanticTypes.swift"
+          - "Protocol/WorkspaceSemanticTypes.swift"
+          - "Protocol/TabSemanticTypes.swift"
           - "Protocol/GUIColorSlots.swift"
           - "Protocol/FrameResourcePolicy.swift"
           # MingaProtocol-owned (Slice 3)
@@ -352,6 +372,11 @@ targets:
           - "PreviewRegistry.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/AgentStatusTypes.swift"
+          - "Protocol/EditorSemanticTypes.swift"
+          - "Protocol/MessageSemanticTypes.swift"
+          - "Protocol/WorkspaceSemanticTypes.swift"
+          - "Protocol/TabSemanticTypes.swift"
           - "Protocol/GUIColorSlots.swift"
           - "Protocol/FrameResourcePolicy.swift"
           - "Renderer/WindowContent.swift"
@@ -422,6 +447,11 @@ targets:
           - "MingaApp.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/AgentStatusTypes.swift"
+          - "Protocol/EditorSemanticTypes.swift"
+          - "Protocol/MessageSemanticTypes.swift"
+          - "Protocol/WorkspaceSemanticTypes.swift"
+          - "Protocol/TabSemanticTypes.swift"
           - "Protocol/GUIColorSlots.swift"
           - "Protocol/FrameResourcePolicy.swift"
           # MingaProtocol-owned (Slice 3)

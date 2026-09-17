@@ -22,6 +22,11 @@ defmodule Mix.Tasks.Swift.Harness do
   # below (see @cross_module_import). Keep in sync with the MingaProtocol
   # target's `sources` in macos/project.yml.
   @protocol_module_sources [
+    "macos/Sources/Protocol/AgentStatusTypes.swift",
+    "macos/Sources/Protocol/EditorSemanticTypes.swift",
+    "macos/Sources/Protocol/MessageSemanticTypes.swift",
+    "macos/Sources/Protocol/WorkspaceSemanticTypes.swift",
+    "macos/Sources/Protocol/TabSemanticTypes.swift",
     "macos/Sources/Protocol/ProtocolTypes.swift",
     "macos/Sources/Protocol/StatusBarUpdate.swift",
     "macos/Sources/Protocol/GUIColorSlots.swift",

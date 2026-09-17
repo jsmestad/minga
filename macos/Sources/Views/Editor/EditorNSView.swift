@@ -19,14 +19,6 @@ private enum DividerCursorState: Equatable {
     case horizontal
 }
 
-private enum EditorStatusMode {
-    static let normal: UInt8 = 0
-    static let insert: UInt8 = 1
-    static let command: UInt8 = 3
-    static let search: UInt8 = 5
-    static let replace: UInt8 = 6
-}
-
 /// The main editor view. Uses MTKView's built-in display link for
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
@@ -3025,9 +3017,9 @@ final class EditorNSView: MTKView {
 
     /// Returns true for BEAM modes where SPC is typed text, not a leader chord.
     /// CUA is encoded as normal mode, so it intentionally stays false here.
-    nonisolated static func statusModeUsesLiteralSpace(statusMode: UInt8?) -> Bool {
+    nonisolated static func statusModeUsesLiteralSpace(statusMode: EditorMode?) -> Bool {
         switch statusMode {
-        case EditorStatusMode.insert, EditorStatusMode.command, EditorStatusMode.search, EditorStatusMode.replace:
+        case .insert, .command, .search, .replace:
             return true
         default:
             return false
@@ -3052,8 +3044,8 @@ final class EditorNSView: MTKView {
 
     /// Returns true for Vim-normal keys that immediately enter insert-like text input.
     /// The cursor-shape gate avoids applying Vim assumptions while CUA mode is active.
-    nonisolated static func shouldOptimisticallyEnterTextInputMode(codepoint: UInt32, statusMode: UInt8?, cursorShape: CursorShape) -> Bool {
-        guard statusMode == EditorStatusMode.normal, cursorShape == .block else { return false }
+    nonisolated static func shouldOptimisticallyEnterTextInputMode(codepoint: UInt32, statusMode: EditorMode?, cursorShape: CursorShape) -> Bool {
+        guard statusMode == .normal, cursorShape == .block else { return false }
 
         switch codepoint {
         case 0x69, 0x49, 0x61, 0x41, 0x6F, 0x4F, 0x73, 0x53, 0x43, 0x52:

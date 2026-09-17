@@ -1,5 +1,6 @@
 import Testing
 @testable import MingaUI
+import MingaProtocol
 
 @Suite("MinibufferState Lifecycle")
 struct MinibufferStateLifecycleTests {
@@ -8,7 +9,7 @@ struct MinibufferStateLifecycleTests {
         let state = MinibufferState()
         state.update(
             visible: true,
-            mode: MinibufferMode.textPrompt.rawValue,
+            mode: .textPrompt,
             cursorPos: 3,
             prompt: "Add project: ",
             input: "abc",
@@ -18,7 +19,7 @@ struct MinibufferStateLifecycleTests {
         )
 
         #expect(state.visible == true)
-        #expect(state.mode == MinibufferMode.textPrompt.rawValue)
+        #expect(state.mode == .textPrompt)
         #expect(state.cursorPos == 3)
         #expect(state.isInputMode == true)
         #expect(state.isPromptMode == false)

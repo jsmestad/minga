@@ -392,17 +392,17 @@ extension PreviewRegistry {
         )
 
         state.messagesState.entries = [
-            MessageEntry(id: 1, level: 3, subsystem: 1, timestampSecs: 36_061, filePath: "lib/minga/editor.ex", text: "function head/2 is undefined or private"),
-            MessageEntry(id: 2, level: 3, subsystem: 1, timestampSecs: 36_062, filePath: "lib/minga/buffer/process.ex", text: "pattern can never match: the types <<_::binary>> and :error are incompatible"),
-            MessageEntry(id: 3, level: 2, subsystem: 1, timestampSecs: 36_063, filePath: "lib/minga/editor.ex", text: "unused variable `opts`"),
-            MessageEntry(id: 4, level: 3, subsystem: 2, timestampSecs: 36_064, filePath: "lib/minga/mode/normal.ex", text: "missing @spec for public function handle_key/2"),
-            MessageEntry(id: 5, level: 2, subsystem: 1, timestampSecs: 36_065, filePath: "lib/minga/buffer/document.ex", text: "this clause cannot match because a previous clause always matches"),
-            MessageEntry(id: 6, level: 2, subsystem: 2, timestampSecs: 36_066, filePath: "lib/minga/editor/render_pipeline.ex", text: "unused alias Buffer"),
-            MessageEntry(id: 7, level: 3, subsystem: 1, timestampSecs: 36_067, filePath: "test/minga/editor_test.exs", text: "undefined function assert_received/1 (expected MingaTest.EditorTest to define such a function)"),
-            MessageEntry(id: 8, level: 2, subsystem: 0, timestampSecs: 36_068, filePath: "lib/minga/editor.ex", text: "variable `state` is unused (if the variable is not meant to be used, prefix it with an underscore)"),
+            MessageEntry(id: 1, level: .error, subsystem: .lsp, timestampSecs: 36_061, filePath: "lib/minga/editor.ex", text: "function head/2 is undefined or private"),
+            MessageEntry(id: 2, level: .error, subsystem: .lsp, timestampSecs: 36_062, filePath: "lib/minga/buffer/process.ex", text: "pattern can never match: the types <<_::binary>> and :error are incompatible"),
+            MessageEntry(id: 3, level: .warning, subsystem: .lsp, timestampSecs: 36_063, filePath: "lib/minga/editor.ex", text: "unused variable `opts`"),
+            MessageEntry(id: 4, level: .error, subsystem: .parser, timestampSecs: 36_064, filePath: "lib/minga/mode/normal.ex", text: "missing @spec for public function handle_key/2"),
+            MessageEntry(id: 5, level: .warning, subsystem: .lsp, timestampSecs: 36_065, filePath: "lib/minga/buffer/document.ex", text: "this clause cannot match because a previous clause always matches"),
+            MessageEntry(id: 6, level: .warning, subsystem: .parser, timestampSecs: 36_066, filePath: "lib/minga/editor/render_pipeline.ex", text: "unused alias Buffer"),
+            MessageEntry(id: 7, level: .error, subsystem: .lsp, timestampSecs: 36_067, filePath: "test/minga/editor_test.exs", text: "undefined function assert_received/1 (expected MingaTest.EditorTest to define such a function)"),
+            MessageEntry(id: 8, level: .warning, subsystem: .editor, timestampSecs: 36_068, filePath: "lib/minga/editor.ex", text: "variable `state` is unused (if the variable is not meant to be used, prefix it with an underscore)"),
         ]
 
-        state.messagesState.activeLevels = [2, 3]
+        state.messagesState.activeLevels = [.warning, .error]
 
         return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
             .frame(width: 800, height: 250)

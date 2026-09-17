@@ -10,7 +10,7 @@ import MingaProtocol
 ///
 /// SwiftUI identity is `id`, a `(streamInstance, seq)` composite carried by the wire contract, NOT the raw backend sequence number (`seq`).
 public struct MessageEntry: Identifiable, Equatable {
-    public init(id: UInt64, level: UInt8, subsystem: UInt8, timestampSecs: UInt32, filePath: String, text: String) {
+    public init(id: UInt64, level: MessageLevel, subsystem: MessageSubsystem, timestampSecs: UInt32, filePath: String, text: String) {
         self.id = id
         self.level = level
         self.subsystem = subsystem
@@ -20,8 +20,8 @@ public struct MessageEntry: Identifiable, Equatable {
     }
     /// Restart-safe composite identity: `(UInt64(streamInstance) << 32) | seq`.
     public let id: UInt64
-    public let level: UInt8
-    public let subsystem: UInt8
+    public let level: MessageLevel
+    public let subsystem: MessageSubsystem
     public let timestampSecs: UInt32
     public let filePath: String
     public let text: String
@@ -45,37 +45,37 @@ public struct MessageEntry: Identifiable, Equatable {
     /// Human-readable level name.
     public var levelName: String {
         switch level {
-        case 0: return "DEBUG"
-        case 1: return "INFO"
-        case 2: return "WARN"
-        case 3: return "ERROR"
-        default: return "?"
+        case .debug: return "DEBUG"
+        case .info: return "INFO"
+        case .warning: return "WARN"
+        case .error: return "ERROR"
+        case .unknown: return "?"
         }
     }
 
     /// Human-readable subsystem name.
     public var subsystemName: String {
         switch subsystem {
-        case 0: return "EDITOR"
-        case 1: return "LSP"
-        case 2: return "PARSER"
-        case 3: return "GIT"
-        case 4: return "RENDER"
-        case 5: return "AGENT"
-        case 6: return "ZIG"
-        case 7: return "GUI"
-        default: return "?"
+        case .editor: return "EDITOR"
+        case .lsp: return "LSP"
+        case .parser: return "PARSER"
+        case .git: return "GIT"
+        case .render: return "RENDER"
+        case .agent: return "AGENT"
+        case .zig: return "ZIG"
+        case .gui: return "GUI"
+        case .unknown: return "?"
         }
     }
 
     /// Color for the level indicator dot.
     public var levelColor: Color {
         switch level {
-        case 0: return .gray
-        case 1: return .green
-        case 2: return .yellow
-        case 3: return .red
-        default: return .gray
+        case .debug: return .gray
+        case .info: return .green
+        case .warning: return .yellow
+        case .error: return .red
+        case .unknown: return .gray
         }
     }
 
@@ -85,56 +85,56 @@ public struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Static lookup for level color by ID (used by filter bar + severity summary).
-    public static func levelColor(for level: UInt8) -> Color {
+    public static func levelColor(for level: MessageLevel) -> Color {
         switch level {
-        case 0: return .gray
-        case 1: return .green
-        case 2: return .yellow
-        case 3: return .red
-        default: return .gray
+        case .debug: return .gray
+        case .info: return .green
+        case .warning: return .yellow
+        case .error: return .red
+        case .unknown: return .gray
         }
     }
 
     /// Title-case level name for tooltips. Distinct from the instance `levelName`,
     /// which returns the uppercase badge form ("WARN"); the two formats serve
     /// different surfaces, so they are intentionally separate.
-    public static func levelTooltip(for level: UInt8) -> String {
+    public static func levelTooltip(for level: MessageLevel) -> String {
         switch level {
-        case 0: return "Debug"
-        case 1: return "Info"
-        case 2: return "Warning"
-        case 3: return "Error"
-        default: return "Unknown"
+        case .debug: return "Debug"
+        case .info: return "Info"
+        case .warning: return "Warning"
+        case .error: return "Error"
+        case .unknown: return "Unknown"
         }
     }
 
     /// Static lookup for subsystem name by ID (used by filter bar).
-    public static func subsystemName(for sub: UInt8) -> String {
+    public static func subsystemName(for sub: MessageSubsystem) -> String {
         switch sub {
-        case 0: return "EDITOR"
-        case 1: return "LSP"
-        case 2: return "PARSER"
-        case 3: return "GIT"
-        case 4: return "RENDER"
-        case 5: return "AGENT"
-        case 6: return "ZIG"
-        case 7: return "GUI"
-        default: return "?"
+        case .editor: return "EDITOR"
+        case .lsp: return "LSP"
+        case .parser: return "PARSER"
+        case .git: return "GIT"
+        case .render: return "RENDER"
+        case .agent: return "AGENT"
+        case .zig: return "ZIG"
+        case .gui: return "GUI"
+        case .unknown: return "?"
         }
     }
 
     /// Static lookup for subsystem color by ID (used by filter bar).
-    public static func subsystemColor(for sub: UInt8) -> Color {
+    public static func subsystemColor(for sub: MessageSubsystem) -> Color {
         switch sub {
-        case 0: return .blue        // EDITOR
-        case 1: return .purple      // LSP
-        case 2: return .orange      // PARSER
-        case 3: return .green       // GIT
-        case 4: return .cyan        // RENDER
-        case 5: return .indigo      // AGENT
-        case 6: return .teal        // ZIG
-        case 7: return .pink        // GUI
-        default: return .gray
+        case .editor: return .blue
+        case .lsp: return .purple
+        case .parser: return .orange
+        case .git: return .green
+        case .render: return .cyan
+        case .agent: return .indigo
+        case .zig: return .teal
+        case .gui: return .pink
+        case .unknown: return .gray
         }
     }
 }
@@ -142,7 +142,7 @@ public struct MessageEntry: Identifiable, Equatable {
 @MainActor
 @Observable
 public final class MessagesContentState {
-    public init(entries: [MessageEntry] = [], isAutoScrolling: Bool = true, hasNewEntries: Bool = false, activeLevels: Set<UInt8> = [1, 2, 3], activeSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7], searchText: String = "") {
+    public init(entries: [MessageEntry] = [], isAutoScrolling: Bool = true, hasNewEntries: Bool = false, activeLevels: Set<MessageLevel> = [.info, .warning, .error], activeSubsystems: Set<MessageSubsystem> = [.editor, .lsp, .parser, .git, .render, .agent, .zig, .gui], searchText: String = "") {
         self.entries = entries
         self.isAutoScrolling = isAutoScrolling
         self.hasNewEntries = hasNewEntries
@@ -159,16 +159,16 @@ public final class MessagesContentState {
     // MARK: - Filters
 
     /// Active log levels. Default: info + warning + error (debug hidden).
-    public var activeLevels: Set<UInt8> = [1, 2, 3]
+    public var activeLevels: Set<MessageLevel> = [.info, .warning, .error]
     /// Active subsystems. Default: all.
-    public var activeSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
+    public var activeSubsystems: Set<MessageSubsystem> = [.editor, .lsp, .parser, .git, .render, .agent, .zig, .gui]
     /// Text search query (case-insensitive substring match).
     public var searchText: String = ""
 
     /// All known subsystem IDs.
-    public static let allSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
+    public static let allSubsystems: Set<MessageSubsystem> = [.editor, .lsp, .parser, .git, .render, .agent, .zig, .gui]
     /// Default active levels (info + warning + error).
-    public static let defaultLevels: Set<UInt8> = [1, 2, 3]
+    public static let defaultLevels: Set<MessageLevel> = [.info, .warning, .error]
 
     /// Whether any filter is active (not at defaults).
     public var isFiltering: Bool {
@@ -188,7 +188,7 @@ public final class MessagesContentState {
     }
 
     /// Toggle a level filter on/off.
-    public func toggleLevel(_ level: UInt8) {
+    public func toggleLevel(_ level: MessageLevel) {
         if activeLevels.contains(level) {
             activeLevels.remove(level)
         } else {
@@ -197,7 +197,7 @@ public final class MessagesContentState {
     }
 
     /// Toggle a subsystem filter on/off.
-    public func toggleSubsystem(_ sub: UInt8) {
+    public func toggleSubsystem(_ sub: MessageSubsystem) {
         if activeSubsystems.contains(sub) {
             activeSubsystems.remove(sub)
         } else {
@@ -213,7 +213,7 @@ public final class MessagesContentState {
     }
 
     /// Set of subsystem IDs that have at least one entry.
-    public var presentSubsystems: Set<UInt8> {
+    public var presentSubsystems: Set<MessageSubsystem> {
         Set(entries.map(\.subsystem))
     }
 

@@ -165,7 +165,7 @@ struct GUITabBarDecoderTests {
         #expect(tabs[1].groupId == 1)
         #expect(tabs[1].isAgent == true)
         #expect(tabs[1].hasAttention == true)
-        #expect(tabs[1].agentStatus == 1)
+        #expect(tabs[1].agentStatus == .thinking)
         #expect(tabs[1].isPinned == true)
         #expect(tabs[1].tintColorRGB == 0x7AA2F7)
         #expect(tabs[1].label == "Agent")
@@ -254,7 +254,7 @@ struct GUICompletionDecoderTests {
         #expect(anchorCol == 10)
         #expect(selectedIndex == 0)
         #expect(items.count == 2)
-        #expect(items[0].kind == 1)
+        #expect(items[0].kind == .function)
         #expect(items[0].label == "def")
         #expect(items[0].detail == "keyword")
         #expect(items[1].label == "my_var")
@@ -481,12 +481,12 @@ struct GUIStatusBarDecoderTests {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(update.contentKind == 0)
-        #expect(update.mode == 1)
+        #expect(update.contentKind == .buffer)
+        #expect(update.mode == .insert)
         #expect(update.cursorLine == 42)
         #expect(update.cursorCol == 9)
         #expect(update.lineCount == 500)
-        #expect(update.flags == 0x0B)
+        #expect(update.flags.rawValue == 0x0B)
         #expect(update.safeMode == true)
         #expect(update.lspStatus == 1)
         #expect(update.gitBranch == "main")
@@ -498,7 +498,7 @@ struct GUIStatusBarDecoderTests {
         #expect(update.hintCount == 2)
         #expect(update.macroRecording == 0)
         #expect(update.parserStatus == 1)
-        #expect(update.agentStatus == 0)
+        #expect(update.agentStatus == .idle)
         #expect(update.activeToolName == "read_file")
         #expect(update.gitAdded == 5)
         #expect(update.gitModified == 3)
@@ -569,11 +569,11 @@ struct GUIStatusBarDecoderTests {
             return
         }
 
-        #expect(update.contentKind == 1)
+        #expect(update.contentKind == .agent)
         #expect(update.modelName == "claude-3-5-sonnet")
         #expect(update.messageCount == 12)
-        #expect(update.sessionStatus == 1)
-        #expect(update.agentStatus == 1)
+        #expect(update.sessionStatus == .thinking)
+        #expect(update.agentStatus == .thinking)
         #expect(update.activeToolName == "shell")
         #expect(update.backgroundSubagentCount == 3)
         #expect(update.backgroundSubagentLabel == "session-3: agent tests")
@@ -617,9 +617,9 @@ struct GUIStatusBarDecoderTests {
         }
 
         #expect(update.workspace?.id == 7)
-        #expect(update.workspace?.kind == 1)
-        #expect(update.workspace?.status == 2)
-        #expect(update.workspace?.flags == 0x0003)
+        #expect(update.workspace?.kind == .agent)
+        #expect(update.workspace?.status == .executingTool)
+        #expect(update.workspace?.flags.rawValue == 0x0003)
         #expect(update.workspace?.draftCount == 4)
         #expect(update.workspace?.conflictCount == 1)
         #expect(update.workspace?.backgroundCount == 2)
@@ -704,17 +704,17 @@ struct GUIStatusBarDecoderTests {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(update.contentKind == 1)
+        #expect(update.contentKind == .agent)
         #expect(update.modelName == "claude-3-5-sonnet")
         #expect(update.messageCount == 12)
-        #expect(update.sessionStatus == 1)
+        #expect(update.sessionStatus == .thinking)
         #expect(update.cursorLine == 11)
         #expect(update.lineCount == 100)
         #expect(update.gitBranch == "feat/agent")
         #expect(update.filetype == "elixir")
         #expect(update.errorCount == 1)
         #expect(update.hintCount == 1)
-        #expect(update.agentStatus == 1)
+        #expect(update.agentStatus == .thinking)
         #expect(update.activeToolName == "shell")
         #expect(update.gitAdded == 3)
         #expect(update.gitModified == 2)
@@ -1094,8 +1094,8 @@ struct GUIStatusBarDecoderTests {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(update.contentKind == 0)
-        #expect(update.mode == 2) // visual
+        #expect(update.contentKind == .buffer)
+        #expect(update.mode == .visual)
         #expect(update.cursorLine == 0) // default
         #expect(update.gitBranch == "") // default
         #expect(update.errorCount == 0) // default
@@ -1781,8 +1781,8 @@ struct GUIBottomPanelDecoderTests {
         #expect(entries.count == 1)
         #expect(entries[0].streamInstance == 7)
         #expect(entries[0].id == 42)
-        #expect(entries[0].level == 1)
-        #expect(entries[0].subsystem == 0)
+        #expect(entries[0].level == .info)
+        #expect(entries[0].subsystem == .editor)
         #expect(entries[0].timestampSecs == 3661)
         #expect(entries[0].text == "File opened: editor.ex")
     }
@@ -2100,16 +2100,16 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
         #expect(data[1] == 8)
-        guard case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(visible == true)
-        #expect(status == 1)
+        #expect(status == .thinking)
         #expect(model == "claude")
         #expect(thinkingLevel == "high")
         #expect(prompt == "fix")
         #expect(promptLineCount == 4)
         #expect(promptCursorLine == 2)
         #expect(promptCursorCol == 5)
-        #expect(promptVimMode == 1)
+        #expect(promptMode == .insert)
         #expect(promptVisibleRows == 3)
         #expect(promptCompletion?.type == 2)
         #expect(promptCompletion?.selected == 1)
@@ -2220,15 +2220,15 @@ struct GUIWorkspacesDecoderTests {
 
         #expect(version == 2)
         #expect(activeId == 1)
-        #expect(mode == 1)
-        #expect(flags == 1)
+        #expect(mode == .agent)
+        #expect(flags == [.hasAttention])
         #expect(workspaces.count == 2)
-        #expect(workspaces[0].kind == 0)
+        #expect(workspaces[0].kind == .manual)
         #expect(workspaces[0].label == "minga")
         #expect(workspaces[1].id == 1)
-        #expect(workspaces[1].kind == 1)
-        #expect(workspaces[1].agentStatus == 2)
-        #expect(workspaces[1].flags == 0x0003)
+        #expect(workspaces[1].kind == .agent)
+        #expect(workspaces[1].agentStatus == .executingTool)
+        #expect(workspaces[1].flags == [.attention, .closeable])
         #expect(workspaces[1].draftCount == 4)
         #expect(workspaces[1].conflictCount == 2)
         #expect(workspaces[1].runningBackgroundCount == 1)
@@ -2236,7 +2236,7 @@ struct GUIWorkspacesDecoderTests {
         #expect(visibleTabs.count == 1)
         #expect(visibleTabs[0].id == 42)
         #expect(visibleTabs[0].workspaceId == 1)
-        #expect(visibleTabs[0].flags == 0x0013)
+        #expect(visibleTabs[0].flags.rawValue == 0x0013)
         #expect(visibleTabs[0].pathHash == 0x12345678)
         #expect(visibleTabs[0].tintColorRGB == 0x7AA2F7)
         #expect(visibleTabs[0].label == "agent.ex")

@@ -177,14 +177,14 @@ public enum PreviewFixtures {
     public static func populateAgentChat(_ state: AgentChatState) {
         state.update(
             visible: true,
-            status: 2,
+            status: .executingTool,
             model: "anthropic:claude-sonnet-4",
             thinkingLevel: "medium",
             prompt: "Make the notification card use the configured theme",
             promptLineCount: 1,
             promptCursorLine: 0,
             promptCursorCol: 52,
-            promptVimMode: 1,
+            promptMode: .insert,
             promptVisibleRows: 1,
             promptCompletion: nil,
             helpVisible: false,

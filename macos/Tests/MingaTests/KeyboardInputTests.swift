@@ -563,13 +563,13 @@ struct KeyboardInputTests {
     @Test("Text input modes treat space as literal")
     func statusModesUsingLiteralSpace() throws {
         #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: nil))
-        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: 0))
-        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 1))
-        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: 2))
-        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 3))
-        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: 4))
-        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 5))
-        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 6))
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: .normal))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: .insert))
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: .visual))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: .command))
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: .operatorPending))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: .search))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: .replace))
     }
 
     @Test("Vim normal insert-entering keys use optimistic text input mode")
@@ -580,13 +580,13 @@ struct KeyboardInputTests {
         ]
 
         for (key, scalar) in insertKeys {
-            #expect(EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: scalar, statusMode: 0, cursorShape: .block), "\(key) should predict text input mode")
+            #expect(EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: scalar, statusMode: .normal, cursorShape: .block), "\(key) should predict text input mode")
         }
 
-        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("x").value, statusMode: 0, cursorShape: .block))
-        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar(" ").value, statusMode: 0, cursorShape: .block))
-        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("s").value, statusMode: 0, cursorShape: .beam))
-        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("i").value, statusMode: 1, cursorShape: .beam))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("x").value, statusMode: .normal, cursorShape: .block))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar(" ").value, statusMode: .normal, cursorShape: .block))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("s").value, statusMode: .normal, cursorShape: .beam))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("i").value, statusMode: .insert, cursorShape: .beam))
         #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("i").value, statusMode: nil, cursorShape: .block))
     }
 

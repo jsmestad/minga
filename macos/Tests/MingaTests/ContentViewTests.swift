@@ -716,8 +716,8 @@ struct ContentViewTests {
         gui.tabBarState.install(WorkspacePresentationSnapshot(
             version: 1,
             activeWorkspaceId: 7,
-            mode: 1,
-            flags: 0,
+            mode: .agent,
+            flags: [],
             workspaces: [Wire.WorkspaceEntry(
                 id: 7,
                 kind: 1,
@@ -764,8 +764,8 @@ struct ContentViewTests {
         gui.tabBarState.install(WorkspacePresentationSnapshot(
             version: 1,
             activeWorkspaceId: 7,
-            mode: 1,
-            flags: 0,
+            mode: .agent,
+            flags: [],
             workspaces: [],
             visibleTabs: []
         ))

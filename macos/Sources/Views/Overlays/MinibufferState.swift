@@ -26,25 +26,10 @@ public struct MinibufferCandidate: Identifiable {
     public let matchPositions: Set<Int>
 }
 
-/// Minibuffer mode constants matching the BEAM protocol.
-public enum MinibufferMode: UInt8 {
-    case command = 0
-    case searchForward = 1
-    case searchBackward = 2
-    case searchPrompt = 3
-    case eval = 4
-    case substituteConfirm = 5
-    case extensionConfirm = 6
-    case describeKey = 7
-    case deleteConfirm = 8
-    case branchDeleteConfirm = 9
-    case textPrompt = 10
-}
-
 @MainActor
 @Observable
 public final class MinibufferState {
-    public init(visible: Bool = false, mode: UInt8 = 0, cursorPos: UInt16 = 0xFFFF, prompt: String = "", input: String = "", context: String = "", selectedIndex: UInt16 = 0, candidates: [MinibufferCandidate] = [], totalCandidates: UInt16 = 0, inputVersion: Int = 0) {
+    public init(visible: Bool = false, mode: MinibufferMode = .command, cursorPos: UInt16 = 0xFFFF, prompt: String = "", input: String = "", context: String = "", selectedIndex: UInt16 = 0, candidates: [MinibufferCandidate] = [], totalCandidates: UInt16 = 0, inputVersion: Int = 0) {
         self.visible = visible
         self.mode = mode
         self.cursorPos = cursorPos
@@ -57,7 +42,7 @@ public final class MinibufferState {
         self.inputVersion = inputVersion
     }
     public var visible: Bool = false
-    public var mode: UInt8 = 0
+    public var mode: MinibufferMode = .command
     public var cursorPos: UInt16 = 0xFFFF
     public var prompt: String = ""
     public var input: String = ""
@@ -76,7 +61,7 @@ public final class MinibufferState {
 
     /// Whether the current mode accepts text input (shows a cursor).
     public var isInputMode: Bool {
-        mode <= MinibufferMode.eval.rawValue || mode == MinibufferMode.textPrompt.rawValue
+        mode.acceptsTextInput
     }
 
     /// Whether to show a blinking cursor in the input field.
@@ -86,7 +71,7 @@ public final class MinibufferState {
 
     /// Whether this is a prompt-only mode (no text input, shows action keys).
     public var isPromptMode: Bool {
-        mode >= MinibufferMode.substituteConfirm.rawValue && mode != MinibufferMode.textPrompt.rawValue
+        mode.presentsActionKeys
     }
 
     /// Whether completion candidates are present.
@@ -94,7 +79,7 @@ public final class MinibufferState {
         !candidates.isEmpty
     }
 
-    public func update(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String,
+    public func update(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String,
                 input: String, context: String, selectedIndex: UInt16,
                 totalCandidates: UInt16 = 0,
                 rawCandidates: [Wire.MinibufferCandidate]) {

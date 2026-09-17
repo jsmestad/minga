@@ -429,7 +429,7 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
 @MainActor
 @Observable
 public final class AgentChatState {
-    public init(visible: Bool = false, status: UInt8 = 0, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], helpVisible: Bool = false, helpGroups: [HelpGroup] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptVimMode: UInt8 = 0, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
+    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], helpVisible: Bool = false, helpGroups: [HelpGroup] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -449,12 +449,12 @@ public final class AgentChatState {
         self.promptLineCount = promptLineCount
         self.promptCursorLine = promptCursorLine
         self.promptCursorCol = promptCursorCol
-        self.promptVimMode = promptVimMode
+        self.promptMode = promptMode
         self.promptVisibleRows = promptVisibleRows
         self.promptCompletion = promptCompletion
     }
     public var visible: Bool = false
-    public var status: UInt8 = 0
+    public var status: AgentStatus = .idle
     public var model: String = ""
     public var thinkingLevel: String = "medium"
     public var prompt: String = ""
@@ -509,13 +509,12 @@ public final class AgentChatState {
     public var promptCursorLine: UInt16 = 0
     /// Cursor column within the prompt buffer.
     public var promptCursorCol: UInt16 = 0
-    /// Vim mode: 0=normal, 1=insert, 2=visual, 3=visual_line, 4=operator_pending.
-    public var promptVimMode: UInt8 = 0
+    public var promptMode: PromptMode = .normal
     /// Number of visible rows in the prompt (after wrapping, clamped to max).
     public var promptVisibleRows: UInt8 = 1
 
     /// Whether the prompt is in insert mode (for SwiftUI styling).
-    public var isPromptInsertMode: Bool { promptVimMode == 1 }
+    public var isPromptInsertMode: Bool { promptMode.isInsert }
 
     // ── Prompt completion popup ──
 
@@ -524,15 +523,16 @@ public final class AgentChatState {
 
     public var statusLabel: String {
         switch status {
-        case 0: return "idle"
-        case 1: return "thinking"
-        case 2: return "running tool"
-        case 3: return "error"
-        default: return "idle"
+        case .idle: return "idle"
+        case .thinking: return "thinking"
+        case .executingTool: return "running tool"
+        case .error: return "error"
+        case .planning: return "planning"
+        case .unknown: return "unknown"
         }
     }
 
-    public var isThinking: Bool { status == 1 || status == 2 }
+    public var isThinking: Bool { status.isWorking }
 
     public var displayModel: String {
         guard let separator = model.firstIndex(of: ":") else { return model }
@@ -560,7 +560,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt, help).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup]) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup]) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -569,7 +569,7 @@ public final class AgentChatState {
         self.promptLineCount = promptLineCount
         self.promptCursorLine = promptCursorLine
         self.promptCursorCol = promptCursorCol
-        self.promptVimMode = promptVimMode
+        self.promptMode = promptMode
         self.promptVisibleRows = promptVisibleRows
         self.promptCompletion = promptCompletion
         self.promptVersion += 1

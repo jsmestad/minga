@@ -402,17 +402,17 @@ struct StatusBarViewViewTests {
         diagnosticHint: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
         rightSegments: [Wire.StatusBarSegment] = [],
-        agentStatus: UInt8 = 0,
+        agentStatus: AgentStatus = .idle,
         activeToolName: String = "",
         safeMode: Bool = false
     ) -> StatusBarState {
         let state = StatusBarState()
         state.update(from: StatusBarUpdate(
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
-            lineCount: 500, flags: safeMode ? 0x08 : 0, safeMode: safeMode, lspStatus: 0, gitBranch: "",
+            lineCount: 500, flags: safeMode ? 0x08 : 0, lspStatus: 0, gitBranch: "",
             message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
             modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus.rawValue,
             activeToolName: activeToolName,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: diagnosticHint,
@@ -766,7 +766,7 @@ struct StatusBarViewViewTests {
 
     @Test("Agent status shows readable labels and active tool names")
     @MainActor func agentStatusLabels() throws {
-        let running = statusBarState(agentStatus: 2, activeToolName: "read_file")
+        let running = statusBarState(agentStatus: .executingTool, activeToolName: "read_file")
         let runningTexts = try StatusBarView(state: running, encoder: nil)
             .environment(\.themeColors, ThemeColors())
             .inspect()
@@ -775,7 +775,7 @@ struct StatusBarViewViewTests {
 
         #expect(runningTexts.contains("Running read_file"))
 
-        let fallback = statusBarState(agentStatus: 2)
+        let fallback = statusBarState(agentStatus: .executingTool)
         let fallbackTexts = try StatusBarView(state: fallback, encoder: nil)
             .environment(\.themeColors, ThemeColors())
             .inspect()
@@ -785,7 +785,7 @@ struct StatusBarViewViewTests {
         #expect(fallbackTexts.contains("Running"))
         #expect(!fallbackTexts.contains("Running read_file"))
 
-        let plan = statusBarState(agentStatus: 4)
+        let plan = statusBarState(agentStatus: .planning)
         let planBody = try StatusBarView(state: plan, encoder: nil).environment(\.themeColors, ThemeColors()).inspect()
         let planTexts = planBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         let planAccessibilityLabels = try planBody.findAll(ViewType.HStack.self).compactMap {
@@ -926,8 +926,8 @@ struct TabBarViewViewTests {
         WorkspacePresentationSnapshot(
             version: 1,
             activeWorkspaceId: id,
-            mode: 0,
-            flags: 0,
+            mode: .editor,
+            flags: [],
             workspaces: [
                 Wire.WorkspaceEntry(
                     id: id,
@@ -954,7 +954,7 @@ struct TabBarViewViewTests {
     }
 
     private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
-        TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
+        TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: .idle, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
     }
 
     @Test("Tab bar shows all tab labels")
@@ -1000,7 +1000,7 @@ struct TabBarViewViewTests {
     @Test("Workspace indicator controls have explicit native actions")
     @MainActor func workspaceIndicatorAccessibilityContract() throws {
         let snapshot = WorkspacePresentationSnapshot(
-            version: 1, activeWorkspaceId: 7, mode: 0, flags: 0,
+            version: 1, activeWorkspaceId: 7, mode: .editor, flags: [],
             workspaces: [
                 Wire.WorkspaceEntry(id: 7, kind: 0, status: 1, flags: 0, colorR: 0, colorG: 0, colorB: 255,
                                     tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0,
@@ -1219,7 +1219,7 @@ struct TabBarViewViewTests {
 
         #expect(state.movableFileTabIndex(for: tab(id: 2, label: "file-a.ex")) == 0)
         #expect(state.movableFileTabIndex(for: tab(id: 3, label: "file-b.ex")) == 1)
-        #expect(state.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 0, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
+        #expect(state.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: .idle, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
         #expect(state.tabDropReorder(droppedTabs: [TabDragPayload(id: 2)], target: tab(id: 3, label: "file-b.ex"), visibleIndex: 2)?.newIndex == 1)
     }
 
@@ -1232,7 +1232,7 @@ struct TabBarViewViewTests {
             Wire.TabEntry(id: 2, groupId: 2, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "background.ex")
         ])
-        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: .agent, flags: [], workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu"),
             Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
@@ -1253,7 +1253,7 @@ struct TabBarViewViewTests {
     @Test("Canonical workspace tabs render agent entries with the agent icon")
     @MainActor func canonicalWorkspaceTabsRenderAgentEntriesWithAgentIcon() throws {
         let fileState = TabBarState()
-        fileState.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
+        fileState.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: .agent, flags: [], workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu")
         ], visibleTabs: [
@@ -1261,7 +1261,7 @@ struct TabBarViewViewTests {
         ]))
 
         let agentState = TabBarState()
-        agentState.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
+        agentState.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: .agent, flags: [], workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu")
         ], visibleTabs: [
@@ -1292,7 +1292,7 @@ struct WorkspaceHeaderViewTests {
 
     @MainActor private func populatedState() -> WorkspaceState {
         let state = WorkspaceState()
-        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 2, mode: 1, flags: 1, workspaces: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 2, mode: .agent, flags: [.hasAttention], workspaces: [
             Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
@@ -1321,7 +1321,7 @@ struct WorkspaceHeaderViewTests {
     @Test("Header exposes background workspace badges without activating them")
     @MainActor func showsBackgroundWorkspaceBadges() throws {
         let state = WorkspaceState()
-        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 0, mode: .editor, flags: [], workspaces: [
             Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 3, flags: 0x0001, colorR: 0x44, colorG: 0x55, colorB: 0x66,
@@ -1443,7 +1443,7 @@ struct AgentChatViewTests {
         let state = AgentChatState()
         state.visible = true
         state.model = "claude-sonnet-4"
-        state.status = 0
+        state.status = .idle
         state.seed(messages: messages)
         return state
     }
@@ -1483,7 +1483,7 @@ struct AgentChatViewTests {
         let state = AgentChatState()
         state.visible = true
         state.model = "claude-sonnet-4"
-        state.status = 0
+        state.status = .idle
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1506,7 +1506,7 @@ struct AgentChatViewTests {
         state.visible = true
         state.model = "anthropic:claude-sonnet-4"
         state.thinkingLevel = "high"
-        state.status = 0
+        state.status = .idle
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1526,7 +1526,7 @@ struct AgentChatViewTests {
         state.visible = true
         state.model = "claude-sonnet-4"
         state.thinkingLevel = "medium"
-        state.status = 0
+        state.status = .idle
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: spy)
             .environment(\.themeColors, ThemeColors())
@@ -1684,7 +1684,7 @@ struct AgentChatViewTests {
         let state = AgentChatState()
         state.visible = true
         state.model = "test-model"
-        state.promptVimMode = 1 // insert mode
+        state.promptMode = .insert
 
         let sut = AgentChatView(state: state, isInsertMode: true, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1757,7 +1757,7 @@ struct MinibufferViewAccessibilityTests {
     @MainActor func candidateActivation() throws {
         let state = MinibufferState()
         state.update(
-            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "org", context: "", selectedIndex: 1,
             totalCandidates: 2,
             rawCandidates: [
@@ -1782,7 +1782,7 @@ struct MinibufferViewAccessibilityTests {
     @MainActor func staleCandidateActivationIsRejected() throws {
         let state = MinibufferState()
         state.update(
-            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "old", context: "", selectedIndex: 0,
             totalCandidates: 1,
             rawCandidates: [
@@ -1795,7 +1795,7 @@ struct MinibufferViewAccessibilityTests {
         let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
 
         state.update(
-            visible: true, mode: MinibufferMode.command.rawValue, cursorPos: 0,
+            visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "new", context: "", selectedIndex: 0,
             totalCandidates: 1,
             rawCandidates: [
