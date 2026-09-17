@@ -22,6 +22,12 @@ defmodule MingaEditor.State.LSP.PendingRequests do
            non_neg_integer(), MingaEditor.State.Tab.id() | nil, position() | nil}
           | {:inlay_hint, pid(), pid(), non_neg_integer(), MingaEditor.State.Tab.id() | nil,
              non_neg_integer(), pos_integer()}
+          | {:completion_result, MingaEditor.CompletionTrigger.response_role(),
+             Minga.Editing.Completion.Item.provider_id(), pid(), reference(), pid(),
+             non_neg_integer(), reference(), non_neg_integer(), position()}
+          | {:completion_resolve, pid(), reference(), pid(), non_neg_integer(), reference(),
+             non_neg_integer(), Minga.Editing.Completion.Item.provider_id(),
+             Minga.Editing.Completion.Item.id(), map()}
           | {:completion_result, MingaEditor.CompletionTrigger.response_role(), pid(), pid(),
              non_neg_integer(), non_neg_integer(), position()}
           | {:completion_resolve, pid(), pid(), non_neg_integer(), non_neg_integer(), map()}
@@ -53,6 +59,24 @@ defmodule MingaEditor.State.LSP.PendingRequests do
             when is_tuple(cursor) and tuple_size(cursor) == 2 and is_integer(elem(cursor, 0)) and
                    elem(cursor, 0) >= 0 and is_integer(elem(cursor, 1)) and elem(cursor, 1) >= 0
 
+  @doc "Tracks one provider-owned completion result request by its full session identity."
+  @spec track_completion_result(t(), MingaEditor.CompletionTrigger.tracking_fact()) ::
+          {:ok, t()} | {:error, :duplicate_ref}
+  def track_completion_result(
+        %__MODULE__{} = pending,
+        {ref, role, provider_id, client, buffer, version, session_id, gen, pos}
+      )
+      when is_reference(ref) and role in [:primary, :secondary] and is_pid(client) and
+             is_pid(buffer) and is_integer(version) and version >= 0 and is_integer(gen) and
+             is_reference(session_id) and gen >= 0 and valid_cursor_guard(pos) do
+    track_request(
+      pending,
+      ref,
+      {:completion_result, role, provider_id, client, ref, buffer, version, session_id, gen, pos}
+    )
+  end
+
+  @doc "Tracks a legacy completion request that predates stable session ownership."
   @spec track_completion_result(
           t(),
           reference(),
@@ -63,22 +87,28 @@ defmodule MingaEditor.State.LSP.PendingRequests do
           non_neg_integer(),
           position()
         ) :: {:ok, t()} | {:error, :duplicate_ref}
-  def track_completion_result(
-        %__MODULE__{} = pending,
-        ref,
-        role,
-        client,
-        buffer,
-        version,
-        gen,
-        pos
-      )
-      when is_reference(ref) and role in [:primary, :secondary] and is_pid(client) and
-             is_pid(buffer) and is_integer(version) and version >= 0 and is_integer(gen) and
-             gen >= 0 and valid_cursor_guard(pos) do
+  def track_completion_result(pending, ref, role, client, buffer, version, gen, pos) do
     track_request(pending, ref, {:completion_result, role, client, buffer, version, gen, pos})
   end
 
+  @doc "Tracks one lazy resolve request by its full session and item identity."
+  @spec track_completion_resolve(t(), MingaEditor.State.LSP.resolve_tracking_fact()) ::
+          {:ok, t()} | {:error, :duplicate_ref}
+  def track_completion_resolve(
+        %__MODULE__{} = pending,
+        {ref, client, buffer, version, session_id, gen, provider_id, item_id, raw_item}
+      )
+      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
+             version >= 0 and is_integer(gen) and gen >= 0 and is_map(raw_item) do
+    track_request(
+      pending,
+      ref,
+      {:completion_resolve, client, ref, buffer, version, session_id, gen, provider_id, item_id,
+       raw_item}
+    )
+  end
+
+  @doc "Tracks a legacy completion resolve request that predates stable item identity."
   @spec track_completion_resolve(
           t(),
           reference(),
@@ -88,17 +118,7 @@ defmodule MingaEditor.State.LSP.PendingRequests do
           non_neg_integer(),
           map()
         ) :: {:ok, t()} | {:error, :duplicate_ref}
-  def track_completion_resolve(
-        %__MODULE__{} = pending,
-        ref,
-        client,
-        buffer,
-        version,
-        gen,
-        raw_item
-      )
-      when is_reference(ref) and is_pid(client) and is_pid(buffer) and is_integer(version) and
-             version >= 0 and is_integer(gen) and gen >= 0 and is_map(raw_item) do
+  def track_completion_resolve(pending, ref, client, buffer, version, gen, raw_item) do
     track_request(pending, ref, {:completion_resolve, client, buffer, version, gen, raw_item})
   end
 
@@ -355,9 +375,24 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   def drop_completion_requests(%__MODULE__{} = pending) do
     by_ref =
       Map.reject(pending.by_ref, fn
-        {_ref, {:completion_result, _role, _client, _buffer, _version, _gen, _pos}} -> true
-        {_ref, {:completion_resolve, _client, _buffer, _version, _gen, _raw_item}} -> true
-        {_ref, _request} -> false
+        {_map_ref,
+         {:completion_result, _role, _provider, _client, _request_ref, _buffer, _version,
+          _session, _gen, _pos}} ->
+          true
+
+        {_map_ref,
+         {:completion_resolve, _client, _request_ref, _buffer, _version, _session, _gen,
+          _provider, _item, _raw_item}} ->
+          true
+
+        {_ref, {:completion_result, _role, _client, _buffer, _version, _gen, _pos}} ->
+          true
+
+        {_ref, {:completion_resolve, _client, _buffer, _version, _gen, _raw_item}} ->
+          true
+
+        {_ref, _request} ->
+          false
       end)
 
     %{pending | by_ref: by_ref}

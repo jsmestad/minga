@@ -1321,6 +1321,12 @@ defmodule MingaEditor do
   # Editor hot path. The Task sends this message back with the processed menu.
   # apply_processed/7 applies it cheaply and uses the generation and buffer
   # identity to discard stale, superseded results.
+  def handle_info({:completion_processed, fact, payload}, state) do
+    new_state = CompletionHandling.apply_processed(state, fact, payload)
+
+    {:noreply, Renderer.render_or_async(new_state)}
+  end
+
   def handle_info(
         {:completion_processed, gen, mode, payload, trigger_pos, buffer, version},
         state

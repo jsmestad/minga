@@ -12,6 +12,9 @@ defmodule MingaEditor.CompletionHandling do
   alias Minga.Buffer.CursorContext
   alias Minga.Config
   alias Minga.Editing.Completion
+  alias Minga.Editing.Completion.Item
+  alias Minga.Editing.Completion.ProviderBatch
+  alias Minga.Editing.Completion.Session
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
@@ -43,68 +46,279 @@ defmodule MingaEditor.CompletionHandling do
   @spec do_maybe_resolve_selected(EditorState.t(), Completion.t()) :: EditorState.t()
   defp do_maybe_resolve_selected(state, completion) do
     item = Completion.selected_item(completion)
-    raw_item = if item, do: item.raw
-    gen = CompletionTrigger.generation(ModalWorkflow.completion_trigger(state))
+    maybe_schedule_resolve(state, completion, item)
+  end
 
-    if item == nil or raw_item == nil or raw_item == completion.last_resolved_identity or
-         item.documentation != "" do
-      state
-    else
-      if completion.resolve_timer do
-        Process.cancel_timer(completion.resolve_timer)
-      end
+  @spec maybe_schedule_resolve(EditorState.t(), Completion.t(), Item.t() | nil) :: EditorState.t()
+  defp maybe_schedule_resolve(state, _completion, nil), do: state
 
-      timer =
-        if state.frontend.backend != :headless do
-          Process.send_after(self(), {:completion_resolve, gen, raw_item}, @resolve_debounce_ms)
-        end
+  defp maybe_schedule_resolve(state, _completion, %Item{raw: nil}), do: state
 
-      ModalWorkflow.update_completion(state, fn _ ->
-        %{completion | resolve_timer: timer}
-      end)
+  defp maybe_schedule_resolve(state, _completion, %Item{documentation: documentation})
+       when documentation != "",
+       do: state
+
+  defp maybe_schedule_resolve(state, completion, %Item{} = item) do
+    trigger = ModalWorkflow.completion_trigger(state)
+
+    case CompletionTrigger.session(trigger) do
+      %Session{} -> schedule_session_resolve(state, completion, item, trigger)
+      nil -> schedule_legacy_resolve(state, completion, item, trigger)
     end
   end
 
+  @spec schedule_session_resolve(
+          EditorState.t(),
+          Completion.t(),
+          Item.t(),
+          CompletionTrigger.t()
+        ) :: EditorState.t()
+  defp schedule_session_resolve(state, completion, item, trigger) do
+    timer =
+      if state.frontend.backend != :headless do
+        Process.send_after(
+          self(),
+          {:completion_resolve, session_id(trigger), CompletionTrigger.generation(trigger),
+           item.provider_id, item.id},
+          @resolve_debounce_ms
+        )
+      end
+
+    case CompletionTrigger.begin_resolve(trigger, item, timer) do
+      {:ok, trigger, _identity} ->
+        state
+        |> ModalWorkflow.put_completion_trigger(trigger)
+        |> ModalWorkflow.update_completion(fn _ -> %{completion | resolve_timer: timer} end)
+
+      :stale ->
+        if is_reference(timer), do: Process.cancel_timer(timer)
+        state
+    end
+  end
+
+  @spec schedule_legacy_resolve(
+          EditorState.t(),
+          Completion.t(),
+          Item.t(),
+          CompletionTrigger.t()
+        ) :: EditorState.t()
+  defp schedule_legacy_resolve(state, completion, item, trigger) do
+    if completion.resolve_timer, do: Process.cancel_timer(completion.resolve_timer)
+
+    timer =
+      if state.frontend.backend != :headless do
+        Process.send_after(
+          self(),
+          {:completion_resolve, CompletionTrigger.generation(trigger), item.raw},
+          @resolve_debounce_ms
+        )
+      end
+
+    ModalWorkflow.update_completion(state, fn _ -> %{completion | resolve_timer: timer} end)
+  end
+
+  @spec flush_resolve(
+          EditorState.t(),
+          reference(),
+          non_neg_integer(),
+          Item.provider_id(),
+          Item.id()
+        ) :: EditorState.t()
+  def flush_resolve(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        session_id,
+        gen,
+        provider_id,
+        item_id
+      ) do
+    do_flush_resolve(state, session_id, gen, provider_id, item_id)
+  end
+
+  def flush_resolve(state, _session_id, _gen, _provider_id, _item_id), do: state
+
+  @doc "Flushes a legacy positional completion resolve timer."
   @spec flush_resolve(EditorState.t(), non_neg_integer(), map()) :: EditorState.t()
-  def flush_resolve(%{shell_runtime: %{state: %ShellState{}}} = state, gen, raw_item) do
-    case ModalWorkflow.completion(state) do
-      nil -> state
-      completion -> do_flush_resolve(state, completion, gen, raw_item)
+  def flush_resolve(
+        %{shell_runtime: %{state: %ShellState{}}, workspace: %{buffers: %{active: buf}}} = state,
+        gen,
+        raw_item
+      ) do
+    completion = ModalWorkflow.completion(state)
+    trigger = ModalWorkflow.completion_trigger(state)
+
+    if match?(%Completion{}, completion) and CompletionTrigger.generation(trigger) == gen and
+         Completion.selected_raw?(completion, raw_item) do
+      case {lsp_client_for(state, buf), buffer_value(buf, &Buffer.version/1)} do
+        {client, version} when is_pid(client) and is_integer(version) and version >= 0 ->
+          ref = Client.request(client, "completionItem/resolve", raw_item)
+          track_legacy_completion_resolve_request(state, ref, client, buf, version, gen, raw_item)
+
+        _ ->
+          state
+      end
+    else
+      state
     end
   end
 
   def flush_resolve(state, _gen, _raw_item), do: state
 
-  @spec do_flush_resolve(EditorState.t(), Completion.t(), non_neg_integer(), map()) ::
-          EditorState.t()
+  @spec do_flush_resolve(
+          EditorState.t(),
+          reference(),
+          non_neg_integer(),
+          Item.provider_id(),
+          Item.id()
+        ) :: EditorState.t()
   defp do_flush_resolve(
          %{workspace: %{buffers: %{active: buf}}} = state,
-         completion,
+         session_id,
          gen,
-         raw_item
+         provider_id,
+         item_id
        ) do
     trigger = ModalWorkflow.completion_trigger(state)
+    identity = {session_id, provider_id, item_id}
 
-    if CompletionTrigger.generation(trigger) == gen and
-         Completion.selected_raw?(completion, raw_item) do
-      flush_resolve_request(state, buf, gen, raw_item)
+    if Minga.Editing.inserting?(state) do
+      case CompletionTrigger.session(trigger) do
+        %Session{id: ^session_id, generation: ^gen, selected_item_id: ^item_id} = session ->
+          flush_resolve_request(state, trigger, session, identity, buf)
+
+        _ ->
+          state
+      end
     else
       state
     end
   end
 
-  @spec flush_resolve_request(EditorState.t(), pid(), non_neg_integer(), map()) :: EditorState.t()
-  defp flush_resolve_request(state, buf, gen, raw_item) do
-    case {lsp_client_for(state, buf), buffer_value(buf, &Buffer.version/1)} do
-      {client, version} when is_pid(client) and is_integer(version) and version >= 0 ->
+  @spec flush_resolve_request(
+          EditorState.t(),
+          CompletionTrigger.t(),
+          Session.t(),
+          Session.resolve_identity(),
+          pid()
+        ) :: EditorState.t()
+  defp flush_resolve_request(state, trigger, session, identity, buf) do
+    {_session_id, provider_id, item_id} = identity
+    item = Session.find_item(session, item_id)
+
+    case {resolve_client(session, provider_id), item, buffer_value(buf, &Buffer.version/1)} do
+      {client, %Item{raw: raw_item}, version}
+      when is_pid(client) and is_map(raw_item) and is_integer(version) and version >= 0 ->
         ref = Client.request(client, "completionItem/resolve", raw_item)
-        track_completion_resolve_request(state, ref, client, buf, version, gen, raw_item)
+
+        case CompletionTrigger.track_resolve(trigger, identity, ref) do
+          {:ok, trigger} ->
+            state
+            |> ModalWorkflow.put_completion_trigger(trigger)
+            |> track_completion_resolve_request(
+              {ref, client, buf, version, session.id, session.generation, provider_id, item_id,
+               raw_item}
+            )
+
+          :stale ->
+            Client.cancel_request(client, ref)
+            state
+        end
 
       _ ->
         state
     end
   end
 
+  @spec handle_resolve_response(
+          EditorState.t(),
+          Session.resolve_identity(),
+          reference(),
+          {:ok, term()} | {:error, term()}
+        ) ::
+          EditorState.t()
+  def handle_resolve_response(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        identity,
+        request_ref,
+        {:error, _error}
+      ) do
+    trigger = ModalWorkflow.completion_trigger(state)
+
+    case CompletionTrigger.session(trigger) do
+      %Session{} = session ->
+        case Session.fail_resolve(session, identity, request_ref) do
+          {:ok, session} ->
+            install_resolve_session(state, trigger, session)
+
+          :stale ->
+            state
+        end
+
+      nil ->
+        state
+    end
+  end
+
+  def handle_resolve_response(state, _identity, _request_ref, {:error, _error}), do: state
+
+  def handle_resolve_response(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        identity,
+        request_ref,
+        {:ok, resolved}
+      ) do
+    trigger = ModalWorkflow.completion_trigger(state)
+    doc_text = extract_resolve_documentation(resolved)
+
+    case CompletionTrigger.session(trigger) do
+      %Session{} = session ->
+        apply_resolved_item(state, trigger, session, identity, request_ref, doc_text)
+
+      nil ->
+        state
+    end
+  end
+
+  def handle_resolve_response(state, _identity, _request_ref, {:ok, _resolved}), do: state
+
+  @spec apply_resolved_item(
+          EditorState.t(),
+          CompletionTrigger.t(),
+          Session.t(),
+          Session.resolve_identity(),
+          reference(),
+          String.t()
+        ) :: EditorState.t()
+  defp apply_resolved_item(state, trigger, session, identity, request_ref, doc_text) do
+    case Session.resolve_item(session, identity, request_ref, doc_text) do
+      {:ok, session} -> install_resolved_item(state, trigger, session, identity, doc_text)
+      :stale -> state
+    end
+  end
+
+  @spec install_resolved_item(
+          EditorState.t(),
+          CompletionTrigger.t(),
+          Session.t(),
+          Session.resolve_identity(),
+          String.t()
+        ) :: EditorState.t()
+  defp install_resolved_item(state, trigger, session, identity, doc_text) do
+    {_session_id, _provider_id, item_id} = identity
+
+    state
+    |> ModalWorkflow.put_completion_trigger(CompletionTrigger.put_session(trigger, session))
+    |> ModalWorkflow.update_completion(fn completion ->
+      Completion.update_item_documentation(completion, item_id, doc_text)
+    end)
+  end
+
+  @spec install_resolve_session(EditorState.t(), CompletionTrigger.t(), Session.t()) ::
+          EditorState.t()
+  defp install_resolve_session(state, trigger, session),
+    do:
+      ModalWorkflow.put_completion_trigger(state, CompletionTrigger.put_session(trigger, session))
+
+  @doc "Applies a legacy completion resolve response by raw item identity."
   @spec handle_resolve_response(EditorState.t(), map(), {:ok, term()} | {:error, term()}) ::
           EditorState.t()
   def handle_resolve_response(state, _raw_item, {:error, _error}), do: state
@@ -115,17 +329,11 @@ defmodule MingaEditor.CompletionHandling do
         {:ok, resolved}
       )
       when is_map(raw_item) do
-    case ModalWorkflow.completion(state) do
-      nil ->
-        state
+    doc_text = extract_resolve_documentation(resolved)
 
-      _completion ->
-        doc_text = extract_resolve_documentation(resolved)
-
-        ModalWorkflow.update_completion(state, fn completion ->
-          Completion.update_selected_documentation(completion, raw_item, doc_text)
-        end)
-    end
+    ModalWorkflow.update_completion(state, fn completion ->
+      Completion.update_selected_documentation(completion, raw_item, doc_text)
+    end)
   end
 
   def handle_resolve_response(state, _raw_item, {:ok, _resolved}), do: state
@@ -166,18 +374,6 @@ defmodule MingaEditor.CompletionHandling do
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state) do
     if ModalOverlay.match(state.shell_runtime.state.modal, :completion) do
-      # Cancel any pending resolve timer and dismiss the trigger to cancel
-      # debounce timers and forget pending refs before the modal closes.
-      case ModalWorkflow.completion(state) do
-        %Completion{resolve_timer: timer} when is_reference(timer) ->
-          Process.cancel_timer(timer)
-
-        _ ->
-          :ok
-      end
-
-      _ = CompletionTrigger.dismiss(ModalWorkflow.completion_trigger(state))
-
       state
       |> Map.update!(:lsp, &LSPState.drop_completion_requests/1)
       |> ModalWorkflow.dismiss()
@@ -192,26 +388,32 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec install_completion_tracking(EditorState.t(), [CompletionTrigger.tracking_fact()]) ::
           EditorState.t()
+  def install_completion_tracking(state, []), do: state
+
   def install_completion_tracking(state, facts) do
-    Enum.reduce(facts, state, fn {ref, role, client, buffer, version, gen, pos}, state ->
-      %{
-        state
-        | lsp:
-            LSPState.track_completion_result_request(
-              state.lsp,
-              ref,
-              role,
-              client,
-              buffer,
-              version,
-              gen,
-              pos
-            )
-      }
+    state = %{state | lsp: LSPState.drop_completion_requests(state.lsp)}
+
+    Enum.reduce(facts, state, fn
+      {_ref, _role, _provider_id, _client, _buffer, _version, _session_id, _gen, _pos} =
+          fact,
+      state ->
+        %{
+          state
+          | lsp: LSPState.track_completion_result_request(state.lsp, fact)
+        }
     end)
   end
 
-  @spec track_completion_resolve_request(
+  @spec track_completion_resolve_request(EditorState.t(), LSPState.resolve_tracking_fact()) ::
+          EditorState.t()
+  defp track_completion_resolve_request(state, fact) do
+    %{
+      state
+      | lsp: LSPState.track_completion_resolve_request(state.lsp, fact)
+    }
+  end
+
+  @spec track_legacy_completion_resolve_request(
           EditorState.t(),
           reference(),
           pid(),
@@ -220,7 +422,15 @@ defmodule MingaEditor.CompletionHandling do
           non_neg_integer(),
           map()
         ) :: EditorState.t()
-  defp track_completion_resolve_request(state, ref, client, buffer, version, gen, raw_item) do
+  defp track_legacy_completion_resolve_request(
+         state,
+         ref,
+         client,
+         buffer,
+         version,
+         gen,
+         raw_item
+       ) do
     %{
       state
       | lsp:
@@ -340,6 +550,15 @@ defmodule MingaEditor.CompletionHandling do
     if Completion.active?(filtered) do
       ModalWorkflow.update_completion(state, fn _ -> filtered end)
     else
+      retain_retriggerable_completion(state, filtered)
+    end
+  end
+
+  @spec retain_retriggerable_completion(EditorState.t(), Completion.t()) :: EditorState.t()
+  defp retain_retriggerable_completion(state, filtered) do
+    if CompletionTrigger.retriggerable?(ModalWorkflow.completion_trigger(state)) do
+      ModalWorkflow.update_completion(state, fn _ -> filtered end)
+    else
       dismiss(state)
     end
   end
@@ -352,17 +571,26 @@ defmodule MingaEditor.CompletionHandling do
         state
 
       char ->
-        {new_bridge, facts} =
-          CompletionTrigger.maybe_trigger(
-            ModalWorkflow.completion_trigger(state),
-            char,
-            buf,
-            context
-          )
+        bridge = ModalWorkflow.completion_trigger(state)
+        {new_bridge, facts} = trigger_for_completion(state, bridge, char, buf, context)
 
         state
         |> ModalWorkflow.put_completion_trigger(new_bridge)
         |> install_completion_tracking(facts)
+    end
+  end
+
+  @spec trigger_for_completion(
+          EditorState.t(),
+          CompletionTrigger.t(),
+          String.t(),
+          pid(),
+          CursorContext.t()
+        ) :: {CompletionTrigger.t(), [CompletionTrigger.tracking_fact()]}
+  defp trigger_for_completion(state, bridge, char, buf, context) do
+    case ModalWorkflow.completion(state) do
+      %Completion{} -> CompletionTrigger.maybe_retrigger(bridge, char, buf, context)
+      nil -> CompletionTrigger.maybe_trigger(bridge, char, buf, context)
     end
   end
 
@@ -371,7 +599,7 @@ defmodule MingaEditor.CompletionHandling do
   @typedoc "Config completion context detected from cursor position."
   @type config_context :: :option_name | {:option_value, atom()} | :filetype | :none
 
-  @doc false
+  @doc "Returns completion context for a config buffer or captured cursor context."
   @spec config_completion_context(pid() | CursorContext.t()) :: config_context()
   def config_completion_context(buf) when is_pid(buf) do
     buf |> Buffer.cursor_context() |> config_completion_context()
@@ -520,12 +748,14 @@ defmodule MingaEditor.CompletionHandling do
   @type active_config_context :: :option_name | {:option_value, atom()} | :filetype
 
   @spec config_items_for_context(active_config_context()) :: [Completion.item()]
-  defp config_items_for_context(:option_name), do: Config.option_name_completions()
+  defp config_items_for_context(:option_name),
+    do: Enum.map(Config.option_name_completions(), &Item.from_fields(:config, &1))
 
   defp config_items_for_context({:option_value, name}),
-    do: Config.option_value_completions(name)
+    do: Enum.map(Config.option_value_completions(name), &Item.from_fields(:config, &1))
 
-  defp config_items_for_context(:filetype), do: Config.filetype_completions()
+  defp config_items_for_context(:filetype),
+    do: Enum.map(Config.filetype_completions(), &Item.from_fields(:config, &1))
 
   @spec config_trigger_col(CursorContext.t(), active_config_context()) :: non_neg_integer()
   defp config_trigger_col(%CursorContext{} = cursor_context, context) do
@@ -561,6 +791,27 @@ defmodule MingaEditor.CompletionHandling do
   defp completion_prefix(%CursorContext{} = context, trigger_position),
     do: CursorContext.text_since(context, trigger_position)
 
+  @doc "Starts background processing for one identity-checked provider response."
+  @spec handle_completion_result(EditorState.t(), CompletionTrigger.tracking_fact(), term()) ::
+          EditorState.t()
+  def handle_completion_result(
+        state,
+        {_request_ref, role, _provider_id, _client, buffer, version, _session_id, _gen,
+         trigger_pos} = fact,
+        result
+      ) do
+    with %CursorContext{version: ^version} = context <-
+           buffer_value(buffer, &Buffer.cursor_context/1),
+         true <- completion_result_current?(state, fact),
+         {:ok, prefix} <- completion_prefix_from_trigger(context, trigger_pos) do
+      mode = if role == :primary, do: :primary, else: :merge
+      start_completion_task(self(), mode, result, prefix, fact)
+    end
+
+    state
+  end
+
+  @doc "Handles a legacy completion response that predates stable session ownership."
   @spec handle_completion_result(
           EditorState.t(),
           CompletionTrigger.response_role(),
@@ -574,10 +825,15 @@ defmodule MingaEditor.CompletionHandling do
   def handle_completion_result(state, role, client, buffer, version, gen, trigger_pos, result) do
     with %CursorContext{version: ^version} = context <-
            buffer_value(buffer, &Buffer.cursor_context/1),
-         true <- completion_result_current?(state, client, buffer, gen),
+         true <- legacy_completion_result_current?(state, client, buffer, gen),
          {:ok, prefix} <- completion_prefix_from_trigger(context, trigger_pos) do
+      editor = self()
       mode = if role == :primary, do: :primary, else: :merge
-      start_completion_task(self(), mode, result, trigger_pos, prefix, gen, buffer, version)
+
+      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+        payload = legacy_processed_payload(mode, result, trigger_pos, prefix)
+        send(editor, {:completion_processed, gen, mode, payload, trigger_pos, buffer, version})
+      end)
     end
 
     state
@@ -585,18 +841,57 @@ defmodule MingaEditor.CompletionHandling do
 
   defp completion_result_current?(
          %{shell_runtime: %{state: %ShellState{}}} = state,
-         client,
-         buffer,
-         gen
+         {_ref, _role, _provider_id, client, buffer, version, session_id, gen, _position}
        ) do
     trigger = ModalWorkflow.completion_trigger(state)
 
     ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
-      CompletionTrigger.generation(trigger) == gen and state.workspace.buffers.active == buffer and
+      Minga.Editing.inserting?(state) and
+      match?(%Session{}, CompletionTrigger.session(trigger)) and
+      Session.current?(CompletionTrigger.session(trigger), session_id, gen, buffer, version) and
+      state.workspace.buffers.active == buffer and
       client in SyncServer.clients_for_buffer(buffer)
   end
 
-  defp completion_result_current?(_state, _client, _buffer, _gen), do: false
+  defp completion_result_current?(_state, _fact), do: false
+
+  @spec legacy_completion_result_current?(EditorState.t(), pid(), pid(), non_neg_integer()) ::
+          boolean()
+  defp legacy_completion_result_current?(
+         %{shell_runtime: %{state: %ShellState{}}} = state,
+         client,
+         buffer,
+         gen
+       ) do
+    ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
+      CompletionTrigger.generation(ModalWorkflow.completion_trigger(state)) == gen and
+      state.workspace.buffers.active == buffer and client in SyncServer.clients_for_buffer(buffer)
+  end
+
+  defp legacy_completion_result_current?(_state, _client, _buffer, _gen), do: false
+
+  @spec legacy_processed_payload(
+          :primary | :merge,
+          term(),
+          CompletionTrigger.position(),
+          String.t()
+        ) :: Completion.t() | [Completion.item()] | :failed
+  defp legacy_processed_payload(:primary, {:ok, result}, trigger_pos, prefix) do
+    result
+    |> Completion.parse_response()
+    |> Completion.new(trigger_pos)
+    |> Completion.filter(prefix)
+  rescue
+    _error -> :failed
+  end
+
+  defp legacy_processed_payload(:merge, {:ok, result}, _trigger_pos, _prefix) do
+    Completion.parse_response(result)
+  rescue
+    _error -> :failed
+  end
+
+  defp legacy_processed_payload(_mode, _result, _trigger_pos, _prefix), do: :failed
 
   @spec completion_prefix_from_trigger(CursorContext.t(), CompletionTrigger.position()) ::
           {:ok, String.t()} | :stale
@@ -607,15 +902,15 @@ defmodule MingaEditor.CompletionHandling do
           pid(),
           :primary | :merge,
           term(),
-          {non_neg_integer(), non_neg_integer()},
           String.t(),
-          non_neg_integer(),
-          pid(),
-          non_neg_integer()
+          CompletionTrigger.tracking_fact()
         ) :: :ok
-  defp start_completion_task(editor, mode, result, trigger_pos, prefix, gen, buffer, version) do
+  defp start_completion_task(editor, mode, result, prefix, fact) do
+    {_request_ref, _role, _provider_id, _client, _buffer, _version, _session_id, gen,
+     _trigger_pos} = fact
+
     case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-           run_completion_task(editor, mode, result, trigger_pos, prefix, gen, buffer, version)
+           run_completion_task(editor, mode, result, prefix, fact)
          end) do
       {:ok, _pid} ->
         :ok
@@ -627,7 +922,8 @@ defmodule MingaEditor.CompletionHandling do
           "Completion Task failed to start (gen=#{gen}, mode=#{mode}): #{inspect(reason)}"
         end)
 
-        send(editor, {:completion_processed, gen, mode, :failed, trigger_pos, buffer, version})
+        send(editor, {:completion_processed, fact, :failed})
+
         :ok
     end
   end
@@ -636,16 +932,24 @@ defmodule MingaEditor.CompletionHandling do
           pid(),
           :primary | :merge,
           term(),
-          {non_neg_integer(), non_neg_integer()},
           String.t(),
-          non_neg_integer(),
-          pid(),
-          non_neg_integer()
+          CompletionTrigger.tracking_fact()
         ) :: :ok
-  defp run_completion_task(editor, mode, result, trigger_pos, prefix, gen, buffer, version) do
+  defp run_completion_task(editor, mode, result, _prefix, fact) do
+    {request_ref, _role, provider_id, client, _buffer, _version, session_id, gen, _trigger_pos} =
+      fact
+
     payload =
       try do
-        build_processed(mode, result, trigger_pos, prefix)
+        build_processed(
+          mode,
+          result,
+          session_id,
+          gen,
+          provider_id,
+          client,
+          request_ref
+        )
       rescue
         e ->
           Minga.Log.warning(:lsp, fn ->
@@ -662,35 +966,76 @@ defmodule MingaEditor.CompletionHandling do
           :failed
       end
 
-    send(editor, {:completion_processed, gen, mode, payload, trigger_pos, buffer, version})
+    send(editor, {:completion_processed, fact, payload})
+
     :ok
   end
 
   @spec build_processed(
-          :primary,
+          :primary | :merge,
           term(),
-          {non_neg_integer(), non_neg_integer()},
-          String.t()
-        ) :: Completion.t()
-  defp build_processed(:primary, {:ok, result}, trigger_pos, prefix) do
-    result
-    |> Completion.parse_response()
-    |> Completion.new(trigger_pos)
-    |> Completion.filter(prefix)
+          reference(),
+          non_neg_integer(),
+          Item.provider_id(),
+          pid(),
+          reference()
+        ) :: ProviderBatch.t()
+  defp build_processed(
+         _mode,
+         {:ok, result},
+         session_id,
+         gen,
+         provider_id,
+         client,
+         request_ref
+       ) do
+    ProviderBatch.from_response(session_id, gen, provider_id, client, request_ref, result)
   end
 
-  @spec build_processed(:merge, term(), {non_neg_integer(), non_neg_integer()}, String.t()) ::
-          [Completion.item()]
-  defp build_processed(:merge, {:ok, result}, _trigger_pos, _prefix) do
-    Completion.parse_response(result)
+  @doc "Applies one processed provider batch only while its full request identity is current."
+  @spec apply_processed(
+          EditorState.t(),
+          CompletionTrigger.tracking_fact(),
+          ProviderBatch.t() | :failed
+        ) :: EditorState.t()
+  def apply_processed(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        {request_ref, role, provider_id, _client, buffer, version, session_id, gen, trigger_pos},
+        payload
+      ) do
+    trigger = ModalWorkflow.completion_trigger(state)
+    mode = if role == :primary, do: :primary, else: :merge
+
+    if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
+         Minga.Editing.inserting?(state) and
+         match?(%Session{}, CompletionTrigger.session(trigger)) and
+         Session.current?(CompletionTrigger.session(trigger), session_id, gen, buffer, version) and
+         provider_request_current?(trigger, provider_id, request_ref) and
+         state.workspace.buffers.active == buffer and
+         buffer_value(buffer, &Buffer.version/1) == version do
+      apply_processed_current(
+        state,
+        trigger,
+        mode,
+        provider_id,
+        request_ref,
+        payload,
+        trigger_pos
+      )
+    else
+      state
+    end
   end
 
+  def apply_processed(state, _fact, _payload), do: state
+
+  @doc "Applies a legacy processed completion batch that predates stable session ownership."
   @spec apply_processed(
           EditorState.t(),
           non_neg_integer(),
           :primary | :merge,
           Completion.t() | [Completion.item()] | :failed,
-          {non_neg_integer(), non_neg_integer()},
+          CompletionTrigger.position(),
           pid(),
           non_neg_integer()
         ) :: EditorState.t()
@@ -708,7 +1053,7 @@ defmodule MingaEditor.CompletionHandling do
     if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
          CompletionTrigger.generation(trigger) == gen and state.workspace.buffers.active == buffer and
          buffer_value(buffer, &Buffer.version/1) == version do
-      apply_processed_current(state, mode, payload, trigger_pos)
+      apply_legacy_processed(state, mode, payload, trigger_pos)
     else
       state
     end
@@ -718,67 +1063,149 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec apply_processed_current(
           EditorState.t(),
+          CompletionTrigger.t(),
           :primary | :merge,
-          Completion.t() | [Completion.item()] | :failed,
+          Item.provider_id(),
+          reference(),
+          ProviderBatch.t() | :failed,
           {non_neg_integer(), non_neg_integer()}
         ) :: EditorState.t()
-  defp apply_processed_current(state, :primary, :failed, _trigger_pos) do
+  defp apply_processed_current(
+         state,
+         trigger,
+         _mode,
+         provider_id,
+         request_ref,
+         :failed,
+         _trigger_pos
+       ) do
+    case Session.fail_request(CompletionTrigger.session(trigger), provider_id, request_ref) do
+      {:ok, session} ->
+        state
+        |> ModalWorkflow.put_completion_trigger(CompletionTrigger.put_session(trigger, session))
+        |> maybe_finish_failed()
+
+      :stale ->
+        state
+    end
+  end
+
+  defp apply_processed_current(
+         state,
+         trigger,
+         _mode,
+         _provider_id,
+         _request_ref,
+         %ProviderBatch{} = batch,
+         trigger_pos
+       ) do
+    case CompletionTrigger.accept_batch(trigger, batch) do
+      {:ok, trigger} -> install_session_completion(state, trigger, trigger_pos)
+      :stale -> state
+    end
+  end
+
+  @spec apply_legacy_processed(
+          EditorState.t(),
+          :primary | :merge,
+          Completion.t() | [Completion.item()] | :failed,
+          CompletionTrigger.position()
+        ) :: EditorState.t()
+  defp apply_legacy_processed(state, :primary, :failed, _trigger_pos) do
     case ModalWorkflow.completion(state) do
       nil -> dismiss(state)
       %Completion{} -> state
     end
   end
 
-  defp apply_processed_current(state, :merge, :failed, _trigger_pos), do: state
+  defp apply_legacy_processed(state, :merge, :failed, _trigger_pos), do: state
 
-  defp apply_processed_current(state, :primary, %Completion{items: []}, _trigger_pos) do
-    state
-  end
+  defp apply_legacy_processed(state, :primary, %Completion{items: []}, _trigger_pos), do: state
 
-  defp apply_processed_current(state, :primary, %Completion{} = built, _trigger_pos) do
-    case ModalWorkflow.completion(state) do
-      nil ->
-        ModalWorkflow.update_completion(state, fn _ -> built end)
+  defp apply_legacy_processed(state, :primary, %Completion{} = completion, trigger_pos),
+    do: merge_legacy_completion(state, completion.items, trigger_pos)
 
-      %Completion{} ->
-        merge_completion_items(state, built.items, built.trigger_position)
-    end
-  end
+  defp apply_legacy_processed(state, :merge, items, trigger_pos) when is_list(items),
+    do: merge_legacy_completion(state, items, trigger_pos)
 
-  defp apply_processed_current(state, :merge, items, trigger_pos) when is_list(items) do
-    merge_completion_items(state, items, trigger_pos)
-  end
-
-  @spec merge_completion_items(
+  @spec merge_legacy_completion(
           EditorState.t(),
           [Completion.item()],
-          {non_neg_integer(), non_neg_integer()}
-        ) :: EditorState.t()
-  defp merge_completion_items(state, [], _trigger_pos), do: state
+          CompletionTrigger.position()
+        ) ::
+          EditorState.t()
+  defp merge_legacy_completion(state, [], _trigger_pos), do: state
 
-  defp merge_completion_items(state, new_items, trigger_pos) do
+  defp merge_legacy_completion(state, new_items, trigger_pos) do
     context = buffer_value(state.workspace.buffers.active, &Buffer.cursor_context/1)
 
     case ModalWorkflow.completion(state) do
       nil ->
         completion = Completion.new(new_items, trigger_pos)
 
-        prefix = typed_since_trigger(context, trigger_pos)
-
-        completion = Completion.filter(completion, prefix)
-        open_completion(state, completion)
+        open_completion(
+          state,
+          Completion.filter(completion, typed_since_trigger(context, trigger_pos))
+        )
 
       %Completion{} = existing ->
-        merged_items = existing.items ++ new_items
-        completion = Completion.new(merged_items, existing.trigger_position)
-
+        completion = Completion.new(existing.items ++ new_items, existing.trigger_position)
         prefix = typed_since_trigger(context, existing.trigger_position)
+        ModalWorkflow.update_completion(state, fn _ -> Completion.filter(completion, prefix) end)
+    end
+  end
 
-        completion = Completion.filter(completion, prefix)
+  @spec install_session_completion(
+          EditorState.t(),
+          CompletionTrigger.t(),
+          CompletionTrigger.position()
+        ) ::
+          EditorState.t()
+  defp install_session_completion(state, trigger, trigger_pos) do
+    session = CompletionTrigger.session(trigger)
+    items = Session.items(session)
 
-        ModalWorkflow.update_completion(state, fn _ ->
-          completion
-        end)
+    if items == [] and session.provider_requests == %{} do
+      dismiss(state)
+    else
+      context = buffer_value(state.workspace.buffers.active, &Buffer.cursor_context/1)
+      prefix = typed_since_trigger(context, trigger_pos)
+
+      completion =
+        items
+        |> Completion.new(trigger_pos)
+        |> Completion.filter(prefix)
+        |> Completion.select_item(session.selected_item_id)
+
+      state = ModalWorkflow.put_completion_trigger(state, trigger)
+      ModalWorkflow.update_completion(state, fn _ -> completion end)
+    end
+  end
+
+  @spec maybe_finish_failed(EditorState.t()) :: EditorState.t()
+  defp maybe_finish_failed(state) do
+    case CompletionTrigger.session(ModalWorkflow.completion_trigger(state)) do
+      %Session{provider_requests: requests, batches: batches}
+      when map_size(requests) == 0 and map_size(batches) == 0 ->
+        dismiss(state)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec provider_request_current?(CompletionTrigger.t(), Item.provider_id(), reference()) ::
+          boolean()
+  defp provider_request_current?(trigger, provider_id, request_ref) do
+    case CompletionTrigger.session(trigger) do
+      %Session{provider_requests: requests} ->
+        case Map.fetch(requests, provider_id) do
+          {:ok, {_client, ^request_ref}} -> true
+          _ -> false
+        end
+
+      nil ->
+        false
     end
   end
 
@@ -788,6 +1215,22 @@ defmodule MingaEditor.CompletionHandling do
     do: CompletionTrigger.get_typed_since_trigger(context, trigger_position)
 
   defp typed_since_trigger(:stale, _trigger_position), do: ""
+
+  @spec session_id(CompletionTrigger.t()) :: reference()
+  defp session_id(trigger) do
+    case CompletionTrigger.session(trigger) do
+      %Session{id: id} -> id
+      nil -> make_ref()
+    end
+  end
+
+  @spec resolve_client(Session.t(), Item.provider_id()) :: pid() | nil
+  defp resolve_client(%Session{} = session, provider_id) do
+    case Map.fetch(session.batches, provider_id) do
+      {:ok, %ProviderBatch{client: client}} -> client
+      :error -> nil
+    end
+  end
 
   @spec codepoint_to_char(non_neg_integer()) :: String.t() | nil
   defp codepoint_to_char(cp) when cp >= 32 and cp <= 0x10FFFF do

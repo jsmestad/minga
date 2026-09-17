@@ -15,6 +15,8 @@ defmodule Minga.Editing.Completion do
   5. `accept/1` — returns the text/edit to insert for the selected item
   """
 
+  alias Minga.Editing.Completion.Item
+
   @enforce_keys [:items, :trigger_position]
   defstruct items: [],
             filtered: [],
@@ -23,59 +25,17 @@ defmodule Minga.Editing.Completion do
             trigger_position: {0, 0},
             max_visible: 10,
             resolve_timer: nil,
-            last_resolved_identity: nil
+            last_resolved_identity: nil,
+            selected_item_id: nil
 
   @typedoc "LSP CompletionItemKind as an atom."
-  @type item_kind ::
-          :text
-          | :method
-          | :function
-          | :constructor
-          | :field
-          | :variable
-          | :class
-          | :interface
-          | :module
-          | :property
-          | :unit
-          | :value
-          | :enum
-          | :keyword
-          | :snippet
-          | :color
-          | :file
-          | :reference
-          | :folder
-          | :enum_member
-          | :constant
-          | :struct
-          | :event
-          | :operator
-          | :type_parameter
+  @type item_kind :: Item.kind()
 
   @typedoc "A text edit to apply when accepting a completion."
-  @type text_edit :: %{
-          range: %{
-            start_line: non_neg_integer(),
-            start_col: non_neg_integer(),
-            end_line: non_neg_integer(),
-            end_col: non_neg_integer()
-          },
-          new_text: String.t()
-        }
+  @type text_edit :: Item.text_edit()
 
   @typedoc "A parsed completion item."
-  @type item :: %{
-          label: String.t(),
-          kind: item_kind(),
-          insert_text: String.t(),
-          filter_text: String.t(),
-          detail: String.t(),
-          documentation: String.t(),
-          sort_text: String.t(),
-          text_edit: text_edit() | nil,
-          raw: map() | nil
-        }
+  @type item :: Item.t()
 
   @type t :: %__MODULE__{
           items: [item()],
@@ -85,7 +45,8 @@ defmodule Minga.Editing.Completion do
           trigger_position: {non_neg_integer(), non_neg_integer()},
           max_visible: pos_integer(),
           resolve_timer: reference() | nil,
-          last_resolved_identity: map() | nil
+          last_resolved_identity: map() | nil,
+          selected_item_id: Item.id() | nil
         }
 
   # ── Constructor ──────────────────────────────────────────────────────────────
@@ -96,13 +57,14 @@ defmodule Minga.Editing.Completion do
   """
   @spec new([item()], {non_neg_integer(), non_neg_integer()}) :: t()
   def new(items, trigger_position) when is_list(items) do
-    sorted = Enum.sort_by(items, & &1.sort_text)
+    sorted = items |> Enum.map(&normalize_item/1) |> Enum.sort_by(& &1.sort_text)
 
     %__MODULE__{
       items: sorted,
       filtered: sorted,
       trigger_position: trigger_position,
-      selected: 0
+      selected: 0,
+      selected_item_id: first_item_id(sorted)
     }
   end
 
@@ -124,7 +86,13 @@ defmodule Minga.Editing.Completion do
         String.starts_with?(String.downcase(item.filter_text), down_prefix)
       end)
 
-    %{completion | filtered: filtered, filter_text: prefix, selected: 0}
+    %{
+      completion
+      | filtered: filtered,
+        filter_text: prefix,
+        selected: 0,
+        selected_item_id: item_id_at(filtered, 0)
+    }
   end
 
   # ── Navigation ───────────────────────────────────────────────────────────────
@@ -134,7 +102,8 @@ defmodule Minga.Editing.Completion do
   def move_down(%__MODULE__{filtered: []} = c), do: c
 
   def move_down(%__MODULE__{filtered: filtered, selected: sel} = c) do
-    %{c | selected: rem(sel + 1, length(filtered))}
+    selected = rem(sel + 1, length(filtered))
+    %{c | selected: selected, selected_item_id: item_id_at(filtered, selected)}
   end
 
   @doc "Moves the selection up one item, wrapping at the top."
@@ -143,7 +112,7 @@ defmodule Minga.Editing.Completion do
 
   def move_up(%__MODULE__{filtered: filtered, selected: sel} = c) do
     new_sel = if sel == 0, do: length(filtered) - 1, else: sel - 1
-    %{c | selected: new_sel}
+    %{c | selected: new_sel, selected_item_id: item_id_at(filtered, new_sel)}
   end
 
   # ── Selection ────────────────────────────────────────────────────────────────
@@ -159,7 +128,13 @@ defmodule Minga.Editing.Completion do
     if Enum.at(visible, offset) == nil do
       completion
     else
-      %{completion | selected: visible_start(completion) + offset}
+      selected = visible_start(completion) + offset
+
+      %{
+        completion
+        | selected: selected,
+          selected_item_id: item_id_at(completion.filtered, selected)
+      }
     end
   end
 
@@ -169,6 +144,17 @@ defmodule Minga.Editing.Completion do
 
   def selected_item(%__MODULE__{filtered: filtered, selected: sel}) do
     Enum.at(filtered, sel)
+  end
+
+  @doc "Selects an item by stable identity when it remains visible."
+  @spec select_item(t(), Item.id() | nil) :: t()
+  def select_item(%__MODULE__{} = completion, nil), do: completion
+
+  def select_item(%__MODULE__{} = completion, item_id) do
+    case Enum.find_index(completion.filtered, &(&1.id == item_id)) do
+      nil -> completion
+      selected -> %{completion | selected: selected, selected_item_id: item_id}
+    end
   end
 
   @doc """
@@ -242,36 +228,28 @@ defmodule Minga.Editing.Completion do
   `CompletionItem[]` response formats.
   """
   @spec parse_response(map() | [map()] | nil) :: [item()]
-  def parse_response(nil), do: []
-  def parse_response(items) when is_list(items), do: Enum.map(items, &parse_item/1)
+  def parse_response(response), do: parse_response(response, :local)
 
-  def parse_response(%{"items" => items}) when is_list(items) do
-    Enum.map(items, &parse_item/1)
+  @doc "Parses a completion response and qualifies every item with its provider identity."
+  @spec parse_response(map() | [map()] | nil, Item.provider_id()) :: [item()]
+  def parse_response(nil, _provider_id), do: []
+
+  def parse_response(items, provider_id) when is_list(items),
+    do: Enum.map(items, &parse_item(&1, provider_id))
+
+  def parse_response(%{"items" => items}, provider_id) when is_list(items) do
+    Enum.map(items, &parse_item(&1, provider_id))
   end
 
-  def parse_response(_), do: []
+  def parse_response(_response, _provider_id), do: []
 
   @doc "Parses a single LSP CompletionItem map into an `item()` struct."
   @spec parse_item(map()) :: item()
-  def parse_item(raw) when is_map(raw) do
-    label = Map.get(raw, "label", "")
-    insert_text = Map.get(raw, "insertText", label)
+  def parse_item(raw) when is_map(raw), do: parse_item(raw, :local)
 
-    # Strip snippet markers ($1, ${2:placeholder}, $0) for plain text insertion
-    insert_text = strip_snippet_markers(insert_text)
-
-    %{
-      label: label,
-      kind: parse_kind(Map.get(raw, "kind", 1)),
-      insert_text: insert_text,
-      filter_text: Map.get(raw, "filterText", label),
-      detail: Map.get(raw, "detail", ""),
-      documentation: extract_documentation(Map.get(raw, "documentation")),
-      sort_text: Map.get(raw, "sortText", label),
-      text_edit: parse_text_edit(Map.get(raw, "textEdit")),
-      raw: raw
-    }
-  end
+  @doc "Parses one completion item with its provider identity."
+  @spec parse_item(map(), Item.provider_id()) :: item()
+  def parse_item(raw, provider_id) when is_map(raw), do: Item.from_lsp(provider_id, raw)
 
   @doc "Returns true when the selected item's raw identity equals the expected raw item."
   @spec selected_raw?(t(), map()) :: boolean()
@@ -299,6 +277,16 @@ defmodule Minga.Editing.Completion do
     end
   end
 
+  @doc "Updates documentation for one stable item identity."
+  @spec update_item_documentation(t(), Item.id(), String.t()) :: t()
+  def update_item_documentation(%__MODULE__{} = completion, item_id, doc_text) do
+    %{
+      completion
+      | items: update_documentation_items_by_id(completion.items, item_id, doc_text),
+        filtered: update_documentation_items_by_id(completion.filtered, item_id, doc_text)
+    }
+  end
+
   @spec update_documentation_for_raw(t(), map(), String.t()) :: t()
   defp update_documentation_for_raw(%__MODULE__{} = completion, raw_item, doc_text) do
     %{
@@ -316,76 +304,29 @@ defmodule Minga.Editing.Completion do
     end)
   end
 
-  @spec extract_documentation(term()) :: String.t()
-  defp extract_documentation(nil), do: ""
-  defp extract_documentation(text) when is_binary(text), do: String.trim(text)
-
-  defp extract_documentation(%{"kind" => _, "value" => value}) when is_binary(value),
-    do: String.trim(value)
-
-  defp extract_documentation(%{"value" => value}) when is_binary(value),
-    do: String.trim(value)
-
-  defp extract_documentation(_), do: ""
-
-  @spec strip_snippet_markers(String.t()) :: String.t()
-  defp strip_snippet_markers(text) do
-    text
-    # ${N:placeholder} → placeholder
-    |> String.replace(~r/\$\{\d+:([^}]*)\}/, "\\1")
-    # $N → empty
-    |> String.replace(~r/\$\d+/, "")
+  @spec update_documentation_items_by_id([item()], Item.id(), String.t()) :: [item()]
+  defp update_documentation_items_by_id(items, item_id, doc_text) do
+    Enum.map(items, fn
+      %Item{id: ^item_id} = item -> Item.resolve(item, doc_text)
+      item -> item
+    end)
   end
 
-  @spec parse_text_edit(map() | nil) :: text_edit() | nil
-  defp parse_text_edit(nil), do: nil
+  @spec first_item_id([item()]) :: Item.id() | nil
+  defp first_item_id([%Item{id: id} | _]), do: id
+  defp first_item_id([]), do: nil
 
-  defp parse_text_edit(%{"range" => range, "newText" => new_text}) do
-    %{
-      range: %{
-        start_line: get_in(range, ["start", "line"]) || 0,
-        start_col: get_in(range, ["start", "character"]) || 0,
-        end_line: get_in(range, ["end", "line"]) || 0,
-        end_col: get_in(range, ["end", "character"]) || 0
-      },
-      new_text: strip_snippet_markers(new_text)
-    }
+  @spec item_id_at([item()], non_neg_integer()) :: Item.id() | nil
+  defp item_id_at(items, index) do
+    case Enum.at(items, index) do
+      %Item{id: id} -> id
+      nil -> nil
+    end
   end
 
-  # InsertReplaceEdit has "insert" and "replace" ranges; use the insert range
-  defp parse_text_edit(%{"insert" => insert_range, "newText" => new_text}) do
-    parse_text_edit(%{"range" => insert_range, "newText" => new_text})
-  end
-
-  defp parse_text_edit(_), do: nil
-
-  @spec parse_kind(integer()) :: item_kind()
-  defp parse_kind(1), do: :text
-  defp parse_kind(2), do: :method
-  defp parse_kind(3), do: :function
-  defp parse_kind(4), do: :constructor
-  defp parse_kind(5), do: :field
-  defp parse_kind(6), do: :variable
-  defp parse_kind(7), do: :class
-  defp parse_kind(8), do: :interface
-  defp parse_kind(9), do: :module
-  defp parse_kind(10), do: :property
-  defp parse_kind(11), do: :unit
-  defp parse_kind(12), do: :value
-  defp parse_kind(13), do: :enum
-  defp parse_kind(14), do: :keyword
-  defp parse_kind(15), do: :snippet
-  defp parse_kind(16), do: :color
-  defp parse_kind(17), do: :file
-  defp parse_kind(18), do: :reference
-  defp parse_kind(19), do: :folder
-  defp parse_kind(20), do: :enum_member
-  defp parse_kind(21), do: :constant
-  defp parse_kind(22), do: :struct
-  defp parse_kind(23), do: :event
-  defp parse_kind(24), do: :operator
-  defp parse_kind(25), do: :type_parameter
-  defp parse_kind(_), do: :text
+  @spec normalize_item(item() | map()) :: item()
+  defp normalize_item(%Item{} = item), do: item
+  defp normalize_item(item) when is_map(item), do: Item.from_fields(:local, item)
 
   @doc "Returns a single-character kind indicator for rendering."
   @spec kind_label(item_kind()) :: String.t()

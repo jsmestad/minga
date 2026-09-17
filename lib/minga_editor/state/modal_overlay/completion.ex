@@ -80,7 +80,7 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   @spec put_completion(t(), completion_or_nil()) :: t()
   def put_completion(%__MODULE__{} = payload, completion)
       when is_struct(completion, Completion) or is_nil(completion) do
-    %{payload | completion: completion}
+    %{payload | completion: completion, trigger: sync_selection(payload.trigger, completion)}
   end
 
   @doc """
@@ -91,4 +91,10 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   def put_trigger(%__MODULE__{} = payload, %CompletionTrigger{} = trigger) do
     %{payload | trigger: trigger}
   end
+
+  @spec sync_selection(CompletionTrigger.t(), completion_or_nil()) :: CompletionTrigger.t()
+  defp sync_selection(trigger, %Completion{} = completion),
+    do: CompletionTrigger.sync_selection(trigger, completion)
+
+  defp sync_selection(trigger, nil), do: trigger
 end

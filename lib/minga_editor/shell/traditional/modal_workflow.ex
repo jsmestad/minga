@@ -9,6 +9,8 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
+  alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
 
   @doc "Opens an exact modal value, preserving conflict stickiness and suppressing lower transients."
@@ -57,11 +59,14 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
 
   def close(%EditorState{} = state), do: state
 
-  @doc "Dismisses a canceled modal and cancels only its local completion timers."
+  @doc "Dismisses a canceled modal and clears all completion lifecycle ownership."
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%EditorState{shell_runtime: %Runtime{state: %ShellState{modal: modal}}} = state) do
     cancel_completion_timers(modal)
-    update_shell_state(state, &ShellState.dismiss_modal/1)
+
+    state
+    |> drop_completion_requests(modal)
+    |> update_shell_state(&ShellState.dismiss_modal/1)
   end
 
   def dismiss(%EditorState{} = state), do: state
@@ -139,14 +144,28 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   def dismiss_if_stale(%EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state) do
     {state, active_tab} = ShellWorkflow.resolve_active_tab(state)
     active_tab_id = if match?(%Tab{}, active_tab), do: active_tab.id, else: nil
-
-    update_shell_state(
-      state,
-      &ShellState.dismiss_stale_modal_completion(&1, active_tab_id)
-    )
+    dismiss_stale_completion(state, state.shell_runtime.state.modal, active_tab_id)
   end
 
   def dismiss_if_stale(%EditorState{} = state), do: state
+
+  @spec dismiss_stale_completion(EditorState.t(), ModalOverlay.t(), Tab.id() | nil) ::
+          EditorState.t()
+  defp dismiss_stale_completion(
+         state,
+         {:completion, %CompletionPayload{owner: owner}} = modal,
+         active_tab_id
+       )
+       when owner != active_tab_id do
+    cancel_completion_timers(modal)
+
+    state
+    |> Map.update!(:lsp, &LSPState.drop_completion_requests/1)
+    |> update_shell_state(&ShellState.dismiss_stale_modal_completion(&1, active_tab_id))
+  end
+
+  defp dismiss_stale_completion(state, _modal, active_tab_id),
+    do: update_shell_state(state, &ShellState.dismiss_stale_modal_completion(&1, active_tab_id))
 
   @spec suppress_lower_surfaces(EditorState.t()) :: EditorState.t()
   defp suppress_lower_surfaces(state) do
@@ -165,6 +184,12 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
     _trigger = modal |> ModalOverlay.completion_trigger() |> CompletionTrigger.dismiss()
     :ok
   end
+
+  @spec drop_completion_requests(EditorState.t(), ModalOverlay.t()) :: EditorState.t()
+  defp drop_completion_requests(state, {:completion, %CompletionPayload{}}),
+    do: Map.update!(state, :lsp, &LSPState.drop_completion_requests/1)
+
+  defp drop_completion_requests(state, _modal), do: state
 
   @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
                                                MingaEditor.Shell.Traditional.State.t())) ::
