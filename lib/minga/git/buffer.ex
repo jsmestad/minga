@@ -15,7 +15,6 @@ defmodule Minga.Git.Buffer do
 
   alias Minga.Core.Diff
   alias Minga.Git
-  alias Minga.Git.MergeConflict
 
   @typedoc "Internal state."
   @type state :: %{
@@ -24,7 +23,6 @@ defmodule Minga.Git.Buffer do
           base_lines: [String.t()],
           hunks: [Diff.hunk()],
           signs: %{non_neg_integer() => Diff.hunk_type()},
-          conflicts: [MergeConflict.Region.t()],
           branch: String.t() | nil
         }
 
@@ -46,6 +44,12 @@ defmodule Minga.Git.Buffer do
   @spec update(GenServer.server(), String.t()) :: :ok
   def update(server, current_content) when is_binary(current_content) do
     GenServer.cast(server, {:update, current_content})
+  end
+
+  @doc "Recomputes the diff and returns after the tracked state is current."
+  @spec update_sync(GenServer.server(), String.t()) :: :ok
+  def update_sync(server, current_content) when is_binary(current_content) do
+    GenServer.call(server, {:update, current_content})
   end
 
   @doc "Re-reads the HEAD version and recomputes the diff."
@@ -70,18 +74,6 @@ defmodule Minga.Git.Buffer do
   @spec hunk_at(GenServer.server(), non_neg_integer()) :: Diff.hunk() | nil
   def hunk_at(server, line) when is_integer(line) do
     GenServer.call(server, {:hunk_at, line})
-  end
-
-  @doc "Returns parsed merge conflict regions for the buffer."
-  @spec conflicts(GenServer.server()) :: [MergeConflict.Region.t()]
-  def conflicts(server) do
-    GenServer.call(server, :conflicts)
-  end
-
-  @doc "Returns the parsed merge conflict count for the buffer."
-  @spec conflict_count(GenServer.server()) :: non_neg_integer()
-  def conflict_count(server) do
-    GenServer.call(server, :conflict_count)
   end
 
   @doc "Returns the git root path."
@@ -139,7 +131,6 @@ defmodule Minga.Git.Buffer do
 
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
-    conflicts = MergeConflict.parse_lines(current_lines)
 
     branch = read_branch(git_root)
 
@@ -149,7 +140,6 @@ defmodule Minga.Git.Buffer do
       base_lines: base_lines,
       hunks: hunks,
       signs: signs,
-      conflicts: conflicts,
       branch: branch
     }
 
@@ -169,12 +159,8 @@ defmodule Minga.Git.Buffer do
     {:reply, Diff.hunk_at_line(state.hunks, line), state}
   end
 
-  def handle_call(:conflicts, _from, state) do
-    {:reply, state.conflicts, state}
-  end
-
-  def handle_call(:conflict_count, _from, state) do
-    {:reply, Enum.count(state.conflicts), state}
+  def handle_call({:update, content}, _from, state) do
+    {:reply, :ok, update_diff(state, content)}
   end
 
   def handle_call(:summary, _from, state) do
@@ -196,11 +182,7 @@ defmodule Minga.Git.Buffer do
 
   @impl true
   def handle_cast({:update, content}, state) do
-    current_lines = split_lines(content)
-    hunks = Diff.diff_lines(state.base_lines, current_lines)
-    signs = Diff.signs_for_hunks(hunks)
-    conflicts = MergeConflict.parse_lines(current_lines)
-    {:noreply, %{state | hunks: hunks, signs: signs, conflicts: conflicts}}
+    {:noreply, update_diff(state, content)}
   end
 
   def handle_cast({:invalidate_base, content}, state) do
@@ -208,7 +190,6 @@ defmodule Minga.Git.Buffer do
     current_lines = split_lines(content)
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
-    conflicts = MergeConflict.parse_lines(current_lines)
     branch = read_branch(state.git_root)
 
     {:noreply,
@@ -217,12 +198,19 @@ defmodule Minga.Git.Buffer do
        | base_lines: base_lines,
          hunks: hunks,
          signs: signs,
-         conflicts: conflicts,
          branch: branch
      }}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec update_diff(state(), String.t()) :: state()
+  defp update_diff(state, content) do
+    current_lines = split_lines(content)
+    hunks = Diff.diff_lines(state.base_lines, current_lines)
+    signs = Diff.signs_for_hunks(hunks)
+    %{state | hunks: hunks, signs: signs}
+  end
 
   @spec count_signs(%{non_neg_integer() => Diff.hunk_type()}) :: diff_summary()
   defp count_signs(signs) do

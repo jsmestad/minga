@@ -15,6 +15,15 @@ defmodule Minga.Buffer do
   @spec content(t()) :: String.t()
   def content(_server), do: raise("minga_sdk is compile-time only")
 
+  @spec conflicts(t()) :: [term()]
+  def conflicts(_server), do: raise("minga_sdk is compile-time only")
+
+  @spec conflict_count(t()) :: non_neg_integer()
+  def conflict_count(_server), do: raise("minga_sdk is compile-time only")
+
+  @spec conflict_snapshot(t()) :: {String.t(), position(), [term()]}
+  def conflict_snapshot(_server), do: raise("minga_sdk is compile-time only")
+
   @spec cursor(t()) :: position()
   def cursor(_server), do: raise("minga_sdk is compile-time only")
 

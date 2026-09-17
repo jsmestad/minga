@@ -2,7 +2,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   @moduledoc """
   Renderer-local frame wrapper.
 
-  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, caches, font registry, message store, layout, focus tree, and frame sequence.
+  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, composed highlights, caches, font registry, message store, layout, focus tree, and frame sequence.
   """
 
   alias MingaEditor.Extension.Sidebar
@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.RenderPipeline.WorkspaceIntent
+  alias MingaEditor.Renderer.HighlightCache
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.State.Buffers
@@ -19,7 +20,15 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
 
-  @enforce_keys [:intent, :workspace, :windows, :caches, :font_registry, :message_store]
+  @enforce_keys [
+    :intent,
+    :workspace,
+    :windows,
+    :caches,
+    :font_registry,
+    :message_store,
+    :composed_highlights
+  ]
   defstruct [
     :intent,
     :workspace,
@@ -29,7 +38,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     :caches,
     :font_registry,
     :message_store,
-    :frame_seq
+    :frame_seq,
+    :composed_highlights
   ]
 
   @type t :: %__MODULE__{
@@ -41,7 +51,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           caches: Caches.t(),
           font_registry: FontRegistry.t(),
           message_store: MessageStore.t(),
-          frame_seq: non_neg_integer() | nil
+          frame_seq: non_neg_integer() | nil,
+          composed_highlights: HighlightCache.highlights()
         }
 
   @type workspace :: WorkspaceIntent.t()
@@ -52,14 +63,27 @@ defmodule MingaEditor.RenderPipeline.Input do
           Caches.t(),
           FontRegistry.t(),
           MessageStore.t()
-        ) ::
-          t()
+        ) :: t()
+  def from_intent(intent, windows, caches, font_registry, message_store) do
+    {_cache, highlights} = HighlightCache.prepare(HighlightCache.new(), intent)
+    from_intent(intent, windows, caches, font_registry, message_store, highlights)
+  end
+
+  @spec from_intent(
+          Intent.t(),
+          Windows.t(RenderWindow.t()),
+          Caches.t(),
+          FontRegistry.t(),
+          MessageStore.t(),
+          HighlightCache.highlights()
+        ) :: t()
   def from_intent(
         %Intent{} = intent,
         %Windows{} = windows,
         %Caches{} = caches,
         %FontRegistry{} = font_registry,
-        %MessageStore{} = message_store
+        %MessageStore{} = message_store,
+        highlights
       ) do
     %__MODULE__{
       intent: intent,
@@ -70,7 +94,8 @@ defmodule MingaEditor.RenderPipeline.Input do
       caches: caches,
       font_registry: font_registry,
       message_store: message_store,
-      frame_seq: nil
+      frame_seq: nil,
+      composed_highlights: highlights
     }
     |> sync_active_window_cursor()
   end

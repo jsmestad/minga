@@ -202,10 +202,14 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         | highlighting:
             Highlighting.put_highlight(state.intent.frame.highlighting, buffer, parser),
           semantic_tokens: %{buffer => semantic},
+          semantic_token_revisions: %{buffer => make_ref()},
           face_override_registries: %{buffer => override}
       }
 
-      state = %{state | intent: %{state.intent | frame: frame}}
+      intent = %{state.intent | frame: frame}
+
+      {_renderer, state} =
+        MingaEditor.Renderer.BufferChanges.prepare(MingaEditor.Renderer.State.new([]), intent)
 
       ctx = ContentHelpers.window_highlight(state, window)
 

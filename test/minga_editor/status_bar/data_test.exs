@@ -467,7 +467,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert data.merge_conflict_count == 1
   end
 
-  test "active buffer merge conflict count uses tracked git buffer cache when present" do
+  test "active buffer merge conflict count remains owned by the current buffer when tracked" do
     root = Path.join(System.tmp_dir!(), "status-bar-git-#{System.unique_integer([:positive])}")
     GitStub.ensure_table()
     GitStub.set_root(root, root)
@@ -487,7 +487,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     data = Data.from_state(state) |> Data.to_modeline_data()
 
-    assert data.merge_conflict_count == 1
+    assert data.merge_conflict_count == 0
   end
 
   test "visual char selection reports grapheme count" do

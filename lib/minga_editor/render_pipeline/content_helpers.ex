@@ -426,27 +426,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @doc "Returns the highlight state for a window's buffer."
   @spec window_highlight(state(), window()) :: MingaEditor.UI.Highlight.t() | nil
   def window_highlight(state, %{content: {:buffer, buffer}}) do
-    hl =
-      case Map.fetch(state.intent.frame.highlighting.highlights, buffer) do
-        {:ok, highlight} -> highlight
-        :error -> MingaEditor.UI.Highlight.from_theme(state.intent.frame.theme)
-      end
-
-    semantic_layer = Map.get(state.intent.frame.semantic_tokens, buffer)
-
-    if hl.capture_names == {} and semantic_layer == nil do
-      nil
-    else
-      hl
-      |> apply_buffer_face_overrides(buffer, state)
-      |> maybe_compose_semantic_layer(semantic_layer)
+    case Map.fetch!(state.composed_highlights, buffer) do
+      nil -> nil
+      highlight -> apply_buffer_face_overrides(highlight, buffer, state)
     end
   end
-
-  @spec maybe_compose_semantic_layer(Highlight.t(), MingaEditor.State.LSP.semantic_layer() | nil) ::
-          Highlight.t()
-  defp maybe_compose_semantic_layer(hl, nil), do: hl
-  defp maybe_compose_semantic_layer(hl, layer), do: Highlight.compose_semantic_layer(hl, layer)
 
   # Applies buffer-local face overrides to the highlight's face registry.
   # Reads from the editor's pre-computed face_override_registries map,

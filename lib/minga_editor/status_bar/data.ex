@@ -12,7 +12,6 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Git
-  alias Minga.Git.MergeConflict
   alias Minga.Git.Repo, as: GitRepo
   alias Minga.LSP.SyncServer
   alias Minga.RenderModel.UI.StatusBar.Agent, as: SemanticStatusAgent
@@ -461,10 +460,7 @@ defmodule MingaEditor.StatusBar.Data do
   defp merge_conflict_count(nil), do: 0
 
   defp merge_conflict_count(buf) when is_pid(buf) do
-    case Git.tracking_pid(buf) do
-      nil -> buf |> BufferAPI.content() |> MergeConflict.parse() |> Enum.count()
-      git_pid -> Git.conflict_count(git_pid)
-    end
+    BufferAPI.conflict_count(buf)
   catch
     :exit, _ -> 0
   end

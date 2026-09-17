@@ -6,6 +6,7 @@ defmodule Minga.Buffer.State do
   """
 
   alias Minga.Buffer.ChangeLog
+  alias Minga.Buffer.ConflictIndex
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.SaveState
@@ -15,6 +16,7 @@ defmodule Minga.Buffer.State do
   alias Minga.Core.Decorations
 
   @default_change_log ChangeLog.new()
+  @default_conflict_index ConflictIndex.new(Document.new(""))
   @default_save_state SaveState.new()
   @default_undo_history UndoHistory.new()
 
@@ -49,6 +51,7 @@ defmodule Minga.Buffer.State do
             read_only: false,
             unlisted: false,
             persistent: false,
+            conflict_index: @default_conflict_index,
             change_log: @default_change_log,
             decorations: %Decorations{},
             face_overrides: %{},
@@ -75,6 +78,7 @@ defmodule Minga.Buffer.State do
           read_only: boolean(),
           unlisted: boolean(),
           persistent: boolean(),
+          conflict_index: ConflictIndex.t(),
           change_log: ChangeLog.t(),
           decorations: Decorations.t(),
           face_overrides: %{String.t() => keyword()},

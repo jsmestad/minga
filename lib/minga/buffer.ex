@@ -123,6 +123,19 @@ defmodule Minga.Buffer do
   @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
   defdelegate content_with_version(server), to: BufferProcess
 
+  @doc "Returns the buffer-owned merge conflict entries."
+  @spec conflicts(t()) :: [Minga.Git.MergeConflict.Entry.t()]
+  defdelegate conflicts(server), to: BufferProcess
+
+  @doc "Returns the buffer-owned merge conflict count."
+  @spec conflict_count(t()) :: non_neg_integer()
+  defdelegate conflict_count(server), to: BufferProcess
+
+  @doc "Returns content, cursor, and merge conflict entries from one buffer state."
+  @spec conflict_snapshot(t()) ::
+          {String.t(), Minga.Buffer.Document.position(), [Minga.Git.MergeConflict.Entry.t()]}
+  defdelegate conflict_snapshot(server), to: BufferProcess
+
   @doc "Bounded metadata, cursor, and viewport lines captured in one buffer call."
   @spec inspection_snapshot(t(), non_neg_integer(), pos_integer()) ::
           Minga.Buffer.InspectionSnapshot.t()

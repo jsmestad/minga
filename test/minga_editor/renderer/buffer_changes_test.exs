@@ -77,6 +77,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     assert Map.keys(Map.from_struct(input)) |> Enum.sort() ==
              [
                :caches,
+               :composed_highlights,
                :focus_tree,
                :font_registry,
                :frame_seq,
@@ -172,6 +173,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :notifications,
                :port_manager,
                :presentation_target,
+               :semantic_token_revisions,
                :semantic_tokens,
                :shell,
                :shell_id,

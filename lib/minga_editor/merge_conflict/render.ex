@@ -2,15 +2,14 @@ defmodule MingaEditor.MergeConflict.Render do
   @moduledoc """
   Builds transient decorations for inline Git merge conflict resolution.
 
-  These decorations are derived from current buffer content or the tracked Git buffer cache. They are composed during render and hit-testing, not stored permanently on the buffer.
+  These decorations are derived from the buffer-owned conflict index. They are composed during render and hit-testing, not stored permanently on the buffer.
   """
 
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Face
-  alias Minga.Git
   alias Minga.Git.MergeConflict
-  alias Minga.Git.MergeConflict.Region
+  alias Minga.Git.MergeConflict.Entry
 
   @group :merge_conflict
   @marker_face Face.new(fg: 0x7F8490, bg: 0x2A2E3A, italic: true)
@@ -41,27 +40,15 @@ defmodule MingaEditor.MergeConflict.Render do
 
   def merge_decorations(%Decorations{} = decorations, _state, _buf), do: decorations
 
-  @spec conflict_regions(pid()) :: [Region.t()]
+  @spec conflict_regions(pid()) :: [Entry.t()]
   defp conflict_regions(buf) do
-    case Git.tracking_pid(buf) do
-      nil -> parse_buffer_content(buf)
-      git_pid -> Git.conflicts(git_pid)
-    end
+    Buffer.conflicts(buf)
   catch
     :exit, _ -> []
   end
 
-  @spec parse_buffer_content(pid()) :: [Region.t()]
-  defp parse_buffer_content(buf) do
-    buf
-    |> Buffer.content()
-    |> MergeConflict.parse()
-  catch
-    :exit, _ -> []
-  end
-
-  @spec decorate_region(Region.t(), Decorations.t()) :: Decorations.t()
-  defp decorate_region(%Region{} = region, decorations) do
+  @spec decorate_region(Entry.t(), Decorations.t()) :: Decorations.t()
+  defp decorate_region(%Entry{} = region, decorations) do
     decorations
     |> add_marker_highlights(region)
     |> add_side_highlights(region.current_range, @current_face)
@@ -70,8 +57,8 @@ defmodule MingaEditor.MergeConflict.Render do
     |> add_action_block(region)
   end
 
-  @spec add_marker_highlights(Decorations.t(), Region.t()) :: Decorations.t()
-  defp add_marker_highlights(decorations, %Region{} = region) do
+  @spec add_marker_highlights(Decorations.t(), Entry.t()) :: Decorations.t()
+  defp add_marker_highlights(decorations, %Entry{} = region) do
     marker_lines = [region.start_line, region.separator_line, region.end_line]
 
     marker_lines =
@@ -82,30 +69,20 @@ defmodule MingaEditor.MergeConflict.Render do
     end)
   end
 
-  @spec add_base_highlights(Decorations.t(), Region.t()) :: Decorations.t()
-  defp add_base_highlights(decorations, %Region{base_range: nil}), do: decorations
+  @spec add_base_highlights(Decorations.t(), Entry.t()) :: Decorations.t()
+  defp add_base_highlights(decorations, %Entry{base_range: nil}), do: decorations
 
-  defp add_base_highlights(decorations, %Region{base_range: range}) do
+  defp add_base_highlights(decorations, %Entry{base_range: range}) do
     add_side_highlights(decorations, range, @marker_face)
   end
 
-  @spec add_side_highlights(Decorations.t(), Region.line_range(), Face.t()) :: Decorations.t()
-  defp add_side_highlights(decorations, range, face) do
-    if Region.empty_range?(range) do
-      decorations
-    else
-      {start_line, end_line} = range
+  @spec add_side_highlights(Decorations.t(), Entry.line_range(), Face.t()) :: Decorations.t()
+  defp add_side_highlights(decorations, {start_line, end_line}, _face) when end_line < start_line,
+    do: decorations
 
-      Enum.reduce(start_line..end_line, decorations, fn line, acc ->
-        add_line_highlight(acc, line, face)
-      end)
-    end
-  end
-
-  @spec add_line_highlight(Decorations.t(), non_neg_integer(), Face.t()) :: Decorations.t()
-  defp add_line_highlight(decorations, line, face) do
+  defp add_side_highlights(decorations, {start_line, end_line}, face) do
     {_id, decorations} =
-      Decorations.add_highlight(decorations, {line, 0}, {line, 9999},
+      Decorations.add_highlight(decorations, {start_line, 0}, {end_line, 9999},
         style: face,
         priority: @priority,
         group: @group
@@ -114,8 +91,12 @@ defmodule MingaEditor.MergeConflict.Render do
     decorations
   end
 
-  @spec add_action_block(Decorations.t(), Region.t()) :: Decorations.t()
-  defp add_action_block(decorations, %Region{} = region) do
+  @spec add_line_highlight(Decorations.t(), non_neg_integer(), Face.t()) :: Decorations.t()
+  defp add_line_highlight(decorations, line, face),
+    do: add_side_highlights(decorations, {line, line}, face)
+
+  @spec add_action_block(Decorations.t(), Entry.t()) :: Decorations.t()
+  defp add_action_block(decorations, %Entry{} = region) do
     {_id, decorations} =
       Decorations.add_block_decoration(decorations, region.start_line,
         placement: :above,

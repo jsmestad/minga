@@ -1948,6 +1948,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       status_bar_data: nil,
       highlighting: %MingaEditor.State.Highlighting{},
       semantic_tokens: %{},
+      semantic_token_revisions: %{},
       terminal_viewport: MingaEditor.Viewport.new(24, 80),
       last_input_seq: 0,
       force_keyframe?: false,

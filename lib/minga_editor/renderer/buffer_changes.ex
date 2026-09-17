@@ -27,7 +27,8 @@ defmodule MingaEditor.Renderer.BufferChanges do
     state = State.reconcile_windows(state, intent)
     versions = ObservedBuffers.monitored_versions(state.observed_buffers, intent.buffer_versions)
     state = consume_changed_buffers(state, versions)
-    {state, materialize(state, intent)}
+    {state, highlights} = State.prepare_highlights(state, intent)
+    {state, materialize(state, intent, highlights)}
   end
 
   @doc "Commits renderer-owned per-window cache state after a successful pipeline frame."
@@ -213,8 +214,9 @@ defmodule MingaEditor.Renderer.BufferChanges do
   defp union_range({first, last}, {new_first, new_last}),
     do: {min(first, new_first), max(last, new_last)}
 
-  @spec materialize(State.t(), Intent.t()) :: Input.t()
-  defp materialize(%State{} = state, %Intent{} = intent) do
+  @spec materialize(State.t(), Intent.t(), MingaEditor.Renderer.HighlightCache.highlights()) ::
+          Input.t()
+  defp materialize(%State{} = state, %Intent{} = intent, highlights) do
     map =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
         cache = materialize_cache(state, id)
@@ -231,7 +233,14 @@ defmodule MingaEditor.Renderer.BufferChanges do
 
     message_store = merge_message_store(intent.frame.message_store, state.message_store)
 
-    Input.from_intent(intent, windows, state.caches, state.font_registry, message_store)
+    Input.from_intent(
+      intent,
+      windows,
+      state.caches,
+      state.font_registry,
+      message_store,
+      highlights
+    )
   end
 
   @spec materialize_cache(State.t(), MingaEditor.Window.id()) ::

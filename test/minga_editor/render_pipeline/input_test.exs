@@ -55,6 +55,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert Map.keys(Map.from_struct(input)) |> Enum.sort() ==
                [
                  :caches,
+                 :composed_highlights,
                  :focus_tree,
                  :font_registry,
                  :frame_seq,
