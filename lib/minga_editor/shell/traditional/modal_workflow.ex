@@ -59,11 +59,14 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
 
   def close(%EditorState{} = state), do: state
 
-  @doc "Dismisses a canceled modal and cancels only its local completion timers."
+  @doc "Dismisses a canceled modal and clears all completion lifecycle ownership."
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%EditorState{shell_runtime: %Runtime{state: %ShellState{modal: modal}}} = state) do
     cancel_completion_timers(modal)
-    update_shell_state(state, &ShellState.dismiss_modal/1)
+
+    state
+    |> drop_completion_requests(modal)
+    |> update_shell_state(&ShellState.dismiss_modal/1)
   end
 
   def dismiss(%EditorState{} = state), do: state
@@ -181,6 +184,12 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
     _trigger = modal |> ModalOverlay.completion_trigger() |> CompletionTrigger.dismiss()
     :ok
   end
+
+  @spec drop_completion_requests(EditorState.t(), ModalOverlay.t()) :: EditorState.t()
+  defp drop_completion_requests(state, {:completion, %CompletionPayload{}}),
+    do: Map.update!(state, :lsp, &LSPState.drop_completion_requests/1)
+
+  defp drop_completion_requests(state, _modal), do: state
 
   @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
                                                MingaEditor.Shell.Traditional.State.t())) ::

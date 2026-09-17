@@ -124,6 +124,12 @@ defmodule Minga.Editing.Completion.Session do
     |> register_requests(requests)
   end
 
+  @doc "Advances the session snapshot after local filtering sends no provider request."
+  @spec continue_locally(t(), non_neg_integer()) :: t()
+  def continue_locally(%__MODULE__{} = session, buffer_version)
+      when is_integer(buffer_version) and buffer_version >= session.buffer_version,
+      do: %{session | buffer_version: buffer_version}
+
   @doc "Returns incomplete providers that require an LSP trigger-kind-3 refresh."
   @spec incomplete_providers(t()) :: [{Item.provider_id(), pid()}]
   def incomplete_providers(%__MODULE__{} = session) do

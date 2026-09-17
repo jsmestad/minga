@@ -445,7 +445,13 @@ defmodule MingaEditor.CompletionTrigger do
 
   @spec do_retrigger_incomplete(t(), CursorContext.t(), [{Item.provider_id(), pid()}]) ::
           {t(), [tracking_fact()]}
-  defp do_retrigger_incomplete(bridge, _context, []), do: {bridge, []}
+  defp do_retrigger_incomplete(
+         %__MODULE__{session: %Session{} = session} = bridge,
+         %CursorContext{version: version},
+         []
+       ) do
+    {%{bridge | session: Session.continue_locally(session, version)}, []}
+  end
 
   defp do_retrigger_incomplete(
          %__MODULE__{session: %Session{} = session} = bridge,
