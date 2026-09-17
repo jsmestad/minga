@@ -22,9 +22,6 @@ public struct TabEntry: Identifiable {
         self.icon = icon
         self.label = label
     }
-    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, isEphemeral: Bool = false, tintColor: Color? = nil, icon: String, label: String) {
-        self.init(id: id, groupId: groupId, isActive: isActive, isDirty: isDirty, isAgent: isAgent, hasAttention: hasAttention, agentStatus: AgentStatus(rawValue: agentStatus), isPinned: isPinned, isEphemeral: isEphemeral, tintColor: tintColor, icon: icon, label: label)
-    }
     public let id: UInt32
     public let groupId: UInt16
     public let isActive: Bool

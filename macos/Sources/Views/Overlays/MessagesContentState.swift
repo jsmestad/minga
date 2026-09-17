@@ -10,14 +10,6 @@ import MingaProtocol
 ///
 /// SwiftUI identity is `id`, a `(streamInstance, seq)` composite carried by the wire contract, NOT the raw backend sequence number (`seq`).
 public struct MessageEntry: Identifiable, Equatable {
-    public init(id: UInt64, level: UInt8, subsystem: UInt8, timestampSecs: UInt32, filePath: String, text: String) {
-        self.id = id
-        self.level = MessageLevel(rawValue: level)
-        self.subsystem = MessageSubsystem(rawValue: subsystem)
-        self.timestampSecs = timestampSecs
-        self.filePath = filePath
-        self.text = text
-    }
     public init(id: UInt64, level: MessageLevel, subsystem: MessageSubsystem, timestampSecs: UInt32, filePath: String, text: String) {
         self.id = id
         self.level = level

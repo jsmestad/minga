@@ -920,14 +920,14 @@ struct MessagesContentStateLifecycleTests {
 
     @Test("MessageEntry timestamp formatting")
     @MainActor func timestampFormatting() {
-        let entry = MessageEntry(id: 1, level: 1, subsystem: 0,
+        let entry = MessageEntry(id: 1, level: .info, subsystem: .editor,
                                 timestampSecs: 3661, filePath: "", text: "")
         #expect(entry.timestamp == "01:01:01")
     }
 
     @Test("MessageEntry level and subsystem names")
     @MainActor func levelAndSubsystemNames() {
-        let entry = MessageEntry(id: 1, level: 2, subsystem: 5,
+        let entry = MessageEntry(id: 1, level: .warning, subsystem: .agent,
                                 timestampSecs: 0, filePath: "", text: "")
         #expect(entry.levelName == "WARN")
         #expect(entry.subsystemName == "AGENT")

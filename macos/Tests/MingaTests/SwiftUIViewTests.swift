@@ -402,7 +402,7 @@ struct StatusBarViewViewTests {
         diagnosticHint: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
         rightSegments: [Wire.StatusBarSegment] = [],
-        agentStatus: UInt8 = 0,
+        agentStatus: AgentStatus = .idle,
         activeToolName: String = "",
         safeMode: Bool = false
     ) -> StatusBarState {
@@ -412,7 +412,7 @@ struct StatusBarViewViewTests {
             lineCount: 500, flags: safeMode ? 0x08 : 0, lspStatus: 0, gitBranch: "",
             message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
             modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus.rawValue,
             activeToolName: activeToolName,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: diagnosticHint,
@@ -766,7 +766,7 @@ struct StatusBarViewViewTests {
 
     @Test("Agent status shows readable labels and active tool names")
     @MainActor func agentStatusLabels() throws {
-        let running = statusBarState(agentStatus: 2, activeToolName: "read_file")
+        let running = statusBarState(agentStatus: .executingTool, activeToolName: "read_file")
         let runningTexts = try StatusBarView(state: running, encoder: nil)
             .environment(\.themeColors, ThemeColors())
             .inspect()
@@ -775,7 +775,7 @@ struct StatusBarViewViewTests {
 
         #expect(runningTexts.contains("Running read_file"))
 
-        let fallback = statusBarState(agentStatus: 2)
+        let fallback = statusBarState(agentStatus: .executingTool)
         let fallbackTexts = try StatusBarView(state: fallback, encoder: nil)
             .environment(\.themeColors, ThemeColors())
             .inspect()
@@ -785,7 +785,7 @@ struct StatusBarViewViewTests {
         #expect(fallbackTexts.contains("Running"))
         #expect(!fallbackTexts.contains("Running read_file"))
 
-        let plan = statusBarState(agentStatus: 4)
+        let plan = statusBarState(agentStatus: .planning)
         let planBody = try StatusBarView(state: plan, encoder: nil).environment(\.themeColors, ThemeColors()).inspect()
         let planTexts = planBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         let planAccessibilityLabels = try planBody.findAll(ViewType.HStack.self).compactMap {
@@ -954,7 +954,7 @@ struct TabBarViewViewTests {
     }
 
     private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
-        TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
+        TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: .idle, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
     }
 
     @Test("Tab bar shows all tab labels")
@@ -1219,7 +1219,7 @@ struct TabBarViewViewTests {
 
         #expect(state.movableFileTabIndex(for: tab(id: 2, label: "file-a.ex")) == 0)
         #expect(state.movableFileTabIndex(for: tab(id: 3, label: "file-b.ex")) == 1)
-        #expect(state.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 0, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
+        #expect(state.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: .idle, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
         #expect(state.tabDropReorder(droppedTabs: [TabDragPayload(id: 2)], target: tab(id: 3, label: "file-b.ex"), visibleIndex: 2)?.newIndex == 1)
     }
 
