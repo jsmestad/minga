@@ -171,11 +171,14 @@ final class CommandDispatcher {
     var onNativePresentationObservation: ((NativePresentationEvidence) -> Void)?
     var requestPresentationFocus: (() -> Bool)?
 
-    /// Claims the newest applied input sequence for one Metal submission.
-    func takePresentationInputSeq() -> UInt32 {
-        let seq = pendingPresentationInputSeq
+    /// Captures the newest applied input sequence without consuming it.
+    func capturePresentationInputSeq() -> UInt32 { pendingPresentationInputSeq }
+
+    /// Consumes only the correlation captured by an actual Metal submission.
+    /// A newer committed input sequence remains pending for its own submission.
+    func acknowledgePresentationSubmission(inputSeq: UInt32) {
+        guard inputSeq != 0, pendingPresentationInputSeq == inputSeq else { return }
         pendingPresentationInputSeq = 0
-        return seq
     }
 
     /// Returns the committed editor frame waiting for native Metal presentation.

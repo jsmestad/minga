@@ -89,6 +89,7 @@ private func rendererPaneGeometry(windowId: UInt16, gutter: Wire.WindowGutter, f
 
 extension CoreTextMetalRenderer {
     @MainActor
+    @discardableResult
     func render(
         frameState: FrameState,
         fontManager: FontManager,
@@ -112,7 +113,7 @@ extension CoreTextMetalRenderer {
         connectionID: UInt64 = 0,
         isPresentationCurrent: @escaping @MainActor () -> Bool = { true },
         onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }
-    ) {
+    ) -> NativeRenderSubmissionOutcome {
         let snapshot = rendererSnapshot(
             generation: presentationFrame?.generation ?? 1,
             frameSeq: presentationFrame?.frameSeq ?? presentationInputSeq,
@@ -123,7 +124,7 @@ extension CoreTextMetalRenderer {
             windowIndentGuides: windowIndentGuides,
             metadata: metadata
         )
-        render(
+        return render(
             snapshot: snapshot,
             fontManager: fontManager,
             cursorBlinkVisible: cursorBlinkVisible,

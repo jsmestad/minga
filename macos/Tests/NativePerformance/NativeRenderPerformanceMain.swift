@@ -15,6 +15,7 @@ private let transcriptWarmupFrameCount = 12
 private let transcriptMeasuredFrameCount = 120
 private let accessibilityWarmupCount = 200
 private let accessibilityMeasuredCount = 1_000
+private let capacityRecoveryCycleCount = 30
 
 private struct AccessibilityPerformanceFixture: Codable {
     let caseName: String
@@ -147,6 +148,24 @@ private final class NativeBenchmarkProbe {
             allocationCount: allocationCount,
             presented: presented
         ))
+    }
+}
+
+@MainActor
+private final class ControlledCompletionQueue {
+    typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+
+    private var completions: [Completion] = []
+
+    var count: Int { completions.count }
+
+    func append(_ completion: @escaping Completion) { completions.append(completion) }
+
+    func releaseOldestGeneration() {
+        precondition(!completions.isEmpty, "controlled completion queue is empty")
+        completions.removeFirst()(true, Int(MTLCommandBufferStatus.completed.rawValue))
+        precondition(!completions.isEmpty, "render completion did not enqueue presentation completion")
+        completions.removeLast()(true, Int(MTLCommandBufferStatus.completed.rawValue))
     }
 }
 
@@ -543,6 +562,116 @@ private func makeFactories(probe: NativeBenchmarkProbe) -> NativeRenderFactories
 }
 
 @MainActor
+private func measureCapacityRecovery(
+    refreshRateHz: Int,
+    snapshot: CommittedEditorSnapshot,
+    fontManager: FontManager,
+    drawable: BenchmarkDrawable
+) async -> NativeCapacityRecoveryMeasurement {
+    let completionQueue = ControlledCompletionQueue()
+    var factories = NativeRenderFactories.production
+    factories.observeCompletion = { _, completion in completionQueue.append(completion) }
+    factories.present = { _ in }
+    factories.reportFailure = { failure in
+        preconditionFailure("controlled capacity recovery failed: \(failure)")
+    }
+    guard let renderer = CoreTextMetalRenderer(factories: factories) else {
+        preconditionFailure("unable to initialize controlled capacity renderer")
+    }
+    renderer.setupRenderers(fontManager: fontManager)
+
+    var pendingStartedAt: ContinuousClock.Instant?
+    var waitSamples: [Double] = []
+    var deferredCPUSamples: [Double] = []
+    var retryScheduleCount = 0
+    var submittedRetryCount = 0
+    var capacityAvailable = false
+    var maximumPendingRedrawCount = 0
+    renderer.onPresentationCapacityAvailable = {
+        guard let startedAt = pendingStartedAt else { return }
+        let duration = startedAt.duration(to: .now)
+        waitSamples.append(
+            Double(duration.components.seconds) * 1_000
+                + Double(duration.components.attoseconds) / 1_000_000_000_000_000
+        )
+        retryScheduleCount += 1
+        capacityAvailable = true
+    }
+
+    for sequence in 1...CoreTextMetalRenderer.nativeFrameSlotCount {
+        let outcome = renderer.render(
+            snapshot: snapshot,
+            fontManager: fontManager,
+            drawableProvider: { drawable },
+            viewportSize: CGSize(width: 1_920, height: 1_200),
+            contentScale: 1,
+            presentationWindowId: 1,
+            presentationInputSeq: UInt32(sequence)
+        )
+        precondition(outcome == .submitted, "controlled capacity setup did not fill a slot")
+    }
+
+    let completionDelay = Duration.nanoseconds(1_000_000_000 / Int64(refreshRateHz))
+    for index in 0..<capacityRecoveryCycleCount {
+        let cpuStart = threadCPUTimeNanoseconds()
+        let outcome = renderer.render(
+            snapshot: snapshot,
+            fontManager: fontManager,
+            drawableProvider: { drawable },
+            viewportSize: CGSize(width: 1_920, height: 1_200),
+            contentScale: 1,
+            presentationWindowId: 1,
+            presentationInputSeq: UInt32(10_000 + index)
+        )
+        deferredCPUSamples.append(Double(threadCPUTimeNanoseconds() - cpuStart) / 1_000_000)
+        precondition(outcome == .deferredCapacity, "controlled capacity attempt did not defer")
+        pendingStartedAt = .now
+        maximumPendingRedrawCount = max(maximumPendingRedrawCount, 1)
+
+        try? await Task.sleep(for: completionDelay)
+        completionQueue.releaseOldestGeneration()
+        precondition(capacityAvailable, "capacity release did not schedule a retry")
+        await Task.yield()
+        capacityAvailable = false
+
+        let retryOutcome = renderer.render(
+            snapshot: snapshot,
+            fontManager: fontManager,
+            drawableProvider: { drawable },
+            viewportSize: CGSize(width: 1_920, height: 1_200),
+            contentScale: 1,
+            presentationWindowId: 1,
+            presentationInputSeq: UInt32(20_000 + index)
+        )
+        precondition(retryOutcome == .submitted, "scheduled capacity retry did not submit")
+        submittedRetryCount += 1
+        pendingStartedAt = nil
+    }
+
+    renderer.onPresentationCapacityAvailable = nil
+    while renderer.inFlightPresentationCount > 0 {
+        completionQueue.releaseOldestGeneration()
+    }
+    precondition(completionQueue.count == 0, "controlled capacity completions did not drain")
+
+    return NativeCapacityRecoveryMeasurement(
+        refreshRateHz: refreshRateHz,
+        slotMissCount: renderer.capacityDeferralCount,
+        maximumPendingRedrawCount: maximumPendingRedrawCount,
+        deferredAttemptCount: deferredCPUSamples.count,
+        retryScheduleCount: retryScheduleCount,
+        submittedRetryCount: submittedRetryCount,
+        deferredAttemptCPUP50Ms: percentile(deferredCPUSamples, 0.50),
+        deferredAttemptCPUP95Ms: percentile(deferredCPUSamples, 0.95),
+        deferredAttemptCPUP99Ms: percentile(deferredCPUSamples, 0.99),
+        mainActorWaitP50Ms: percentile(waitSamples, 0.50),
+        mainActorWaitP95Ms: percentile(waitSamples, 0.95),
+        mainActorWaitP99Ms: percentile(waitSamples, 0.99),
+        revision: ProcessInfo.processInfo.environment["MINGA_BENCHMARK_REVISION"] ?? "unknown"
+    )
+}
+
+@MainActor
 private func renderFrame(
     renderer: CoreTextMetalRenderer,
     dispatcher: CommandDispatcher,
@@ -678,6 +807,18 @@ private struct NativeRenderPerformanceMain {
         let drawSamples = frames.map(\.drawCPUMs)
         let gpuSamples = frames.map(\.gpuMs)
         let completionWallSamples = frames.map(\.completionWallMs)
+        guard let committedSnapshot = dispatcher.committedEditorSnapshot else {
+            preconditionFailure("capacity recovery benchmark requires a committed snapshot")
+        }
+        var capacityRecovery: [NativeCapacityRecoveryMeasurement] = []
+        for refreshRateHz in [60, 120] {
+            capacityRecovery.append(await measureCapacityRecovery(
+                refreshRateHz: refreshRateHz,
+                snapshot: committedSnapshot,
+                fontManager: fontManager,
+                drawable: drawable
+            ))
+        }
         let measurement = NativeRenderPerformanceMeasurement(
             freezePublicationP50Ms: percentile(freezeSamples, 0.50),
             freezePublicationP95Ms: percentile(freezeSamples, 0.95),
@@ -694,7 +835,8 @@ private struct NativeRenderPerformanceMain {
             copyCompletedFrameCount: frames.filter(\.presented).count,
             failedOrDiscardedFrameCount: frames.filter { !$0.presented }.count,
             maximumInFlightGenerations: probe.maximumInFlight,
-            transcriptAccounting: transcriptAccounting
+            transcriptAccounting: transcriptAccounting,
+            capacityRecovery: capacityRecovery
         )
 
         let encoder = JSONEncoder()

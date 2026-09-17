@@ -135,6 +135,10 @@ final class CoreTextMetalRenderer {
     weak var presentationMetrics: GUIFramePresentationMetrics?
     /// Correctness callback for an exact committed frame that failed before the Metal completion boundary.
     var onNativePresentationFailure: ((GUICommittedFrame, NativeOperationResult.Outcome) -> Void)?
+    /// Notifies the view asynchronously when saturation clears and a deferred redraw may retry.
+    var onPresentationCapacityAvailable: (@MainActor () -> Void)?
+    /// Number of nonblocking submissions deferred because all native slots were occupied.
+    private(set) var capacityDeferralCount = 0
     /// Generation of the last GPU-completed presentation whose candidate resources were promoted.
     private(set) var lastCompletedPresentationGeneration: UInt64 = 0
     private let bgPipeline: MTLRenderPipelineState
@@ -328,7 +332,7 @@ final class CoreTextMetalRenderer {
     private var maxInstanceSlots: Int = 0
 
     /// Number of renderer-owned reusable slots, matching the maximum allowed native generations in flight.
-    private static let nativeFrameSlotCount = LineTextureAtlas.textureGenerationCount
+    static let nativeFrameSlotCount = LineTextureAtlas.textureGenerationCount
     private static let quadBufferFrameCount = nativeFrameSlotCount
 
     /// Reusable line-instance buffers, one per native frame slot. Slots grow on demand and are reused after warm-up.
@@ -378,6 +382,7 @@ final class CoreTextMetalRenderer {
     /// Render the editor from one complete committed snapshot.
     ///
     /// Buffer windows with semantic content are rendered via their already-paired snapshot surfaces. The renderer must not accept independently read `FrameState` and window-content dictionaries from production call sites.
+    @discardableResult
     func render(snapshot: CommittedEditorSnapshot, fontManager: FontManager,
                 cursorBlinkVisible: Bool = true,
                 isMouseInGutter: Bool = false,
@@ -390,21 +395,18 @@ final class CoreTextMetalRenderer {
                 latencyRecorder: LatencyRecorder? = nil,
                 connectionID: UInt64 = 0,
                 isPresentationCurrent: @escaping @MainActor () -> Bool = { true },
-                onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) {
+                onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) -> NativeRenderSubmissionOutcome {
         guard let reservation = presentationGeneration.issue(slotCount: Self.nativeFrameSlotCount) else {
-            let presentationFrame = GUICommittedFrame(connectionID: connectionID, generation: snapshot.generation, frameSeq: snapshot.frameSeq)
-            recordNativeFailure(NativePresentationFailure(
-                phase: .command, dimension: .submission,
-                frameSequence: presentationInputSeq, reason: .unavailable
-            ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
-            return
+            capacityDeferralCount += 1
+            os_signpost(.event, log: renderLog, name: "NativeSlotMiss",
+                        "input=%{public}u pending_redraw_count=1", presentationInputSeq)
+            return .deferredCapacity
         }
         let generation = reservation.generation
         let nativeFrameSlot = reservation.slot
         var submitted = false
         defer {
-            if !submitted { presentationGeneration.retire(generation) }
+            if !submitted { retirePresentationGeneration(generation) }
         }
 
         let frameState = snapshot.frameState
@@ -511,7 +513,7 @@ final class CoreTextMetalRenderer {
                 phase: .atlas, dimension: .texture,
                 frameSequence: presentationInputSeq, reason: .unavailable
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         let candidateConfigurationEpoch = configurationEpoch
         let candidateRasterizer = factories.makeRasterizer()
@@ -528,7 +530,7 @@ final class CoreTextMetalRenderer {
             break
         case .failure(let failure):
             recordNativeFailure(failure, latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
 
         // Local shadowing guarantees all preparation below targets only candidates.
@@ -936,7 +938,7 @@ final class CoreTextMetalRenderer {
         if let failure = windowContentRenderer?.nativePresentationFailure ?? candidateAtlas.nativePresentationFailure {
             recordNativeFailure(failure, frameSequence: presentationInputSeq,
                                 latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
 
         // Derive one exact aggregate buffer request before command creation. No
@@ -971,13 +973,13 @@ final class CoreTextMetalRenderer {
             )
         } catch let failure as NativePresentationFailure {
             recordNativeFailure(failure, latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         } catch {
             recordNativeFailure(NativePresentationFailure(
                 phase: .buffers, dimension: .arithmetic,
                 frameSequence: presentationInputSeq, reason: .overflow
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         let candidateInstanceBuffer: MTLBuffer?
         if bufferDemand.lineBytes > 0 {
@@ -988,7 +990,7 @@ final class CoreTextMetalRenderer {
                         requested: bufferDemand.lineBytes,
                         frameSequence: presentationInputSeq, reason: .allocation
                     ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                    return
+                    return .failed
                 }
                 lineBufferSlots[nativeFrameSlot] = buffer
                 lineBufferSlotBytes[nativeFrameSlot] = bufferDemand.lineBytes
@@ -1010,7 +1012,7 @@ final class CoreTextMetalRenderer {
                             requested: bufferDemand.quadBytesPerBuffer,
                             frameSequence: presentationInputSeq, reason: .allocation
                         ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                        return
+                        return .failed
                     }
                     allocatedBuffers.append(buffer)
                 }
@@ -1028,7 +1030,7 @@ final class CoreTextMetalRenderer {
                 phase: .drawable, dimension: .renderTarget,
                 frameSequence: presentationInputSeq, reason: .overflow
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         let deviceDimensionLimit = nativeDeviceTextureDimensionLimit(device)
         let targetWidthLimit = min(resourcePolicy.textureWidth, deviceDimensionLimit)
@@ -1041,7 +1043,7 @@ final class CoreTextMetalRenderer {
                 requested: requested, limit: targetWidthLimit,
                 frameSequence: presentationInputSeq, reason: .limit
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         guard viewportSize.height <= CGFloat(targetHeightLimit) else {
             let requested = viewportSize.height <= CGFloat(Int32.max)
@@ -1051,7 +1053,7 @@ final class CoreTextMetalRenderer {
                 requested: requested, limit: targetHeightLimit,
                 frameSequence: presentationInputSeq, reason: .limit
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         let targetWidth = Int(viewportSize.width.rounded(.up))
         let targetHeight = Int(viewportSize.height.rounded(.up))
@@ -1065,13 +1067,13 @@ final class CoreTextMetalRenderer {
             )
         } catch let failure as NativePresentationFailure {
             recordNativeFailure(failure, latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         } catch {
             recordNativeFailure(NativePresentationFailure(
                 phase: .drawable, dimension: .arithmetic,
                 frameSequence: presentationInputSeq, reason: .overflow
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         if renderTargetSlots[nativeFrameSlot] == nil || renderTargetSlotSizes[nativeFrameSlot].width != targetDemand.width || renderTargetSlotSizes[nativeFrameSlot].height != targetDemand.height {
             let targetDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -1088,7 +1090,7 @@ final class CoreTextMetalRenderer {
                     requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
                     frameSequence: presentationInputSeq, reason: .allocation
                 ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-                return
+                return .failed
             }
             renderTargetSlots[nativeFrameSlot] = renderTarget
             renderTargetSlotSizes[nativeFrameSlot] = (targetDemand.width, targetDemand.height)
@@ -1099,7 +1101,7 @@ final class CoreTextMetalRenderer {
                 requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
                 frameSequence: presentationInputSeq, reason: .allocation
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
 
         // Set up the offscreen render pass.
@@ -1114,21 +1116,18 @@ final class CoreTextMetalRenderer {
                 phase: .command, dimension: .commandBuffer,
                 frameSequence: presentationInputSeq, reason: .unavailable
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
         guard let encoder = factories.makeEncoder(cmdBuf, renderDesc) else {
             recordNativeFailure(NativePresentationFailure(
                 phase: .command, dimension: .encoder,
                 frameSequence: presentationInputSeq, reason: .unavailable
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
 
-        // Triple-buffered quad uploads: wait until a quad buffer is free (at most
-        // `quadBufferFrameCount` frames in flight), then rotate to it and reset
-        // its write cursor. The matching `signal()` runs in the command buffer's
-        // completion handler below. Acquired after the encoder guard so the early
-        // return above never holds the semaphore.
+        // The reservation selected one free frame slot without blocking AppKit.
+        // Every early return above releases that exact reservation.
         var candidateQuadWriteOffset = 0
         let candidateQuadBuffer = candidateQuadBuffers.first
 
@@ -1573,7 +1572,7 @@ final class CoreTextMetalRenderer {
             encoder.endEncoding()
             recordNativeFailure(failure, frameSequence: presentationInputSeq,
                                 latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
 
         // Submit only the offscreen render. The drawable is neither written nor
@@ -1586,7 +1585,7 @@ final class CoreTextMetalRenderer {
                 phase: .submission, dimension: .submission,
                 frameSequence: presentationInputSeq, reason: .submission
             ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
-            return
+            return .failed
         }
 
         let commitTime = CACurrentMediaTime()
@@ -1596,7 +1595,7 @@ final class CoreTextMetalRenderer {
             guard let self else { return }
             var presentationSubmitted = false
             defer {
-                if !presentationSubmitted { self.presentationGeneration.retire(generation) }
+                if !presentationSubmitted { self.retirePresentationGeneration(generation) }
             }
             guard isPresentationCurrent() else { return }
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
@@ -1686,7 +1685,7 @@ final class CoreTextMetalRenderer {
 
             self.factories.observeCompletion(presentationBuffer) { [weak self] copied, _ in
                 guard let self else { return }
-                defer { self.presentationGeneration.retire(generation) }
+                defer { self.retirePresentationGeneration(generation) }
                 guard isPresentationCurrent() else { return }
                 guard copied else {
                     self.recordNativeFailure(NativePresentationFailure(
@@ -1713,7 +1712,7 @@ final class CoreTextMetalRenderer {
                     ), latencyRecorder: latencyRecorder, presentationFrame: presentationFrame)
                     return
                 }
-                guard self.presentationGeneration.complete(generation) else {
+                guard self.completePresentationGeneration(generation) else {
                     latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
                     self.presentationMetrics?.discard(
                         domain: .editor, outcome: .superseded, frame: presentationFrame
@@ -1749,6 +1748,7 @@ final class CoreTextMetalRenderer {
         latencyRecorder?.markSubmitted(seq: presentationInputSeq)
         os_signpost(.event, log: renderLog, name: "MetalSubmit", signpostID: renderSignpostID,
                     "input=%{public}u", presentationInputSeq)
+        return .submitted
     }
 
     func activeResourceSnapshot() -> NativeActiveResourceSnapshot {
@@ -1764,10 +1764,26 @@ final class CoreTextMetalRenderer {
         )
     }
 
-    #if DEBUG
     var inFlightPresentationCount: Int { presentationGeneration.inFlightCount }
-    #endif
 
+    private func retirePresentationGeneration(_ generation: UInt64) {
+        let priorCount = presentationGeneration.inFlightCount
+        presentationGeneration.retire(generation)
+        notifyCapacityAvailableIfNeeded(priorCount: priorCount)
+    }
+
+    private func completePresentationGeneration(_ generation: UInt64) -> Bool {
+        let priorCount = presentationGeneration.inFlightCount
+        let completed = presentationGeneration.complete(generation)
+        notifyCapacityAvailableIfNeeded(priorCount: priorCount)
+        return completed
+    }
+
+    private func notifyCapacityAvailableIfNeeded(priorCount: Int) {
+        guard priorCount == Self.nativeFrameSlotCount,
+              presentationGeneration.inFlightCount < priorCount else { return }
+        onPresentationCapacityAvailable?()
+    }
     private func recordNativeFailure(
         _ failure: NativePresentationFailure,
         frameSequence: UInt32? = nil,

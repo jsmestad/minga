@@ -373,6 +373,20 @@ struct NativeRenderPerformanceGateTests {
             .contains { $0.contains("invalid or incomplete") })
     }
 
+    @Test("capacity recovery evidence requires one coalesced retry at 60 and 120 Hz")
+    func capacityRecoveryEvidenceFailsClosed() {
+        let valid = [capacityMeasurement(refreshRateHz: 60), capacityMeasurement(refreshRateHz: 120)]
+        #expect(NativeRenderPerformanceGate.absoluteFailures(measurement(capacityRecovery: valid)).isEmpty)
+
+        let looping = [capacityMeasurement(refreshRateHz: 60, pending: 2), capacityMeasurement(refreshRateHz: 120)]
+        #expect(NativeRenderPerformanceGate.absoluteFailures(measurement(capacityRecovery: looping))
+            .contains { $0.contains("retained 2 pending redraws") })
+
+        let lostRetry = [capacityMeasurement(refreshRateHz: 60, retries: 29), capacityMeasurement(refreshRateHz: 120)]
+        #expect(NativeRenderPerformanceGate.absoluteFailures(measurement(capacityRecovery: lostRetry))
+            .contains { $0.contains("counters are invalid") })
+    }
+
     @Test("paired native comparison requires equal odd sample counts")
     func pairedSampleShapeFailsClosed() {
         let sample = measurement()
@@ -462,7 +476,8 @@ struct NativeRenderPerformanceGateTests {
         dropped: Int = 0,
         generations: Int = 3,
         attempted: Int? = nil,
-        transcriptAccounting: [NativeTranscriptAccountingMeasurement]? = nil
+        transcriptAccounting: [NativeTranscriptAccountingMeasurement]? = nil,
+        capacityRecovery: [NativeCapacityRecoveryMeasurement]? = nil
     ) -> NativeRenderPerformanceMeasurement {
         NativeRenderPerformanceMeasurement(
             freezePublicationP50Ms: 0.5,
@@ -480,7 +495,30 @@ struct NativeRenderPerformanceGateTests {
             copyCompletedFrameCount: 1_000,
             failedOrDiscardedFrameCount: dropped,
             maximumInFlightGenerations: generations,
-            transcriptAccounting: transcriptAccounting
+            transcriptAccounting: transcriptAccounting,
+            capacityRecovery: capacityRecovery
+        )
+    }
+
+    private func capacityMeasurement(
+        refreshRateHz: Int,
+        pending: Int = 1,
+        retries: Int = 30
+    ) -> NativeCapacityRecoveryMeasurement {
+        NativeCapacityRecoveryMeasurement(
+            refreshRateHz: refreshRateHz,
+            slotMissCount: 30,
+            maximumPendingRedrawCount: pending,
+            deferredAttemptCount: 30,
+            retryScheduleCount: retries,
+            submittedRetryCount: 30,
+            deferredAttemptCPUP50Ms: 0.01,
+            deferredAttemptCPUP95Ms: 0.02,
+            deferredAttemptCPUP99Ms: 0.03,
+            mainActorWaitP50Ms: 8,
+            mainActorWaitP95Ms: 9,
+            mainActorWaitP99Ms: 10,
+            revision: "test"
         )
     }
 }

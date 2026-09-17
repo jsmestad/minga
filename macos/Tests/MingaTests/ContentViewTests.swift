@@ -123,12 +123,15 @@ struct ContentViewTests {
         gui: GUIState,
         dispatcher: CommandDispatcher,
         encoder: InputEncoder,
-        reduceMotionEnabled: Bool = false
+        reduceMotionEnabled: Bool = false,
+        factories overrideFactories: NativeRenderFactories? = nil
     ) throws -> EditorNSView {
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
-        var factories = NativeRenderFactories.production
-        factories.makeLibrary = { device in
-            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+        var factories = overrideFactories ?? NativeRenderFactories.production
+        if overrideFactories == nil {
+            factories.makeLibrary = { device in
+                Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+            }
         }
         let renderer = try #require(CoreTextMetalRenderer(factories: factories))
         renderer.setupRenderers(fontManager: fontManager)
@@ -579,14 +582,150 @@ struct ContentViewTests {
         )
     }
 
-    private func commitScrollFrame(_ dispatcher: CommandDispatcher, frameSeq: UInt32, anchorTop: UInt32) throws -> CommittedEditorSnapshot {
+    private func commitScrollFrame(
+        _ dispatcher: CommandDispatcher,
+        frameSeq: UInt32,
+        anchorTop: UInt32,
+        inputSeq: UInt32 = 0
+    ) throws -> CommittedEditorSnapshot {
         dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: frameSeq - 1, generation: 1))
         if frameSeq == 1 {
             dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         }
         dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(anchorTop: anchorTop)))
-        dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: inputSeq))
         return try #require(dispatcher.committedEditorSnapshot)
+    }
+
+    @Test("native saturation coalesces the newest committed snapshot and retries after complete slot release")
+    func saturatedNativePresentationRetriesLatestCommit() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("Metal device is required for deferred redraw coverage")
+            return
+        }
+        let size = CGSize(width: 640, height: 480)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb,
+            width: Int(size.width),
+            height: Int(size.height),
+            mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        let texture = try #require(device.makeTexture(descriptor: descriptor))
+        let drawable = ReadbackDrawable(texture: texture)
+        typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+        var completions: [Completion] = []
+        var factories = NativeRenderFactories.production
+        factories.makeLibrary = { device in
+            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+        }
+        factories.observeCompletion = { _, completion in completions.append(completion) }
+        factories.present = { $0.present() }
+
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let view = try makeEditorNSView(
+            gui: gui,
+            dispatcher: dispatcher,
+            encoder: NullInputEncoder(),
+            factories: factories
+        )
+        view.drawableProvider = { drawable }
+        view.frame = NSRect(origin: .zero, size: size)
+        view.drawableSize = size
+
+        let firstInput = dispatcher.latency.stamp()
+        _ = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10, inputSeq: firstInput)
+        for _ in 0..<3 { view.draw(view.bounds) }
+        #expect(completions.count == 3)
+        #expect(dispatcher.capturePresentationInputSeq() == 0)
+
+        let deferredInput = dispatcher.latency.stamp()
+        _ = try commitScrollFrame(dispatcher, frameSeq: 2, anchorTop: 11, inputSeq: deferredInput)
+        view.draw(view.bounds)
+        #expect(view.hasPendingCapacityRedraw)
+        #expect(dispatcher.capturePresentationInputSeq() == deferredInput)
+        #expect(completions.count == 3)
+
+        let latestInput = dispatcher.latency.stamp()
+        _ = try commitScrollFrame(dispatcher, frameSeq: 3, anchorTop: 12, inputSeq: latestInput)
+        #expect(view.hasPendingCapacityRedraw)
+        #expect(dispatcher.capturePresentationInputSeq() == latestInput)
+
+        completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(completions.count == 4)
+        completions[3](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        for _ in 0..<20 where view.capacityRetryScheduleCount == 0 {
+            await Task.yield()
+        }
+        #expect(view.capacityRetryScheduleCount == 1)
+
+        view.draw(view.bounds)
+        #expect(completions.count == 5)
+        #expect(!view.hasPendingCapacityRedraw)
+        #expect(dispatcher.capturePresentationInputSeq() == 0)
+
+        completions[4](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(completions.count == 6)
+        completions[5](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 3)
+
+        completions[1](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(completions.count == 7)
+        completions[6](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 3)
+    }
+
+    @Test("connection replacement cancels a deferred native redraw and old completions only release slots")
+    func reconnectCancelsDeferredNativeRedraw() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let size = CGSize(width: 640, height: 480)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb,
+            width: Int(size.width),
+            height: Int(size.height),
+            mipmapped: false
+        )
+        descriptor.usage = .renderTarget
+        let texture = try #require(device.makeTexture(descriptor: descriptor))
+        let drawable = ReadbackDrawable(texture: texture)
+        typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
+        var completions: [Completion] = []
+        var factories = NativeRenderFactories.production
+        factories.makeLibrary = { device in
+            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+        }
+        factories.observeCompletion = { _, completion in completions.append(completion) }
+        factories.present = { $0.present() }
+
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        dispatcher.replaceConnection(with: 1)
+        let view = try makeEditorNSView(
+            gui: gui,
+            dispatcher: dispatcher,
+            encoder: NullInputEncoder(),
+            factories: factories
+        )
+        view.drawableProvider = { drawable }
+        view.frame = NSRect(origin: .zero, size: size)
+        view.drawableSize = size
+
+        _ = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
+        for _ in 0..<4 { view.draw(view.bounds) }
+        #expect(view.hasPendingCapacityRedraw)
+        #expect(completions.count == 3)
+
+        view.invalidateConnection()
+        dispatcher.replaceConnection(with: 2)
+        #expect(!view.hasPendingCapacityRedraw)
+        completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        await Task.yield()
+        await Task.yield()
+
+        #expect(view.capacityRetryScheduleCount == 0)
+        #expect(completions.count == 3)
+        #expect(dispatcher.visibleEditorSnapshot == nil)
     }
 
     @Test("draw reconciles a live trackpad prediction against its captured committed snapshot exactly once")
