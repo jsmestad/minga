@@ -20,6 +20,7 @@ defmodule Minga.Buffer.Process do
 
   alias Minga.Buffer.{
     ChangeLog,
+    ConflictIndex,
     Cursor,
     CursorContext,
     Document,
@@ -446,6 +447,19 @@ defmodule Minga.Buffer.Process do
   def content_with_version(server) do
     GenServer.call(server, :content_with_version)
   end
+
+  @doc "Returns the buffer-owned merge conflict entries."
+  @spec conflicts(GenServer.server()) :: [Minga.Git.MergeConflict.Entry.t()]
+  def conflicts(server), do: GenServer.call(server, :conflicts)
+
+  @doc "Returns the buffer-owned merge conflict count."
+  @spec conflict_count(GenServer.server()) :: non_neg_integer()
+  def conflict_count(server), do: GenServer.call(server, :conflict_count)
+
+  @doc "Returns content, cursor, and merge conflict entries from one buffer state."
+  @spec conflict_snapshot(GenServer.server()) ::
+          {String.t(), Document.position(), [Minga.Git.MergeConflict.Entry.t()]}
+  def conflict_snapshot(server), do: GenServer.call(server, :conflict_snapshot)
 
   @doc "Returns bounded semantic inspection data from one coherent buffer state."
   @spec inspection_snapshot(GenServer.server(), non_neg_integer(), pos_integer()) ::
@@ -1068,8 +1082,10 @@ defmodule Minga.Buffer.Process do
 
         options_server = normalize_options_server(Keyword.get(opts, :options_server))
 
+        document = Document.new(text)
+
         state = %BufState{
-          document: Document.new(text),
+          document: document,
           file_path: path,
           filetype: filetype,
           options_server: options_server,
@@ -1081,6 +1097,7 @@ defmodule Minga.Buffer.Process do
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
           persistent: Keyword.get(opts, :persistent, false),
+          conflict_index: ConflictIndex.new(document),
           options: seed_options(options_server, filetype),
           explicit_options: MapSet.new(),
           swap: opts |> Keyword.put_new(:swap_backend, Minga.Session.Swap) |> SwapState.new(),
@@ -1115,6 +1132,8 @@ defmodule Minga.Buffer.Process do
               decorations: Decorations.new(),
               undo_history: UndoHistory.clear(state.undo_history)
           }
+
+          new_state = rebuild_conflict_index(new_state)
 
           unregister_path(state.file_path)
           register_path(file_path)
@@ -1459,6 +1478,8 @@ defmodule Minga.Buffer.Process do
             decorations: Decorations.new()
         }
 
+        new_state = rebuild_conflict_index(new_state)
+
         defer_content_replaced(new_state)
         {:reply, :ok, new_state}
 
@@ -1548,6 +1569,8 @@ defmodule Minga.Buffer.Process do
         decorations: Decorations.new()
     }
 
+    new_state = rebuild_conflict_index(new_state)
+
     defer_content_replaced(new_state)
     {:reply, :ok, new_state}
   end
@@ -1564,6 +1587,8 @@ defmodule Minga.Buffer.Process do
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
+
+    new_state = rebuild_conflict_index(new_state)
 
     defer_content_replaced(new_state)
     {:reply, :ok, new_state}
@@ -1589,6 +1614,24 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:content_with_version, _from, state) do
     {:reply, {Document.content(state.document), BufState.version(state)}, state}
+  end
+
+  def handle_call(:conflicts, _from, state) do
+    {:reply, ConflictIndex.entries(state.conflict_index), state}
+  end
+
+  def handle_call(:conflict_count, _from, state) do
+    {:reply, ConflictIndex.count(state.conflict_index), state}
+  end
+
+  def handle_call(:conflict_snapshot, _from, state) do
+    snapshot = {
+      Document.content(state.document),
+      Document.cursor(state.document),
+      ConflictIndex.entries(state.conflict_index)
+    }
+
+    {:reply, snapshot, state}
   end
 
   def handle_call({:inspection_snapshot, viewport_start, viewport_count}, _from, state) do
@@ -1804,7 +1847,8 @@ defmodule Minga.Buffer.Process do
       end
 
     new_buf = Cursor.place(new_buf, {last_line, last_col})
-    {:reply, :ok, %{state | document: new_buf}}
+    new_state = rebuild_conflict_index(%{state | document: new_buf})
+    {:reply, :ok, new_state}
   end
 
   def handle_call({:render_snapshot, first_line, count}, _from, state) do
@@ -2052,6 +2096,8 @@ defmodule Minga.Buffer.Process do
         change_log: ChangeLog.clear(state.change_log),
         decorations: new_decs
     }
+
+    new_state = rebuild_conflict_index(new_state)
 
     defer_content_replaced(new_state)
     {:reply, :ok, new_state}
@@ -2688,7 +2734,7 @@ defmodule Minga.Buffer.Process do
     state
     |> push_undo_force(new_buf, undo_source, delta)
     |> mark_dirty()
-    |> clear_edits(source)
+    |> clear_edits(delta, source)
   end
 
   defp apply_operation(state, {:full, new_buf}, source, {:force_full, undo_source, :clear}) do
@@ -3220,7 +3266,11 @@ defmodule Minga.Buffer.Process do
 
   @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do
-    state = %{state | change_log: ChangeLog.record_change(state.change_log, delta)}
+    state = %{
+      state
+      | change_log: ChangeLog.record_change(state.change_log, delta),
+        conflict_index: ConflictIndex.apply_edit(state.conflict_index, state.document, delta)
+    }
 
     # Adjust decoration anchors based on the edit
     state =
@@ -3245,11 +3295,33 @@ defmodule Minga.Buffer.Process do
   # Clear pending edits to force HighlightSync into full content sync.
   # Used for operations where computing accurate deltas is impractical
   # (undo, redo, multi-edit batches, full content replacement).
-  @spec clear_edits(state(), EditSource.t()) :: state()
-  defp clear_edits(state, source) do
-    state = %{state | change_log: ChangeLog.clear(state.change_log)}
+  @spec clear_edits(state(), EditDelta.t(), EditSource.t()) :: state()
+  defp clear_edits(state, delta, source) do
+    state = %{
+      state
+      | change_log: ChangeLog.clear(state.change_log),
+        conflict_index: ConflictIndex.apply_edit(state.conflict_index, state.document, delta)
+    }
+
     defer_buffer_changed(state, nil, source)
     state
+  end
+
+  @spec clear_edits(state(), EditSource.t()) :: state()
+  defp clear_edits(state, source) do
+    state = %{
+      state
+      | change_log: ChangeLog.clear(state.change_log),
+        conflict_index: ConflictIndex.new(state.document)
+    }
+
+    defer_buffer_changed(state, nil, source)
+    state
+  end
+
+  @spec rebuild_conflict_index(state()) :: state()
+  defp rebuild_conflict_index(state) do
+    %{state | conflict_index: ConflictIndex.new(state.document)}
   end
 
   @spec sync_snapshot_changes(state(), :full | ChangeLog.sequence()) :: SyncSnapshot.changes()

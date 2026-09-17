@@ -1024,6 +1024,79 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
+  describe "merge conflict index" do
+    test "conflict snapshot captures content, cursor, and entries from one state" do
+      content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch"
+      pid = start_supervised!({BufferProcess, content: content})
+      Buffer.move_to(pid, {1, 2})
+
+      assert {^content, {1, 2}, [entry]} = Buffer.conflict_snapshot(pid)
+      assert entry.start_line == 0
+      assert entry.end_line == 4
+    end
+
+    test "tracks marker edits through undo and redo" do
+      content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch"
+      pid = start_supervised!({BufferProcess, content: content})
+
+      assert Buffer.conflict_count(pid) == 1
+      Buffer.move_to(pid, {2, 0})
+      Buffer.insert_text(pid, "x")
+      assert Buffer.conflict_count(pid) == 0
+
+      Buffer.undo(pid)
+      assert Buffer.conflict_count(pid) == 1
+
+      Buffer.redo(pid)
+      assert Buffer.conflict_count(pid) == 0
+    end
+
+    test "full content replacement rebuilds the index" do
+      pid = start_supervised!({BufferProcess, content: "plain"})
+      conflict = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch"
+
+      assert Buffer.conflict_count(pid) == 0
+      Buffer.replace_content(pid, conflict)
+      assert Buffer.conflict_count(pid) == 1
+      Buffer.undo(pid)
+      assert Buffer.conflict_count(pid) == 0
+    end
+
+    test "known-delta find and replace updates marker state while forcing full sync" do
+      content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch"
+      pid = start_supervised!({BufferProcess, content: content})
+
+      assert {:ok, _message} = BufferProcess.find_and_replace(pid, "=======", "changed")
+      assert Buffer.conflict_count(pid) == 0
+    end
+
+    test "append indexes completed markers and additional conflict blocks" do
+      content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>"
+      pid = start_supervised!({BufferProcess, content: content, read_only: true})
+
+      assert Buffer.conflict_count(pid) == 0
+      assert :ok = Buffer.append(pid, "> branch")
+      assert [first] = Buffer.conflicts(pid)
+      assert first.incoming_label == "branch"
+
+      assert :ok = Buffer.append(pid, "\n<<<<<<< second\nours\n=======\ntheirs\n>>>>>>> third")
+      assert Buffer.conflict_count(pid) == 2
+      assert [^first, second] = Buffer.conflicts(pid)
+      assert second.start_line == 5
+      assert second.incoming_label == "third"
+    end
+
+    test "reload rebuilds the index from file content", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "conflict.txt")
+      File.write!(path, "plain")
+      pid = start_supervised!({BufferProcess, file_path: path})
+      File.write!(path, "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch")
+
+      assert :ok = BufferProcess.reload(pid)
+      assert Buffer.conflict_count(pid) == 1
+    end
+  end
+
   describe "clear_line/2" do
     test "returns yanked text, changes content, and supports undo/redo" do
       pid = start_supervised!({BufferProcess, content: "one\ntwo\nthree"})

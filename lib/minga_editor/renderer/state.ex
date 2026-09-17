@@ -14,6 +14,7 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.AckLease
+  alias MingaEditor.Renderer.HighlightCache
   alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.Caches
@@ -39,6 +40,7 @@ defmodule MingaEditor.Renderer.State do
           editor_pid: editor_ref(),
           highlights: Submission.highlights(),
           semantic_tokens: Submission.semantic_tokens(),
+          highlight_cache: HighlightCache.t(),
           frame_credit: frame_credit(),
           ack_timeout_ms: pos_integer(),
           font_registry: FontRegistry.t(),
@@ -55,6 +57,7 @@ defmodule MingaEditor.Renderer.State do
   defstruct editor_pid: nil,
             highlights: %{},
             semantic_tokens: %{},
+            highlight_cache: HighlightCache.new(),
             frame_credit: :idle,
             ack_timeout_ms: 2_000,
             font_registry: FontRegistry.new(),
@@ -91,7 +94,17 @@ defmodule MingaEditor.Renderer.State do
     {intent, highlights, semantic_tokens} =
       Submission.materialize(submission, state.highlights, state.semantic_tokens)
 
-    {%{state | highlights: highlights, semantic_tokens: semantic_tokens}, intent}
+    cache = HighlightCache.retain(state.highlight_cache, intent)
+
+    {%{state | highlights: highlights, semantic_tokens: semantic_tokens, highlight_cache: cache},
+     intent}
+  end
+
+  @doc "Prepares derived highlights from this attempt's immutable sources."
+  @spec prepare_highlights(t(), Intent.t()) :: {t(), HighlightCache.highlights()}
+  def prepare_highlights(%__MODULE__{} = state, %Intent{} = intent) do
+    {cache, highlights} = HighlightCache.prepare(state.highlight_cache, intent)
+    {%{state | highlight_cache: cache}, highlights}
   end
 
   @spec accept_intent(t(), Intent.t()) :: {:accepted, t()} | {:blocked, t()}
@@ -327,7 +340,12 @@ defmodule MingaEditor.Renderer.State do
       windows =
         Map.reject(state.resident_windows, fn {_id, resident} -> resident.buffer == buffer end)
 
-      {%{state | resident_windows: windows, observed_buffers: observed_buffers}, true}
+      {%{
+         state
+         | resident_windows: windows,
+           observed_buffers: observed_buffers,
+           highlight_cache: HighlightCache.drop_buffer(state.highlight_cache, buffer)
+       }, true}
     else
       {state, false}
     end

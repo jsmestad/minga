@@ -27,7 +27,7 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaGitPorcelain.Effects.RemoteOperation
   alias Minga.Git
   alias Minga.Git.MergeConflict
-  alias Minga.Git.MergeConflict.Region
+  alias Minga.Git.MergeConflict.Entry
   alias Minga.Language
   alias MingaGitPorcelain.UI.Picker.GitChangedSource
   alias MingaGitPorcelain.UI.Picker.GitLogFileSource
@@ -466,13 +466,13 @@ defmodule MingaGitPorcelain.Commands do
 
     case target_conflict(regions, cursor_line, direction) do
       nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No merge conflicts")
-      %Region{} = region -> jump_to_line(state, buf, region.start_line)
+      %Entry{} = region -> jump_to_line(state, buf, region.start_line)
     end
   end
 
   defp navigate_merge_conflict(state, _direction), do: state
 
-  @spec target_conflict([Region.t()], non_neg_integer(), :next | :prev) :: Region.t() | nil
+  @spec target_conflict([Entry.t()], non_neg_integer(), :next | :prev) :: Entry.t() | nil
   defp target_conflict(regions, cursor_line, :next),
     do: MergeConflict.next_after(regions, cursor_line)
 
@@ -482,14 +482,15 @@ defmodule MingaGitPorcelain.Commands do
   @spec accept_conflict_at_cursor(state(), MergeConflict.choice()) :: state()
   defp accept_conflict_at_cursor(%{workspace: %{buffers: %{active: buf}}} = state, choice)
        when is_pid(buf) do
-    {cursor_line, _col} = Buffer.cursor(buf)
-    content = Buffer.content(buf)
+    {content, {cursor_line, _col}, entries} = Buffer.conflict_snapshot(buf)
 
-    case MergeConflict.replace_at_line(content, cursor_line, choice) do
-      {:ok, new_content} ->
+    case MergeConflict.at_line(entries, cursor_line) do
+      %Entry{} = entry ->
+        region = MergeConflict.region_from_entry(content, entry)
+        new_content = MergeConflict.replace_region(content, region, choice)
         apply_conflict_resolution(state, buf, new_content, cursor_line)
 
-      :not_found ->
+      nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No merge conflict at cursor")
     end
   end
@@ -504,8 +505,7 @@ defmodule MingaGitPorcelain.Commands do
          start_line
        )
        when is_pid(buf) do
-    content = Buffer.content(buf)
-    regions = MergeConflict.parse(content)
+    {content, _cursor, regions} = Buffer.conflict_snapshot(buf)
 
     case Enum.find(regions, fn region -> region.start_line == start_line end) do
       nil ->
@@ -514,7 +514,9 @@ defmodule MingaGitPorcelain.Commands do
           "Merge conflict action is stale"
         )
 
-      %Region{} = region ->
+      %Entry{} = entry ->
+        region = MergeConflict.region_from_entry(content, entry)
+
         apply_conflict_resolution(
           state,
           buf,
@@ -531,7 +533,7 @@ defmodule MingaGitPorcelain.Commands do
     case Buffer.replace_content(buf, new_content, :user) do
       :ok ->
         Git.sync_tracked_buffer(buf, new_content)
-        after_conflict_replacement(state, buf, new_content, cursor_line)
+        after_conflict_replacement(state, buf, cursor_line)
 
       {:error, reason} ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
@@ -541,11 +543,11 @@ defmodule MingaGitPorcelain.Commands do
     end
   end
 
-  @spec after_conflict_replacement(state(), pid(), String.t(), non_neg_integer()) :: state()
-  defp after_conflict_replacement(state, buf, new_content, cursor_line) do
+  @spec after_conflict_replacement(state(), pid(), non_neg_integer()) :: state()
+  defp after_conflict_replacement(state, buf, cursor_line) do
     Buffer.move_to(buf, {min(cursor_line, max(Buffer.line_count(buf) - 1, 0)), 0})
 
-    if MergeConflict.parse(new_content) == [] do
+    if Buffer.conflict_count(buf) == 0 do
       save_and_stage_resolved_file(state, buf)
     else
       MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Resolved merge conflict")
@@ -598,12 +600,9 @@ defmodule MingaGitPorcelain.Commands do
     Git.root_for(file_path)
   end
 
-  @spec current_conflicts(pid()) :: [Region.t()]
+  @spec current_conflicts(pid()) :: [Entry.t()]
   defp current_conflicts(buf) do
-    case Git.tracking_pid(buf) do
-      nil -> buf |> Buffer.content() |> MergeConflict.parse()
-      git_pid -> Git.conflicts(git_pid)
-    end
+    Buffer.conflicts(buf)
   catch
     :exit, _ -> []
   end

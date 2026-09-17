@@ -43,6 +43,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   # Individual modules from mixed directories (buffer/, editing/) are listed explicitly.
   @layer_0_prefixes [
     "Minga.Buffer.ChangeLog",
+    "Minga.Buffer.ConflictIndex",
     "Minga.Buffer.Cursor",
     "Minga.Buffer.Document",
     "Minga.Buffer.EditDelta",
@@ -71,6 +72,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Mode",
     "Minga.RenderModel",
     "Minga.Diagnostics.Diagnostic",
+    "Minga.Git.MergeConflict.Entry",
     "Minga.Language.Highlight.InjectionRange",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",

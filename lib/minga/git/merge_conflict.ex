@@ -6,6 +6,7 @@ defmodule Minga.Git.MergeConflict do
   """
 
   alias Minga.Git.MergeConflict.Region
+  alias Minga.Git.MergeConflict.Entry
 
   @type choice :: :current | :incoming | :both
 
@@ -27,13 +28,13 @@ defmodule Minga.Git.MergeConflict do
   end
 
   @doc "Returns the conflict region containing `line`, if any."
-  @spec at_line([Region.t()], non_neg_integer()) :: Region.t() | nil
+  @spec at_line([Region.t() | Entry.t()], non_neg_integer()) :: Region.t() | Entry.t() | nil
   def at_line(regions, line) when is_list(regions) and is_integer(line) do
     Enum.find(regions, fn region -> line >= region.start_line and line <= region.end_line end)
   end
 
   @doc "Returns the next conflict after `line`, wrapping to the first conflict."
-  @spec next_after([Region.t()], non_neg_integer()) :: Region.t() | nil
+  @spec next_after([Region.t() | Entry.t()], non_neg_integer()) :: Region.t() | Entry.t() | nil
   def next_after([], _line), do: nil
 
   def next_after(regions, line) when is_list(regions) and is_integer(line) do
@@ -41,7 +42,7 @@ defmodule Minga.Git.MergeConflict do
   end
 
   @doc "Returns the previous conflict before `line`, wrapping to the last conflict."
-  @spec prev_before([Region.t()], non_neg_integer()) :: Region.t() | nil
+  @spec prev_before([Region.t() | Entry.t()], non_neg_integer()) :: Region.t() | Entry.t() | nil
   def prev_before([], _line), do: nil
 
   def prev_before(regions, line) when is_list(regions) and is_integer(line) do
@@ -58,6 +59,28 @@ defmodule Minga.Git.MergeConflict do
 
   def replacement_lines(%Region{} = region, :both),
     do: region.current_lines ++ region.incoming_lines
+
+  @doc "Materializes a full conflict region from a retained lightweight entry."
+  @spec region_from_entry(String.t(), Entry.t()) :: Region.t()
+  def region_from_entry(content, %Entry{} = entry) when is_binary(content) do
+    lines = String.split(content, "\n", trim: false)
+
+    %Region{
+      start_line: entry.start_line,
+      separator_line: entry.separator_line,
+      end_line: entry.end_line,
+      base_marker_line: entry.base_marker_line,
+      current_range: entry.current_range,
+      base_range: entry.base_range,
+      incoming_range: entry.incoming_range,
+      current_label: entry.current_label,
+      base_label: entry.base_label,
+      incoming_label: entry.incoming_label,
+      current_lines: slice_range(lines, entry.current_range),
+      base_lines: optional_slice_range(lines, entry.base_range),
+      incoming_lines: slice_range(lines, entry.incoming_range)
+    }
+  end
 
   @doc "Returns marker-free replacement text for the selected side."
   @spec replacement(Region.t(), choice()) :: String.t()
@@ -258,6 +281,13 @@ defmodule Minga.Git.MergeConflict do
   defp slice_lines(lines, start_idx, end_idx),
     do: lines |> Enum.slice(start_idx, end_idx - start_idx + 1)
 
+  @spec slice_range([String.t()], Entry.line_range()) :: [String.t()]
+  defp slice_range(lines, {start_idx, end_idx}), do: slice_lines(lines, start_idx, end_idx)
+
+  @spec optional_slice_range([String.t()], Entry.line_range() | nil) :: [String.t()] | nil
+  defp optional_slice_range(_lines, nil), do: nil
+  defp optional_slice_range(lines, range), do: slice_range(lines, range)
+
   @spec marker?(String.t(), String.t()) :: boolean()
   defp marker?(line, prefix), do: String.starts_with?(line, prefix)
 
@@ -268,7 +298,8 @@ defmodule Minga.Git.MergeConflict do
     |> String.trim()
   end
 
-  @spec previous_or_last(Region.t() | nil, [Region.t()]) :: Region.t() | nil
+  @spec previous_or_last(Region.t() | Entry.t() | nil, [Region.t() | Entry.t()]) ::
+          Region.t() | Entry.t() | nil
   defp previous_or_last(nil, regions), do: Enum.at(regions, -1)
   defp previous_or_last(region, _regions), do: region
 end

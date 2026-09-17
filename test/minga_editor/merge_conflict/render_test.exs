@@ -75,6 +75,51 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert :ok = block.on_click.(0, trailing.start)
   end
 
+  test "conflict decoration work stays bounded by regions rather than side length", context do
+    small = start_large_conflict_buffer(100, context)
+    large = start_large_conflict_buffer(100_000, context)
+    {small_cost, small_decorations} = composition_reductions(small)
+    {large_cost, large_decorations} = composition_reductions(large)
+
+    assert Decorations.highlight_count(small_decorations) == 7
+    assert Decorations.highlight_count(large_decorations) == 7
+    assert large_cost <= small_cost * 3 + 500
+
+    for line <- [1, 50_000, 100_000] do
+      assert [%{style: %{bg: 0x263A2E}}] =
+               Decorations.highlights_for_line(large_decorations, line)
+    end
+
+    assert [%{style: %{bg: 0x2A2E3A}}] =
+             Decorations.highlights_for_line(large_decorations, 100_001)
+
+    assert [%{style: %{bg: 0x2A2E3A}}] =
+             Decorations.highlights_for_line(large_decorations, 100_002)
+
+    assert [%{style: %{bg: 0x263445}}] =
+             Decorations.highlights_for_line(large_decorations, 100_004)
+
+    assert [] = Decorations.highlights_for_line(large_decorations, 100_006)
+    assert {[_block], []} = Decorations.blocks_for_line(large_decorations, 0)
+  end
+
+  test "empty conflict sides add only marker highlights", context do
+    buffer =
+      start_supervised!(
+        {BufferProcess,
+         content: "<<<<<<< HEAD\n||||||| base\n=======\n>>>>>>> branch",
+         events_registry: context.events_registry,
+         options_server: context.options_server}
+      )
+
+    decorations = BufferDecorations.compose(%{}, buffer)
+    assert Decorations.highlight_count(decorations) == 4
+
+    for line <- 0..3 do
+      assert [%{style: %{bg: 0x2A2E3A}}] = Decorations.highlights_for_line(decorations, line)
+    end
+  end
+
   test "compose/2 returns empty decorations when the base buffer is dead" do
     buffer = dead_pid()
     assert BufferDecorations.compose(%{}, buffer) == Decorations.new()
@@ -154,6 +199,32 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     assert BufferProcess.content(buffer) == before_content
     assert BufferProcess.cursor(buffer) == before_cursor
     assert state.shell_runtime.state.notice.message == nil
+  end
+
+  defp start_large_conflict_buffer(line_count, context) do
+    content =
+      Enum.join(
+        ["<<<<<<< HEAD"] ++
+          List.duplicate("ours", line_count) ++
+          ["||||||| base", "original", "=======", "theirs", ">>>>>>> branch", "outside"],
+        "\n"
+      )
+
+    start_supervised!(
+      {BufferProcess,
+       content: content,
+       events_registry: context.events_registry,
+       options_server: context.options_server},
+      id: {:conflict, line_count}
+    )
+  end
+
+  defp composition_reductions(buffer) do
+    :erlang.garbage_collect()
+    {:reductions, before_count} = Process.info(self(), :reductions)
+    decorations = BufferDecorations.compose(%{}, buffer)
+    {:reductions, after_count} = Process.info(self(), :reductions)
+    {after_count - before_count, decorations}
   end
 
   defp dead_pid do

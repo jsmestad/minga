@@ -18,32 +18,7 @@ defmodule Minga.Git.BufferTest do
     %{root: dir, file_path: Path.join(dir, "conflict.txt")}
   end
 
-  test "caches parsed merge conflicts on init", %{root: root, file_path: file_path} do
-    {:ok, pid} =
-      start_supervised(
-        {GitBuffer, git_root: root, file_path: file_path, initial_content: conflict_content()}
-      )
-
-    assert GitBuffer.conflict_count(pid) == 1
-    assert [region] = GitBuffer.conflicts(pid)
-    assert region.current_lines == ["ours"]
-    assert region.incoming_lines == ["theirs"]
-  end
-
-  test "updates cached conflicts when buffer content changes", %{root: root, file_path: file_path} do
-    {:ok, pid} =
-      start_supervised(
-        {GitBuffer, git_root: root, file_path: file_path, initial_content: conflict_content()}
-      )
-
-    GitBuffer.update(pid, "resolved")
-    :sys.get_state(pid)
-
-    assert GitBuffer.conflicts(pid) == []
-    assert GitBuffer.conflict_count(pid) == 0
-  end
-
-  test "sync_tracked_buffer updates tracked conflicts through the public facade", %{
+  test "does not retain duplicate conflict regions", %{
     root: root,
     file_path: file_path
   } do
@@ -52,43 +27,26 @@ defmodule Minga.Git.BufferTest do
         {GitBuffer, git_root: root, file_path: file_path, initial_content: conflict_content()}
       )
 
-    buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
-    register_tracked_buffer(buffer, pid)
-
-    assert :ok = Git.sync_tracked_buffer(buffer, "resolved")
-    assert Git.conflicts(pid) == []
-    assert Git.conflict_count(pid) == 0
+    refute Map.has_key?(:sys.get_state(pid), :conflicts)
   end
 
-  test "updates cached conflicts when the base is invalidated", %{
+  test "sync_tracked_buffer returns after diff state is updated", %{
     root: root,
     file_path: file_path
   } do
-    {:ok, pid} =
-      start_supervised(
-        {GitBuffer, git_root: root, file_path: file_path, initial_content: conflict_content()}
-      )
+    {:ok, git_pid} =
+      start_supervised({GitBuffer, git_root: root, file_path: file_path, initial_content: "base"})
 
-    GitBuffer.invalidate_base(pid, "resolved")
-    :sys.get_state(pid)
-
-    assert GitBuffer.conflicts(pid) == []
-    assert GitBuffer.conflict_count(pid) == 0
-  end
-
-  test "public Git facade exposes cached conflict regions", %{root: root, file_path: file_path} do
-    {:ok, pid} =
-      start_supervised(
-        {GitBuffer, git_root: root, file_path: file_path, initial_content: conflict_content()}
-      )
-
-    assert Git.conflict_count(pid) == 1
-    assert [_region] = Git.conflicts(pid)
-  end
-
-  defp register_tracked_buffer(buffer, git_pid) do
+    buffer = start_supervised!({BufferProcess, content: "base"})
     Minga.Git.Tracker.put_mapping(buffer, git_pid)
     on_exit(fn -> Minga.Git.Tracker.remove_mapping(buffer) end)
+
+    :ok = :sys.suspend(git_pid)
+    sync = Task.async(fn -> Git.sync_tracked_buffer(buffer, "changed") end)
+    refute Task.yield(sync, 50)
+
+    :ok = :sys.resume(git_pid)
+    assert Task.await(sync) == :ok
   end
 
   defp conflict_content do
