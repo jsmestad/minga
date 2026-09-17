@@ -105,6 +105,44 @@ struct EncoderApplicationQuitTests {
     }
 }
 
+// MARK: - Native file dialogs
+
+@Suite("Encoder Binary: Native File Dialog")
+struct EncoderNativeFileDialogTests {
+    @Test("multi-open result carries correlation and every selected path")
+    func multiOpenLayout() {
+        let payload = captureFrame {
+            _ = $0.sendFileDialogResult(
+                requestID: 0xA1B2_C3D4,
+                outcome: 1,
+                paths: ["/tmp/one.txt", "/tmp/two.txt"]
+            )
+        }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_FILE_DIALOG_RESULT)
+        #expect(readU32(payload, 2) == 0xA1B2_C3D4)
+        #expect(payload[6] == 1)
+        #expect(readU16(payload, 7) == 2)
+        let (first, next) = readString16(payload, 9)
+        let (second, end) = readString16(payload, next)
+        #expect(first == "/tmp/one.txt")
+        #expect(second == "/tmp/two.txt")
+        #expect(end == payload.count)
+    }
+
+    @Test("cancel result carries no paths")
+    func cancelLayout() {
+        let payload = captureFrame {
+            _ = $0.sendFileDialogResult(requestID: 7, outcome: 0, paths: [])
+        }
+        #expect(payload.count == 9)
+        #expect(readU32(payload, 2) == 7)
+        #expect(payload[6] == 0)
+        #expect(readU16(payload, 7) == 0)
+    }
+}
+
 // MARK: - Ready event
 
 @Suite("Encoder Binary: Ready")

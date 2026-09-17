@@ -8,6 +8,7 @@ final class EditorFocusPolicy {
     private var windowUpdateTask: Task<Void, Never>?
     private var deferredReclaimTask: Task<Void, Never>?
     private var agentKeyMonitor: Any?
+    private var nativeModalDepth = 0
 
     private(set) var agentOverlayVisible = false
 
@@ -71,6 +72,20 @@ final class EditorFocusPolicy {
         scheduleDeferredReclaim()
     }
 
+    /// Suspends editor focus reclamation while an AppKit sheet or modal panel owns focus.
+    func beginNativeModal() {
+        nativeModalDepth += 1
+        deferredReclaimTask?.cancel()
+        deferredReclaimTask = nil
+    }
+
+    /// Ends one native modal scope and restores the editor responder when the last scope closes.
+    func endNativeModalAndRestore() {
+        nativeModalDepth = max(0, nativeModalDepth - 1)
+        guard nativeModalDepth == 0 else { return }
+        restoreAfterNativeModal()
+    }
+
     /// Brings the attached editor window forward and restores its responder after a native modal closes.
     func restoreAfterNativeModal() {
         guard let window = attachedWindow else { return }
@@ -96,6 +111,7 @@ final class EditorFocusPolicy {
 
     /// Activates the app and returns whether the requested editor focus postcondition now holds.
     func requestPresentationFocus() -> Bool {
+        guard nativeModalDepth == 0 else { return false }
         guard let window = attachedWindow,
               let editorView,
               editorView.window === window
@@ -110,6 +126,7 @@ final class EditorFocusPolicy {
 
     /// Reclaims and verifies the AppKit responder state required by a native open receipt.
     func presentationFocusReady() -> Bool {
+        guard nativeModalDepth == 0 else { return false }
         guard let window = attachedWindow,
               let editorView,
               editorView.window === window,
@@ -126,7 +143,8 @@ final class EditorFocusPolicy {
 
     /// Routes one overlay event through the editor's existing responder methods when policy permits.
     func routeAgentOverlayEvent(_ event: NSEvent) -> NSEvent? {
-        guard agentOverlayVisible,
+        guard nativeModalDepth == 0,
+              agentOverlayVisible,
               let window = attachedWindow,
               let editorView,
               editorView.window === window
@@ -171,7 +189,7 @@ final class EditorFocusPolicy {
 
         if modifiers == [.command, .shift] {
             switch event.charactersIgnoringModifiers {
-            case "z", "Z", "=", "+":
+            case "s", "S", "z", "Z", "=", "+":
                 return true
             default:
                 return false
@@ -186,6 +204,7 @@ final class EditorFocusPolicy {
     }
 
     private func scheduleDeferredReclaim() {
+        guard nativeModalDepth == 0 else { return }
         deferredReclaimTask?.cancel()
         deferredReclaimTask = Task { @MainActor [weak self] in
             await Task.yield()
@@ -195,7 +214,8 @@ final class EditorFocusPolicy {
     }
 
     private func reclaimEditorIfNeeded(in window: NSWindow, respectingNativeTextInput: Bool) {
-        guard attachedWindow === window,
+        guard nativeModalDepth == 0,
+              attachedWindow === window,
               let editorView,
               editorView.window === window
         else {

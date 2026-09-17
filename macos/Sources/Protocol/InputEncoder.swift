@@ -34,6 +34,9 @@ public protocol InputEncoder: AnyObject, Sendable {
     /// Resolve the matching native application-quit attempt: 0 Save, 1 Discard, 2 Cancel.
     @discardableResult
     func sendApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool
+    /// Return Cancel, selected open paths, or a Save As destination for a correlated request.
+    @discardableResult
+    func sendFileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String]) -> Bool
 
     // GUI actions (semantic commands from SwiftUI chrome)
     func sendSelectTab(id: UInt32)
@@ -183,6 +186,7 @@ public extension InputEncoder {
     func sendWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16) {}
     func sendApplicationQuitRequest(requestID: UInt32) -> Bool { false }
     func sendApplicationQuitDecision(requestID: UInt32, decision: UInt8) -> Bool { false }
+    func sendFileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String]) -> Bool { false }
 
     /// Default no-op so existing test spies do not need to implement native picker editing.
     func sendPickerQueryChanged(generation: UInt32, editSeq: UInt32, text: String) {}

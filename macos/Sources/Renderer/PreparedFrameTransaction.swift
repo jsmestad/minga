@@ -49,7 +49,7 @@ extension GUIFrameImpact {
              .clipboardWrite, .guiConfigState:
             return []
 
-        case .applicationQuitResponse:
+        case .applicationQuitResponse, .guiRequest:
             return []
         }
     }
@@ -501,7 +501,8 @@ struct PreparedFrameTransactionBuilder {
                 weight: resourceWeight, domain: .chrome
             )
 
-        case .beginFrame, .commitFrame, .presentationOperation, .applicationQuitResponse:
+        case .beginFrame, .commitFrame, .presentationOperation, .applicationQuitResponse,
+             .guiRequest:
             break
         }
     }
@@ -957,6 +958,7 @@ private extension RenderCommand {
         case .applicationQuitResponse: 56
         case .presentationTarget: 57
         case .presentationOperation: 58
+        case .guiRequest: 59
         }
     }
 }

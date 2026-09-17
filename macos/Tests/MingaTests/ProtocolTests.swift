@@ -135,6 +135,36 @@ struct ProtocolDecoderTests {
         }
     }
 
+    @Test("Decode correlated native Save As request")
+    func decodeNativeSaveAsRequest() throws {
+        let path = "/tmp/notes.txt"
+        var body = Data()
+        appendWireU32(&body, 0x0102_0304)
+        body.append(NativeFileDialogRequest.Kind.saveAs.rawValue)
+        appendWireString16(&body, path)
+        var data = Data([OP_GUI_REQUEST])
+        appendWireU16(&data, UInt16(body.count))
+        data.append(body)
+
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiRequest(let request) = command else {
+            Issue.record("Expected .guiRequest, got \(String(describing: command))")
+            return
+        }
+        #expect(request.requestID == 0x0102_0304)
+        #expect(request.kind == .saveAs)
+        #expect(request.suggestedPath == path)
+    }
+
+    @Test("Reject malformed native file-dialog request")
+    func rejectMalformedNativeFileDialogRequest() {
+        let data = Data([OP_GUI_REQUEST, 0, 7, 0, 0, 0, 1, 0xFF, 0, 0])
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
     @Test("Decode commit_frame command")
     func decodeCommitFrame() throws {
         // commit_frame (#2219): frame_seq:u32 + input_seq:u32. input_seq is the

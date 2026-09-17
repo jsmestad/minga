@@ -446,7 +446,7 @@ defmodule MingaEditor.MinibufferData do
   end
 
   @spec score_match(String.t(), String.t(), non_neg_integer()) :: integer()
-  defp score_match(same, same, _len), do: 200
+  defp score_match(same, same, _len), do: 300
 
   defp score_match(name_lower, query, len) do
     do_score_match(name_lower, query, len)

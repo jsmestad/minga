@@ -28,6 +28,18 @@ struct ApplicationQuitResponse: Sendable, Equatable {
     let detail: String
 }
 
+/// One BEAM-owned request for AppKit's native open or save panel.
+struct NativeFileDialogRequest: Sendable, Equatable {
+    enum Kind: UInt8, Sendable {
+        case open = 0
+        case saveAs = 1
+    }
+
+    let requestID: UInt32
+    let kind: Kind
+    let suggestedPath: String
+}
+
 // `StatusBarUpdate` and its nested types moved to StatusBarUpdate.swift in the
 // MingaProtocol framework. The decoder still constructs it below.
 
@@ -66,6 +78,7 @@ enum RenderCommand: Sendable {
     /// #2237). Wire format: opcode(1) + len(u16) + UTF-8 message.
     case protocolError(message: String)
     case applicationQuitResponse(ApplicationQuitResponse)
+    case guiRequest(NativeFileDialogRequest)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case setFontFallback(families: [String])
     case registerFont(id: UInt8, family: String)
@@ -417,6 +430,36 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     detail: detail
                 )
             ),
+            3 + payloadLength
+        )
+
+    case OP_GUI_REQUEST:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLength = Int(try readU16(data, rest))
+        let payloadStart = rest + 2
+        let payloadEnd = payloadStart + payloadLength
+        guard data.count >= payloadEnd, payloadLength >= 7 else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        let requestID = try readU32(data, payloadStart)
+        guard let kind = NativeFileDialogRequest.Kind(rawValue: data[payloadStart + 4]) else {
+            throw ProtocolDecodeError.malformed
+        }
+        let pathLength = Int(try readU16(data, payloadStart + 5))
+        let pathStart = payloadStart + 7
+        let pathEnd = pathStart + pathLength
+        guard pathEnd == payloadEnd,
+              let suggestedPath = try decodeUTF8(data[pathStart..<pathEnd]) else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        return (
+            .guiRequest(NativeFileDialogRequest(
+                requestID: requestID,
+                kind: kind,
+                suggestedPath: suggestedPath
+            )),
             3 + payloadLength
         )
 

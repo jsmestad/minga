@@ -33,6 +33,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
@@ -106,6 +107,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # ── Internal dispatch clauses ────────────────────────────────────────
 
   @spec dispatch_action(state(), Protocol.GUI.gui_action()) :: state()
+
+  defp dispatch_action(state, {:file_dialog_result, request_id, result}),
+    do: BufferManagement.handle_file_dialog_result(state, request_id, result)
 
   defp dispatch_action(state, :system_will_sleep) do
     Minga.Log.info(:editor, "System will sleep")

@@ -46,7 +46,10 @@ version = "2.0.0"
 # protocol_version 21 widens GUI Find counts to u32 and appends its typed
 # ready/loading/rebuilding/failed status. Older frontends are rejected before
 # they can interpret the incompatible count fields.
-protocol_version = 21
+# protocol_version 22 adds correlated native file-dialog requests and results.
+# The BEAM retains the originating save buffer; native frontends only present
+# the platform panel and return the chosen paths for the matching request id.
+protocol_version = 22
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -735,6 +738,17 @@ value = 0x86
 direction = "beam_to_frontend"
 framing = "len32"
 
+# Out-of-band native file-dialog request. Payload:
+# request_id(u32) + request_type(u8: 0=open, 1=save_as) + suggested_path(string16).
+# The request id correlates the frontend result with BEAM-owned request state;
+# suggested_path is empty for Open and the current buffer path/name for Save As.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_request"
+value = 0x87
+direction = "beam_to_frontend"
+framing = "len16"
+
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_agent_context"
@@ -1249,6 +1263,14 @@ value = 0x61
 [[gui_actions]]
 name = "search_focus"
 value = 0x62
+
+# Completes one correlated native file-dialog request. Payload:
+# request_id(u32) + outcome(u8: 0=cancel, 1=open, 2=save_as) + path_count(u16)
+# + path_count * string16. Cancel requires zero paths, Open accepts one or more,
+# and Save As requires exactly one path.
+[[gui_actions]]
+name = "file_dialog_result"
+value = 0x63
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #

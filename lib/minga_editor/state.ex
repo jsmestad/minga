@@ -142,6 +142,11 @@ defmodule MingaEditor.State do
       ),
       do: %{state | session: session}
 
+  @doc "Accepts the next state of a correlated native file-dialog transition."
+  @spec accept_file_dialog_transition(t(), FrontendState.t()) :: t()
+  def accept_file_dialog_transition(%__MODULE__{} = state, %FrontendState{} = frontend),
+    do: %{state | frontend: frontend}
+
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
   @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
   def accept_extension_event_result(
@@ -219,6 +224,7 @@ defmodule MingaEditor.State do
       |> FrontendState.resize_terminal(viewport)
       |> FrontendState.accept_capabilities(capabilities)
       |> FrontendState.clear_native_presentation()
+      |> FrontendState.clear_file_dialog()
 
     state = reset_frontend_render_state(%{state | frontend: frontend})
     render = RenderState.invalidate_layout(state.render)

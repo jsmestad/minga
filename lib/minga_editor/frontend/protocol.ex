@@ -20,7 +20,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   ## Render Commands (BEAM → frontend)
 
-  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for titles, fonts, window background, frame-transaction boundaries (`begin_frame`/`commit_frame`), and the `protocol_error` version-mismatch signal. The cell-paradigm encoders (`draw_text`, `set_cursor`, `clear`, region commands) were retired in protocol_version 2; `batch_end` was replaced by the begin/commit frame transaction in protocol_version 3 (#2219).
+  Rendering is semantic-first. GUI render commands are encoded by `Minga.Frontend.Adapter.GUI`, with this module retaining the common side-channel encoders for titles, fonts, window background, frame-transaction boundaries (`begin_frame`/`commit_frame`), native lifecycle requests such as `gui_request`, and the `protocol_error` version-mismatch signal. The cell-paradigm encoders (`draw_text`, `set_cursor`, `clear`, region commands) were retired in protocol_version 2; `batch_end` was replaced by the begin/commit frame transaction in protocol_version 3 (#2219).
 
   ## Modifier Flags
 
@@ -60,6 +60,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_link_cursor Opcodes.set_link_cursor()
   @op_application_quit_response Opcodes.application_quit_response()
+  @op_gui_request Opcodes.gui_request()
   @op_set_font Opcodes.set_font()
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
@@ -151,6 +152,9 @@ defmodule MingaEditor.Frontend.Protocol do
 
   @typedoc "A correlated result in the native application termination handshake."
   @type application_quit_outcome :: :needs_decision | :proceeding | :cancelled | :save_failed
+
+  @typedoc "A native file dialog the BEAM asks the frontend to present."
+  @type file_dialog_request_type :: :open | :save_as
 
   @typedoc "Stable frontend frame-transaction rejection reason."
   @type frame_rejection_reason ::
@@ -393,6 +397,23 @@ defmodule MingaEditor.Frontend.Protocol do
         byte_size(buffer_name)::16, buffer_name::binary, byte_size(detail)::16, detail::binary>>
 
     <<@op_application_quit_response, byte_size(payload)::16, payload::binary>>
+  end
+
+  @doc "Encodes one correlated native file-dialog request."
+  @spec encode_gui_request(
+          non_neg_integer(),
+          file_dialog_request_type(),
+          String.t()
+        ) :: binary()
+  def encode_gui_request(request_id, request_type, suggested_path \\ "")
+      when request_id in 0..0xFFFFFFFF and is_binary(suggested_path) do
+    suggested_path = truncate_utf8_bytes(suggested_path, 0xFFFF - 7)
+
+    payload =
+      <<request_id::32, encode_file_dialog_request_type(request_type)::8,
+        byte_size(suggested_path)::16, suggested_path::binary>>
+
+    <<@op_gui_request, byte_size(payload)::16, payload::binary>>
   end
 
   @doc """
@@ -812,6 +833,10 @@ defmodule MingaEditor.Frontend.Protocol do
       focus_ready: focus_ready
     }
   end
+
+  @spec encode_file_dialog_request_type(file_dialog_request_type()) :: 0..1
+  defp encode_file_dialog_request_type(:open), do: 0
+  defp encode_file_dialog_request_type(:save_as), do: 1
 
   @spec encode_application_quit_outcome(application_quit_outcome()) :: 0..3
   defp encode_application_quit_outcome(:needs_decision), do: 0
