@@ -7,7 +7,7 @@ import SwiftUI
 import MingaProtocol
 
 public struct AgentContextBar: View {
-    public enum ReviewAction: Sendable {
+    public enum ReviewAction: Equatable, Sendable {
         case approve
         case requestChanges
         case dismiss

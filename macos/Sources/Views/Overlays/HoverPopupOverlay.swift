@@ -9,7 +9,11 @@ import SwiftUI
 import MingaProtocol
 
 public struct HoverPopupOverlay: View {
-    public init(state: HoverPopupState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case open
+    }
+
+    public init(state: HoverPopupState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
@@ -17,7 +21,7 @@ public struct HoverPopupOverlay: View {
     @Environment(\.themeColors) private var theme
 
     @Environment(\.anchoredOverlayContext) private var overlayContext
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let maxWidth: CGFloat = 500
 
@@ -67,7 +71,7 @@ public struct HoverPopupOverlay: View {
                         .padding(.vertical, 4)
 
                     Button("Open") {
-                        sendAction?(.hoverOpen)
+                        sendAction?(.open)
                     }
                     .buttonStyle(.borderless)
                     .font(.system(size: 12, weight: .semibold))

@@ -1,12 +1,17 @@
 import SwiftUI
 
 public struct AgentChatHeaderView: View {
-    public init(state: AgentChatState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+        case executeCommand(name: String)
+    }
+
+    public init(state: AgentChatState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
     public let state: AgentChatState
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     @Environment(\.themeColors) private var theme
 
     @State private var isModelHovered: Bool = false

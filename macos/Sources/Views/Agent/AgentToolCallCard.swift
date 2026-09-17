@@ -2,7 +2,11 @@ import SwiftUI
 import MingaProtocol
 
 public struct AgentToolCallCard: View {
-    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], sendAction: OutboundActionHandler?, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
+    public enum Action: Equatable, Sendable {
+        case toggle(messageID: UInt32)
+    }
+
+    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], sendAction: ViewActionHandler<Action>?, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
         self.messageID = messageID
         self.name = name
         self.summary = summary
@@ -29,7 +33,7 @@ public struct AgentToolCallCard: View {
     public let resultLines: [[Wire.StyledTextRun]]?
     public let previewLines: [String]
     @Environment(\.themeColors) private var theme
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     /// Closure to render a styled line, provided by the parent since it's shared
     /// with assistant message rendering.
     public let styledLineView: ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView
@@ -88,7 +92,7 @@ public struct AgentToolCallCard: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 if hasResult, let messageID = UInt32(exactly: messageID), messageID != 0 {
-                    sendAction?(.agentToolToggle(messageID: messageID))
+                    sendAction?(.toggle(messageID: messageID))
                 }
             }
 

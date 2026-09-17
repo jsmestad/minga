@@ -2,11 +2,15 @@ import SwiftUI
 import MingaProtocol
 
 public struct FrontendExtensionViewContext {
+    public enum Action: Equatable, Sendable {
+        case invoke(extensionID: String, action: String, payload: Data)
+    }
+
     public let theme: ThemeColors
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     public let namespace: Namespace.ID
 
-    public init(theme: ThemeColors, sendAction: OutboundActionHandler?, namespace: Namespace.ID) {
+    public init(theme: ThemeColors, sendAction: ViewActionHandler<Action>?, namespace: Namespace.ID) {
         self.theme = theme
         self.sendAction = sendAction
         self.namespace = namespace

@@ -5,7 +5,12 @@ import MingaProtocol
 
 /// Renders editor notifications owned by the BEAM.
 public struct NotificationCenterView: View {
-    public init(state: NotificationCenterState, sendAction: OutboundActionHandler?, bottomInset: CGFloat) {
+    public enum Action: Equatable, Sendable {
+        case dismiss(id: String)
+        case invoke(id: String, actionID: String)
+    }
+
+    public init(state: NotificationCenterState, sendAction: ViewActionHandler<Action>?, bottomInset: CGFloat) {
         self.state = state
         self.sendAction = sendAction
         self.bottomInset = bottomInset
@@ -13,7 +18,7 @@ public struct NotificationCenterView: View {
     public let state: NotificationCenterState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     public let bottomInset: CGFloat
 
     public var body: some View {
@@ -34,7 +39,7 @@ public struct NotificationCenterView: View {
 private struct NotificationCard: View {
     let notification: EditorNotification
     @Environment(\.themeColors) private var theme
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<NotificationCenterView.Action>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -53,7 +58,7 @@ private struct NotificationCard: View {
 
                         if notification.dismissable {
                             Button {
-                                sendAction?(.notificationDismiss(id: notification.id))
+                                sendAction?(.dismiss(id: notification.id))
                             } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 10, weight: .bold))
@@ -79,7 +84,7 @@ private struct NotificationCard: View {
                 HStack(spacing: 6) {
                     ForEach(notification.actions) { action in
                         Button(action.label) {
-                            sendAction?(.notificationAction(id: notification.id, actionID: action.id))
+                            sendAction?(.invoke(id: notification.id, actionID: action.id))
                         }
                         .buttonStyle(.plain)
                         .font(.system(size: 11, weight: .medium))

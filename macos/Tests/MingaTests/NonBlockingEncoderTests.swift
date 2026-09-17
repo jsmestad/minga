@@ -2,6 +2,7 @@
 
 import Darwin
 import Foundation
+import MingaUI
 import Testing
 
 private func fillPipeUntilWouldBlock(_ fd: Int32) {
@@ -323,7 +324,7 @@ struct NonBlockingEncoderTests {
         var iterator = rejections.stream.makeAsyncIterator()
 
         for text in [String(repeating: "x", count: 65_536), String(repeating: "x", count: 65_534) + "é"] {
-            encoder.send(.paste(text))
+            #expect(encoder.send(.paste(text)) == .rejected(.payloadTooLarge(limitBytes: 65_535, attemptedBytes: 65_536)))
             let rejection = await iterator.next()
             #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
             #expect(encoder.waitForPendingWritesForTesting())
@@ -335,7 +336,7 @@ struct NonBlockingEncoderTests {
         #expect(encoder.waitForPendingWritesForTesting())
         let acceptedFrame = encoder.bufferedDataForTesting()
         #expect(acceptedFrame.isEmpty == false)
-        encoder.send(.paste(String(repeating: "x", count: 65_536)))
+        #expect(encoder.send(.paste(String(repeating: "x", count: 65_536))) == .rejected(.payloadTooLarge(limitBytes: 65_535, attemptedBytes: 65_536)))
         let rejection = await iterator.next()
         #expect(rejection == .pasteTooLarge(limitBytes: 65_535, attemptedBytes: 65_536))
         #expect(encoder.bufferedDataForTesting() == acceptedFrame)
@@ -348,6 +349,31 @@ struct NonBlockingEncoderTests {
             Data([OP_PASTE_EVENT, 0, 2, 0x6F, 0x6B])
         ])
         #expect(failures.failures.isEmpty)
+    }
+
+    @Test("bounded outbound fields reject instead of truncating")
+    func boundedOutboundFieldsRejectInsteadOfTruncating() {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(writer: writer)
+        let oversized16 = String(repeating: "x", count: Int(UInt16.max) + 1)
+        let oversized8 = String(repeating: "x", count: Int(UInt8.max) + 1)
+
+        let bounded16Actions: [OutboundAction] = [
+            .log(level: LOG_LEVEL_INFO, message: oversized16),
+            .executeCommand(name: oversized16),
+            .sidebarAction(sidebarID: "files", kind: "native", action: oversized16),
+            .configUpdate(key: "editor.font", value: .string(oversized16)),
+            .searchReplace(replacement: oversized16)
+        ]
+        for action in bounded16Actions {
+            #expect(encoder.send(action) == .rejected(.payloadTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: oversized16.utf8.count)))
+        }
+
+        #expect(encoder.send(.emptyStateActivate(id: oversized8)) == .rejected(.payloadTooLarge(limitBytes: Int(UInt8.max), attemptedBytes: oversized8.utf8.count)))
+        #expect(encoder.send(.configUpdate(key: oversized8, value: .bool(true))) == .rejected(.payloadTooLarge(limitBytes: Int(UInt8.max), attemptedBytes: oversized8.utf8.count)))
+        #expect(encoder.send(.fileDialogResult(requestID: 1, outcome: 0, paths: Array(repeating: "", count: Int(UInt16.max) + 1))) == .rejected(.collectionTooLarge(limitCount: Int(UInt16.max), attemptedCount: Int(UInt16.max) + 1)))
+        #expect(encoder.waitForPendingWritesForTesting())
+        #expect(writer.writtenData().isEmpty)
     }
 
     @Test("production capacity admits the maximum legal protocol frame")
@@ -397,9 +423,9 @@ struct NonBlockingEncoderTests {
             onTransportFailure: { failure in capture.append(failure) }
         )
 
-        encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
-        encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0))
-        encoder.send(.paste("ignored after terminal failure"))
+        #expect(encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0)) == .accepted)
+        #expect(encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0)) == .rejected(.capacityExhausted(limitBytes: 14, attemptedBytes: 14)))
+        #expect(encoder.send(.paste("ignored after terminal failure")) == .rejected(.disconnected))
         await awaitFailureCount(1, capture: capture)
 
         #expect(capture.failures == [OutboundTransportFailureReport(
@@ -408,6 +434,16 @@ struct NonBlockingEncoderTests {
             undeliveredDurableByteCount: 14
         )])
         #expect(encoder.bufferedByteCount == 0)
+    }
+
+    @Test("disconnected transport rejects synchronously")
+    func disconnectedTransportRejectsSynchronously() {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(writer: writer)
+        encoder.disconnect(reason: .expectedTeardown)
+
+        #expect(encoder.send(.newTab) == .rejected(.disconnected))
+        #expect(writer.writtenData().isEmpty)
     }
 
     @Test("fatal writes report exactly one terminal failure")

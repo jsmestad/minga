@@ -83,6 +83,8 @@ targets:
         type: file
       - path: Sources/Views/Shared/EditTimelineView.swift
         type: file
+      - path: Sources/Views/Shared/FrontendViewAction.swift
+        type: file
       - path: Sources/Views/Shared/EditorGeometry.swift
         type: file
       - path: Sources/Views/Shared/GUIFramePresentationMetrics.swift
@@ -98,6 +100,8 @@ targets:
       - path: Sources/Views/Shared/ThemeColors.swift
         type: file
       - path: Sources/ContentView.swift
+        type: file
+      - path: Sources/FrontendActionComposition.swift
         type: file
       - path: Sources/PreviewFixtures.swift
         type: file
@@ -161,6 +165,7 @@ targets:
           - "Protocol/OperationReceiptTypes.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -177,6 +182,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
@@ -299,6 +305,7 @@ targets:
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -315,6 +322,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
@@ -387,6 +395,7 @@ targets:
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -403,6 +412,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
@@ -464,6 +474,7 @@ targets:
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/OutboundAction.swift"
+          - "FrontendActionComposition.swift"
           - "Protocol/PortLogger.swift"
           - "Extensions/FrontendExtensionRuntime.swift"
           - "Views/Editor/InlineEditField.swift"
@@ -480,6 +491,7 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/FrontendViewAction.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"

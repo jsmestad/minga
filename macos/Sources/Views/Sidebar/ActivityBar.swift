@@ -6,7 +6,11 @@ import SwiftUI
 
 /// Thin VS Code-style icon strip for sidebar panel discovery and switching.
 public struct ActivityBar: View {
-    public init(input: ShellHostInput, sidebarHostState: SidebarHostState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case activate(sidebarID: String, kind: String, action: String)
+    }
+
+    public init(input: ShellHostInput, sidebarHostState: SidebarHostState, sendAction: ViewActionHandler<Action>?) {
         self.input = input
         self.sidebarHostState = sidebarHostState
         self.sendAction = sendAction
@@ -15,7 +19,7 @@ public struct ActivityBar: View {
     public let sidebarHostState: SidebarHostState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let width: CGFloat = 32
     private let buttonSize: CGFloat = 28
@@ -63,7 +67,7 @@ public struct ActivityBar: View {
 
     private func activityButtonBase(for item: SidebarItem, isActive: Bool) -> some View {
         return Button {
-            sendAction?(.sidebarAction(sidebarID: item.id, kind: item.semanticKind.wireValue, action: isActive ? "toggle" : "activate"
+            sendAction?(.activate(sidebarID: item.id, kind: item.semanticKind.wireValue, action: isActive ? "toggle" : "activate"
             ))
         } label: {
             ZStack(alignment: .topTrailing) {

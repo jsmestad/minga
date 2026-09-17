@@ -2,7 +2,14 @@ import SwiftUI
 import MingaProtocol
 
 public struct WorkspaceIndicatorView: View {
-    public init(workspace: WorkspacePresentationEntry, presentationRevision: UInt64, owner: TabBarState, sendAction: OutboundActionHandler?, barHeight: CGFloat) {
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+        case setIcon(id: UInt16, icon: String)
+        case rename(id: UInt16, name: String)
+        case close(id: UInt16)
+    }
+
+    public init(workspace: WorkspacePresentationEntry, presentationRevision: UInt64, owner: TabBarState, sendAction: ViewActionHandler<Action>?, barHeight: CGFloat) {
         self.workspace = workspace
         self.presentationRevision = presentationRevision
         self.owner = owner
@@ -13,7 +20,7 @@ public struct WorkspaceIndicatorView: View {
     public let presentationRevision: UInt64
     public let owner: TabBarState
     @Environment(\.themeColors) private var theme
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     public let barHeight: CGFloat
 
     @State private var isRenaming: Bool = false
@@ -158,11 +165,11 @@ public struct WorkspaceIndicatorView: View {
         guard targetIsCurrent else { return }
         switch action {
         case .setIcon(let icon):
-            sendAction?(.workspaceSetIcon(id: workspace.id, icon: icon))
+            sendAction?(.setIcon(id: workspace.id, icon: icon))
         case .rename(let name):
-            sendAction?(.workspaceRename(id: workspace.id, name: name))
+            sendAction?(.rename(id: workspace.id, name: name))
         case .close:
-            sendAction?(.workspaceClose(id: workspace.id))
+            sendAction?(.close(id: workspace.id))
         }
     }
 

@@ -30,9 +30,9 @@ struct PickerQueryFieldTests {
 
     @Test("the AppKit coordinator sends complete correlated edits and rejects stale echoes")
     @MainActor func coordinatorEditingPath() {
-        let encoder = SpyEncoder()
+        let recorder = LocalActionRecorder<PickerQueryField.Action>()
         let style = InlineEditFieldStyle(textColor: .primary, selectionBackgroundColor: .accentColor, selectionForegroundColor: .primary, insertionPointColor: .accentColor)
-        let coordinator = PickerQueryField.Coordinator(sendAction: { action in _ = encoder.send(action) }, style: style)
+        let coordinator = PickerQueryField.Coordinator(sendAction: recorder.handler, style: style)
         let field = PickerNSTextField()
         let editor = NSTextView()
         field.isEditable = true
@@ -43,7 +43,7 @@ struct PickerQueryFieldTests {
         editor.string = path
         coordinator.handleTextChange(field: field, editor: editor)
 
-        #expect(encoder.pickerQueryCalls == [SpyEncoder.PickerQuery(generation: 7, editSeq: 1, text: path)])
+        #expect(recorder.actions == [.queryChanged(generation: 7, editSequence: 1, text: path)])
 
         editor.setSelectedRange(NSRange(location: 1, length: 2))
         coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 0, authoritativeText: "")

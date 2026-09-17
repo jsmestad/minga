@@ -12,7 +12,11 @@ import SwiftUI
 import MingaProtocol
 
 public struct MinibufferView: View {
-    public init(state: MinibufferState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case select(index: UInt16)
+    }
+
+    public init(state: MinibufferState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
@@ -20,7 +24,7 @@ public struct MinibufferView: View {
     @Environment(\.themeColors) private var theme
 
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var hoveredIndex: Int? = nil
     @AccessibilityFocusState private var accessibilityFocus: Int?
@@ -286,7 +290,7 @@ public struct MinibufferView: View {
               state.inputVersion == offeredInputVersion,
               let currentCandidate = state.candidates.first(where: { $0.id == offeredCandidate.id }),
               candidatesMatch(currentCandidate, offeredCandidate) else { return }
-        sendAction?(.minibufferSelect(index: UInt16(currentCandidate.id)))
+        sendAction?(.select(index: UInt16(currentCandidate.id)))
     }
 
     private func candidatesMatch(_ lhs: MinibufferCandidate, _ rhs: MinibufferCandidate) -> Bool {

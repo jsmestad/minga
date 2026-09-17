@@ -156,24 +156,18 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Encode and admit one typed outbound action.
     @discardableResult
     func send(_ action: OutboundAction) -> OutboundActionResult {
-        if case .paste(let text) = action, text.utf8.count > Int(UInt16.max) {
-            let attemptedBytes = text.utf8.count
-            let rejection = OutboundActionRejection.payloadTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: attemptedBytes)
-            let callback = onInputRejection
-            Task { @MainActor in
-                callback(.pasteTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: attemptedBytes))
+        if let rejection = preflight(action) {
+            if case .paste = action,
+               case .payloadTooLarge(let limitBytes, let attemptedBytes) = rejection {
+                let callback = onInputRejection
+                Task { @MainActor in
+                    callback(.pasteTooLarge(limitBytes: limitBytes, attemptedBytes: attemptedBytes))
+                }
+            }
+            if case .invalidPayload(let message) = rejection {
+                encodeLog(level: LOG_LEVEL_WARN, message: message)
             }
             return .rejected(rejection)
-        }
-
-        if case .searchQuery(_, _, let query, _) = action, query.utf8.count > Int(UInt16.max) {
-            return .rejected(.payloadTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: query.utf8.count))
-        }
-
-        if case .fileTreeDrop(let sourcePaths, _, let targetID, _, let targetPath, _, _) = action,
-           let error = fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetID, targetPath: targetPath) {
-            encodeLog(level: LOG_LEVEL_WARN, message: error)
-            return .rejected(.invalidPayload(error))
         }
 
         return withWriteQueue {
@@ -181,6 +175,99 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             lastAdmissionRejection = nil
             encode(action)
             return lastAdmissionRejection.map(OutboundActionResult.rejected) ?? .accepted
+        }
+    }
+
+    private func preflight(_ action: OutboundAction) -> OutboundActionRejection? {
+        switch action {
+        case .fileDialogResult(_, _, let paths):
+            if paths.count > Int(UInt16.max) {
+                return .collectionTooLarge(limitCount: Int(UInt16.max), attemptedCount: paths.count)
+            }
+            return firstOversizedString(in: paths, limit: Int(UInt16.max))
+        case .paste(let text):
+            return oversizedString(text, limit: Int(UInt16.max))
+        case .log(_, let message):
+            return oversizedString(message, limit: Int(UInt16.max))
+        case .emptyStateActivate(let id):
+            return oversizedString(id, limit: Int(UInt8.max))
+        case .pickerQueryChanged(_, _, let text):
+            return oversizedString(text, limit: Int(UInt16.max))
+        case .fileTreeEditConfirm(_, let text):
+            return oversizedString(text, limit: Int(UInt16.max))
+        case .fileTreeDrop(let sourcePaths, _, let targetID, _, let targetPath, _, _):
+            return fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetID, targetPath: targetPath)
+                .map(OutboundActionRejection.invalidPayload)
+        case .sidebarAction(let sidebarID, let kind, let action):
+            return firstOversizedString(in: [sidebarID, kind, action], limit: Int(UInt16.max))
+        case .extensionAction(let extensionID, let action, _):
+            return firstOversizedString(in: [extensionID, action], limit: Int(UInt16.max))
+        case .systemWillUnmount(let volumePath):
+            return oversizedString(volumePath, limit: Int(UInt16.max))
+        case .executeCommand(let name):
+            return oversizedString(name, limit: Int(UInt16.max))
+        case .openFile(let path), .gitStageFile(let path), .gitUnstageFile(let path),
+             .gitDiscardFile(let path), .gitOpenFile(let path):
+            return oversizedString(path, limit: Int(UInt16.max))
+        case .gitCommit(let message), .gitCommitAmend(let message):
+            return oversizedString(message, limit: Int(UInt16.max))
+        case .gitOpenDiff(let path, _):
+            return oversizedString(path, limit: Int(UInt16.max))
+        case .workspaceRename(_, let name):
+            return oversizedString(name, limit: Int(UInt16.max))
+        case .workspaceSetIcon(_, let icon):
+            return oversizedString(icon, limit: Int(UInt8.max))
+        case .findPasteboardSearch(let text, _):
+            return oversizedString(text, limit: Int(UInt16.max))
+        case .configUpdate(let key, let value):
+            return oversizedString(key, limit: Int(UInt8.max)) ?? oversizedSettingValue(value)
+        case .notificationDismiss(let id):
+            return oversizedString(id, limit: Int(UInt16.max))
+        case .notificationAction(let id, let actionID):
+            return firstOversizedString(in: [id, actionID], limit: Int(UInt16.max))
+        case .observatoryInspect(let pid):
+            return oversizedString(pid, limit: Int(UInt16.max))
+        case .searchQuery(_, _, let query, _):
+            return oversizedString(query, limit: Int(UInt16.max))
+        case .searchReplace(let replacement), .searchReplaceAll(let replacement):
+            return oversizedString(replacement, limit: Int(UInt16.max))
+        case .ready, .keyPress, .resize, .requestKeyframe, .frameApplied, .frameRejected,
+             .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
+             .applicationQuitRequest, .applicationQuitDecision, .mouse, .scrollBatch,
+             .selectTab, .closeTab, .tabCopyPath, .tabReorder, .tabPin, .tabUnpin,
+             .tabMoveLeft, .tabMoveRight, .hoverOpen, .pickerItemActivate,
+             .pickerActionActivate, .fileTreeClick, .fileTreeToggle, .fileTreeOpenInSplit,
+             .fileTreeNewFile, .fileTreeNewFolder, .fileTreeEditCancel, .fileTreeDelete,
+             .fileTreeRename, .fileTreeDuplicate, .fileTreeMove, .fileTreeCollapseAll,
+             .fileTreeRefresh, .completionSelect, .togglePanel, .newTab, .systemWillSleep,
+             .systemDidWake, .powerThermalState, .commandCopy, .commandCut, .panelSwitchTab,
+             .panelDismiss, .panelResize, .agentToolToggle, .minibufferSelect, .gitStageAll,
+             .gitUnstageAll, .gitPush, .gitPull, .gitFetch, .gitPullAndRetry,
+             .workspaceClose, .spaceLeaderChord, .spaceLeaderRetract, .agentApprove,
+             .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
+             .chatReturnedToBottom, .scrollToLine, .foldToggleAtLine, .focusWindow,
+             .configQuery, .fontSizeAdjust, .timelineNavigate, .searchFocus, .searchNext,
+             .searchPrevious, .searchDismiss:
+            return nil
+        }
+    }
+
+    private func oversizedString(_ text: String, limit: Int) -> OutboundActionRejection? {
+        let attemptedBytes = text.utf8.count
+        guard attemptedBytes > limit else { return nil }
+        return .payloadTooLarge(limitBytes: limit, attemptedBytes: attemptedBytes)
+    }
+
+    private func firstOversizedString(in values: [String], limit: Int) -> OutboundActionRejection? {
+        values.lazy.compactMap { self.oversizedString($0, limit: limit) }.first
+    }
+
+    private func oversizedSettingValue(_ value: SettingValue) -> OutboundActionRejection? {
+        switch value {
+        case .string(let text), .atom(let text):
+            return oversizedString(text, limit: Int(UInt16.max))
+        case .bool, .int, .float:
+            return nil
         }
     }
 
@@ -506,9 +593,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Return one correlated native file-dialog result on the durable input channel.
     @discardableResult
     private func encodeFileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String]) -> Bool {
-        let encodedPaths = paths.map { Array($0.utf8).prefix(Int(UInt16.max)) }
-        let pathCount = min(encodedPaths.count, Int(UInt16.max))
-        let payloadSize = encodedPaths.prefix(pathCount).reduce(7) { $0 + 2 + $1.count }
+        let encodedPaths = paths.map { Array($0.utf8) }
+        let pathCount = encodedPaths.count
+        let payloadSize = encodedPaths.reduce(7) { $0 + 2 + $1.count }
         var buf = Data(count: 2 + payloadSize)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_DIALOG_RESULT
@@ -516,7 +603,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf[6] = outcome
         writeU16(&buf, 7, UInt16(pathCount))
         var offset = 9
-        for path in encodedPaths.prefix(pathCount) {
+        for path in encodedPaths {
             writeU16(&buf, offset, UInt16(path.count))
             offset += 2
             buf.replaceSubrange(offset..<offset + path.count, with: path)
@@ -555,13 +642,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Oversized input is rejected in full without changing transport state.
     private func encodePasteEvent(text: String) {
         let textLen = text.utf8.count
-        guard textLen <= Int(UInt16.max) else {
-            let onInputRejection = self.onInputRejection
-            Task { @MainActor in
-                onInputRejection(.pasteTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: textLen))
-            }
-            return
-        }
         var buf = Data(count: 3 + textLen)
         buf[0] = OP_PASTE_EVENT
         writeU16(&buf, 1, UInt16(textLen))
@@ -575,7 +655,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Layout: opcode(1) + level(1) + msg_len(2, big-endian) + msg(msg_len).
     private func encodeLog(level: UInt8, message: String) {
         let utf8 = Array(message.utf8)
-        let msgLen = min(utf8.count, Int(UInt16.max))
+        let msgLen = utf8.count
         var buf = Data(count: 4 + msgLen)
         buf[0] = OP_LOG_MESSAGE
         buf[1] = level
@@ -613,7 +693,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// forwards the click.
     private func encodeEmptyStateActivate(id: String) {
         let utf8 = Array(id.utf8)
-        let idLen = min(utf8.count, Int(UInt8.max))
+        let idLen = utf8.count
         var buf = Data(count: 3 + idLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_EMPTY_STATE_ACTIVATE
@@ -814,11 +894,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     /// Send a gui_action: file_tree_drop. Layout: opcode(1) + action_type(1) + target_index(2) + target_hash(4) + target_kind(1) + modifiers(1) + target_id + target_path + sources.
     private func encodeFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8) {
-        if let error = fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetId, targetPath: targetPath) {
-            encodeLog(level: LOG_LEVEL_WARN, message: error)
-            return
-        }
-
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_FILE_TREE_DROP)
@@ -828,9 +903,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf.append(modifiers)
         appendString16(&buf, targetId)
         appendString16(&buf, targetPath)
-        appendU16(&buf, UInt16(min(sourcePaths.count, Int(UInt16.max))))
+        appendU16(&buf, UInt16(sourcePaths.count))
 
-        for path in sourcePaths.prefix(Int(UInt16.max)) {
+        for path in sourcePaths {
             appendString16(&buf, path)
         }
 
@@ -992,7 +1067,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// The command name must match a registered atom (e.g., "buffer_prev", "find_file").
     private func encodeExecuteCommand(name: String) {
         let utf8 = Array(name.utf8)
-        let nameLen = min(utf8.count, Int(UInt16.max))
+        let nameLen = utf8.count
         var buf = Data(count: 4 + nameLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_EXECUTE_COMMAND
@@ -1015,7 +1090,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Send a gui_action: open_file. Layout: opcode(1) + action_type(1) + path_len(2) + path(path_len).
     private func encodeOpenFile(path: String) {
         let utf8 = Array(path.utf8)
-        let pathLen = min(utf8.count, Int(UInt16.max))
+        let pathLen = utf8.count
         var buf = Data(count: 4 + pathLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_OPEN_FILE
@@ -1060,7 +1135,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private func encodeGitCommit(message: String, amend: Bool) {
         let utf8 = Array(message.utf8)
-        let msgLen = min(utf8.count, Int(UInt16.max))
+        let msgLen = utf8.count
         var buf = Data(count: 5 + msgLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_COMMIT
@@ -1078,7 +1153,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private func encodeGitOpenDiff(path: String, section: UInt8) {
         let utf8 = Array(path.utf8)
-        let pathLen = min(utf8.count, Int(UInt16.max))
+        let pathLen = utf8.count
         var buf = Data(count: 5 + pathLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_OPEN_DIFF
@@ -1125,7 +1200,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private func encodeWorkspaceRename(id: UInt16, name: String) {
         let utf8 = Array(name.utf8)
-        let nameLen = min(utf8.count, Int(UInt16.max))
+        let nameLen = utf8.count
         var buf = Data(count: 6 + nameLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_WORKSPACE_RENAME
@@ -1139,7 +1214,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private func encodeWorkspaceSetIcon(id: UInt16, icon: String) {
         let utf8 = Array(icon.utf8)
-        let iconLen = min(utf8.count, 255)
+        let iconLen = utf8.count
         var buf = Data(count: 5 + iconLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_WORKSPACE_SET_ICON
@@ -1189,7 +1264,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Direction: 0 = forward (Cmd+G), 1 = backward (Cmd+Shift+G).
     private func encodeFindPasteboardSearch(text: String, direction: UInt8) {
         let utf8 = Array(text.utf8)
-        let textLen = min(utf8.count, Int(UInt16.max))
+        let textLen = utf8.count
         var buf = Data(count: 5 + textLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FIND_PASTEBOARD_SEARCH
@@ -1203,7 +1278,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private func encodeGitPathAction(_ actionType: UInt8, path: String) {
         let utf8 = Array(path.utf8)
-        let pathLen = min(utf8.count, Int(UInt16.max))
+        let pathLen = utf8.count
         var buf = Data(count: 4 + pathLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = actionType
@@ -1298,7 +1373,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     /// Send a gui_action: config_update. Layout: opcode(1) + action_type(1) + key_len(1) + key + value.
     private func encodeConfigUpdate(key: String, value: SettingValue) {
-        let keyBytes = Array(key.utf8.prefix(Int(UInt8.max)))
+        let keyBytes = Array(key.utf8)
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_CONFIG_UPDATE)
@@ -1370,7 +1445,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Layout: opcode(1) + action_type(1) + session_id(4) + edit_seq(4) + query_len(2) + query + flags(1).
     private func encodeSearchQuery(sessionID: UInt32, editSeq: UInt32, query: String, flags: UInt8) {
         let utf8 = Array(query.utf8)
-        guard utf8.count <= Int(UInt16.max) else { return }
         let queryLen = utf8.count
         var buf = Data(count: 12 + queryLen + 1)
         buf[0] = OP_GUI_ACTION
@@ -1404,7 +1478,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Send a gui_action: search_replace. Layout: opcode(1) + action_type(1) + replacement_len(2) + replacement.
     private func encodeSearchReplace(replacement: String) {
         let utf8 = Array(replacement.utf8)
-        let repLen = min(utf8.count, Int(UInt16.max))
+        let repLen = utf8.count
         var buf = Data(count: 4 + repLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_REPLACE
@@ -1418,7 +1492,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Send a gui_action: search_replace_all. Layout: opcode(1) + action_type(1) + replacement_len(2) + replacement.
     private func encodeSearchReplaceAll(replacement: String) {
         let utf8 = Array(replacement.utf8)
-        let repLen = min(utf8.count, Int(UInt16.max))
+        let repLen = utf8.count
         var buf = Data(count: 4 + repLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SEARCH_REPLACE_ALL
@@ -1730,7 +1804,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private func appendString16(_ buf: inout Data, _ text: String) {
         let utf8 = Array(text.utf8)
-        let length = min(utf8.count, Int(UInt16.max))
+        let length = utf8.count
         appendU16(&buf, UInt16(length))
         if length > 0 {
             buf.append(contentsOf: utf8[0..<length])

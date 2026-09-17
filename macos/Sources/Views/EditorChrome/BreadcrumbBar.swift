@@ -25,14 +25,18 @@ public final class BreadcrumbState {
 }
 
 public struct BreadcrumbBar: View {
-    public init(state: BreadcrumbState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+    }
+
+    public init(state: BreadcrumbState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
     public let state: BreadcrumbState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let barHeight: CGFloat = 26
 

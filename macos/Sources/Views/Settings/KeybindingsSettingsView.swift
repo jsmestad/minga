@@ -3,12 +3,16 @@ import MingaProtocol
 
 /// Read-only keybinding browser with a shortcut to open the hand-written config file.
 public struct KeybindingsSettingsView: View {
-    public init(state: SettingsState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case openConfig
+    }
+
+    public init(state: SettingsState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
     @Bindable var state: SettingsState
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<Action>?
     @State private var searchText: String = ""
 
     private var filteredBindings: [Wire.KeybindingEntry] {
@@ -36,7 +40,7 @@ public struct KeybindingsSettingsView: View {
                 Spacer()
 
                 Button("Open Config File") {
-                    sendAction?(.executeCommand(name: "open_config"))
+                    sendAction?(.openConfig)
                 }
             }
 

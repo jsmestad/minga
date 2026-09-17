@@ -172,15 +172,15 @@ struct CompletionOverlayViewTests {
             ],
             documentation: ""
         )
-        let spy = SpyEncoder()
-        let sut = CompletionOverlay(state: state, sendAction: { action in _ = spy.send(action) })
+        let recorder = LocalActionRecorder<CompletionOverlay.Action>()
+        let sut = CompletionOverlay(state: state, sendAction: recorder.handler)
             .environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
         let selected = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "defmodule" })
 
         #expect(try selected.accessibilityValue().string() == "selected, module")
         try selected.tap()
-        #expect(spy.actions == [.completionSelect(index: 1)])
+        #expect(recorder.actions == [.select(index: 1)])
     }
 
     @Test("Retained completion choice cannot activate a replacement item")
@@ -191,8 +191,8 @@ struct CompletionOverlayViewTests {
             rawItems: [Wire.CompletionItem(kind: 1, label: "original", detail: "function")],
             documentation: ""
         )
-        let spy = SpyEncoder()
-        let sut = CompletionOverlay(state: state, sendAction: { action in _ = spy.send(action) })
+        let recorder = LocalActionRecorder<CompletionOverlay.Action>()
+        let sut = CompletionOverlay(state: state, sendAction: recorder.handler)
             .environment(\.themeColors, ThemeColors())
         let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
 
@@ -203,7 +203,7 @@ struct CompletionOverlayViewTests {
         )
         try retained.tap()
 
-        #expect(spy.actions.isEmpty)
+        #expect(recorder.actions.isEmpty)
     }
 
     @Test("Retained completion choice rejects an identical replacement presentation")
@@ -214,8 +214,8 @@ struct CompletionOverlayViewTests {
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
             rawItems: [item], documentation: ""
         )
-        let spy = SpyEncoder()
-        let sut = CompletionOverlay(state: state, sendAction: { action in _ = spy.send(action) })
+        let recorder = LocalActionRecorder<CompletionOverlay.Action>()
+        let sut = CompletionOverlay(state: state, sendAction: recorder.handler)
             .environment(\.themeColors, ThemeColors())
         let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
 
@@ -227,7 +227,7 @@ struct CompletionOverlayViewTests {
         )
         try retained.tap()
 
-        #expect(spy.actions.isEmpty)
+        #expect(recorder.actions.isEmpty)
     }
 }
 
@@ -496,7 +496,7 @@ struct StatusBarViewViewTests {
     @MainActor func fallbackBuiltinControlsEmitDefaultCommands() throws {
         let spy = SpyEncoder()
         let state = statusBarState()
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -511,7 +511,7 @@ struct StatusBarViewViewTests {
     @MainActor func configuredBuiltinControlsPreferBeamCommandOverride() throws {
         let spy = SpyEncoder()
         let state = statusBarState(rightSegments: [segment(1, " Elixir ", kind: "filetype", command: "filetype_menu")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -526,7 +526,7 @@ struct StatusBarViewViewTests {
     @MainActor func filenameControlEmitsFallbackBufferListCommand() throws {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -540,7 +540,7 @@ struct StatusBarViewViewTests {
     @MainActor func filenameControlPrefersBeamCommandOverride() throws {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename", command: "custom_buffer_picker")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -555,7 +555,7 @@ struct StatusBarViewViewTests {
     @MainActor func customUnknownStatusBarSegmentVisibleAndClickable() throws {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " 42W ", kind: "word_count", command: "word_count")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         let buttons = body.findAll(ViewType.Button.self)
@@ -684,7 +684,7 @@ struct StatusBarViewViewTests {
     @MainActor func clickableConfiguredModelineSegmentEmitsCommand() throws {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " Buffers ", command: "buffer_list")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -699,7 +699,7 @@ struct StatusBarViewViewTests {
     @MainActor func passiveConfiguredModelineSegmentDoesNotEmitCommand() throws {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " Passive ")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -812,7 +812,7 @@ struct StatusBarViewViewTests {
             modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
         ))
 
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -1011,12 +1011,12 @@ struct TabBarViewViewTests {
         let workspace = try #require(snapshot.workspaces.first)
         let owner = TabBarState()
         owner.install(snapshot)
-        let spy = SpyEncoder()
+        let recorder = LocalActionRecorder<WorkspaceIndicatorView.Action>()
         let body = try WorkspaceIndicatorView(
             workspace: workspace,
             presentationRevision: owner.workspacePresentationRevision,
             owner: owner,
-            sendAction: { action in _ = spy.send(action) },
+            sendAction: recorder.handler,
             barHeight: 34
         )
             .environment(\.themeColors, ThemeColors())
@@ -1028,7 +1028,7 @@ struct TabBarViewViewTests {
 
         #expect(buttons.contains { (try? $0.accessibilityLabel().string()) == "Change icon for workspace Project" })
         try workspaceList.tap()
-        #expect(spy.actions == [.executeCommand(name: "workspace_list")])
+        #expect(recorder.actions == [.executeCommand(name: "workspace_list")])
     }
 
     @Test("Retained workspace actions reject a same-ID replacement")
@@ -1036,13 +1036,13 @@ struct TabBarViewViewTests {
         let original = workspaceSnapshot(id: 7, label: "Project")
         let owner = TabBarState()
         owner.install(original)
-        let spy = SpyEncoder()
+        let recorder = LocalActionRecorder<WorkspaceIndicatorView.Action>()
         let workspace = try #require(original.workspaces.first)
         let sut = WorkspaceIndicatorView(
             workspace: workspace,
             presentationRevision: owner.workspacePresentationRevision,
             owner: owner,
-            sendAction: { action in _ = spy.send(action) },
+            sendAction: recorder.handler,
             barHeight: 34
         )
 
@@ -1051,7 +1051,7 @@ struct TabBarViewViewTests {
         sut.performTargetedAction(.rename("Renamed"))
         sut.performTargetedAction(.close)
 
-        #expect(spy.actions.isEmpty)
+        #expect(recorder.actions.isEmpty)
     }
 
     @Test("Native close buttons emit the represented tab IDs without selecting them")
@@ -1062,7 +1062,7 @@ struct TabBarViewViewTests {
             wireTab(id: 41, isActive: true, label: "active.ex"),
             wireTab(id: 73, label: "inactive.ex"),
         ])
-        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(action) })
+        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
@@ -1083,7 +1083,7 @@ struct TabBarViewViewTests {
         let spy = SpyEncoder()
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [wireTab(id: 41, isActive: true, label: "original.ex")])
-        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(action) })
+        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let close = try #require(sut.inspect().findAll(ViewType.Button.self).first {
             (try? $0.accessibilityLabel().string()) == "Close original.ex"
@@ -1104,7 +1104,7 @@ struct TabBarViewViewTests {
             wireTab(id: 2),
             wireTab(id: 3, isPinned: true),
         ])
-        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(action) })
+        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let inactive = tab(id: 2)
         let pinnedInactive = tab(id: 3, isPinned: true)
 
@@ -1182,7 +1182,7 @@ struct TabBarViewViewTests {
             wireTab(id: 4, label: "plain-2.ex"),
             wireTab(id: 5, groupId: 1, label: "other-group.ex"),
         ])
-        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(action) })
+        let sut = TabBarView(tabBarState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let target = tab(id: 3, label: "plain-1.ex")
 
         #expect(TabDragPayload.contentType.identifier == "com.minga.tab-id")
@@ -1352,7 +1352,7 @@ struct WorkspaceHeaderViewTests {
     @Test("Switcher click advances to the next workspace")
     @MainActor func switcherClickAdvancesWorkspace() throws {
         let spy = SpyEncoder()
-        let sut = WorkspaceHeaderView(workspaceState: populatedState(), sendAction: { action in _ = spy.send(action) })
+        let sut = WorkspaceHeaderView(workspaceState: populatedState(), sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
         let button = try #require(buttons.first(where: {
             (try? $0.accessibilityLabel().string()) == "Switch to next workspace"
@@ -1528,7 +1528,7 @@ struct AgentChatViewTests {
         state.thinkingLevel = "medium"
         state.status = .idle
 
-        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(action) })
+        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
 
@@ -1555,7 +1555,7 @@ struct AgentChatViewTests {
             .approvalToolCall(id: 1, name: "shell", summary: "git diff --cached", toolCallId: "call-1", previewKind: 2, previewLines: ["git diff --cached"])
         ])
 
-        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(action) })
+        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = try body.findAll(ViewType.Button.self)
@@ -1766,7 +1766,7 @@ struct MinibufferViewAccessibilityTests {
             ]
         )
         let spy = SpyEncoder()
-        let sut = MinibufferView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = MinibufferView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
         let selected = try #require(buttons.first {
@@ -1790,7 +1790,7 @@ struct MinibufferViewAccessibilityTests {
             ]
         )
         let spy = SpyEncoder()
-        let sut = MinibufferView(state: state, sendAction: { action in _ = spy.send(action) })
+        let sut = MinibufferView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
 
@@ -1892,7 +1892,7 @@ struct PickerOverlayActivationTests {
             ],
             actionMenu: nil, activationGeneration: 99
         )
-        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(action) }).environment(\.themeColors, ThemeColors())
+        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
         let second = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Second" })
 
@@ -1918,7 +1918,7 @@ struct PickerOverlayActivationTests {
             actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Delete"], activationIDs: [11, 27]),
             activationGeneration: 101
         )
-        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(action) }).environment(\.themeColors, ThemeColors())
+        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
         let delete = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Delete" })
 
@@ -1936,6 +1936,27 @@ struct PickerOverlayActivationTests {
 }
 
 // MARK: - ViewInspector query helper
+
+@Suite("Agent Context Bar")
+struct AgentContextBarTests {
+    @Test("review buttons emit consumer-local actions")
+    @MainActor func reviewButtonsEmitLocalActions() throws {
+        let state = AgentContextBarState(visible: true, task: "Review", status: .done, canApprove: true)
+        let recorder = LocalActionRecorder<AgentContextBar.ReviewAction>()
+        let sut = AgentContextBar(state: state, onReview: recorder.handler)
+            .environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        let approve = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Approve" })
+        let requestChanges = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Reject Changes" })
+        let dismiss = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Dismiss" })
+
+        try approve.tap()
+        try requestChanges.tap()
+        try dismiss.tap()
+
+        #expect(recorder.actions == [.approve, .requestChanges, .dismiss])
+    }
+}
 
 /// Namespace for ViewInspector query types.
 enum ViewInspectorQuery {

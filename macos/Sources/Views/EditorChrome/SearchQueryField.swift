@@ -3,9 +3,16 @@ import SwiftUI
 
 /// Native single-line search editor that preserves AppKit marked text until IME commit.
 struct SearchQueryField: NSViewRepresentable {
+    enum Action: Equatable, Sendable {
+        case query(sessionID: UInt32, editSequence: UInt32, query: String, flags: UInt8)
+        case previous
+        case next
+        case dismiss
+    }
+
     let searchState: SearchState
     let style: InlineEditFieldStyle
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<Action>?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(searchState: searchState, sendAction: sendAction, style: style)
@@ -52,12 +59,12 @@ struct SearchQueryField: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         let searchState: SearchState
-        var sendAction: OutboundActionHandler?
+        var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle
         var sessionID: UInt32 = 0
         private var applyingAuthoritativeText = false
 
-        init(searchState: SearchState, sendAction: OutboundActionHandler?, style: InlineEditFieldStyle) {
+        init(searchState: SearchState, sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle) {
             self.searchState = searchState
             self.sendAction = sendAction
             self.style = style
@@ -110,7 +117,7 @@ struct SearchQueryField: NSViewRepresentable {
                   let edit = searchState.recordQueryEdit(field.stringValue)
             else { return }
 
-            sendAction(.searchQuery(sessionID: edit.sessionID, editSequence: edit.sequence, query: edit.query, flags: edit.flags))
+            sendAction(.query(sessionID: edit.sessionID, editSequence: edit.sequence, query: edit.query, flags: edit.flags))
         }
 
         func control(_ control: NSControl, textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
@@ -123,13 +130,13 @@ struct SearchQueryField: NSViewRepresentable {
             switch NSStringFromSelector(commandSelector) {
             case "insertNewline:", "insertNewlineIgnoringFieldEditor:":
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                    sendAction?(.searchPrevious)
+                    sendAction?(.previous)
                 } else {
-                    sendAction?(.searchNext)
+                    sendAction?(.next)
                 }
                 return true
             case "cancelOperation:":
-                sendAction?(.searchDismiss)
+                sendAction?(.dismiss)
                 return true
             default:
                 return false

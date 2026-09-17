@@ -75,7 +75,10 @@ struct MingaApp: App {
         }
 
         Settings {
-            SettingsView(state: appDelegate.appState.gui.settingsState, sendAction: { action in appDelegate.appState.encoder?.send(action) })
+            SettingsView(
+                state: appDelegate.appState.gui.settingsState,
+                sendAction: FrontendActionComposition.settingsHandler(encoder: appDelegate.appState.encoder)
+            )
         }
     }
 }
@@ -549,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nsView.editorInput = appState.gui.editorInput
         ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
-        appState.gui.settingsState.sendAction = { action in enc.send(action) }
+        appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: enc)
         appState.gui.settingsState.onCursorBlinkChanged = { [weak nsView] enabled in
             nsView?.setCursorBlinkEnabled(enabled)
         }
@@ -1178,7 +1181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let connection else { return nil }
         protocolConnection = connection
         appState.encoder = connection.encoder
-        appState.gui.settingsState.sendAction = { action in connection.encoder.send(action) }
+        appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: connection.encoder)
         editorNSView?.installConnectionEncoder(connection.encoder)
         PortLogger.setup(encoder: connection.encoder)
         return connection

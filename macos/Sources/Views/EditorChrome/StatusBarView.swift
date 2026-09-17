@@ -33,7 +33,12 @@ private struct StatusBarSegmentGroup: Identifiable {
 }
 
 public struct StatusBarView: View {
-    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: OutboundActionHandler?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+        case togglePanel(panel: UInt8)
+    }
+
+    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
         self.state = state
         self.feedbackState = feedbackState
         self.sendAction = sendAction
@@ -47,7 +52,7 @@ public struct StatusBarView: View {
     public var feedbackState: FeedbackState?
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     public var isFileTreeVisible: Bool = false
     public var isGitStatusVisible: Bool = false
     public var isBottomPanelVisible: Bool = false
@@ -939,7 +944,7 @@ public enum StatusBarModelineFont {
 
 private struct StatusBarModelineSegmentView: View {
     let segment: Wire.StatusBarSegment
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<StatusBarView.Action>?
 
     var body: some View {
         if segment.command.isEmpty {

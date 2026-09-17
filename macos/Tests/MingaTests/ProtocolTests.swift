@@ -8,6 +8,15 @@ import QuartzCore
 import os
 import MingaProtocol
 
+@MainActor
+final class LocalActionRecorder<Action: Equatable & Sendable> {
+    private(set) var actions: [Action] = []
+
+    var handler: ViewActionHandler<Action> {
+        { [self] action in actions.append(action) }
+    }
+}
+
 private func appendConfigStateU16(_ data: inout Data, _ value: UInt16) {
     data.append(UInt8((value >> 8) & 0xFF))
     data.append(UInt8(value & 0xFF))
@@ -987,6 +996,34 @@ struct ProtocolEncoderTests {
     @Test("Paste event opcode matches protocol constant")
     func pasteEventOpcode() {
         #expect(OP_PASTE_EVENT == 0x06)
+    }
+}
+
+@Suite("Frontend Action Composition")
+struct FrontendActionCompositionTests {
+    @Test("agent review actions map exhaustively")
+    func agentReviewActionsMapExhaustively() {
+        #expect(FrontendActionComposition.outbound(AgentContextBar.ReviewAction.approve) == .agentApprove)
+        #expect(FrontendActionComposition.outbound(AgentContextBar.ReviewAction.requestChanges) == .agentRequestChanges)
+        #expect(FrontendActionComposition.outbound(AgentContextBar.ReviewAction.dismiss) == .agentDismiss)
+    }
+
+    @Test("consumer actions map semantic values at composition")
+    func consumerActionsMapAtComposition() {
+        #expect(FrontendActionComposition.outbound(AgentChatView.Action.agentToolToggle(messageID: 9)) == .agentToolToggle(messageID: 9))
+        #expect(FrontendActionComposition.outbound(WorkspaceHeaderView.Action.rename(id: 3, name: "Docs")) == .workspaceRename(id: 3, name: "Docs"))
+        #expect(FrontendActionComposition.outbound(NotificationCenterView.Action.invoke(id: "build", actionID: "retry")) == .notificationAction(id: "build", actionID: "retry"))
+        #expect(FrontendActionComposition.outbound(GitStatusView.Action.openDiff(path: "lib/a.ex", section: 2)) == .gitOpenDiff(path: "lib/a.ex", section: 2))
+        #expect(FrontendActionComposition.outbound(SettingsView.Action.update(key: "editor.font_size", value: .int(15))) == .configUpdate(key: "editor.font_size", value: .int(15)))
+        #expect(FrontendActionComposition.outbound(FrontendExtensionViewContext.Action.invoke(extensionID: "outline", action: "open", payload: Data([1, 2]))) == .extensionAction(extensionID: "outline", action: "open", payload: Data([1, 2])))
+    }
+
+    @Test("settings handler is absent without a transport")
+    @MainActor func settingsHandlerIsAbsentWithoutTransport() {
+        switch FrontendActionComposition.settingsHandler(encoder: nil) {
+        case nil: break
+        case .some: Issue.record("Settings actions must be unavailable without a transport")
+        }
     }
 }
 

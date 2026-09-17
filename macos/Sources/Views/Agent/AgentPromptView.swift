@@ -3,7 +3,11 @@ import MingaProtocol
 import CoreText
 
 public struct AgentPromptView: View {
-    public init(state: AgentChatState, isInsertMode: Bool, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+    }
+
+    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.isInsertMode = isInsertMode
         self.sendAction = sendAction
@@ -12,7 +16,7 @@ public struct AgentPromptView: View {
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     /// Whether the agent is actively streaming a response.
     private var isStreaming: Bool { state.status.isWorking }

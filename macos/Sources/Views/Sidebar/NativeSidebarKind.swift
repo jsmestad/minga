@@ -60,7 +60,7 @@ public enum NativeSidebarKind: Equatable {
 struct NativeSidebarHeader: View {
     let input: ShellHostInput
     let item: SidebarItem
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<SidebarContainer.Action>?
     let projectName: String
     let gitBranch: String
     let leadingPadding: CGFloat
@@ -71,7 +71,7 @@ struct NativeSidebarHeader: View {
         case .fileTree:
             FileTreeHeaderView(
                 fileTreeState: input.fileTreeState,
-                sendAction: sendAction,
+                sendAction: headerAction,
                 branchName: gitBranch,
                 leadingPadding: leadingPadding
             )
@@ -91,20 +91,25 @@ struct NativeSidebarHeader: View {
             GenericSidebarFallbackHeader(item: item, leadingPadding: leadingPadding)
         }
     }
+
+    private var headerAction: ViewActionHandler<FileTreeHeaderView.Action>? {
+        guard let sendAction else { return nil }
+        return { sendAction(.fileTreeHeader($0)) }
+    }
 }
 
 @MainActor
 struct NativeSidebarBody: View {
     let input: ShellHostInput
     let item: SidebarItem
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<SidebarContainer.Action>?
     let frameProbe: ContentViewFrameProbe?
 
     @ViewBuilder
     var body: some View {
         switch item.semanticKind {
         case .fileTree:
-            FileTreeView(fileTreeState: input.fileTreeState, sendAction: sendAction)
+            FileTreeView(fileTreeState: input.fileTreeState, sendAction: fileTreeAction)
                 .background {
                     if let frameProbe {
                         frameProbe.makeView(
@@ -115,12 +120,27 @@ struct NativeSidebarBody: View {
                     }
                 }
         case .gitStatus:
-            GitStatusView(state: input.gitStatusState, sendAction: sendAction)
+            GitStatusView(state: input.gitStatusState, sendAction: gitStatusAction)
         case .observatory:
-            ObservatoryView(state: input.observatoryState, sendAction: sendAction)
+            ObservatoryView(state: input.observatoryState, sendAction: observatoryAction)
         case .unsupported:
             GenericSidebarFallbackView(item: item)
         }
+    }
+
+    private var fileTreeAction: ViewActionHandler<FileTreeView.Action>? {
+        guard let sendAction else { return nil }
+        return { sendAction(.fileTree($0)) }
+    }
+
+    private var gitStatusAction: ViewActionHandler<GitStatusView.Action>? {
+        guard let sendAction else { return nil }
+        return { sendAction(.gitStatus($0)) }
+    }
+
+    private var observatoryAction: ViewActionHandler<ObservatoryView.Action>? {
+        guard let sendAction else { return nil }
+        return { sendAction(.observatory($0)) }
     }
 }
 

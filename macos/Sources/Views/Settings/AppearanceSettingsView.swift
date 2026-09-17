@@ -4,12 +4,12 @@ import MingaProtocol
 
 /// Appearance settings: theme and font controls.
 public struct AppearanceSettingsView: View {
-    public init(state: SettingsState, sendAction: OutboundActionHandler?) {
+    public init(state: SettingsState, onOpenFontPanel: @escaping @MainActor @Sendable () -> Void) {
         self.state = state
-        self.sendAction = sendAction
+        self.onOpenFontPanel = onOpenFontPanel
     }
     @Bindable var state: SettingsState
-    let sendAction: OutboundActionHandler?
+    let onOpenFontPanel: @MainActor @Sendable () -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
 
@@ -46,7 +46,7 @@ public struct AppearanceSettingsView: View {
                     Spacer()
 
                     Button("Choose Font…") {
-                        state.openFontPanel(using: sendAction)
+                        onOpenFontPanel()
                     }
                 }
 
@@ -124,6 +124,6 @@ private struct ThemeSwatch: View {
         Wire.ThemePreview(name: "Gruvbox Dark", atom: "gruvbox_dark", editorBg: 0x282828, editorFg: 0xEBDBB2, accent: 0xFE8019),
         Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
     ]
-    return AppearanceSettingsView(state: state, sendAction: { _ in })
+    return AppearanceSettingsView(state: state, onOpenFontPanel: {})
         .frame(width: 520, height: 360)
 }

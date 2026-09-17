@@ -55,8 +55,8 @@ struct ActivityBarViewTests {
     @MainActor func tapSendsPanelToggle() throws {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
-        let spy = SpyEncoder()
-        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, sendAction: { action in _ = spy.send(action) })
+        let recorder = LocalActionRecorder<ActivityBar.Action>()
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, sendAction: recorder.handler)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -65,10 +65,10 @@ struct ActivityBarViewTests {
             try button.tap()
         }
 
-        #expect(spy.actions == [
-            .sidebarAction(sidebarID: "file_tree", kind: "file_tree", action: "toggle"),
-            .sidebarAction(sidebarID: "git_status", kind: "git_status", action: "activate"),
-            .sidebarAction(sidebarID: "observatory", kind: "observatory", action: "activate")
+        #expect(recorder.actions == [
+            .activate(sidebarID: "file_tree", kind: "file_tree", action: "toggle"),
+            .activate(sidebarID: "git_status", kind: "git_status", action: "activate"),
+            .activate(sidebarID: "observatory", kind: "observatory", action: "activate")
         ])
     }
 
@@ -404,7 +404,7 @@ struct FileTreeViewTests {
         state.selectedIndex = 7
         let spy = SpyEncoder()
 
-        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: { action in _ = spy.send(action) }, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, branchName: "main", leadingPadding: 10)
             .environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
 
@@ -479,7 +479,7 @@ struct FileTreeViewTests {
         state.entries = [entry]
         let spy = SpyEncoder()
 
-        let sut = FileTreeView(fileTreeState: state, sendAction: { action in _ = spy.send(action) })
+        let sut = FileTreeView(fileTreeState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let expectedModifiers = currentModifierBitsForTest()
         let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
 
@@ -820,7 +820,7 @@ struct GitStatusViewSectionTests {
         state.updateDraft("  commit subject  ")
         state.toggleSection(.staged)
         let spy = SpyEncoder()
-        let view = GitStatusView(state: state, sendAction: { action in _ = spy.send(action) }, usesPreviewEagerLayout: true)
+        let view = GitStatusView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
         let buttons = try view.inspect().findAll(ViewType.Button.self)
         let commitButton = try #require(buttons.last)
@@ -835,7 +835,7 @@ struct GitStatusViewSectionTests {
 
         state.updateDraft("amended subject")
         state.setAmendMode(true)
-        let amendView = GitStatusView(state: state, sendAction: { action in _ = spy.send(action) }, usesPreviewEagerLayout: true)
+        let amendView = GitStatusView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, usesPreviewEagerLayout: true)
             .environment(\.themeColors, ThemeColors())
         let amendButton = try #require(amendView.inspect().findAll(ViewType.Button.self).last)
 

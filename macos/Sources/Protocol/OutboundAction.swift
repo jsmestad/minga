@@ -114,6 +114,7 @@ public enum OutboundAction: Equatable, Sendable {
 public enum OutboundActionRejection: Equatable, Sendable {
     case disconnected
     case payloadTooLarge(limitBytes: Int, attemptedBytes: Int)
+    case collectionTooLarge(limitCount: Int, attemptedCount: Int)
     case capacityExhausted(limitBytes: Int, attemptedBytes: Int)
     case invalidPayload(String)
 }
@@ -147,6 +148,3 @@ public final class ClosureOutboundActionEncoder: OutboundActionEncoding, Sendabl
         handler(action)
     }
 }
-
-/// A local action closure used to translate a view's supported actions at composition.
-public typealias OutboundActionHandler = @MainActor @Sendable (OutboundAction) -> Void

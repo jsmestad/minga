@@ -11,14 +11,24 @@ import SwiftUI
 
 /// Find/replace toolbar view.
 public struct SearchToolbar: View {
-    public init(searchState: SearchState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case focus(replaceMode: Bool)
+        case query(sessionID: UInt32, editSequence: UInt32, query: String, flags: UInt8)
+        case next
+        case previous
+        case replace(String)
+        case replaceAll(String)
+        case dismiss
+    }
+
+    public init(searchState: SearchState, sendAction: ViewActionHandler<Action>?) {
         self.searchState = searchState
         self.sendAction = sendAction
     }
     public let searchState: SearchState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var replaceText: String = ""
 
@@ -73,7 +83,7 @@ public struct SearchToolbar: View {
         HStack(spacing: 4) {
             // Replace mode toggle (chevron)
             Button {
-                sendAction?(.searchFocus(replaceMode: !searchState.replaceMode))
+                sendAction?(.focus(replaceMode: !searchState.replaceMode))
             } label: {
                 Image(systemName: searchState.replaceMode ? "chevron.down" : "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
@@ -94,7 +104,7 @@ public struct SearchToolbar: View {
                         selectionForegroundColor: theme.editorFg,
                         insertionPointColor: theme.accent
                     ),
-                    sendAction: sendAction
+                    sendAction: searchFieldAction
                 )
                 .frame(maxWidth: .infinity, minHeight: 18, alignment: .leading)
 
@@ -124,12 +134,12 @@ public struct SearchToolbar: View {
 
             // Previous match
             toolbarButton(icon: "chevron.up", label: "Previous Match") {
-                sendAction?(.searchPrevious)
+                sendAction?(.previous)
             }
 
             // Next match
             toolbarButton(icon: "chevron.down", label: "Next Match") {
-                sendAction?(.searchNext)
+                sendAction?(.next)
             }
 
             // Case sensitive toggle
@@ -151,7 +161,7 @@ public struct SearchToolbar: View {
 
             // Close button
             toolbarButton(icon: "xmark", label: "Close Search") {
-                sendAction?(.searchDismiss)
+                sendAction?(.dismiss)
             }
         }
         .frame(height: 24)
@@ -182,17 +192,17 @@ public struct SearchToolbar: View {
                         .stroke(theme.popupBorder.opacity(0.4), lineWidth: 1)
                 )
                 .onSubmit {
-                    sendAction?(.searchReplace(replacement: replaceText))
+                    sendAction?(.replace(replaceText))
                 }
 
             // Replace
             toolbarButton(icon: "arrow.left.arrow.right", label: "Replace") {
-                sendAction?(.searchReplace(replacement: replaceText))
+                sendAction?(.replace(replaceText))
             }
 
             // Replace All
             toolbarButton(icon: "arrow.left.arrow.right.circle", label: "Replace All") {
-                sendAction?(.searchReplaceAll(replacement: replaceText))
+                sendAction?(.replaceAll(replaceText))
             }
 
             Spacer(minLength: 0)
@@ -243,6 +253,18 @@ public struct SearchToolbar: View {
 
     private func sendEdit(_ edit: SearchEdit?) {
         guard let edit else { return }
-        sendAction?(.searchQuery(sessionID: edit.sessionID, editSequence: edit.sequence, query: edit.query, flags: edit.flags))
+        sendAction?(.query(sessionID: edit.sessionID, editSequence: edit.sequence, query: edit.query, flags: edit.flags))
+    }
+
+    private var searchFieldAction: ViewActionHandler<SearchQueryField.Action>? {
+        guard let sendAction else { return nil }
+        return { action in
+            switch action {
+            case .query(let sessionID, let editSequence, let query, let flags): sendAction(.query(sessionID: sessionID, editSequence: editSequence, query: query, flags: flags))
+            case .previous: sendAction(.previous)
+            case .next: sendAction(.next)
+            case .dismiss: sendAction(.dismiss)
+            }
+        }
     }
 }

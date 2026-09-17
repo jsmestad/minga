@@ -7,7 +7,14 @@
 import SwiftUI
 
 public struct BottomPanelView: View {
-    public init(state: BottomPanelState, sendAction: OutboundActionHandler?, availableHeight: CGFloat) {
+    public enum Action: Equatable, Sendable {
+        case switchTab(index: UInt8)
+        case dismiss
+        case resize(heightPercent: UInt8)
+        case openFile(path: String)
+    }
+
+    public init(state: BottomPanelState, sendAction: ViewActionHandler<Action>?, availableHeight: CGFloat) {
         self.state = state
         self.sendAction = sendAction
         self.availableHeight = availableHeight
@@ -15,7 +22,7 @@ public struct BottomPanelView: View {
     public let state: BottomPanelState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     /// Total height of the right pane (tab bar + editor + panel + status bar).
     /// Used to cap the panel at 60% of available space. Measured by the parent
     /// via a preference key so the panel itself doesn't need a GeometryReader.
@@ -79,7 +86,7 @@ public struct BottomPanelView: View {
                                 guard windowHeight > 0 else { return }
                                 let percent = Int((state.userHeight / windowHeight) * 100)
                                 let clamped = UInt8(min(max(percent, 10), 60))
-                                sendAction?(.panelResize(heightPercent: clamped))
+                                sendAction?(.resize(heightPercent: clamped))
                             }
                     )
             )
@@ -97,7 +104,7 @@ public struct BottomPanelView: View {
 
             // Dismiss button
             Button(action: {
-                sendAction?(.panelDismiss)
+                sendAction?(.dismiss)
             }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
@@ -116,7 +123,7 @@ public struct BottomPanelView: View {
         let isActive = tab.id == state.activeTabIndex
 
         return Button(action: {
-            sendAction?(.panelSwitchTab(index: UInt8(tab.id)))
+            sendAction?(.switchTab(index: UInt8(tab.id)))
         }) {
             Text(tab.name)
                 .font(.system(size: 11, weight: isActive ? .semibold : .regular))
@@ -151,7 +158,7 @@ public struct BottomPanelView: View {
             // Messages tab: render structured log entries
             MessagesContentView(
                 state: state.messagesState,
-                sendAction: sendAction
+                sendAction: messagesAction
             )
         } else {
             // Placeholder for other tab types (diagnostics, terminal)
@@ -170,6 +177,15 @@ public struct BottomPanelView: View {
             return state.tabs[state.activeTabIndex].name
         }
         return ""
+    }
+
+    private var messagesAction: ViewActionHandler<MessagesContentView.Action>? {
+        guard let sendAction else { return nil }
+        return { action in
+            switch action {
+            case .openFile(let path): sendAction(.openFile(path: path))
+            }
+        }
     }
 }
 

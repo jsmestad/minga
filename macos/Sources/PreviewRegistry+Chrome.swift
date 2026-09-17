@@ -448,7 +448,7 @@ extension PreviewRegistry {
         let appState = AppState()
         let encoder = PreviewFixtures.encoder()
         appState.encoder = encoder
-        appState.gui.settingsState.sendAction = { action in encoder.send(action) }
+        appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: encoder)
 
         // Populate settings state to skip the loading spinner
         let settings = appState.gui.settingsState
@@ -472,7 +472,10 @@ extension PreviewRegistry {
             Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
         ]
 
-        return SettingsView(state: appState.gui.settingsState, sendAction: { action in appState.encoder?.send(action) })
+        return SettingsView(
+            state: appState.gui.settingsState,
+            sendAction: FrontendActionComposition.settingsHandler(encoder: appState.encoder)
+        )
             .frame(width: 600, height: 480)
             .environment(\.themeColors, appState.gui.themeColors)
     }

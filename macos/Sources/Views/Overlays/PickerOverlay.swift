@@ -8,14 +8,21 @@ import SwiftUI
 import MingaProtocol
 
 public struct PickerOverlay: View {
-    public init(state: PickerState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case queryChanged(generation: UInt32, editSequence: UInt32, text: String)
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+        case activateItem(generation: UInt32, activationID: UInt32)
+        case activateAction(generation: UInt32, activationID: UInt32)
+    }
+
+    public init(state: PickerState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
     public let state: PickerState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
@@ -107,7 +114,7 @@ public struct PickerOverlay: View {
                     selectionForegroundColor: theme.popupFg,
                     insertionPointColor: theme.accent
                 ),
-                sendAction: sendAction
+                sendAction: queryFieldAction
             )
             .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
 
@@ -337,12 +344,22 @@ public struct PickerOverlay: View {
 
     private func activate(_ item: PickerItem) {
         guard item.activation.isAvailable else { return }
-        sendAction?(.pickerItemActivate(generation: item.activation.generation, activationID: item.activation.activationID))
+        sendAction?(.activateItem(generation: item.activation.generation, activationID: item.activation.activationID))
     }
 
     private func activate(_ entry: PickerActionEntry) {
         guard entry.activation.isAvailable else { return }
-        sendAction?(.pickerActionActivate(generation: entry.activation.generation, activationID: entry.activation.activationID))
+        sendAction?(.activateAction(generation: entry.activation.generation, activationID: entry.activation.activationID))
+    }
+
+    private var queryFieldAction: ViewActionHandler<PickerQueryField.Action>? {
+        guard let sendAction else { return nil }
+        return { action in
+            switch action {
+            case .queryChanged(let generation, let editSequence, let text): sendAction(.queryChanged(generation: generation, editSequence: editSequence, text: text))
+            case .keyPress(let codepoint, let modifiers, let sequence): sendAction(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence))
+            }
+        }
     }
 
     private func updateAccessibilityFocus() {

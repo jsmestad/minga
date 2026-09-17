@@ -3,14 +3,21 @@ import MingaProtocol
 
 /// Workspace header row rendered above active-workspace file tabs.
 public struct WorkspaceHeaderView: View {
-    public init(workspaceState: WorkspaceState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+        case setIcon(id: UInt16, icon: String)
+        case close(id: UInt16)
+        case rename(id: UInt16, name: String)
+    }
+
+    public init(workspaceState: WorkspaceState, sendAction: ViewActionHandler<Action>?) {
         self.workspaceState = workspaceState
         self.sendAction = sendAction
     }
     public let workspaceState: WorkspaceState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var isRenaming = false
     @State private var renameText = ""
@@ -75,7 +82,7 @@ public struct WorkspaceHeaderView: View {
         .onTapGesture(count: 2) { beginRename(workspace) }
         .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
             WorkspaceIconPicker(currentIcon: workspace.icon, accentColor: workspace.color) { selectedIcon in
-                sendAction?(.workspaceSetIcon(id: workspace.id, icon: selectedIcon))
+                sendAction?(.setIcon(id: workspace.id, icon: selectedIcon))
                 showIconPicker = false
             }
             .frame(width: 320, height: 260)
@@ -192,7 +199,7 @@ public struct WorkspaceHeaderView: View {
 
     private func closeButton(_ workspace: WorkspacePresentationEntry) -> some View {
         Button {
-            sendAction?(.workspaceClose(id: workspace.id))
+            sendAction?(.close(id: workspace.id))
         } label: {
             Image(systemName: "xmark.circle")
                 .font(.system(size: 13))
@@ -242,7 +249,7 @@ public struct WorkspaceHeaderView: View {
         isRenaming = false
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != workspace.label else { return }
-        sendAction?(.workspaceRename(id: workspace.id, name: trimmed))
+        sendAction?(.rename(id: workspace.id, name: trimmed))
     }
 
     private func workspaceValue(_ workspace: WorkspacePresentationEntry) -> String {

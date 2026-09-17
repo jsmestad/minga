@@ -26,6 +26,11 @@ public enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendabl
 @MainActor
 @Observable
 public final class SettingsState {
+    public enum Action: Equatable, Sendable {
+        case query
+        case update(key: String, value: SettingValue)
+    }
+
     public init() {}
 
     public var isLoading: Bool = true
@@ -42,7 +47,7 @@ public final class SettingsState {
     public var themePreviews: [Wire.ThemePreview] = []
     public var keybindings: [Wire.KeybindingEntry] = []
 
-    public var sendAction: OutboundActionHandler?
+    public var sendAction: ViewActionHandler<Action>?
     public var onCursorBlinkChanged: ((Bool) -> Void)?
 
     private var fontPanelCoordinator: FontPanelCoordinator?
@@ -74,20 +79,19 @@ public final class SettingsState {
     }
 
     /// Sends a settings query to the BEAM.
-    public func query(using sendAction: OutboundActionHandler?) {
+    public func query(using sendAction: ViewActionHandler<Action>?) {
         self.sendAction = sendAction
         isLoading = true
-        sendAction?(.configQuery)
+        sendAction?(.query)
     }
 
     /// Sends a typed setting update to the BEAM.
     public func update(key: String, value: SettingValue) {
-        sendAction?(.configUpdate(key: key, value: value))
+        sendAction?(.update(key: key, value: value))
     }
 
     /// Opens the macOS system font panel and routes selections back through config updates.
-    public func openFontPanel(using sendAction: OutboundActionHandler?) {
-        self.sendAction = sendAction
+    public func openFontPanel() {
         let coordinator = fontPanelCoordinator ?? FontPanelCoordinator(settingsState: self)
         fontPanelCoordinator = coordinator
         NSFontManager.shared.target = coordinator

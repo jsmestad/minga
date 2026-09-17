@@ -1,7 +1,11 @@
 import SwiftUI
 
 public struct AgentApprovalCard: View {
-    public init(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String], sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+    }
+
+    public init(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String], sendAction: ViewActionHandler<Action>?) {
         self.name = name
         self.summary = summary
         self.toolCallId = toolCallId
@@ -15,7 +19,7 @@ public struct AgentApprovalCard: View {
     public let previewKind: UInt8
     public let previewLines: [String]
     @Environment(\.themeColors) private var theme
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     public var body: some View {
         let visiblePreviewLines = Array(previewLines.prefix(8))

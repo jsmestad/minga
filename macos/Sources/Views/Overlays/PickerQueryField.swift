@@ -52,13 +52,18 @@ enum PickerQueryKeyRouting {
 
 /// Native single-line picker editor with optimistic local caret and selection state.
 struct PickerQueryField: NSViewRepresentable {
+    enum Action: Equatable, Sendable {
+        case queryChanged(generation: UInt32, editSequence: UInt32, text: String)
+        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+    }
+
     let authoritativeText: String
     let generation: UInt32
     let acknowledgedEditSequence: UInt32
     let placeholder: String
     let isEditable: Bool
     let style: InlineEditFieldStyle
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<Action>?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(sendAction: sendAction, style: style)
@@ -103,12 +108,12 @@ struct PickerQueryField: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
-        var sendAction: OutboundActionHandler?
+        var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle
         var reconciler = PickerQueryReconciler()
         private var applyingAuthoritativeText = false
 
-        init(sendAction: OutboundActionHandler?, style: InlineEditFieldStyle) {
+        init(sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle) {
             self.sendAction = sendAction
             self.style = style
         }
@@ -167,7 +172,7 @@ struct PickerQueryField: NSViewRepresentable {
                   let edit = reconciler.recordLocalEdit(field.stringValue)
             else { return }
 
-            sendAction(.pickerQueryChanged(generation: edit.generation, editSequence: edit.sequence, text: edit.text))
+            sendAction(.queryChanged(generation: edit.generation, editSequence: edit.sequence, text: edit.text))
         }
 
         func control(_ control: NSControl, textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {

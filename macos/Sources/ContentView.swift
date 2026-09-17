@@ -182,12 +182,18 @@ private struct WindowOverlayHost<Content: View>: View {
     }
 }
 
+private enum EditorOverlayAction: Equatable, Sendable {
+    case openHover
+    case selectCompletion(index: UInt16)
+}
+
 private struct EditorOverlayHost<ExtensionContent: View>: View {
+
     let input: EditorOverlayHostInput
     let metrics: GUIFramePresentationMetrics
     let geometry: EditorGeometry
     let viewportHeight: CGFloat
-    let sendAction: OutboundActionHandler?
+    let sendAction: ViewActionHandler<EditorOverlayAction>?
     let frameProbe: ContentViewFrameProbe?
     @ViewBuilder let extensionContent: () -> ExtensionContent
 
@@ -203,7 +209,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
 
             if let content = input.hoverPopupState.content {
                 anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
-                    HoverPopupOverlay(state: input.hoverPopupState, sendAction: sendAction)
+                    HoverPopupOverlay(state: input.hoverPopupState, sendAction: translatedAction { _ in .openHover })
                         .allowsHitTesting(true)
                 }
                 .zIndex(20)
@@ -211,7 +217,11 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
 
             if let content = input.completionState.content {
                 anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
-                    CompletionOverlay(state: input.completionState, sendAction: sendAction)
+                    CompletionOverlay(state: input.completionState, sendAction: translatedAction { action in
+                        switch action {
+                        case .select(let index): .selectCompletion(index: index)
+                        }
+                    })
                         .background {
                             probe(
                                 .editorOverlay,
@@ -234,6 +244,11 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
         if let frameProbe {
             frameProbe.makeView(point, value, stateObject)
         }
+    }
+
+    private func translatedAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> EditorOverlayAction) -> ViewActionHandler<ChildAction>? {
+        guard let sendAction else { return nil }
+        return { action in sendAction(translate(action)) }
     }
 
     private func anchoredOverlay<Content: View>(
@@ -485,10 +500,16 @@ public struct ContentView<EditorSurface: View>: View {
     let gui: GUIState
     let encoderProvider: () -> OutboundActionEncoding?
     var encoder: OutboundActionEncoding? { encoderProvider() }
-    var sendAction: OutboundActionHandler? {
+    var sendAction: ViewActionHandler<OutboundAction>? {
         guard let encoder else { return nil }
         return { action in
             encoder.send(action)
+        }
+    }
+    private func translatedAction<Action: Sendable>(_ translate: @escaping @Sendable (Action) -> OutboundAction) -> ViewActionHandler<Action>? {
+        guard let sendAction else { return nil }
+        return { action in
+            sendAction(translate(action))
         }
     }
     /// Editor geometry read just-in-time inside the body. This is a closure (not
@@ -683,14 +704,14 @@ public struct ContentView<EditorSurface: View>: View {
                     if input.workspaceState.shouldShowHeader {
                         WorkspaceHeaderView(
                             workspaceState: input.workspaceState,
-                            sendAction: sendAction
+                            sendAction: translatedAction(FrontendActionComposition.outbound)
                         )
                     }
 
                     if !input.tabBarState.displayTabs.isEmpty {
                         TabBarView(
                             tabBarState: input.tabBarState,
-                            sendAction: sendAction
+                            sendAction: translatedAction(FrontendActionComposition.outbound)
                         )
                         .background {
                             frameProbeView(
@@ -730,7 +751,7 @@ public struct ContentView<EditorSurface: View>: View {
             NativeSidebarHeader(
                 input: input,
                 item: activeSidebar,
-                sendAction: sendAction,
+                sendAction: translatedAction(FrontendActionComposition.outbound),
                 projectName: projectName(input),
                 gitBranch: input.statusBarState.gitBranch,
                 leadingPadding: sidebarHeaderLeadingPadding
@@ -776,14 +797,14 @@ public struct ContentView<EditorSurface: View>: View {
             ActivityBar(
                 input: input,
                 sidebarHostState: input.sidebarHostState,
-                sendAction: sendAction
+                sendAction: translatedAction(FrontendActionComposition.outbound)
             )
 
             if let activeSidebar = input.sidebarHostState.activeSidebar {
                 SidebarContainer(
                     input: input,
                     activeSidebar: activeSidebar,
-                    sendAction: sendAction,
+                    sendAction: translatedAction(FrontendActionComposition.outbound),
                     sidebarWidth: $sidebarWidth,
                     frameProbe: frameProbe
                 )
@@ -806,24 +827,20 @@ public struct ContentView<EditorSurface: View>: View {
                 AgentContextBar(
                     state: input.agentContextBarState,
                     onReview: { action in
-                        switch action {
-                        case .approve: sendAction?(.agentApprove)
-                        case .requestChanges: sendAction?(.agentRequestChanges)
-                        case .dismiss: sendAction?(.agentDismiss)
-                        }
+                        sendAction?(FrontendActionComposition.outbound(action))
                     }
                 )
             } else {
                 BreadcrumbBar(
                     state: input.breadcrumbState,
-                    sendAction: sendAction
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
                 )
             }
 
             if input.searchState.visible {
                 SearchToolbar(
                     searchState: input.searchState,
-                    sendAction: sendAction
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
                 )
                 .transition(
                     reduceMotion
@@ -851,13 +868,13 @@ public struct ContentView<EditorSurface: View>: View {
 
             EditTimelineView(
                 state: input.editTimelineState,
-                sendAction: sendAction
+                sendAction: translatedAction(FrontendActionComposition.outbound)
             )
 
             if input.bottomPanelState.visible {
                 BottomPanelView(
                     state: input.bottomPanelState,
-                    sendAction: sendAction,
+                    sendAction: translatedAction(FrontendActionComposition.outbound),
                     availableHeight: rightPaneHeight
                 )
             }
@@ -867,7 +884,7 @@ public struct ContentView<EditorSurface: View>: View {
             if input.minibufferState.visible {
                 MinibufferView(
                     state: input.minibufferState,
-                    sendAction: sendAction
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
                 )
                 .transition(
                     reduceMotion
@@ -910,7 +927,7 @@ public struct ContentView<EditorSurface: View>: View {
                 AgentChatView(
                     state: input.agentChatState,
                     isInsertMode: input.statusBarState.isInsertMode,
-                    sendAction: sendAction,
+                    sendAction: translatedAction(FrontendActionComposition.outbound),
                     cellHeight: geo.cellHeight
                 )
             }
@@ -918,7 +935,7 @@ public struct ContentView<EditorSurface: View>: View {
             if input.emptyStateState.visible {
                 EmptyStateView(
                     state: input.emptyStateState,
-                    sendAction: sendAction
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
                 )
                 .background {
                     frameProbeView(
@@ -934,7 +951,12 @@ public struct ContentView<EditorSurface: View>: View {
                 metrics: metrics,
                 geometry: geo,
                 viewportHeight: rightPaneHeight,
-                sendAction: sendAction,
+                sendAction: translatedAction { (action: EditorOverlayAction) in
+                    switch action {
+                    case .openHover: .hoverOpen
+                    case .selectCompletion(let index): .completionSelect(index: index)
+                    }
+                },
                 frameProbe: frameProbe
             ) {
                 extensionOverlayLayer(overlayInput)
@@ -1143,7 +1165,7 @@ public struct ContentView<EditorSurface: View>: View {
         StatusBarView(
             state: input.statusBarState,
             feedbackState: input.feedbackState,
-            sendAction: sendAction,
+            sendAction: translatedAction(FrontendActionComposition.outbound),
             isFileTreeVisible: input.fileTreeState.visible,
             isGitStatusVisible: input.gitStatusState.snapshot.visible,
             isBottomPanelVisible: input.bottomPanelState.visible,
@@ -1158,7 +1180,7 @@ public struct ContentView<EditorSurface: View>: View {
     private func frontendExtensionRuntimeLayer(_ input: WindowOverlayHostInput) -> some View {
         let context = FrontendExtensionViewContext(
             theme: input.currentTheme,
-            sendAction: sendAction,
+            sendAction: translatedAction(FrontendActionComposition.outbound),
             namespace: frontendExtensionNamespace
         )
         ForEach(input.frontendExtensions.activeExtensionIDs, id: \.self) { extensionID in
@@ -1183,7 +1205,7 @@ public struct ContentView<EditorSurface: View>: View {
 
         PickerOverlay(
             state: input.pickerState,
-            sendAction: sendAction
+            sendAction: translatedAction(FrontendActionComposition.outbound)
         )
         .background {
             frameProbeView(
@@ -1207,7 +1229,7 @@ public struct ContentView<EditorSurface: View>: View {
 
         NotificationCenterView(
             state: input.notificationCenterState,
-            sendAction: sendAction,
+            sendAction: translatedAction(FrontendActionComposition.outbound),
             bottomInset: notificationCenterBottomInset(input)
         )
 

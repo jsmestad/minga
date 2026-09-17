@@ -34,13 +34,29 @@ public struct TabContextMenuMoveItem: Identifiable, Equatable {
 
 /// The tab bar strip rendered above the editor area.
 public struct TabBarView: View {
-    public init(tabBarState: TabBarState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case executeCommand(name: String)
+        case newTab
+        case selectTab(id: UInt32)
+        case closeTab(id: UInt32)
+        case copyPath(id: UInt32)
+        case reorder(id: UInt32, newIndex: UInt16)
+        case pin(id: UInt32)
+        case unpin(id: UInt32)
+        case moveLeft(id: UInt32)
+        case moveRight(id: UInt32)
+        case closeWorkspace(id: UInt16)
+        case setWorkspaceIcon(id: UInt16, icon: String)
+        case renameWorkspace(id: UInt16, name: String)
+    }
+
+    public init(tabBarState: TabBarState, sendAction: ViewActionHandler<Action>?) {
         self.tabBarState = tabBarState
         self.sendAction = sendAction
     }
     public let tabBarState: TabBarState
     @Environment(\.themeColors) private var theme
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var hoverTabId: UInt32?
     @State private var dropTargetTabId: UInt32?
@@ -90,7 +106,7 @@ public struct TabBarView: View {
                     workspace: activeWorkspace,
                     presentationRevision: tabBarState.workspacePresentationRevision,
                     owner: tabBarState,
-                    sendAction: sendAction,
+                    sendAction: workspaceIndicatorAction,
                     barHeight: barHeight
                 )
                 groupSeparator(color: activeWorkspace.color)
@@ -183,13 +199,13 @@ public struct TabBarView: View {
     public func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
         switch action {
         case .pin:
-            sendAction?(.tabPin(id: tab.id))
+            sendAction?(.pin(id: tab.id))
         case .unpin:
-            sendAction?(.tabUnpin(id: tab.id))
+            sendAction?(.unpin(id: tab.id))
         case .moveLeft:
-            sendAction?(.tabMoveLeft(id: tab.id))
+            sendAction?(.moveLeft(id: tab.id))
         case .moveRight:
-            sendAction?(.tabMoveRight(id: tab.id))
+            sendAction?(.moveRight(id: tab.id))
         }
     }
 
@@ -204,7 +220,7 @@ public struct TabBarView: View {
         guard let reorder = tabBarState.tabDropReorder(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex) else {
             return false
         }
-        sendAction?(.tabReorder(id: reorder.id, newIndex: reorder.newIndex))
+        sendAction?(.reorder(id: reorder.id, newIndex: reorder.newIndex))
         return true
     }
 
@@ -302,7 +318,7 @@ public struct TabBarView: View {
             }
             Divider()
             Button("Close Workspace") {
-                sendAction?(.workspaceClose(id: workspace.id))
+                sendAction?(.closeWorkspace(id: workspace.id))
             }
         }
     }
@@ -494,7 +510,7 @@ public struct TabBarView: View {
         Divider()
 
         Button("Copy Path") {
-            sendAction?(.tabCopyPath(id: tab.id))
+            sendAction?(.copyPath(id: tab.id))
         }
 
         Divider()
@@ -670,6 +686,18 @@ public struct TabBarView: View {
         }
 
         return values.isEmpty ? "clean" : values.joined(separator: ", ")
+    }
+
+    private var workspaceIndicatorAction: ViewActionHandler<WorkspaceIndicatorView.Action>? {
+        guard let sendAction else { return nil }
+        return { action in
+            switch action {
+            case .executeCommand(let name): sendAction(.executeCommand(name: name))
+            case .setIcon(let id, let icon): sendAction(.setWorkspaceIcon(id: id, icon: icon))
+            case .rename(let id, let name): sendAction(.renameWorkspace(id: id, name: name))
+            case .close(let id): sendAction(.closeWorkspace(id: id))
+            }
+        }
     }
 }
 

@@ -8,7 +8,11 @@ import SwiftUI
 import MingaProtocol
 
 public struct CompletionOverlay: View {
-    public init(state: CompletionState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case select(index: UInt16)
+    }
+
+    public init(state: CompletionState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
@@ -16,7 +20,7 @@ public struct CompletionOverlay: View {
     @Environment(\.themeColors) private var theme
 
     @Environment(\.anchoredOverlayContext) private var overlayContext
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     private let maxVisibleItems = 10
     private let itemHeight: CGFloat = 24
@@ -175,7 +179,7 @@ public struct CompletionOverlay: View {
               currentItem.kind == offeredItem.kind,
               currentItem.label == offeredItem.label,
               currentItem.detail == offeredItem.detail else { return }
-        sendAction?(.completionSelect(index: UInt16(currentItem.id)))
+        sendAction?(.select(index: UInt16(currentItem.id)))
     }
 
     private func updateAccessibilityFocus() {

@@ -3,14 +3,18 @@ import MingaProtocol
 
 /// Native sidebar for observing the live BEAM supervision tree.
 public struct ObservatoryView: View {
-    public init(state: ObservatoryState, sendAction: OutboundActionHandler?) {
+    public enum Action: Equatable, Sendable {
+        case inspect(pid: String)
+    }
+
+    public init(state: ObservatoryState, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
     }
     public let state: ObservatoryState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
 
     @State private var expandedNodeIds: Set<String> = []
     @State private var selectedNodeId: String?
@@ -76,7 +80,7 @@ public struct ObservatoryView: View {
 
             Button {
                 selectedNodeId = node.id
-                sendAction?(.observatoryInspect(pid: node.pid))
+                sendAction?(.inspect(pid: node.pid))
             } label: {
                 Image(systemName: "info.circle")
                     .font(.caption)
@@ -194,7 +198,7 @@ public struct ObservatoryView: View {
     }
 
     private func dismissInspection() {
-        sendAction?(.observatoryInspect(pid: ""))
+        sendAction?(.inspect(pid: ""))
     }
 
     private func toggleExpanded(_ id: String) {

@@ -7,15 +7,31 @@
 import SwiftUI
 
 public struct GitStatusView: View {
+    public enum Action: Equatable, Sendable {
+        case discardFile(path: String)
+        case unstageAll
+        case stageAll
+        case openFile(path: String)
+        case openDiff(path: String, section: UInt8)
+        case stageFile(path: String)
+        case unstageFile(path: String)
+        case pull
+        case push
+        case fetch
+        case commit(message: String)
+        case amend(message: String)
+        case pullAndRetry
+    }
+
     public let state: GitStatusState
     @Environment(\.themeColors) private var theme
 
-    public let sendAction: OutboundActionHandler?
+    public let sendAction: ViewActionHandler<Action>?
     public let usesPreviewEagerLayout: Bool
 
     public init(
         state: GitStatusState,
-        sendAction: OutboundActionHandler?,
+        sendAction: ViewActionHandler<Action>?,
         usesPreviewEagerLayout: Bool = false
     ) {
         self.state = state
@@ -81,7 +97,7 @@ public struct GitStatusView: View {
             }
             Button("Discard", role: .destructive) {
                 if let entry = fileToDiscard {
-                    sendAction?(.gitDiscardFile(path: entry.path))
+                    sendAction?(.discardFile(path: entry.path))
                     fileToDiscard = nil
                 }
             }
@@ -413,9 +429,9 @@ public struct GitStatusView: View {
         guard !state.entries(for: section).isEmpty else { return }
         switch section {
         case .staged:
-            sendAction?(.gitUnstageAll)
+            sendAction?(.unstageAll)
         case .changed, .untracked:
-            sendAction?(.gitStageAll)
+            sendAction?(.stageAll)
         case .conflicted:
             break
         }
@@ -425,13 +441,13 @@ public struct GitStatusView: View {
         guard let entry = currentEntry(matching: offeredEntry) else { return }
         switch action {
         case .open:
-            sendAction?(.gitOpenFile(path: entry.path))
+            sendAction?(.openFile(path: entry.path))
         case .openDiff:
-            sendAction?(.gitOpenDiff(path: entry.path, section: entry.section.rawValue))
+            sendAction?(.openDiff(path: entry.path, section: entry.section.rawValue))
         case .stage:
-            sendAction?(.gitStageFile(path: entry.path))
+            sendAction?(.stageFile(path: entry.path))
         case .unstage:
-            sendAction?(.gitUnstageFile(path: entry.path))
+            sendAction?(.unstageFile(path: entry.path))
         case .discard:
             fileToDiscard = entry
         case .copyPath:
@@ -532,16 +548,16 @@ public struct GitStatusView: View {
                 HStack(spacing: 4) {
                     if state.snapshot.behind > 0 {
                         miniButton(systemName: "arrow.down.circle", label: "Pull \(state.snapshot.behind)") {
-                            sendAction?(.gitPull)
+                            sendAction?(.pull)
                         }
                     }
                     if state.snapshot.ahead > 0 {
                         miniButton(systemName: "arrow.up.circle", label: "Push \(state.snapshot.ahead)") {
-                            sendAction?(.gitPush)
+                            sendAction?(.push)
                         }
                     }
                     miniButton(systemName: "arrow.2.circlepath", label: "Fetch") {
-                        sendAction?(.gitFetch)
+                        sendAction?(.fetch)
                     }
                     Spacer()
                 }
@@ -551,9 +567,9 @@ public struct GitStatusView: View {
                     guard let submission = state.submit() else { return }
                     switch submission.action {
                     case .commit:
-                        sendAction?(.gitCommit(message: submission.message))
+                        sendAction?(.commit(message: submission.message))
                     case .amend:
-                        sendAction?(.gitCommitAmend(message: submission.message))
+                        sendAction?(.amend(message: submission.message))
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -677,7 +693,7 @@ public struct GitStatusView: View {
 
             if action == .pullAndRetry {
                 Button("Pull & Retry") {
-                    sendAction?(.gitPullAndRetry)
+                    sendAction?(.pullAndRetry)
                 }
                 .font(.system(size: 10, weight: .medium))
                 .buttonStyle(.plain)
