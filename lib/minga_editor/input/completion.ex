@@ -91,12 +91,15 @@ defmodule MingaEditor.Input.Completion do
           MingaEditor.Input.Handler.result()
   defp do_handle_mouse(state, _node, _completion, _row, :wheel_down) do
     {:handled,
-     MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, &Completion.move_down/1)}
+     MingaEditor.Shell.Traditional.ModalWorkflow.navigate_completion(
+       state,
+       &Completion.move_down/1
+     )}
   end
 
   defp do_handle_mouse(state, _node, _completion, _row, :wheel_up) do
     {:handled,
-     MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, &Completion.move_up/1)}
+     MingaEditor.Shell.Traditional.ModalWorkflow.navigate_completion(state, &Completion.move_up/1)}
   end
 
   defp do_handle_mouse(state, node, completion, row, :left) do
@@ -159,7 +162,7 @@ defmodule MingaEditor.Input.Completion do
        when (cp == ?n and band(mods, @ctrl) != 0) or
               cp in [@arrow_down_legacy, @arrow_down_kitty, @arrow_down_mac] do
     state =
-      MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(
+      MingaEditor.Shell.Traditional.ModalWorkflow.navigate_completion(
         state,
         &Completion.move_down/1
       )
@@ -172,7 +175,10 @@ defmodule MingaEditor.Input.Completion do
        when (cp == ?p and band(mods, @ctrl) != 0) or
               cp in [@arrow_up_legacy, @arrow_up_kitty, @arrow_up_mac] do
     state =
-      MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, &Completion.move_up/1)
+      MingaEditor.Shell.Traditional.ModalWorkflow.navigate_completion(
+        state,
+        &Completion.move_up/1
+      )
 
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end

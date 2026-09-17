@@ -76,6 +76,39 @@ defmodule Minga.Editing.Completion.IndexTest do
            )
   end
 
+  test "match ranges use Unicode codepoint offsets for decomposed graphemes" do
+    index = Index.from_items([item(:provider, "e\u0301x")])
+
+    assert [%{match_ranges: [{0, 2}]}] = Index.snapshot(index, "e\u0301").items
+    assert [%{match_ranges: [{2, 1}]}] = Index.snapshot(index, "x").items
+  end
+
+  test "omits ranges when provider filter text cannot map to the displayed label" do
+    index = Index.from_items([item(:provider, "display", %{"filterText" => "searchable"})])
+
+    assert [%{label: "display", match_ranges: []}] = Index.snapshot(index, "sea").items
+  end
+
+  test "expanding case normalization maps ranges back to original label codepoints" do
+    index = Index.from_items([item(:provider, "İx")])
+
+    assert [%{match_ranges: [{0, 1}]}] = Index.snapshot(index, "i").items
+    assert [%{match_ranges: [{1, 1}]}] = Index.snapshot(index, "x").items
+  end
+
+  test "caps compact match ranges at the u8 wire boundary" do
+    ranges_for = fn count ->
+      query = String.duplicate("a", count)
+      candidate = String.duplicate("ab", count)
+      index = Index.from_items([item(:provider, candidate)])
+      [%{match_ranges: ranges}] = Index.snapshot(index, query).items
+      ranges
+    end
+
+    assert Enum.count_until(ranges_for.(255), 256) == 255
+    assert Enum.count_until(ranges_for.(256), 256) == 255
+  end
+
   test "100, 1,000, and 50,000 candidates produce bounded top-200 snapshots" do
     for count <- [100, 1_000, 50_000] do
       items =

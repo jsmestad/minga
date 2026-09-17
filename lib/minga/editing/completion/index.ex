@@ -95,8 +95,8 @@ defmodule Minga.Editing.Completion.Index do
 
     retained =
       Enum.map(:gb_sets.to_list(retained_top), fn {_rank, _wire_id, score, item} ->
-        ranges = Ranker.match_ranges(normalized_query, item.normalized_filter_text, score)
-        Item.with_match_ranges(item, ranges)
+        ranges = Ranker.match_ranges(normalized_query, item.search.filter_text, score)
+        Item.with_normalized_match_ranges(item, ranges)
       end)
 
     %Snapshot{
@@ -142,7 +142,7 @@ defmodule Minga.Editing.Completion.Index do
   def all_items(%__MODULE__{} = index) do
     index.providers
     |> Enum.flat_map(fn {_id, provider} -> Map.values(provider.items) end)
-    |> Enum.sort_by(&{&1.normalized_sort_text, &1.normalized_label, &1.source, Item.wire_id(&1)})
+    |> Enum.sort_by(&{&1.search.sort_text, &1.search.label, &1.source, Item.wire_id(&1)})
   end
 
   @spec reduce_provider(Provider.t(), snapshot_acc(), String.t(), pos_integer()) :: snapshot_acc()
@@ -154,7 +154,7 @@ defmodule Minga.Editing.Completion.Index do
 
   @spec score_item(Item.t(), snapshot_acc(), String.t(), pos_integer()) :: snapshot_acc()
   defp score_item(item, {set, matched, work}, normalized_query, limit) do
-    case Ranker.score(normalized_query, item.normalized_filter_text) do
+    case Ranker.score(normalized_query, item.search.filter_text) do
       {:ok, score} ->
         entry = {Ranker.rank_key(item, score), Item.wire_id(item), score, item}
         {bounded_insert(set, entry, limit), matched + 1, work + 1}
@@ -175,7 +175,7 @@ defmodule Minga.Editing.Completion.Index do
 
   defp retain_selected(set, index, selected_item_id, normalized_query, limit) do
     with %Item{} = item <- find_item(index, selected_item_id),
-         {:ok, score} <- Ranker.score(normalized_query, item.normalized_filter_text) do
+         {:ok, score} <- Ranker.score(normalized_query, item.search.filter_text) do
       entry = {Ranker.rank_key(item, score), Item.wire_id(item), score, item}
       force_bounded_insert(set, entry, limit)
     else

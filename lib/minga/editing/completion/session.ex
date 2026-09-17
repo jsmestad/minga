@@ -15,6 +15,9 @@ defmodule Minga.Editing.Completion.Session do
   @typedoc "Stable resolve identity for one selected item."
   @type resolve_identity :: {reference(), Item.provider_id(), Item.id()}
 
+  @typedoc "Whether ranking or explicit user navigation owns the current selection."
+  @type selection_origin :: :automatic | :user
+
   @typedoc "Resolve work owned by this session."
   @type resolve :: %{
           identity: resolve_identity(),
@@ -34,6 +37,7 @@ defmodule Minga.Editing.Completion.Session do
             batches: %{},
             index: %Index{},
             selected_item_id: nil,
+            selection_origin: :automatic,
             previewed_item_id: nil,
             resolve: nil,
             debounce_timer: nil,
@@ -50,6 +54,7 @@ defmodule Minga.Editing.Completion.Session do
           batches: %{Item.provider_id() => ProviderBatch.t()},
           index: Index.t(),
           selected_item_id: Item.id() | nil,
+          selection_origin: selection_origin(),
           previewed_item_id: Item.id() | nil,
           resolve: resolve() | nil,
           debounce_timer: reference() | nil,
@@ -189,13 +194,14 @@ defmodule Minga.Editing.Completion.Session do
   @spec index(t()) :: Index.t()
   def index(%__MODULE__{index: index}), do: index
 
-  @doc "Selects one item by stable identity. Unknown or stale identities are ignored."
+  @doc "Records an explicit user selection by stable identity. Unknown or stale identities are ignored."
   @spec select(t(), Item.id() | nil) :: t()
-  def select(%__MODULE__{} = session, nil), do: %{session | selected_item_id: nil}
+  def select(%__MODULE__{} = session, nil),
+    do: %{session | selected_item_id: nil, selection_origin: :automatic}
 
   def select(%__MODULE__{} = session, item_id) do
     if Index.find_item(session.index, item_id) != nil,
-      do: %{session | selected_item_id: item_id},
+      do: %{session | selected_item_id: item_id, selection_origin: :user},
       else: session
   end
 
@@ -311,6 +317,7 @@ defmodule Minga.Editing.Completion.Session do
          batches: %{},
          index: Index.empty(),
          selected_item_id: nil,
+         selection_origin: :automatic,
          previewed_item_id: nil,
          resolve: nil,
          debounce_timer: nil,
@@ -331,15 +338,23 @@ defmodule Minga.Editing.Completion.Session do
     do: Index.find_item(session.index, item_id)
 
   @spec preserve_selection(t()) :: t()
-  defp preserve_selection(%__MODULE__{} = session) do
+  defp preserve_selection(%__MODULE__{selection_origin: :user} = session) do
     case Index.find_item(session.index, session.selected_item_id) do
       %Item{} ->
         session
 
       nil ->
-        first = session.index |> Index.snapshot("", 1) |> Map.fetch!(:items) |> first_item_id()
-        %{session | selected_item_id: first}
+        select_automatic_default(session)
     end
+  end
+
+  defp preserve_selection(%__MODULE__{selection_origin: :automatic} = session),
+    do: select_automatic_default(session)
+
+  @spec select_automatic_default(t()) :: t()
+  defp select_automatic_default(%__MODULE__{} = session) do
+    first = session.index |> Index.snapshot("", 1) |> Map.fetch!(:items) |> first_item_id()
+    %{session | selected_item_id: first, selection_origin: :automatic}
   end
 
   @spec first_item_id([Item.t()]) :: Item.id() | nil

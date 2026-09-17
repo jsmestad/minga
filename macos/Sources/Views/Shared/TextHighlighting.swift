@@ -7,6 +7,39 @@
 import SwiftUI
 
 public enum TextHighlighting {
+    public enum OffsetUnit: Sendable {
+        case graphemeCluster
+        case unicodeScalar
+    }
+
+    public struct MatchRange: Sendable {
+        public let start: Int
+        public let length: Int
+
+        public init(start: Int, length: Int) {
+            self.start = start
+            self.length = length
+        }
+    }
+
+    /// Converts ranges in an explicit source unit to grapheme-cluster positions used by `AttributedString`.
+    public static func matchPositions(
+        in text: String,
+        ranges: [MatchRange],
+        offsetUnit: OffsetUnit
+    ) -> Set<Int> {
+        switch offsetUnit {
+        case .graphemeCluster:
+            let characterCount = text.count
+            return Set(ranges.flatMap { range in
+                clampedOffsets(range, upperBound: characterCount)
+            })
+
+        case .unicodeScalar:
+            return unicodeScalarRangesToGraphemePositions(text, ranges: ranges)
+        }
+    }
+
     /// Builds an AttributedString with matched character positions highlighted.
     ///
     /// Uses range overrides on a pre-built base string instead of per-character
@@ -65,5 +98,43 @@ public enum TextHighlighting {
         }
 
         return positions
+    }
+
+    private static func unicodeScalarRangesToGraphemePositions(
+        _ text: String,
+        ranges: [MatchRange]
+    ) -> Set<Int> {
+        let scalarCount = text.unicodeScalars.count
+        let scalarRanges = ranges
+            .map { clampedOffsets($0, upperBound: scalarCount) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.lowerBound < $1.lowerBound }
+        guard !scalarRanges.isEmpty else { return [] }
+
+        var positions = Set<Int>()
+        var scalarOffset = 0
+        var rangeIndex = 0
+
+        for (characterOffset, character) in text.enumerated() {
+            let nextScalarOffset = scalarOffset + character.unicodeScalars.count
+
+            while rangeIndex < scalarRanges.count && scalarRanges[rangeIndex].upperBound <= scalarOffset {
+                rangeIndex += 1
+            }
+
+            if rangeIndex < scalarRanges.count && scalarRanges[rangeIndex].lowerBound < nextScalarOffset {
+                positions.insert(characterOffset)
+            }
+
+            scalarOffset = nextScalarOffset
+        }
+
+        return positions
+    }
+
+    private static func clampedOffsets(_ range: MatchRange, upperBound: Int) -> Range<Int> {
+        guard range.start >= 0, range.length > 0, range.start < upperBound else { return 0..<0 }
+        let clampedLength = min(range.length, upperBound - range.start)
+        return range.start..<(range.start + clampedLength)
     }
 }

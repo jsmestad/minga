@@ -119,6 +119,24 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       assert detail == "Enum.map/2"
     end
 
+    test "enforces the u8 match range count boundary" do
+      ranges = for index <- 0..254, do: %{start: index, length: 1}
+      item = %Item{kind: :function, label: "map", match_ranges: ranges}
+      model = %Completion{visible?: true, items: [item]}
+
+      <<@op_gui_completion, 1::8, _row::16, _col::16, _sel::16, 1::16, _kind::8, label_len::16,
+        _label::binary-size(label_len), detail_len::16, _detail::binary-size(detail_len),
+        id_len::8, _id::binary-size(id_len), source_len::16, _source::binary-size(source_len),
+        255::8, _ranges::binary-size(255 * 4), _tail::binary>> =
+        CompletionEncoder.encode_command(model)
+
+      oversized = %{item | match_ranges: [%{start: 255, length: 1} | ranges]}
+
+      assert_raise Minga.Frontend.Adapter.GUI.EncodingError, fn ->
+        CompletionEncoder.encode_command(%Completion{visible?: true, items: [oversized]})
+      end
+    end
+
     test "rejects every oversized completion coordinate with command-scoped metadata" do
       base = %Completion{visible?: true}
 

@@ -46,12 +46,21 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
       cursor_col: model.cursor_col,
       selected_offset: model.selected_offset,
       selected_item_id: model.selected_item_id,
-      items: Enum.map(model.items, fn item -> Map.from_struct(item) end),
+      items: Enum.map(model.items, &item_to_wire/1),
       documentation: model.documentation,
       total_count: model.total_count,
       matched_count: model.matched_count,
       incomplete: if(model.incomplete?, do: 1, else: 0)
     }
+  end
+
+  @spec item_to_wire(Minga.RenderModel.UI.Completion.Item.t()) :: map()
+  defp item_to_wire(item) do
+    :gui_completion
+    |> Writer.new()
+    |> Writer.check_uint8(:match_range_count, Enum.count(item.match_ranges))
+
+    Map.from_struct(item)
   end
 
   @spec fingerprint(Completion.t()) :: term()

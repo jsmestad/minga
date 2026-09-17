@@ -16,6 +16,22 @@ defmodule Minga.Editing.Completion.Item do
   @typedoc "A half-open match range expressed in Unicode codepoint offsets."
   @type match_range :: {start :: non_neg_integer(), length :: pos_integer()}
 
+  @max_match_ranges 255
+
+  defmodule Search do
+    @moduledoc "Normalized ranking fields and their optional mapping back to the displayed label."
+
+    @enforce_keys [:label, :filter_text, :sort_text, :filter_to_label]
+    defstruct [:label, :filter_text, :sort_text, :filter_to_label]
+
+    @type t :: %__MODULE__{
+            label: String.t(),
+            filter_text: String.t(),
+            sort_text: String.t(),
+            filter_to_label: [non_neg_integer()] | nil
+          }
+  end
+
   @typedoc "LSP CompletionItemKind as an atom."
   @type kind ::
           :text
@@ -63,9 +79,7 @@ defmodule Minga.Editing.Completion.Item do
     :insert_text,
     :filter_text,
     :sort_text,
-    :normalized_label,
-    :normalized_filter_text,
-    :normalized_sort_text
+    :search
   ]
   defstruct id: nil,
             provider_id: nil,
@@ -77,9 +91,7 @@ defmodule Minga.Editing.Completion.Item do
             detail: "",
             documentation: "",
             sort_text: "",
-            normalized_label: "",
-            normalized_filter_text: "",
-            normalized_sort_text: "",
+            search: nil,
             preselect: false,
             match_ranges: [],
             text_edit: nil,
@@ -96,9 +108,7 @@ defmodule Minga.Editing.Completion.Item do
           detail: String.t(),
           documentation: String.t(),
           sort_text: String.t(),
-          normalized_label: String.t(),
-          normalized_filter_text: String.t(),
-          normalized_sort_text: String.t(),
+          search: Search.t(),
           preselect: boolean(),
           match_ranges: [match_range()],
           text_edit: text_edit() | nil,
@@ -126,9 +136,7 @@ defmodule Minga.Editing.Completion.Item do
       detail: detail,
       documentation: extract_documentation(Map.get(raw, "documentation")),
       sort_text: sort_text,
-      normalized_label: normalize(label),
-      normalized_filter_text: normalize(filter_text),
-      normalized_sort_text: normalize(sort_text),
+      search: build_search(label, filter_text, sort_text),
       preselect: Map.get(raw, "preselect", false) == true,
       text_edit: text_edit,
       raw: raw
@@ -158,9 +166,7 @@ defmodule Minga.Editing.Completion.Item do
       detail: detail,
       documentation: Map.get(fields, :documentation, ""),
       sort_text: sort_text,
-      normalized_label: normalize(label),
-      normalized_filter_text: normalize(filter_text),
-      normalized_sort_text: normalize(sort_text),
+      search: build_search(label, filter_text, sort_text),
       preselect: Map.get(fields, :preselect, false) == true,
       text_edit: text_edit,
       raw: raw
@@ -172,10 +178,17 @@ defmodule Minga.Editing.Completion.Item do
   def resolve(%__MODULE__{} = item, documentation) when is_binary(documentation),
     do: %{item | documentation: documentation}
 
-  @doc "Returns this candidate with query match ranges for the current snapshot."
+  @doc "Returns this candidate with at most 255 display-label match ranges for the wire snapshot."
   @spec with_match_ranges(t(), [match_range()]) :: t()
   def with_match_ranges(%__MODULE__{} = item, ranges) when is_list(ranges),
-    do: %{item | match_ranges: ranges}
+    do: %{item | match_ranges: Enum.take(ranges, @max_match_ranges)}
+
+  @doc "Maps normalized filter-text ranges onto the displayed label, omitting non-mappable ranges."
+  @spec with_normalized_match_ranges(t(), [match_range()]) :: t()
+  def with_normalized_match_ranges(%__MODULE__{search: search} = item, ranges)
+      when is_list(ranges) do
+    with_match_ranges(item, map_ranges_to_label(search.filter_to_label, ranges))
+  end
 
   @doc "Returns the provider-aware semantic key used to collapse true duplicates."
   @spec semantic_key(t()) :: id()
@@ -202,6 +215,75 @@ defmodule Minga.Editing.Completion.Item do
 
   @spec normalize(String.t()) :: String.t()
   defp normalize(text), do: String.downcase(text)
+
+  @spec build_search(String.t(), String.t(), String.t()) :: Search.t()
+  defp build_search(label, filter_text, sort_text) do
+    normalized_label = normalize(label)
+    normalized_filter_text = normalize(filter_text)
+
+    %Search{
+      label: normalized_label,
+      filter_text: normalized_filter_text,
+      sort_text: normalize(sort_text),
+      filter_to_label:
+        filter_to_label_mapping(label, filter_text, normalized_label, normalized_filter_text)
+    }
+  end
+
+  @spec filter_to_label_mapping(String.t(), String.t(), String.t(), String.t()) ::
+          [non_neg_integer()] | nil
+  defp filter_to_label_mapping(label, label, normalized, normalized) do
+    {parts, offsets, _next_offset} =
+      label
+      |> String.to_charlist()
+      |> Enum.reduce({[], [], 0}, fn codepoint, {parts, offsets, label_offset} ->
+        normalized_part = normalize(List.to_string([codepoint]))
+        normalized_codepoints = String.to_charlist(normalized_part)
+
+        mapped_offsets =
+          Enum.reduce(normalized_codepoints, offsets, fn _codepoint, acc ->
+            [label_offset | acc]
+          end)
+
+        {[normalized_part | parts], mapped_offsets, label_offset + 1}
+      end)
+
+    if parts |> Enum.reverse() |> IO.iodata_to_binary() == normalized do
+      Enum.reverse(offsets)
+    else
+      nil
+    end
+  end
+
+  defp filter_to_label_mapping(_label, _filter_text, _normalized_label, _normalized_filter_text),
+    do: nil
+
+  @spec map_ranges_to_label([non_neg_integer()] | nil, [match_range()]) :: [match_range()]
+  defp map_ranges_to_label(nil, _ranges), do: []
+
+  defp map_ranges_to_label(offset_mapping, ranges) do
+    positions =
+      ranges
+      |> Enum.flat_map(fn {start, length} -> Enum.slice(offset_mapping, start, length) end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    compact_match_positions(positions)
+  end
+
+  @doc "Compacts sorted match positions into half-open ranges."
+  @spec compact_match_positions([non_neg_integer()]) :: [match_range()]
+  def compact_match_positions([]), do: []
+
+  def compact_match_positions([first | rest]) do
+    rest
+    |> Enum.reduce([{first, 1}], fn position, [{start, length} | ranges] ->
+      if position == start + length,
+        do: [{start, length + 1} | ranges],
+        else: [{position, 1}, {start, length} | ranges]
+    end)
+    |> Enum.reverse()
+  end
 
   @spec source_label(provider_id()) :: String.t()
   defp source_label({:lsp_client, pid}) when is_pid(pid), do: "lsp:#{inspect(pid)}"

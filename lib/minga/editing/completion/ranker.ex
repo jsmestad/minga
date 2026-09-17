@@ -27,20 +27,20 @@ defmodule Minga.Editing.Completion.Ranker do
   def match_ranges("", _candidate, _score), do: []
 
   def match_ranges(query, _candidate, {kind, _score}) when kind in [:exact, :prefix],
-    do: [{0, String.length(query)}]
+    do: [{0, codepoint_length(query)}]
 
   def match_ranges(query, candidate, {:fuzzy, _score}) do
     query
     |> String.to_charlist()
     |> fuzzy_positions(String.to_charlist(candidate), 0, [])
-    |> positions_to_ranges()
+    |> Item.compact_match_positions()
   end
 
   @doc "Returns a deterministic sortable key for one scored item."
   @spec rank_key(Item.t(), score()) :: tuple()
   def rank_key(%Item{} = item, {kind, score}) do
-    {preselect_rank(item.preselect), kind_rank(kind), score, item.normalized_sort_text,
-     item.normalized_label, item.source, Item.wire_id(item)}
+    {preselect_rank(item.preselect), kind_rank(kind), score, item.search.sort_text,
+     item.search.label, item.source, Item.wire_id(item)}
   end
 
   @spec preselect_rank(boolean()) :: 0 | 1
@@ -89,16 +89,6 @@ defmodule Minga.Editing.Completion.Ranker do
   defp fuzzy_positions(query, [_candidate | rest], index, positions),
     do: fuzzy_positions(query, rest, index + 1, positions)
 
-  @spec positions_to_ranges([non_neg_integer()]) :: [Item.match_range()]
-  defp positions_to_ranges([]), do: []
-
-  defp positions_to_ranges([first | rest]) do
-    rest
-    |> Enum.reduce([{first, 1}], fn position, [{start, length} | ranges] ->
-      if position == start + length,
-        do: [{start, length + 1} | ranges],
-        else: [{position, 1}, {start, length} | ranges]
-    end)
-    |> Enum.reverse()
-  end
+  @spec codepoint_length(String.t()) :: non_neg_integer()
+  defp codepoint_length(text), do: text |> String.to_charlist() |> length()
 end

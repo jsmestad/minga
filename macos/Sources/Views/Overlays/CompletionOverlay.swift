@@ -114,7 +114,7 @@ public struct CompletionOverlay: View {
                 // Label
                 Text(TextHighlighting.attributedString(
                     item.label,
-                    matchPositions: matchPositions(item.matchRanges),
+                    matchPositions: matchPositions(item.matchRanges, in: item.label),
                     baseFont: .system(size: 12, design: .monospaced),
                     matchFont: .system(size: 12, weight: .semibold, design: .monospaced),
                     baseColor: isSelected ? theme.popupSelFg : theme.popupFg,
@@ -195,11 +195,12 @@ public struct CompletionOverlay: View {
         accessibilityFocus = accessibilityIdentity(for: item, content: content)
     }
 
-    private func matchPositions(_ ranges: [Wire.CompletionMatchRange]) -> Set<Int> {
-        Set(ranges.flatMap { range in
-            let start = Int(range.start)
-            return start..<(start + Int(range.length))
-        })
+    private func matchPositions(_ ranges: [Wire.CompletionMatchRange], in text: String) -> Set<Int> {
+        TextHighlighting.matchPositions(
+            in: text,
+            ranges: ranges.map { TextHighlighting.MatchRange(start: Int($0.start), length: Int($0.length)) },
+            offsetUnit: .unicodeScalar
+        )
     }
 
     @ViewBuilder
@@ -245,7 +246,7 @@ private struct CompletionAccessibilityIdentity: Hashable {
     let presentationRevision: UInt64
     let anchorRow: Int
     let anchorCol: Int
-    let id: Int
+    let id: String
     let kind: CompletionKind
     let label: String
     let detail: String

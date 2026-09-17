@@ -140,6 +140,18 @@ defmodule MingaEditor.State.ModalOverlay do
   def update_completion({:conflict, %ConflictPayload{}} = modal, fun) when is_function(fun, 1),
     do: modal
 
+  @doc "Updates completion through an explicit user-navigation transition."
+  @spec navigate_completion(t(), (Completion.t() -> Completion.t())) :: t()
+  def navigate_completion(
+        {:completion, %CompletionPayload{completion: completion} = payload},
+        fun
+      )
+      when is_function(fun, 1) do
+    {:completion, CompletionPayload.navigate(payload, fun.(completion))}
+  end
+
+  def navigate_completion(modal, fun) when is_function(fun, 1), do: modal
+
   @doc "Records completion-trigger lifecycle using explicit active-tab context."
   @spec put_completion_trigger(t(), CompletionTrigger.t(), Tab.id() | nil) :: t()
   def put_completion_trigger(
