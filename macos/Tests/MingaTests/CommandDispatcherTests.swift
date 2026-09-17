@@ -1778,7 +1778,7 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Batch lifecycle
 
-    @Test("commitFrame fires onFirstRender once then clears it")
+    @Test("commitFrame fires onFirstRender once across later frames and connections")
     @MainActor func commitFrameFiresFirstRenderOnce() throws {
         let (dispatcher, _) = makeDispatcher()
         var callCount = 0
@@ -1794,6 +1794,12 @@ struct CommandDispatcherRoutingTests {
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(callCount == 1)
+
+        dispatcher.replaceConnection(with: 2)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 2))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(callCount == 1)
     }
 

@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 import XCTest
 
@@ -8,6 +9,8 @@ struct AccessibilityNode {
     let label: String?
     let value: String?
     let focused: Bool?
+    let selectedTextRange: NSRange?
+    let selectedText: String?
 }
 
 enum AccessibilityClientError: Error, CustomStringConvertible {
@@ -27,11 +30,14 @@ enum AccessibilityClientError: Error, CustomStringConvertible {
 @MainActor
 final class AccessibilityClient {
     private let application: XCUIApplication
+    private let accessibilityApplication: AXUIElement
     private let maximumFailureElements = 120
     private let pollInterval: TimeInterval = 0.25
+    private var accessibilityElementsByIdentifier: [String: AXUIElement] = [:]
 
-    init(application: XCUIApplication) {
+    init(application: XCUIApplication, processID: pid_t) {
         self.application = application
+        accessibilityApplication = AXUIElementCreateApplication(processID)
     }
 
     func elements(
@@ -111,12 +117,24 @@ final class AccessibilityClient {
     }
 
     func focus(_ node: AccessibilityNode) throws {
-        guard node.role == .textView else {
+        guard node.role == .textView,
+              let identifier = node.identifier,
+              let element = accessibilityElement(identifier: identifier)
+        else {
             throw AccessibilityClientError.condition(
                 "Required text-area focus action is missing from \(summary(node))"
             )
         }
-        node.element.click()
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXFocusedAttribute as CFString,
+            kCFBooleanTrue
+        )
+        guard result == .success else {
+            throw AccessibilityClientError.condition(
+                "Text-area focus action failed with AXError \(result.rawValue) for \(summary(node))"
+            )
+        }
     }
 
     func boundedTreeDump() -> String {
@@ -129,7 +147,9 @@ final class AccessibilityClient {
                     "id=\(node.identifier ?? "nil")",
                     "label=\(node.label ?? "nil")",
                     "value=\(bounded(node.value))",
-                    "focused=\(String(describing: node.focused))"
+                    "focused=\(String(describing: node.focused))",
+                    "selectedTextRange=\(String(describing: node.selectedTextRange))",
+                    "selectedText=\(bounded(node.selectedText))"
                 ].joined(separator: " ")
             }
             let suffix = elements.count > maximumFailureElements
@@ -144,14 +164,53 @@ final class AccessibilityClient {
     private func snapshot(_ element: XCUIElement) throws -> AccessibilityNode {
         let snapshot = try element.snapshot()
         let representation = snapshot.dictionaryRepresentation
+        let identifier = emptyAsNil(snapshot.identifier)
+        let textSelection = identifier.flatMap(editorTextSelection)
         return AccessibilityNode(
             element: element,
             role: snapshot.elementType,
-            identifier: emptyAsNil(snapshot.identifier),
+            identifier: identifier,
             label: emptyAsNil(snapshot.label),
             value: describe(snapshot.value),
-            focused: representation[.hasFocus] as? Bool
+            focused: representation[.hasFocus] as? Bool,
+            selectedTextRange: textSelection?.range,
+            selectedText: textSelection?.text
         )
+    }
+
+    private func editorTextSelection(identifier: String) -> (range: NSRange, text: String?)? {
+        guard identifier.hasPrefix("minga.editor."),
+              let element = accessibilityElement(identifier: identifier),
+              let rawRangeValue = attribute(kAXSelectedTextRangeAttribute as CFString, from: element),
+              CFGetTypeID(rawRangeValue) == AXValueGetTypeID() else { return nil }
+        let rangeValue = unsafeDowncast(rawRangeValue, to: AXValue.self)
+        guard AXValueGetType(rangeValue) == .cfRange else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(rangeValue, .cfRange, &range) else { return nil }
+        let selectedText = attribute(kAXSelectedTextAttribute as CFString, from: element) as? String
+        return (NSRange(location: range.location, length: range.length), emptyAsNil(selectedText ?? ""))
+    }
+
+    private func accessibilityElement(identifier: String) -> AXUIElement? {
+        if let cached = accessibilityElementsByIdentifier[identifier] { return cached }
+
+        var pending = [accessibilityApplication]
+        while let element = pending.popLast() {
+            if attribute(kAXIdentifierAttribute as CFString, from: element) as? String == identifier {
+                accessibilityElementsByIdentifier[identifier] = element
+                return element
+            }
+            if let children = attribute(kAXChildrenAttribute as CFString, from: element) as? [AXUIElement] {
+                pending.append(contentsOf: children)
+            }
+        }
+        return nil
+    }
+
+    private func attribute(_ name: CFString, from element: AXUIElement) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name, &value) == .success else { return nil }
+        return value
     }
 
     private func wait<T>(
@@ -196,7 +255,9 @@ final class AccessibilityClient {
 
         let protocolError = elements(ofType: .any, identifierPrefix: "protocol-error-overlay").firstMatch
         if protocolError.exists {
-            throw AccessibilityClientError.condition("The protocol error overlay appeared before the editor became ready")
+            throw AccessibilityClientError.condition(
+                "The protocol error overlay appeared before the editor became ready"
+            )
         }
     }
 
