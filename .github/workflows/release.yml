@@ -191,7 +191,7 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Install pinned XcodeGen
-        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
 
       - name: Cache deps
         uses: actions/cache@v4

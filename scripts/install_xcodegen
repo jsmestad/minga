@@ -17,7 +17,7 @@ fi
 
 rm -rf "$destination"
 mkdir -p "$destination"
-curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/$version/xcodegen.zip" -o "$archive"
+curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 "https://github.com/yonaskolb/XcodeGen/releases/download/$version/xcodegen.zip" -o "$archive"
 ditto -x -k "$archive" "$destination"
 
 binary=$(find "$destination" -type f -name xcodegen -perm +111 | head -n 1)
