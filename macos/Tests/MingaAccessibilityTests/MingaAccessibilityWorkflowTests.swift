@@ -228,6 +228,7 @@ private extension MingaAccessibilityWorkflowTests {
     func configuredApplication(inputs: AccessibilityTestInputs) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = [
+            "-NSTreatUnknownArgumentsAsOpen", "NO",
             "--editor",
             "--config", inputs.config.path,
             "--debug-log", inputs.debugLog.path,

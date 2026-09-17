@@ -47,6 +47,7 @@ struct BEAMLaunchConfigurationTests {
     func buildsSafeConfiguration() {
         let arguments = [
             "Minga",
+            "-NSTreatUnknownArgumentsAsOpen", "NO",
             "--safe",
             "-Q",
             "--editor",

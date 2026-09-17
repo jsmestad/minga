@@ -184,7 +184,9 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
                 skipsInternalValue = false
                 continue
             }
-            if argument == "--minga-launch-nonce" || argument == "--minga-ipc-runtime-parent" {
+            if argument == "--minga-launch-nonce"
+                || argument == "--minga-ipc-runtime-parent"
+                || argument == "-NSTreatUnknownArgumentsAsOpen" {
                 skipsInternalValue = true
                 continue
             }
