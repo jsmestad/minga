@@ -1,0 +1,20 @@
+{
+  "medianBaseMeasurement" : {
+    "combinedP50Ms" : 0.100916,
+    "combinedP95Ms" : 0.119833,
+    "commandPreparationP50Ms" : 0.089584,
+    "commandPreparationP95Ms" : 0.103583,
+    "decodeApplyP50Ms" : 0.008042,
+    "decodeApplyP95Ms" : 0.011208
+  },
+  "medianCombinedP50Ratio" : 0.8296354679802955,
+  "medianHeadMeasurement" : {
+    "combinedP50Ms" : 0.084208,
+    "combinedP95Ms" : 0.102416,
+    "commandPreparationP50Ms" : 0.073083,
+    "commandPreparationP95Ms" : 0.08625,
+    "decodeApplyP50Ms" : 0.008,
+    "decodeApplyP95Ms" : 0.012041
+  },
+  "pairCount" : 3
+}

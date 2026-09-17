@@ -131,9 +131,8 @@ final class CommandDispatcher {
     /// Called when line_spacing changes, so EditorNSView can trigger a resize.
     var onLineSpacingChanged: ((Float) -> Void)?
 
-    /// Called when a reset-required scroll presentation is promoted into GUI state.
-    /// The editor view uses this to discard local smooth-scroll state once per frame.
-    var onScrollPresentationReset: (() -> Void)?
+    /// Called for a pane whose committed scroll authority invalidates local prediction.
+    var onScrollPresentationReset: ((UInt16) -> Void)?
 
     /// Called when the BEAM changes the GUI cursor animation preference.
     var onCursorAnimationChanged: ((Bool) -> Void)?
@@ -1432,7 +1431,10 @@ final class CommandDispatcher {
         // scroll report), even in the rare case where the jump coincidentally
         // lands on the same anchor key as the frontend's own in-flight offset.
         if next.scrollSeq > prev.scrollSeq { return true }
-        return !next.isSameAnchorKey(as: prev)
+        // Overlapping frame lineages can regress the sequence; retain anchor-key invalidation for those frames.
+        if next.scrollSeq < prev.scrollSeq { return !next.isSameAnchorKey(as: prev) }
+        // Anchor movement with unchanged authority is an acknowledgment of local scrolling.
+        return next.contentEpoch != prev.contentEpoch || next.layoutGeneration != prev.layoutGeneration
     }
 
     func discardLocalPresentation(_ kind: TransformKind, windowId: UInt16 = 0) {
@@ -1449,8 +1451,8 @@ final class CommandDispatcher {
             switch effect {
             case .fontChanged(let family, let size, let ligatures, let weight):
                 onFontChanged?(family, size, ligatures, weight)
-            case .scrollPresentationReset:
-                onScrollPresentationReset?()
+            case .scrollPresentationReset(let windowID):
+                onScrollPresentationReset?(windowID)
             case .titleChanged(let title):
                 onTitleChanged?(title)
             case .windowBackgroundChanged(let red, let green, let blue):

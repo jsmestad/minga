@@ -16,7 +16,9 @@ public struct ResidentRenderPreparationResult: Sendable {
     public let range: Range<Int>
     public let rows: [GUIVisualRow]
     public let commands: [ResidentPreparedRowCommand]
+    /// Index of the committed anchor; local scrolling changes the selected range, not this origin.
     public let visibleStartIndex: Int
+    /// Signed distance from the selected range's start to the committed anchor, negative when the range starts below it.
     public let overscanBeforeRows: Int
     public let counters: ResidentRowStoreCounters
     public let decorationsVisited: Int
@@ -34,28 +36,28 @@ public enum ResidentRenderPreparation {
         content: GUIWindowContent,
         fallbackVisibleRows: Int,
         overscanRows: Int,
+        localOffsetRows: Double = 0,
         scrollLeft: Int = 0,
         viewportCols: Int = Int(UInt16.max)
     ) -> ResidentRenderPreparationResult {
         let store = content.rowStore
         let visibleStart: Int
-        let visibleEnd: Int
 
         if let presentation = content.scrollPresentation {
             let indexedStart = store.lowerBound(bufferLine: presentation.visibleStartLine)
             let anchorStart = store.lowerBound(bufferLine: presentation.anchorTop)
             let anchoredVisualStart = min(anchorStart + Int(presentation.anchorVisualRowOffset), store.count)
             visibleStart = anchoredVisualStart < store.count ? anchoredVisualStart : min(indexedStart, store.count)
-            let indexedEnd = store.lowerBound(bufferLine: presentation.visibleEndLine)
-            visibleEnd = max(indexedEnd, min(visibleStart + fallbackVisibleRows, store.count))
         } else {
             visibleStart = 0
-            visibleEnd = min(fallbackVisibleRows, store.count)
         }
 
         let overscan = max(overscanRows, 0)
-        let lower = max(visibleStart - overscan, 0)
-        let upper = min(max(visibleEnd, visibleStart) + overscan, store.count)
+        // Select the local viewport, but keep row coordinates relative to the committed anchor.
+        // Fractional scrolling exposes one extra row. Work stays bounded regardless of travel distance.
+        let localStart = Double(visibleStart) + localOffsetRows
+        let lower = min(max(Int(floor(localStart)) - overscan, 0), store.count)
+        let upper = min(max(Int(ceil(localStart + Double(fallbackVisibleRows))) + overscan, lower), store.count)
         let result = store.rows(in: lower..<upper)
         let clipStart = max(scrollLeft, 0)
         let clipWidth = max(viewportCols, 0)
@@ -83,14 +85,33 @@ public enum ResidentRenderPreparation {
     public static func clip(row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> GUIVisualRow {
         let text = row.text
         guard !text.isEmpty else { return row }
-        let columnMap = displayColumnMap(for: text)
-        let totalColumns = max(columnMap.count - 1, 0)
-        let clipStart = min(max(scrollLeft, 0), totalColumns)
-        let clipEnd = min(clipStart + max(viewportCols, 0), totalColumns)
+        let clipStart = max(scrollLeft, 0)
+        let clipLimit = clipStart + max(viewportCols, 0)
+        var column = 0
+        var index = text.startIndex
+        var start = text.endIndex
+        var end = text.endIndex
+        // Walk only as far as the viewport edge; retain the existing wide-character clipping semantics.
+        while index < text.endIndex {
+            if column >= clipLimit {
+                end = index
+                break
+            }
+            let nextColumn = column + displayColumnWidth(text[index])
+            if column <= clipStart && clipStart < nextColumn { start = index }
+            if clipLimit < nextColumn {
+                end = index
+                column = clipLimit
+                break
+            }
+            column = nextColumn
+            index = text.index(after: index)
+        }
+        let clipEnd = min(clipLimit, column)
         guard clipStart < clipEnd else {
             return rebuilt(row, text: "", spans: [], scrollLeft: scrollLeft)
         }
-        let clippedText = String(text[columnMap[clipStart]..<columnMap[clipEnd]])
+        let clippedText = String(text[start..<end])
         let clippedSpans = row.spans.compactMap { span -> GUIHighlightSpan? in
             let start = Int(span.startCol)
             let end = Int(span.endCol)
@@ -112,17 +133,6 @@ public enum ResidentRenderPreparation {
         let hash = scrollLeft > 0 ? UInt32(truncatingIfNeeded: hasher.finalize()) : row.contentHash
         return GUIVisualRow(rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
                             contentHash: hash, text: text, spans: spans)
-    }
-
-    private static func displayColumnMap(for text: String) -> [String.Index] {
-        var map: [String.Index] = []
-        map.reserveCapacity(text.count + text.count / 4)
-        for index in text.indices {
-            map.append(index)
-            if displayColumnWidth(text[index]) == 2 { map.append(index) }
-        }
-        map.append(text.endIndex)
-        return map
     }
 
     private static func displayColumnWidth(_ character: Character) -> Int {

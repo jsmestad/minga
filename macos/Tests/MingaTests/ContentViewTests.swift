@@ -7,6 +7,7 @@ import Testing
 import ViewInspector
 
 private final class MountedPreciseScrollEvent: NSEvent {
+    var preciseDeltas = true
     private let mountedLocation: NSPoint
     private let mountedWindowNumber: Int
     private let mountedDeltaY: CGFloat
@@ -38,7 +39,7 @@ private final class MountedPreciseScrollEvent: NSEvent {
     override var modifierFlags: NSEvent.ModifierFlags { [] }
     override var scrollingDeltaX: CGFloat { 0 }
     override var scrollingDeltaY: CGFloat { mountedDeltaY }
-    override var hasPreciseScrollingDeltas: Bool { true }
+    override var hasPreciseScrollingDeltas: Bool { preciseDeltas }
     override var phase: NSEvent.Phase { mountedPhase }
     override var momentumPhase: NSEvent.Phase { mountedMomentumPhase }
 }
@@ -140,10 +141,11 @@ struct ContentViewTests {
         return view
     }
 
-    private func nativeInteractionContent() throws -> GUIWindowContent {
+    private func nativeInteractionContent(anchorTop: UInt32 = 10, fullRefresh: Bool = true, scrollSeq: UInt32 = 0, resident: Bool = true, extraRows: Int = 0) throws -> GUIWindowContent {
         var rows: [GUIVisualRow] = []
         rows.reserveCapacity(100)
-        for index in 0..<100 {
+        let range = resident ? 0..<100 : Int(anchorTop)..<(Int(anchorTop) + 24 + extraRows)
+        for index in range {
             let rowID = UInt64(index + 1)
             let bufferLine = UInt32(index)
             let contentHash = UInt32(index + 1)
@@ -165,7 +167,7 @@ struct ContentViewTests {
             gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
             clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
             viewport: GUIViewportSummary(
-                top: 10,
+                top: anchorTop,
                 left: 0,
                 rows: 24,
                 cols: 80,
@@ -179,19 +181,20 @@ struct ContentViewTests {
         let scroll = GUIScrollPresentation(
             windowId: 1,
             resetRequired: false,
-            anchorTop: 10,
+            anchorTop: anchorTop,
             anchorLeft: 0,
             anchorVisualRowOffset: 0,
-            visibleStartLine: 10,
-            visibleEndLine: 33,
-            overscanStartLine: 0,
-            overscanEndLine: 99,
+            visibleStartLine: anchorTop,
+            visibleEndLine: anchorTop + 23,
+            overscanStartLine: UInt32(range.lowerBound),
+            overscanEndLine: UInt32(range.upperBound),
             contentEpoch: 1,
-            layoutGeneration: 1
+            layoutGeneration: 1,
+            scrollSeq: scrollSeq
         )
         return try GUIWindowContent(
             windowId: 1,
-            fullRefresh: true,
+            fullRefresh: fullRefresh,
             contentEpoch: 1,
             cursorRow: 0,
             cursorCol: 0,
@@ -204,6 +207,167 @@ struct ContentViewTests {
             paneGeometry: geometry,
             scrollPresentation: scroll
         )
+    }
+
+    @Test("ordinary scroll echoes preserve wheel easing and trackpad presentation", arguments: [false, true])
+    func scrollEchoPreservesPresentation(precise: Bool) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let initial = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(snapshot: initial, localTransform: nil)
+
+        var resetRequests = 0
+        dispatcher.onScrollPresentationReset = { [weak editor] windowId in
+            resetRequests += 1
+            guard let editor else { return }
+            editor.resetScrollPresentation(windowId: windowId)
+        }
+        let event = MountedPreciseScrollEvent(
+            locationInWindow: editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight * 6), to: nil),
+            windowNumber: 0,
+            deltaY: -editor.cellHeight,
+            phase: precise ? .began : []
+        )
+        event.preciseDeltas = precise
+        editor.scrollWheel(with: event)
+        let before = editor.interactionSnapshot
+        #expect(spy.mouseEventCalls.last?.row == 6 || precise)
+        try #require(before.scrollWindowId == 1)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        let echoedContent = try nativeInteractionContent(anchorTop: 11, fullRefresh: false)
+        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: 1, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: 100, resultRowCount: 100, rowSplices: [],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [],
+            paneGeometry: echoedContent.paneGeometry, cursorline: nil,
+            scrollPresentation: echoedContent.scrollPresentation
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let committed = try #require(dispatcher.committedEditorSnapshot)
+        let previousScroll = try #require(initial.content(for: 1)?.scrollPresentation)
+        let nextScroll = try #require(committed.content(for: 1)?.scrollPresentation)
+        #expect(committed.frameSeq == 2)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        #expect(nextScroll.anchorTop == previousScroll.anchorTop + 1)
+        #expect(nextScroll.scrollSeq == previousScroll.scrollSeq)
+        #expect(nextScroll.resetRequired == false)
+        #expect(nextScroll.contentEpoch == previousScroll.contentEpoch)
+        #expect(nextScroll.layoutGeneration == previousScroll.layoutGeneration)
+        #expect(resetRequests == 0)
+        let after = editor.interactionSnapshot
+        #expect(after.scrollWindowId == 1)
+        if precise {
+            editor.draw(editor.bounds)
+            #expect(editor.interactionSnapshot.scrollOffset.y == 0)
+        }
+
+        editor.resetScrollPresentation(windowId: 2)
+        #expect(editor.interactionSnapshot.scrollWindowId == 1)
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(anchorTop: 40, scrollSeq: 1)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(resetRequests == 1)
+        #expect(editor.interactionSnapshot.scrollWindowId == nil)
+        #expect(editor.interactionSnapshot.scrollOffset == .zero)
+
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+        editor.scrollWheel(with: event)
+        #expect(editor.interactionSnapshot.scrollWindowId == 1)
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(anchorTop: 30, scrollSeq: 0)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+        #expect(resetRequests == 2)
+        #expect(editor.interactionSnapshot.scrollWindowId == nil)
+        #expect(editor.interactionSnapshot.scrollOffset == .zero)
+    }
+
+    @Test("wheel ticks around an undisplayed echo keep moving forward", arguments: [-1, 1])
+    func wheelReconciliationUsesRenderedAnchor(direction: Int) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let initial = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorPresentation(snapshot: initial, localTransform: nil)
+        let event = MountedPreciseScrollEvent(
+            locationInWindow: editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight * 6), to: nil),
+            windowNumber: 0, deltaY: -CGFloat(direction) * editor.cellHeight, phase: []
+        )
+        event.preciseDeltas = false
+        editor.scrollWheel(with: event)
+
+        dispatcher.onScrollPresentationReset = { [weak editor] windowId in
+            guard let editor else { return }
+            editor.resetScrollPresentation(windowId: windowId)
+        }
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        let echoedContent = try nativeInteractionContent(anchorTop: UInt32(10 + direction), fullRefresh: false)
+        dispatcher.dispatch(.guiWindowRowsDelta(data: GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: 1, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: 100, resultRowCount: 100, rowSplices: [],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [],
+            paneGeometry: echoedContent.paneGeometry, cursorline: nil,
+            scrollPresentation: echoedContent.scrollPresentation
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let next = try #require(dispatcher.committedEditorSnapshot)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+
+        #expect(editor.interactionSnapshot.scrollWindowId == 1)
+        // A second tick arrives after the first echo commits but before it is displayed.
+        editor.scrollWheel(with: event)
+        try #require(editor.interactionSnapshot.scrollWindowId == 1)
+        editor.draw(editor.bounds)
+        let firstOffset = editor.interactionSnapshot.scrollOffset.y
+        let firstVisualTop = CGFloat(10 + direction) * editor.cellHeight + firstOffset
+        dispatcher.promoteVisibleEditorPresentation(snapshot: next, localTransform: nil)
+        editor.draw(editor.bounds)
+        let secondOffset = editor.interactionSnapshot.scrollOffset.y
+        let secondVisualTop = CGFloat(10 + direction) * editor.cellHeight + secondOffset
+        #expect((firstVisualTop - CGFloat(10) * editor.cellHeight) * CGFloat(direction) >= 0)
+        #expect((secondVisualTop - CGFloat(10) * editor.cellHeight) * CGFloat(direction) <= 2 * editor.cellHeight)
+        #expect((secondVisualTop - firstVisualTop) * CGFloat(direction) >= 0)
+    }
+
+    @Test("windowed scrolling keeps unavailable rows hidden during live and settling frames", arguments: [false, true], [0, 2])
+    func windowedScrollRespectsPayload(precise: Bool, extraRows: Int) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: SpyEncoder())
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(resident: false, extraRows: extraRows)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+        let point = editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight * 6), to: nil)
+        let event = MountedPreciseScrollEvent(locationInWindow: point, windowNumber: 0, deltaY: -editor.cellHeight * (precise ? 10 : 1), phase: precise ? .began : [])
+        event.preciseDeltas = precise
+        editor.scrollWheel(with: event)
+        editor.draw(editor.bounds)
+        #expect(editor.interactionSnapshot.scrollOffset.y <= CGFloat(extraRows) * editor.cellHeight)
+        if precise {
+            editor.scrollWheel(with: MountedPreciseScrollEvent(locationInWindow: point, windowNumber: 0, deltaY: 0, phase: .ended))
+            editor.draw(editor.bounds)
+            #expect(editor.interactionSnapshot.scrollOffset.y <= CGFloat(extraRows) * editor.cellHeight)
+        }
     }
 
     private func nativeFoldInteractionContent(

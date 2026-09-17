@@ -484,6 +484,7 @@ final class CoreTextMetalRenderer {
                 content: content,
                 fallbackVisibleRows: fallbackRows,
                 overscanRows: RendererSignposts.configuredOverscanRows,
+                localOffsetRows: Double(Self.smoothScrollOffset(for: content.windowId, targetWindowId: scrollTargetWindowId, scrollOffsetPx: smoothScrollOffsetPx).y / (displayCellH * scale)),
                 scrollLeft: max(scrollLeftInt - localScrollInsetCols, 0),
                 viewportCols: contentCols + 2
             )

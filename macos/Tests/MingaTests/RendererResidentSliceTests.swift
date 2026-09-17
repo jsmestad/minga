@@ -259,8 +259,44 @@ struct RendererResidentSliceTests {
 
         let slice = RendererSignposts.visibleSlice(for: content, fallbackVisibleRows: 2, overscanRows: 0)
         #expect(slice.visibleStartIndex == 1)
-        #expect(slice.rows.map(\.rowId) == [2, 3, 4, 5])
+        #expect(slice.rows.map(\.rowId) == [2, 3])
         #expect(slice.overscanBeforeRows == 0)
+    }
+
+    @Test("local viewport preparation stays bounded in both directions and at fractional offsets", arguments: [-1500.5, -22, -0.5, 0, 0.5, 22, 1500.5])
+    func localViewportPreparation(offsetRows: Double) throws {
+        for rowCount in [5_000, 65_536] {
+            let resident = try content(rowCount: rowCount, visibleStart: 2_000, visibleRows: 40)
+            let prepared = ResidentRenderPreparation.prepare(content: resident, fallbackVisibleRows: 40, overscanRows: 2, localOffsetRows: offsetRows)
+            let firstVisible = Int((2_000 + offsetRows).rounded(.down))
+            let endVisible = Int((2_040 + offsetRows).rounded(.up))
+            #expect(prepared.range == (firstVisible - 2)..<(endVisible + 2))
+            #expect(prepared.counters.rowsVisited <= 45)
+            #expect(prepared.commands.first?.presentationRow == firstVisible - 2 - 2_000)
+            #expect(prepared.commands.last?.gutterBufferLine == UInt32(endVisible + 1))
+            let slice = RendererSignposts.rowSlice(for: prepared)
+            #expect(slice.overscanBeforeRows == 2_000 - prepared.range.lowerBound)
+        }
+    }
+
+    @Test("clipping preserves grapheme and wide-character boundaries", arguments: ["abcdef", "a界b", "é🙂z", "", "界界abc"])
+    func clippingBoundaries(text: String) {
+        let source = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: text, spans: [])
+        // Explicit expected display columns include duplicate indices for wide glyphs.
+        let columns: [String]
+        switch text {
+        case "a界b": columns = ["a界b", "界b", "界b", "b", ""]
+        case "界界abc": columns = ["界界abc", "界界abc", "界abc", "界abc", "abc", "bc", "c", ""]
+        default: columns = (0...text.count).map { String(text.dropFirst($0)) }
+        }
+        for (left, expected) in columns.enumerated() {
+            #expect(ResidentRenderPreparation.clip(row: source, scrollLeft: left, viewportCols: 80).text == expected)
+        }
+        #expect(ResidentRenderPreparation.clip(row: source, scrollLeft: 0, viewportCols: 0).text.isEmpty)
+        #expect(ResidentRenderPreparation.clip(row: source, scrollLeft: 100, viewportCols: 4).text.isEmpty)
+        let wide = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 0, contentHash: 2, text: "a界b", spans: [])
+        #expect(ResidentRenderPreparation.clip(row: wide, scrollLeft: 0, viewportCols: 2).text == "a")
+        #expect(ResidentRenderPreparation.clip(row: wide, scrollLeft: 0, viewportCols: 3).text == "a界")
     }
 
     private func content(rowCount: Int, visibleStart: Int, visibleRows: Int, visualOffset: Int = 0) throws -> GUIWindowContent {

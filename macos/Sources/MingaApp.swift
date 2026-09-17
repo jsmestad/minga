@@ -406,11 +406,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the editor view.
         let nsView = EditorNSView(encoder: enc, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
-        disp.onScrollPresentationReset = { [weak nsView] in
-            guard let nsView else { return }
-            // Resetting mid-gesture would zero scrollUnconfirmedLines and corrupt pixel-offset compensation.
-            if nsView.hasActiveScrollGesture { return }
-            nsView.resetSmoothScrollState()
+        disp.onScrollPresentationReset = { [weak nsView] windowId in
+            nsView?.resetScrollPresentation(windowId: windowId)
         }
         // Go-to-definition link cursor (#2630): the BEAM toggles the pointing-hand
         // cursor when Cmd+hover lands on a navigable symbol.

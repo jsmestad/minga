@@ -58,7 +58,7 @@ struct ThumbDragSession {
     /// Reconcile watchdog deadline. A thumb-drag reconcile is a single BEAM round trip, so this is
     /// deliberately generous; it only fires when a stranding path stalls the reconcile (a dropped
     /// final flush under backpressure / disconnect, a vanished presentation) so the gate cannot stay
-    /// open forever and keep suppressing the BEAM's own `onScrollPresentationReset` recovery signal.
+    /// open forever after progress stops.
     static let watchdogDeadline: CFTimeInterval = 0.5
 
     let windowId: UInt16
@@ -198,8 +198,7 @@ struct ThumbDragSession {
     /// flat and steps `anchorTop` toward the target without touching the content epoch or layout
     /// generation. Anything else — a `scrollSeq` bump (jump / cursor re-anchor), a content-epoch or
     /// layout-generation change (edit / resize / full refresh), or an anchor move away from the
-    /// target — is an out-of-band jump that must discard the local offset immediately, since the
-    /// gesture gate suppresses the normal reset while a thumb drag owns the pane. Pure.
+    /// target is an out-of-band jump that must discard the local offset immediately. Pure.
     nonisolated static func authoritativeInterrupt(
         baselineScrollSeq: UInt32, nextScrollSeq: UInt32,
         baselineContentEpoch: UInt32, nextContentEpoch: UInt32,
