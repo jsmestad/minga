@@ -225,7 +225,8 @@ final class EditorNSView: MTKView {
     private var scrollerStyleTask: Task<Void, Never>?
 
     init(encoder: InputEncoder, dispatcher: CommandDispatcher,
-         coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
+         coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager,
+         reduceMotion: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
         self.encoder = encoder
         self.dispatcher = dispatcher
         self.coreTextRenderer = coreTextRenderer
@@ -244,11 +245,11 @@ final class EditorNSView: MTKView {
         layer?.isOpaque = true
         (layer as? CAMetalLayer)?.maximumDrawableCount = 3
 
-        coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        coreTextRenderer.setCursorAnimationReduceMotionDisabled(reduceMotion)
         coreTextRenderer.onNativePresentationFailure = { [weak dispatcher] frame, outcome in
             dispatcher?.nativePresentationFailed(frame: frame, outcome: outcome)
         }
-        scrollAnimationsReduceMotionDisabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        scrollAnimationsReduceMotionDisabled = reduceMotion
     }
 
     @available(*, unavailable)

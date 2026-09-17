@@ -122,7 +122,8 @@ struct ContentViewTests {
     private func makeEditorNSView(
         gui: GUIState,
         dispatcher: CommandDispatcher,
-        encoder: InputEncoder
+        encoder: InputEncoder,
+        reduceMotion: Bool = false
     ) throws -> EditorNSView {
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         var factories = NativeRenderFactories.production
@@ -135,7 +136,8 @@ struct ContentViewTests {
             encoder: encoder,
             dispatcher: dispatcher,
             coreTextRenderer: renderer,
-            fontManager: fontManager
+            fontManager: fontManager,
+            reduceMotion: reduceMotion
         )
         view.editorInput = gui.editorInput
         return view
@@ -207,6 +209,35 @@ struct ContentViewTests {
             paneGeometry: geometry,
             scrollPresentation: scroll
         )
+    }
+
+    @Test("wheel input honors Reduce Motion without dropping scroll intent", arguments: [false, true], [-1, 1])
+    func wheelRespectsReduceMotion(reduceMotion: Bool, direction: Int) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy, reduceMotion: reduceMotion)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+
+        let event = MountedPreciseScrollEvent(
+            locationInWindow: editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight * 6), to: nil),
+            windowNumber: 0, deltaY: -CGFloat(direction) * editor.cellHeight, phase: []
+        )
+        event.preciseDeltas = false
+        editor.scrollWheel(with: event)
+
+        #expect(spy.mouseEventCalls.count == 1)
+        #expect(spy.mouseEventCalls.last?.button == (direction > 0 ? MOUSE_SCROLL_DOWN : MOUSE_SCROLL_UP))
+        let expectedWindow: UInt16? = reduceMotion ? nil : 1
+        #expect(editor.interactionSnapshot.scrollWindowId == expectedWindow)
+        if reduceMotion {
+            #expect(editor.interactionSnapshot.scrollOffset == .zero)
+        }
     }
 
     @Test("ordinary scroll echoes preserve wheel easing and trackpad presentation", arguments: [false, true])
