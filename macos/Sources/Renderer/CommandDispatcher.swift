@@ -123,7 +123,7 @@ final class CommandDispatcher {
     var onFirstRender: (() -> Void)?
 
     /// Tracks the last mode to detect changes.
-    private var lastMode: UInt8 = 0
+    private var lastMode: EditorMode = .normal
 
     /// Tracks the last emitted line spacing so the `lineSpacingChanged` effect is
     /// detected against prior committed state. Publication installs the snapshot's
@@ -369,7 +369,7 @@ final class CommandDispatcher {
         let cols = frameState.cols
         let rows = frameState.rows
         frameState = FrameState(cols: cols, rows: rows)
-        lastMode = 0
+        lastMode = .normal
         lastLineSpacing = 1.0
         pendingPresentationInputSeq = 0
         committedEditorSnapshot = nil
@@ -1193,13 +1193,13 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups):
             let wasVisible = guiState.agentChatState.visible
             if visible {
                 let groups = helpGroups.map { g in
                     HelpGroup(title: g.title, bindings: g.bindings.map { ($0.key, $0.description) })
                 }
-                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups)
             } else {
                 guiState.agentChatState.hide()
             }

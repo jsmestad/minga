@@ -29,7 +29,7 @@ struct CompletionStateLifecycleTests {
         #expect(state.content?.selectedIndex == 1)
         #expect(state.content?.items.count == 2)
         #expect(state.content?.items[0].label == "def")
-        #expect(state.content?.items[0].kind == 1)
+        #expect(state.content?.items[0].kind == .function)
         #expect(state.content?.items[1].label == "my_var")
         #expect(state.content?.items[1].detail == "String.t()")
         #expect(state.content?.documentation == "Defines a function.")
@@ -432,7 +432,7 @@ struct TabBarStateLifecycleTests {
     @Test("install() marks canonical agent tabs")
     @MainActor func installMarksCanonicalAgentTabs() {
         let state = TabBarState()
-        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: 1, flags: 0, workspaces: [
+        state.install(WorkspacePresentationSnapshot(version: 1, activeWorkspaceId: 1, mode: .agent, flags: [], workspaces: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                                 tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Agent", icon: "cpu")
         ], visibleTabs: [
@@ -489,13 +489,13 @@ struct AgentChatStateLifecycleTests {
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
             Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))
         ])
-        state.update(visible: true, status: 1, model: "claude", thinkingLevel: "high", prompt: "fix bug",
+        state.update(visible: true, status: .thinking, model: "claude", thinkingLevel: "high", prompt: "fix bug",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
-                     promptVimMode: 1, promptVisibleRows: 1,
+                     promptMode: .insert, promptVisibleRows: 1,
                      promptCompletion: nil, helpVisible: false, helpGroups: [])
 
         #expect(state.visible == true)
-        #expect(state.status == 1)
+        #expect(state.status == .thinking)
         #expect(state.model == "claude")
         #expect(state.thinkingLevel == "high")
         #expect(state.prompt == "fix bug")
@@ -507,9 +507,9 @@ struct AgentChatStateLifecycleTests {
     @Test("hide() clears all state")
     @MainActor func hideClearsAll() {
         let state = AgentChatState()
-        state.update(visible: true, status: 1, model: "claude", thinkingLevel: "medium", prompt: "test",
+        state.update(visible: true, status: .thinking, model: "claude", thinkingLevel: "medium", prompt: "test",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
-                     promptVimMode: 1, promptVisibleRows: 1,
+                     promptMode: .insert, promptVisibleRows: 1,
                      promptCompletion: nil, helpVisible: false, helpGroups: [])
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
@@ -521,11 +521,11 @@ struct AgentChatStateLifecycleTests {
     @Test("statusLabel maps all status values")
     @MainActor func statusLabels() {
         let state = AgentChatState()
-        state.status = 0; #expect(state.statusLabel == "idle")
-        state.status = 1; #expect(state.statusLabel == "thinking")
-        state.status = 2; #expect(state.statusLabel == "running tool")
-        state.status = 3; #expect(state.statusLabel == "error")
-        state.status = 255; #expect(state.statusLabel == "idle")
+        state.status = .idle; #expect(state.statusLabel == "idle")
+        state.status = .thinking; #expect(state.statusLabel == "thinking")
+        state.status = .executingTool; #expect(state.statusLabel == "running tool")
+        state.status = .error; #expect(state.statusLabel == "error")
+        state.status = .unknown(rawValue: 255); #expect(state.statusLabel == "unknown")
     }
 }
 
@@ -798,7 +798,7 @@ struct BottomPanelStateLifecycleTests {
                      filterPreset: 1, tabs: [BottomPanelTab(id: 0, tabType: 0, name: "Messages")])
 
         #expect(state.visible == true)
-        #expect(state.messagesState.activeLevels == [2, 3]) // warning + error
+        #expect(state.messagesState.activeLevels == [.warning, .error])
     }
 
     @Test("hide() only hides, keeps messages")
@@ -848,7 +848,7 @@ struct MessagesContentStateLifecycleTests {
         #expect(state.filteredEntries.count == 2) // info + error
 
         // Filter to only LSP subsystem
-        state.activeSubsystems = [1]
+        state.activeSubsystems = [.lsp]
         #expect(state.filteredEntries.count == 1)
         #expect(state.filteredEntries[0].text == "error in LSP")
     }
@@ -873,23 +873,23 @@ struct MessagesContentStateLifecycleTests {
         let state = MessagesContentState()
 
         // Default has level 1 (info) active
-        #expect(state.activeLevels.contains(1))
-        state.toggleLevel(1)
-        #expect(!state.activeLevels.contains(1))
-        state.toggleLevel(1)
-        #expect(state.activeLevels.contains(1))
+        #expect(state.activeLevels.contains(.info))
+        state.toggleLevel(.info)
+        #expect(!state.activeLevels.contains(.info))
+        state.toggleLevel(.info)
+        #expect(state.activeLevels.contains(.info))
 
         // Toggle subsystem
-        #expect(state.activeSubsystems.contains(0))
-        state.toggleSubsystem(0)
-        #expect(!state.activeSubsystems.contains(0))
+        #expect(state.activeSubsystems.contains(.editor))
+        state.toggleSubsystem(.editor)
+        #expect(!state.activeSubsystems.contains(.editor))
     }
 
     @Test("resetFilters restores defaults")
     @MainActor func resetFilters() {
         let state = MessagesContentState()
-        state.activeLevels = [3]
-        state.activeSubsystems = [1]
+        state.activeLevels = [.error]
+        state.activeSubsystems = [.lsp]
         state.searchText = "foo"
 
         state.resetFilters()
@@ -967,7 +967,7 @@ struct MessagesContentStateLifecycleTests {
         let state = MessagesContentState()
         #expect(state.isFiltering == false)
 
-        state.toggleLevel(0) // enabling debug deviates from the default levels
+        state.toggleLevel(.debug)
         #expect(state.isFiltering == true)
 
         state.resetFilters()
@@ -976,14 +976,14 @@ struct MessagesContentStateLifecycleTests {
 
     @Test("MessageEntry static level lookups")
     @MainActor func staticLevelLookups() {
-        #expect(MessageEntry.levelColor(for: 1) == .green)
-        #expect(MessageEntry.levelColor(for: 2) == .yellow)
-        #expect(MessageEntry.levelColor(for: 3) == .red)
-        #expect(MessageEntry.levelColor(for: 99) == .gray)
+        #expect(MessageEntry.levelColor(for: .info) == .green)
+        #expect(MessageEntry.levelColor(for: .warning) == .yellow)
+        #expect(MessageEntry.levelColor(for: .error) == .red)
+        #expect(MessageEntry.levelColor(for: .unknown(rawValue: 99)) == .gray)
 
-        #expect(MessageEntry.levelTooltip(for: 0) == "Debug")
-        #expect(MessageEntry.levelTooltip(for: 2) == "Warning")
-        #expect(MessageEntry.levelTooltip(for: 99) == "Unknown")
+        #expect(MessageEntry.levelTooltip(for: .debug) == "Debug")
+        #expect(MessageEntry.levelTooltip(for: .warning) == "Warning")
+        #expect(MessageEntry.levelTooltip(for: .unknown(rawValue: 99)) == "Unknown")
     }
 }
 
@@ -1075,24 +1075,24 @@ struct StatusBarStateLifecycleTests {
     @Test("modeName maps all mode values")
     @MainActor func modeNames() {
         let state = StatusBarState()
-        state.mode = 0; #expect(state.modeName == "NORMAL")
-        state.mode = 1; #expect(state.modeName == "INSERT")
-        state.mode = 2; #expect(state.modeName == "VISUAL")
-        state.mode = 3; #expect(state.modeName == "COMMAND")
-        state.mode = 4; #expect(state.modeName == "O-PENDING")
-        state.mode = 5; #expect(state.modeName == "SEARCH")
-        state.mode = 6; #expect(state.modeName == "REPLACE")
-        state.mode = 255; #expect(state.modeName == "NORMAL")
+        state.mode = .normal; #expect(state.modeName == "NORMAL")
+        state.mode = .insert; #expect(state.modeName == "INSERT")
+        state.mode = .visual; #expect(state.modeName == "VISUAL")
+        state.mode = .command; #expect(state.modeName == "COMMAND")
+        state.mode = .operatorPending; #expect(state.modeName == "O-PENDING")
+        state.mode = .search; #expect(state.modeName == "SEARCH")
+        state.mode = .replace; #expect(state.modeName == "REPLACE")
+        state.mode = .unknown(rawValue: 255); #expect(state.modeName == "NORMAL")
     }
 
     @Test("computed flags work correctly")
     @MainActor func computedFlags() {
         let state = StatusBarState()
-        state.flags = 0x03 // has_lsp + has_git
+        state.flags = [.hasLSP, .hasGit]
         #expect(state.hasLsp == true)
         #expect(state.hasGit == true)
 
-        state.flags = 0x00
+        state.flags = []
         #expect(state.hasLsp == false)
         #expect(state.hasGit == false)
     }
@@ -1100,9 +1100,9 @@ struct StatusBarStateLifecycleTests {
     @Test("isInsertMode and isAgentWindow")
     @MainActor func computedBooleans() {
         let state = StatusBarState()
-        state.mode = 1; #expect(state.isInsertMode == true)
-        state.mode = 0; #expect(state.isInsertMode == false)
-        state.contentKind = 1; #expect(state.isAgentWindow == true)
-        state.contentKind = 0; #expect(state.isAgentWindow == false)
+        state.mode = .insert; #expect(state.isInsertMode == true)
+        state.mode = .normal; #expect(state.isInsertMode == false)
+        state.contentKind = .agent; #expect(state.isAgentWindow == true)
+        state.contentKind = .buffer; #expect(state.isAgentWindow == false)
     }
 }

@@ -8,7 +8,7 @@ import MingaProtocol
 
 /// A single tab entry for SwiftUI rendering.
 public struct TabEntry: Identifiable {
-    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, isEphemeral: Bool = false, tintColor: Color? = nil, icon: String, label: String) {
+    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: AgentStatus, isPinned: Bool, isEphemeral: Bool = false, tintColor: Color? = nil, icon: String, label: String) {
         self.id = id
         self.groupId = groupId
         self.isActive = isActive
@@ -22,13 +22,16 @@ public struct TabEntry: Identifiable {
         self.icon = icon
         self.label = label
     }
+    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, isEphemeral: Bool = false, tintColor: Color? = nil, icon: String, label: String) {
+        self.init(id: id, groupId: groupId, isActive: isActive, isDirty: isDirty, isAgent: isAgent, hasAttention: hasAttention, agentStatus: AgentStatus(rawValue: agentStatus), isPinned: isPinned, isEphemeral: isEphemeral, tintColor: tintColor, icon: icon, label: label)
+    }
     public let id: UInt32
     public let groupId: UInt16
     public let isActive: Bool
     public let isDirty: Bool
     public let isAgent: Bool
     public let hasAttention: Bool
-    public let agentStatus: UInt8
+    public let agentStatus: AgentStatus
     public let isPinned: Bool
     /// File tab backed by no file on disk (e.g. Untitled-1).
     public let isEphemeral: Bool
@@ -41,7 +44,7 @@ public struct TabEntry: Identifiable {
 @MainActor
 @Observable
 public final class TabBarState {
-    public init(tabs: [TabEntry] = [], activeIndex: UInt8 = 0, workspaces: [WorkspacePresentationEntry] = [], workspaceTabs: [WorkspacePresentationTabEntry] = [], activeWorkspaceId: UInt16 = 0, workspaceMode: UInt8 = 0, workspaceFlags: UInt8 = 0, hasCanonicalWorkspaceTabs: Bool = false) {
+    public init(tabs: [TabEntry] = [], activeIndex: UInt8 = 0, workspaces: [WorkspacePresentationEntry] = [], workspaceTabs: [WorkspacePresentationTabEntry] = [], activeWorkspaceId: UInt16 = 0, workspaceMode: WorkspaceViewMode = .editor, workspaceFlags: WorkspaceFlags = [], hasCanonicalWorkspaceTabs: Bool = false) {
         self.tabs = tabs
         self.activeIndex = activeIndex
         self.workspaces = workspaces
@@ -57,8 +60,8 @@ public final class TabBarState {
     public var workspaces: [WorkspacePresentationEntry] = []
     public var workspaceTabs: [WorkspacePresentationTabEntry] = []
     public var activeWorkspaceId: UInt16 = 0
-    public var workspaceMode: UInt8 = 0
-    public var workspaceFlags: UInt8 = 0
+    public var workspaceMode: WorkspaceViewMode = .editor
+    public var workspaceFlags: WorkspaceFlags = []
     public var hasCanonicalWorkspaceTabs: Bool = false
     public private(set) var workspacePresentationRevision: UInt64 = 0
 
@@ -123,7 +126,7 @@ public final class TabBarState {
                     isDirty: tab.isDirty,
                     isAgent: tab.isAgent,
                     hasAttention: tab.hasAttention,
-                    agentStatus: 0,
+                    agentStatus: .idle,
                     isPinned: tab.isPinned,
                     isEphemeral: tab.isEphemeral,
                     tintColor: tab.tintColor,
@@ -195,8 +198,8 @@ public final class TabBarState {
         workspaces = []
         workspaceTabs = []
         activeWorkspaceId = 0
-        workspaceMode = 0
-        workspaceFlags = 0
+        workspaceMode = .editor
+        workspaceFlags = []
         hasCanonicalWorkspaceTabs = false
     }
 }

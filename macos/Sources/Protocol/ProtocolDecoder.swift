@@ -93,7 +93,7 @@ enum RenderCommand: Sendable {
     case guiStatusBar(StatusBarUpdate)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup])
+    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
     /// `trimFront` messages are first evicted from the store front, then over the remainder
@@ -112,7 +112,7 @@ enum RenderCommand: Sendable {
     case guiWindowOverlayDelta(data: GUIWindowOverlayDelta)
     case guiWindowViewportDelta(data: GUIWindowRowsDelta)
     case guiWindowRowsDelta(data: GUIWindowRowsDelta)
-    case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
+    case guiMinibuffer(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
     case guiHoverAction(visible: Bool, actionName: String)
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [Wire.Signature])
@@ -123,7 +123,7 @@ enum RenderCommand: Sendable {
     case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
-    case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
+    case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
@@ -1000,20 +1000,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let labelData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + labelLen)]
             let label = try decodeUTF8(labelData) ?? ""
             let tintColorRGB = try readU32(data, pos + 10 + iconLen + labelLen)
-            // Bits 4-6 are kind-scoped: agent status for agent tabs,
-            // ephemeral (not-on-disk) marker in bit 4 for file tabs.
-            let isAgent = flags & 0x04 != 0
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             tabs.append(Wire.TabEntry(
                 id: tabId,
                 groupId: groupId,
-                isActive: flags & 0x01 != 0,
-                isDirty: flags & 0x02 != 0,
-                isAgent: isAgent,
-                hasAttention: flags & 0x08 != 0,
-                agentStatus: isAgent ? (flags >> 4) & 0x07 : 0,
-                isPinned: flags & 0x80 != 0,
-                isEphemeral: !isAgent && flags & 0x10 != 0,
+                flags: TabFlags(rawValue: flags),
                 tintColorRGB: tintColorRGB,
                 icon: icon,
                 label: label
@@ -1357,7 +1348,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let update = StatusBarUpdate(
             contentKind: contentKind, mode: mode,
             cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
-            flags: flags, safeMode: (flags & 0x08) != 0,
+            flags: flags,
             lspStatus: lspStatus, gitBranch: gitBranch,
             message: message, filetype: filetype,
             errorCount: errorCount, warningCount: warningCount,
@@ -1527,7 +1518,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let chatSectionCount = Int(data[rest])
         if chatSectionCount == 0 {
-            return (.guiAgentChat(visible: false, status: 0, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: []), 2)
+            return (.guiAgentChat(visible: false, status: .idle, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .normal, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: []), 2)
         }
         var chatPos = rest + 1
         var chatVisible = false
@@ -1660,7 +1651,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups), chatPos - offset)
 
     case OP_GUI_AGENT_TRANSCRIPT:
         // len32 framing: opcode(1) + payload_len(4) + payload (GUI_PROTOCOL.md 0x86).
@@ -2029,7 +2020,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let mbVisible = data[rest] != 0
         guard mbVisible else {
-            return (.guiMinibuffer(visible: false, mode: 0, cursorPos: 0xFFFF, prompt: "",
+            return (.guiMinibuffer(visible: false, mode: .command, cursorPos: 0xFFFF, prompt: "",
                                     input: "", context: "", selectedIndex: 0, totalCandidates: 0, candidates: []), 2)
         }
         // mode(1) + cursor_pos(2) + prompt_len(1)
@@ -2097,7 +2088,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             mbCandidates.append(Wire.MinibufferCandidate(matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
         }
-        return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
+        return (.guiMinibuffer(visible: true, mode: MinibufferMode(rawValue: mbMode), cursorPos: mbCursorPos,
                                 prompt: mbPrompt, input: mbInput, context: mbContext,
                                 selectedIndex: mbSelIndex, totalCandidates: mbTotalCandidates,
                                 candidates: mbCandidates), mbPos - offset)
@@ -2507,7 +2498,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
         guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }
-        return (.guiWorkspaces(version: version, activeWorkspaceId: activeGId, mode: mode, flags: workspaceFlags, workspaces: workspaces, visibleTabs: visibleTabs),
+        return (.guiWorkspaces(version: version, activeWorkspaceId: activeGId, mode: WorkspaceViewMode(rawValue: mode), flags: WorkspaceFlags(rawValue: workspaceFlags), workspaces: workspaces, visibleTabs: visibleTabs),
                 payloadEnd - offset)
 
     case OP_GUI_AGENT_CONTEXT:
@@ -2586,7 +2577,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
         let consumed = framedSize ?? (timestampPos + 10 - offset)
         return (.guiAgentContext(visible: contextVisible, task: task, dispatchTimestamp: dispatchTimestamp,
-                                 status: CardStatus(rawValue: statusRaw) ?? .idle, canApprove: canApprove,
+                                 status: CardStatus(rawValue: statusRaw), canApprove: canApprove,
                                  progress: progress, todos: todos),
                 consumed)
     case OP_GUI_INDENT_GUIDES:

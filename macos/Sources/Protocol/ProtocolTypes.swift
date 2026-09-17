@@ -188,27 +188,40 @@ public enum Wire {
     public struct TabEntry: Sendable {
         public let id: UInt32
         public let groupId: UInt16
-        public let isActive: Bool
-        public let isDirty: Bool
-        public let isAgent: Bool
-        public let hasAttention: Bool
-        public let agentStatus: UInt8
-        public let isPinned: Bool
-        public let isEphemeral: Bool
+        public let flags: TabFlags
         public let tintColorRGB: UInt32
         public let icon: String
         public let label: String
 
+        public var isActive: Bool { flags.contains(.active) }
+        public var isDirty: Bool { flags.contains(.dirty) }
+        public var isAgent: Bool { flags.contains(.agent) }
+        public var hasAttention: Bool { flags.contains(.attention) }
+        public var agentStatus: AgentStatus { flags.agentStatus }
+        public var isPinned: Bool { flags.contains(.pinned) }
+        public var isEphemeral: Bool { flags.isEphemeralFile }
+
+        public init(id: UInt32, groupId: UInt16, flags: TabFlags, tintColorRGB: UInt32, icon: String, label: String) {
+            self.id = id
+            self.groupId = groupId
+            self.flags = flags
+            self.tintColorRGB = tintColorRGB
+            self.icon = icon
+            self.label = label
+        }
+
         public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, isEphemeral: Bool = false, tintColorRGB: UInt32, icon: String, label: String) {
             self.id = id
             self.groupId = groupId
-            self.isActive = isActive
-            self.isDirty = isDirty
-            self.isAgent = isAgent
-            self.hasAttention = hasAttention
-            self.agentStatus = agentStatus
-            self.isPinned = isPinned
-            self.isEphemeral = isEphemeral
+            var rawFlags: UInt8 = 0
+            if isActive { rawFlags |= TabFlags.active.rawValue }
+            if isDirty { rawFlags |= TabFlags.dirty.rawValue }
+            if isAgent { rawFlags |= TabFlags.agent.rawValue }
+            if hasAttention { rawFlags |= TabFlags.attention.rawValue }
+            if isAgent { rawFlags |= (agentStatus & 0x07) << 4 }
+            if isEphemeral && !isAgent { rawFlags |= TabFlags.ephemeralFile.rawValue }
+            if isPinned { rawFlags |= TabFlags.pinned.rawValue }
+            self.flags = TabFlags(rawValue: rawFlags)
             self.tintColorRGB = tintColorRGB
             self.icon = icon
             self.label = label
@@ -265,9 +278,9 @@ public enum Wire {
     /// A workspace entry decoded from the canonical gui_workspaces protocol message.
     public struct WorkspaceEntry: Sendable {
         public let id: UInt16
-        public let kind: UInt8
-        public let status: UInt8
-        public let flags: UInt16
+        public let kind: WorkspaceKind
+        public let status: AgentStatus
+        public let flags: WorkspaceEntryFlags
         public let colorR: UInt8
         public let colorG: UInt8
         public let colorB: UInt8
@@ -278,13 +291,13 @@ public enum Wire {
         public let label: String
         public let icon: String
 
-        public var agentStatus: UInt8 { status }
+        public var agentStatus: AgentStatus { status }
 
         public init(id: UInt16, kind: UInt8, status: UInt8, flags: UInt16, colorR: UInt8, colorG: UInt8, colorB: UInt8, tabCount: UInt16, draftCount: UInt16, conflictCount: UInt16, runningBackgroundCount: UInt16, label: String, icon: String) {
             self.id = id
-            self.kind = kind
-            self.status = status
-            self.flags = flags
+            self.kind = WorkspaceKind(rawValue: kind)
+            self.status = AgentStatus(rawValue: status)
+            self.flags = WorkspaceEntryFlags(rawValue: flags)
             self.colorR = colorR
             self.colorG = colorG
             self.colorB = colorB
@@ -301,8 +314,8 @@ public enum Wire {
     public struct WorkspaceTabEntry: Sendable {
         public let id: UInt32
         public let workspaceId: UInt16
-        public let kind: UInt8
-        public let flags: UInt16
+        public let kind: WorkspaceTabKind
+        public let flags: WorkspaceTabFlags
         public let pathHash: UInt32
         public let tintColorRGB: UInt32
         public let icon: String
@@ -312,8 +325,8 @@ public enum Wire {
         public init(id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, tintColorRGB: UInt32, icon: String, label: String, path: String) {
             self.id = id
             self.workspaceId = workspaceId
-            self.kind = kind
-            self.flags = flags
+            self.kind = WorkspaceTabKind(rawValue: kind)
+            self.flags = WorkspaceTabFlags(rawValue: flags)
             self.pathHash = pathHash
             self.tintColorRGB = tintColorRGB
             self.icon = icon
@@ -423,12 +436,12 @@ public enum Wire {
 
     /// A completion item from gui_completion.
     public struct CompletionItem: Sendable {
-        public let kind: UInt8
+        public let kind: CompletionKind
         public let label: String
         public let detail: String
 
         public init(kind: UInt8, label: String, detail: String) {
-            self.kind = kind
+            self.kind = CompletionKind(rawValue: kind)
             self.label = label
             self.detail = detail
         }
@@ -802,8 +815,8 @@ public enum Wire {
     public struct MessageEntry: Sendable {
         public let streamInstance: UInt32
         public let id: UInt32
-        public let level: UInt8
-        public let subsystem: UInt8
+        public let level: MessageLevel
+        public let subsystem: MessageSubsystem
         public let timestampSecs: UInt32
         public let filePath: String
         public let text: String
@@ -811,8 +824,8 @@ public enum Wire {
         public init(streamInstance: UInt32, id: UInt32, level: UInt8, subsystem: UInt8, timestampSecs: UInt32, filePath: String, text: String) {
             self.streamInstance = streamInstance
             self.id = id
-            self.level = level
-            self.subsystem = subsystem
+            self.level = MessageLevel(rawValue: level)
+            self.subsystem = MessageSubsystem(rawValue: subsystem)
             self.timestampSecs = timestampSecs
             self.filePath = filePath
             self.text = text

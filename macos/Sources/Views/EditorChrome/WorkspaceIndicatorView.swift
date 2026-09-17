@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 public struct WorkspaceIndicatorView: View {
     public init(workspace: WorkspacePresentationEntry, presentationRevision: UInt64, owner: TabBarState, encoder: InputEncoder? = nil, barHeight: CGFloat) {
@@ -188,11 +189,11 @@ enum WorkspaceIndicatorTargetedAction {
 }
 
 public struct AgentStatusDot: View {
-    public init(status: UInt8, color: Color) {
+    public init(status: AgentStatus, color: Color) {
         self.status = status
         self.color = color
     }
-    public let status: UInt8
+    public let status: AgentStatus
     public let color: Color
     @Environment(\.themeColors) private var theme
 
@@ -204,11 +205,10 @@ public struct AgentStatusDot: View {
 
     private var dotColor: Color {
         switch status {
-        case 1: return color
-        case 2: return color
-        case 3: return Color.red
-        case 4: return theme.agentStatusNeedsYou
-        default: return theme.tabInactiveFg
+        case .thinking, .executingTool: return color
+        case .error: return Color.red
+        case .planning: return theme.agentStatusNeedsYou
+        case .idle, .unknown: return theme.tabInactiveFg
         }
     }
 }

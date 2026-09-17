@@ -262,23 +262,23 @@ public struct StatusBarView: View {
 
     private var agentStatusText: String? {
         switch state.agentStatus {
-        case 0: return "Idle"
-        case 1: return "Thinking"
-        case 2: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
-        case 3: return "Error"
-        case 4: return "PLAN"
-        default: return nil
+        case .idle: return "Idle"
+        case .thinking: return "Thinking"
+        case .executingTool: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
+        case .error: return "Error"
+        case .planning: return "PLAN"
+        case .unknown: return nil
         }
     }
 
     private var agentStatusHelpText: String {
         switch state.agentStatus {
-        case 0: return "Agent idle"
-        case 1: return "Agent thinking"
-        case 2: return state.activeToolName.isEmpty ? "Agent executing tools" : "Agent running \(state.activeToolName)"
-        case 3: return "Agent error"
-        case 4: return "Agent plan mode"
-        default: return "Agent status"
+        case .idle: return "Agent idle"
+        case .thinking: return "Agent thinking"
+        case .executingTool: return state.activeToolName.isEmpty ? "Agent executing tools" : "Agent running \(state.activeToolName)"
+        case .error: return "Agent error"
+        case .planning: return "Agent plan mode"
+        case .unknown: return "Agent status"
         }
     }
 
@@ -303,31 +303,31 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var agentStatusGlyph: some View {
         switch state.agentStatus {
-        case 0:
+        case .idle:
             Text("◯")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.55))
-        case 1:
+        case .thinking:
             ProgressView()
                 .scaleEffect(0.45)
                 .frame(width: 14, height: barHeight)
                 .tint(theme.statusbarAccentFg)
-        case 2:
+        case .executingTool:
             Image(systemName: "bolt.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.statusbarAccentFg)
                 .frame(width: 14, height: barHeight)
-        case 3:
+        case .error:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.gutterErrorFg)
                 .frame(width: 14, height: barHeight)
-        case 4:
+        case .planning:
             Image(systemName: "pencil.and.outline")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.agentStatusNeedsYou)
                 .frame(width: 14, height: barHeight)
-        default:
+        case .unknown:
             EmptyView()
         }
     }
@@ -684,12 +684,13 @@ public struct StatusBarView: View {
         .help(state.isSafeMode ? "Safe mode enabled, \(state.modeName) mode" : "\(state.modeName) mode")
     }
 
-    private func modeColors(_ mode: UInt8) -> (Color, Color) {
+    private func modeColors(_ mode: EditorMode) -> (Color, Color) {
         switch mode {
-        case 0: return (theme.modeNormalBg, theme.modeNormalFg)
-        case 1: return (theme.modeInsertBg, theme.modeInsertFg)
-        case 2: return (theme.modeVisualBg, theme.modeVisualFg)
-        default: return (theme.modelineInfoBg, theme.modelineInfoFg)
+        case .normal: return (theme.modeNormalBg, theme.modeNormalFg)
+        case .insert: return (theme.modeInsertBg, theme.modeInsertFg)
+        case .visual: return (theme.modeVisualBg, theme.modeVisualFg)
+        case .command, .operatorPending, .search, .replace, .unknown:
+            return (theme.modelineInfoBg, theme.modelineInfoFg)
         }
     }
 
@@ -1122,4 +1123,3 @@ private func statusBarAgentPreviewState() -> StatusBarState {
     StatusBarView(state: statusBarAgentPreviewState(), isAgentChatVisible: true)
         .frame(width: 800, height: 28)
 }
-

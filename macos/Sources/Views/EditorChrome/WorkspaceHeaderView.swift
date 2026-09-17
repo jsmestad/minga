@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 /// Workspace header row rendered above active-workspace file tabs.
 public struct WorkspaceHeaderView: View {
@@ -249,26 +250,27 @@ public struct WorkspaceHeaderView: View {
             .joined(separator: ", ")
     }
 
-    private func agentStatusLabel(_ status: UInt8) -> String {
+    private func agentStatusLabel(_ status: AgentStatus) -> String {
         switch status {
-        case 1: return "Thinking"
-        case 2: return "Using tools"
-        case 3: return "Error"
-        case 4: return "Planning"
-        default: return "Idle"
+        case .thinking: return "Thinking"
+        case .executingTool: return "Using tools"
+        case .error: return "Error"
+        case .planning: return "Planning"
+        case .idle: return "Idle"
+        case .unknown: return "Unknown"
         }
     }
 
-    private func agentStatusHelp(_ status: UInt8) -> String {
+    private func agentStatusHelp(_ status: AgentStatus) -> String {
         "Agent status: \(agentStatusLabel(status))"
     }
 
-    private func agentStatusColor(_ status: UInt8, accent: Color) -> Color {
+    private func agentStatusColor(_ status: AgentStatus, accent: Color) -> Color {
         switch status {
-        case 1, 2: return accent
-        case 3: return .red
-        case 4: return theme.agentStatusNeedsYou
-        default: return theme.tabInactiveFg
+        case .thinking, .executingTool: return accent
+        case .error: return .red
+        case .planning: return theme.agentStatusNeedsYou
+        case .idle, .unknown: return theme.tabInactiveFg
         }
     }
 }

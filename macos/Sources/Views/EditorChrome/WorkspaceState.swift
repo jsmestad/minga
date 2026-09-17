@@ -1,10 +1,11 @@
 import SwiftUI
+import MingaProtocol
 
 /// Observable state for the workspace header and active-workspace file tabs.
 @MainActor
 @Observable
 public final class WorkspaceState {
-    public init(workspaces: [WorkspacePresentationEntry] = [], visibleTabs: [WorkspacePresentationTabEntry] = [], activeWorkspaceId: UInt16 = 0, viewMode: UInt8 = 0, flags: UInt8 = 0, hasCanonicalPayload: Bool = false) {
+    public init(workspaces: [WorkspacePresentationEntry] = [], visibleTabs: [WorkspacePresentationTabEntry] = [], activeWorkspaceId: UInt16 = 0, viewMode: WorkspaceViewMode = .editor, flags: WorkspaceFlags = [], hasCanonicalPayload: Bool = false) {
         self.workspaces = workspaces
         self.visibleTabs = visibleTabs
         self.activeWorkspaceId = activeWorkspaceId
@@ -15,8 +16,8 @@ public final class WorkspaceState {
     public var workspaces: [WorkspacePresentationEntry] = []
     public var visibleTabs: [WorkspacePresentationTabEntry] = []
     public var activeWorkspaceId: UInt16 = 0
-    public var viewMode: UInt8 = 0
-    public var flags: UInt8 = 0
+    public var viewMode: WorkspaceViewMode = .editor
+    public var flags: WorkspaceFlags = []
     public var hasCanonicalPayload: Bool = false
 
     public var activeWorkspace: WorkspacePresentationEntry? {
@@ -24,7 +25,7 @@ public final class WorkspaceState {
     }
 
     public var hasAttention: Bool {
-        flags & 0x01 != 0 || workspaces.contains(where: { $0.hasAttention })
+        flags.contains(.hasAttention) || workspaces.contains(where: { $0.hasAttention })
     }
 
     public var shouldShowHeader: Bool {
@@ -66,7 +67,7 @@ public final class WorkspaceState {
     }
 
     public var backgroundErrorCount: Int {
-        backgroundWorkspaces.filter { $0.agentStatus == 3 }.count
+        backgroundWorkspaces.filter { $0.agentStatus == .error }.count
     }
 
     public func install(_ snapshot: WorkspacePresentationSnapshot) {
@@ -86,8 +87,8 @@ public final class WorkspaceState {
         workspaces = []
         visibleTabs = []
         activeWorkspaceId = 0
-        viewMode = 0
-        flags = 0
+        viewMode = .editor
+        flags = []
         hasCanonicalPayload = false
     }
 }

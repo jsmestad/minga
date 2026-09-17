@@ -402,7 +402,7 @@ extension PreviewRegistry {
             MessageEntry(id: 8, level: 2, subsystem: 0, timestampSecs: 36_068, filePath: "lib/minga/editor.ex", text: "variable `state` is unused (if the variable is not meant to be used, prefix it with an underscore)"),
         ]
 
-        state.messagesState.activeLevels = [2, 3]
+        state.messagesState.activeLevels = [.warning, .error]
 
         return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
             .frame(width: 800, height: 250)

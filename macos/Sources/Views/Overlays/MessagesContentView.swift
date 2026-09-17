@@ -10,6 +10,7 @@
 /// instead of yanking the viewport down.
 
 import SwiftUI
+import MingaProtocol
 
 public struct MessagesContentView: View {
     public init(state: MessagesContentState, encoder: InputEncoder? = nil, usesPreviewEagerLayout: Bool = false) {
@@ -151,13 +152,13 @@ private struct MessagesFilterBar: View {
     /// quiet. Inactive levels fade so "Debug is off" reads at a glance.
     private var levelDots: some View {
         HStack(spacing: Spacing.xs) {
-            ForEach([UInt8(0), 1, 2, 3], id: \.self) { level in
+            ForEach([MessageLevel.debug, .info, .warning, .error], id: \.self) { level in
                 levelDot(level)
             }
         }
     }
 
-    private func levelDot(_ level: UInt8) -> some View {
+    private func levelDot(_ level: MessageLevel) -> some View {
         let isActive = state.activeLevels.contains(level)
         let color = MessageEntry.levelColor(for: level)
         return Button(action: { state.toggleLevel(level) }) {
@@ -182,12 +183,12 @@ private struct MessagesFilterBar: View {
                 state.activeSubsystems = MessagesContentState.allSubsystems
             }
             Button("Warnings & Errors Only") {
-                state.activeLevels = [2, 3]
+                state.activeLevels = [.warning, .error]
                 state.activeSubsystems = MessagesContentState.allSubsystems
                 state.searchText = ""
             }
             Divider()
-            ForEach(Array(state.presentSubsystems).sorted(), id: \.self) { sub in
+            ForEach(Array(state.presentSubsystems).sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { sub in
                 Button {
                     state.toggleSubsystem(sub)
                 } label: {
@@ -285,12 +286,12 @@ private struct MessagesFilterBar: View {
 
     /// Counts of the currently shown entries, ordered error → warning → info →
     /// debug. Levels with no visible entries are omitted to avoid a row of zeros.
-    private func levelCounts() -> [(level: UInt8, count: Int)] {
-        var counts: [UInt8: Int] = [:]
+    private func levelCounts() -> [(level: MessageLevel, count: Int)] {
+        var counts: [MessageLevel: Int] = [:]
         for entry in state.filteredEntries {
             counts[entry.level, default: 0] += 1
         }
-        return [3, 2, 1, 0].compactMap { level in
+        return [MessageLevel.error, .warning, .info, .debug].compactMap { level in
             counts[level].map { (level, $0) }
         }
     }
@@ -364,9 +365,9 @@ private struct MessageEntryRow: View {
 
     @ViewBuilder
     private var rowTint: some View {
-        if entry.level >= 3 {
+        if entry.level == .error {
             Color.red.opacity(0.06)
-        } else if entry.level == 2 {
+        } else if entry.level == .warning {
             Color.yellow.opacity(0.045)
         } else {
             Color.clear

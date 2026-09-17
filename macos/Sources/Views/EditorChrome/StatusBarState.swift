@@ -4,14 +4,13 @@ import MingaProtocol
 @MainActor
 @Observable
 public final class StatusBarState {
-    public init(contentKind: UInt8 = 0, mode: UInt8 = 0, cursorLine: UInt32 = 1, cursorCol: UInt32 = 1, lineCount: UInt32 = 1, flags: UInt8 = 0, safeMode: Bool = false, lspStatus: UInt8 = 0, gitBranch: String = "", message: String = "", filetype: String = "", errorCount: UInt16 = 0, warningCount: UInt16 = 0, modelName: String = "", messageCount: UInt32 = 0, sessionStatus: UInt8 = 0, infoCount: UInt16 = 0, hintCount: UInt16 = 0, macroRecording: UInt8 = 0, parserStatus: UInt8 = 0, agentStatus: UInt8 = 0, activeToolName: String = "", gitAdded: UInt16 = 0, gitModified: UInt16 = 0, gitDeleted: UInt16 = 0, icon: String = "", iconColorR: UInt8 = 0, iconColorG: UInt8 = 0, iconColorB: UInt8 = 0, filename: String = "", diagnosticHint: String = "", backgroundSubagentCount: UInt16 = 0, backgroundSubagentLabel: String = "", indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2), modelineSegmentsPresent: Bool = false, modelineLeftSegments: [Wire.StatusBarSegment] = [], modelineRightSegments: [Wire.StatusBarSegment] = [], selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0), pendingKeys: String = "") {
+    public init(contentKind: EditorContentKind = .buffer, mode: EditorMode = .normal, cursorLine: UInt32 = 1, cursorCol: UInt32 = 1, lineCount: UInt32 = 1, flags: StatusBarFlags = [], lspStatus: UInt8 = 0, gitBranch: String = "", message: String = "", filetype: String = "", errorCount: UInt16 = 0, warningCount: UInt16 = 0, modelName: String = "", messageCount: UInt32 = 0, sessionStatus: AgentStatus = .idle, infoCount: UInt16 = 0, hintCount: UInt16 = 0, macroRecording: UInt8 = 0, parserStatus: UInt8 = 0, agentStatus: AgentStatus = .idle, activeToolName: String = "", gitAdded: UInt16 = 0, gitModified: UInt16 = 0, gitDeleted: UInt16 = 0, icon: String = "", iconColorR: UInt8 = 0, iconColorG: UInt8 = 0, iconColorB: UInt8 = 0, filename: String = "", diagnosticHint: String = "", backgroundSubagentCount: UInt16 = 0, backgroundSubagentLabel: String = "", indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2), modelineSegmentsPresent: Bool = false, modelineLeftSegments: [Wire.StatusBarSegment] = [], modelineRightSegments: [Wire.StatusBarSegment] = [], selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0), pendingKeys: String = "") {
         self.contentKind = contentKind
         self.mode = mode
         self.cursorLine = cursorLine
         self.cursorCol = cursorCol
         self.lineCount = lineCount
         self.flags = flags
-        self.safeMode = safeMode
         self.lspStatus = lspStatus
         self.gitBranch = gitBranch
         self.message = message
@@ -45,14 +44,12 @@ public final class StatusBarState {
         self.selection = selection
         self.pendingKeys = pendingKeys
     }
-    /// 0 = buffer window, 1 = agent chat window.
-    public var contentKind: UInt8 = 0
-    public var mode: UInt8 = 0
+    public var contentKind: EditorContentKind = .buffer
+    public var mode: EditorMode = .normal
     public var cursorLine: UInt32 = 1
     public var cursorCol: UInt32 = 1
     public var lineCount: UInt32 = 1
-    public var flags: UInt8 = 0
-    public var safeMode: Bool = false
+    public var flags: StatusBarFlags = []
     public var lspStatus: UInt8 = 0
     public var gitBranch: String = ""
     public var message: String = ""
@@ -62,13 +59,13 @@ public final class StatusBarState {
     // Agent-only fields
     public var modelName: String = ""
     public var messageCount: UInt32 = 0
-    public var sessionStatus: UInt8 = 0
+    public var sessionStatus: AgentStatus = .idle
     // Extended fields (TUI modeline parity)
     public var infoCount: UInt16 = 0
     public var hintCount: UInt16 = 0
     public var macroRecording: UInt8 = 0
     public var parserStatus: UInt8 = 0
-    public var agentStatus: UInt8 = 0
+    public var agentStatus: AgentStatus = .idle
     public var activeToolName: String = ""
     public var gitAdded: UInt16 = 0
     public var gitModified: UInt16 = 0
@@ -101,7 +98,6 @@ public final class StatusBarState {
         if self.cursorCol != data.cursorCol { self.cursorCol = data.cursorCol }
         if self.lineCount != data.lineCount { self.lineCount = data.lineCount }
         if self.flags != data.flags { self.flags = data.flags }
-        if self.safeMode != data.safeMode { self.safeMode = data.safeMode }
         if self.lspStatus != data.lspStatus { self.lspStatus = data.lspStatus }
         if self.gitBranch != data.gitBranch { self.gitBranch = data.gitBranch }
         if self.message != data.message { self.message = data.message }
@@ -139,13 +135,12 @@ public final class StatusBarState {
 
     /// Clears status and mode authority when the BEAM connection is replaced.
     public func resetProtocolConnection() {
-        contentKind = 0
-        mode = 0
+        contentKind = .buffer
+        mode = .normal
         cursorLine = 1
         cursorCol = 1
         lineCount = 1
-        flags = 0
-        safeMode = false
+        flags = []
         lspStatus = 0
         gitBranch = ""
         message = ""
@@ -154,12 +149,12 @@ public final class StatusBarState {
         warningCount = 0
         modelName = ""
         messageCount = 0
-        sessionStatus = 0
+        sessionStatus = .idle
         infoCount = 0
         hintCount = 0
         macroRecording = 0
         parserStatus = 0
-        agentStatus = 0
+        agentStatus = .idle
         activeToolName = ""
         gitAdded = 0
         gitModified = 0
@@ -182,26 +177,26 @@ public final class StatusBarState {
 
     public var modeName: String {
         switch mode {
-        case 0: return "NORMAL"
-        case 1: return "INSERT"
-        case 2: return "VISUAL"
-        case 3: return "COMMAND"
-        case 4: return "O-PENDING"
-        case 5: return "SEARCH"
-        case 6: return "REPLACE"
-        default: return "NORMAL"
+        case .normal: return "NORMAL"
+        case .insert: return "INSERT"
+        case .visual: return "VISUAL"
+        case .command: return "COMMAND"
+        case .operatorPending: return "O-PENDING"
+        case .search: return "SEARCH"
+        case .replace: return "REPLACE"
+        case .unknown: return "NORMAL"
         }
     }
 
-    public var hasGit: Bool { flags & 0x02 != 0 }
-    public var hasLsp: Bool { flags & 0x01 != 0 }
-    public var isDirty: Bool { flags & 0x04 != 0 }
-    public var isInsertMode: Bool { mode == 1 }
-    public var isAgentWindow: Bool { contentKind == 1 }
+    public var hasGit: Bool { flags.contains(.hasGit) }
+    public var hasLsp: Bool { flags.contains(.hasLSP) }
+    public var isDirty: Bool { flags.contains(.dirty) }
+    public var isInsertMode: Bool { mode == .insert }
+    public var isAgentWindow: Bool { contentKind == .agent }
     public var isRecordingMacro: Bool { macroRecording > 0 }
     public var hasGitDiffStats: Bool { gitAdded > 0 || gitModified > 0 || gitDeleted > 0 }
     public var hasRunningBackgroundSubagents: Bool { backgroundSubagentCount > 0 }
-    public var isSafeMode: Bool { safeMode }
+    public var isSafeMode: Bool { flags.contains(.safeMode) }
 
     /// The macro register character (a-z), or nil if not recording.
     public var macroRegister: Character? {
@@ -229,12 +224,12 @@ public final class StatusBarState {
 
     public var sessionStatusName: String {
         switch sessionStatus {
-        case 0: return "idle"
-        case 1: return "thinking"
-        case 2: return "executing"
-        case 3: return "error"
-        case 4: return "plan"
-        default: return "idle"
+        case .idle: return "idle"
+        case .thinking: return "thinking"
+        case .executingTool: return "executing"
+        case .error: return "error"
+        case .planning: return "plan"
+        case .unknown: return "unknown"
         }
     }
 }
